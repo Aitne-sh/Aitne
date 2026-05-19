@@ -1,0 +1,25 @@
+{
+  "kind": "knowledge_layout",
+  "files": [
+    {
+      "path": "projects/*.md",
+      "purpose": "Per-project context document for Git-backed projects",
+      "sections": [
+        { "heading": "## Overview", "contains": "one-paragraph description of the project and its current state" },
+        { "heading": "## Git Activity", "contains": "recent commits, branches, contributors summarised by the daemon" },
+        { "heading": "## Lifecycle Phases", "contains": "phase markers (planning, build, ship, maintenance)" },
+        { "heading": "## Notable Changes", "contains": "human-readable notes on important commits or decisions" },
+        { "heading": "## Open Threads", "contains": "follow-ups and pending questions tracked across sessions" },
+        { "heading": "## History (compressed)", "contains": "older content rolled up to keep the active body concise" }
+      ]
+    },
+    {
+      "path": "git-repos/*.md",
+      "purpose": "Per-repository context for non-project watched repositories",
+      "sections": [
+        { "heading": "## Activity", "contains": "summarised recent activity for the watched repo" },
+        { "heading": "## Recent Pushes", "contains": "list of push events with dates and short summaries" }
+      ]
+    }
+  ]
+}

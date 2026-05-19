@@ -1,0 +1,1160 @@
+/**
+ * `MorningRoutinePipelineOrchestrator` — Phase 5 of
+ * `docs/design/appendices/morning-routine-optimization.md`. Replaces the
+ * single monolithic medium-tier session that today's
+ * `MorningRoutineRunner.executeMorningRoutine` runs with a daemon-
+ * orchestrated pipeline:
+ *
+ *     ① rotateDayFiles                          (owned by MorningRoutineRunner)
+ *     ② HandoffParser                           (this module)
+ *     ③ JournalSkeletonBuilder                  (this module)
+ *     ④ Pre-pass fan-out                        (owned by MorningRoutineRunner)
+ *     ⑤A Stage A: today.md synthesis  [medium]  (this module)  ─┐ Promise.all
+ *     ⑤B Stage B: daily journal author [lite]   (this module)  ─┘
+ *     ⑥  AgentJournalAppender                   (Phase 6 — left to MorningRoutineRunner)
+ *     ⑥b parent audit row emit                  (this module)
+ *     ⑦  diagnoseTodayMdState                   (owned by MorningRoutineRunner)
+ *     ⑧  Post-morning catchups + roadmap_refresh (owned by MorningRoutineRunner)
+ *
+ * The orchestrator owns only ②③⑤A∥⑤B⑥b. ① and ④ are upstream of `run()`;
+ * ⑥, ⑦, ⑧ stay with the runner so the existing today.md health check /
+ * retry chain / catchups continue to work unchanged on both legacy and
+ * V2 paths.
+ *
+ * Stage event design:
+ *   - Stage A event.type = `routine.morning_routine_today` so its
+ *     `agent_actions` row lands with `action_type='routine.morning_routine_today'`
+ *     (the audit logger derives action_type from `event.type`). Stage A's
+ *     `routine` field stays `"morning_routine"` so ContextBuilder's
+ *     existing heavy-context branch fires (yesterday.md / roadmap.md /
+ *     active_projects / calendar_events_7d).
+ *   - Stage B event.type = `routine.morning_routine_journal`. Stage B's
+ *     `routine` field is `"morning_routine_journal"` so ContextBuilder
+ *     fires the minimal Stage-B branch added in Phase 5 (calendar_events_7d
+ *     for wikilink resolution; no yesterday / roadmap / projects).
+ *   - Both stage events share `correlationId` with the parent
+ *     `routine.morning_routine` envelope — `loadMorningRoutineActionRows`
+ *     and `emitMorningRoutineParentAuditRow` use that as `event_id` to
+ *     correlate.
+ *
+ * Today.md write-lock: Stage A inherits the lockId set on the parent
+ * event by `MorningRoutineRunner` (the lock is acquired before this
+ * runs and released after); Stage B does not write to today.md and
+ * does not receive the lockId.
+ *
+ * Retry semantics (rev2 — `morning-routine-optimization.md`
+ * §"Pipeline-level invariants"):
+ *   - The retry chain is gated on today.md health; only Stage A regen
+ *     is what fixes a missing / wrong-date today.md. On retry,
+ *     `inputs.isRetry` is true and Stage B is NOT re-fired. Phase 5
+ *     simplification: if Stage B succeeded on attempt 1, its
+ *     `daily/<yesterday>.md` is already on disk and re-firing would
+ *     hit the 200/PATCH-Agent-revision path, producing a second
+ *     journal entry on every retry; if Stage B failed on attempt 1,
+ *     re-firing would still risk that duplication once the next
+ *     scheduled write succeeds. The trade-off is documented in design
+ *     §"Retry semantics" — Phase 6 may revisit if structured Stage B
+ *     result tracking justifies the work.
+ *
+ * Pre-pass skip on retry: not enforced here because `MorningRoutineRunner`
+ * already short-circuits the pre-pass when `isRetry === true`. The
+ * pre-pass result lives on the parent event's `event.data.fetchReportBlock`
+ * and is forwarded into the Stage A event unchanged (Stage B does not
+ * consume it).
+ */
+
+import type Database from "better-sqlite3";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  EventPriority,
+  getAgentDayBoundsUtc,
+  getAgentDayDateStr,
+  type AgentResult,
+  type BackendId,
+  type Event,
+  type ProcessKey,
+  type RoutineEvent,
+} from "@aitne/shared";
+import type { AgentConfig } from "../../config.js";
+import { getContextDir } from "../../config.js";
+import type {
+  IAuditLogger,
+  IContextBuilder,
+} from "../dispatcher-types.js";
+import type { PromptAssembler } from "../dispatcher-prompt.js";
+import type { IAgentRouter } from "../backends/backend-router.js";
+import type { DispatcherErrorRouter } from "../dispatcher-error-handling.js";
+import type { ResultProcessor } from "../dispatcher-result-processor.js";
+import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
+import { parseHandoff, type HandoffParsed } from "./handoff-parser.js";
+import {
+  buildJournalSkeleton,
+  gatherJournalSkeletonFacts,
+  type SkeletonCalendarEvent,
+} from "./journal-skeleton-builder.js";
+import {
+  buildRoadmapSkeleton,
+  gatherRoadmapSkeletonFacts,
+  type RoadmapSkeletonCalendarEvent,
+} from "./roadmap-skeleton-builder.js";
+import {
+  emitMorningRoutineParentAuditRow,
+  type ParentAuditEmitResult,
+  type StageActionResult,
+  type StageSummary,
+  type TodayMdHealth,
+} from "./parent-audit-emitter.js";
+import {
+  appendMorningRoutineJournalEntry,
+  STAGE_A_ACTION_TYPE,
+  STAGE_B_ACTION_TYPE,
+  type AgentJournalAppenderResult,
+} from "./agent-journal-appender.js";
+import { createLogger } from "../../logging.js";
+
+const logger = createLogger("morning-pipeline-orchestrator");
+
+const STAGE_A_PROCESS_KEY: ProcessKey = "routine.morning_routine_today";
+const STAGE_B_PROCESS_KEY: ProcessKey = "routine.morning_routine_journal";
+
+/**
+ * The `routine` slug carried on each stage's RoutineEvent. Stage A reuses
+ * the legacy `"morning_routine"` value so the heavy ContextBuilder branch
+ * (yesterday.md / roadmap.md / active_projects / calendar_events_7d)
+ * continues to fire unchanged — the Phase 5 split is about dispatch
+ * shape, not Stage A's context inputs. Stage B's
+ * `"morning_routine_journal"` slug routes into the minimal branch added
+ * to ContextBuilder for Phase 5.
+ */
+const STAGE_A_ROUTINE_SLUG = "morning_routine";
+const STAGE_B_ROUTINE_SLUG = "morning_routine_journal";
+
+export interface MorningPipelineOrchestratorDeps {
+  db: Database.Database;
+  config: AgentConfig;
+  contextBuilder: IContextBuilder;
+  agentRouter: IAgentRouter;
+  prompt: PromptAssembler;
+  errorRouter: DispatcherErrorRouter;
+  resultProcessor: ResultProcessor;
+  /**
+   * morning-routine-optimization.md Phase 6 — pre-insert an
+   * `agent_actions(result='in_progress', action_type='routine.morning_routine_today')`
+   * row before Stage A spawns so the agent's
+   * `PATCH /api/agent-actions/self` can resolve and write its structured
+   * metadata side-channel. Optional so Phase 5 tests that don't exercise
+   * the metadata pathway can construct the orchestrator without an
+   * `IAuditLogger` mock. Production wiring always supplies it.
+   */
+  audit?: IAuditLogger;
+  /**
+   * morning-routine-optimization.md Phase 6 — ⑥ AgentJournalAppender
+   * needs the safety write-tracker so the journal's atomic write does
+   * not get tagged as a user-actor change by the obsidian / git
+   * observers (which would re-trigger the hourly check on the agent's
+   * own output). The context-index reconciler is intentionally NOT
+   * threaded here: `agent/journal.md` is not in the indexable set, so
+   * the chokidar fallback path covers it without an explicit hint.
+   */
+  writeTracker?: AgentWriteTracker;
+}
+
+export interface MorningPipelineRunInputs {
+  /**
+   * The parent `routine.morning_routine` event. Its `correlationId` is
+   * the link parent-audit-emitter uses to find both stages' agent_actions
+   * rows; `data.fetchReportBlock` (pre-pass output) and
+   * `data.todayWriteLockId` (today.md lock from the runner) are
+   * forwarded to Stage A verbatim.
+   */
+  parentEvent: Event;
+  /**
+   * Mirrors `MorningRoutineRunner`'s `isRetry` derivation. When true,
+   * Stage B is skipped (see §"Retry semantics" in the module JSDoc).
+   */
+  isRetry: boolean;
+  /**
+   * When set, both stages' `resolveBinding` calls receive this as
+   * `requestedTier`. `MorningRoutineRunner` forces `"medium"` on retry;
+   * the orchestrator forwards verbatim so Stage A's cost-cap-fix
+   * downgrade behaviour is preserved. Stage B ignores the override —
+   * it always runs on lite per `routine.morning_routine_journal`'s
+   * process-key default. (Forcing Stage B to medium on retry would
+   * defeat the whole point of the split, and the journal author has
+   * no failure mode that medium would fix.)
+   */
+  requestedTier?: "lite" | "medium" | "high";
+}
+
+export interface MorningPipelineRunResult {
+  /**
+   * Stage A's `AgentResult`. `MorningRoutineRunner.processResult` is
+   * invoked on this so today.md health checks / drift / cost telemetry
+   * follow the same path as the legacy monolithic session.
+   */
+  stageAResult: AgentResult;
+  /**
+   * Stage B's `AgentResult`, or `null` when Stage B was skipped (retry
+   * path) or its session threw before producing a result. Stage B
+   * failure does not block the pipeline — the journal author is
+   * independent of today.md health, so its absence surfaces only in
+   * the parent audit row's `detail.stageB` field.
+   */
+  stageBResult: AgentResult | null;
+  /**
+   * Snapshot of `Date.now()` taken when `run()` is first invoked. Used
+   * by `MorningRoutineRunner` as the parent audit row's `started_at`
+   * when it later calls `emitParentAuditRow`.
+   */
+  startedAt: Date;
+}
+
+export class MorningRoutinePipelineOrchestrator {
+  constructor(private readonly deps: MorningPipelineOrchestratorDeps) {}
+
+  /**
+   * Drive ②③⑤A∥⑤B. The caller (`MorningRoutineRunner`) is responsible
+   * for invoking ⑦ (today.md health diagnose) and ⑥b (parent audit
+   * emit, via `emitParentAuditRow`) afterwards.
+   *
+   * Errors:
+   *   - Stage A throw → re-thrown so the runner's outer try/finally
+   *     (lock release + flag reset) still fires, and the runner's
+   *     `diagnoseTodayMdState` post-check catches the missing today.md
+   *     and schedules a retry the same way legacy failures do.
+   *   - Stage B throw → logged + folded into `stageBResult=null`. Does
+   *     NOT propagate; Stage B failure is independent of today.md
+   *     health (the day still opens, the journal is best-effort).
+   */
+  async run(inputs: MorningPipelineRunInputs): Promise<MorningPipelineRunResult> {
+    const startedAt = new Date();
+    const parentEvent = inputs.parentEvent;
+    const correlationId = parentEvent.correlationId;
+
+    // ② HandoffParser — read yesterday.md, parse `## Handoff`, render the
+    // `<handoff_parsed>` XML block. Fail-soft per design §"Data-flow
+    // principle": when parsing returns null (no file, malformed section)
+    // the orchestrator omits the block and Stage A's task-flow falls
+    // back to reading `<yesterday>` raw — one extra Stage A turn at most.
+    const handoffParsedBlock = this.buildHandoffParsedBlock();
+
+    // ③ JournalSkeletonBuilder — deterministic frontmatter +
+    // pre-aggregated facts for yesterday's daily journal. Skipped on
+    // retry per `morning-routine-optimization.md` rev4
+    // §"Pipeline-level invariants → Retry semantics": Stage B is not
+    // re-fired on retry (its prior-attempt PUT is preserved to avoid
+    // double-authoring the daily file), so building the skeleton would
+    // do work with no consumer. The builder itself remains idempotent
+    // — re-enabling Stage B on retry would require no skeleton change.
+    const stageBInputs = inputs.isRetry
+      ? null
+      : this.buildStageBInputs();
+
+    // morning-routine-optimization.md Phase 7 — daemon-prepared roadmap
+    // skeleton for the first-run (no-yesterday) branch. The legacy
+    // `routine.morning_routine_initial` high-tier session paid for an
+    // Opus turn to generate this from scratch; the medium-tier Stage A
+    // can spot-edit a deterministic skeleton into roadmap.md via the
+    // same `roadmap` skill PATCH paths the recurring branch uses. Only
+    // emitted on the first-run branch (yesterday.md absent) — the
+    // recurring branch leaves the block off and Stage A reads the
+    // truncated `<roadmap>` ContextBuilder injects as usual.
+    const roadmapSkeletonBlock = this.buildRoadmapSkeletonBlock();
+
+    // ⑤A + ⑤B — Promise.allSettled so a Stage B throw does not abort
+    // Stage A. (Promise.all would; Stage A's result is what gates the
+    // morning routine's success, so we always want to surface it.)
+    const stageAEvent = this.composeStageAEvent(
+      parentEvent,
+      correlationId,
+      handoffParsedBlock,
+      roadmapSkeletonBlock,
+    );
+    const stageBEvent = stageBInputs === null
+      ? null
+      : this.composeStageBEvent(
+          parentEvent,
+          correlationId,
+          stageBInputs.block,
+        );
+
+    // morning-routine-optimization.md Phase 6 — pre-insert the
+    // `result='in_progress'` sentinel for Stage A so the agent's
+    // `PATCH /api/agent-actions/self` resolves to a real row during the
+    // run. The eventual `logAction` call from `persistStageAuditRows`
+    // settles the same row (UPSERT path in `audit.ts.logAction`),
+    // preserving the metadata column the agent wrote. Stage B does NOT
+    // call PATCH self (it has no `agent-actions` skill in its policy
+    // set), so it gets no pre-insert.
+    this.preInsertStageAInProgressRow(correlationId);
+
+    const [stageA, stageB] = await Promise.allSettled([
+      this.runStageA(stageAEvent, inputs.requestedTier),
+      stageBEvent === null
+        ? Promise.resolve<AgentResult | null>(null)
+        : this.runStageB(stageBEvent),
+    ]);
+
+    // Land Stage A / Stage B `agent_actions` rows BEFORE deciding whether
+    // to re-throw on Stage A failure. The rows are what
+    // `parent-audit-emitter.readStageSummaries` reads via SQL, what the
+    // autonomous-cost-cap SUM aggregates over, and what
+    // `agent-journal-appender` (Phase 6) will template-fill from. Without
+    // this call the orchestrator's parent-audit emit silently degrades to
+    // `stage_a_row_missing` in production and Stage B's cost is dropped
+    // from the budget tracker.
+    //
+    // We deliberately call this even when Stage A failed: Stage B's
+    // result may exist and its row is still meaningful (parent-audit emit
+    // won't fire on this attempt because Stage A failed, but a retry's
+    // emit will read Stage B's prior-attempt row).
+    //
+    // `processResult` is the unique writer of `agent_actions` for routine
+    // sessions; calling it per stage with the stage's RoutineEvent makes
+    // each row land with `action_type=<stage process key>` (the audit
+    // logger derives action_type from `event.type`). Routine events are
+    // silent-by-default in `shouldNotify`, so no user-facing notify side
+    // effect fires.
+    const stageBResultIfFulfilled =
+      stageB.status === "fulfilled" ? stageB.value : null;
+    await this.persistStageAuditRows(
+      stageA.status === "fulfilled" ? stageA.value : null,
+      stageAEvent,
+      stageBResultIfFulfilled,
+      stageBEvent,
+    );
+
+    if (stageA.status === "rejected") {
+      // Re-throw so the runner's existing finally / retry path fires.
+      // Log enough context that the operator can confirm the V2 path
+      // was active when the throw happened — the runner-side log will
+      // also fire from its own catch.
+      logger.error(
+        {
+          err: stageA.reason,
+          correlationId,
+          stageB: stageB.status,
+        },
+        "Stage A threw — propagating to MorningRoutineRunner",
+      );
+      throw stageA.reason;
+    }
+
+    if (stageB.status === "rejected") {
+      logger.warn(
+        { err: stageB.reason, correlationId },
+        "Stage B threw — folding into stageBResult=null; today.md health gates parent audit independently",
+      );
+    }
+
+    return {
+      stageAResult: stageA.value,
+      stageBResult: stageBResultIfFulfilled,
+      startedAt,
+    };
+  }
+
+  /**
+   * Write per-stage `agent_actions` rows via `processResult`. Each stage
+   * is processed against its OWN `RoutineEvent` (carrying the stage's
+   * process-key event type), so the row's `action_type` lands as
+   * `routine.morning_routine_today` / `routine.morning_routine_journal`
+   * — exactly what `parent-audit-emitter.readStageSummaries` and the
+   * Phase 6 `agent-journal-appender` will read.
+   *
+   * Failures inside `processResult` (e.g. a notify hook misbehaving) do
+   * NOT propagate — losing audit rows is bad, but blocking the entire
+   * morning routine on a downstream telemetry hiccup is worse. In
+   * practice `audit.logAction` already swallows its own DB errors with
+   * an internal logger.error, so the catch here is a defence-in-depth
+   * guard against non-audit hooks (notify side effects we don't expect
+   * for routine events but might land later).
+   *
+   * Tail-risk acknowledgement: if a stage row truly fails to land
+   * (audit's internal try/catch swallowed a real SQLite error AND
+   * `processResult`'s notification path threw too), the parent-audit
+   * emitter will return `stage_a_row_missing` and the pre-routine gate
+   * stays unfired for the day — that day's hourly_check / evening_review
+   * are skipped with `morning_routine_pending_for_today`, but
+   * `MAX_RETRIES`-bounded `scheduleMorningRetry` does NOT loop on this
+   * shape because today.md health is independent. The day's automation
+   * degrades silently for that day; it does not infinite-loop.
+   */
+  private async persistStageAuditRows(
+    stageAResult: AgentResult | null,
+    stageAEvent: RoutineEvent,
+    stageBResult: AgentResult | null,
+    stageBEvent: RoutineEvent | null,
+  ): Promise<void> {
+    const tasks: Array<Promise<void>> = [];
+    if (stageAResult !== null) {
+      tasks.push(
+        this.deps.resultProcessor
+          .processResult(stageAResult, stageAEvent)
+          .catch((err) => {
+            logger.warn(
+              { err, correlationId: stageAEvent.correlationId },
+              "Stage A processResult failed — audit row may be missing",
+            );
+          }),
+      );
+    }
+    if (stageBResult !== null && stageBEvent !== null) {
+      tasks.push(
+        this.deps.resultProcessor
+          .processResult(stageBResult, stageBEvent)
+          .catch((err) => {
+            logger.warn(
+              { err, correlationId: stageBEvent.correlationId },
+              "Stage B processResult failed — audit row may be missing",
+            );
+          }),
+      );
+    }
+    if (tasks.length > 0) {
+      await Promise.all(tasks);
+    }
+  }
+
+  /**
+   * ⑥b parent audit emit — the row keyed `action_type='routine.morning_routine'`
+   * that `morningRoutineRanToday` in `schedule-helpers.ts` SELECTs on.
+   * Called by `MorningRoutineRunner` AFTER its `diagnoseTodayMdState`
+   * verdict so the today.md health gate is enforced; gated also on
+   * Stage A success (Stage B success is recorded in `detail` but does
+   * NOT block — the day still "opened" if today.md is good).
+   *
+   * Reads agent_actions rows by correlationId to get authoritative
+   * `cost_usd` / `num_turns` / `result` for each stage — handles the
+   * case where one stage's `AgentResult` is in memory and the other
+   * is null (Stage B was skipped on retry) without an
+   * impedance-mismatch shim.
+   */
+  emitParentAuditRow(args: {
+    correlationId: string;
+    startedAt: Date;
+    todayMdHealth: TodayMdHealth;
+    backend?: BackendId;
+  }): ParentAuditEmitResult {
+    const stages = this.readStageSummaries(args.correlationId);
+    return emitMorningRoutineParentAuditRow(this.deps.db, {
+      correlationId: args.correlationId,
+      stageA: stages.stageA,
+      stageB: stages.stageB,
+      todayMdHealth: args.todayMdHealth,
+      startedAt: args.startedAt,
+      completedAt: new Date(),
+      ...(args.backend ? { backend: args.backend } : {}),
+    });
+  }
+
+  /**
+   * morning-routine-optimization.md Phase 6 — ⑥ AgentJournalAppender.
+   * Assembles the one-paragraph English audit-trail entry for
+   * `agent/journal.md` from `agent_actions` rows (stage results +
+   * the metadata column Stage A wrote via `PATCH /api/agent-actions/self`)
+   * plus `daily/<yesterday>.md` frontmatter. No LLM final-text parsing.
+   *
+   * Called by `MorningRoutineRunner` AFTER both stage rows have settled
+   * (so `loadMorningRoutineActionRows` sees terminal `result` + the
+   * agent-supplied metadata) and BEFORE `emitParentAuditRow` so the
+   * journal block is on disk by the time the pre-routine gate fires.
+   *
+   * Returns the appender's structured outcome so the runner can log the
+   * skip reason (e.g. `stage_a_row_missing` when the Stage A audit row
+   * never landed) without grepping the file. Returns `null` when the
+   * orchestrator was constructed without the deps the appender needs
+   * (Phase 5-only test fixtures) — caller treats `null` as a no-op.
+   */
+  appendAgentJournalEntry(args: {
+    correlationId: string;
+  }): AgentJournalAppenderResult | null {
+    const contextDir = getContextDir(this.deps.config, this.deps.db);
+    const now = new Date();
+    const yesterdayNow = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const morningDateStr = getAgentDayDateStr(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      now,
+    );
+    const yesterdayDateStr = getAgentDayDateStr(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      yesterdayNow,
+    );
+    // Yesterday's agent-day UTC window — same shape `buildStageBInputs`
+    // derives for the skeleton facts. The appender uses it to aggregate
+    // the agent-action breakdown into the `agent/journal.md` footprint
+    // line. Recomputed here (rather than threaded from `buildStageBInputs`)
+    // because Stage B is dispatched async and the orchestrator does not
+    // retain its inputs between phases.
+    const bounds = getAgentDayBoundsUtc(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      yesterdayNow,
+    );
+    const agentDayWindow = { startUtc: bounds.start, endUtc: bounds.end };
+    return appendMorningRoutineJournalEntry(
+      {
+        db: this.deps.db,
+        contextDir,
+        ...(this.deps.writeTracker
+          ? { writeTracker: this.deps.writeTracker }
+          : {}),
+      },
+      {
+        correlationId: args.correlationId,
+        morningDateStr,
+        yesterdayDateStr,
+        agentDayWindow,
+      },
+    );
+  }
+
+  // ── ⑥ pre-insert in_progress row for Stage A ────────────────────────
+
+  private preInsertStageAInProgressRow(correlationId: string): void {
+    if (this.deps.audit === undefined) return;
+    this.deps.audit.insertInProgressRow({
+      correlationId,
+      actionType: STAGE_A_ACTION_TYPE,
+      // Morning routine fires from cron — never reactive.
+      trigger: "autonomous",
+    });
+  }
+
+  // ── ② HandoffParser plumbing ─────────────────────────────────────────
+
+  private buildHandoffParsedBlock(): string | null {
+    const contextDir = getContextDir(this.deps.config, this.deps.db);
+    const yesterdayPath = join(contextDir, "yesterday.md");
+    if (!existsSync(yesterdayPath)) return null;
+    let body: string;
+    try {
+      body = readFileSync(yesterdayPath, "utf-8");
+    } catch (err) {
+      logger.warn(
+        { err, yesterdayPath },
+        "yesterday.md read failed — falling back to in-task handoff parse",
+      );
+      return null;
+    }
+    const parsed = parseHandoff(body);
+    if (parsed === null) return null;
+    return renderHandoffParsedBlock(parsed);
+  }
+
+  // ── ③ JournalSkeletonBuilder plumbing ────────────────────────────────
+
+  private buildStageBInputs(): { block: string; yesterdayDateStr: string } | null {
+    const contextDir = getContextDir(this.deps.config, this.deps.db);
+
+    // First-run skip: when yesterday.md is absent, there is no prior
+    // agent-day to author a journal about. Firing Stage B anyway would
+    // produce a phantom `daily/<yesterday>.md` with `calendar_events: 0`
+    // / `messages_handled: 0` / `## Tasks: (none)` for a date the user
+    // wasn't using the agent — and `daily/<date>.md` is user-facing in
+    // the vault, so the phantom entry is a real correctness issue, not
+    // just internal noise. Aligns with §5.9 Step 5's "Skipped when no
+    // yesterday.md (initial variant)" entry in the design's per-stage
+    // responsibility matrix. The downstream `agent-journal-appender`
+    // renders the daemon-emitted `Journal synthesis: skipped (no
+    // prior-day data)` line whenever `daily/<yesterday>.md` is absent on
+    // disk, so the audit-trail entry stays correct without Stage B.
+    const yesterdayPath = join(contextDir, "yesterday.md");
+    if (!existsSync(yesterdayPath)) return null;
+
+    // Yesterday's agent-day window = today's window shifted by -24h.
+    // `getAgentDayBoundsUtc(now=<24h ago>)` yields the correct
+    // `[start, end)` even across the 04:00 boundary / DST transitions
+    // because the helper recomputes the offset at the boundary instant.
+    const now = new Date();
+    const yesterdayNow = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    // `getAgentDayBoundsUtc` returns `{start, end}` shaped strings;
+    // `gatherJournalSkeletonFacts` consumes `{startUtc, endUtc}`. Adapt
+    // here at the call site so the helper's shared shape stays stable
+    // across other callers (`buildYesterdaySqliteContext` etc.).
+    const bounds = getAgentDayBoundsUtc(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      yesterdayNow,
+    );
+    const window = { startUtc: bounds.start, endUtc: bounds.end };
+    const dateStr = getAgentDayDateStr(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      yesterdayNow,
+    );
+    // Today's agent-day — lands in the skeleton's `updated:` frontmatter
+    // field. Computed from `now` (not `yesterdayNow`) so a 04:00 run on
+    // 2026-05-15 stamps `updated: 2026-05-15` while the journal's `date:`
+    // stays `2026-05-14`.
+    const updatedDateStr = getAgentDayDateStr(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      now,
+    );
+    const weekday = new Date(`${dateStr}T00:00:00Z`).toLocaleDateString("en-US", {
+      weekday: "long",
+      timeZone: "UTC",
+    });
+
+    const yesterdayMd = readFileSync(yesterdayPath, "utf-8");
+
+    const facts = gatherJournalSkeletonFacts(this.deps.db, window);
+    const calendarEvents = this.readYesterdayCalendarEvents(window);
+
+    const skeleton = buildJournalSkeleton(
+      {
+        dateStr,
+        weekday,
+        updatedDateStr,
+        yesterdayMd,
+        calendarEvents,
+        ...(this.deps.config.timezone
+          ? { timezone: this.deps.config.timezone }
+          : {}),
+      },
+      facts,
+    );
+    return {
+      block: `<journal_skeleton>\n${skeleton}\n</journal_skeleton>`,
+      yesterdayDateStr: dateStr,
+    };
+  }
+
+  private readYesterdayCalendarEvents(window: {
+    startUtc: string;
+    endUtc: string;
+  }): ReadonlyArray<SkeletonCalendarEvent> {
+    // Calendar events stored in `observations` or `calendar_events` are
+    // schema-fluid across direct / delegated / native modes. Phase 2's
+    // skeleton builder is contract-tested against this shape; for Phase
+    // 5 wiring we read the agent-day window from `observations` rows
+    // tagged with a calendar source_prefix. Missing rows yield an empty
+    // array — the skeleton renders `- (none)` in that case.
+    const rows = this.deps.db
+      .prepare(
+        `SELECT payload AS payload
+           FROM observations
+          WHERE (source LIKE 'google_calendar:%'
+              OR source LIKE 'outlook_calendar:%')
+            AND observed_at >= ?
+            AND observed_at < ?
+          ORDER BY observed_at ASC`,
+      )
+      .all(window.startUtc, window.endUtc) as Array<{ payload: string | null }>;
+
+    const out: SkeletonCalendarEvent[] = [];
+    const timezone = this.deps.config.timezone || undefined;
+    for (const row of rows) {
+      const event = parseCalendarPayload(row.payload, timezone);
+      if (event !== null) out.push(event);
+    }
+    return out;
+  }
+
+  // ── ⑤A Stage A dispatch ──────────────────────────────────────────────
+
+  private composeStageAEvent(
+    parent: Event,
+    correlationId: string,
+    handoffParsedBlock: string | null,
+    roadmapSkeletonBlock: string | null,
+  ): RoutineEvent {
+    const data: Record<string, unknown> = {
+      ...parent.data,
+      morningPipelineStage: "today",
+    };
+    if (handoffParsedBlock !== null) {
+      data.handoffParsedBlock = handoffParsedBlock;
+    }
+    if (roadmapSkeletonBlock !== null) {
+      // Picked up by `ContextBuilder.build` on the `morning_routine`
+      // branch; injected as the `<roadmap_skeleton>` block alongside
+      // the truncated `<roadmap>` so Stage A can detect the placeholder
+      // wizard skeleton and fully populate roadmap.md from the
+      // daemon-prepared facts on the first-run day.
+      data.roadmapSkeletonBlock = roadmapSkeletonBlock;
+    }
+    return {
+      type: STAGE_A_PROCESS_KEY,
+      source: parent.source,
+      priority: parent.priority ?? EventPriority.HIGH,
+      timestamp: parent.timestamp,
+      correlationId,
+      data,
+      routine: STAGE_A_ROUTINE_SLUG,
+    };
+  }
+
+  // ── Phase 7 — Roadmap skeleton plumbing (first-run branch only) ──────
+
+  /**
+   * Compose the `<roadmap_skeleton>` block injected into Stage A's
+   * prompt on the **first-run** (no-yesterday) branch. Returns `null`
+   * on the recurring branch (yesterday.md present); the recurring
+   * branch reads the live truncated `<roadmap>` ContextBuilder
+   * already injects.
+   *
+   * Why gate on `yesterday.md`: the first-run signal lines up with
+   * the variant collapse documented in §5 ("variant collapse") — the
+   * setup wizard produces a placeholder roadmap.md and rotateDayFiles
+   * has not yet emitted yesterday.md. Both gates fire from the same
+   * fs predicate so Stage A's first-run branch never sees a mismatch.
+   *
+   * Errors are swallowed: a malformed projects file or a missing
+   * travel_bookings table degrades to "Stage A sees an empty
+   * section" rather than failing the whole stage. The variant
+   * collapse depends on Stage A still landing roadmap.md in this
+   * case (it can fall back to reading `<management_rules>` and
+   * `<active_projects>` inline); shipping a broken skeleton block
+   * would be worse than no skeleton block at all.
+   */
+  private buildRoadmapSkeletonBlock(): string | null {
+    const contextDir = getContextDir(this.deps.config, this.deps.db);
+    const yesterdayPath = join(contextDir, "yesterday.md");
+    if (existsSync(yesterdayPath)) return null; // recurring branch
+    try {
+      const now = new Date();
+      const todayDateStr = getAgentDayDateStr(
+        this.deps.config.timezone || undefined,
+        this.deps.config.dayBoundaryHour,
+        now,
+      );
+      const calendarEvents = this.readForwardCalendarEvents(now);
+      const facts = gatherRoadmapSkeletonFacts(
+        this.deps.db,
+        contextDir,
+        todayDateStr,
+      );
+      const skeleton = buildRoadmapSkeleton(
+        {
+          todayDateStr,
+          calendarEvents,
+          ...(this.deps.config.timezone
+            ? { timezone: this.deps.config.timezone }
+            : {}),
+        },
+        facts,
+      );
+      return `<roadmap_skeleton>\n${skeleton}\n</roadmap_skeleton>`;
+    } catch (err) {
+      logger.warn(
+        { err },
+        "Roadmap skeleton build threw — Stage A will run without <roadmap_skeleton>",
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Read forward-looking calendar events from the observations table
+   * for the next 7 days (matching the design's "Annual Goals from
+   * management rules, Quarterly Focus from active projects +
+   * calendar, Preparation Timeline from travel_bookings + calendar"
+   * window).
+   *
+   * Filtering note (pre-Phase-7-rev2 bug fix): the SQL filter does
+   * NOT use `observed_at` as a window bound. `observed_at` is the
+   * recording timestamp (CURRENT_TIMESTAMP at INSERT) — for a
+   * forward-looking window every relevant row was inserted BEFORE
+   * `now` (the just-completed pre-pass, an observer poll yesterday,
+   * etc.), so an `observed_at >= now` predicate would exclude every
+   * row. Instead we pull pending calendar observations and let JS
+   * filter on the parsed event start time extracted from
+   * `payload.raw.start`. The `consumed_at IS NULL` predicate scopes
+   * the read to rows the next Stage A turn has not yet consumed —
+   * exactly the set the pre-pass just landed for this morning's run.
+   * The `LIMIT 500` clamp guards against an unexpectedly large
+   * pending backlog blowing up Stage A's prompt budget; 500 is well
+   * above any realistic seven-day window the routine
+   * `cal_morning_7d` pre-pass would emit.
+   *
+   * Returns `[]` when no provider has pushed observations yet — the
+   * skeleton renders an explicit placeholder line.
+   */
+  private readForwardCalendarEvents(
+    now: Date,
+  ): ReadonlyArray<RoadmapSkeletonCalendarEvent> {
+    let rows: Array<{ payload: string | null }>;
+    try {
+      rows = this.deps.db
+        .prepare(
+          `SELECT payload AS payload
+             FROM observations
+            WHERE (source LIKE 'google_calendar:%'
+                OR source LIKE 'outlook_calendar:%')
+              AND consumed_at IS NULL
+            ORDER BY observed_at DESC
+            LIMIT 500`,
+        )
+        .all() as Array<{ payload: string | null }>;
+    } catch {
+      return [];
+    }
+    const startMs = now.getTime();
+    const endMs = startMs + 7 * 24 * 60 * 60 * 1000;
+    const out: RoadmapSkeletonCalendarEvent[] = [];
+    for (const row of rows) {
+      const event = parseForwardCalendarPayload(
+        row.payload,
+        this.deps.config.timezone || undefined,
+      );
+      if (event === null) continue;
+      if (event.startMs < startMs) continue;
+      if (event.startMs >= endMs) continue;
+      out.push({ date: event.date, title: event.title });
+    }
+    // Stable ascending order so the skeleton output is deterministic
+    // regardless of the SQL-side `ORDER BY observed_at DESC` (which is
+    // tuned for the LIMIT clamp, not the rendering order).
+    out.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.title.localeCompare(b.title);
+    });
+    return out;
+  }
+
+  private async runStageA(
+    event: RoutineEvent,
+    requestedTier: MorningPipelineRunInputs["requestedTier"],
+  ): Promise<AgentResult> {
+    const context = await this.deps.contextBuilder.build(event);
+    const binding = this.deps.agentRouter.resolveBinding(event, {
+      processKey: STAGE_A_PROCESS_KEY,
+      ...(requestedTier ? { requestedTier } : {}),
+    });
+    const reassemblePrompt = (bid: BackendId): string =>
+      this.deps.prompt.assemble(event.type, STAGE_A_PROCESS_KEY, bid);
+    const prompt = reassemblePrompt(binding.main.backendId);
+    return this.deps.errorRouter.executeWithRetry(
+      () =>
+        this.deps.agentRouter.execute({
+          prompt,
+          context,
+          event,
+          processKey: STAGE_A_PROCESS_KEY,
+          preResolvedBinding: binding,
+          reassemblePrompt,
+          ...(requestedTier ? { requestedTier } : {}),
+        }),
+      event,
+    );
+  }
+
+  // ── ⑤B Stage B dispatch ──────────────────────────────────────────────
+
+  private composeStageBEvent(
+    parent: Event,
+    correlationId: string,
+    journalSkeletonBlock: string,
+  ): RoutineEvent {
+    // Stage B does NOT inherit the parent's `todayWriteLockId` or
+    // `fetchReportBlock`. The lock gates today.md only (Stage B never
+    // touches it); the fetch report describes data Stage A consumes
+    // (pending observations from mail / notion / calendar pre-pass)
+    // that Stage B has no skill bundle to read. Stripping them keeps
+    // Stage B's prompt minimal so the lite-tier cold-start floor holds.
+    const stripped: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(parent.data ?? {})) {
+      if (key === "todayWriteLockId") continue;
+      if (key === "fetchReportBlock") continue;
+      if (key === "acquisitionPlanBlock") continue;
+      stripped[key] = value;
+    }
+    stripped.morningPipelineStage = "journal";
+    stripped.journalSkeletonBlock = journalSkeletonBlock;
+    return {
+      type: STAGE_B_PROCESS_KEY,
+      source: parent.source,
+      priority: parent.priority ?? EventPriority.HIGH,
+      timestamp: parent.timestamp,
+      correlationId,
+      data: stripped,
+      routine: STAGE_B_ROUTINE_SLUG,
+    };
+  }
+
+  private async runStageB(event: RoutineEvent): Promise<AgentResult> {
+    const context = await this.deps.contextBuilder.build(event);
+    const binding = this.deps.agentRouter.resolveBinding(event, {
+      processKey: STAGE_B_PROCESS_KEY,
+    });
+    const reassemblePrompt = (bid: BackendId): string =>
+      this.deps.prompt.assemble(event.type, STAGE_B_PROCESS_KEY, bid);
+    const prompt = reassemblePrompt(binding.main.backendId);
+    return this.deps.errorRouter.executeWithRetry(
+      () =>
+        this.deps.agentRouter.execute({
+          prompt,
+          context,
+          event,
+          processKey: STAGE_B_PROCESS_KEY,
+          preResolvedBinding: binding,
+          reassemblePrompt,
+        }),
+      event,
+    );
+  }
+
+  // ── ⑥b helpers — read DB-side stage summaries for parent-audit ──────
+
+  private readStageSummaries(correlationId: string): {
+    stageA: StageSummary | null;
+    stageB: StageSummary | null;
+  } {
+    // We use the auditor's authoritative agent_actions rows (cost / turns /
+    // result) rather than the in-memory `AgentResult` so retry attempts
+    // and partial-failure paths report the same shape regardless of which
+    // branch produced them.
+    const rows = this.deps.db
+      .prepare(
+        `SELECT action_type AS actionType,
+                cost_usd   AS cost_usd,
+                num_turns  AS num_turns,
+                result     AS result
+           FROM agent_actions
+          WHERE event_id = ?
+            AND action_type IN (?, ?)
+          ORDER BY id ASC`,
+      )
+      .all(correlationId, STAGE_A_ACTION_TYPE, STAGE_B_ACTION_TYPE) as Array<{
+      actionType: string;
+      cost_usd: number | null;
+      num_turns: number | null;
+      result: StageActionResult;
+    }>;
+
+    let stageA: StageSummary | null = null;
+    let stageB: StageSummary | null = null;
+    for (const row of rows) {
+      // Latest row wins on retry — agent_actions inserts append a fresh
+      // row per attempt; the most-recent row is the one the gate should
+      // attribute. `loadMorningRoutineActionRows` follows the same rule.
+      const summary: StageSummary = {
+        cost_usd: row.cost_usd,
+        num_turns: row.num_turns,
+        result: row.result,
+      };
+      if (row.actionType === STAGE_A_ACTION_TYPE) stageA = summary;
+      else if (row.actionType === STAGE_B_ACTION_TYPE) stageB = summary;
+    }
+    return { stageA, stageB };
+  }
+}
+
+// ── module-level helpers ────────────────────────────────────────────────
+
+function renderHandoffParsedBlock(parsed: HandoffParsed): string {
+  // XML over JSON: the rest of the daemon's prompt-injection payloads
+  // (`<fetch_report>`, `<acquisition-plan>`, `<integration_modes>`) use
+  // XML-style tags; keep the same shape so Stage A's task-flow can read
+  // them with one consistent extractor.
+  const lines: string[] = ["<handoff_parsed>"];
+  lines.push("  <tomorrow>");
+  if (parsed.tomorrow.length === 0) {
+    lines.push("    <item>(none)</item>");
+  } else {
+    for (const item of parsed.tomorrow) {
+      lines.push(`    <item>${escapeXml(item)}</item>`);
+    }
+  }
+  lines.push("  </tomorrow>");
+  lines.push("  <later>");
+  if (parsed.later.length === 0) {
+    lines.push("    <item>(none)</item>");
+  } else {
+    for (const item of parsed.later) {
+      lines.push(`    <item>${escapeXml(item)}</item>`);
+    }
+  }
+  lines.push("  </later>");
+  lines.push("</handoff_parsed>");
+  return lines.join("\n");
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Calendar observation payload shape. The canonical wrapper produced by
+ * `_partials/calendar-acquire.{google,outlook}_calendar.md`,
+ * `imminent-event-scheduler.ts`, and any other writer that POSTs to
+ * `/api/observations` for a calendar event is
+ *
+ *     { kind: "calendar", providerId: string, raw: { title, start, end, ... } }
+ *
+ * The pre-Phase-7 readers in this file only looked at the legacy /
+ * hypothetical top-level fields (`startTime`, `start_time`, `start`,
+ * `title`, `summary`) — none of which appear in the canonical row. As a
+ * result every real-world calendar observation parsed to a null event
+ * and the roadmap/journal skeletons silently rendered their empty
+ * placeholders even when the pre-pass had just landed a full window.
+ *
+ * The struct keeps the legacy keys as a forward-compat fallback so any
+ * fixture or future writer that happens to emit a flatter shape still
+ * resolves; the canonical `raw.*` lookup is checked first.
+ */
+interface CalendarPayloadShape {
+  raw?: {
+    title?: unknown;
+    summary?: unknown;
+    start?: unknown;
+    end?: unknown;
+    allDay?: unknown;
+    all_day?: unknown;
+  };
+  // Legacy top-level fields kept for forward-compat with non-canonical
+  // observation writers and test fixtures.
+  startTime?: unknown;
+  start_time?: unknown;
+  start?: unknown;
+  title?: unknown;
+  summary?: unknown;
+  allDay?: unknown;
+  all_day?: unknown;
+}
+
+/** Parsed `{startMs, title, isAllDay}` triple from a canonical calendar payload. */
+interface CalendarPayloadParts {
+  startMs: number | null;
+  title: string;
+  isAllDay: boolean;
+}
+
+/**
+ * Walk a calendar observation payload and lift the load-bearing fields
+ * (`start`, `title`, `allDay`) into a uniform struct. Canonical
+ * `raw.*` keys win over legacy top-level keys; whichever provides the
+ * value first is taken so a writer that emits both does not produce
+ * inconsistent reads.
+ */
+function extractCalendarPayloadParts(parsed: CalendarPayloadShape): CalendarPayloadParts {
+  const title =
+    pickString(parsed.raw?.title)
+    ?? pickString(parsed.raw?.summary)
+    ?? pickString(parsed.title)
+    ?? pickString(parsed.summary)
+    ?? "";
+  const isAllDay =
+    parsed.raw?.allDay === true
+    || parsed.raw?.all_day === true
+    || parsed.allDay === true
+    || parsed.all_day === true;
+  const startRaw =
+    pickString(parsed.raw?.start)
+    ?? pickString(parsed.startTime)
+    ?? pickString(parsed.start_time)
+    ?? pickString(parsed.start);
+  if (startRaw === null) return { startMs: null, title, isAllDay };
+  const ms = Date.parse(startRaw);
+  if (!Number.isFinite(ms)) return { startMs: null, title, isAllDay };
+  return { startMs: ms, title, isAllDay };
+}
+
+function safeParseCalendarShape(raw: string | null): CalendarPayloadShape | null {
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw) as CalendarPayloadShape;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Phase 7 — extract `{date, title}` from a calendar observation payload
+ * for the roadmap skeleton. Differs from `parseCalendarPayload` (which
+ * emits `{time HH:MM, title}` for the daily journal skeleton): the
+ * roadmap skeleton renders calendar events as date bullets, not time
+ * bullets, because the look-ahead window is 7 days forward and per-
+ * minute granularity is irrelevant for Quarterly Focus / Preparation
+ * Timeline hints.
+ *
+ * Returns `null` when the payload has no parseable start time. Title-
+ * only payloads are intentionally dropped — a calendar bullet without a
+ * date is noise for a forward-window skeleton.
+ */
+function parseForwardCalendarPayload(
+  raw: string | null,
+  timezone: string | undefined,
+): { date: string; title: string; startMs: number } | null {
+  const parsed = safeParseCalendarShape(raw);
+  if (parsed === null) return null;
+  const parts = extractCalendarPayloadParts(parsed);
+  if (parts.startMs === null) return null;
+  // Render the date in the operator's timezone so the skeleton's bullet
+  // dates line up with `<calendar_events_7d>` (which renders in the same
+  // tz). All-day events stored with a trailing 00:00 UTC suffix could
+  // otherwise drift by one day for east-of-UTC operators.
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone ?? "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const date = formatter.format(new Date(parts.startMs));
+  return { date, title: parts.title, startMs: parts.startMs };
+}
+
+function parseCalendarPayload(
+  raw: string | null,
+  timezone: string | undefined,
+): SkeletonCalendarEvent | null {
+  const parsed = safeParseCalendarShape(raw);
+  if (parsed === null) return null;
+  const parts = extractCalendarPayloadParts(parsed);
+  if (parts.isAllDay) {
+    return { time: null, title: parts.title };
+  }
+  if (parts.startMs === null) {
+    return { time: null, title: parts.title };
+  }
+  // Render `HH:MM` in the operator's local timezone — matches
+  // `SkeletonCalendarEvent.time`'s "HH:MM local start time" contract,
+  // the DM-section bullet's tz-aware rendering inside the skeleton
+  // builder, and ContextBuilder's `<calendar_events_7d>` block. The
+  // pre-fix UTC slice (`getUTCHours`/`Minutes`) would render a 10:00
+  // local standup for a UTC-7 operator as `17:00` in the `## Schedule`
+  // scratch input that Stage B then uses to author the daily journal.
+  if (typeof timezone === "string" && timezone.length > 0) {
+    try {
+      const fmt = new Intl.DateTimeFormat("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+        timeZone: timezone,
+      });
+      return { time: fmt.format(new Date(parts.startMs)), title: parts.title };
+    } catch {
+      // Fall through to UTC slice on a bad TZ name (Intl throws
+      // RangeError). Still better than throwing past the pure helper.
+    }
+  }
+  const date = new Date(parts.startMs);
+  const hh = String(date.getUTCHours()).padStart(2, "0");
+  const mm = String(date.getUTCMinutes()).padStart(2, "0");
+  return { time: `${hh}:${mm}`, title: parts.title };
+}
+
+function pickString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (value.length === 0) return null;
+  return value;
+}
+
+// Re-export the action-type constants so dispatcher / runner can
+// continue to import them from one path even after Phase 6 moves
+// more responsibilities into the orchestrator.
+export {
+  STAGE_A_PROCESS_KEY,
+  STAGE_B_PROCESS_KEY,
+  STAGE_A_ROUTINE_SLUG,
+  STAGE_B_ROUTINE_SLUG,
+};
+

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "source-namespacing",
+      "kind": "convention_notes",
+      "anchor": "<!-- CURATION:convention_notes id=\"source-namespacing\" -->",
+      "human_label": "Observation source namespacing",
+      "description": "Source string conventions: prefix grammar, sub-kind suffixes, idempotency key shape",
+      "scope_paths": ["agent-journal.md"]
+    }
+  ]
+}

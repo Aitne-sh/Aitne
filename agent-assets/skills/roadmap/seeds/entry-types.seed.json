@@ -1,0 +1,16 @@
+{
+  "kind": "knowledge_layout",
+  "files": [
+    {
+      "path": "roadmap.md",
+      "purpose": "Long-horizon user intent: goals, focus, plans, scheduled tasks, and recurring entries",
+      "sections": [
+        { "heading": "## Annual Goals", "contains": "user-authored yearly goals preserved verbatim" },
+        { "heading": "## Quarterly Focus", "contains": "user-authored quarterly focus areas preserved verbatim" },
+        { "heading": "## Long-term Plans", "contains": "agent-writable cumulative plan lines tagged with horizon" },
+        { "heading": "## Agent Action Plan", "contains": "agent-writable dated entries with stable IDs and Preparation Timeline" },
+        { "heading": "## Recurring", "contains": "recurring schedule entries preserved verbatim across refreshes" }
+      ]
+    }
+  ]
+}

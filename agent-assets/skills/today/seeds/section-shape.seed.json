@@ -1,0 +1,17 @@
+{
+  "kind": "knowledge_layout",
+  "files": [
+    {
+      "path": "today.md",
+      "purpose": "today's plan, schedule, agent log, and handoff to tomorrow",
+      "sections": [
+        { "heading": "## Plan", "contains": "the day's intent in plain prose" },
+        { "heading": "## Schedule", "contains": "time-blocked events for today" },
+        { "heading": "## Tasks", "contains": "open task entries with status checkbox" },
+        { "heading": "## Agent Notes", "contains": "look-aheads, day-time observations, latent profile questions" },
+        { "heading": "## Handoff", "contains": "context for tomorrow's morning routine" },
+        { "heading": "## Done", "contains": "tasks the user marked complete" }
+      ]
+    }
+  ]
+}

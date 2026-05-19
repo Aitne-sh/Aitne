@@ -1,0 +1,103 @@
+{
+  "manifestVersion": 1,
+  "generatedAt": "2026-05-18",
+  "notes": "Auto-generated inventory of versioned templates. Each entry's 'version' must equal the `template_version:` field in the corresponding template file's frontmatter. Bump both in the same PR. A unit test asserts this consistency.",
+  "templates": {
+    "_index.md": {
+      "version": 1
+    },
+    "agent/journal.md": {
+      "version": 1
+    },
+    "agent/profile-questions.md": {
+      "version": 1
+    },
+    "context-index.md": {
+      "version": 1
+    },
+    "dossiers/_index.md": {
+      "version": 1
+    },
+    "dossiers/evening.md": {
+      "version": 1
+    },
+    "dossiers/hourly.md": {
+      "version": 1
+    },
+    "dossiers/monthly.md": {
+      "version": 1
+    },
+    "dossiers/morning.md": {
+      "version": 1
+    },
+    "dossiers/roadmap.md": {
+      "version": 1
+    },
+    "dossiers/weekly.md": {
+      "version": 1
+    },
+    "projects/_index.md": {
+      "version": 1
+    },
+    "routines/_index.md": {
+      "version": 1
+    },
+    "routines/evening.md": {
+      "version": 1
+    },
+    "routines/hourly.md": {
+      "version": 1
+    },
+    "routines/monthly.md": {
+      "version": 1
+    },
+    "routines/morning.md": {
+      "version": 1
+    },
+    "routines/weekly.md": {
+      "version": 1
+    },
+    "rules/_index.md": {
+      "version": 2
+    },
+    "rules/journal-export.md": {
+      "version": 1
+    },
+    "rules/journal-format.md": {
+      "version": 3
+    },
+    "rules/management.md": {
+      "version": 2
+    },
+    "rules/mcp.md": {
+      "version": 1
+    },
+    "rules/policies/_index.md": {
+      "version": 2
+    },
+    "rules/redaction.md": {
+      "version": 1
+    },
+    "user/_index.md": {
+      "version": 1
+    },
+    "user/expertise.md": {
+      "version": 2
+    },
+    "user/goals.md": {
+      "version": 2
+    },
+    "user/people.md": {
+      "version": 2
+    },
+    "user/personal.md": {
+      "version": 2
+    },
+    "user/profile.md": {
+      "version": 2
+    },
+    "user/work.md": {
+      "version": 2
+    }
+  }
+}

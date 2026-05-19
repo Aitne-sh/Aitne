@@ -1,0 +1,55 @@
+{
+  "kind": "knowledge_layout",
+  "files": [
+    {
+      "path": "user/profile.md",
+      "purpose": "identity, preferences, learned context",
+      "sections": [
+        { "heading": "## Identity", "contains": "name, role, time zone" },
+        { "heading": "## Work Pattern", "contains": "active hours, typical schedule" },
+        { "heading": "## Platforms", "contains": "messaging accounts and ids" },
+        { "heading": "## Expertise", "contains": "domains and skill levels" },
+        { "heading": "## Notification Preferences", "contains": "channels and quiet hours" },
+        { "heading": "## Learned Context", "contains": "30-day TTL bullets prefixed [YYYY-MM-DD]" },
+        { "heading": "## Raw Signals", "contains": "uncategorized observations awaiting promotion" }
+      ]
+    },
+    {
+      "path": "user/people.md",
+      "purpose": "people the user knows",
+      "sections": [
+        { "heading": "## Family", "contains": "household members" },
+        { "heading": "## Colleagues", "contains": "current and recent coworkers" },
+        { "heading": "## Friends", "contains": "social ties" }
+      ]
+    },
+    {
+      "path": "user/work.md",
+      "purpose": "workplace, team, tech stack",
+      "sections": [
+        { "heading": "## Stack", "contains": "tools, languages, services used at work" }
+      ]
+    },
+    {
+      "path": "user/expertise.md",
+      "purpose": "domains, tools, skill levels",
+      "sections": [
+        { "heading": "## Tools", "contains": "tools the user uses habitually" }
+      ]
+    },
+    {
+      "path": "user/personal.md",
+      "purpose": "hobbies, health, habits",
+      "sections": [
+        { "heading": "## Habits", "contains": "routines, lifestyle, health" }
+      ]
+    },
+    {
+      "path": "user/goals.md",
+      "purpose": "developmental goals and learning targets",
+      "sections": [
+        { "heading": "## Learning", "contains": "skills the user wants to build" }
+      ]
+    }
+  ]
+}

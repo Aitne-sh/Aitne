@@ -1,0 +1,100 @@
+---
+schema_version: 1
+slug: concepts/auth-health
+title: Auth Health
+id: auth-health
+aliases:
+  - auth probe
+  - auth recovery
+  - credentials
+  - auth health monitor
+  - subscription auth warning
+category: concepts
+summary: |
+  The auth-health monitor probes each backend's credentials at startup
+  and on a recurring interval, surfaces failures on the dashboard, and
+  triggers recovery flows when the right signal is available.
+section: auth-health
+tags:
+  - core
+  - safety
+  - backends
+  - operations
+status: stable
+ask_examples:
+  - Why is the dashboard showing a degraded backend?
+  - How does the agent check that I'm still logged in to Claude?
+  - What happens when my Codex token expires?
+  - What is the SubscriptionAuthWarning banner?
+locale: en-US
+created: 2026-04-25
+updated: 2026-05-15
+keywords:
+  - auth
+  - authentication
+  - credentials
+  - probe
+  - degraded
+  - auth health monitor
+  - auth recovery
+  - api-key-probe
+  - SubscriptionAuthWarning
+related:
+  - concepts/backends-and-tiers
+  - concepts/costs-and-quotas
+  - troubleshooting/auth-failed
+config_keys:
+  - authProbeDisabled
+  - authPreflightFreshnessMs
+---
+
+# Auth Health
+
+## TL;DR
+
+The daemon probes each configured backend on boot and at a freshness
+interval. A failed probe flips the dashboard's auth-health card from
+green to amber/red and surfaces a recovery hint.
+
+## Why This Concept Exists
+
+Routines silently failing because of an expired token is the most
+common operator pain. The auth-health monitor is the proactive surface
+that surfaces "your credentials expired" before the next morning
+routine fails.
+
+## Definitions
+
+- **Probe**: a no-op call against each backend's auth surface. With
+  a registered API key the probe hits the provider's lightweight
+  `models` endpoint (Anthropic, OpenAI, Google) and verifies the key
+  is live. Without an API key, the probe checks whatever local CLI
+  login Aitne fell back to (Claude credentials store, Codex token,
+  Gemini ADC).
+- **Preflight freshness**: how long the daemon trusts a successful
+  probe before re-running.
+- **Recovery**: backend-specific repair. The recommended path is
+  re-pasting the API key on `/settings/models`; for the fallback
+  path, re-running the matching CLI login (`claude`,
+  `codex login`, `gemini auth`).
+
+## Concrete Examples
+
+- Anthropic API key revoked → probe fails → card flips red →
+  operator pastes a new key on `/settings/models`. Per-call billing
+  resumes against the new key on the next run.
+- Operator never registered an API key, ran on the subscription
+  fallback, and the underlying `claude` CLI session expired → probe
+  fails → card flips amber → recommended fix is to register an API
+  key on `/settings/models`; otherwise re-run the CLI login.
+
+Cloud-provider credentials (Bedrock / Vertex / Foundry / Azure
+OpenAI / Gemini-Vertex) are not probed against a `models` endpoint —
+those providers trust the SDK's runtime auth chain, so the auth-
+health card stays neutral until the first execution either succeeds
+or surfaces a runtime auth error.
+
+## Related
+
+- [Backends and Tiers](backends-and-tiers.md)
+- [Troubleshooting: Auth Failed](../troubleshooting/auth-failed.md)

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "outDir": "dist-test-typecheck",
+    "types": ["node", "better-sqlite3", "busboy", "html-to-text", "node-cron", "qrcode", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": []
+}

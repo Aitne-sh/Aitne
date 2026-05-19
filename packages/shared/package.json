@@ -1,0 +1,50 @@
+{
+  "name": "@aitne/shared",
+  "version": "0.1.8",
+  "description": "Shared types, schemas, and utilities for Aitne (used by @aitne/daemon and @aitne/dashboard).",
+  "homepage": "https://github.com/Aitne-sh/Aitne#readme",
+  "bugs": {
+    "url": "https://github.com/Aitne-sh/Aitne/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aitne-sh/Aitne.git",
+    "directory": "packages/shared"
+  },
+  "license": "MIT",
+  "author": "Aitne contributors",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./keychain-helper-client": {
+      "import": "./dist/keychain-helper-client.js",
+      "types": "./dist/keychain-helper-client.d.ts"
+    },
+    "./secret-client-factory": {
+      "import": "./dist/secret-client-factory.js",
+      "types": "./dist/secret-client-factory.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint .",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
+    "clean": "node ../../scripts/rm-paths.mjs dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

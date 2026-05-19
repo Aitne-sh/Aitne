@@ -1,0 +1,146 @@
+import { describe, expect, it } from "vitest";
+import { runtimeSettingsSchema } from "./runtime-settings.js";
+
+describe("runtimeSettingsSchema — character field", () => {
+  it("defaults to empty string", () => {
+    const parsed = runtimeSettingsSchema.parse({});
+    expect(parsed.character).toBe("");
+  });
+
+  it("accepts a 999-char value (below cap)", () => {
+    const value = "x".repeat(999);
+    const parsed = runtimeSettingsSchema.parse({ character: value });
+    expect(parsed.character).toBe(value);
+  });
+
+  it("accepts a 1000-char value (at cap)", () => {
+    const value = "x".repeat(1000);
+    const parsed = runtimeSettingsSchema.parse({ character: value });
+    expect(parsed.character).toBe(value);
+  });
+
+  it("rejects a 1001-char value (over cap)", () => {
+    const value = "x".repeat(1001);
+    const result = runtimeSettingsSchema.safeParse({ character: value });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path[0] === "character")).toBe(true);
+    }
+  });
+
+  it("rejects a value containing the block start marker", () => {
+    const result = runtimeSettingsSchema.safeParse({
+      character: "hello <!-- character:start --> there",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          i.message.includes("block marker substring"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a value containing the block end marker", () => {
+    const result = runtimeSettingsSchema.safeParse({
+      character: "hello <!-- character:end --> there",
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          i.message.includes("block marker substring"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a whitespace-only value (non-empty but blank)", () => {
+    const result = runtimeSettingsSchema.safeParse({ character: "   \n\t  " });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          i.message.includes("non-blank or empty"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("accepts a non-empty value that begins or ends with whitespace", () => {
+    const parsed = runtimeSettingsSchema.parse({
+      character: "  Speak casually.  ",
+    });
+    expect(parsed.character).toBe("  Speak casually.  ");
+  });
+});
+
+// docs/design/appendices/pre-pass-fan-out.md §6 — `prePassBackoffMs.length >= maxAttempts - 1`.
+// A too-short array would silently fall back to the last element via
+// `RoutineFetchWindowRunner.backoffForAttempt`, surprising operators
+// who set distinct values intentionally. Equality and overshoot pass.
+describe("runtimeSettingsSchema — prePassBackoffMs length cross-field check (PRE_PASS_FAN_OUT_DESIGN §6)", () => {
+  it("accepts the documented defaults (maxAttempts=3, backoffMs length 3)", () => {
+    const parsed = runtimeSettingsSchema.parse({});
+    expect(parsed.prePassMaxAttemptsPerIntegration).toBe(3);
+    expect(parsed.prePassBackoffMs).toEqual([1000, 2000, 4000]);
+  });
+
+  it("accepts exact length match (maxAttempts=3, backoffMs length 2)", () => {
+    const parsed = runtimeSettingsSchema.parse({
+      prePassMaxAttemptsPerIntegration: 3,
+      prePassBackoffMs: [500, 1000],
+    });
+    expect(parsed.prePassBackoffMs).toEqual([500, 1000]);
+  });
+
+  it("accepts overshoot (maxAttempts=2, backoffMs length 3)", () => {
+    // Extra trailing entries are harmless — the loop never reads past
+    // index `attempt - 1`. Rejecting overshoot would force operators to
+    // keep two fields in lockstep across every PATCH.
+    const parsed = runtimeSettingsSchema.parse({
+      prePassMaxAttemptsPerIntegration: 2,
+      prePassBackoffMs: [1000, 2000, 4000],
+    });
+    expect(parsed.prePassBackoffMs).toEqual([1000, 2000, 4000]);
+  });
+
+  it("rejects too-short backoffMs (maxAttempts=4, backoffMs length 2)", () => {
+    // Required = maxAttempts - 1 = 3, supplied 2 → reject so the operator
+    // sees the misconfiguration instead of silently inheriting the last
+    // value for the third inter-attempt wait.
+    const result = runtimeSettingsSchema.safeParse({
+      prePassMaxAttemptsPerIntegration: 4,
+      prePassBackoffMs: [500, 1000],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some(
+          (i) =>
+            i.path.includes("prePassBackoffMs")
+            && i.message.includes("at least"),
+        ),
+        "expected the cross-field error to mention prePassBackoffMs and 'at least'",
+      ).toBe(true);
+    }
+  });
+
+  it("rejects empty backoffMs when maxAttempts >= 2", () => {
+    const result = runtimeSettingsSchema.safeParse({
+      prePassMaxAttemptsPerIntegration: 2,
+      prePassBackoffMs: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts empty backoffMs when maxAttempts === 1 (no inter-attempt waits)", () => {
+    // maxAttempts - 1 = 0, so the empty array is structurally valid.
+    const parsed = runtimeSettingsSchema.parse({
+      prePassMaxAttemptsPerIntegration: 1,
+      prePassBackoffMs: [],
+    });
+    expect(parsed.prePassBackoffMs).toEqual([]);
+  });
+});

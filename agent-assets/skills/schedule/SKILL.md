@@ -1,0 +1,233 @@
+---
+name: schedule
+description: Load when scheduling a future agent wake-up, pre-composed DM, recurring task, or de-duping against existing pending schedules.
+allowed-tools:
+  - Bash(curl *)
+  - Read
+---
+
+# Schedule Wake-Up Decision Guide
+
+## When to Schedule
+Register a wake-up when **all three** are true:
+1. There is follow-up work that must happen at a specific time
+2. The current session is ending before that time
+3. No other session will reliably pick it up (a peer routine, an SSE poll, etc.)
+
+Common triggers: morning routine end, calendar event prep (15 min before), deadline/reminder requests, in-flight work needing follow-up (e.g. PR review).
+
+## Before creating — dedup pre-check (mandatory)
+
+Every `POST /api/schedule` / `POST /api/schedule/dm` call MUST be
+preceded by a dedup scan. Duplicate schedules are invisible to the
+user but compound into duplicate DMs/notifications at fire time.
+
+1. **Agent Plan check.** Scan `<today>` `## Agent Plan` for a row with
+   HH:MM within ±15 min of your target AND an overlapping subject. If
+   present, the plan is already in place — do NOT add a second one.
+2. **Pending schedule check.** `GET /api/schedule?status=pending,running`
+   and look for an item whose `scheduledFor` is within ±15 min of your
+   target with a matching `description` subject. If found, skip (or
+   PATCH the existing item if it needs updating — never register a
+   parallel second one).
+3. **Recurring check.** `GET /api/recurring-schedules?enabled=true` to
+   confirm no recurring rule already covers this cadence (e.g. a daily
+   09:00 inbox triage). If covered, skip — the recurring instance will
+   regenerate on its own.
+4. **`confirm_dedup_key` check (mandatory for `confirm:` sub-flow rows
+   only).** When scheduling a `dm_session` row with
+   `taskContext.sub_flow="confirm"`, run the dedup pre-check + shape
+   contract documented in
+   `task-flows/_partials/confirm-subflow.md` (also included verbatim
+   by `scheduled.dm.md` and `message.received.dm{,_first}.md`). The
+   single source covers the `dedup_key` filter, the
+   `<gate>:<stable-topic>` shape, and cross-path cancellation.
+
+Log the skip to `## Agent Log`:
+`- HH:MM [schedule] skipped <subject>: duplicate of <planId|row>`.
+
+Only after all four clear do you create the new schedule.
+
+## When the user wants a durable rule, not a wake-up
+
+If the request expresses an **ongoing management practice** with a
+recorded reason — "every morning, run my finance app and log the
+balance to a finance dossier", "from now on whenever X happens, do
+Y" — switch to the `management-policy` skill instead. It creates a
+`rules/policies/<slug>.md` that captures the WHY alongside the cadence
+(via `routines/custom/<slug>.md`) so the rule survives a context
+reset. Plain recurring schedules via `/api/recurring-schedules` are
+still right when the cadence is all that matters and there is no need
+to record intent.
+
+## DM vs Agent Task
+
+| Criterion | `/api/schedule/dm` (free) | `/api/schedule` (~$0.03) |
+|---|---|---|
+| Message text knowable now? | Yes | No — needs lookup/decision at execution |
+| Needs calendar/API data at execution? | No | Yes |
+| Multi-step action at execution? | No | Yes |
+| Conditional on state that may change? | No | Yes |
+
+**Default to DM** when possible. Every agent wake-up costs money and context.
+
+## Writing a Good Description (for agent tasks)
+
+> **The wake-up agent has NO memory of why it was scheduled.** It receives only: `today.md`, a fresh 1-day calendar, `user/profile.md` + `rules/management.md`, and the `description` + `taskContext` fields you provide. Nothing else.
+
+Include all four elements:
+
+| Element | What it answers |
+|---|---|
+| **What** | Specific verb + object (notify, check, update, prepare) |
+| **Why** | The trigger or reason (meeting approaching, deadline, user request) |
+| **Who/What** | Concrete names, IDs, URLs, filenames |
+| **Expected output** | What "success" looks like (notification sent, file updated) |
+
+**Good:** `"15-minute reminder for the 14:00 design review. Attendees: Sarah, Mike. Agenda: API v2 breaking changes. Prepare the meeting-note template and notify the user via Slack."`
+
+**Bad:** `"Meeting prep"` — which meeting? when? what to prepare?
+
+## Using `taskContext`
+Structured metadata for IDs, URLs, and correlation. Put long identifiers here so `description` stays under ~2 sentences:
+```json
+{ "scheduledBy": "morning_routine", "prUrl": "https://github.com/user/repo/pull/42" }
+```
+
+**`importance` convention.** This controls whether `agent_schedule`
+rows become `roadmap.md` `Scheduled:` entries:
+
+| Tier | Roadmap behavior | Use |
+|---|---|---|
+| `transient` | Never in roadmap; surfaces in today.md only on the day it fires | Default for `/api/schedule/dm`; short pings like "call mom next Tuesday" |
+| `normal` | In roadmap only when scheduled more than 7 days out | Default for `/api/schedule`; ordinary user-facing follow-ups |
+| `strategic` | In roadmap regardless of horizon | Long-prep commitments such as ESTA / travel / deadline reminders |
+| `low` | Never in roadmap | Internal ticks already visible elsewhere, e.g. Agent Plan rows, recurring-schedule instances, morning retries |
+
+For direct DMs, omit `importance` for ordinary one-off pings. If the
+reminder is clearly tied to a long-prep commitment ("remind me in a
+month about ESTA for the LA trip"), either write/promote the roadmap
+item via the roadmap skill and let AAP schedule the reminder, or call
+`/api/schedule/dm` with `"importance":"strategic"`.
+
+## Tier / Model selection
+
+Pick `tier` (`lite` / `medium` / `high`) by default — backend-neutral cost knob. Pin `model` (registered id, alias, or `<backendId>/<modelId>`) only when the row must outlive a `/settings/models` re-route. Mutually exclusive — both set returns `schedule.tier_and_model_conflict`. Omit both to use the dispatcher's process-key default. Discovery, PATCH swap form, alias rewrite, and `/api/schedule/options` payload are in the reference below.
+
+{{> ref:model-selection }}
+
+## Time discipline
+- **Absolute time required** — resolve relative expressions via `<current_time>` into ISO 8601 with offset. E.g. "in 1 hour" at 15:30 EDT → `2026-04-06T16:30:00-04:00`.
+- **No quiet hours (default 22:00-08:00, configurable)** unless `critical` priority.
+- **Check today.md Schedule** before creating wakes to avoid piling onto a busy hour.
+
+## Budget
+- **Max 5 wake-ups per execution.** Consolidate into a single briefing task if more.
+- **Morning Routine batches all day's wake-ups at once.** Other events schedule only immediate needs.
+
+---
+
+## API Reference
+
+### POST /api/schedule/dm — Schedule a direct DM
+Sends a pre-composed message at the specified time. No AI agent invoked.
+```bash
+curl -s -X POST http://localhost:8321/api/schedule/dm \
+  -H 'Content-Type: application/json' \
+  -d '{"time":"2026-04-06T16:00:00-04:00","message":"Reminder: Design review in 30 min.","platform":"slack"}'
+```
+| Field | Required | Description |
+|---|---|---|
+| `time` | Yes | ISO 8601 with timezone offset |
+| `message` | Yes | Complete message text — sent as-is |
+| `platform` | No | Target platform (defaults to primary) |
+| `importance` | No | `transient` (default), `normal`, or `strategic`. Use `strategic` only for roadmap-shaped long-prep reminders. |
+
+Response: `{ "status":"scheduled", "scheduleId":"123", "scheduledFor":"..." }`. Rejects times in the past (> 1 min ago).
+
+### POST /api/schedule — Schedule an agent task
+```bash
+curl -s -X POST http://localhost:8321/api/schedule \
+  -H 'Content-Type: application/json' \
+  -d '{"time":"2026-04-06T16:00:00-04:00","taskType":"wake","description":"Hourly docker health check: run `docker ps --format` and DM if any container is in restart loop.","tier":"lite","taskContext":{"scheduledBy":"docker_monitor"}}'
+```
+| Field | Required | Description |
+|---|---|---|
+| `time` | Yes | ISO 8601 with timezone offset |
+| `taskType` | Yes | `wake` for scheduled tasks |
+| `description` | Yes | Self-contained (min 20 chars). See format above. Doubles as the agent body unless `prompt` overrides it. |
+| `prompt` | No | Optional override for the agent body (min 20 chars when set). When set, the dispatcher injects this — not `description` — into the task-flow template. Use when you want a short list-friendly `description` plus a longer, separate instruction for the agent. |
+| `tier` | No | `lite` / `medium` / `high`. Omit to use the dispatcher's process-key default (medium for `scheduled.task`). See "Tier / Model selection" above. Mutually exclusive with `model`. |
+| `model` | No | Registered model id (`claude-opus-4-7`, `gpt-5.4`, …), legacy alias (`sonnet` / `opus`, auto-rewritten to `tier`), or composite `<backendId>/<modelId>`. See "Tier / Model selection" above. Mutually exclusive with `tier`. |
+| `taskContext` | No | Structured metadata object |
+
+Response: `{ "status":"scheduled", "scheduleId":"123", "scheduledFor":"YYYY-MM-DD HH:MM:SS" }`. `scheduledFor` is the normalized UTC SQLite timestamp the daemon actually stored — log this verbatim instead of re-formatting the input `time`. Rejects times in the past (> 1 min ago), same as `/api/schedule/dm`.
+
+### PATCH /api/schedule/:id — Edit a pending item
+```bash
+curl -s -X PATCH http://localhost:8321/api/schedule/42 \
+  -H 'Content-Type: application/json' \
+  -d '{"time":"2026-04-06T17:00:00-04:00"}'
+```
+Fields: `time` (ISO 8601), `description` (min 20 chars, non-dm only), `prompt` (min 20 chars OR `null` to clear; non-dm only), `message` (dm only), `tier` (`lite`/`medium`/`high` OR `null` to clear), `model` (registered id / alias / composite OR `null` to clear), `taskContext`. At least one required. Only `pending` items editable. `description`/`message` mutually exclusive; `prompt`/`message` mutually exclusive. Tier ↔ model swap form is in the model-selection reference above. Response: `{ "status":"updated", "id":42, "warnings":[] }` / 404 / 409 — surface `warnings[]` (e.g. `schedule.model_deprecated`) to the next turn.
+
+### GET /api/schedule — List scheduled items
+```bash
+curl -s "http://localhost:8321/api/schedule?status=pending"
+```
+Param `status` (default `pending,running`): comma-separated `pending`, `running`, `completed`, `failed`.
+Param `roadmapEligible=true`: return only rows that may become
+roadmap `Scheduled:` entries (`transient` / `low` excluded, `normal`
+only beyond 7 days, `strategic` included).
+Response: `{ "items":[{ "id","scheduledFor","taskType","description","prompt","status","model","backendId","tier","taskContext","createdAt" }] }`. `prompt` / `tier` / `model` / `backendId` are `null` when no override is set. `model` is a registered id verbatim and travels with `backendId` when set — the row carries either the `(model, backendId)` pin or `tier`, never both. Legacy alias inputs (`sonnet` / `opus`) are normalized to `tier` at write time. `taskContext` is the parsed JSON (or `null`); filter with `jq` e.g. `'.items[] | select(.taskContext.confirm_dedup_key == "create_project:la-pm-masters")'`.
+
+### DELETE /api/schedule/:id — Cancel a pending item
+```bash
+curl -s -X DELETE http://localhost:8321/api/schedule/42
+```
+Only cancels `pending` items. Response: `{ "status":"cancelled", "id":42 }` / 404 / 409.
+
+### POST /api/schedule/batch — Bulk register rich-context schedules
+
+Morning-routine Stage A only. Single-row callers use `POST /api/schedule`
+above. The required `taskContext.background` + `expected_output`
+fields, the 50-row cap, the atomic / per-row commit modes, and the
+success payload are in the batch reference below.
+
+{{> ref:batch }}
+
+---
+
+## Errors
+
+Every endpoint in this skill emits errors in the **agent-consumable
+envelope** — read `errors[].hint`, fix the value at `errors[].field`,
+and resubmit the same body. The full envelope shape and every
+`schedule.*` code (request-shape, time-bound, row-content, taskContext,
+model, batch) are in the errors reference below.
+
+{{> ref:errors }}
+
+---
+
+## Recurring Schedules
+
+For tasks that repeat on a fixed pattern. The daemon auto-regenerates
+the next one-shot occurrence after each execution. **Hourly / daily /
+weekly / monthly** cadences are supported; the recurring reference
+below documents the full shape, the hourly + monthly missing-day
+recipes, pause-vs-delete trade-off, and PATCH / GET / DELETE surface.
+
+{{> ref:recurring }}
+
+### recurrenceRule grammar — engine vs consumer
+
+The full engine grammar (mapping table, frequency-vs-field matrix,
+cadence-string-must-match-recurrenceRule discipline) is shared with
+the `managed-tasks` skill. The reference is byte-identical across
+both skills — pinned by `skills-manifest.test.ts` so they cannot
+drift. Schedule callers may use any of the four frequencies the
+engine accepts; the `managed-tasks` consumer chooses to refuse
+sub-daily for app-fetch correctness and that constraint lives there.
+
+{{> ref:recurrence-rule }}

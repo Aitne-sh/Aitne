@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "project-shape",
+      "kind": "knowledge_layout",
+      "anchor": "<!-- CURATION:knowledge_layout id=\"project-shape\" -->",
+      "human_label": "Project / git-repo file shape",
+      "description": "Required sections in projects/*.md and git-repos/*.md, and what each section holds",
+      "scope_paths": ["projects/*.md", "git-repos/*.md"]
+    },
+    {
+      "id": "slug-grammar",
+      "kind": "convention_notes",
+      "anchor": "<!-- CURATION:convention_notes id=\"slug-grammar\" -->",
+      "human_label": "Project slug grammar",
+      "description": "Slug format, length cap, reserved stems",
+      "scope_paths": ["projects/*.md", "git-repos/*.md"]
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "name": "@aitne/dashboard",
+  "version": "0.1.8",
+  "description": "Aitne dashboard — Next.js web UI for the Aitne personal agent. Consumed by the `aitne` CLI; not intended for standalone use.",
+  "homepage": "https://github.com/Aitne-sh/Aitne#readme",
+  "bugs": {
+    "url": "https://github.com/Aitne-sh/Aitne/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aitne-sh/Aitne.git",
+    "directory": "packages/dashboard"
+  },
+  "license": "MIT",
+  "author": "Aitne contributors",
+  "type": "module",
+  "files": [
+    ".next/BUILD_ID",
+    ".next/*.json",
+    ".next/*.js",
+    ".next/build/**",
+    ".next/server/**",
+    ".next/static/**",
+    ".next/types/**",
+    ".next/diagnostics/**",
+    "next.config.ts",
+    "next-env.d.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "eslint .",
+    "clean": "node ../../scripts/rm-paths.mjs .next out tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@aitne/shared": "workspace:*",
+    "@radix-ui/react-alert-dialog": "^1.1.15",
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-separator": "^1.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-toggle": "^1.1.10",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-query": "^5.96.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.2.6",
+    "next-themes": "^0.4.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^9.0.0",
+    "recharts": "^2.15.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.5",
+    "@tailwindcss/postcss": "^4.2.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.6",
+    "tailwindcss": "^4.2.2",
+    "typescript": "^5.8.0"
+  }
+}

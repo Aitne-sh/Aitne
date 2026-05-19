@@ -1,0 +1,17 @@
+{
+  "kind": "convention_notes",
+  "notes": [
+    {
+      "topic": "Look-ahead",
+      "rule": "Look-ahead notes flag a future event the user may want to prepare for, written as a single bullet under ## Agent Notes."
+    },
+    {
+      "topic": "Day-time observation",
+      "rule": "Day-time observations capture something the user said or did during the day that is worth surfacing later, often in the next morning routine."
+    },
+    {
+      "topic": "Latent profile question",
+      "rule": "Latent profile questions are open questions the agent wants to ask the user when context allows, marked with the suffix `(asked HH:MM)` once asked."
+    }
+  ]
+}

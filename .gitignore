@@ -1,0 +1,94 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.buildstamp
+.next/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+/logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Turbo
+.turbo/
+
+# Test coverage
+coverage/
+
+# Temp
+tmp/
+
+# Claude Code — tool-local directory, fully ignored
+.claude/
+
+# Obsidian workspace settings (auto-generated)
+.obsidian/
+
+# Operator-facing docs surface (see DOCS_QA_DESIGN.md §5)
+docs/user/
+
+# Internal design / dev docs (not for public repo)
+docs/design/
+docs/prompt-reduction/
+docs/audit/
+docs/migration-report.md
+DESIGN.md
+/*_DESIGN.md
+/phase*-findings.md
+PRODUCT_OVERVIEW.md
+coverage-gaps.md
+INTEGRATION_NATIVE_MODE_DESIGN.md
+ROUTINE_DATA_ACQUISITION_DESIGN.md
+OPENCODE_BACKEND_DESIGN.md
+WIKI_BUILDER_DESIGN.md
+PRE_PASS_FAN_OUT_DESIGN.md
+AUDIT-BACKLOG-*.md
+RELEASE_STRATEGY.md
+RELEASE_GIT_C1_C4_PLAN.md
+HOURLY_CHECK_GATE_REDESIGN_PLAN.md
+DM_HISTORY_CONTINUITY_FIX_PLAN.md
+MESSAGING_P2_IMPROVEMENT_PLAN.md
+SCHEDULE_API_REDESIGN_PLAN.md
+
+# Local opencode probe/capture artifacts
+/.opencode/
+/__fixtures__/opencode-phase0/
+
+# Root developer-only Claude Code instructions (per-session CLAUDE.md is rendered at runtime)
+/CLAUDE.md
+
+# Internal proof-of-concept scripts
+scripts/poc/
+
+# Experimental / one-off run artifacts
+.codex-pet-runs/
+
+# Stray literal '~' directory (typo-created)
+/~/
+
+# Source media (raw videos) — converted artifacts live in docs/assets/
+/media-source/
+
+# Local pre-release backups (timestamped snapshots — never committed, never published)
+/bk/

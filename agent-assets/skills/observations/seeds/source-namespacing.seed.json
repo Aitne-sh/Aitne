@@ -1,0 +1,20 @@
+{
+  "kind": "convention_notes",
+  "notes": [
+    {
+      "topic": "Source prefix",
+      "rule": "Observation source strings carry a kind prefix followed by an optional colon-separated sub-kind: kind[:sub_kind][:detail].",
+      "example": "obsidian:primary, obsidian:external, roadmap_candidate:travel"
+    },
+    {
+      "topic": "Obsidian split",
+      "rule": "obsidian:primary covers the agent's own management vault; obsidian:external covers user note vaults watched separately.",
+      "example": "source=obsidian matches both via the prefix filter on GET /api/observations"
+    },
+    {
+      "topic": "Idempotency key",
+      "rule": "The pair (source, ref) is the idempotency key on POST /api/observations and a re-post of the same pair updates the pending row instead of duplicating it.",
+      "example": "source=roadmap_candidate:travel ref=trip-portland-2026-summer"
+    }
+  ]
+}

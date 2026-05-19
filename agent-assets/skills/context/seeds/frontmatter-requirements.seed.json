@@ -1,0 +1,40 @@
+{
+  "kind": "frontmatter_schema",
+  "file_types": [
+    {
+      "glob": "projects/*.md",
+      "required": [
+        { "key": "type", "type": "enum", "example": "project" },
+        { "key": "owner", "type": "string", "example": "shared" },
+        { "key": "updated", "type": "iso-date", "example": "2026-05-04" }
+      ],
+      "conventional": [
+        { "key": "slug", "purpose": "kebab-case slug matching the filename" },
+        { "key": "state", "purpose": "lifecycle state used by the active-projects view" },
+        { "key": "start", "purpose": "iso-date the project started" },
+        { "key": "due", "purpose": "iso-date the project is due" },
+        { "key": "stakeholders", "purpose": "list of involved parties" },
+        { "key": "next_milestone", "purpose": "what's next on the roadmap" },
+        { "key": "tags", "purpose": "free-form classification tags" }
+      ]
+    },
+    {
+      "glob": "user/*.md",
+      "required": [
+        { "key": "type", "type": "enum", "example": "user" },
+        { "key": "owner", "type": "string", "example": "shared" },
+        { "key": "updated", "type": "iso-date", "example": "2026-05-04" }
+      ],
+      "conventional": []
+    },
+    {
+      "glob": "rules/*.md",
+      "required": [
+        { "key": "type", "type": "enum", "example": "rule" },
+        { "key": "owner", "type": "string", "example": "shared" },
+        { "key": "updated", "type": "iso-date", "example": "2026-05-04" }
+      ],
+      "conventional": []
+    }
+  ]
+}

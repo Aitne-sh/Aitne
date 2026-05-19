@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "file-responsibilities",
+      "kind": "knowledge_layout",
+      "anchor": "<!-- CURATION:knowledge_layout id=\"file-responsibilities\" -->",
+      "human_label": "File responsibilities",
+      "description": "Which file owns which area of the context tree (today, roadmap, projects, weekly, rules, user)",
+      "scope_paths": [
+        "today.md",
+        "roadmap.md",
+        "projects/*.md",
+        "weekly/*.md",
+        "monthly/*.md",
+        "rules/*.md",
+        "user/*.md",
+        "agent/*.md"
+      ]
+    },
+    {
+      "id": "frontmatter-requirements",
+      "kind": "frontmatter_schema",
+      "anchor": "<!-- CURATION:frontmatter_schema id=\"frontmatter-requirements\" -->",
+      "human_label": "Required frontmatter for guarded files",
+      "description": "Per file-glob: required + conventional frontmatter keys",
+      "scope_paths": [
+        "projects/*.md",
+        "user/*.md",
+        "rules/*.md",
+        "weekly/*.md",
+        "monthly/*.md",
+        "daily/*.md"
+      ]
+    }
+  ]
+}

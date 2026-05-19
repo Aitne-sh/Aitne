@@ -1,0 +1,13 @@
+{
+  "kind": "knowledge_layout",
+  "files": [
+    { "path": "today.md", "purpose": "today's schedule, tasks, agent log, handoff", "sections": [{ "heading": "## Schedule", "contains": "today's events" }, { "heading": "## Tasks", "contains": "open tasks" }, { "heading": "## Agent Notes", "contains": "agent observations" }] },
+    { "path": "roadmap.md", "purpose": "long-horizon agent action plan + Long-term Plans", "sections": [{ "heading": "## Annual Goals", "contains": "year-scope outcomes" }, { "heading": "## Quarterly Milestones", "contains": "quarter-scope deliverables" }, { "heading": "## Focus Areas", "contains": "current themes of work" }] },
+    { "path": "projects/*.md", "purpose": "per-project state summaries (slug-named)", "sections": [{ "heading": "## Overview", "contains": "what the project is about" }, { "heading": "## Lifecycle Phases", "contains": "phase ladder for the project" }] },
+    { "path": "weekly/*.md", "purpose": "weekly review snapshots (YYYY-Www); Carry Over / Next Week Focus / Lessons are lifted into next week's morning_routine via <previous_week>", "sections": [{ "heading": "## Highlights", "contains": "wins of the week" }, { "heading": "## Open Loops", "contains": "tasks/commitments still pending" }, { "heading": "## Carry Over to Next Week", "contains": "open loops to carry over (max 5) with one-line reason" }, { "heading": "## Next Week Focus", "contains": "top priorities for next week (max 3)" }, { "heading": "## Lessons for Next Week", "contains": "behavioral observation → action (max 3)" }] },
+    { "path": "monthly/*.md", "purpose": "monthly review snapshots (YYYY-MM)", "sections": [{ "heading": "## Theme", "contains": "the month's overall theme" }] },
+    { "path": "rules/*.md", "purpose": "user-controlled policy files", "sections": [{ "heading": "## Why", "contains": "rationale for the rule" }, { "heading": "## How", "contains": "concrete rule shape" }] },
+    { "path": "user/*.md", "purpose": "user identity and preferences dictionary", "sections": [{ "heading": "## Identity", "contains": "name role tz" }] },
+    { "path": "agent/journal.md", "purpose": "agent-owned weekly + monthly self-critique", "sections": [{ "heading": "## Weekly", "contains": "what worked, what slipped, improvements" }] }
+  ]
+}

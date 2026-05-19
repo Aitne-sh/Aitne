@@ -1,0 +1,254 @@
+---
+name: notion
+description: Load when the task touches Notion AND Notion is cross-backend delegated from a Claude DM session (`delegatedBackend` is non-Claude). All Notion operations flow through `POST /api/integrations/notion/exec`. `GET /api/notion/databases` remains available for label resolution.
+allowed-tools:
+  - Bash(curl *)
+  - Read
+---
+
+# Notion (delegated, cross-backend)
+
+Your DM session runs on Claude Code. Notion access has been delegated
+to a *different* backend (Codex or Gemini) whose Notion connector is
+signed in. **You describe Notion intent in natural language; the
+daemon picks the tool.** Tool name divergence between Codex
+(`search`, `notion_create_pages`), Gemini (`notion-search`,
+`notion-create-pages`) and any custom Notion MCP server the user
+installs is invisible to you.
+
+To check which backend currently owns Notion, read
+`~/.personal-agent/integrations.md`. The `/exec` body below is
+backend-agnostic.
+
+## 1. Label resolution (still direct)
+
+Database UUIDs are unstable; the user's labels (e.g. `"projects"`,
+`"meeting-notes"`) map to UUIDs through the daemon's settings store.
+This route is NOT proxied — it returns the configured map even in
+delegated mode:
+
+```bash
+curl -s http://localhost:8321/api/notion/databases
+# → { databases: { "<label>": { "id": "<uuid>", "title": "..." }, ... } }
+```
+
+Resolve label → UUID here BEFORE the `/exec` call so your `task`
+prose carries a concrete data-source URL or UUID.
+
+## 2. The single call shape
+
+Every Notion operation in this mode is one POST:
+
+```bash
+curl -s -X POST http://localhost:8321/api/integrations/notion/exec \
+  -H 'Content-Type: application/json' \
+  -d '{"task": "<natural-language intent>", "outputSchema": { ... }, "cacheable": true}'
+```
+
+The daemon:
+
+1. Verifies Notion is in `mode="delegated"`. If not, you get
+   `409 mode_mismatch` — re-read `integrations.md` and stop.
+2. Spawns the delegatedBackend in a tempdir, lets it pick the right
+   tool against the per-task allowed-tools envelope, validates the
+   final JSON against your `outputSchema`, returns it.
+
+`outputSchema` is **required** (4 KB cap). Defaults: `maxToolCalls=7`,
+`maxBudgetUsd=0.05`, `timeoutMs=60000`. Bump up to 15 / 0.50 / 300000
+for genuinely larger intents.
+
+## 3. Worked examples
+
+### Search + structured listing (read)
+
+```bash
+curl -s -X POST http://localhost:8321/api/integrations/notion/exec \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "task": "List the top-level pages in the Tasks database (data source <UUID>). For each page return the title, status (if a Status property exists), and last-edited timestamp. Sort by last-edited descending.",
+    "outputSchema": {
+      "type": "object",
+      "required": ["pages"],
+      "properties": {
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "lastEditedAt"],
+            "properties": {
+              "id":           {"type": "string"},
+              "title":        {"type": "string"},
+              "status":       {"type": "string"},
+              "lastEditedAt": {"type": "string", "format": "date-time"}
+            }
+          }
+        }
+      }
+    },
+    "maxToolCalls": 5,
+    "cacheable": true
+  }'
+```
+
+### Read a page tree (composition)
+
+```bash
+curl -s -X POST http://localhost:8321/api/integrations/notion/exec \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "task": "Fetch Notion page <UUID> and recursively walk its child pages and toggle blocks. Return id, title, depth, and a flat array of text content per page.",
+    "outputSchema": {
+      "type": "object",
+      "required": ["nodes"],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "title", "depth", "content"],
+            "properties": {
+              "id":      {"type": "string"},
+              "title":   {"type": "string"},
+              "depth":   {"type": "integer"},
+              "content": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "maxToolCalls": 8,
+    "cacheable": true
+  }'
+```
+
+### Create a page (destructive — confirmation required)
+
+```bash
+curl -s -X POST http://localhost:8321/api/integrations/notion/exec \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "task": "Create a new page under the Projects database (data source <UUID>) titled \"Migration plan — May\". Body: <BODY>. Properties: Status=\"Active\", Owner=<USER_ID>.",
+    "outputSchema": {
+      "type": "object",
+      "required": ["pageId", "url"],
+      "properties": {
+        "pageId": {"type": "string"},
+        "url":    {"type": "string"}
+      }
+    },
+    "allowDestructive": true
+  }'
+```
+
+## 4. Destructive-confirm two-step (`allowDestructive`)
+
+Default is `false`. The subprocess will not run create / update /
+delete / move / duplicate / comment — instead it returns:
+
+```jsonc
+{
+  "needsConfirmation": true,
+  "confirmationPlan": "I will create a new page titled \"Migration plan — May\" under the Projects database with status \"Active\"."
+}
+```
+
+Surface `confirmationPlan` to the user verbatim. On their explicit OK,
+re-issue the **same `task` verbatim** with `allowDestructive: true`.
+Never set `cacheable: true` on the second call.
+
+## 5. `cacheable: true` for read-only Notion lookups
+
+Page reads, database queries, and search results are good cache
+candidates — Notion's content rarely changes minute-to-minute and
+follow-up reads are common. 60s TTL. Skip caching when the user
+explicitly asked about a recent edit, and never set on writes or the
+destructive-confirm second call.
+
+## 6. Decision rules
+
+### Page archive — workaround only
+
+Neither hosted connector exposes a page-archive tool. Pre-existing
+direct-mode trash via `DELETE /api/notion/pages/:id` is unavailable
+here. Phrase the intent as one of:
+
+1. **Property workaround** (preferred when the page lives in a
+   database with a Status property): "Set Status = Archived on page
+   <UUID>." The page stays addressable but drops out of default
+   views.
+2. **Move to a "Trash" page**: "Move page <UUID> under the top-level
+   Trash page (creating Trash if it doesn't exist)." Reversible
+   without admin intervention.
+
+Tell the user when neither option fits — never silently leave a page
+visible the user asked to remove.
+
+### Schema admin — Approve-tier intent
+
+Database / view / data-source mutations change workspace structure.
+Surface what you'd do before invoking, and ask the user. Do not
+auto-confirm "this looks right".
+
+### Mass-update — ask first
+
+The connectors accept up to 100 pages per create call. If the user
+asks for a batch operation that would touch more than ~10 pages,
+summarize the plan and ask before executing.
+
+### Structured database filtering
+
+When the user asks "what tasks are in status X" or anything that maps
+to `WHERE <property> = ...`, phrase the intent as the WHERE clause
+and let the subprocess pick the right primitive
+(`notion_query_data_sources` SQL on Codex, filtered `notion-search`
+on Gemini, etc.).
+
+## 7. Error envelope
+
+`/exec` extends the direct-mode envelope with delegated-mode fields.
+Discriminator: `body.mode === "delegated"`.
+
+| HTTP | `error` | retry? | What to do |
+|---|---|---|---|
+| 400 | `validation_error` / `schema_too_large` | no | Fix the request body. |
+| 409 | `mode_mismatch` | no | Notion isn't delegated. Re-read `integrations.md` and stop. |
+| 409 | `precondition` | no | Mode/backend flipped during the queue wait. Re-check state. |
+| 429 | `task_quota_exhausted` | no | Daily cap reached. Wait or surface. |
+| 502 | `parse_error` / `schema_violation` | no (daemon already retried once) | Simplify schema. |
+| 502 | `tool_unavailable` | no | No connector tool fits. Surface the gap. |
+| 502 | `tool_failed` | maybe | Connector tool returned an error. Surface verbatim. |
+| 502 | `auth_error` | no | Connector signed out. Re-authenticate. |
+| 502 | `policy_violation` | no | Subprocess attempted an out-of-allowlist tool (anti-injection). |
+| 502 | `loop_aborted` | no | `maxToolCalls` exceeded. Bump or simplify. |
+| 502 | `budget_exhausted` | no | `maxBudgetUsd` exceeded. Caller can raise the cap. |
+| 502 | `post_write_format_failure` | no | Write succeeded; formatting failed. Surface with partial trace. |
+| 503 | `delegated_proxy_busy` | yes | Queue saturated. Backoff and retry once. |
+| 503 | `task_mode_disabled` | no | Operator killed it. Stop. |
+| 504 | `timeout` | yes (1×) | Wall-clock fired. Retry once. |
+| 500 | `subprocess_crashed` | no | Daemon-side defect. Surface and stop. |
+
+Always preserve `body.message` verbatim when reporting to the user.
+
+## 8. Owner notification (opt-in)
+
+The daemon does not auto-DM the owner. When you take an action you
+judge the user wants to know about *now* — archiving a stack of pages,
+moving content out of a long-lived database, posting a public comment
+— call:
+
+```bash
+curl -s -X POST http://localhost:8321/api/notify \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "Archived 7 stale pages under the <db> database."}'
+```
+
+Do not call `/api/notify` for routine reads or single-page edits.
+
+## 9. Cost attribution
+
+Every `/exec` writes one row to `agent_actions` with
+`action_type='delegated_task.exec'`, full token + USD breakdown, and
+the parent `event_id` / `processKey` (the daemon attaches both via
+session env vars). Retrospective calls
+(`GET /api/agent/actions?kind=delegated_task.exec`) surface exactly
+what was spent.

@@ -1,0 +1,14 @@
+{
+  "kind": "convention_notes",
+  "notes": [
+    {
+      "topic": "Date prefix",
+      "rule": "Learned Context entries carry a [YYYY-MM-DD] date prefix so the Evening Review can prune entries older than 30 days.",
+      "example": "- [2026-04-01] Prefers concise bullets in DM responses"
+    },
+    {
+      "topic": "30-day prune",
+      "rule": "Entries older than 30 days are removed during the Evening Review pruning pass."
+    }
+  ]
+}

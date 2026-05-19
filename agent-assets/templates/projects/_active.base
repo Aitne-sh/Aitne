@@ -1,0 +1,14 @@
+filters:
+  and:
+    - file.inFolder("projects")
+    - state != "archived"
+views:
+  - type: table
+    name: "Active projects"
+    order: [file.name, state, next_milestone, due, updated]
+    sort:
+      - property: updated
+        direction: desc
+  - type: cards
+    name: "By state"
+    group_by: state

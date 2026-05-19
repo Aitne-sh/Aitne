@@ -1,0 +1,20 @@
+{
+  "kind": "convention_notes",
+  "notes": [
+    {
+      "topic": "Slug format",
+      "rule": "Project and repo slugs are kebab-case, lowercase letters with hyphens between words.",
+      "example": "projects/cost-explorer.md, git-repos/personal-agent.md"
+    },
+    {
+      "topic": "Slug length",
+      "rule": "Slugs are 32 characters or fewer, including the hyphens but excluding the .md suffix.",
+      "example": "projects/personal-agent-skills.md is at the upper bound"
+    },
+    {
+      "topic": "Reserved stems",
+      "rule": "Stems _index and _archive are reserved for daemon-maintained files and not in use as project slugs.",
+      "example": "projects/_index.md is a directory listing, not a project file"
+    }
+  ]
+}

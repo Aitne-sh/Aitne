@@ -1,0 +1,1318 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createEvent, EventPriority, type AgentResult } from "@aitne/shared";
+import { applySchema } from "../db/schema.js";
+import { AuditLogger, bangStatusToResult } from "./audit.js";
+import type { MessageEvent } from "@aitne/shared";
+
+describe("AuditLogger", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("logs successful actions", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "message.received",
+      source: "slack",
+      priority: EventPriority.HIGH,
+    });
+
+    audit.logAction({
+      event,
+      model: "claude-sonnet-4-6",
+      costUsd: 0.01,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "reactive",
+      contextUpdated: true,
+    });
+
+    const row = db
+      .prepare(
+        "SELECT model_used, cost_usd, context_updated FROM agent_actions LIMIT 1",
+      )
+      .get() as {
+        model_used: string;
+        cost_usd: number;
+        context_updated: number;
+      };
+
+    expect(row.model_used).toBe("claude-sonnet-4-6");
+    expect(row.cost_usd).toBe(0.01);
+    expect(row.context_updated).toBe(1);
+  });
+
+  it("persists backend metadata when migrated schema is present", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pa-audit-"));
+    try {
+      applySchema(db);
+      const audit = new AuditLogger(db);
+      const event = createEvent({
+        type: "routine.hourly_check",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+
+      audit.logAction({
+        event,
+        model: "gpt-5.4",
+        costUsd: 0.123,
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 250,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {
+          "gpt-5.4": {
+            inputTokens: 1000,
+            outputTokens: 250,
+            costUsd: 0.123,
+          },
+        } satisfies AgentResult["modelUsage"],
+        durationMs: 800,
+        numTurns: 2,
+        trigger: "autonomous",
+          backend: "codex",
+        costSource: "hardcoded",
+        contextUpdated: false,
+      });
+
+      const row = db
+        .prepare(
+          "SELECT backend, cost_source, model_usage_json FROM agent_actions LIMIT 1",
+        )
+        .get() as {
+          backend: string | null;
+          cost_source: string | null;
+          model_usage_json: string | null;
+        };
+
+      expect(row.backend).toBe("codex");
+      expect(row.cost_source).toBe("hardcoded");
+      expect(row.model_usage_json).toContain("gpt-5.4");
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("logSkip records a skipped event with reason", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.hourly_check",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    audit.logSkip(event, "no_observations", "autonomous");
+
+    const row = db
+      .prepare(
+        "SELECT action_type, result, error, trigger FROM agent_actions LIMIT 1",
+      )
+      .get() as {
+        action_type: string;
+        result: string;
+        error: string;
+        trigger: string;
+      };
+
+    expect(row.action_type).toBe("routine.hourly_check");
+    expect(row.result).toBe("skipped");
+    expect(row.error).toBe("no_observations");
+    expect(row.trigger).toBe("autonomous");
+  });
+
+  it("logError records a failed event with error message", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "message.received",
+      source: "slack",
+      priority: EventPriority.HIGH,
+    });
+
+    audit.logError(event, new Error("quota exceeded"), "reactive");
+
+    const row = db
+      .prepare(
+        "SELECT action_type, result, error, trigger FROM agent_actions LIMIT 1",
+      )
+      .get() as {
+        action_type: string;
+        result: string;
+        error: string;
+        trigger: string;
+      };
+
+    expect(row.action_type).toBe("message.received");
+    expect(row.result).toBe("failed");
+    expect(row.error).toBe("quota exceeded");
+    expect(row.trigger).toBe("reactive");
+  });
+
+  it("logError persists duration / backend / failure shape when supplied", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "scheduled.task",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    audit.logError(
+      event,
+      new Error('Backend "claude" failed without fallback: quota:max_budget_usd — Reached maximum budget ($0.1)'),
+      "autonomous",
+      {
+        durationMs: 59415,
+        backendId: "claude",
+        failureKind: "quota",
+        failureCode: "max_budget_usd",
+      },
+    );
+
+    const row = db
+      .prepare(
+        `SELECT result, duration_ms, backend, model_used, detail,
+                started_at, completed_at, error
+           FROM agent_actions LIMIT 1`,
+      )
+      .get() as {
+        result: string;
+        duration_ms: number;
+        backend: string | null;
+        model_used: string | null;
+        detail: string | null;
+        started_at: string;
+        completed_at: string;
+        error: string;
+      };
+
+    expect(row.result).toBe("failed");
+    expect(row.duration_ms).toBe(59415);
+    expect(row.backend).toBe("claude");
+    expect(row.detail).toBe(
+      JSON.stringify({ failureKind: "quota", failureCode: "max_budget_usd" }),
+    );
+    // started_at must precede completed_at by ~the duration so the
+    // dashboard "Started" column reflects when the run actually began.
+    const startedMs = Date.parse(`${row.started_at}Z`);
+    const completedMs = Date.parse(`${row.completed_at}Z`);
+    expect(completedMs - startedMs).toBeGreaterThanOrEqual(58_000);
+    expect(completedMs - startedMs).toBeLessThanOrEqual(61_000);
+    expect(row.error).toContain("max_budget_usd");
+  });
+
+  it("publishes persisted rows when a callback is configured", () => {
+    const onRowInserted = vi.fn();
+    const audit = new AuditLogger(db, { onRowInserted });
+
+    const successEvent = createEvent({
+      type: "message.received",
+      source: "slack",
+      priority: EventPriority.HIGH,
+    });
+    const skippedEvent = createEvent({
+      type: "routine.hourly_check",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+    const failedEvent = createEvent({
+      type: "scheduled.task",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    audit.logAction({
+      event: successEvent,
+      model: "claude-sonnet-4-6",
+      costUsd: 0.01,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "reactive",
+    });
+    audit.logSkip(skippedEvent, "no_observations", "autonomous");
+    audit.logError(failedEvent, new Error("quota exceeded"), "autonomous");
+
+    expect(onRowInserted).toHaveBeenCalledTimes(3);
+    expect(onRowInserted).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        id: 1,
+        action_type: "message.received",
+        result: "success",
+      }),
+    );
+    expect(onRowInserted).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        id: 2,
+        action_type: "routine.hourly_check",
+        result: "skipped",
+        error: "no_observations",
+      }),
+    );
+    expect(onRowInserted).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        id: 3,
+        action_type: "scheduled.task",
+        result: "failed",
+        error: "quota exceeded",
+      }),
+    );
+  });
+
+  it("logAction does not throw when DB insert fails", () => {
+    // Close the DB to force an error
+    const brokenDb = new Database(":memory:");
+    brokenDb.pragma("foreign_keys = ON");
+    applySchema(brokenDb);
+    const audit = new AuditLogger(brokenDb);
+    brokenDb.close();
+
+    const event = createEvent({
+      type: "message.received",
+      source: "slack",
+      priority: EventPriority.HIGH,
+    });
+
+    // Should not throw — the error is caught and logged
+    expect(() => {
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.01,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 250,
+        numTurns: 1,
+        trigger: "reactive",
+      });
+    }).not.toThrow();
+  });
+
+  it("logSkip does not throw when DB insert fails", () => {
+    const brokenDb = new Database(":memory:");
+    brokenDb.pragma("foreign_keys = ON");
+    applySchema(brokenDb);
+    const audit = new AuditLogger(brokenDb);
+    brokenDb.close();
+
+    const event = createEvent({
+      type: "routine.hourly_check",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    expect(() => {
+      audit.logSkip(event, "test reason", "autonomous");
+    }).not.toThrow();
+  });
+
+  it("logError does not throw when DB insert fails", () => {
+    const brokenDb = new Database(":memory:");
+    brokenDb.pragma("foreign_keys = ON");
+    applySchema(brokenDb);
+    const audit = new AuditLogger(brokenDb);
+    brokenDb.close();
+
+    const event = createEvent({
+      type: "message.received",
+      source: "slack",
+      priority: EventPriority.HIGH,
+    });
+
+    expect(() => {
+      audit.logError(event, new Error("test error"), "reactive");
+    }).not.toThrow();
+  });
+
+  it("logAction defaults contextUpdated to false (0)", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "message.received",
+      source: "slack",
+      priority: EventPriority.HIGH,
+    });
+
+    audit.logAction({
+      event,
+      model: "claude-sonnet-4-6",
+      costUsd: 0.01,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "reactive",
+      // contextUpdated omitted — should default to false
+    });
+
+    const row = db
+      .prepare("SELECT context_updated FROM agent_actions LIMIT 1")
+      .get() as { context_updated: number };
+    expect(row.context_updated).toBe(0);
+  });
+
+  it("persists advisorCallCount into agent_actions.advisor_call_count (migrated schema)", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pa-audit-advisor-"));
+    try {
+      applySchema(db);
+      const audit = new AuditLogger(db);
+      const event = createEvent({
+        type: "message.received",
+        source: "dashboard",
+        priority: EventPriority.HIGH,
+      });
+
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.01,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 250,
+        numTurns: 1,
+        trigger: "reactive",
+        backend: "claude",
+        advisorCallCount: 3,
+      });
+
+      const row = db
+        .prepare(
+          "SELECT advisor_call_count FROM agent_actions LIMIT 1",
+        )
+        .get() as { advisor_call_count: number };
+      expect(row.advisor_call_count).toBe(3);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("logAction advisorCallCount defaults to 0 when omitted (migrated schema)", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pa-audit-advisor-default-"));
+    try {
+      applySchema(db);
+      const audit = new AuditLogger(db);
+      const event = createEvent({
+        type: "message.received",
+        source: "dashboard",
+        priority: EventPriority.HIGH,
+      });
+
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.01,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 250,
+        numTurns: 1,
+        trigger: "reactive",
+        backend: "claude",
+        // advisorCallCount omitted — should default to 0 at the audit layer
+      });
+
+      const row = db
+        .prepare("SELECT advisor_call_count FROM agent_actions LIMIT 1")
+        .get() as { advisor_call_count: number };
+      expect(row.advisor_call_count).toBe(0);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("logAction clamps negative advisorCallCount to 0", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "pa-audit-advisor-clamp-"));
+    try {
+      applySchema(db);
+      const audit = new AuditLogger(db);
+      const event = createEvent({
+        type: "message.received",
+        source: "dashboard",
+        priority: EventPriority.HIGH,
+      });
+
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.01,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 250,
+        numTurns: 1,
+        trigger: "reactive",
+        backend: "claude",
+        advisorCallCount: -5,
+      });
+
+      const row = db
+        .prepare("SELECT advisor_call_count FROM agent_actions LIMIT 1")
+        .get() as { advisor_call_count: number };
+      expect(row.advisor_call_count).toBe(0);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  describe("logAttachment (Phase 1 chat attachments)", () => {
+    it("inserts a reactive inbound upload row tagged `attachment.upload.inbound`", () => {
+      const audit = new AuditLogger(db);
+      audit.logAttachment({
+        direction: "inbound",
+        attachmentId: "att-inbound-1",
+        mimeType: "image/png",
+        sizeBytes: 12_345,
+        provenance: "user_dashboard",
+        originalFilename: "screenshot.png",
+      });
+      const row = db
+        .prepare(
+          `SELECT event_id, action_type, trigger, result, detail
+           FROM agent_actions WHERE action_type = 'attachment.upload.inbound'`,
+        )
+        .get() as {
+          event_id: string;
+          action_type: string;
+          trigger: string;
+          result: string;
+          detail: string;
+        };
+      expect(row.event_id).toBe("att-inbound-1");
+      expect(row.trigger).toBe("reactive");
+      expect(row.result).toBe("success");
+      const detail = JSON.parse(row.detail);
+      expect(detail).toMatchObject({
+        mimeType: "image/png",
+        sizeBytes: 12_345,
+        provenance: "user_dashboard",
+        originalFilename: "screenshot.png",
+      });
+    });
+
+    it("inserts an autonomous outbound row tagged `attachment.upload.outbound`", () => {
+      const audit = new AuditLogger(db);
+      audit.logAttachment({
+        direction: "outbound",
+        attachmentId: "att-outbound-1",
+        mimeType: "application/pdf",
+        sizeBytes: 40_000,
+        provenance: "agent",
+        originalFilename: "report.pdf",
+      });
+      const row = db
+        .prepare(
+          `SELECT action_type, trigger, result
+           FROM agent_actions WHERE action_type = 'attachment.upload.outbound'`,
+        )
+        .get() as { action_type: string; trigger: string; result: string };
+      expect(row).toMatchObject({
+        action_type: "attachment.upload.outbound",
+        trigger: "autonomous",
+        result: "success",
+      });
+    });
+
+    it("swallows DB failures so a broken audit never fails the upload", () => {
+      const audit = new AuditLogger(db);
+      db.close(); // subsequent writes throw
+      // Must not throw — the user's upload already succeeded, the
+      // caller only cares about the optional audit trail.
+      expect(() =>
+        audit.logAttachment({
+          direction: "inbound",
+          attachmentId: "x",
+          mimeType: "image/png",
+          sizeBytes: 1,
+          provenance: "user_dashboard",
+          originalFilename: "x.png",
+        }),
+      ).not.toThrow();
+      // Reopen an in-memory DB so the outer afterEach `db.close()` is a no-op.
+      db = new Database(":memory:");
+    });
+  });
+
+  describe("logBangCommand (messaging-bang-commands.md §6.6)", () => {
+    function makeBangEvent(): MessageEvent {
+      return {
+        type: "message.received",
+        source: "slack",
+        priority: 1 as MessageEvent["priority"],
+        timestamp: new Date(),
+        data: {},
+        correlationId: "corr-99",
+        sender: "owner",
+        channel: "D1",
+        content: "!stop",
+        platform: "telegram",
+        threadId: null,
+        isDm: true,
+        isMention: false,
+      };
+    }
+
+    it("inserts a bang_command row with mapped result and detail JSON", () => {
+      const audit = new AuditLogger(db);
+      audit.logBangCommand(makeBangEvent(), {
+        command: "!stop",
+        status: "ok",
+        prevPaused: false,
+        nextPaused: true,
+      });
+      const row = db
+        .prepare(
+          `SELECT event_id, action_type, trigger, result, detail
+           FROM agent_actions`,
+        )
+        .get() as {
+        event_id: string;
+        action_type: string;
+        trigger: string;
+        result: string;
+        detail: string;
+      };
+      expect(row.event_id).toBe("corr-99");
+      expect(row.action_type).toBe("bang_command");
+      expect(row.trigger).toBe("reactive");
+      expect(row.result).toBe("success");
+      const detail = JSON.parse(row.detail);
+      expect(detail).toMatchObject({
+        command: "!stop",
+        status: "ok",
+        platform: "telegram",
+        prevPaused: false,
+        nextPaused: true,
+      });
+    });
+
+    it("maps paused_decline to result='skipped'", () => {
+      const audit = new AuditLogger(db);
+      audit.logBangCommand(makeBangEvent(), {
+        command: "(non-command)",
+        status: "paused_decline",
+      });
+      const row = db
+        .prepare("SELECT result FROM agent_actions")
+        .get() as { result: string };
+      expect(row.result).toBe("skipped");
+    });
+
+    it("maps unknown to result='failed'", () => {
+      const audit = new AuditLogger(db);
+      audit.logBangCommand(makeBangEvent(), {
+        command: "!banana",
+        status: "unknown",
+      });
+      const row = db
+        .prepare("SELECT result FROM agent_actions")
+        .get() as { result: string };
+      expect(row.result).toBe("failed");
+    });
+
+    it("emits onRowInserted for the new bang_command row", () => {
+      const onRowInserted = vi.fn();
+      const audit = new AuditLogger(db, { onRowInserted });
+      audit.logBangCommand(makeBangEvent(), {
+        command: "!stop",
+        status: "ok",
+      });
+      expect(onRowInserted).toHaveBeenCalledTimes(1);
+      const row = onRowInserted.mock.calls[0]?.[0];
+      expect(row.action_type).toBe("bang_command");
+    });
+
+    it("swallows DB errors and logs them", () => {
+      const audit = new AuditLogger(db);
+      // Closing the DB makes subsequent prepare() throw — we must not
+      // propagate the error to the caller.
+      db.close();
+      expect(() =>
+        audit.logBangCommand(makeBangEvent(), {
+          command: "!stop",
+          status: "ok",
+        }),
+      ).not.toThrow();
+      // Reopen so the outer afterEach close is a no-op.
+      db = new Database(":memory:");
+    });
+  });
+
+  describe("bangStatusToResult", () => {
+    it("maps every status variant", () => {
+      expect(bangStatusToResult("ok")).toBe("success");
+      expect(bangStatusToResult("unknown")).toBe("failed");
+      expect(bangStatusToResult("skipped")).toBe("skipped");
+      expect(bangStatusToResult("paused_decline")).toBe("skipped");
+    });
+  });
+
+  it("logError detail contains only failureKind when failureCode is omitted", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "scheduled.task",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    audit.logError(event, new Error("only kind"), "autonomous", {
+      failureKind: "quota",
+    });
+
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    expect(JSON.parse(row.detail!)).toEqual({ failureKind: "quota" });
+  });
+
+  it("logError detail contains only failureCode when failureKind is omitted", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "scheduled.task",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    audit.logError(event, new Error("only code"), "autonomous", {
+      failureCode: "max_budget_usd",
+    });
+
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    expect(JSON.parse(row.detail!)).toEqual({ failureCode: "max_budget_usd" });
+  });
+
+  it("logError persists modelId into model_used when supplied", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "scheduled.task",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+
+    audit.logError(event, new Error("budget overrun"), "autonomous", {
+      durationMs: 1234,
+      backendId: "claude",
+      modelId: "claude-sonnet-4-6",
+      failureKind: "quota",
+      failureCode: "max_budget_usd",
+    });
+
+    const row = db
+      .prepare(
+        `SELECT result, duration_ms, backend, model_used, detail, error
+           FROM agent_actions LIMIT 1`,
+      )
+      .get() as {
+        result: string;
+        duration_ms: number;
+        backend: string | null;
+        model_used: string | null;
+        detail: string | null;
+        error: string;
+      };
+
+    expect(row.result).toBe("failed");
+    expect(row.duration_ms).toBe(1234);
+    expect(row.backend).toBe("claude");
+    expect(row.model_used).toBe("claude-sonnet-4-6");
+    expect(row.error).toBe("budget overrun");
+    expect(JSON.parse(row.detail!)).toEqual({
+      failureKind: "quota",
+      failureCode: "max_budget_usd",
+    });
+  });
+
+  it("logError persists detail.prePass so MetricsCollector.collectPrePassMetrics sees the failure", () => {
+    // Bug 005 regression — before the fix, fan-out failures wrote either
+    // no row (binding-resolve / budget-cap / context-build) or a
+    // failureKind-only row (agent-execute) that the aggregator skipped
+    // because it filters on `detail.prePass` being a non-null object.
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.fetch_window",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.logError(event, new Error("execute boom"), "autonomous", {
+      durationMs: 800,
+      backendId: "claude",
+      modelId: "claude-haiku-4-5",
+      failureKind: "agent-execute-failed",
+      prePass: {
+        parentCorrelationId: "parent-corr-1",
+        parentRoutine: "routine.hourly_check",
+        integrationKey: "gmail",
+        attempt: 1,
+        maxAttempts: 1,
+        retriedFromAttempt: null,
+        status: "failed",
+        fetched: 0,
+        posted: 0,
+        duplicates: 0,
+        errors: [{ type: "pre-pass-failed", kind: "agent-execute-failed" }],
+        willRetry: false,
+        retryReason: "max-attempts",
+        requestedBackend: "claude",
+      },
+    });
+
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    const parsed = JSON.parse(row.detail!) as Record<string, unknown>;
+    expect(parsed.failureKind).toBe("agent-execute-failed");
+    expect(parsed.prePass).toMatchObject({
+      parentCorrelationId: "parent-corr-1",
+      parentRoutine: "routine.hourly_check",
+      integrationKey: "gmail",
+      attempt: 1,
+      status: "failed",
+      willRetry: false,
+      retryReason: "max-attempts",
+      requestedBackend: "claude",
+    });
+  });
+
+  it("emitInsertedRow swallows errors when the post-insert SELECT throws", () => {
+    const onRowInserted = vi.fn();
+    const audit = new AuditLogger(db, { onRowInserted });
+
+    const origPrepare = db.prepare.bind(db);
+    const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+      if (sql.includes("FROM agent_actions") && sql.includes("WHERE id = ?")) {
+        throw new Error("simulated post-insert SELECT failure");
+      }
+      return origPrepare(sql);
+    });
+
+    try {
+      const event = createEvent({
+        type: "message.received",
+        source: "slack",
+        priority: EventPriority.HIGH,
+      });
+
+      expect(() => {
+        audit.logAction({
+          event,
+          model: "claude-sonnet-4-6",
+          costUsd: 0,
+          usage: {
+            inputTokens: 1,
+            outputTokens: 1,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+          },
+          modelUsage: {},
+          durationMs: 1,
+          numTurns: 1,
+          trigger: "reactive",
+        });
+      }).not.toThrow();
+
+      // Inserted row exists despite the SELECT failure.
+      prepareSpy.mockRestore();
+      const inserted = db
+        .prepare("SELECT COUNT(*) as n FROM agent_actions")
+        .get() as { n: number };
+      expect(inserted.n).toBe(1);
+      // emitInsertedRow caught — no callback fires.
+      expect(onRowInserted).not.toHaveBeenCalled();
+    } finally {
+      prepareSpy.mockRestore();
+    }
+  });
+
+  // ── morning-routine-optimization.md Phase 6 — UPSERT semantics ────────
+
+  describe("insertInProgressRow + logAction UPSERT (Phase 6)", () => {
+    it("insertInProgressRow lands a row with result='in_progress' and the supplied identity", () => {
+      const audit = new AuditLogger(db);
+      const id = audit.insertInProgressRow({
+        correlationId: "morning-corr-1",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      expect(id).toBeGreaterThan(0);
+      const row = db
+        .prepare(
+          "SELECT event_id, action_type, trigger, result FROM agent_actions WHERE id = ?",
+        )
+        .get(id) as {
+          event_id: string;
+          action_type: string;
+          trigger: string;
+          result: string;
+        };
+      expect(row).toEqual({
+        event_id: "morning-corr-1",
+        action_type: "routine.morning_routine_today",
+        trigger: "autonomous",
+        result: "in_progress",
+      });
+    });
+
+    it("logAction UPDATEs the in_progress row in-place rather than inserting a duplicate", () => {
+      const audit = new AuditLogger(db);
+      const inProgressId = audit.insertInProgressRow({
+        correlationId: "morning-corr-2",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      // Simulate the agent writing structured metadata mid-session.
+      db.prepare(
+        `UPDATE agent_actions SET metadata = ? WHERE id = ?`,
+      ).run(
+        JSON.stringify({ dayType: "weekday", anomalies: ["pre-pass partial"] }),
+        inProgressId,
+      );
+
+      const event = createEvent({
+        type: "routine.morning_routine_today",
+        source: "cron",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-corr-2",
+      });
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.32,
+        usage: {
+          inputTokens: 1200,
+          outputTokens: 800,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 1500,
+        numTurns: 12,
+        trigger: "autonomous",
+      });
+
+      // Exactly ONE row for (event_id, action_type) — the in_progress
+      // sentinel was settled in place.
+      const rows = db
+        .prepare(
+          `SELECT id, result, cost_usd, num_turns, metadata
+             FROM agent_actions
+            WHERE event_id = ? AND action_type = ?
+            ORDER BY id`,
+        )
+        .all("morning-corr-2", "routine.morning_routine_today") as Array<{
+        id: number;
+        result: string;
+        cost_usd: number;
+        num_turns: number;
+        metadata: string;
+      }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toBe(inProgressId);
+      expect(rows[0].result).toBe("success");
+      expect(rows[0].cost_usd).toBe(0.32);
+      expect(rows[0].num_turns).toBe(12);
+      // Metadata preserved across the UPDATE.
+      const metadata = JSON.parse(rows[0].metadata);
+      expect(metadata).toEqual({
+        dayType: "weekday",
+        anomalies: ["pre-pass partial"],
+      });
+    });
+
+    it("logAction INSERTs fresh when no in_progress row exists (legacy path unchanged)", () => {
+      const audit = new AuditLogger(db);
+      const event = createEvent({
+        type: "routine.morning_routine_today",
+        source: "cron",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-corr-3",
+      });
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.1,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 200,
+        numTurns: 3,
+        trigger: "autonomous",
+      });
+      const rows = db
+        .prepare(
+          `SELECT result, metadata FROM agent_actions WHERE event_id = ?`,
+        )
+        .all("morning-corr-3") as { result: string; metadata: string }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0].result).toBe("success");
+      // Default `metadata` is '{}', not preserved from a non-existent
+      // in_progress row.
+      expect(JSON.parse(rows[0].metadata)).toEqual({});
+    });
+
+    it("logAction UPSERT settles the in_progress row even when dmFreshness flips on `detail` column inclusion", () => {
+      // Exercise the UPDATE branch's `column === 'detail'` arm by
+      // supplying dmFreshness, which causes logAction to emit a `detail`
+      // column. Without coverage here the `detail = json(?)` UPDATE
+      // assignment path goes untested.
+      const audit = new AuditLogger(db);
+      audit.insertInProgressRow({
+        correlationId: "morning-corr-detail",
+        actionType: "message.received.dm",
+        trigger: "reactive",
+      });
+      const event = createEvent({
+        type: "message.received.dm",
+        source: "slack",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-corr-detail",
+      });
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.05,
+        usage: {
+          inputTokens: 50,
+          outputTokens: 30,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 200,
+        numTurns: 1,
+        trigger: "reactive",
+        dmFreshness: {
+          resumed: true,
+          agentLogLagMinutes: 5,
+          loudWritesSinceSessionStart: 1,
+          quietWritesSinceSessionStart: 0,
+          refetchedToday: true,
+          triggerMatched: true,
+        },
+      });
+      const row = db
+        .prepare(
+          `SELECT result, detail FROM agent_actions WHERE event_id = ?`,
+        )
+        .get("morning-corr-detail") as { result: string; detail: string };
+      expect(row.result).toBe("success");
+      const detail = JSON.parse(row.detail);
+      expect(detail.dm_freshness.resumed).toBe(true);
+    });
+
+    it("falls back to INSERT preserving the `detail` column when UPDATE fails on a dmFreshness-bearing call", () => {
+      // Combines: pre-inserted in_progress row + simulated UPDATE
+      // failure + dmFreshness on the logAction call so the fallback
+      // INSERT exercises the `column === 'detail'` placeholder branch
+      // (`json(?)` mapping). Without dmFreshness here, the fallback
+      // INSERT skips the detail column and that branch goes untested.
+      const audit = new AuditLogger(db);
+      audit.insertInProgressRow({
+        correlationId: "morning-corr-detail-fallback",
+        actionType: "message.received.dm",
+        trigger: "reactive",
+      });
+      const originalPrepare = db.prepare.bind(db);
+      const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+        if (sql.trim().startsWith("UPDATE agent_actions SET")) {
+          throw new Error("simulated UPDATE failure with detail");
+        }
+        return originalPrepare(sql);
+      });
+      try {
+        const event = createEvent({
+          type: "message.received.dm",
+          source: "slack",
+          priority: EventPriority.HIGH,
+          correlationId: "morning-corr-detail-fallback",
+        });
+        audit.logAction({
+          event,
+          model: "claude-sonnet-4-6",
+          costUsd: 0.05,
+          usage: {
+            inputTokens: 50,
+            outputTokens: 30,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+          },
+          modelUsage: {},
+          durationMs: 200,
+          numTurns: 1,
+          trigger: "reactive",
+          dmFreshness: {
+            resumed: true,
+            agentLogLagMinutes: 1,
+            loudWritesSinceSessionStart: 0,
+            quietWritesSinceSessionStart: 0,
+            refetchedToday: false,
+            triggerMatched: true,
+          },
+        });
+      } finally {
+        prepareSpy.mockRestore();
+      }
+      // Both the in_progress sentinel AND a fresh terminal INSERT exist;
+      // the terminal row carries the detail JSON.
+      const rows = db
+        .prepare(
+          `SELECT id, result, detail FROM agent_actions WHERE event_id = ? ORDER BY id`,
+        )
+        .all("morning-corr-detail-fallback") as Array<{
+          id: number;
+          result: string;
+          detail: string | null;
+        }>;
+      expect(rows).toHaveLength(2);
+      expect(rows[1].result).toBe("success");
+      expect(rows[1].detail).not.toBeNull();
+      expect(JSON.parse(rows[1].detail as string).dm_freshness.resumed).toBe(true);
+    });
+
+    it("falls back to INSERT when the UPDATE on the in_progress row fails", () => {
+      // Simulate the UPDATE branch throwing (e.g. the in_progress row
+      // was garbage-collected between SELECT and UPDATE). The fallback
+      // INSERT must still land the terminal row so monitoring tooling
+      // sees the run.
+      const audit = new AuditLogger(db);
+      const inProgressId = audit.insertInProgressRow({
+        correlationId: "morning-corr-update-fail",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      // Manually DELETE the row to simulate a janitor sweep so the
+      // UPDATE statement's `WHERE id = ?` matches no rows; SQLite
+      // doesn't throw on zero-row UPDATEs, so for a "throw fallback"
+      // proof we stub the prepare call instead.
+      const originalPrepare = db.prepare.bind(db);
+      let updateCallCount = 0;
+      const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+        if (sql.trim().startsWith("UPDATE agent_actions SET")) {
+          updateCallCount += 1;
+          if (updateCallCount === 1) {
+            throw new Error("simulated UPDATE failure");
+          }
+        }
+        return originalPrepare(sql);
+      });
+      try {
+        const event = createEvent({
+          type: "routine.morning_routine_today",
+          source: "cron",
+          priority: EventPriority.HIGH,
+          correlationId: "morning-corr-update-fail",
+        });
+        audit.logAction({
+          event,
+          model: "claude-sonnet-4-6",
+          costUsd: 0.1,
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+          },
+          modelUsage: {},
+          durationMs: 100,
+          numTurns: 1,
+          trigger: "autonomous",
+        });
+      } finally {
+        prepareSpy.mockRestore();
+      }
+      // Two rows now: the in_progress sentinel (NOT settled because
+      // UPDATE threw) + the fresh terminal INSERT.
+      const rows = db
+        .prepare(
+          `SELECT id, result FROM agent_actions WHERE event_id = ? ORDER BY id`,
+        )
+        .all("morning-corr-update-fail") as { id: number; result: string }[];
+      expect(rows).toHaveLength(2);
+      expect(rows[0].id).toBe(inProgressId);
+      expect(rows[0].result).toBe("in_progress");
+      expect(rows[1].result).toBe("success");
+    });
+
+    it("insertInProgressRow swallows SQL failures and returns -1", () => {
+      const audit = new AuditLogger(db);
+      const originalPrepare = db.prepare.bind(db);
+      const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+        if (sql.startsWith("INSERT INTO agent_actions")) {
+          throw new Error("simulated insertInProgressRow failure");
+        }
+        return originalPrepare(sql);
+      });
+      try {
+        const id = audit.insertInProgressRow({
+          correlationId: "morning-corr-fail",
+          actionType: "routine.morning_routine_today",
+          trigger: "autonomous",
+        });
+        expect(id).toBe(-1);
+      } finally {
+        prepareSpy.mockRestore();
+      }
+    });
+
+    it("insertInProgressRow attaches optional backend + modelId when supplied", () => {
+      const audit = new AuditLogger(db);
+      audit.insertInProgressRow({
+        correlationId: "morning-corr-backend",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+        backend: "claude",
+        modelId: "claude-sonnet-4-6",
+      });
+      const row = db
+        .prepare(
+          `SELECT backend, model_used FROM agent_actions WHERE event_id = ?`,
+        )
+        .get("morning-corr-backend") as { backend: string; model_used: string };
+      expect(row.backend).toBe("claude");
+      expect(row.model_used).toBe("claude-sonnet-4-6");
+    });
+
+    it("findInProgressRowId returns null when the SELECT throws (treats as no row)", () => {
+      const audit = new AuditLogger(db);
+      const originalPrepare = db.prepare.bind(db);
+      const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+        if (sql.trim().startsWith("SELECT id FROM agent_actions")) {
+          throw new Error("simulated SELECT failure");
+        }
+        return originalPrepare(sql);
+      });
+      try {
+        const event = createEvent({
+          type: "routine.morning_routine_today",
+          source: "cron",
+          priority: EventPriority.HIGH,
+          correlationId: "morning-corr-select-fail",
+        });
+        // logAction's findInProgressRowId call throws; the catch
+        // returns null so logAction falls through to fresh INSERT.
+        audit.logAction({
+          event,
+          model: "claude-sonnet-4-6",
+          costUsd: 0.1,
+          usage: {
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+          },
+          modelUsage: {},
+          durationMs: 100,
+          numTurns: 1,
+          trigger: "autonomous",
+        });
+      } finally {
+        prepareSpy.mockRestore();
+      }
+      // One INSERT landed — no UPSERT happened because the lookup
+      // returned null.
+      const rows = db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM agent_actions WHERE event_id = ?`,
+        )
+        .get("morning-corr-select-fail") as { n: number };
+      expect(rows.n).toBe(1);
+    });
+
+    it("logAction's UPSERT scope is keyed on (event_id, action_type) — does not collide with sibling action types", () => {
+      const audit = new AuditLogger(db);
+      // Pre-insert a Stage A in_progress sentinel.
+      audit.insertInProgressRow({
+        correlationId: "morning-corr-4",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      // Now logAction for Stage B (different action_type) — should NOT
+      // settle the Stage A row.
+      const stageBEvent = createEvent({
+        type: "routine.morning_routine_journal",
+        source: "cron",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-corr-4",
+      });
+      audit.logAction({
+        event: stageBEvent,
+        model: "claude-haiku-4-5",
+        costUsd: 0.05,
+        usage: {
+          inputTokens: 50,
+          outputTokens: 30,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 100,
+        numTurns: 2,
+        trigger: "autonomous",
+      });
+      const rows = db
+        .prepare(
+          `SELECT action_type, result FROM agent_actions WHERE event_id = ? ORDER BY id`,
+        )
+        .all("morning-corr-4") as { action_type: string; result: string }[];
+      expect(rows).toEqual([
+        { action_type: "routine.morning_routine_today", result: "in_progress" },
+        { action_type: "routine.morning_routine_journal", result: "success" },
+      ]);
+    });
+  });
+});
