@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { gmail_v1 } from "googleapis";
+import type { GoogleAuth, OAuth2Client } from "google-auth-library";
 import { createLogger } from "../logging.js";
 import type { SecretBroker } from "../secrets/secret-broker.js";
 import {
@@ -8,6 +10,9 @@ import {
 } from "./google-auth.js";
 
 const logger = createLogger("gmail-service");
+
+type GoogleApis = typeof import("googleapis");
+type GoogleAuthClient = GoogleAuth | OAuth2Client;
 
 export interface GmailMessage {
   id: string;
@@ -209,8 +214,7 @@ export interface GmailHistoryPage {
 }
 
 export class GmailService {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private gmail: any = null;
+  private gmail: gmail_v1.Gmail | null = null;
 
   constructor(private readonly secretBroker: SecretBroker) {}
 
@@ -227,10 +231,9 @@ export class GmailService {
 
     const credentials = parseGoogleCredentialsJson(credentialsRaw);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let google: any;
+    let google: GoogleApis["google"];
     try {
-      const mod = await import("googleapis" as string);
+      const mod = (await import("googleapis" as string)) as GoogleApis;
       google = mod.google;
     } catch {
       throw new Error(
@@ -238,8 +241,7 @@ export class GmailService {
       );
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let auth: any;
+    let auth: GoogleAuthClient;
 
     if (credentials.type === "service_account") {
       auth = new google.auth.GoogleAuth({
@@ -258,21 +260,22 @@ export class GmailService {
       const clientConfig = getGoogleOAuthClientConfig(credentials);
       if (!clientConfig) throw new Error("Invalid Google credentials format");
 
-      auth = new google.auth.OAuth2(
+      const oauth2 = new google.auth.OAuth2(
         clientConfig.client_id,
         clientConfig.client_secret,
         clientConfig.redirect_uris?.[0],
       );
-      auth.setCredentials(token);
-      auth.on("tokens", async (tokens: Record<string, unknown>) => {
+      oauth2.setCredentials(token);
+      oauth2.on("tokens", async (tokens) => {
         try {
           const existingRaw = await this.secretBroker.getGoogleTokenJson();
-          const merged = mergeGoogleTokenPayload(existingRaw, tokens);
+          const merged = mergeGoogleTokenPayload(existingRaw, tokens as Record<string, unknown>);
           await this.secretBroker.saveGoogleTokenJson(merged);
         } catch (error) {
           logger.error({ err: error }, "Failed to persist refreshed Gmail token");
         }
       });
+      auth = oauth2;
     }
 
     this.gmail = google.gmail({ version: "v1", auth });
@@ -309,13 +312,13 @@ export class GmailService {
     const listRes = await this.gmail.users.messages.list(params);
     const messageRefs = listRes.data.messages ?? [];
 
+    const gmail = this.gmail;
     const messages = await Promise.all(
       messageRefs.slice(0, params.maxResults as number).map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        async (ref: any) => {
-          const msg = await this.gmail.users.messages.get({
+        async (ref) => {
+          const msg = await gmail.users.messages.get({
             userId: "me",
-            id: ref.id,
+            id: ref.id ?? "",
             format: "metadata",
             metadataHeaders: [
               "Subject",
@@ -360,13 +363,11 @@ export class GmailService {
     try {
       const res = await this.gmail.users.history.list(params);
       const removedIds = new Set<string>();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const history = (res.data.history ?? []) as any[];
+      const history = res.data.history ?? [];
       for (const item of history) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const deleted = (item?.messagesDeleted ?? []) as any[];
+        const deleted = item.messagesDeleted ?? [];
         for (const entry of deleted) {
-          const id = entry?.message?.id;
+          const id = entry.message?.id;
           if (typeof id === "string" && id.length > 0) {
             removedIds.add(id);
           }
@@ -435,16 +436,16 @@ export class GmailService {
 
     const raw = buildRawMessage(params);
 
-    const draftParams: Record<string, unknown> = {
-      userId: "me",
-      requestBody: {
-        message: { raw },
-      },
+    const draftBody: gmail_v1.Schema$Draft = {
+      message: { raw },
     };
-    if (params.threadId) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (draftParams.requestBody as any).message.threadId = params.threadId;
+    if (params.threadId && draftBody.message) {
+      draftBody.message.threadId = params.threadId;
     }
+    const draftParams = {
+      userId: "me",
+      requestBody: draftBody,
+    };
 
     const res = await this.gmail.users.drafts.create(draftParams);
     return { draftId: res.data.id ?? "" };
@@ -462,15 +463,14 @@ export class GmailService {
     });
     const drafts = res.data.drafts ?? [];
 
+    const gmail = this.gmail;
     const summaries = await Promise.all(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      drafts.slice(0, max).map(async (d: any) => {
+      drafts.slice(0, max).map(async (d) => {
         try {
-          const detail = await this.gmail.users.drafts.get({
+          const detail = await gmail.users.drafts.get({
             userId: "me",
-            id: d.id,
+            id: d.id ?? "",
             format: "metadata",
-            metadataHeaders: ["Subject", "To"],
           });
           const msg = detail.data.message;
           const headers = msg?.payload?.headers ?? [];
@@ -558,15 +558,15 @@ export class GmailService {
 
     const raw = buildRawMessage(merged);
 
-    const updateReq: Record<string, unknown> = {
+    const updateBody: gmail_v1.Schema$Draft = { message: { raw } };
+    if (merged.threadId && updateBody.message) {
+      updateBody.message.threadId = merged.threadId;
+    }
+    const updateReq = {
       userId: "me",
       id: draftId,
-      requestBody: { message: { raw } },
+      requestBody: updateBody,
     };
-    if (merged.threadId) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (updateReq.requestBody as any).message.threadId = merged.threadId;
-    }
 
     const res = await this.gmail.users.drafts.update(updateReq);
     return { draftId: res.data.id ?? "" };
@@ -610,8 +610,7 @@ export class GmailService {
       throw err;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let messages = (res.data.messages ?? []).map((m: any) => this.parseFullMessage(m));
+    let messages = (res.data.messages ?? []).map((m) => this.parseFullMessage(m));
 
     const max = options.maxMessages;
     if (max && messages.length > max) {
@@ -696,25 +695,23 @@ export class GmailService {
   }
 
   private extractAttachmentMetadata(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    payload: any,
+    payload: gmail_v1.Schema$MessagePart | null | undefined,
     allowedMimeTypes?: ReadonlySet<string>,
   ): GmailAttachmentMetadata[] {
     const attachments: GmailAttachmentMetadata[] = [];
     if (!payload) return attachments;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const walk = (parts: any[]): void => {
+    const walk = (parts: gmail_v1.Schema$MessagePart[]): void => {
       for (const part of parts) {
         if (
           part.body?.attachmentId &&
           part.filename &&
-          (!allowedMimeTypes || allowedMimeTypes.has(part.mimeType))
+          (!allowedMimeTypes || allowedMimeTypes.has(part.mimeType ?? ""))
         ) {
           attachments.push({
             attachmentId: part.body.attachmentId,
             filename: part.filename,
-            mimeType: part.mimeType,
+            mimeType: part.mimeType ?? "",
             size: part.body.size ?? 0,
           });
         }
@@ -787,16 +784,14 @@ export class GmailService {
   async listLabels(): Promise<GmailLabel[]> {
     if (!this.gmail) return [];
     const res = await this.gmail.users.labels.list({ userId: "me" });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (res.data.labels ?? []).map((l: any) => ({
+    return (res.data.labels ?? []).map((l) => ({
       id: l.id ?? "",
       name: l.name ?? "",
       type: l.type ?? "",
     }));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private parseMessageSummary(data: any): GmailMessageSummary {
+  private parseMessageSummary(data: gmail_v1.Schema$Message): GmailMessageSummary {
     const headers = data.payload?.headers ?? [];
     return {
       id: data.id ?? "",
@@ -812,8 +807,7 @@ export class GmailService {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private parseFullMessage(data: any): GmailMessage {
+  private parseFullMessage(data: gmail_v1.Schema$Message): GmailMessage {
     const headers = data.payload?.headers ?? [];
     return {
       id: data.id ?? "",
@@ -833,14 +827,12 @@ export class GmailService {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private getHeader(headers: any[], name: string): string | null {
+  private getHeader(headers: gmail_v1.Schema$MessagePartHeader[], name: string): string | null {
     const header = headers.find((h) => h.name?.toLowerCase() === name.toLowerCase());
     return header?.value ?? null;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractBody(payload: any): string | null {
+  private extractBody(payload: gmail_v1.Schema$MessagePart | null | undefined): string | null {
     if (!payload) return null;
     if (payload.body?.data) {
       return Buffer.from(payload.body.data, "base64").toString("utf-8");
@@ -855,16 +847,14 @@ export class GmailService {
     return null;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extractHtmlBody(payload: any): string | null {
+  private extractHtmlBody(payload: gmail_v1.Schema$MessagePart | null | undefined): string | null {
     if (!payload) return null;
     if (payload.mimeType === "text/html" && payload.body?.data) {
       return Buffer.from(payload.body.data, "base64").toString("utf-8");
     }
-    const stack: unknown[] = payload.parts ? [...payload.parts] : [];
+    const stack: gmail_v1.Schema$MessagePart[] = payload.parts ? [...payload.parts] : [];
     while (stack.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const part = stack.shift() as any;
+      const part = stack.shift();
       if (part?.mimeType === "text/html" && part?.body?.data) {
         return Buffer.from(part.body.data, "base64").toString("utf-8");
       }
@@ -880,13 +870,11 @@ export class GmailService {
  * regardless of MIME type. Used by full-format parse so callers get accurate
  * `hasAttachment` on MailMessage. Metadata-mode lists don't exercise this.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function hasAnyAttachment(payload: any): boolean {
+function hasAnyAttachment(payload: gmail_v1.Schema$MessagePart | null | undefined): boolean {
   if (!payload) return false;
-  const stack: unknown[] = [payload];
+  const stack: gmail_v1.Schema$MessagePart[] = [payload];
   while (stack.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const node = stack.shift() as any;
+    const node = stack.shift();
     if (node?.body?.attachmentId) return true;
     if (node?.parts) stack.push(...node.parts);
   }

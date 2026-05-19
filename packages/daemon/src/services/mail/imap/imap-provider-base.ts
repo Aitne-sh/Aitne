@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { simpleParser } from "mailparser";
+import { simpleParser, type ParsedAttachment } from "mailparser";
 import { ImapFlow } from "imapflow";
 import type {
   DraftDetail,
@@ -213,8 +213,7 @@ implements IdleCapableMailProvider {
         html: typeof parsed.html === "string" ? parsed.html : undefined,
       },
       attachments: parsed.attachments.map(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (attachment: any, index: number) => toAttachmentMeta(attachment, index),
+        (attachment, index) => toAttachmentMeta(attachment, index),
       ),
     };
   }
@@ -1172,8 +1171,7 @@ function getObject(value: unknown): Record<string, unknown> {
  * a mismatch would silently break receipt downloads even though the rows
  * were inserted correctly.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function attachmentIdFor(attachment: any, index: number): string {
+function attachmentIdFor(attachment: ParsedAttachment, index: number): string {
   return (
     (typeof attachment?.contentId === "string" && attachment.contentId) ||
     (typeof attachment?.cid === "string" && attachment.cid) ||
@@ -1181,8 +1179,7 @@ function attachmentIdFor(attachment: any, index: number): string {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function toAttachmentMeta(attachment: any, index: number): {
+function toAttachmentMeta(attachment: ParsedAttachment, index: number): {
   id: string;
   filename: string;
   mimeType: string;

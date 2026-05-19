@@ -190,10 +190,9 @@ export function registerOauthGoogleRoutes(app: Hono, deps: ApiDependencies): voi
       return c.json({ error: "Invalid credentials format" }, 400);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let google: any;
+    let google: typeof import("googleapis").google;
     try {
-      const mod = await import("googleapis" as string);
+      const mod = (await import("googleapis" as string)) as typeof import("googleapis");
       google = mod.google;
     } catch {
       return c.json({ error: "googleapis package not installed" }, 500);

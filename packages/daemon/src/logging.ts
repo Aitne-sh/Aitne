@@ -127,8 +127,21 @@ export function createLogger(
           // Push redacted log entry to the in-memory buffer for dashboard viewing
           pushToLogBuffer(level, name, sanitizedArgs);
           if (typeof externalLogMethod === "function") {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- pino custom method signature
-            return (externalLogMethod as any).call(this, sanitizedArgs, method, level);
+            // Pino types `logMethod` as `(this: Logger, args, method, level)`; we
+            // forward verbatim with the redacted args so the upstream hook sees
+            // the same shape Pino would have delivered.
+            type ExternalHook = (
+              this: unknown,
+              args: unknown[],
+              method: (...innerArgs: unknown[]) => void,
+              level: number,
+            ) => void;
+            return (externalLogMethod as unknown as ExternalHook).call(
+              this,
+              sanitizedArgs,
+              method,
+              level,
+            );
           }
           return method.apply(this as never, sanitizedArgs);
         },

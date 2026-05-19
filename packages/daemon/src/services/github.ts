@@ -1,6 +1,9 @@
+import type { Octokit } from "@octokit/rest";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("github-service");
+
+type OctokitModule = typeof import("@octokit/rest");
 
 export interface GitHubPullRequest {
   number: number;
@@ -32,8 +35,7 @@ export interface GitHubRepository {
 export class GitHubService {
   private readonly token: string | null;
   private readonly webhookSecret: string | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private octokit: any = null;
+  private octokit: Octokit | null = null;
 
   constructor(
     token: string | null,
@@ -58,7 +60,7 @@ export class GitHubService {
     }
 
     try {
-      const mod = await import("@octokit/rest" as string);
+      const mod = (await import("@octokit/rest" as string)) as OctokitModule;
       this.octokit = new mod.Octokit({ auth: this.token });
       logger.info("GitHub service initialized");
     } catch {
@@ -84,8 +86,7 @@ export class GitHubService {
         per_page: 20,
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return data.map((pr: any) => ({
+      return data.map((pr) => ({
         number: pr.number,
         title: pr.title,
         state: pr.state,

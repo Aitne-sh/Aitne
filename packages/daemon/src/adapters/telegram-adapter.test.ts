@@ -469,7 +469,7 @@ describe("TelegramAdapter sendMessage", () => {
     expect(result.messageId).toBe("42");
   });
 
-  it("sends with reply_to_message_id when threadId is provided", async () => {
+  it("sends with reply_parameters when threadId is provided", async () => {
     const adapter = makeAdapter({ ownerChatId: "CHAT1" });
     const mockBot = {
       telegram: {
@@ -487,7 +487,7 @@ describe("TelegramAdapter sendMessage", () => {
     expect(mockBot.telegram.sendMessage).toHaveBeenCalledWith(
       "CHAT1",
       "reply",
-      { reply_to_message_id: 10 },
+      { reply_parameters: { message_id: 10 } },
     );
     expect(result.messageId).toBe("43");
   });

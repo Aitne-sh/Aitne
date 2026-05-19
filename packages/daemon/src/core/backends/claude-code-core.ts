@@ -1210,12 +1210,17 @@ export class ClaudeCodeCore implements IAgentCore {
           sessionId = sysMsg.session_id;
           logger.debug({ sessionId, model: sysMsg.model }, "Session initialized");
         } else if (message.type === "stream_event") {
-          // Forward streaming text deltas to the caller (e.g., dashboard SSE)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK stream_event lacks typed .event
-          const event = (message as any).event;
-          if (event?.type === "content_block_delta" && event?.delta?.type === "text_delta") {
-            streamedOutput += event.delta.text;
-            streamCallbacks?.onText?.(event.delta.text);
+          // Forward streaming text deltas to the caller (e.g., dashboard SSE).
+          // The SDK union doesn't surface `.event` on the stream_event variant,
+          // so narrow with a local shape that mirrors what the runtime emits.
+          const event = (message as { event?: {
+            type?: string;
+            delta?: { type?: string; text?: string };
+          } }).event;
+          if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+            const text = event.delta.text ?? "";
+            streamedOutput += text;
+            streamCallbacks?.onText?.(text);
           }
         } else if (message.type === "assistant") {
           // Track Bash tool_use blocks that hit the context API + server-side

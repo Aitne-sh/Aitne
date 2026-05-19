@@ -622,11 +622,13 @@ export class MailPoller implements Observer {
         : typeof (err as { code?: unknown } | null)?.code === "string"
           ? (err as { code: string }).code
         : null;
+    const gmailErr = err as {
+      response?: { data?: { error?: { errors?: Array<{ reason?: string }> } } };
+      errors?: Array<{ reason?: string }>;
+    } | null;
     const gmailReason =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((err as any)?.response?.data?.error?.errors?.[0]?.reason as string | undefined) ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((err as any)?.errors?.[0]?.reason as string | undefined) ??
+      gmailErr?.response?.data?.error?.errors?.[0]?.reason ??
+      gmailErr?.errors?.[0]?.reason ??
       null;
     // ImapFlow IMAP errors don't carry a numeric responseCode; extract it
     // separately from the error object (distinct from httpStatus which is

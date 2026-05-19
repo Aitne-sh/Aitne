@@ -1,3 +1,5 @@
+import type { calendar_v3 } from "googleapis";
+import type { GoogleAuth, OAuth2Client } from "google-auth-library";
 import { createLogger } from "../logging.js";
 import type { AgentConfig } from "../config.js";
 import type { SecretBroker } from "../secrets/secret-broker.js";
@@ -8,6 +10,9 @@ import {
 } from "./google-auth.js";
 
 const logger = createLogger("calendar-service");
+
+type GoogleApis = typeof import("googleapis");
+type GoogleAuthClient = GoogleAuth | OAuth2Client;
 
 export interface CalendarEvent {
   id: string;
@@ -175,8 +180,7 @@ function buildEventTimeFields(params: { start?: string; end?: string }): Record<
   return result;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseCalendarEvent(item: any): CalendarEvent {
+function parseCalendarEvent(item: calendar_v3.Schema$Event): CalendarEvent {
   const startValue = item.start?.dateTime ?? item.start?.date ?? null;
   return {
     id: item.id ?? "",
@@ -189,12 +193,10 @@ function parseCalendarEvent(item: any): CalendarEvent {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function parseCalendarEventDetail(item: any): CalendarEventDetail {
+function parseCalendarEventDetail(item: calendar_v3.Schema$Event): CalendarEventDetail {
   // Sanitize attendees to only include defined interface fields
   const attendees = Array.isArray(item.attendees)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? item.attendees.map((a: any) => ({
+    ? item.attendees.map((a) => ({
         email: a.email ?? "",
         ...(a.displayName != null && { displayName: a.displayName }),
         responseStatus: a.responseStatus ?? "needsAction",
@@ -211,7 +213,22 @@ function parseCalendarEventDetail(item: any): CalendarEventDetail {
     attendees,
     recurrence: item.recurrence ?? null,
     recurringEventId: item.recurringEventId ?? null,
-    reminders: item.reminders ?? null,
+    // Google Calendar API contract: `useDefault: true` ↔ no overrides;
+    // `useDefault: false` ↔ overrides apply. The response normally sets the
+    // boolean explicitly, but if it's omitted we derive it from the
+    // overrides field so the two never disagree.
+    reminders: item.reminders
+      ? {
+          useDefault:
+            item.reminders.useDefault ?? !item.reminders.overrides?.length,
+          ...(item.reminders.overrides && {
+            overrides: item.reminders.overrides.map((o) => ({
+              method: o.method ?? "popup",
+              minutes: o.minutes ?? 0,
+            })),
+          }),
+        }
+      : null,
     visibility: item.visibility ?? null,
     created: item.created ?? null,
     updated: item.updated ?? null,
@@ -236,10 +253,9 @@ async function createGoogleCalendarApi(
 ): Promise<GoogleCalendarApi> {
   const credentials = parseGoogleCredentialsJson(credentialsRaw);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let google: any;
+  let google: GoogleApis["google"];
   try {
-    const mod = await import("googleapis" as string);
+    const mod = (await import("googleapis" as string)) as GoogleApis;
     google = mod.google;
   } catch {
     throw new Error(
@@ -247,8 +263,7 @@ async function createGoogleCalendarApi(
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let auth: any;
+  let auth: GoogleAuthClient;
 
   if (credentials.type === "service_account") {
     auth = new google.auth.GoogleAuth({
@@ -267,21 +282,22 @@ async function createGoogleCalendarApi(
       throw new Error("Invalid Google Calendar credentials format");
     }
 
-    auth = new google.auth.OAuth2(
+    const oauth2 = new google.auth.OAuth2(
       clientConfig.client_id,
       clientConfig.client_secret,
       clientConfig.redirect_uris?.[0],
     );
-    auth.setCredentials(token);
-    auth.on("tokens", async (tokens: Record<string, unknown>) => {
+    oauth2.setCredentials(token);
+    oauth2.on("tokens", async (tokens) => {
       try {
         const existingRaw = await secretBroker.getGoogleTokenJson();
-        const merged = mergeGoogleTokenPayload(existingRaw, tokens);
+        const merged = mergeGoogleTokenPayload(existingRaw, tokens as Record<string, unknown>);
         await secretBroker.saveGoogleTokenJson(merged);
       } catch (error) {
         logger.error({ err: error }, "Failed to persist refreshed Google Calendar token");
       }
     });
+    auth = oauth2;
   }
 
   const calendar = google.calendar({ version: "v3", auth });
@@ -299,8 +315,7 @@ async function createGoogleCalendarApi(
       if (query) params.q = query;
 
       const res = await calendar.events.list(params);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (res.data.items ?? []).map((item: any) => parseCalendarEvent(item));
+      return (res.data.items ?? []).map((item) => parseCalendarEvent(item));
     },
 
     async getEvent(calendarId, eventId) {
@@ -361,8 +376,7 @@ async function createGoogleCalendarApi(
 
     async listCalendars() {
       const res = await calendar.calendarList.list({ maxResults: 250 });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (res.data.items ?? []).map((item: any) => ({
+      return (res.data.items ?? []).map((item) => ({
         id: item.id ?? "",
         summary: item.summary ?? "",
         description: item.description ?? null,
@@ -384,10 +398,8 @@ async function createGoogleCalendarApi(
       const calendars: FreeBusyResult["calendars"] = {};
       const rawCalendars = res.data.calendars ?? {};
       for (const [id, data] of Object.entries(rawCalendars)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const d = data as any;
         calendars[id] = {
-          busy: (d.busy ?? []).map((b: { start?: string; end?: string }) => ({
+          busy: (data.busy ?? []).map((b) => ({
             start: b.start ?? "",
             end: b.end ?? "",
           })),

@@ -5,6 +5,14 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import type {
+  AnyMessageContent,
+  AuthenticationState,
+  ConnectionState,
+  WAMessage,
+  WASocket,
+  proto,
+} from "@whiskeysockets/baileys";
 import { EventPriority, createEvent } from "@aitne/shared";
 import type { AttachmentRef, Event } from "@aitne/shared";
 import type {
@@ -17,6 +25,8 @@ import type {
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
 import { filenameForMime, splitOutboundText } from "./outbound-text.js";
+
+type BaileysModule = typeof import("@whiskeysockets/baileys");
 
 // Per-type WhatsApp inbound size caps (symmetric with server limits).
 const WA_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
@@ -145,7 +155,7 @@ export interface WhatsAppAdapterOptions {
 }
 
 interface AuthStateBundle {
-  state: unknown;
+  state: AuthenticationState;
   saveCreds: () => Promise<void>;
 }
 
@@ -252,18 +262,15 @@ export class WhatsAppAdapter implements MessageAdapter {
   private readonly onMessage: OnMessageCallback;
   private readonly onLoggedOut: (() => Promise<void> | void) | null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private sock: any = null;
+  private sock: WASocket | null = null;
   private authState: AuthStateBundle | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private makeWASocket: ((options: any) => any) | null = null;
+  private makeWASocket: BaileysModule["default"] | null = null;
   private renderQr: RenderQrFn | null = null;
   private renderQrToDataUrl: RenderQrToDataUrlFn | null = null;
   private fetchLatestWaWebVersion: FetchVersionFn | null = null;
   private fetchLatestBaileysVersion: FetchVersionFn | null = null;
   private generateMessageId: (() => string) | null = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private downloadMediaMessage: ((msg: any, type: "buffer", opts?: any) => Promise<Buffer>) | null = null;
+  private downloadMediaMessage: BaileysModule["downloadMediaMessage"] | null = null;
   private readonly attachmentStore: AttachmentStore | null;
   /**
    * WhatsApp now often addresses the owner's own account as an LID
@@ -548,23 +555,19 @@ export class WhatsAppAdapter implements MessageAdapter {
       try {
         const { readFileSync: rfs } = await import("node:fs");
         const buf = rfs(att.path);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let mediaPayload: any;
-
-        if (att.mimeType.startsWith("image/")) {
-          mediaPayload = { image: buf, mimetype: att.mimeType, caption };
-        } else {
-          mediaPayload = {
-            document: buf,
-            mimetype: att.mimeType,
-            fileName: att.originalFilename,
-            caption,
-          };
-        }
+        const mediaPayload: AnyMessageContent = att.mimeType.startsWith("image/")
+          ? { image: buf, mimetype: att.mimeType, caption }
+          : {
+              document: buf,
+              mimetype: att.mimeType,
+              fileName: att.originalFilename,
+              caption,
+            };
 
         const preId = this.generateMessageId?.() ?? null;
         if (preId) this.rememberSentMessageId(preId);
 
+        if (!this.sock) continue;
         const result = await this.sock.sendMessage(
           channel,
           mediaPayload,
@@ -616,6 +619,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       const preId = this.generateMessageId?.() ?? null;
       if (preId) this.rememberSentMessageId(preId);
 
+      if (!this.sock) break;
       const result = await this.sock.sendMessage(
         channel,
         { text: chunk },
@@ -705,30 +709,30 @@ export class WhatsAppAdapter implements MessageAdapter {
     const installHint =
       "Run: pnpm --filter @aitne/daemon add @whiskeysockets/baileys qrcode-terminal qrcode";
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let baileys: any;
+    let baileys: BaileysModule;
     try {
-      baileys = await import("@whiskeysockets/baileys" as string);
+      baileys = (await import("@whiskeysockets/baileys" as string)) as BaileysModule;
     /* v8 ignore next 4 — packages always installed in production; catch only reachable when package is absent */
     } catch (err) {
       logger.error({ err }, "Failed to load @whiskeysockets/baileys");
       throw new Error(`@whiskeysockets/baileys not installed. ${installHint}`);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let qrTermModule: any;
+    interface QrTerminalModule {
+      generate(input: string, opts?: { small?: boolean }, cb?: (s: string) => void): void;
+    }
+    let qrTermModule: { default?: QrTerminalModule } & QrTerminalModule;
     try {
-      qrTermModule = await import("qrcode-terminal" as string);
+      qrTermModule = (await import("qrcode-terminal" as string)) as typeof qrTermModule;
     /* v8 ignore next 4 — packages always installed in production; catch only reachable when package is absent */
     } catch (err) {
       logger.error({ err }, "Failed to load qrcode-terminal");
       throw new Error(`qrcode-terminal not installed. ${installHint}`);
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let qrModule: any;
+    let qrModule: typeof import("qrcode");
     try {
-      qrModule = await import("qrcode" as string);
+      qrModule = (await import("qrcode" as string)) as typeof import("qrcode");
     /* v8 ignore next 4 — packages always installed in production; catch only reachable when package is absent */
     } catch (err) {
       logger.error({ err }, "Failed to load qrcode");
@@ -750,7 +754,12 @@ export class WhatsAppAdapter implements MessageAdapter {
     }
     this.renderQr = qrTermLib.generate.bind(qrTermLib) as RenderQrFn;
 
-    const qrLib = /* v8 ignore next */ qrModule.default ?? qrModule;
+    // `qrcode` is CommonJS but provides named ESM exports; the dynamic import
+    // returns the namespace with `toDataURL` directly. Cast through `unknown`
+    // to also tolerate the legacy `{ default: { toDataURL } }` shape.
+    const qrLib = (
+      ((qrModule as unknown as { default?: typeof qrModule }).default ?? qrModule)
+    ) as typeof qrModule;
     /* v8 ignore next 3 — unreachable when qrcode exposes toDataURL() */
     if (!qrLib || typeof qrLib.toDataURL !== "function") {
       throw new Error("qrcode module does not expose toDataURL()");
@@ -795,8 +804,7 @@ export class WhatsAppAdapter implements MessageAdapter {
 
     // Phase 2 inbound media download helper.
     if (typeof baileys.downloadMediaMessage === "function") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.downloadMediaMessage = baileys.downloadMediaMessage as (msg: any, type: "buffer", opts?: any) => Promise<Buffer>;
+      this.downloadMediaMessage = baileys.downloadMediaMessage;
     /* v8 ignore next 3 — null branch only reachable with a Baileys build that omits this helper */
     } else {
       this.downloadMediaMessage = null;
@@ -812,7 +820,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       return;
     /* v8 ignore next 9 — real Baileys auth state is always pre-injected in tests; this branch only runs in production */
     } else {
-      const baileys = await import("@whiskeysockets/baileys" as string);
+      const baileys = (await import("@whiskeysockets/baileys" as string)) as BaileysModule;
       const bundle = await baileys.useMultiFileAuthState(this.authDir);
       this.authState = {
         state: bundle.state,
@@ -960,7 +968,9 @@ export class WhatsAppAdapter implements MessageAdapter {
       syncFullHistory: false,
       shouldSyncHistoryMessage: () => false,
       /* v8 ignore next 1 — both truthy and falsy version paths tested; V8 ternary branch merge artefact */
-      ...(version ? { version } : {}),
+      ...(version && version.length === 3
+        ? { version: version as [number, number, number] }
+        : {}),
     });
     this.sock = sock;
     // P2-10: clear the self-echo dedup set on every fresh socket. WAMessage
@@ -982,13 +992,15 @@ export class WhatsAppAdapter implements MessageAdapter {
     sock.ev.on("messages.upsert", (payload: unknown) => {
       this.handleMessagesUpsert(payload);
     });
-    sock.ev.on("connection.update", (update: unknown) => {
+    sock.ev.on("connection.update", (update) => {
       void this.handleConnectionUpdate(update, sock);
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleConnectionUpdate(update: any, sock: any): Promise<void> {
+  private async handleConnectionUpdate(
+    update: Partial<ConnectionState>,
+    sock: WASocket,
+  ): Promise<void> {
     if (sock !== this.sock) return;
 
     if (typeof update?.qr === "string") {
@@ -1025,9 +1037,15 @@ export class WhatsAppAdapter implements MessageAdapter {
       return;
     }
 
+    const boomError = update?.lastDisconnect?.error as
+      | (Error & {
+          output?: { statusCode?: number };
+          data?: { statusCode?: number };
+        })
+      | undefined;
     const statusCode =
-      update?.lastDisconnect?.error?.output?.statusCode
-      ?? update?.lastDisconnect?.error?.data?.statusCode
+      boomError?.output?.statusCode
+      ?? boomError?.data?.statusCode
       ?? null;
 
     this.closeSocket();
@@ -1151,14 +1169,13 @@ export class WhatsAppAdapter implements MessageAdapter {
       : [];
 
     for (const message of messages) {
-      void this.handleIncomingMessage(message).catch((err) => {
+      void this.handleIncomingMessage(message as proto.IWebMessageInfo).catch((err) => {
         logger.error({ err }, "whatsapp incoming message handler threw");
       });
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleIncomingMessage(rawMessage: any): Promise<void> {
+  private async handleIncomingMessage(rawMessage: proto.IWebMessageInfo): Promise<void> {
     const remoteJid: unknown = rawMessage?.key?.remoteJid;
     const messageId: unknown = rawMessage?.key?.id;
     const fromMe = rawMessage?.key?.fromMe === true;
@@ -1202,7 +1219,9 @@ export class WhatsAppAdapter implements MessageAdapter {
       return;
     }
 
-    const text = extractWhatsAppText(rawMessage?.message) ?? "";
+    const text = extractWhatsAppText(
+      rawMessage?.message as Record<string, unknown> | null | undefined,
+    ) ?? "";
 
     // Only await media extraction when the store is ready — this preserves
     // synchronous execution for the no-store path so existing tests that call
@@ -1240,12 +1259,13 @@ export class WhatsAppAdapter implements MessageAdapter {
     this.onMessage(event);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async extractAndIngestWhatsAppMedia(rawMessage: any): Promise<AttachmentRef[]> {
+  private async extractAndIngestWhatsAppMedia(rawMessage: proto.IWebMessageInfo): Promise<AttachmentRef[]> {
     /* v8 ignore next 1 — caller already checks attachmentStore && downloadMediaMessage */
     if (!this.attachmentStore || !this.downloadMediaMessage) return [];
 
-    const msg = unwrapWhatsAppMessage(rawMessage?.message ?? null);
+    const msg = unwrapWhatsAppMessage(
+      (rawMessage?.message ?? null) as Record<string, unknown> | null,
+    );
     if (!msg) return [];
 
     const refs: AttachmentRef[] = [];
@@ -1339,8 +1359,7 @@ export class WhatsAppAdapter implements MessageAdapter {
   }
 
   private async downloadAndIngestWhatsApp(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rawMessage: any,
+    rawMessage: proto.IWebMessageInfo,
     mimeType: string,
     filename: string,
     maxBytes: number,
@@ -1350,7 +1369,7 @@ export class WhatsAppAdapter implements MessageAdapter {
     if (!this.downloadMediaMessage || !this.attachmentStore) return null;
     let buf: Buffer;
     try {
-      buf = await this.downloadMediaMessage(rawMessage, "buffer");
+      buf = await this.downloadMediaMessage(rawMessage as WAMessage, "buffer", {});
     } catch (err) {
       logger.error({ err }, "whatsapp downloadMediaMessage failed");
       return null;
@@ -1500,7 +1519,16 @@ export class WhatsAppAdapter implements MessageAdapter {
     // Without this, repeated reconnection cycles accumulate stale listeners
     // on the old socket's EventEmitter until the socket is garbage collected.
     try {
-      sock.ev?.removeAllListeners?.();
+      // Baileys' typed emitter constrains removeAllListeners(event) to a
+      // single known event name, but at runtime its prototype chain inherits
+      // EventEmitter#removeAllListeners() which accepts no args and wipes
+      // every listener — including Baileys' own internal subscriptions
+      // attached during socket setup. We want that wildcard sweep here so
+      // a reconnect cycle doesn't leak internal listeners on the previous
+      // socket's emitter. Cast through the Node EventEmitter shape to skip
+      // the narrowed typed signature without losing the runtime behaviour.
+      (sock.ev as unknown as import("node:events").EventEmitter)
+        ?.removeAllListeners?.();
     } catch {
       // Ignore — ev may already be torn down.
     }

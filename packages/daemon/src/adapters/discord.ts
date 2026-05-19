@@ -200,11 +200,22 @@ export class DiscordAdapter implements MessageAdapter {
   }
 
   async start(): Promise<void> {
+    // discord.js's typed event map omits "raw", but the underlying
+    // EventEmitter still fires it. Narrow once via a local shape so the
+    // wide-event surface doesn't leak elsewhere.
+    type RawEventClient = {
+      removeAllListeners(event: "raw"): void;
+      on(
+        event: "raw",
+        listener: (packet: { t?: string; d?: RawMessagePayload }) => void,
+      ): void;
+    };
+    const rawClient = this.client as unknown as RawEventClient;
+
     // Remove all listeners first to prevent duplicates on re-start
     this.client.removeAllListeners(Events.Error);
     this.client.removeAllListeners(Events.Warn);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.client.removeAllListeners("raw" as any);
+    rawClient.removeAllListeners("raw");
 
     this.client.on(Events.Error, (err) => {
       logger.error({ error: err.message }, "Discord client error");
@@ -231,8 +242,7 @@ export class DiscordAdapter implements MessageAdapter {
     // unmodified. If a future discord.js release fixes the bug, we stay
     // on the raw path regardless — re-enabling Events.MessageCreate
     // would produce duplicate deliveries without deduplication plumbing.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.client.on("raw" as any, (packet: { t?: string; d?: RawMessagePayload }) => {
+    rawClient.on("raw", (packet) => {
       if (packet.t === "MESSAGE_CREATE" && packet.d) {
         void this.handleRawMessage(packet.d).catch((err) => {
           logger.error({ err }, "discord raw message handler threw");

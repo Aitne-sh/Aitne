@@ -1,11 +1,44 @@
 import { Readable } from "node:stream";
 import { readFileSync } from "node:fs";
+import type { App } from "@slack/bolt";
 import { EventPriority, createEvent } from "@aitne/shared";
 import type { AttachmentRef, Event } from "@aitne/shared";
 import type { MessageAdapter, OnMessageCallback, OutboundAttachmentRef } from "./types.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
 import { splitOutboundText } from "./outbound-text.js";
+
+type SlackApp = App;
+type SlackBoltModule = typeof import("@slack/bolt");
+
+/**
+ * Wide subset of a Slack message event we read in handleMessage. Bolt models
+ * `message` as a discriminated union of ~30 subtypes; we use a permissive
+ * shape for the fields we actually touch and let the runtime payload carry
+ * the rest verbatim.
+ */
+interface SlackInboundMessage {
+  ts?: string;
+  team?: string;
+  channel?: string;
+  channel_type?: string;
+  bot_id?: string;
+  subtype?: string;
+  user?: string;
+  text?: string;
+  thread_ts?: string;
+  files?: SlackInboundFile[];
+}
+
+interface SlackInboundFile {
+  id?: string;
+  name?: string;
+  size?: number;
+  mimetype?: string;
+  url_private?: string;
+  url_private_download?: string;
+  file_access?: string;
+}
 
 const SLACK_INBOUND_MAX_BYTES = 25 * 1024 * 1024; // practical cap: 25 MB
 
@@ -84,8 +117,7 @@ export class SlackAdapter implements MessageAdapter {
   private readonly onOwnerDetected:
     | ((userId: string) => void | Promise<void>)
     | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private app: any = null;
+  private app: SlackApp | null = null;
   private botUserId: string | null = null;
   private botInfo: SlackBotInfo | null = null;
   private pairingChallenge: SlackPairingChallenge | null = null;
@@ -188,10 +220,9 @@ export class SlackAdapter implements MessageAdapter {
 
   async start(): Promise<void> {
     // Dynamic import — @slack/bolt is an optional dependency
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let bolt: any;
+    let bolt: SlackBoltModule;
     try {
-      bolt = await import("@slack/bolt" as string);
+      bolt = (await import("@slack/bolt" as string)) as SlackBoltModule;
     } catch {
       throw new Error(
         "@slack/bolt not installed. Run: pnpm --filter @aitne/daemon add @slack/bolt",
@@ -220,12 +251,9 @@ export class SlackAdapter implements MessageAdapter {
     // captureOwner. Bolt's `app.message` handler accepts async callbacks
     // and surfaces unhandled rejections; awaiting here also lets Bolt's
     // own error middleware see exceptions thrown downstream.
-    this.app.message(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      async ({ message, say: _say }: { message: any; say: any }) => {
-        await this.handleMessage(message);
-      },
-    );
+    this.app.message(async ({ message }) => {
+      await this.handleMessage(message as SlackInboundMessage);
+    });
 
     await this.app.start();
     logger.info({ botUserId: this.botUserId }, "Slack adapter connected (Socket Mode)");
@@ -329,8 +357,7 @@ export class SlackAdapter implements MessageAdapter {
     return { messageId: lastTs };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleMessage(message: any): Promise<void> {
+  private async handleMessage(message: SlackInboundMessage): Promise<void> {
     // Ignore bot messages and message_changed/deleted subtypes
     if (message.bot_id || message.subtype) return;
 
@@ -391,9 +418,13 @@ export class SlackAdapter implements MessageAdapter {
       const hint = challenge.hintReply?.(text);
       if (hint) {
         try {
-          await this.app.client.chat.postMessage({
+          // `this.app` is guaranteed non-null here: Bolt only fires the
+          // message handler after `await this.app.start()` returns. The `!`
+          // preserves the original throw-and-log behaviour if invariants
+          // ever change, rather than silently dropping the hint reply.
+          await this.app!.client.chat.postMessage({
             token: this.botToken,
-            channel: message.channel,
+            channel: message.channel ?? "",
             text: hint,
           });
         } catch (err) {
@@ -411,7 +442,7 @@ export class SlackAdapter implements MessageAdapter {
     // Inbound file attachments — download and ingest asynchronously, then
     // emit the event. For messages with no files (common case) this path
     // is synchronous and returns immediately.
-    const files: unknown[] = Array.isArray(message.files) ? message.files : [];
+    const files: SlackInboundFile[] = Array.isArray(message.files) ? message.files : [];
     if (files.length > 0 && this.attachmentStore) {
       void this.downloadAndEmitSlackMessage(
         message,
@@ -419,8 +450,7 @@ export class SlackAdapter implements MessageAdapter {
         text,
         isDm,
         isMention,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        files as any[],
+        files,
       ).catch((err) => logger.error({ err }, "slack attachment handler threw"));
       return;
     }
@@ -429,20 +459,18 @@ export class SlackAdapter implements MessageAdapter {
   }
 
   private async downloadAndEmitSlackMessage(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    message: any,
+    message: SlackInboundMessage,
     senderId: string,
     text: string,
     isDm: boolean,
     isMention: boolean,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    files: any[],
+    files: SlackInboundFile[],
   ): Promise<void> {
     const attachmentRefs: AttachmentRef[] = [];
 
     for (const file of files) {
       if (!file || typeof file !== "object") continue;
-      let resolvedFile = file;
+      let resolvedFile: SlackInboundFile = file;
       if (
         file.file_access === "check_file_info"
         && typeof file.id === "string"
@@ -454,15 +482,15 @@ export class SlackAdapter implements MessageAdapter {
             file: file.id,
           });
           if (info?.file && typeof info.file === "object") {
-            resolvedFile = info.file;
+            resolvedFile = info.file as SlackInboundFile;
           }
         } catch (err) {
           logger.warn({ err, fileId: file.id }, "slack files.info lookup failed");
         }
       }
 
-      const fileSize = (resolvedFile.size as number | undefined) ?? 0;
-      const mimetype = (resolvedFile.mimetype as string | undefined) ?? null;
+      const fileSize = resolvedFile.size ?? 0;
+      const mimetype = resolvedFile.mimetype ?? null;
 
       if (fileSize > SLACK_INBOUND_MAX_BYTES) {
         logger.warn({ fileSize, filename: file.name }, "slack file exceeds inbound cap, skipping");
@@ -470,9 +498,7 @@ export class SlackAdapter implements MessageAdapter {
       }
 
       // Prefer url_private_download (includes Content-Disposition header)
-      const downloadUrl =
-        (resolvedFile.url_private_download as string | undefined)
-        ?? (resolvedFile.url_private as string | undefined);
+      const downloadUrl = resolvedFile.url_private_download ?? resolvedFile.url_private;
       if (!downloadUrl) continue;
 
       try {
@@ -510,8 +536,7 @@ export class SlackAdapter implements MessageAdapter {
   }
 
   private emitSlackEvent(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    message: any,
+    message: SlackInboundMessage,
     senderId: string,
     text: string,
     isDm: boolean,

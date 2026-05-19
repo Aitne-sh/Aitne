@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
 import { readFileSync } from "node:fs";
+import type { Context, Telegraf } from "telegraf";
 import { EventPriority, createEvent } from "@aitne/shared";
 import type { AttachmentRef, Event } from "@aitne/shared";
 import type { MessageAdapter, OnMessageCallback, OutboundAttachmentRef } from "./types.js";
@@ -8,6 +9,49 @@ import { createLogger } from "../logging.js";
 import { filenameForMime, splitOutboundText } from "./outbound-text.js";
 
 const logger = createLogger("telegram-adapter");
+
+type TelegrafModule = typeof import("telegraf");
+type TelegrafContext = Context;
+type TelegrafBot = Telegraf<TelegrafContext>;
+
+/** Telegram Bot API PhotoSize (subset of @telegraf/types/message). Re-declared
+ *  locally because telegraf's `Types` namespace doesn't re-export Schema types
+ *  and we don't take a direct dep on @telegraf/types. */
+interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id?: string;
+  width?: number;
+  height?: number;
+  file_size?: number;
+}
+
+/**
+ * The wide union of fields the inbound handler reads off any message
+ * subtype. Telegraf models `ctx.message` as a discriminated union; modelling
+ * every variant here is noisy, so we type the surface we actually touch
+ * and access via optional-chained reads. Bytes on the wire are the same.
+ */
+interface TelegramInboundMessage {
+  message_id: number;
+  text?: string;
+  caption?: string;
+  media_group_id?: string;
+  chat?: { id?: number | string; type?: string };
+  from?: { id?: number | string };
+  reply_to_message?: { message_id?: number };
+  photo?: TelegramPhotoSize[];
+  document?: {
+    file_id?: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
+  sticker?: unknown;
+  audio?: Record<string, unknown>;
+  voice?: Record<string, unknown>;
+  video?: Record<string, unknown>;
+  video_note?: Record<string, unknown>;
+}
 
 const TELEGRAM_INBOUND_MAX_BYTES = 20 * 1024 * 1024; // 20 MB Telegram bot download cap
 const TELEGRAM_CAPTION_MAX_CHARS = 1024;
@@ -103,8 +147,7 @@ export class TelegramAdapter implements MessageAdapter {
     | null;
   private readonly attachmentStore: AttachmentStore | null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private bot: any = null;
+  private bot: TelegrafBot | null = null;
   private botInfo: TelegramBotInfo | null = null;
 
   /** Active pairing challenge (null when pairing isn't in progress). */
@@ -202,18 +245,17 @@ export class TelegramAdapter implements MessageAdapter {
 
   async start(): Promise<void> {
     // Dynamic import — telegraf is an optional dependency
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let Telegraf: any;
+    let TelegrafCtor: TelegrafModule["Telegraf"];
     try {
-      const mod = await import("telegraf" as string);
-      Telegraf = mod.Telegraf;
+      const mod = (await import("telegraf" as string)) as TelegrafModule;
+      TelegrafCtor = mod.Telegraf;
     } catch {
       throw new Error(
         "telegraf not installed. Run: pnpm --filter @aitne/daemon add telegraf",
       );
     }
 
-    this.bot = new Telegraf(this.botToken);
+    this.bot = new TelegrafCtor(this.botToken);
 
     // Validate token + cache bot identity for the dashboard's QR deep link.
     try {
@@ -226,8 +268,7 @@ export class TelegramAdapter implements MessageAdapter {
     // video, etc. The Phase 1 text-only handler is replaced here so that
     // media-with-caption messages (which do NOT fire the "text" event) are
     // also captured.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.bot.on("message", async (ctx: any) => {
+    this.bot.on("message", async (ctx) => {
       await this.handleMessage(ctx).catch((err) => {
         logger.error({ err }, "telegram message handler threw");
       });
@@ -269,7 +310,9 @@ export class TelegramAdapter implements MessageAdapter {
     }
 
     const { channel, text, threadId, attachments } = params;
-    const replyOpts = threadId ? { reply_to_message_id: Number(threadId) } : {};
+    const replyOpts: { reply_parameters?: { message_id: number } } = threadId
+      ? { reply_parameters: { message_id: Number(threadId) } }
+      : {};
 
     if (!attachments?.length) {
       // Text only — existing behaviour.
@@ -310,8 +353,7 @@ export class TelegramAdapter implements MessageAdapter {
       isFirst = false;
       try {
         const buf = readFileSync(att.path);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let result: any;
+        let result: { message_id?: number } | undefined;
         if (att.mimeType.startsWith("image/")) {
           result = await this.bot.telegram.sendPhoto(
             channel,
@@ -340,9 +382,8 @@ export class TelegramAdapter implements MessageAdapter {
 
   // ── Inbound message handling ───────────────────────────────────────────
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleMessage(ctx: any): Promise<void> {
-    const msg = ctx.message;
+  private async handleMessage(ctx: TelegrafContext): Promise<void> {
+    const msg = ctx.message as TelegramInboundMessage | undefined;
     if (!msg) return;
 
     const chatType = msg.chat?.type ?? "private";
@@ -615,11 +656,11 @@ export class TelegramAdapter implements MessageAdapter {
       return null;
     }
 
+    if (!this.bot) return null;
     let filePath: string | undefined;
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fileInfo: any = await this.bot.telegram.getFile(fileId);
-      filePath = fileInfo?.file_path as string | undefined;
+      const fileInfo = await this.bot.telegram.getFile(fileId);
+      filePath = fileInfo?.file_path;
     } catch (err) {
       logger.error({ err, fileId }, "telegram getFile failed");
       return null;
@@ -699,24 +740,20 @@ export class TelegramAdapter implements MessageAdapter {
 
   // ── Photo helpers ─────────────────────────────────────────────────────
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private pickLargestPhoto(photos: any[]): string {
+  private pickLargestPhoto(photos: TelegramPhotoSize[]): string {
     if (!Array.isArray(photos) || photos.length === 0) return "";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const largest = [...photos].sort((a: any, b: any) =>
-      (b.file_size ?? 0) - (a.file_size ?? 0),
+    const largest = [...photos].sort(
+      (a, b) => (b.file_size ?? 0) - (a.file_size ?? 0),
     )[0];
-    return (largest?.file_id as string) ?? "";
+    return largest?.file_id ?? "";
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private photoSizeBytes(photos: any[]): number {
+  private photoSizeBytes(photos: TelegramPhotoSize[]): number {
     if (!Array.isArray(photos) || photos.length === 0) return 0;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const largest = [...photos].sort((a: any, b: any) =>
-      (b.file_size ?? 0) - (a.file_size ?? 0),
+    const largest = [...photos].sort(
+      (a, b) => (b.file_size ?? 0) - (a.file_size ?? 0),
     )[0];
-    return (largest?.file_size as number | undefined) ?? 0;
+    return largest?.file_size ?? 0;
   }
 
   /**

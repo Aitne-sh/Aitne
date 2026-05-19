@@ -3,7 +3,12 @@ import type {
   AudioDecoder,
   DecodedAudio,
   PipelineLoader,
+  PipelineProgressEvent,
 } from "./transcriber.js";
+
+type TransformersModule = typeof import("@huggingface/transformers");
+type FfmpegStaticModule = typeof import("ffmpeg-static");
+type PipelineOptions = NonNullable<Parameters<TransformersModule["pipeline"]>[2]>;
 
 const TARGET_SAMPLE_RATE = 16000;
 
@@ -48,10 +53,9 @@ export const defaultLoadPipeline: PipelineLoader = async ({
   modelDir,
   onProgress,
 }) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mod: any;
+  let mod: TransformersModule;
   try {
-    mod = await import("@huggingface/transformers" as string);
+    mod = (await import("@huggingface/transformers" as string)) as TransformersModule;
   } catch (err) {
     throw new Error(
       `@huggingface/transformers not installed: ${(err as Error).message}`,
@@ -72,8 +76,7 @@ export const defaultLoadPipeline: PipelineLoader = async ({
     mod.env.cacheDir = modelDir;
     mod.env.localModelPath = modelDir;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pipelineOptions: Record<string, any> = {};
+  const pipelineOptions: PipelineOptions = {};
   // `onnx-community/whisper-large-v3-turbo`'s default fp32 encoder is a tiny
   // 439 KB stub that references a 2.55 GB sibling `.onnx_data` external-data
   // file (~3 GB total). The `_q4` variants are self-contained single ONNX
@@ -85,39 +88,43 @@ export const defaultLoadPipeline: PipelineLoader = async ({
   // straight through to transformers.js).
   const dtype = resolveDtype(model);
   if (dtype !== undefined) {
-    pipelineOptions.dtype = dtype;
+    // Operator may pin to a dtype not yet enumerated in the upstream union
+    // (e.g. a new quantization variant). Pass the string through and let
+    // transformers.js validate at runtime instead of erroring at compile.
+    pipelineOptions.dtype = dtype as PipelineOptions["dtype"];
   }
   if (onProgress) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    pipelineOptions.progress_callback = (event: any) => {
+    pipelineOptions.progress_callback = ((event: PipelineProgressEvent) => {
       try {
         onProgress(event);
       } catch {
         // Never let a UI-progress observer break the actual download.
       }
-    };
+    }) as PipelineOptions["progress_callback"];
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const transcriber: any = await mod.pipeline(
+  const transcriber = await mod.pipeline(
     "automatic-speech-recognition",
     model,
     pipelineOptions,
   );
   return async (samples, options) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = await transcriber(samples, {
+    const result = (await (transcriber as unknown as (
+      input: Float32Array,
+      opts: Record<string, unknown>,
+    ) => Promise<unknown>)(samples, {
       language: options.language ?? undefined,
       task: options.task,
       return_timestamps: false,
       chunk_length_s: 30,
       stride_length_s: 5,
-    });
+    })) as { text?: unknown; language?: unknown; chunks?: Array<{ text?: unknown }> };
     const text =
       typeof result?.text === "string"
         ? result.text
         : Array.isArray(result?.chunks)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ? result.chunks.map((c: any) => c.text ?? "").join(" ")
+          ? result.chunks
+              .map((c) => (typeof c.text === "string" ? c.text : ""))
+              .join(" ")
           : "";
     const language =
       typeof result?.language === "string" ? result.language : null;
@@ -132,21 +139,24 @@ export const defaultLoadPipeline: PipelineLoader = async ({
  * carries the samples directly.
  */
 export const decodeAudioWithFfmpeg: AudioDecoder = async ({ path }) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ffmpegPathMod: any;
+  let ffmpegPathMod: FfmpegStaticModule | string;
   try {
-    ffmpegPathMod = await import("ffmpeg-static" as string);
+    ffmpegPathMod = (await import("ffmpeg-static" as string)) as
+      | FfmpegStaticModule
+      | string;
   } catch (err) {
     throw new Error(
       `ffmpeg-static not installed: ${(err as Error).message}`,
     );
   }
-  const ffmpegPath: string =
-    typeof ffmpegPathMod?.default === "string"
-      ? ffmpegPathMod.default
-      : typeof ffmpegPathMod === "string"
-        ? ffmpegPathMod
-        : "";
+  let ffmpegPath = "";
+  if (typeof ffmpegPathMod === "string") {
+    ffmpegPath = ffmpegPathMod;
+  } else if (ffmpegPathMod) {
+    const def = ffmpegPathMod.default;
+    if (typeof def === "string") ffmpegPath = def;
+  }
+
   if (!ffmpegPath) {
     throw new Error("ffmpeg-static: binary path not resolved");
   }
