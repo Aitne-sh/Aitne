@@ -349,35 +349,6 @@ Monorepo: pnpm 10 workspaces · Turborepo · TypeScript 5.8 · Vitest 3 (100% co
 
 ---
 
-## Contributing
-
-Issues and PRs welcome. Conventions:
-
-- All code, comments, tests, and user-facing text are in **English**
-- TypeScript throughout, camelCase, ESM with `.js` import extensions
-- Tests colocated with source as `foo.ts` + `foo.test.ts`
-- `packages/daemon/src/` is the source of truth
-
----
-
-## FAQ
-
-**Is Aitne a chatbot?** No — it's a daemon. It also responds to chat, but the more interesting half is what it does while you're not looking at it.
-
-**Does it phone home?** No. The daemon binds to `127.0.0.1` only. No telemetry. Verify with `lsof` and `nettop`.
-
-**Can I edit memory directly?** Yes. Open `~/.personal-agent/context/today.md`, change anything, save. The agent picks up your edits on the next routine.
-
-**Do my existing Claude Code / Codex / Gemini settings work?** Yes. Aitne reads `~/.claude/`, `~/.codex/`, and `~/.gemini/` on session init and layers its persona on top. (`~/.opencode/` is recognised but the OpenCode runtime is coming soon.)
-
-**Is this for my team?** No — single-owner by design. Group chats and multi-user channels are filtered at the adapter layer.
-
-**Does it work without internet?** Backends and reactive messaging need internet. The daemon, dashboard, observers, and Markdown memory are entirely offline.
-
-**How do I uninstall?** `aitne uninstall` — offers to wipe `~/.personal-agent` or keep it for re-installation.
-
----
-
 ## License
 
 MIT — see [LICENSE](./LICENSE).
