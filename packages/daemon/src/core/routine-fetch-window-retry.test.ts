@@ -617,4 +617,37 @@ describe("buildPriorAttemptHintBlock", () => {
     );
     expect(block).toContain("partial is the source of truth");
   });
+
+  it("renders <unknown /> when err.type is not a string (defensive fallback)", () => {
+    // Covers the false branch of `typeof err.type === 'string' ? err.type : 'unknown'`.
+    // A malformed error row from a non-conforming integration that surfaces
+    // up the retry path should not break the prompt.
+    const block = buildPriorAttemptHintBlock(
+      [
+        attempt({
+          attempt: 1,
+          // `errors` is typed as Record<string, unknown> rows, so a missing
+          // type is structurally valid — the renderer normalizes it.
+          errors: [{ type: 42 as unknown as string, status: 500 }],
+        }),
+      ],
+      "gmail",
+    );
+    expect(block).toContain("<unknown ");
+  });
+
+  it("renders a self-closing tag with no attrs when err has only a type", () => {
+    // Covers the false branch of `attrs ? ' ' + attrs : ''` — when the
+    // error row has no string/number attributes other than `type`, the
+    // rendered tag must close cleanly without a trailing space.
+    const block = buildPriorAttemptHintBlock(
+      [attempt({ attempt: 1, errors: [{ type: "fetch-failed" }] })],
+      "gmail",
+    );
+    // `<fetch_failed />` — no extra space between tag name and the closing ` />`.
+    expect(block).toContain("<fetch_failed />");
+    // No double-spaced separator (`<fetch_failed  />`) and no stray attr-like
+    // residue (a wrong false-branch would leave ` ` from " " + "").
+    expect(block).not.toMatch(/<fetch_failed\s\s+\/>/);
+  });
 });

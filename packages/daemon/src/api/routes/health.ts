@@ -168,9 +168,11 @@ export function createHealthRoutes(deps: ApiDependencies): Hono {
           active: number;
           failing_now: number;
         };
+        // SQL COUNT() always returns an integer (zero on an empty table,
+        // never NULL), so a `?? 0` fallback would be dead defensive code.
         return {
-          active: row.active ?? 0,
-          failingNow: row.failing_now ?? 0,
+          active: row.active,
+          failingNow: row.failing_now,
         };
       },
       { active: 0, failingNow: 0 },

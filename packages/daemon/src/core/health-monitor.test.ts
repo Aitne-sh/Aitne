@@ -172,6 +172,20 @@ describe("HealthMonitor", () => {
     expect(status.todayCostUsd).toBe(4.8);
   });
 
+  it("reports dbConnected=false when a DB query throws (catch arm)", () => {
+    // Covers the `try { ... } catch { dbConnected = false; }` arm —
+    // simulate a corrupt schema by closing the DB so the prepared
+    // statement throws. The monitor must still return a status object
+    // with dbConnected flipped to false, not crash.
+    deps.db.close();
+    const status = monitor.check();
+    expect(status.dbConnected).toBe(false);
+    // Counters fall back to their initial zeros when the read fails.
+    expect(status.activeSessions).toBe(0);
+    expect(status.todaySessions).toBe(0);
+    expect(status.todayCostUsd).toBe(0);
+  });
+
   it("start and stop work correctly", () => {
     monitor.start();
     monitor.stop();

@@ -4,6 +4,9 @@ import {
   DEFAULT_AGENT_DISPLAY_NAME,
   EXECUTION_PERMISSION_MODES,
   INTEGRATION_KEYS,
+  browserHistoryBrowserOverrideSchema,
+  browserHistoryCategorySchema,
+  browserHistoryLifecycleConfigSchema,
   isAdvisorModel,
   isSupportedVoiceLanguage,
   validateAgentDisplayName,
@@ -535,6 +538,23 @@ export const runtimeSettingsSchema = z.object({
   githubPollIntervalSeconds: z.number().int().min(60).default(1800),
 
   /**
+   * Browser History P1 — dashboard consent latch and passive detector /
+   * lifecycle configuration. The integration's master enabled/disabled
+   * mode remains in the integrations registry; these fields carry the
+   * per-browser, category, retention, and lifecycle knobs behind that mode.
+   */
+  browserHistoryConsentAccepted: z.boolean().default(false),
+  browserHistoryBrowserOverrides: z
+    .record(z.string(), browserHistoryBrowserOverrideSchema)
+    .default({}),
+  browserHistoryCategories: z
+    .array(browserHistoryCategorySchema)
+    .default(["research", "news", "dev"]),
+  browserHistoryRetentionDays: z.number().int().min(1).max(365).default(30),
+  browserHistorySearchQueryRetentionDays: z.number().int().min(1).max(90).default(7),
+  browserHistoryLifecycle: browserHistoryLifecycleConfigSchema.prefault({}),
+
+  /**
    * B-003 Phase 4.3 — auto-probe cadence for enabled MCP servers.
    *
    * Every `mcpAutoProbeIntervalMinutes` the observer walks every enabled row
@@ -909,6 +929,12 @@ export const RUNTIME_SETTING_KEYS = [
   "calendarPollIntervalSeconds",
   "gmailPollIntervalSeconds",
   "githubPollIntervalSeconds",
+  "browserHistoryConsentAccepted",
+  "browserHistoryBrowserOverrides",
+  "browserHistoryCategories",
+  "browserHistoryRetentionDays",
+  "browserHistorySearchQueryRetentionDays",
+  "browserHistoryLifecycle",
   "mcpAutoProbeIntervalMinutes",
   "delegatedProbeIntervalMinutes",
   "enabledMailProviders",

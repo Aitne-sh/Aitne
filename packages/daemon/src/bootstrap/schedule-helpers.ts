@@ -206,7 +206,10 @@ export function hasFreshAgentDayTodayMd(
     return false;
   }
 
-  const firstLine = readFileSync(todayMdPath, "utf-8").split("\n")[0] ?? "";
+  // `String.split` always returns a non-empty array, so index 0 is
+  // defined for any contents — including the empty string. A `?? ""`
+  // fallback would be dead defensive code.
+  const firstLine = readFileSync(todayMdPath, "utf-8").split("\n")[0]!;
   const today = getAgentDayDateStr(timezone, dayBoundaryHour, now);
   return firstLine.includes(today);
 }

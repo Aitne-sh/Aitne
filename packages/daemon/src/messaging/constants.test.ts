@@ -4,9 +4,28 @@ import {
   DOCS_QA_SCOPE,
   DOCS_QA_SCOPE_KEY,
   getConversationScope,
+  isNotificationDestinationPlatform,
   OWNER_DM_SCOPE,
   THREAD_SCOPE,
 } from "./constants.js";
+
+describe("isNotificationDestinationPlatform", () => {
+  it("returns true for every supported destination platform", () => {
+    for (const platform of ["slack", "telegram", "discord", "whatsapp"]) {
+      expect(isNotificationDestinationPlatform(platform)).toBe(true);
+    }
+  });
+
+  it("returns false for dashboard (chat-only, never a notification target)", () => {
+    expect(isNotificationDestinationPlatform("dashboard")).toBe(false);
+  });
+
+  it("returns false for unknown / arbitrary strings", () => {
+    expect(isNotificationDestinationPlatform("email")).toBe(false);
+    expect(isNotificationDestinationPlatform("")).toBe(false);
+    expect(isNotificationDestinationPlatform("Slack")).toBe(false);
+  });
+});
 
 describe("getConversationScope", () => {
   it("routes dashboard DMs to dashboard_chat by default", () => {

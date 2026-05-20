@@ -79,6 +79,18 @@ describe("parseSummarizerResponse", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.summary).toBe("a b c");
   });
+
+  it("truncates rawSnippet to 200 chars on long inputs", () => {
+    // Covers the true branch of `s.length > 200 ? slice + '...' : s` in
+    // the `snippet()` helper. Use an oversize input that fails JSON.parse.
+    const raw = "x".repeat(300);
+    const result = parseSummarizerResponse(raw);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.rawSnippet.length).toBeLessThanOrEqual(203);
+      expect(result.rawSnippet.endsWith("...")).toBe(true);
+    }
+  });
 });
 
 describe("applyNoveltyFloor", () => {

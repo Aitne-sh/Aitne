@@ -93,6 +93,8 @@ import type { RoadmapWriteLockManager } from "../core/roadmap-write-lock.js";
 import type { ManagementMdWriteLockManager } from "../core/management-md-write-lock.js";
 import type { RefreshDmSessionWorkdirsResult } from "../core/workdir.js";
 import type { RoadmapMaintenanceResult } from "../core/roadmap-maintenance.js";
+import { BrowserLifecycleSupervisor } from "../services/browser-history/lifecycle/supervisor.js";
+import { BrowserHistoryPoller } from "../observers/browser-history-poller.js";
 import type {
   IntegrationKey,
   IntegrationState,
@@ -451,6 +453,12 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
       if (observerName === "notion-poller") return buildNotionPoller();
       if (observerName === "git") return buildGitWatcher();
       if (observerName === "github") return buildGithubPoller();
+      if (observerName === "browser-lifecycle-supervisor") {
+        return new BrowserLifecycleSupervisor(db, config);
+      }
+      if (observerName === "browser-history-poller") {
+        return new BrowserHistoryPoller(db, config);
+      }
       return null;
     };
     await applyIntegrationModeChange(

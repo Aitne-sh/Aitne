@@ -60,6 +60,7 @@ import { createCommandsRoutes } from "./routes/commands.js";
 import { createVoiceRoutes } from "./routes/voice.js";
 import { createWikiRoutes } from "./routes/wiki.js";
 import { createFsRoutes } from "./routes/fs.js";
+import { createBrowserHistoryRoutes } from "./routes/browser-history.js";
 import {
   buildManagedTasksRoutesDepsFromApi,
   createManagedTasksRoutes,
@@ -921,6 +922,7 @@ export function createApp(deps: ApiDependencies): Hono {
   const voiceRoutes = createVoiceRoutes(deps);
   const wikiRoutes = createWikiRoutes(deps);
   const fsRoutes = createFsRoutes(deps);
+  const browserHistoryRoutes = createBrowserHistoryRoutes(deps);
   // Management Registry & Entities (docs/design/21-management-registry-
   // and-entities.md). The managed-tasks and sot-bindings routes MUST
   // share one lock manager — separate instances would let back-to-back
@@ -979,6 +981,7 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", voiceRoutes);
   app.route("/api", wikiRoutes);
   app.route("/api", fsRoutes);
+  app.route("/api", browserHistoryRoutes);
 
   // ── Chat file attachments (Phase 1) ──
   if (deps.attachmentStore) {

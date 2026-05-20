@@ -79,6 +79,13 @@ describe("schedule-maintenance", () => {
     ]);
   });
 
+  it("is a no-op when no orphans exist (skipped === 0 && failed === 0)", () => {
+    // Regression: covers the negative branch of the "log when recovered"
+    // gate — an empty table must return zeros silently.
+    const result = recoverOrphanedRunningSchedules(db, "2026-04-07 04:00:00");
+    expect(result).toEqual({ skipped: 0, failed: 0 });
+  });
+
   it("detects whether a routine already ran in the current agent-day window", () => {
     db.prepare(
       `INSERT INTO agent_actions (action_type, started_at)

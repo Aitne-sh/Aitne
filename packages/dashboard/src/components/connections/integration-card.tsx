@@ -1286,6 +1286,10 @@ const directDetailsCopy: Readonly<
     present: "Outlook BYOA client config present. Calendar reads are on-demand and reuse the MSAL token from Outlook Mail; no background poller in v1.",
     absent: "Direct mode requires the BYOA client config used by Outlook Mail. Configure it via the Outlook Mail card; calendar reads reuse the same authenticated session.",
   },
+  browser_history: {
+    present: "Browser history ingest is active. The daemon reads local browser history databases on the configured cadence.",
+    absent: "Direct mode requires accepting the on-device browser history consent latch. No external credentials are required.",
+  },
 };
 
 // ── Recent proxy calls table (DELEGATED-PROXY-API-DESIGN.md §7) ────────────

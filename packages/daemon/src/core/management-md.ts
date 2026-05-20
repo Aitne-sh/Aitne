@@ -450,6 +450,8 @@ function dataPathPrefixFor(key: IntegrationKey): string {
       return "mail";
     case "outlook_calendar":
       return "calendar/outlook";
+    case "browser_history":
+      return "browser-history";
   }
 }
 

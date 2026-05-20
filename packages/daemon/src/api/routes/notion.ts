@@ -154,10 +154,14 @@ export function createNotionRoutes(deps: NotionRouteDependencies): Hono {
       filter = filterParam ? JSON.parse(filterParam) : undefined;
       sorts = sortsParam ? JSON.parse(sortsParam) : undefined;
     } catch {
+      // The catch is reachable only when at least one of filterParam /
+      // sortsParam was non-empty and failed JSON.parse. Both falsy means
+      // the try is a no-op and never throws, so a `?? "<missing>"`
+      // fallback would be dead defensive code.
       return respondWithAgentError(c, 400, [
         composeIssue("notion.invalid_json_parameter", {
           field: filterParam && !sortsParam ? "filter" : "sorts",
-          received: filterParam ?? sortsParam ?? "<missing>",
+          received: filterParam ?? sortsParam,
         }),
       ], { legacyFields: { message: "filter or sorts is not valid JSON" } });
     }

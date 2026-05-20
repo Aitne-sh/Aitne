@@ -447,7 +447,7 @@ export function createSkillsRoutes(deps: SkillsRouteDependencies): Hono {
     const skillFile = safeSkillPath(userSkillsRoot, slug);
     // skillFile is null only for traversal slugs; the zod slug check above
     // already rejects those — this null branch is unreachable for valid slugs.
-    /* c8 ignore next */
+    /* c8 ignore start */
     if (!skillFile) {
       return respondWithAgentError(
         c,
@@ -456,6 +456,7 @@ export function createSkillsRoutes(deps: SkillsRouteDependencies): Hono {
         { legacyFields: { name: slug } },
       );
     }
+    /* c8 ignore stop */
 
     try {
       mkdirSync(join(userSkillsRoot, slug), { recursive: true });

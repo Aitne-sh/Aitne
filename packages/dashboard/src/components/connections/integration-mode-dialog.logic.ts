@@ -432,6 +432,14 @@ const DIRECT_MODE_RESUME: Readonly<Record<IntegrationKey, DirectModeResumeShape>
     absentClause: "Outlook Calendar has no BYOA client config to reuse yet",
     setupPhrase: "registering a Microsoft Identity (Azure) app via the Outlook Mail card",
   },
+  // Browser history is direct-only — there is no delegated→direct resume
+  // path. Entry exists to satisfy the exhaustive Record<IntegrationKey, …>
+  // contract; copy mirrors the on-device consent latch model.
+  browser_history: {
+    presentClause: "Browser history consent is already accepted on this device",
+    absentClause: "Browser history consent has not been accepted yet",
+    setupPhrase: "accepting the on-device browser history consent latch",
+  },
 };
 
 export function delegatedToDirectResumeMessage(

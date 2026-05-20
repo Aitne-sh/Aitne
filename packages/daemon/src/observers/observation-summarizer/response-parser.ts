@@ -35,18 +35,17 @@ export function parseSummarizerResponse(raw: string): ParseSummaryResult {
     return { ok: false, reason: "no_json_object", rawSnippet: snippet(raw) };
   }
 
-  let parsed: unknown;
+  // `extractJsonObject` only returns a `{...}`-shaped slice (or `null`,
+  // already handled above). A `JSON.parse` of that slice either throws
+  // (handled by the catch) or evaluates to a non-null object — never a
+  // falsy primitive or array — so a separate `!parsed || typeof !==
+  // "object"` guard would be dead defensive code.
+  let obj: Record<string, unknown>;
   try {
-    parsed = JSON.parse(slice);
+    obj = JSON.parse(slice) as Record<string, unknown>;
   } catch {
     return { ok: false, reason: "invalid_json", rawSnippet: snippet(slice) };
   }
-
-  if (!parsed || typeof parsed !== "object") {
-    return { ok: false, reason: "invalid_json", rawSnippet: snippet(slice) };
-  }
-
-  const obj = parsed as Record<string, unknown>;
   const summaryValue = obj["summary"];
   if (typeof summaryValue !== "string" || summaryValue.length === 0) {
     return { ok: false, reason: "missing_summary", rawSnippet: snippet(slice) };

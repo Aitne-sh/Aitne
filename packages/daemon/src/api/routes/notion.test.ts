@@ -989,6 +989,39 @@ describe("Notion API routes", () => {
     expect(body.error).toBe("updates_required_for_update");
   });
 
+  it("reports received='<missing>' when mode='update' omits the updates field", async () => {
+    // Covers the `body.updates === undefined ? "<missing>" : ...` branch.
+    const service = makeService();
+    const app = createNotionRoutes({ notionService: service });
+    const res = await app.request(`/notion/pages/${samplePage.id}/content`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "update" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors: Array<{ received: string }>;
+    };
+    expect(body.errors[0]!.received).toBe("<missing>");
+  });
+
+  it("reports received='<missing>' when the body omits the mode field", async () => {
+    // Covers the false branch of `body.mode ?? "<missing>"` (mode is
+    // undefined → falls into the switch default and reports missing).
+    const service = makeService();
+    const app = createNotionRoutes({ notionService: service });
+    const res = await app.request(`/notion/pages/${samplePage.id}/content`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      errors: Array<{ received: string }>;
+    };
+    expect(body.errors[0]!.received).toBe("<missing>");
+  });
+
   it("returns 502 when updatePageContent throws a non-not-found error", async () => {
     const service = makeService({
       updatePageContent: vi.fn().mockRejectedValue(new Error("conflict")),

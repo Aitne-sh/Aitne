@@ -40,6 +40,7 @@ describe("integrations-snapshot — registry", () => {
     expect(INTEGRATION_WRITE_TTL_MS.google_calendar).toBe(90 * 60 * 1000);
     expect(INTEGRATION_WRITE_TTL_MS.gmail).toBe(45 * 60 * 1000);
     expect(INTEGRATION_WRITE_TTL_MS.notion).toBe(90 * 60 * 1000);
+    expect(INTEGRATION_WRITE_TTL_MS.browser_history).toBe(90 * 60 * 1000);
   });
 });
 

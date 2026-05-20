@@ -21,6 +21,9 @@ describe("buildIntegrationHealthMap", () => {
   it("emits an entry for every registered integration", () => {
     const map = buildIntegrationHealthMap(db, process.cwd());
     expect(Object.keys(map).sort()).toEqual([
+      // BROWSER_HISTORY_INTEGRATION_PLAN — high-sensitivity browsing
+      // integration; direct-only (no delegated, no native).
+      "browser_history",
       "git",
       "github",
       "gmail",

@@ -2,6 +2,9 @@ import type {
   Alert,
   BackendId,
   BackendModel,
+  BrowserHistoryBrowserOverride,
+  BrowserHistoryCategory,
+  BrowserHistoryLifecycleConfig,
   ExecutionPermissionMode,
   IntegrationKey,
   IntegrationMode,
@@ -809,6 +812,12 @@ export interface ConfigResponse {
   notionPollIntervalSeconds: number;
   calendarPollIntervalSeconds: number;
   gmailPollIntervalSeconds: number;
+  browserHistoryConsentAccepted: boolean;
+  browserHistoryBrowserOverrides: Record<string, BrowserHistoryBrowserOverride>;
+  browserHistoryCategories: BrowserHistoryCategory[];
+  browserHistoryRetentionDays: number;
+  browserHistorySearchQueryRetentionDays: number;
+  browserHistoryLifecycle: BrowserHistoryLifecycleConfig;
   mcpAutoProbeIntervalMinutes: number;
   authProbeDisabled: boolean;
   autonomousDailyCostCapUsd: number | null;

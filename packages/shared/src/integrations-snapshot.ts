@@ -68,6 +68,11 @@ export const INTEGRATION_WRITE_TTL_MS: Readonly<Record<IntegrationKey, number>> 
   // up.
   outlook_mail: 45 * 60 * 1000,
   outlook_calendar: 90 * 60 * 1000,
+  // Browser history does not flow through the delegated-snapshot pipeline
+  // (no MCP connector, no agent writes to attribute), but IntegrationKey is
+  // exhaustive — keep a conservative TTL so generic write-tracker callers
+  // never see undefined for this key.
+  browser_history: 90 * 60 * 1000,
 };
 
 export interface IntegrationNormalizer<TRaw = unknown, TPayload = unknown> {

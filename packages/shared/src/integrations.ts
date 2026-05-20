@@ -30,6 +30,7 @@ export const INTEGRATION_KEYS = [
   "github",
   "outlook_mail",
   "outlook_calendar",
+  "browser_history",
 ] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 
@@ -1188,7 +1189,43 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // user-managed connectors).
     apiRoutesTouched: ["/api/calendar/outlook"],
   },
+  browser_history: {
+    key: "browser_history",
+    displayName: "Browser History",
+    supportedModes: ["direct", "disabled"],
+    backendConnectors: {},
+    skillsTouched: ["browser-history"],
+    taskFlowsTouched: ["routine.research_cluster_update"],
+    // BROWSER_HISTORY_INTEGRATION_PLAN §6.3 — the journal / weekly
+    // review consume browser-history data through a pre-computed digest
+    // file (written by `pre-morning-digest.ts`) and through the typed
+    // `/api/browser-history/*` endpoints, NOT through the
+    // `{include:_partials/<kind>-acquire.<key>.md}` directive that
+    // `taskFlowsReferenced` is built for. Leaving the field unset
+    // honours the lint invariant (`taskFlowsReferenced` + no
+    // `prePassPartial` is structural drift) while preserving the
+    // design coupling — the dashboard surface for "which routines
+    // consume browsing data" lives next to the integration page
+    // instead of this descriptor field.
+    observersTouched: [
+      "browser-history-poller",
+      "browser-lifecycle-supervisor",
+    ],
+    // Gate only agent-facing data routes. `/api/browser-history/status` is a
+    // dashboard control-plane read and must remain reachable while the
+    // integration is still disabled so the consent page can show detection
+    // state before enabling ingest.
+    apiRoutesTouched: [
+      "/api/browser-history/research-clusters",
+      "/api/browser-history/yesterday-summary",
+    ],
+    userManagedConnector: false,
+  },
 };
+
+export const HIGH_SENSITIVITY_INTEGRATIONS = new Set<IntegrationKey>([
+  "browser_history",
+]);
 
 export function getIntegrationDescriptor(
   key: IntegrationKey,

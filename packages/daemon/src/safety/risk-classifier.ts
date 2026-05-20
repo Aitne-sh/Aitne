@@ -151,7 +151,14 @@ const API_RISK: Record<string, RiskTier> = {
   "GET /api/config/character": RiskTier.Autonomous,
   "PATCH /api/config/character": RiskTier.Autonomous,
   "/api/config": RiskTier.Approve,
+  "GET /api/browser-history/status": RiskTier.Approve,
+  "GET /api/browser-history/research-clusters": RiskTier.Autonomous,
+  "GET /api/browser-history/yesterday-summary": RiskTier.Autonomous,
+  "GET /api/browser-history/shopping/{*}": RiskTier.Autonomous,
+  "GET /api/browser-history/reloads/today": RiskTier.Autonomous,
+  "GET /api/browser-history/reloads/weekly": RiskTier.Autonomous,
   "/api/setup": RiskTier.Approve,
+  "POST /api/setup/redetect-browsers": RiskTier.Approve,
   // Management Mode Phase 2 — migration endpoint. Redundant with the
   // /api/setup prefix rule above (which already hits Approve) but named
   // explicitly so future refactors of the setup-tier rules don't

@@ -388,6 +388,53 @@ sources:
     expect(body).toContain("  Webex: zm_abc");
   });
 
+  it("rolls back the write tracker when writeFileAtomically fails", async () => {
+    // Covers the `deps.writeTracker?.unmark` branch — the marker was set
+    // before the atomic write, so a thrown write must unmark to keep the
+    // observer's "was this written by the agent" attribution accurate
+    // (C2 invariant — see comments above the markWriting call).
+    seedEntity(
+      "work/meetings/standup.md",
+      `---
+domain: work
+type: meeting
+slug: standup
+title: Daily Standup
+sources:
+  zoom: zm_abc
+---
+`,
+      "zoom",
+    );
+    const atomicWrite = await import("../atomic-write.js");
+    const spy = vi
+      .spyOn(atomicWrite, "writeFileAtomically")
+      .mockImplementation(() => {
+        throw new Error("disk full");
+      });
+    const markWriting = vi.fn();
+    const unmark = vi.fn();
+    try {
+      const out = await rewriteEntityFilesForSourceRename({
+        db,
+        contextDir,
+        oldKey: "zoom",
+        newKey: "Webex",
+        writeTracker: { markWriting, unmark } as unknown as Parameters<
+          typeof rewriteEntityFilesForSourceRename
+        >[0]["writeTracker"],
+      });
+      expect(out.rewrote).toEqual([]);
+      expect(markWriting).toHaveBeenCalledTimes(1);
+      expect(unmark).toHaveBeenCalledTimes(1);
+      expect(unmark.mock.calls[0]![0]).toBe(
+        join(contextDir, "work/meetings/standup.md"),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("records `errors` when reading a missing file fails", async () => {
     // Sidecar row points at a path that has been deleted from disk —
     // reachable when the entity-mirror has been ahead of an external

@@ -47,6 +47,7 @@ describe("ROUTINE_WINDOWS catalog", () => {
             notion: "notion",
             git: undefined,
             github: undefined,
+            browser_history: undefined,
           };
           const expected = expectedKind[integration];
           if (expected !== undefined) {
@@ -238,4 +239,3 @@ describe("routineHasWindows", () => {
     expect(routineHasWindows("routine.monthly_review")).toBe(false);
   });
 });
-

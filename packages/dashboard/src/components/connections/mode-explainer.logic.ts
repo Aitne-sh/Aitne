@@ -50,6 +50,8 @@ function directSetupSentence(key: IntegrationKey): string {
     case "outlook_mail":
     case "outlook_calendar":
       return "Requires a Microsoft Identity (Azure BYOA) client config plus a per-account MSAL sign-in for each Outlook mailbox.";
+    case "browser_history":
+      return "Requires accepting the on-device browser history consent latch — no external credential is stored; the daemon reads local browser history databases directly.";
   }
 }
 

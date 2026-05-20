@@ -182,30 +182,21 @@ export function renderOpencodeMcp(
       mcp[server.id] = local;
       continue;
     }
-    /* c8 ignore start — McpTransport is closed-set; the http/sse branch
-       always covers the remaining transports after the stdio early-return
-       above, so the false-branch + unknown fallthrough below are
-       unreachable unless a future transport ships without updating the
-       renderer. */
-    if (server.transport === "http" || server.transport === "sse") {
-      /* c8 ignore stop */
-      const remote = renderRemote(server, input.secrets, input.defaultTimeoutMs);
-      if (!remote) {
-        warnings.push(
-          `opencode-mcp: ${server.transport} server '${server.id}' has no 'url'; skipped`,
-        );
-        continue;
-      }
-      mcp[server.id] = remote;
+    // `McpTransport` is the closed set { stdio, http, sse } (see
+    // services/mcp/types.ts). After the stdio branch above, only http
+    // and sse remain — both go through `renderRemote`. Extending
+    // `McpTransport` without updating this branch is caught by the
+    // probe / dashboard layers, which won't ever ask opencode to
+    // materialize an unknown transport.
+    const remote = renderRemote(server, input.secrets, input.defaultTimeoutMs);
+    if (!remote) {
+      warnings.push(
+        `opencode-mcp: ${server.transport} server '${server.id}' has no 'url'; skipped`,
+      );
       continue;
     }
-    /* c8 ignore start — see note above. */
-    const unknown: never = server.transport;
-    warnings.push(
-      `opencode-mcp: unsupported transport '${String(unknown)}' for server '${server.id}'`,
-    );
+    mcp[server.id] = remote;
   }
-  /* c8 ignore stop */
 
   if (Object.keys(mcp).length > 0) {
     logger.debug(

@@ -147,7 +147,10 @@ export function resolveModelToken(args: {
     return { ok: true, model: null, tierOverride: null, backendId: null, warnings: [] };
   }
 
-  // Tier only → store the tier and clear the model pin.
+  // Tier only → store the tier and clear the model pin. Logically `tier`
+  // is defined here (the both-undefined case returned above), but TS does
+  // not propagate that disjunction narrowing through control flow, so the
+  // `?? null` fallback stays.
   if (model === undefined) {
     return {
       ok: true,

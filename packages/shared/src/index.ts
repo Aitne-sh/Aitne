@@ -151,6 +151,54 @@ export type {
   ProcessModelTier,
 } from "./process-key.js";
 
+// Browser History integration shared contracts
+export {
+  browserHistoryBrowserKeySchema,
+  browserHistoryDetectionStatusSchema,
+  browserHistoryCategorySchema,
+  browserHistoryBrowserOverrideSchema,
+  browserHistoryPerBrowserLifecycleConfigSchema,
+  browserHistoryLifecycleConfigSchema,
+  browserHistoryLifecycleStateValueSchema,
+  browserHistoryCapabilityDetailSchema,
+  browserHistoryCapabilitiesSchema,
+  browserHistoryLifecycleBrowserStateSchema,
+  browserHistoryLifecycleStateSchema,
+  browserHistoryClusterStatusSchema,
+  browserHistoryClusterListItemSchema,
+  browserHistoryResearchClustersResponseSchema,
+  yesterdayResearchSummarySchema,
+  browserHistoryStatusResponseSchema,
+  browserShoppingSessionSchema,
+  browserShoppingDateResponseSchema,
+  browserReloadEntrySchema,
+  browserReloadsTodayResponseSchema,
+  browserReloadsWeeklyResponseSchema,
+} from "./browser-history-schemas.js";
+export type {
+  BrowserHistoryBrowserKey,
+  BrowserHistoryDetectionStatus,
+  BrowserHistoryCategory,
+  BrowserHistoryBrowserOverride,
+  BrowserHistoryPerBrowserLifecycleConfig,
+  BrowserHistoryLifecycleConfig,
+  BrowserHistoryLifecycleStateValue,
+  BrowserHistoryCapabilityDetail,
+  BrowserHistoryCapabilities,
+  BrowserHistoryLifecycleBrowserState,
+  BrowserHistoryLifecycleState,
+  BrowserHistoryClusterStatus,
+  BrowserHistoryClusterListItem,
+  BrowserHistoryResearchClustersResponse,
+  YesterdayResearchSummary,
+  BrowserHistoryStatusResponse,
+  BrowserShoppingSession,
+  BrowserShoppingDateResponse,
+  BrowserReloadEntry,
+  BrowserReloadsTodayResponse,
+  BrowserReloadsWeeklyResponse,
+} from "./browser-history-schemas.js";
+
 // Wiki builder shared contract
 export {
   WIKI_BRIDGE_OUTCOMES,

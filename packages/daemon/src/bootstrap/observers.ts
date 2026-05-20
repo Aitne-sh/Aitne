@@ -113,6 +113,8 @@ import { ImminentEventScheduler } from "../observers/imminent-event-scheduler.js
 import { NotionPoller } from "../observers/notion-poller.js";
 import { MailPoller } from "../observers/mail-poller.js";
 import { MailReconciliationJob } from "../observers/mail-reconciliation.js";
+import { BrowserHistoryPoller } from "../observers/browser-history-poller.js";
+import { BrowserLifecycleSupervisor } from "../services/browser-history/lifecycle/supervisor.js";
 import type { BootstrapSecretState } from "./services.js";
 import { createLogger } from "../logging.js";
 
@@ -623,6 +625,11 @@ export async function createObservers(
         db,
       }),
     );
+  }
+
+  observerManager.register(new BrowserLifecycleSupervisor(db, config));
+  if (shouldStartObserversFor(db, "browser_history")) {
+    observerManager.register(new BrowserHistoryPoller(db, config));
   }
 
   // ── 7.04 Skill-curation observers (P22 — appendix p22-skill-self-optimization.md) ──

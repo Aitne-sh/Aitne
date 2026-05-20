@@ -10,6 +10,7 @@ import {
   Terminal,
   BookOpenText,
   BookText,
+  History,
   SlidersHorizontal,
   Repeat,
   ClipboardList,
@@ -83,6 +84,12 @@ const NAV_ITEMS: NavItem[] = [
     description: "Workspace, commands, wiki budgets",
   },
   {
+    href: "/settings/integrations/browser-history",
+    label: "Browser History",
+    icon: History,
+    description: "Consent, browser detection, lifecycle",
+  },
+  {
     href: "/settings/commands",
     label: "Commands",
     icon: Terminal,
@@ -137,6 +144,14 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "historyInjectionMaxMessages", "historyInjectionMaxTokens", "dmStalenessStrict",
     "apiPort",
     "authProbeDisabled", "authPreflightFreshnessMs",
+  ],
+  "/settings/integrations/browser-history": [
+    "browserHistoryConsentAccepted",
+    "browserHistoryBrowserOverrides",
+    "browserHistoryCategories",
+    "browserHistoryRetentionDays",
+    "browserHistorySearchQueryRetentionDays",
+    "browserHistoryLifecycle",
   ],
 };
 

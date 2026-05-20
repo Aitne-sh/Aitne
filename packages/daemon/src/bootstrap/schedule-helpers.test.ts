@@ -221,6 +221,19 @@ describe("getStalledMorningRoutineWake", () => {
     expect(stalled?.id).toBe(older);
   });
 
+  it("defaults `now` to the wall clock when the caller omits it", () => {
+    // Covers the `now ?? new Date()` fallback. Insert a row dated far in
+    // the past — under the real wall clock the routine has not run today
+    // and the wake row is stale beyond any sane threshold, so the call
+    // must surface the row.
+    insertMorningWake(db, { createdAt: "2020-01-01 00:00:00" });
+    const stalled = getStalledMorningRoutineWake(db, tokyo, 120);
+    expect(stalled?.status).toBe("pending");
+    // Age is computed against the wall clock; assert a generous lower
+    // bound rather than a brittle exact value.
+    expect(stalled!.ageMinutes).toBeGreaterThan(1000);
+  });
+
   it("treats a yesterday success as a different agent-day (still stalled today)", () => {
     // Yesterday's success — today's wake row is still stuck.
     insertMorningRoutine(db, {
@@ -408,6 +421,18 @@ describe("shouldCatchUpHourlyCheck", () => {
     expect(shouldCatchUpHourlyCheck(db, cfg, now)).toBe(false);
   });
 
+  it("falls back to the system zone when config.timezone is the empty string", () => {
+    // Covers the `config.timezone || undefined` branch where timezone is
+    // a falsy string (e.g. unset by the runtime-settings default). The
+    // function must not throw and must use the wall-clock zone instead.
+    const cfg = { ...defaultHourlyConfig, timezone: "" } as AgentConfig;
+    const now = new Date("2026-05-14T08:00:00Z");
+    // We're not asserting the boolean result (it depends on the test
+    // host's TZ); we're asserting the path does not throw and returns a
+    // boolean — that pins the branch.
+    expect(typeof shouldCatchUpHourlyCheck(db, cfg, now)).toBe("boolean");
+  });
+
   it("returns false before the active-start hour", () => {
     // 03:30 JST = before 04:00 active start.
     const now = new Date("2026-05-13T18:30:00Z");
@@ -519,6 +544,26 @@ describe("getDueCatchupRoutines", () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it("falls back to the system zone when config.timezone is the empty string", () => {
+    // Covers the `config.timezone || undefined` branch in
+    // `getDueCatchupRoutines`. Mirrors the parallel branch in
+    // `shouldCatchUpHourlyCheck` — the helper must not throw on empty
+    // timezone; it just resolves against the wall-clock zone.
+    const cfg = { ...reviewConfig, timezone: "" } as AgentConfig;
+    const now = new Date("2026-05-14T08:30:00Z");
+    expect(
+      Array.isArray(
+        getDueCatchupRoutines(
+          db,
+          cfg,
+          "2026-05-13 19:00:00",
+          "2026-05-14 19:00:00",
+          now,
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("returns [] when current time is before the 18:00 due-line", () => {

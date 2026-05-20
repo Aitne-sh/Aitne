@@ -47,24 +47,33 @@ describe("Integration registry", () => {
       "github",
       "outlook_mail",
       "outlook_calendar",
+      "browser_history",
     ]);
   });
 
   it("exposes descriptor metadata for every registered key", () => {
-    // Every registered key declares the full mode tuple. Outlook integrations
-    // ship as "user-managed connector" (the daemon trusts the user's MCP
-    // wiring on the chosen backend), so they declare delegated AND native
-    // in `supportedModes` while leaving `backendConnectors` empty —
-    // INTEGRATION_NATIVE_MODE_DESIGN.md §5.3 (2026-05 amendment).
+    // Most registered keys declare the delegated-capable mode tuple. Outlook
+    // integrations ship as "user-managed connector" (the daemon trusts the
+    // user's MCP wiring on the chosen backend), so they declare delegated AND
+    // native while leaving `backendConnectors` empty —
+    // INTEGRATION_NATIVE_MODE_DESIGN.md §5.3 (2026-05 amendment). Browser
+    // History is high-sensitivity local telemetry and intentionally supports
+    // only direct/disabled in P1.
     const userManagedKeys = new Set<string>(["outlook_mail", "outlook_calendar"]);
+    const directOnlyKeys = new Set<string>(["browser_history"]);
     for (const key of INTEGRATION_KEYS) {
       const descriptor = INTEGRATION_DESCRIPTORS[key];
       expect(descriptor.key).toBe(key);
       expect(descriptor.displayName).toBeTruthy();
       expect(descriptor.supportedModes).toEqual(
-        expect.arrayContaining(["direct", "delegated", "disabled"]),
+        directOnlyKeys.has(key)
+          ? ["direct", "disabled"]
+          : expect.arrayContaining(["direct", "delegated", "disabled"]),
       );
-      if (userManagedKeys.has(key)) {
+      if (directOnlyKeys.has(key)) {
+        expect(descriptor.userManagedConnector).toBe(false);
+        expect(Object.keys(descriptor.backendConnectors).length).toBe(0);
+      } else if (userManagedKeys.has(key)) {
         expect(descriptor.userManagedConnector).toBe(true);
         expect(Object.keys(descriptor.backendConnectors).length).toBe(0);
       } else {
@@ -106,6 +115,20 @@ describe("Integration registry", () => {
     // handler is the defense-in-depth surface when a future delegated
     // mode lands.
     expect(INTEGRATION_DESCRIPTORS.outlook_mail.apiRoutesTouched).toEqual([]);
+  });
+
+  it("browser_history is direct-only and exposes only agent-facing data routes to the integration gate", () => {
+    const desc = INTEGRATION_DESCRIPTORS.browser_history;
+    expect(desc.supportedModes).toEqual(["direct", "disabled"]);
+    expect(desc.backendConnectors).toEqual({});
+    expect(desc.observersTouched).toEqual([
+      "browser-history-poller",
+      "browser-lifecycle-supervisor",
+    ]);
+    expect(desc.apiRoutesTouched).toEqual([
+      "/api/browser-history/research-clusters",
+      "/api/browser-history/yesterday-summary",
+    ]);
   });
 
   // docs/design/appendices/routine-data-acquisition.md §10 R3 / F7 — user-managed

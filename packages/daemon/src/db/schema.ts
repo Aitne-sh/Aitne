@@ -1042,6 +1042,83 @@ CREATE TABLE IF NOT EXISTS integration_writes (
 CREATE INDEX IF NOT EXISTS idx_integration_writes_expires
     ON integration_writes(expires_at);
 
+-- ── Browser History Integration (P1 infra + observability) ─────────────────
+
+CREATE TABLE IF NOT EXISTS browser_visits (
+    id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    browser TEXT NOT NULL,
+    profile TEXT,
+    url_hash TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    category TEXT NOT NULL,
+    meaningful INTEGER DEFAULT 0,
+    dwell_sec INTEGER,
+    foreground_sec INTEGER,
+    transition INTEGER,
+    is_reload INTEGER DEFAULT 0,
+    root_task_id INTEGER,
+    http_status INTEGER,
+    title TEXT,
+    search_query TEXT,
+    amazon_asin TEXT,
+    amazon_locale TEXT,
+    UNIQUE(browser, profile, ts, url_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_browser_visits_ts
+    ON browser_visits(ts);
+CREATE INDEX IF NOT EXISTS idx_browser_visits_root_task
+    ON browser_visits(root_task_id) WHERE root_task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_browser_visits_amazon
+    ON browser_visits(amazon_asin) WHERE amazon_asin IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_browser_visits_meaningful
+    ON browser_visits(meaningful, ts) WHERE meaningful = 1;
+
+CREATE TABLE IF NOT EXISTS browser_research_clusters (
+    slug TEXT PRIMARY KEY,
+    root_task_id INTEGER NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    last_activity_at INTEGER NOT NULL,
+    visits_total INTEGER NOT NULL,
+    meaningful_visits_total INTEGER NOT NULL,
+    meaningful_foreground_sec_total INTEGER NOT NULL,
+    distinct_meaningful_domains INTEGER NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('active', 'dormant', 'concluded', 'muted')),
+    last_dm_at INTEGER,
+    last_research_offer_at INTEGER,
+    last_wiki_offer_at INTEGER,
+    research_offer_accepted_at INTEGER,
+    wiki_summary_written_at INTEGER,
+    agent_summary_revision INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS browser_pending_offers (
+    slug TEXT NOT NULL,
+    kind TEXT NOT NULL
+        CHECK (kind IN ('research_assist', 'wiki_summary')),
+    offered_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (slug, kind)
+);
+
+CREATE TABLE IF NOT EXISTS browser_reload_signals (
+    date TEXT NOT NULL,
+    url_pattern TEXT NOT NULL,
+    reload_count INTEGER NOT NULL,
+    PRIMARY KEY (date, url_pattern)
+);
+
+CREATE TABLE IF NOT EXISTS browser_shopping_sessions (
+    id INTEGER PRIMARY KEY,
+    date TEXT NOT NULL,
+    vendor TEXT NOT NULL,
+    asin_set TEXT NOT NULL,
+    comparison_minutes INTEGER NOT NULL,
+    locale TEXT
+);
+
 -- INTEGRATION-DRIFT-PHASE-7-PLAN.md §3.2 — persistent dedup for the
 -- 15-minute imminent-meeting reminder. Pre-Phase-7 the scheduler kept
 -- an in-memory Set, which was lost on every daemon restart and re-DMed

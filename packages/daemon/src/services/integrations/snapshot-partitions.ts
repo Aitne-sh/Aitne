@@ -75,6 +75,14 @@ export const INTEGRATION_SNAPSHOT_PARTITIONS_BY_MODE: Readonly<
     native: [],
     disabled: [],
   },
+  // Browser history has no integration_snapshots partitions — ingest is
+  // local-file-backed and not part of the delegated drift pipeline.
+  browser_history: {
+    direct: [],
+    delegated: [],
+    native: [],
+    disabled: [],
+  },
 };
 
 /**

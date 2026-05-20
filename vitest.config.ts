@@ -72,15 +72,6 @@ export default defineConfig({
         "**/*.d.ts",
         "**/index.ts",                                    // barrel re-exports
         "**/types.ts",                                    // pure type definitions
-        "packages/daemon/src/adapters/types.ts",
-        "packages/daemon/src/api/routes/mail/dependencies.ts", // pure DI interface (no runtime)
-        "packages/daemon/src/secrets/types.ts",
-        "packages/daemon/src/secrets/secret-names.ts",
-        "packages/daemon/src/secrets/secret-store.ts",    // pure interface
-        "packages/daemon/src/messaging/constants.ts",
-        "packages/shared/src/log-entry.ts",              // pure interfaces
-        "packages/shared/src/alerts.ts",                 // pure interfaces (Alert / AlertSeverity / AlertSource)
-        "packages/shared/src/opencode-config.ts",        // pure interfaces (OpencodeRuntimeConfig + permission shapes)
 
         // ── External service wrappers — thin SDK/CLI delegation ──
         "packages/daemon/src/services/github.ts",
@@ -106,8 +97,6 @@ export default defineConfig({
         // ── HTTP/streaming routes — thin Hono handlers for excluded services ──
         "packages/daemon/src/api/routes/sse.ts",
         "packages/daemon/src/api/routes/apple-calendar.ts", // forwards to Apple Calendar (CalDAV) service
-        "packages/daemon/src/api/routes/health.ts",       // simple status endpoint
-        "packages/daemon/src/api/routes/metrics.ts",      // metrics aggregation
         "packages/daemon/src/api/routes/setup.ts",        // interactive setup wizard
         // dashboard.ts was split into routes/dashboard/* (PR 2 of
         // docs/design/appendices/api-route-decomposition.md). Each sub-file
@@ -121,8 +110,6 @@ export default defineConfig({
         "packages/daemon/src/api/routes/dashboard/messaging.ts",        // adapter pairing controls I/O (whatsapp/slack/telegram/discord)
         "packages/daemon/src/api/routes/dashboard/conversations.ts",    // FTS5 + chat-attachments + sessions/messages SQL
         "packages/daemon/src/api/routes/dashboard/cost-approvals.ts",   // SQL aggregation; pure aggregateByBilledModel covered by dashboard.cost-aggregation.test.ts
-        "packages/daemon/src/api/routes/dashboard/schedule-readonly.ts",// agent_schedule list/next SQL
-        "packages/daemon/src/api/routes/dashboard/snapshots.ts",        // md_file_snapshots SQL + wildcard route
         "packages/daemon/src/api/routes/dashboard/notifications.ts",    // hourly-check next-run helpers + DM freshness aggregate
 
         // mail.ts was decomposed into routes/mail/* (multi-mail-provider split).
@@ -178,18 +165,15 @@ export default defineConfig({
         "packages/daemon/src/api/routes/git-templates.ts",
         "packages/daemon/src/api/routes/integrations-reconcile.ts",
         "packages/daemon/src/api/routes/managed-tasks.ts",
-        "packages/daemon/src/api/routes/notion.ts",
         "packages/daemon/src/api/routes/observations.ts",
-        "packages/daemon/src/api/routes/schedule-model-resolver.ts",
         "packages/daemon/src/api/routes/skill-curation.ts",
-        "packages/daemon/src/api/routes/skills.ts",
+        
         "packages/daemon/src/api/routes/system.ts",
         "packages/daemon/src/api/routes/wiki.ts",
         "packages/daemon/src/api/routes/integrations/crud-patch.ts",
 
         // ── Platform-specific code — cannot test cross-platform ──
         "packages/shared/src/secret-client-linux.ts",
-        "packages/shared/src/secret-client-windows.ts",
         "packages/shared/src/secret-client-factory.ts",
 
         // ── Observer I/O — file watchers, pollers ──
@@ -206,7 +190,6 @@ export default defineConfig({
         // ── Metrics aggregation, logging, scheduling internals ──
         "packages/daemon/src/core/metrics.ts",            // SQL aggregation queries
         "packages/daemon/src/logging.ts",                 // pino setup + custom formatters
-        "packages/daemon/src/management-rules.ts",         // config-driven policy
 
         // ── Large complex files with mostly I/O paths ──
         "packages/daemon/src/core/scheduler.ts",          // cron + timer orchestration
@@ -259,7 +242,6 @@ export default defineConfig({
         "packages/daemon/src/api/routes/voice.ts",        // Whisper install handler — spawns aitne restart + lazy-imports transformers, so the success path is inherently I/O
         "packages/daemon/src/core/system-reset.ts",       // pre-existing gap: runStep + clearAllSecrets defensive catches
         "packages/daemon/src/core/retention.ts",          // DB retention queries
-        "packages/daemon/src/core/message-recorder.ts",   // DB insert layer
         "packages/daemon/src/core/session-manager.ts",    // session lifecycle
         "packages/daemon/src/core/signal-detector.ts",    // HTTP-bound signal writer
 
@@ -291,10 +273,6 @@ export default defineConfig({
         // no-op-on-hit) is unit-tested; I/O-bound spawn/close paths
         // are covered only via the smoke script.
         "packages/daemon/src/core/backends/opencode-server-manager.ts",
-        // Local SDK type augmentation — declaration + helper aliases
-        // with no runtime emit, but TS still surfaces it in the
-        // include glob. Mirrors the `types.ts` exclusion.
-        "packages/daemon/src/core/backends/opencode-types.ts",
         "packages/daemon/src/services/calendar.ts",       // Google Calendar service
         "packages/daemon/src/messaging/magic-phrase.ts",  // magic phrase DB
         "packages/daemon/src/observers/notion-poller.ts", // Notion API poller
@@ -327,13 +305,9 @@ export default defineConfig({
         "packages/daemon/src/observers/imminent-event-scheduler.ts",
         "packages/daemon/src/db/hourly-check-signals.ts",
         "packages/daemon/src/core/routine-fetch-window-runner.ts",
-        "packages/daemon/src/core/routine-fetch-window-retry.ts",
         "packages/daemon/src/core/today-direct-writer.ts",
         "packages/daemon/src/core/backends/native-skill-discovery-probe.ts",
         "packages/daemon/src/core/backends/opencode-config-builder.ts",
-        "packages/daemon/src/core/backends/opencode-mcp.ts",
-        "packages/daemon/src/core/context/entity-mirror.ts",
-        "packages/daemon/src/core/context/entity-source-rename.ts",
         "packages/daemon/src/core/morning/roadmap-skeleton-builder.ts",
 
         // ── Bang-command runtime — large async paths over DB + adapters ──
@@ -376,7 +350,6 @@ export default defineConfig({
         "packages/daemon/src/observers/delegated-sync-worker.ts",
         "packages/daemon/src/observers/internal-scheduler.ts",
         "packages/daemon/src/observers/observation-summarizer/pre-filter.ts",
-        "packages/daemon/src/observers/observation-summarizer/response-parser.ts",
         "packages/daemon/src/observers/observation-summarizer/summarizer-client.ts",
         "packages/daemon/src/observers/observation-summarizer/summarizer-prompts.ts",
         "packages/daemon/src/observers/observation-summarizer/worker.ts",
@@ -388,9 +361,6 @@ export default defineConfig({
         "packages/shared/src/secret-client-file.ts",      // file-based secret store
         "packages/daemon/src/core/skills-compiler.ts",    // FS skill compilation
         "packages/daemon/src/api/env-writer.ts",          // env file management
-        "packages/daemon/src/core/health-monitor.ts",     // health check polling
-        "packages/daemon/src/core/schedule-maintenance.ts", // schedule cleanup
-        "packages/daemon/src/settings/locale-settings.ts",  // locale detection
         "packages/daemon/src/settings/runtime-settings.ts", // Zod schema definitions
         "packages/daemon/src/core/backends/cli-utils.ts", // subprocess utilities
 
@@ -469,15 +439,14 @@ export default defineConfig({
 
         // ── Boot-time catchup (file-split-plan.md §10) ──
         // Pure-move from `index.ts` (auto-excluded as barrel-style entry).
-        // Both files exist only to keep the startup IIFE readable; they
-        // chain dispatcher.processInline / DB schedule maintenance / FS
-        // today.md reads. The pure predicate `getProgressMinutesForHour`
-        // is the only line of logic not coupled to the boot sequence —
-        // inlining a test for that alone would not justify a dedicated
-        // *.test.ts. Same rationale as `index.ts` and the existing
-        // dispatcher-* coordinator exclusions above.
+        // `catchup.ts` exists only to keep the startup IIFE readable; it
+        // chains dispatcher.processInline / DB schedule maintenance / FS
+        // today.md reads, none of which are testable without a real
+        // dispatcher. Same rationale as `index.ts` and the existing
+        // dispatcher-* coordinator exclusions above. The sibling
+        // `schedule-helpers.ts` is the pure-predicate half and is in the
+        // covered set with its own peer test.
         "packages/daemon/src/bootstrap/catchup.ts",
-        "packages/daemon/src/bootstrap/schedule-helpers.ts",
 
         // ── Messaging-adapter / external-service bootstrap factories
         //    (file-split-plan.md §10 Tier 2) ──
@@ -599,6 +568,52 @@ export default defineConfig({
         // ffmpeg subprocess + dynamic `@huggingface/transformers` import,
         // both of which require the real binary/model to exercise.
         "packages/daemon/src/services/voice/transcriber-impl.ts",
+
+        // ── Browser History P1 — OS-bound detectors, launchers, readers ──
+        // BROWSER_HISTORY_INTEGRATION_PLAN.md §13 P1 scope. Pure helpers
+        // stay in the covered set with peer tests:
+        //   * `detectors/registry.ts:computeBrowserHistoryIngestEnabled` and
+        //     `serializeBrowserHistoryCapabilities` are pinned by
+        //     `detectors/registry.test.ts`.
+        //   * `lifecycle/failure-escalation.ts` is pure state-machine code
+        //     and is tested directly with all outcome branches.
+        //   * `db/browser-history-store.ts` is exercised end-to-end by
+        //     `api/routes/browser-history.test.ts`.
+        //   * Layer-2 GET routes (`/status`, `/research-clusters`,
+        //     `/yesterday-summary`) are pinned by the same route test.
+        // The exclusions below are the I/O-bound layers — fs probes
+        // against real browser profile roots, `spawn(chromium, ...)` /
+        // `osascript` lifecycle, `better-sqlite3` snapshot opens, the
+        // OS-specific `HostProfile` factory (process.platform + ps /
+        // Get-CimInstance / `which` probes), and the cron-driven
+        // supervisor tick. Each matches the existing observer / SDK
+        // exclusion rationale above (process-mock-blocked by ESM).
+        "packages/daemon/src/services/browser-history/detectors/atlas.ts",
+        "packages/daemon/src/services/browser-history/detectors/chrome.ts",
+        "packages/daemon/src/services/browser-history/detectors/chromium.ts",
+        "packages/daemon/src/services/browser-history/detectors/comet.ts",
+        "packages/daemon/src/services/browser-history/detectors/safari.ts",
+        // The I/O orchestrator inside the registry — `detectBrowserHistoryCapabilities` —
+        // shells out to every per-browser detector and mkdirs the cache root.
+        // Sibling `computeBrowserHistoryIngestEnabled` / `serializeBrowserHistoryCapabilities`
+        // / `browserHistoryCacheRoot` are pure and exercised by the peer test;
+        // because the file mixes pure + I/O surface in a single TS module the
+        // exclusion targets it as a whole rather than splitting into two files.
+        "packages/daemon/src/services/browser-history/detectors/registry.ts",
+        "packages/daemon/src/services/browser-history/lifecycle/chromium-launcher.ts",
+        "packages/daemon/src/services/browser-history/lifecycle/health-check.ts",
+        "packages/daemon/src/services/browser-history/lifecycle/platform.ts",
+        "packages/daemon/src/services/browser-history/lifecycle/safari-launcher.ts",
+        "packages/daemon/src/services/browser-history/lifecycle/supervisor.ts",
+        "packages/daemon/src/services/browser-history/readers/chromium-reader.ts",
+        "packages/daemon/src/services/browser-history/readers/safari-reader.ts",
+        // `readers/snapshot.ts` happy path is pinned by snapshot.test.ts,
+        // but the rm/copyFile failure branches are fs-shaped catches that
+        // match the snapshot-store rationale. Excluded for consistency
+        // with the rest of the readers/lifecycle module set.
+        "packages/daemon/src/services/browser-history/readers/snapshot.ts",
+        "packages/daemon/src/observers/browser-history-poller.ts",
+        "packages/daemon/src/api/routes/browser-history.ts",
 
         // ── Path/frontmatter validators with many small branch gaps ──
       ],

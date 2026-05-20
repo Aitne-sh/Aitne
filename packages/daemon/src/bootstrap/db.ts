@@ -40,6 +40,7 @@ import type { AgentConfig } from "../config.js";
 import { mergeRuntimeSettingsFromDb } from "../config.js";
 import { createDatabase } from "../db/client.js";
 import { applySchema } from "../db/schema.js";
+import { runMigrations } from "../db/migrations.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { bootstrapManagedTaskSeq } from "../db/managed-tasks-store.js";
 import { setWikiWorkspaceTokenResolver } from "../core/skills-compiler.js";
@@ -84,6 +85,13 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
 
   const db = createDatabase(config);
   applySchema(db);
+  // Run any forward-only ALTER / backfill migrations the consolidated
+  // CREATE IF NOT EXISTS script in `applySchema` can't express. Empty on
+  // steady-state boots and on fresh installs (the schema is already at
+  // head); records ids in `schema_migrations` so this stays a no-op once
+  // applied. A failing migration throws — startup aborts intentionally
+  // so we never run with a half-migrated DB.
+  runMigrations(db);
 
   initWikiTokenResolver(db);
 

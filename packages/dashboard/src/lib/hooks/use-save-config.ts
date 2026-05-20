@@ -12,6 +12,7 @@ export type ConfigValue =
   | number
   | boolean
   | string[]
+  | Record<string, unknown>
   | Record<string, unknown>[]
   | null;
 

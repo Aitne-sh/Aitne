@@ -68,6 +68,8 @@ const ID_KEYS_BY_INTEGRATION: Readonly<
   // type system honest.
   outlook_mail: [],
   outlook_calendar: [],
+  // Browser history is read-only — no write/delete connector tools.
+  browser_history: [],
 };
 
 const NESTED_KEYS_BY_INTEGRATION: Readonly<
@@ -80,6 +82,7 @@ const NESTED_KEYS_BY_INTEGRATION: Readonly<
   github: [],
   outlook_mail: [],
   outlook_calendar: [],
+  browser_history: [],
 };
 
 const COLLECTION_KEYS_BY_INTEGRATION: Readonly<
@@ -92,6 +95,7 @@ const COLLECTION_KEYS_BY_INTEGRATION: Readonly<
   github: [],
   outlook_mail: [],
   outlook_calendar: [],
+  browser_history: [],
 };
 
 function asString(v: unknown): string | null {
@@ -174,6 +178,7 @@ const ARGS_SINGULAR_KEYS_BY_INTEGRATION: Readonly<
   github: [],
   outlook_mail: [],
   outlook_calendar: [],
+  browser_history: [],
 };
 
 const ARGS_PLURAL_KEYS_BY_INTEGRATION: Readonly<
@@ -186,6 +191,7 @@ const ARGS_PLURAL_KEYS_BY_INTEGRATION: Readonly<
   github: [],
   outlook_mail: [],
   outlook_calendar: [],
+  browser_history: [],
 };
 
 function pluckArgsIds(args: unknown, integration: IntegrationKey): string[] {

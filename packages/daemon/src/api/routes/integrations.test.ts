@@ -50,6 +50,7 @@ describe("integrations API routes", () => {
     // joined the registry in v1 (direct-or-disabled, no MCP connectors).
     // Git/GitHub default to direct; everything else defaults to disabled.
     expect(body.integrations.map((i) => i.key).sort()).toEqual([
+      "browser_history",
       "git",
       "github",
       "gmail",
@@ -64,6 +65,7 @@ describe("integrations API routes", () => {
       notion: "disabled",
       outlook_mail: "disabled",
       outlook_calendar: "disabled",
+      browser_history: "disabled",
       git: "direct",
       github: "direct",
     };
