@@ -94,6 +94,39 @@ describe("splitOutboundText", () => {
       expect(lastCode >= 0xd800 && lastCode <= 0xdbff).toBe(false);
     }
   });
+
+  it("backs off to a newline outside an open fence so the second chunk starts at the fence", () => {
+    // Window puts the split candidate inside a fenced code block. The
+    // fence-aware backoff walks to the newline immediately before the
+    // most recent fence opener so the first chunk closes cleanly and the
+    // second chunk begins with the fence line itself.
+    const text = "prelude\n```js\ncode line one\ncode line two\n```\ntail";
+    const chunks = splitOutboundText(text, 25);
+    expect(chunks[0]).toBe("prelude");
+    expect(chunks[1]?.startsWith("```")).toBe(true);
+  });
+
+  it("recognises indented fence openers (CommonMark §4.5: up to 3 leading spaces)", () => {
+    // The opener has two leading spaces — isFenceLineStart must skip
+    // whitespace before checking for three consecutive backticks. Without
+    // the skip, the backoff would not trigger and the chunk would split
+    // inside the code block.
+    const text = "alpha\n  ```\ncode body line\n  ```\nomega";
+    const chunks = splitOutboundText(text, 20);
+    expect(chunks[0]).toBe("alpha");
+    expect(chunks[1]?.startsWith("  ```")).toBe(true);
+  });
+
+  it("falls through to maxLen when no fence newline exists before the split", () => {
+    // Open fence at index 0 with no earlier newline → the lookback returns
+    // -1 and the splitter falls back to the surrogate/maxLen branch. This
+    // exercises the `safe > 0` guard in splitOutboundText.
+    const text = "```\nthis_is_a_long_code_body_with_no_safe_newlines_at_all_xx";
+    const chunks = splitOutboundText(text, 10);
+    // First chunk is the fence opener; remainder fans out at maxLen.
+    expect(chunks[0]).toBe("```");
+    expect(chunks.length).toBeGreaterThan(1);
+  });
 });
 
 describe("extensionFromMime", () => {

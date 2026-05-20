@@ -168,6 +168,18 @@ describe("AgentWriteTracker", () => {
       expect(tracker.isAgentCommit("/repo/a", SHA_A)).toBe(false);
     });
 
+    it("sweeps expired commit entries the next time markAgentCommit fires", () => {
+      // cleanupCommits is invoked from markAgentCommit; this drives the
+      // `entry.expiresAt <= now` truthy branch so an entry that aged out
+      // earlier gets deleted on the next mark rather than lingering.
+      const tracker = new AgentWriteTracker(30_000, { commitTtlMs: 60_000 });
+      tracker.markAgentCommit("/repo/a", SHA_A);
+      vi.advanceTimersByTime(60_001);
+      tracker.markAgentCommit("/repo/b", SHA_B);
+      expect(tracker.isAgentCommit("/repo/a", SHA_A)).toBe(false);
+      expect(tracker.isAgentCommit("/repo/b", SHA_B)).toBe(true);
+    });
+
     it("honours per-mark TTL override", () => {
       const tracker = new AgentWriteTracker(30_000, { commitTtlMs: 60_000 });
       tracker.markAgentCommit("/repo/a", SHA_A, { ttlMs: 5_000 });

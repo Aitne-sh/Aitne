@@ -277,6 +277,17 @@ describe("nextActiveHoursStart", () => {
     ).toBe("2026-12-31T23:30:00.000Z"); // hour 23 still inside [4, 24)
   });
 
+  it("falls back to the host TZ offset when timezone is undefined (out-of-window candidate)", () => {
+    // Drives both `timezone ? ... : -candidate.getTimezoneOffset()...`
+    // ternary branches — the function must take the FS path when the
+    // local hour is outside the window. The exact instant depends on
+    // host TZ; we only assert that the function returns a real Date.
+    const candidate = new Date("2026-04-15T02:30:00Z");
+    const result = nextActiveHoursStart(candidate, undefined, 9, 17);
+    expect(result).toBeInstanceOf(Date);
+    expect(Number.isFinite(result.getTime())).toBe(true);
+  });
+
   it("handles undefined timezone via system local", () => {
     // Just ensure it doesn't throw — system-local behaviour is intentionally
     // not asserted because CI / dev machines have different local TZs.
@@ -308,6 +319,20 @@ describe("getAgentDaySqlShiftModifier", () => {
 
   it("returns +540 minutes for Asia/Tokyo with midnight boundary", () => {
     expect(getAgentDaySqlShiftModifier("Asia/Tokyo", 0, fixed)).toBe("+540 minutes");
+  });
+
+  it("falls back to host TZ offset when timezone is undefined", () => {
+    // Exact result depends on host TZ; assert only that the helper
+    // produces a well-formed +/-N minutes string without throwing.
+    const out = getAgentDaySqlShiftModifier(undefined, 4, fixed);
+    expect(out).toMatch(/^[+-]\d+ minutes$/);
+  });
+
+  it("defaults `now` to the current instant when omitted", () => {
+    // Exercises the `now ?? new Date()` branch — exact value depends on
+    // wall clock, so we only assert the output shape.
+    const out = getAgentDaySqlShiftModifier("UTC", 4);
+    expect(out).toMatch(/^[+-]\d+ minutes$/);
   });
 });
 

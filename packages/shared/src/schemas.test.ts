@@ -16,6 +16,8 @@ import {
   recurrenceRuleSchema,
   recurringScheduleCreateSchema,
   recurringScheduleUpdateSchema,
+  triggerCreateSchema,
+  triggerUpdateSchema,
 } from "./schemas.js";
 
 describe("contextPutSchema", () => {
@@ -525,6 +527,65 @@ describe("recurrenceRuleSchema", () => {
       daysOfMonth: [1],
       daysOfWeek: [1],
     }).success).toBe(false);
+  });
+
+  it("rejects weekly with minuteOfHour", () => {
+    // minuteOfHour belongs only to the hourly frequency variant.
+    expect(recurrenceRuleSchema.safeParse({
+      frequency: "weekly",
+      time: "09:00",
+      daysOfWeek: [1],
+      minuteOfHour: 15,
+    }).success).toBe(false);
+  });
+
+  it("rejects monthly with minuteOfHour", () => {
+    expect(recurrenceRuleSchema.safeParse({
+      frequency: "monthly",
+      time: "10:00",
+      daysOfMonth: [1],
+      minuteOfHour: 15,
+    }).success).toBe(false);
+  });
+});
+
+describe("triggerCreateSchema", () => {
+  const base = {
+    domain: "git" as const,
+    prompt: "x".repeat(25),
+    time: "09:00",
+  };
+
+  it("accepts cron.daily without daysOfWeek", () => {
+    expect(triggerCreateSchema.safeParse({
+      ...base,
+      eventType: "cron.daily",
+    }).success).toBe(true);
+  });
+
+  it("accepts cron.weekly with daysOfWeek", () => {
+    expect(triggerCreateSchema.safeParse({
+      ...base,
+      eventType: "cron.weekly",
+      daysOfWeek: [1, 3, 5],
+    }).success).toBe(true);
+  });
+
+  it("rejects cron.weekly without daysOfWeek (refine branch)", () => {
+    expect(triggerCreateSchema.safeParse({
+      ...base,
+      eventType: "cron.weekly",
+    }).success).toBe(false);
+  });
+});
+
+describe("triggerUpdateSchema", () => {
+  it("accepts partial updates with at least one field", () => {
+    expect(triggerUpdateSchema.safeParse({ enabled: false }).success).toBe(true);
+  });
+
+  it("rejects empty updates via the refine guard", () => {
+    expect(triggerUpdateSchema.safeParse({}).success).toBe(false);
   });
 
   it("rejects invalid time format", () => {

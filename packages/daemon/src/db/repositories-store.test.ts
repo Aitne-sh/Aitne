@@ -111,6 +111,13 @@ describe("repositories-store", () => {
     it("falls through when localPath is just slashes", () => {
       expect(deriveSlug({ id: "x", localPath: "///" })).toBe("repo-x");
     });
+
+    it("hashes the id when the id-derived fallback slug is pure dots", () => {
+      // id = "..." → fallbackSlug stays as "..." after sanitize → matches
+      // PURE_DOT_PATTERN and the deterministic hash escape kicks in.
+      const slug = deriveSlug({ id: "...", displayName: "!!!" });
+      expect(slug).toMatch(/^repo-[0-9a-f]{12}$/);
+    });
   });
 
   // C3 — `path.join(contextDir, gitRepoOverviewPath(".."))` normalises the

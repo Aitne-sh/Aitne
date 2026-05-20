@@ -1400,14 +1400,24 @@ VALUES
     -- at/above $0.50. The cap is realigned to $1.50 — 3x the design's
     -- typical p95 (matching the headroom convention used by
     -- routine.today_refresh) and below the parent envelope so Stage A
-    -- still can't silently consume the parent's headroom. Stage B's
-    -- $0.10 cap stays unchanged because its prompt + skills payload
-    -- (~15 KB total) did land at the projected size. Keep these
-    -- envelopes in lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in
-    -- plan-presets.ts (the same lock-step invariant the
-    -- routine.roadmap_refresh row documents above).
+    -- still can't silently consume the parent's headroom.
+    --
+    -- Stage B was originally seeded at $0.10 on the same 15 KB prompt
+    -- projection that Stage A overshot. Production showed Stage B's
+    -- assembled prompt at ~21 KB; Haiku cache_creation alone (charged
+    -- at 1.25x input) consumes ~$0.06 on cold start and a single Bash
+    -- tool round-trip tipped over $0.10 mid-turn, producing
+    -- BackendQuotaError(max_budget_usd) before Stage B could PUT
+    -- daily/<yesterday>.md. Realigned to $0.30 — 3x observed typical
+    -- spend, matching the same headroom convention as
+    -- routine.today_refresh, below the lite-tier nominal ceiling.
+    --
+    -- Keep these envelopes in lock-step with
+    -- ENVELOPE_OVERRIDES_BY_PROCESS_KEY in plan-presets.ts (the same
+    -- lock-step invariant the routine.roadmap_refresh row documents
+    -- above).
     ('routine.morning_routine_today',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50, 1.50, 'preset'),
-    ('routine.morning_routine_journal', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',   20, 0.10, 'preset'),
+    ('routine.morning_routine_journal', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',   20, 0.30, 'preset'),
     ('routine.hourly_check',    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     -- $0.30 budget: a typical drift-triggered refresh on Sonnet runs ~$0.10
     -- in 4 turns; the previous $0.10 cap left zero headroom and any larger

@@ -19,9 +19,18 @@
  *     - Checks from routines/morning.md: (none)
  *     - Anomalies / skipped steps: (none)
  *
- * Initial-flow / Stage-B-failed branches surface the rev1 variant:
+ * The `- Journal: ...` line is replaced by a `Journal synthesis: ...`
+ * variant when the daily file is absent or Stage B did not succeed:
  *
- *     - Journal synthesis: skipped (no prior-day data)
+ *     - Journal synthesis: skipped (no prior-day data)               (first-run)
+ *     - Journal synthesis: failed (audit row missing — see daemon log) (anomaly)
+ *     - Journal synthesis: failed (Stage B <state>)                   (terminal failure)
+ *     - Journal synthesis: failed (Stage B success but daily file missing) (PUT lost)
+ *
+ * The verb (`skipped` vs `failed`) reflects whether Stage B was even
+ * attempted — `skipped` is reserved for the first-run case where the
+ * orchestrator never dispatched Stage B; everything else surfaces as
+ * `failed` so the audit-trail language matches reality.
  *
  * No LLM final-text parsing anywhere — every field is sourced from a
  * structured channel: `agent_actions.metadata` (written by Stage A via
@@ -193,6 +202,32 @@ export interface JournalEntryComposeInputs {
    * SQLite aggregation.
    */
   actionsSummary?: ActionsSummaryInput;
+  /**
+   * Whether Stage B was attempted (i.e. `yesterday.md` existed when the
+   * orchestrator built Stage B's inputs — `buildStageBInputs` returns
+   * non-null iff yesterday.md is on disk). The end-to-end
+   * `appendMorningRoutineJournalEntry` derives this from a live
+   * `existsSync(yesterday.md)` check.
+   *
+   * Disambiguates two states that previously rendered identically as
+   * `Journal synthesis: skipped (no prior-day data)`:
+   *   - `false` → first-run / no prior-day data: legitimate skip.
+   *   - `true` AND `stageB === null` → Stage B was dispatched but its
+   *     `agent_actions` row never landed. This is a defence-in-depth
+   *     anomaly path: with the orchestrator-side failure-row write in
+   *     place (`recordStageFailure` → `audit.logError`), the only way
+   *     to reach this state is a rare SQLite write failure inside
+   *     `audit.logError` itself. Surface it as `Journal synthesis:
+   *     failed (audit row missing — see daemon log)` instead of
+   *     masking the failure as a first-run.
+   *
+   * Optional so unit tests that don't care about the disambiguation
+   * stay terse; when omitted the composer falls back to the legacy
+   * heuristic (`stageB === null` → first-run), preserving the
+   * pre-disambiguation behaviour for callers that haven't been
+   * updated.
+   */
+  stageBAttempted?: boolean;
 }
 
 const EMPTY_ACTIONS_SUMMARY: ActionsSummaryInput = {
@@ -217,6 +252,7 @@ export function composeMorningRoutineJournalEntry(
     inputs.yesterdayDateStr,
     inputs.stageB,
     inputs.dailyJournalContent,
+    inputs.stageBAttempted ?? false,
   );
 
   const lines: string[] = [];
@@ -274,6 +310,17 @@ export function appendMorningRoutineJournalEntry(
   const dailyPath = join(deps.contextDir, dailyJournalPath(args.yesterdayDateStr));
   const dailyContent = existsSync(dailyPath) ? readFileSync(dailyPath, "utf-8") : null;
 
+  // `stageBAttempted` discriminates "first-run / no prior-day" from
+  // "Stage B was attempted but no audit row exists" — the latter is a
+  // defence-in-depth anomaly that the previous renderer masked as a
+  // legit skip. The orchestrator's `buildStageBInputs` gates Stage B
+  // dispatch on `existsSync(yesterday.md)`; mirroring that check here
+  // (after `rotateDayFiles` has run and before the next day's rotation
+  // touches the file) gives us the same predicate without threading
+  // new state through the orchestrator → runner → appender chain.
+  const yesterdayMdPath = join(deps.contextDir, "yesterday.md");
+  const stageBAttempted = existsSync(yesterdayMdPath);
+
   // Reuse the skeleton builder's aggregation for the agent-action
   // breakdown. The query is cheap (two indexed reads against
   // `agent_actions`) and re-running it here keeps the appender
@@ -293,6 +340,7 @@ export function appendMorningRoutineJournalEntry(
     stageB,
     dailyJournalContent: dailyContent,
     actionsSummary,
+    stageBAttempted,
   });
 
   const journalRelative = CONTEXT_RELATIVE_PATHS.agent.journal;
@@ -461,10 +509,16 @@ function formatJournalLine(
   yesterdayDateStr: string,
   stageB: StageActionRow | null,
   dailyContent: string | null,
+  stageBAttempted: boolean,
 ): string {
   if (dailyContent !== null) {
     if (stageB !== null && stageB.result !== "success") {
-      return `Journal synthesis: skipped (Stage B ${stageB.result})`;
+      // Mismatch — daily file is on disk (likely from a prior-attempt
+      // PUT) but the latest Stage B row is non-success. Surfaces as
+      // `failed` so the verb matches reality (`skipped` would imply the
+      // stage didn't run, which is wrong); the parenthetical preserves
+      // the terminal state for operators triaging via `pnpm audit`.
+      return `Journal synthesis: failed (Stage B ${stageB.result})`;
     }
     const stats = inspectDailyJournal(dailyContent);
     return `Journal: daily/${yesterdayDateStr}.md (${stats.bodyLineCount} lines, ${stats.projectsCount} projects referenced)`;
@@ -473,25 +527,33 @@ function formatJournalLine(
   //
   // Disambiguate the missing-file branch by Stage B state so the audit
   // trail surfaces real anomalies instead of masking them as "no prior
-  // day". Three sub-cases:
-  //   1. Stage B was skipped (`stageB === null`) — first-run initial
-  //      variant. Rendering "no prior-day data" is correct.
-  //   2. Stage B ran and failed (`result !== 'success'`) — render the
-  //      terminal state. Matches the dailyContent-present-but-failed
-  //      branch above so the audit log uses one consistent shape per
-  //      Stage B outcome.
-  //   3. Stage B ran and succeeded but the file is not on disk — a real
+  // day". Four sub-cases:
+  //   1. Stage B was not attempted (`!stageBAttempted` — i.e. yesterday.md
+  //      was absent at run start) — first-run / no-prior-day. Rendering
+  //      "skipped (no prior-day data)" is correct.
+  //   2. Stage B was attempted but produced no audit row (the
+  //      defence-in-depth anomaly the `stageBAttempted` discriminator
+  //      surfaces — see `JournalEntryComposeInputs.stageBAttempted`.
+  //      Renders as "failed (audit row missing — see daemon log)" so
+  //      the failure is loud rather than masked as first-run.
+  //   3. Stage B ran and failed (`result !== 'success'`) — render the
+  //      terminal state with the `failed` verb so the audit-trail line
+  //      matches reality.
+  //   4. Stage B ran and succeeded but the file is not on disk — a real
   //      anomaly (atomic PUT lost, fs race, or the appender ran before
   //      the PUT settled). Surface explicitly so `pnpm audit` can
   //      filter on it; the original "no prior-day data" string silently
   //      masked this as a benign first-run condition.
   if (stageB === null) {
+    if (stageBAttempted) {
+      return "Journal synthesis: failed (audit row missing — see daemon log)";
+    }
     return "Journal synthesis: skipped (no prior-day data)";
   }
   if (stageB.result !== "success") {
-    return `Journal synthesis: skipped (Stage B ${stageB.result})`;
+    return `Journal synthesis: failed (Stage B ${stageB.result})`;
   }
-  return "Journal synthesis: skipped (Stage B success but daily file missing)";
+  return "Journal synthesis: failed (Stage B success but daily file missing)";
 }
 
 export interface DailyJournalStats {

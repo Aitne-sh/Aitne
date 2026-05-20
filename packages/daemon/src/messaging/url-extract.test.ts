@@ -25,5 +25,14 @@ describe("extractHttpUrls", () => {
       extractHttpUrls("see [https://a.test/path], (https://b.test).").urls,
     ).toEqual(["https://a.test/path", "https://b.test/"]);
   });
+
+  it("skips candidates whose new URL constructor throws", () => {
+    // `http://%` matches the candidate regex but isn't a valid URL — the
+    // catch must swallow the parse failure and move on to the next match
+    // rather than 500ing the whole extraction.
+    expect(extractHttpUrls("see http://% and https://ok.test").urls).toEqual([
+      "https://ok.test/",
+    ]);
+  });
 });
 

@@ -326,7 +326,10 @@ export function deriveSlug(input: {
     .replace(SLUG_PATTERN, "-")
     .replace(/^-+|-+$/g, "");
   if (fallbackSlug.length === 0 || PURE_DOT_PATTERN.test(fallbackSlug)) {
-    return `repo-${pathHash12(input.id ?? "row")}`;
+    // input.id is non-undefined whenever this branch fires — a missing
+    // id sanitizes to "row" which never matches the pure-dot / empty
+    // guard above. The `?? "row"` is purely defensive.
+    return `repo-${pathHash12(input.id ?? /* c8 ignore next */ "row")}`;
   }
   return `repo-${fallbackSlug}`;
 }

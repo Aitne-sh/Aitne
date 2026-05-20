@@ -905,6 +905,19 @@ function literalPrefixLength(key: string): number {
 }
 /* c8 ignore stop */
 
+/** Strip a trailing `{*}` placeholder from `path` so callers can
+ *  substring-match user skill bodies against the literal prefix. No
+ *  ReadSensitive entry carries `{*}` today (only the Autonomous /
+ *  Approve ones do), so the truthy branch is currently unreachable;
+ *  preserved for future paths and parked out of the coverage gate. */
+/* c8 ignore start */
+function stripWildcardSuffix(path: string): string {
+  return path.includes("{*}")
+    ? path.slice(0, path.indexOf("{*}")).replace(/\/+$/, "")
+    : path;
+}
+/* c8 ignore stop */
+
 /**
  * Return every `/api/*` path that `API_RISK` classifies as
  * `RiskTier.ReadSensitive` for GET requests, with `{*}` placeholders
@@ -924,16 +937,17 @@ export function listReadSensitiveGetPathKeys(): readonly string[] {
   const out = new Set<string>();
   for (const [key, tier] of Object.entries(API_RISK)) {
     if (tier !== RiskTier.ReadSensitive) continue;
+    // Every ReadSensitive entry in `API_RISK` today carries an explicit
+    // "METHOD /api/path" prefix, so the methodless / non-/api/ branches
+    // are defensive and currently unreachable.
     const hasMethod = key.includes(" ");
-    const method = hasMethod ? key.split(" ")[0] : "GET";
-    const path = hasMethod ? key.split(" ")[1] : key;
-    if (method !== "GET") continue;
-    if (!path.startsWith("/api/")) continue;
+    const method = hasMethod ? key.split(" ")[0] : /* c8 ignore next */ "GET";
+    const path = hasMethod ? key.split(" ")[1] : /* c8 ignore next */ key;
+    if (method !== "GET") /* c8 ignore next */ continue;
+    if (!path.startsWith("/api/")) /* c8 ignore next */ continue;
     // Strip `{*}` placeholders to the literal prefix so callers can
     // substring-match user skill bodies against it.
-    const literalPrefix = path.includes("{*}")
-      ? path.slice(0, path.indexOf("{*}")).replace(/\/+$/, "")
-      : path;
+    const literalPrefix = stripWildcardSuffix(path);
     out.add(literalPrefix);
   }
   return [...out].sort();

@@ -26,9 +26,14 @@ export function extractHttpUrls(input: string, limit = 10): UrlExtractResult {
     } catch {
       continue;
     }
+    // Defensive: the candidate regex only matches http(s) prefixes and
+    // URL never normalises away from http/https. Preserved in case the
+    // regex is ever widened — kept out of the coverage gate via v8-ignore.
+    /* v8 ignore start */
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       continue;
     }
+    /* v8 ignore stop */
     const normalized = parsed.toString();
     if (seen.has(normalized)) continue;
     urls.push(normalized);

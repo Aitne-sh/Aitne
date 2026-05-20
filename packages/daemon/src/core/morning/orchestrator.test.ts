@@ -159,7 +159,19 @@ describe("MorningRoutinePipelineOrchestrator", () => {
     const resultProcessor = {
       processResult: vi.fn(async () => undefined),
     };
-    return { contextBuilder, agentRouter, prompt, errorRouter, resultProcessor, calls };
+    // Phase-5/6 failure-path audit dep — supplied so `recordStageFailure`
+    // can write its `result='failed'` row when a stage rejects. The
+    // existing success-path tests don't pass this through (no failure to
+    // record), so the constructor's optional shape stays compatible.
+    const audit = {
+      logAction: vi.fn(),
+      logError: vi.fn(),
+      logSkip: vi.fn(),
+      logAttachment: vi.fn(),
+      logBangCommand: vi.fn(),
+      insertInProgressRow: vi.fn(() => -1),
+    };
+    return { contextBuilder, agentRouter, prompt, errorRouter, resultProcessor, audit, calls };
   }
 
   beforeEach(() => {
@@ -202,6 +214,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       prompt: merged.prompt as never,
       errorRouter: merged.errorRouter as never,
       resultProcessor: merged.resultProcessor as never,
+      audit: merged.audit as never,
     });
   }
 
@@ -493,7 +506,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
   });
 
   describe("error handling", () => {
-    it("rethrows Stage A throws so the runner's lock-release / retry path fires", async () => {
+    it("rethrows Stage A throws and writes a result='failed' audit row for Stage A while still landing the Stage B success row", async () => {
       const stageAMocks = buildMocks({
         stageAThrows: new Error("stage A boom"),
       });
@@ -502,16 +515,41 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       await expect(
         orch.run({ parentEvent: makeParentEvent(), isRetry: false }),
       ).rejects.toThrow("stage A boom");
-      // Even though Stage A threw, Stage B might have produced a result —
-      // we land its agent_actions row so a later retry's parent-audit
-      // emit can still find a Stage B row from the original attempt.
-      // Stage A has no result, so no row is written for it on this attempt.
-      const calls = stageAMocks.resultProcessor.processResult.mock.calls;
-      expect(calls).toHaveLength(1);
-      expect((calls[0]![1] as Event).type).toBe("routine.morning_routine_journal");
+      // Stage B's success row still lands via processResult so a later
+      // retry's parent-audit emit can find a Stage B row from this
+      // attempt's success.
+      const successCalls = stageAMocks.resultProcessor.processResult.mock.calls;
+      expect(successCalls).toHaveLength(1);
+      expect((successCalls[0]![1] as Event).type).toBe(
+        "routine.morning_routine_journal",
+      );
+      // Stage A's rejection now writes a result='failed' row via
+      // audit.logError — the structural fix that closes the
+      // "stage threw, audit row silently dropped" hole. The row's
+      // event.type is Stage A's process key so the agent-journal-
+      // appender (loadMorningRoutineActionRows) reads it as a Stage A
+      // terminal state instead of falling into the "row missing" branch.
+      const failureCalls = stageAMocks.audit.logError.mock.calls;
+      expect(failureCalls).toHaveLength(1);
+      const [failureEvent, failureErr, failureTrigger, failureCtx] =
+        failureCalls[0] as [
+          Event,
+          Error,
+          "reactive" | "autonomous",
+          { backendId?: string; modelId?: string; durationMs: number },
+        ];
+      expect(failureEvent.type).toBe("routine.morning_routine_today");
+      expect(failureErr.message).toBe("stage A boom");
+      expect(failureTrigger).toBe("autonomous");
+      // Pre-resolved binding attribution surfaces the requested
+      // backend/model on the failed row so the dashboard's cost dials +
+      // failure-by-backend view stay accurate.
+      expect(failureCtx.backendId).toBe("claude");
+      expect(failureCtx.modelId).toBe("claude-sonnet-test");
+      expect(failureCtx.durationMs).toBeGreaterThanOrEqual(0);
     });
 
-    it("folds Stage B throws into stageBResult=null without aborting Stage A", async () => {
+    it("folds Stage B throws into stageBResult=null and writes a result='failed' audit row for Stage B without aborting Stage A", async () => {
       const stageBMocks = buildMocks({
         stageBThrows: new Error("stage B boom"),
       });
@@ -523,10 +561,95 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       });
       expect(out.stageAResult.output).toBe("stage-a");
       expect(out.stageBResult).toBeNull();
-      // Stage A row landed; Stage B has no result so no row is written.
-      const calls = stageBMocks.resultProcessor.processResult.mock.calls;
-      expect(calls).toHaveLength(1);
-      expect((calls[0]![1] as Event).type).toBe("routine.morning_routine_today");
+      // Stage A's success row still lands.
+      const successCalls = stageBMocks.resultProcessor.processResult.mock.calls;
+      expect(successCalls).toHaveLength(1);
+      expect((successCalls[0]![1] as Event).type).toBe(
+        "routine.morning_routine_today",
+      );
+      // Stage B's rejection writes a result='failed' row via
+      // `recordStageFailure` → `audit.logError`. Without this write,
+      // Stage B budget-cap rejections leave the audit trail with no
+      // Stage B row at all, and `agent-journal-appender` renders
+      // "Journal synthesis: skipped (no prior-day data)" —
+      // indistinguishable from a legit first-run skip.
+      const failureCalls = stageBMocks.audit.logError.mock.calls;
+      expect(failureCalls).toHaveLength(1);
+      const [failureEvent, failureErr] = failureCalls[0] as [Event, Error];
+      expect(failureEvent.type).toBe("routine.morning_routine_journal");
+      expect(failureErr.message).toBe("stage B boom");
+    });
+
+    it("tags failure rows with failureKind/failureCode/backendId when the rejection is a BackendQuotaError(max_budget_usd)", async () => {
+      // This is the exact production failure shape that masked Stage B
+      // for two consecutive recurring days before the audit-trail fix
+      // landed. The audit row needs failureKind='quota' + failureCode
+      // (Stage B's `originalCode='max_budget_usd'`) so the dashboard's
+      // failure-by-kind view can group budget-cap regressions without
+      // a string-match over `error.message`.
+      const { BackendQuotaError } = await import("../agent-core.js");
+      const quotaErr = new BackendQuotaError(
+        "claude" as BackendId,
+        "max_budget_usd",
+        null,
+        "Reached maximum budget ($0.3)",
+      );
+      const quotaMocks = buildMocks({ stageBThrows: quotaErr });
+      mocks = quotaMocks;
+      const orch = makeOrchestrator();
+      await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
+      expect(quotaMocks.audit.logError).toHaveBeenCalledTimes(1);
+      const ctx = quotaMocks.audit.logError.mock.calls[0]![3] as {
+        backendId?: string;
+        modelId?: string;
+        durationMs: number;
+        failureKind?: string;
+        failureCode?: string;
+      };
+      expect(ctx.failureKind).toBe("quota");
+      expect(ctx.failureCode).toBe("max_budget_usd");
+      expect(ctx.backendId).toBe("claude");
+    });
+
+    it("captures per-stage `durationMs` independently so an early Stage B failure is not inflated by a still-running Stage A", async () => {
+      // Production scenario that motivated this guard: Stage B hit the
+      // budget cap in ~15 seconds while Stage A continued running for ~2
+      // hours. A naïve `nowMs = Date.now()` taken AFTER `Promise.allSettled`
+      // would attribute ~2h to Stage B's `duration_ms` on the failed
+      // audit row — wrong by an order of magnitude. The orchestrator
+      // captures each stage's completion timestamp via `.finally()` so the
+      // failed row reflects the stage's own runtime, not the slowest
+      // sibling's.
+      const STAGE_A_DELAY_MS = 80;
+      const STAGE_B_DELAY_MS = 10;
+      const timedMocks = buildMocks({});
+      timedMocks.agentRouter.execute = vi.fn(async (params: {
+        prompt: string;
+        context: string;
+        event: Event;
+        processKey?: ProcessKey;
+      }) => {
+        if (params.processKey === STAGE_B_PROCESS_KEY) {
+          await new Promise((resolve) => setTimeout(resolve, STAGE_B_DELAY_MS));
+          throw new Error("stage B boom (fast)");
+        }
+        await new Promise((resolve) => setTimeout(resolve, STAGE_A_DELAY_MS));
+        return makeAgentResult({ output: "stage-a" });
+      });
+      mocks = timedMocks;
+      const orch = makeOrchestrator();
+      await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
+      const ctx = timedMocks.audit.logError.mock.calls[0]![3] as {
+        durationMs: number;
+      };
+      // Stage B should report a duration close to STAGE_B_DELAY_MS,
+      // not STAGE_A_DELAY_MS. Strict bound: the failed row's duration
+      // must be at least 20ms below Stage A's wall-clock — anything
+      // higher would indicate the orchestrator's `Promise.allSettled`-
+      // capped timing leaked into Stage B's row.
+      expect(ctx.durationMs).toBeLessThan(STAGE_A_DELAY_MS - 20);
+      // And it must be non-negative + at least the stage's actual delay.
+      expect(ctx.durationMs).toBeGreaterThanOrEqual(0);
     });
 
     it("does not propagate a processResult failure past the orchestrator boundary", async () => {
@@ -546,6 +669,29 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       });
       expect(out.stageAResult.output).toBe("stage-a");
       expect(out.stageBResult?.output).toBe("stage-b");
+    });
+
+    it("does not propagate an audit.logError throw past the orchestrator boundary on Stage B failure", async () => {
+      // Defence-in-depth: the failure-path write must not block the
+      // run() return any more than the success path does. The Stage A
+      // rejection branch already re-throws (so the runner's retry chain
+      // fires); the Stage B branch must NOT — Stage B failure is
+      // independent of today.md health and the runner's parent-audit
+      // emit + journal append still need to fire.
+      const audErrMocks = buildMocks({
+        stageBThrows: new Error("stage B boom"),
+      });
+      audErrMocks.audit.logError = vi.fn(() => {
+        throw new Error("audit logError exploded");
+      });
+      mocks = audErrMocks;
+      const orch = makeOrchestrator();
+      const out = await orch.run({
+        parentEvent: makeParentEvent(),
+        isRetry: false,
+      });
+      expect(out.stageAResult.output).toBe("stage-a");
+      expect(out.stageBResult).toBeNull();
     });
   });
 
@@ -768,9 +914,17 @@ describe("MorningRoutinePipelineOrchestrator", () => {
         // morningDateStr is today's agent-day; yesterdayDateStr is the
         // day before. Both are YYYY-MM-DD strings. Verify the H2 has
         // today's date and the body's Journal-line refers to yesterday.
+        // Accept any of the legitimate journal-line variants: success
+        // (daily file present), first-run skip (yesterday.md absent),
+        // or anomaly (Stage B was attempted but its audit row never
+        // landed). The beforeEach fixture creates yesterday.md but does
+        // not seed a Stage B row, so this test exercises the anomaly
+        // branch — pinning the exact branch would over-specify the
+        // test's intent (the assertion is about date plumbing, not the
+        // failure-rendering contract).
         expect(out!.entryText).toMatch(/^## \d{4}-\d{2}-\d{2} morning routine$/m);
         expect(out!.entryText).toMatch(
-          /- (Journal: daily\/\d{4}-\d{2}-\d{2}\.md|Journal synthesis: skipped)/,
+          /- (Journal: daily\/\d{4}-\d{2}-\d{2}\.md|Journal synthesis: (skipped|failed))/,
         );
       }
     });

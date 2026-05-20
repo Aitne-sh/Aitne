@@ -169,11 +169,19 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // Keep in lock-step with the corresponding schema-seed row.
   "routine.morning_routine_today": { maxTurns: 50, maxBudgetUsd: 1.5 },
   // morning-routine-optimization.md Phase 5 — Stage B is template-
-  // driven daily-journal authoring on lite tier. ~15 KB prompt + skill
-  // payload fits comfortably under a 20-turn / $0.10 envelope; the
-  // lite-tier $0.20 nominal would over-provision by 2x. Keep this in
+  // driven daily-journal authoring on lite tier. The original $0.10 cap
+  // was sized to a 15 KB prompt projection; production showed Stage B's
+  // assembled prompt at ~21 KB and Haiku cache_creation alone (charged
+  // at 1.25x input) consumes ~$0.06 on cold start. A single Bash
+  // tool round-trip then tipped over $0.10 mid-turn, producing
+  // BackendQuotaError(max_budget_usd) before Stage B could PUT
+  // `daily/<yesterday>.md` — the user-facing journal was silently
+  // missing for every recurring run. Realigned to $0.30: 3x the
+  // observed typical spend (matching the headroom convention also
+  // used by routine.today_refresh) and below the lite-tier nominal
+  // ceiling so the cap still binds in pathological cases. Keep in
   // lock-step with the corresponding schema-seed row.
-  "routine.morning_routine_journal": { maxTurns: 20, maxBudgetUsd: 0.1 },
+  "routine.morning_routine_journal": { maxTurns: 20, maxBudgetUsd: 0.3 },
   // `dashboard.docs_qa` is a focused QA panel, hard-clamped to medium
   // tier per §10.1. INHERITOR_DEFAULTS in process-config-cascade.ts
   // mirrors this envelope so cascade writes from message.dm don't bleed

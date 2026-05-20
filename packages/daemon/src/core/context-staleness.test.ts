@@ -93,6 +93,20 @@ describe("classifyContextWriteStaleness", () => {
       }).tier,
     ).toBe("loud");
   });
+
+  it("treats an append with whitespace-only content as loud (looksLikeAgentLogEntry !firstLine branch)", () => {
+    // content contains only newlines / spaces → looksLikeAgentLogEntry's
+    // `if (!firstLine) return false;` branch fires.
+    expect(
+      classifyContextWriteStaleness({
+        path: "today.md",
+        method: "PATCH",
+        mode: "append_to_file",
+        content: "   \n  \n",
+        previousContent: "# Today\n\n## Agent Log\n- old\n",
+      }).tier,
+    ).toBe("loud");
+  });
 });
 
 describe("resolvePromptContextStaleness", () => {

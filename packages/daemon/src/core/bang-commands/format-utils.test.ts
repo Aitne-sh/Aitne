@@ -47,6 +47,19 @@ describe("truncateForMobile", () => {
     expect(out.length).toBeLessThanOrEqual(MOBILE_REPLY_BUDGET);
     expect(out.endsWith("… (truncated)")).toBe(true);
   });
+
+  it("does not tear a surrogate pair at the cut boundary", () => {
+    // Construct a payload where the cut index lands exactly on the low
+    // surrogate of an emoji — without the backoff guard, the truncated
+    // chunk ends with a lone high surrogate that renders as U+FFFD.
+    const footer = "\n… (truncated)";
+    const cut = MOBILE_REPLY_BUDGET - footer.length;
+    const prefix = "a".repeat(cut - 1); // ends one slot before the emoji
+    const long = `${prefix}🎉${"b".repeat(100)}`;
+    const out = truncateForMobile(long);
+    const lastCode = out.replace(footer, "").charCodeAt(out.length - footer.length - 1);
+    expect(lastCode >= 0xd800 && lastCode <= 0xdbff).toBe(false);
+  });
 });
 
 describe("formatMoney", () => {

@@ -83,7 +83,12 @@ import type {
   IContextBuilder,
 } from "../dispatcher-types.js";
 import type { PromptAssembler } from "../dispatcher-prompt.js";
-import type { IAgentRouter } from "../backends/backend-router.js";
+import {
+  BackendRouterHandledError,
+  type IAgentRouter,
+  type ResolvedBackendRoute,
+} from "../backends/backend-router.js";
+import { BackendQuotaError } from "../agent-core.js";
 import type { DispatcherErrorRouter } from "../dispatcher-error-handling.js";
 import type { ResultProcessor } from "../dispatcher-result-processor.js";
 import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
@@ -279,28 +284,63 @@ export class MorningRoutinePipelineOrchestrator {
           stageBInputs.block,
         );
 
+    // Pre-resolve each stage's binding up front so the failure-path
+    // handler below can attribute the `result='failed'` row to the
+    // requested backend / model — `BackendQuotaError.backendId` covers
+    // the quota case, but other rejection shapes (context build error,
+    // an unrelated SDK throw) carry no binding info on the error itself.
+    // Resolving once at the top also matches the pattern `runStageA/B`
+    // already uses internally and keeps the binding observable from this
+    // scope. Wrapped in try/catch so a resolver throw still falls through
+    // to the stage dispatch (which would re-throw the same error and let
+    // the rejection path persist a failed row with a null binding).
+    const stageABinding = this.safeResolveBinding(
+      stageAEvent,
+      STAGE_A_PROCESS_KEY,
+      inputs.requestedTier,
+    );
+    const stageBBinding = stageBEvent === null
+      ? null
+      : this.safeResolveBinding(stageBEvent, STAGE_B_PROCESS_KEY);
+
     // morning-routine-optimization.md Phase 6 — pre-insert the
     // `result='in_progress'` sentinel for Stage A so the agent's
     // `PATCH /api/agent-actions/self` resolves to a real row during the
-    // run. The eventual `logAction` call from `persistStageAuditRows`
-    // settles the same row (UPSERT path in `audit.ts.logAction`),
-    // preserving the metadata column the agent wrote. Stage B does NOT
-    // call PATCH self (it has no `agent-actions` skill in its policy
-    // set), so it gets no pre-insert.
+    // run. The eventual `logAction` / `logError` call from
+    // `persistStageAuditRows` settles the same row (UPSERT path in
+    // `audit.ts`), preserving the metadata column the agent wrote.
+    // Stage B does NOT call PATCH self (it has no `agent-actions` skill
+    // in its policy set), so it gets no pre-insert.
     this.preInsertStageAInProgressRow(correlationId);
 
+    // Capture per-stage timing INSIDE each promise so the failure path
+    // can backdate `started_at` honestly. A naïve `nowMs = Date.now()`
+    // taken AFTER `Promise.allSettled` returns would attribute Stage A's
+    // ~2h wall-clock to Stage B's `duration_ms` whenever Stage B
+    // finished early (e.g. 15s budget-cap failure followed by Stage A
+    // grinding for hours), inflating the failed row's reported runtime
+    // by an order of magnitude. `.finally()` captures the per-stage
+    // settle moment without altering the propagated value/reason that
+    // `Promise.allSettled` sees.
+    const stageAStartedAtMs = Date.now();
+    const stageBStartedAtMs = Date.now();
+    let stageACompletedAtMs = stageAStartedAtMs;
+    let stageBCompletedAtMs = stageBStartedAtMs;
+
     const [stageA, stageB] = await Promise.allSettled([
-      this.runStageA(stageAEvent, inputs.requestedTier),
-      stageBEvent === null
+      this.runStageA(stageAEvent, inputs.requestedTier, stageABinding)
+        .finally(() => { stageACompletedAtMs = Date.now(); }),
+      stageBEvent === null || stageBBinding === null
         ? Promise.resolve<AgentResult | null>(null)
-        : this.runStageB(stageBEvent),
+        : this.runStageB(stageBEvent, stageBBinding)
+            .finally(() => { stageBCompletedAtMs = Date.now(); }),
     ]);
 
     // Land Stage A / Stage B `agent_actions` rows BEFORE deciding whether
     // to re-throw on Stage A failure. The rows are what
     // `parent-audit-emitter.readStageSummaries` reads via SQL, what the
     // autonomous-cost-cap SUM aggregates over, and what
-    // `agent-journal-appender` (Phase 6) will template-fill from. Without
+    // `agent-journal-appender` (Phase 6) template-fills from. Without
     // this call the orchestrator's parent-audit emit silently degrades to
     // `stage_a_row_missing` in production and Stage B's cost is dropped
     // from the budget tracker.
@@ -310,20 +350,41 @@ export class MorningRoutinePipelineOrchestrator {
     // won't fire on this attempt because Stage A failed, but a retry's
     // emit will read Stage B's prior-attempt row).
     //
-    // `processResult` is the unique writer of `agent_actions` for routine
-    // sessions; calling it per stage with the stage's RoutineEvent makes
-    // each row land with `action_type=<stage process key>` (the audit
-    // logger derives action_type from `event.type`). Routine events are
-    // silent-by-default in `shouldNotify`, so no user-facing notify side
-    // effect fires.
+    // Success path → `processResult` (which calls `audit.logAction`,
+    // settling the in_progress sentinel row to `success`).
+    // Failure path → `audit.logError` (which UPSERTs the same in_progress
+    // sentinel to `result='failed'`, preserving any agent-side
+    // `PATCH /api/agent-actions/self` metadata writes that landed before
+    // the throw). The failure-path write is what closes the
+    // "Stage B threw and audit was silently dropped" hole that masked
+    // Stage B budget-cap failures as `Journal synthesis: skipped (no
+    // prior-day data)` — indistinguishable from a legit first-run skip.
+    // Routine events are silent-by-default in `shouldNotify`, so no
+    // user-facing notify side effect fires on either path.
     const stageBResultIfFulfilled =
       stageB.status === "fulfilled" ? stageB.value : null;
-    await this.persistStageAuditRows(
-      stageA.status === "fulfilled" ? stageA.value : null,
-      stageAEvent,
-      stageBResultIfFulfilled,
-      stageBEvent,
-    );
+    await this.persistStageAuditRows({
+      stageA: {
+        event: stageAEvent,
+        binding: stageABinding,
+        startedAtMs: stageAStartedAtMs,
+        completedAtMs: stageACompletedAtMs,
+        ...(stageA.status === "fulfilled"
+          ? { result: stageA.value }
+          : { error: stageA.reason }),
+      },
+      stageB: stageBEvent === null
+        ? null
+        : {
+            event: stageBEvent,
+            binding: stageBBinding,
+            startedAtMs: stageBStartedAtMs,
+            completedAtMs: stageBCompletedAtMs,
+            ...(stageB.status === "fulfilled"
+              ? { result: stageBResultIfFulfilled }
+              : { error: stageB.reason }),
+          },
+    });
 
     if (stageA.status === "rejected") {
       // Re-throw so the runner's existing finally / retry path fires.
@@ -356,20 +417,65 @@ export class MorningRoutinePipelineOrchestrator {
   }
 
   /**
-   * Write per-stage `agent_actions` rows via `processResult`. Each stage
-   * is processed against its OWN `RoutineEvent` (carrying the stage's
-   * process-key event type), so the row's `action_type` lands as
-   * `routine.morning_routine_today` / `routine.morning_routine_journal`
-   * — exactly what `parent-audit-emitter.readStageSummaries` and the
-   * Phase 6 `agent-journal-appender` will read.
+   * Wrap `agentRouter.resolveBinding` so a resolver-side throw (e.g. a
+   * malformed `process_backend_config` row) doesn't abort the whole
+   * `run()` before either stage gets a chance to dispatch. A null
+   * binding signals "binding unknown" to the failure-path writer; the
+   * resulting `agent_actions(result='failed')` row will lack the
+   * backend / model columns but still pin the failure to a known
+   * stage event. The stage's own `runStage*` will re-throw the same
+   * resolution error on dispatch and that's what
+   * `persistStageAuditRows` records.
+   */
+  private safeResolveBinding(
+    event: RoutineEvent,
+    processKey: ProcessKey,
+    requestedTier?: MorningPipelineRunInputs["requestedTier"],
+  ): ResolvedBackendRoute | null {
+    try {
+      return this.deps.agentRouter.resolveBinding(event, {
+        processKey,
+        ...(requestedTier ? { requestedTier } : {}),
+      });
+    } catch (err) {
+      logger.warn(
+        { err, processKey, correlationId: event.correlationId },
+        "resolveBinding threw at the orchestrator's pre-resolve site — falling back to null binding",
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Write per-stage `agent_actions` rows for both success and failure
+   * outcomes. Each stage's row lands keyed on its OWN `RoutineEvent`
+   * (carrying the stage's process-key event type), so the row's
+   * `action_type` is `routine.morning_routine_today` /
+   * `routine.morning_routine_journal` — exactly what
+   * `parent-audit-emitter.readStageSummaries` and the Phase 6
+   * `agent-journal-appender` will read.
    *
-   * Failures inside `processResult` (e.g. a notify hook misbehaving) do
-   * NOT propagate — losing audit rows is bad, but blocking the entire
+   * Success path → `processResult` (which calls `audit.logAction`,
+   * settling the in_progress sentinel row to `result='success'`).
+   *
+   * Failure path → `audit.logError` (which UPSERTs the same in_progress
+   * sentinel to `result='failed'`, preserving the agent-side metadata
+   * column intact). Without the failure-path write, Stage B rejections
+   * (most commonly `BackendQuotaError(max_budget_usd)` from a tight
+   * lite-tier envelope) leave the audit trail with NO Stage B row at
+   * all — `agent-journal-appender.formatJournalLine` then falls into
+   * the `stageB === null` branch and renders `Journal synthesis:
+   * skipped (no prior-day data)`, indistinguishable from a legitimate
+   * first-run skip. This is the structural bug the failure-path write
+   * closes.
+   *
+   * Failures inside `processResult` or `audit.logError` do NOT
+   * propagate — losing audit rows is bad, but blocking the entire
    * morning routine on a downstream telemetry hiccup is worse. In
-   * practice `audit.logAction` already swallows its own DB errors with
-   * an internal logger.error, so the catch here is a defence-in-depth
-   * guard against non-audit hooks (notify side effects we don't expect
-   * for routine events but might land later).
+   * practice `audit.logAction` / `audit.logError` already swallow their
+   * own DB errors with an internal logger.error, so the catches here
+   * are defence-in-depth guards against non-audit hooks (notify side
+   * effects we don't expect for routine events but might land later).
    *
    * Tail-risk acknowledgement: if a stage row truly fails to land
    * (audit's internal try/catch swallowed a real SQLite error AND
@@ -381,40 +487,94 @@ export class MorningRoutinePipelineOrchestrator {
    * shape because today.md health is independent. The day's automation
    * degrades silently for that day; it does not infinite-loop.
    */
-  private async persistStageAuditRows(
-    stageAResult: AgentResult | null,
-    stageAEvent: RoutineEvent,
-    stageBResult: AgentResult | null,
-    stageBEvent: RoutineEvent | null,
-  ): Promise<void> {
+  private async persistStageAuditRows(args: {
+    stageA: StageOutcome;
+    stageB: StageOutcome | null;
+  }): Promise<void> {
     const tasks: Array<Promise<void>> = [];
-    if (stageAResult !== null) {
-      tasks.push(
-        this.deps.resultProcessor
-          .processResult(stageAResult, stageAEvent)
-          .catch((err) => {
+    const outcomes: ReadonlyArray<{ label: "A" | "B"; outcome: StageOutcome }> = [
+      { label: "A", outcome: args.stageA },
+      ...(args.stageB === null
+        ? []
+        : [{ label: "B" as const, outcome: args.stageB }]),
+    ];
+    for (const { label, outcome } of outcomes) {
+      if ("result" in outcome && outcome.result !== null) {
+        tasks.push(
+          this.deps.resultProcessor
+            .processResult(outcome.result, outcome.event)
+            .catch((err) => {
+              logger.warn(
+                { err, correlationId: outcome.event.correlationId, stage: label },
+                `Stage ${label} processResult failed — audit row may be missing`,
+              );
+            }),
+        );
+      } else if ("error" in outcome) {
+        tasks.push(
+          this.recordStageFailure(outcome).catch((err) => {
             logger.warn(
-              { err, correlationId: stageAEvent.correlationId },
-              "Stage A processResult failed — audit row may be missing",
+              { err, correlationId: outcome.event.correlationId, stage: label },
+              `Stage ${label} recordStageFailure threw — audit row may be missing`,
             );
           }),
-      );
-    }
-    if (stageBResult !== null && stageBEvent !== null) {
-      tasks.push(
-        this.deps.resultProcessor
-          .processResult(stageBResult, stageBEvent)
-          .catch((err) => {
-            logger.warn(
-              { err, correlationId: stageBEvent.correlationId },
-              "Stage B processResult failed — audit row may be missing",
-            );
-          }),
-      );
+        );
+      }
+      // "result" in outcome with `result === null` is the Stage B
+      // first-run skip path: no execute call, no audit row to write.
     }
     if (tasks.length > 0) {
       await Promise.all(tasks);
     }
+  }
+
+  /**
+   * Write a `result='failed'` agent_actions row for a rejected stage.
+   * Uses `audit.logError`, which UPSERTs the matching in_progress
+   * sentinel row when one exists (Stage A's pre-insert) and INSERTs a
+   * fresh row otherwise (Stage B). Both paths land a terminal-state
+   * row keyed on `(event_id=correlationId, action_type=event.type)` so
+   * the downstream readers — `loadMorningRoutineActionRows`,
+   * `parent-audit-emitter.readStageSummaries`,
+   * `agent-journal-appender.formatJournalLine` — see one consistent
+   * shape per stage regardless of which terminal state the stage
+   * reached.
+   *
+   * Backend / model attribution: pulled from the pre-resolved binding
+   * when available, with a fallback to `BackendQuotaError.backendId`
+   * if the binding was unresolvable but the error happens to carry
+   * that field. Other failure shapes leave backend/model unset; the
+   * audit logger's `context` schema tolerates absent values.
+   */
+  private async recordStageFailure(outcome: StageFailureOutcome): Promise<void> {
+    if (this.deps.audit === undefined) return;
+    const error = outcome.error instanceof Error
+      ? outcome.error
+      : new Error(String(outcome.error ?? "stage rejection with no message"));
+    const durationMs = Math.max(0, outcome.completedAtMs - outcome.startedAtMs);
+    const quotaError = extractQuotaError(outcome.error);
+    const context: {
+      durationMs: number;
+      backendId?: BackendId;
+      modelId?: string;
+      failureKind?: string;
+      failureCode?: string;
+    } = { durationMs };
+    const backendId =
+      outcome.binding?.main.backendId ?? quotaError?.backendId ?? undefined;
+    const modelId = outcome.binding?.main.modelId ?? undefined;
+    if (backendId !== undefined) context.backendId = backendId;
+    if (modelId !== undefined) context.modelId = modelId;
+    if (quotaError !== null) {
+      context.failureKind = "quota";
+      context.failureCode = quotaError.originalCode;
+    }
+    // Morning routine fires from cron — never reactive — same trigger
+    // shape as `preInsertStageAInProgressRow`. Keeping the trigger value
+    // consistent with the pre-insert row also keeps the UPSERT idempotent
+    // (Stage A's in_progress row has `trigger='autonomous'`; we don't
+    // want the UPSERT to flip it).
+    this.deps.audit.logError(outcome.event, error, "autonomous", context);
   }
 
   /**
@@ -820,12 +980,19 @@ export class MorningRoutinePipelineOrchestrator {
   private async runStageA(
     event: RoutineEvent,
     requestedTier: MorningPipelineRunInputs["requestedTier"],
+    preResolvedBinding: ResolvedBackendRoute | null,
   ): Promise<AgentResult> {
     const context = await this.deps.contextBuilder.build(event);
-    const binding = this.deps.agentRouter.resolveBinding(event, {
-      processKey: STAGE_A_PROCESS_KEY,
-      ...(requestedTier ? { requestedTier } : {}),
-    });
+    // The orchestrator pre-resolves the binding so the failure-path
+    // handler can attribute the audit row to the requested backend/model.
+    // When the pre-resolve threw (binding === null), fall back to a
+    // resolve here — the throw will propagate normally and persist via
+    // `recordStageFailure` with a null binding.
+    const binding = preResolvedBinding
+      ?? this.deps.agentRouter.resolveBinding(event, {
+        processKey: STAGE_A_PROCESS_KEY,
+        ...(requestedTier ? { requestedTier } : {}),
+      });
     const reassemblePrompt = (bid: BackendId): string =>
       this.deps.prompt.assemble(event.type, STAGE_A_PROCESS_KEY, bid);
     const prompt = reassemblePrompt(binding.main.backendId);
@@ -877,11 +1044,16 @@ export class MorningRoutinePipelineOrchestrator {
     };
   }
 
-  private async runStageB(event: RoutineEvent): Promise<AgentResult> {
+  private async runStageB(
+    event: RoutineEvent,
+    preResolvedBinding: ResolvedBackendRoute | null,
+  ): Promise<AgentResult> {
     const context = await this.deps.contextBuilder.build(event);
-    const binding = this.deps.agentRouter.resolveBinding(event, {
-      processKey: STAGE_B_PROCESS_KEY,
-    });
+    // Same pre-resolve fallback as Stage A — see `runStageA`'s comment.
+    const binding = preResolvedBinding
+      ?? this.deps.agentRouter.resolveBinding(event, {
+        processKey: STAGE_B_PROCESS_KEY,
+      });
     const reassemblePrompt = (bid: BackendId): string =>
       this.deps.prompt.assemble(event.type, STAGE_B_PROCESS_KEY, bid);
     const prompt = reassemblePrompt(binding.main.backendId);
@@ -946,6 +1118,52 @@ export class MorningRoutinePipelineOrchestrator {
 }
 
 // ── module-level helpers ────────────────────────────────────────────────
+
+/**
+ * Per-stage settled outcome handed to `persistStageAuditRows`. Models
+ * three states with a discriminated union on the property carried:
+ *   - `result: AgentResult`   → success (writes via processResult)
+ *   - `result: null`          → Stage B first-run skip (no row to write)
+ *   - `error: unknown`        → rejection (writes via audit.logError)
+ *
+ * `startedAtMs` / `completedAtMs` are captured by the orchestrator at
+ * call sites that bracket the `Promise.allSettled` so the failure-path
+ * writer can backdate `agent_actions.started_at` honestly.
+ */
+type StageOutcome = StageSuccessOutcome | StageFailureOutcome;
+
+interface StageSuccessOutcome {
+  event: RoutineEvent;
+  binding: ResolvedBackendRoute | null;
+  startedAtMs: number;
+  completedAtMs: number;
+  /** `null` is the Stage B first-run skip — no execute call happened. */
+  result: AgentResult | null;
+}
+
+interface StageFailureOutcome {
+  event: RoutineEvent;
+  binding: ResolvedBackendRoute | null;
+  startedAtMs: number;
+  completedAtMs: number;
+  error: unknown;
+}
+
+/**
+ * Extract the underlying `BackendQuotaError` from a stage rejection so
+ * `recordStageFailure` can tag the audit row with `failureKind='quota'`
+ * + `failureCode=originalCode` (e.g. `max_budget_usd`). Mirrors the
+ * `DispatcherErrorRouter.extractQuotaError` logic — kept module-local
+ * here so the orchestrator is not coupled to the dispatcher's private
+ * extraction surface.
+ */
+function extractQuotaError(error: unknown): BackendQuotaError | null {
+  if (error instanceof BackendQuotaError) return error;
+  if (error instanceof BackendRouterHandledError) {
+    if (error.cause instanceof BackendQuotaError) return error.cause;
+  }
+  return null;
+}
 
 function renderHandoffParsedBlock(parsed: HandoffParsed): string {
   // XML over JSON: the rest of the daemon's prompt-injection payloads

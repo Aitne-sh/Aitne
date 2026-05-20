@@ -774,6 +774,213 @@ describe("AuditLogger", () => {
     });
   });
 
+  it("logAction tags wiki.* events with source_kind/source_ref from event.data.workspace", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "wiki.compile",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+      data: { workspace: "obsidian-primary" },
+    });
+    audit.logAction({
+      event,
+      model: "claude-sonnet-4-6",
+      costUsd: 0.05,
+      usage: {
+        inputTokens: 200,
+        outputTokens: 50,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 500,
+      numTurns: 2,
+      trigger: "autonomous",
+    });
+    const row = db
+      .prepare("SELECT source_kind, source_ref FROM agent_actions LIMIT 1")
+      .get() as { source_kind: string | null; source_ref: string | null };
+    expect(row.source_kind).toBe("wiki");
+    expect(row.source_ref).toBe("obsidian-primary");
+  });
+
+  it("logAction tags wiki.* events with source_ref=null when workspace is not a string", () => {
+    // Pins the inverse of the `typeof === "string"` ternary — source_ref
+    // must fall back to null rather than coercing a non-string value.
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "wiki.compile",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+      data: { workspace: 42 },
+    });
+    audit.logAction({
+      event,
+      model: "claude-sonnet-4-6",
+      costUsd: 0.05,
+      usage: {
+        inputTokens: 200,
+        outputTokens: 50,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 500,
+      numTurns: 2,
+      trigger: "autonomous",
+    });
+    const row = db
+      .prepare("SELECT source_kind, source_ref FROM agent_actions LIMIT 1")
+      .get() as { source_kind: string | null; source_ref: string | null };
+    expect(row.source_kind).toBe("wiki");
+    expect(row.source_ref).toBeNull();
+  });
+
+  it("logAction persists detail.prePass when a pre-pass success payload is supplied", () => {
+    // Mirrors the logError prePass test below — the metrics aggregator
+    // filters on detail.prePass being a non-null object regardless of
+    // result, so the success-path payload must round-trip too.
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.fetch_window",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.logAction({
+      event,
+      model: "claude-haiku-4-5",
+      costUsd: 0.002,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "autonomous",
+      backend: "claude",
+      prePass: {
+        parentCorrelationId: "parent-corr-success",
+        parentRoutine: "routine.morning_routine_today",
+        integrationKey: "gmail",
+        attempt: 1,
+        maxAttempts: 2,
+        retriedFromAttempt: null,
+        status: "success",
+        fetched: 12,
+        posted: 12,
+        duplicates: 0,
+        errors: [],
+        willRetry: false,
+        retryReason: "",
+        fallbackTriggered: true,
+        requestedBackend: "claude",
+      },
+    });
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    const parsed = JSON.parse(row.detail!) as Record<string, unknown>;
+    expect(parsed.prePass).toMatchObject({
+      parentCorrelationId: "parent-corr-success",
+      parentRoutine: "routine.morning_routine_today",
+      integrationKey: "gmail",
+      status: "success",
+      fetched: 12,
+      posted: 12,
+      fallbackTriggered: true,
+      requestedBackend: "claude",
+    });
+  });
+
+  it("logAction prePass omits fallbackTriggered/requestedBackend when not supplied", () => {
+    // Pins the inverse branches of the spread guards — neither optional
+    // key should appear when the caller leaves them undefined.
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.fetch_window",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.logAction({
+      event,
+      model: "claude-haiku-4-5",
+      costUsd: 0.001,
+      usage: {
+        inputTokens: 50,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 100,
+      numTurns: 1,
+      trigger: "autonomous",
+      prePass: {
+        parentCorrelationId: "parent-corr-minimal",
+        parentRoutine: "routine.hourly_check",
+        integrationKey: "google_calendar",
+        attempt: 1,
+        maxAttempts: 1,
+        retriedFromAttempt: null,
+        status: "skipped",
+        fetched: 0,
+        posted: 0,
+        duplicates: 0,
+        errors: [],
+        willRetry: false,
+        retryReason: "freshness-skip",
+      },
+    });
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    const parsed = JSON.parse(row.detail!) as { prePass: Record<string, unknown> };
+    expect(parsed.prePass).not.toHaveProperty("fallbackTriggered");
+    expect(parsed.prePass).not.toHaveProperty("requestedBackend");
+    expect(parsed.prePass.status).toBe("skipped");
+  });
+
+  it("logError prePass persists fallbackTriggered when supplied", () => {
+    // Pins line 661 — the fallbackTriggered spread guard's truthy arm in
+    // logError. The existing prePass test only exercises requestedBackend.
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.fetch_window",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.logError(event, new Error("fallback fired"), "autonomous", {
+      durationMs: 600,
+      backendId: "claude",
+      failureKind: "agent-execute-failed",
+      prePass: {
+        parentCorrelationId: "parent-corr-fb",
+        parentRoutine: "routine.hourly_check",
+        integrationKey: "notion",
+        attempt: 2,
+        maxAttempts: 2,
+        retriedFromAttempt: 1,
+        status: "failed",
+        fetched: 0,
+        posted: 0,
+        duplicates: 0,
+        errors: [{ kind: "agent-execute-failed" }],
+        willRetry: false,
+        retryReason: "max-attempts",
+        fallbackTriggered: false,
+      },
+    });
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    const parsed = JSON.parse(row.detail!) as { prePass: Record<string, unknown> };
+    expect(parsed.prePass.fallbackTriggered).toBe(false);
+    expect(parsed.prePass).not.toHaveProperty("requestedBackend");
+  });
+
   it("logError persists detail.prePass so MetricsCollector.collectPrePassMetrics sees the failure", () => {
     // Bug 005 regression — before the fix, fan-out failures wrote either
     // no row (binding-resolve / budget-cap / context-build) or a
@@ -1273,6 +1480,51 @@ describe("AuditLogger", () => {
       expect(rows.n).toBe(1);
     });
 
+    it("findInProgressRowId tolerates a null correlationId on the in_progress sentinel and matches by `event_id IS NULL`", () => {
+      // Exercises the `correlationId ?? null` nullish-coalesce branch on
+      // line 442 — when a caller pre-inserts an in_progress row with no
+      // correlationId, the lookup must still resolve via SQLite's NULL-
+      // tolerant `IS` predicate so logAction settles in place.
+      const audit = new AuditLogger(db);
+      audit.insertInProgressRow({
+        correlationId: null,
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      const event = {
+        type: "routine.morning_routine_today" as const,
+        source: "cron" as const,
+        priority: EventPriority.HIGH,
+        timestamp: new Date(),
+        data: {},
+        correlationId: null as unknown as string,
+      };
+      audit.logAction({
+        event: event as unknown as ReturnType<typeof createEvent>,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.1,
+        usage: {
+          inputTokens: 10,
+          outputTokens: 5,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 100,
+        numTurns: 1,
+        trigger: "autonomous",
+      });
+      const rows = db
+        .prepare(
+          `SELECT result FROM agent_actions WHERE event_id IS NULL AND action_type = ?`,
+        )
+        .all("routine.morning_routine_today") as { result: string }[];
+      // Exactly one row — the in_progress sentinel was settled rather
+      // than a parallel terminal row landing.
+      expect(rows).toHaveLength(1);
+      expect(rows[0].result).toBe("success");
+    });
+
     it("logAction's UPSERT scope is keyed on (event_id, action_type) — does not collide with sibling action types", () => {
       const audit = new AuditLogger(db);
       // Pre-insert a Stage A in_progress sentinel.
@@ -1313,6 +1565,169 @@ describe("AuditLogger", () => {
         { action_type: "routine.morning_routine_today", result: "in_progress" },
         { action_type: "routine.morning_routine_journal", result: "success" },
       ]);
+    });
+  });
+
+  // ── morning-routine failed-row fix — logError UPSERT semantics ────────
+  //
+  // The morning-routine pipeline orchestrator pre-inserts a
+  // `result='in_progress'` row for Stage A. When Stage A throws (or any
+  // other caller's stage rejects), `logError` must SETTLE the existing
+  // sentinel rather than INSERT a parallel `result='failed'` row —
+  // otherwise `loadMorningRoutineActionRows` (most-recent-row-wins on
+  // (event_id, action_type)) reads whichever landed last and downstream
+  // composers (`agent-journal-appender.formatJournalLine`,
+  // `parent-audit-emitter.readStageSummaries`) get inconsistent shapes.
+  // Mirrors the `logAction` UPSERT block above.
+  describe("insertInProgressRow + logError UPSERT (morning-routine failed-row fix)", () => {
+    it("logError UPDATEs the in_progress row in-place rather than inserting a duplicate", () => {
+      const audit = new AuditLogger(db);
+      const inProgressId = audit.insertInProgressRow({
+        correlationId: "morning-fail-1",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      // Simulate the agent writing structured metadata mid-session
+      // before the throw — the UPSERT must preserve it (mirrors the
+      // logAction UPSERT contract).
+      db.prepare(
+        `UPDATE agent_actions SET metadata = ? WHERE id = ?`,
+      ).run(
+        JSON.stringify({ dayType: "weekday", anomalies: ["pre-pass partial"] }),
+        inProgressId,
+      );
+
+      const event = createEvent({
+        type: "routine.morning_routine_today",
+        source: "cron",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-fail-1",
+      });
+      audit.logError(event, new Error("stage A boom"), "autonomous", {
+        durationMs: 1500,
+        backendId: "claude",
+        modelId: "claude-sonnet-4-6",
+        failureKind: "quota",
+        failureCode: "max_budget_usd",
+      });
+
+      // Exactly ONE row for (event_id, action_type) — the in_progress
+      // sentinel was settled to 'failed' in place.
+      const rows = db
+        .prepare(
+          `SELECT id, result, error, duration_ms, backend, model_used, detail, metadata
+             FROM agent_actions
+            WHERE event_id = ? AND action_type = ?
+            ORDER BY id`,
+        )
+        .all("morning-fail-1", "routine.morning_routine_today") as Array<{
+        id: number;
+        result: string;
+        error: string;
+        duration_ms: number;
+        backend: string;
+        model_used: string;
+        detail: string;
+        metadata: string;
+      }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toBe(inProgressId);
+      expect(rows[0].result).toBe("failed");
+      expect(rows[0].error).toBe("stage A boom");
+      expect(rows[0].duration_ms).toBe(1500);
+      expect(rows[0].backend).toBe("claude");
+      expect(rows[0].model_used).toBe("claude-sonnet-4-6");
+      const detail = JSON.parse(rows[0].detail);
+      expect(detail).toEqual({
+        failureKind: "quota",
+        failureCode: "max_budget_usd",
+      });
+      // Metadata preserved across the UPDATE — the agent's structured
+      // PATCH side-channel survives the settle so `agent-journal-
+      // appender` still sees `dayType` even on a Stage A failure.
+      const metadata = JSON.parse(rows[0].metadata);
+      expect(metadata).toEqual({
+        dayType: "weekday",
+        anomalies: ["pre-pass partial"],
+      });
+    });
+
+    it("logError INSERTs fresh when no in_progress row exists (legacy path unchanged)", () => {
+      const audit = new AuditLogger(db);
+      const event = createEvent({
+        type: "routine.morning_routine_journal",
+        source: "cron",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-fail-2",
+      });
+      audit.logError(event, new Error("stage B boom"), "autonomous", {
+        durationMs: 250,
+        backendId: "claude",
+      });
+      const rows = db
+        .prepare(
+          `SELECT id, result, error, backend FROM agent_actions
+            WHERE event_id = ? AND action_type = ?
+            ORDER BY id`,
+        )
+        .all("morning-fail-2", "routine.morning_routine_journal") as Array<{
+        id: number;
+        result: string;
+        error: string;
+        backend: string;
+      }>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].result).toBe("failed");
+      expect(rows[0].error).toBe("stage B boom");
+      expect(rows[0].backend).toBe("claude");
+    });
+
+    it("falls back to INSERT when the UPDATE on the in_progress row fails", () => {
+      // Mirrors the same defensive fall-through `logAction` has — if the
+      // UPDATE branch fails (e.g. the row was garbage-collected between
+      // SELECT and UPDATE), a fresh INSERT still records the failure
+      // rather than dropping it on the floor.
+      const audit = new AuditLogger(db);
+      const inProgressId = audit.insertInProgressRow({
+        correlationId: "morning-fail-update-fail",
+        actionType: "routine.morning_routine_today",
+        trigger: "autonomous",
+      });
+      const event = createEvent({
+        type: "routine.morning_routine_today",
+        source: "cron",
+        priority: EventPriority.HIGH,
+        correlationId: "morning-fail-update-fail",
+      });
+
+      const originalPrepare = db.prepare.bind(db);
+      const prepareSpy = vi.spyOn(db, "prepare").mockImplementation((sql: string) => {
+        if (sql.startsWith("UPDATE agent_actions SET")) {
+          throw new Error("simulated UPDATE failure");
+        }
+        return originalPrepare(sql);
+      });
+      try {
+        audit.logError(event, new Error("stage A boom"), "autonomous", {
+          durationMs: 800,
+        });
+      } finally {
+        prepareSpy.mockRestore();
+      }
+
+      // Both rows now exist — the in_progress sentinel (unsettled) and a
+      // fresh terminal 'failed' INSERT. The orphan sentinel survives but
+      // `loadMorningRoutineActionRows` picks the latest row (the failed
+      // INSERT) so the audit trail still surfaces the failure.
+      const rows = db
+        .prepare(
+          `SELECT id, result FROM agent_actions WHERE event_id = ? ORDER BY id`,
+        )
+        .all("morning-fail-update-fail") as { id: number; result: string }[];
+      expect(rows).toHaveLength(2);
+      expect(rows[0].id).toBe(inProgressId);
+      expect(rows[0].result).toBe("in_progress");
+      expect(rows[1].result).toBe("failed");
     });
   });
 });

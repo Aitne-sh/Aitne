@@ -616,16 +616,27 @@ export class AuditLogger implements IAuditLogger {
         error.message,
       ];
 
+      // Optional columns are inserted BEFORE the started_at/completed_at
+      // tail (`columns.length - 2`) and APPENDED to `values` (which has
+      // no started_at/completed_at entries — those are SQL expressions
+      // in the INSERT placeholder map). The lockstep invariant
+      // `columns.length - 2 === values.length` is what makes the
+      // in_progress UPSERT branch's iteration `values[i]` align with
+      // columns[i]: any other splice pattern (e.g. inserting at
+      // `columns.length`, AFTER the timestamps) would shift columns
+      // ahead of values and the UPDATE assignments would bind the wrong
+      // value to each column. Mirrors the identically-shaped block in
+      // `logAction` (above).
       if (typeof context?.durationMs === "number" && context.durationMs >= 0) {
-        columns.splice(columns.length, 0, "duration_ms");
+        columns.splice(columns.length - 2, 0, "duration_ms");
         values.splice(values.length, 0, Math.round(context.durationMs));
       }
       if (context?.modelId) {
-        columns.splice(columns.length, 0, "model_used");
+        columns.splice(columns.length - 2, 0, "model_used");
         values.splice(values.length, 0, context.modelId);
       }
       if (this.hasBackendColumn && context?.backendId) {
-        columns.splice(columns.length, 0, "backend");
+        columns.splice(columns.length - 2, 0, "backend");
         values.splice(values.length, 0, context.backendId);
       }
       const detailPayload: Record<string, unknown> = {};
@@ -655,7 +666,7 @@ export class AuditLogger implements IAuditLogger {
         };
       }
       if (Object.keys(detailPayload).length > 0) {
-        columns.splice(columns.length, 0, "detail");
+        columns.splice(columns.length - 2, 0, "detail");
         values.splice(values.length, 0, JSON.stringify(detailPayload));
       }
 
@@ -668,6 +679,71 @@ export class AuditLogger implements IAuditLogger {
       const startedAtExpr = backdateSeconds > 0
         ? `datetime('now', '-${backdateSeconds.toFixed(3)} seconds')`
         : "datetime('now')";
+
+      // UPSERT semantics for the in_progress sentinel row — mirrors the
+      // identically-shaped branch in `logAction` (lines 297-344). Callers
+      // (notably the morning-routine pipeline orchestrator) pre-insert a
+      // `result='in_progress'` row before spawning Stage A so the agent's
+      // `PATCH /api/agent-actions/self` can resolve and write structured
+      // metadata; without this branch a subsequent throw inside the same
+      // stage would leave the in_progress row orphaned AND emit a parallel
+      // `result='failed'` row, causing `loadMorningRoutineActionRows`
+      // (which picks the most-recent matching row) to read whichever
+      // landed last and producing misleading audit-trail entries. The
+      // UPDATE preserves the row's original `started_at` and `metadata`
+      // column so any agent-side PATCH writes that landed before the
+      // throw survive the settle.
+      //
+      // Lookup is `event_id IS ?` so a NULL correlationId matches a NULL
+      // row — same NULL-tolerant predicate `logAction` uses.
+      const inProgressId = this.findInProgressRowId(
+        event.correlationId,
+        event.type,
+      );
+      if (inProgressId !== null) {
+        const assignments: string[] = [];
+        const updateValues: (string | number | null)[] = [];
+        for (let i = 0; i < columns.length; i++) {
+          const column = columns[i];
+          // event_id / action_type / started_at are immutable on settle —
+          // event_id/action_type are the lookup key; started_at was
+          // captured at the pre-insert and IS the actual start time.
+          if (column === "event_id" || column === "action_type") continue;
+          if (column === "started_at") continue;
+          if (column === "completed_at") {
+            assignments.push(`${column} = datetime('now')`);
+            continue;
+          }
+          if (column === "detail") {
+            assignments.push(`${column} = json(?)`);
+            updateValues.push(values[i]);
+            continue;
+          }
+          assignments.push(`${column} = ?`);
+          updateValues.push(values[i]);
+        }
+        try {
+          this.db
+            .prepare(
+              `UPDATE agent_actions SET ${assignments.join(", ")} WHERE id = ?`,
+            )
+            .run(...updateValues, inProgressId);
+          this.emitInsertedRow(inProgressId, event.type);
+          logger.error(
+            { event: event.type, error: error.message },
+            "Event error",
+          );
+          return;
+        } catch (err) {
+          // Fall through to INSERT on UPDATE failure (e.g. row was
+          // garbage-collected between SELECT and UPDATE). Mirrors the
+          // identical defensive fall-through in `logAction`.
+          logger.warn(
+            { err, event: event.type, inProgressId },
+            "in_progress row UPDATE in logError failed — falling back to INSERT",
+          );
+        }
+      }
 
       const placeholders = columns
         .map((column) => {

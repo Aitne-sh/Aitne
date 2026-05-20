@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { applySchema } from "../../db/schema.js";
 import {
   appendBlockToJournal,
@@ -165,21 +165,45 @@ describe("composeMorningRoutineJournalEntry — typical day", () => {
 });
 
 describe("composeMorningRoutineJournalEntry — initial-flow / Stage-B-failed", () => {
-  it("emits `Journal synthesis: skipped (no prior-day data)` on first-run (Stage B skipped, no daily file)", () => {
+  it("emits `Journal synthesis: skipped (no prior-day data)` on first-run (Stage B not attempted, no daily file)", () => {
     // First-run / initial-variant signal: orchestrator skipped Stage B
     // because yesterday.md was absent (no prior agent-day to author
-    // about). `stageB: null` is the orchestrator's way of communicating
-    // "Stage B was not even attempted" — distinct from "Stage B ran and
-    // failed" (which produces a Stage B row with a non-success result).
+    // about). `stageB: null` + `stageBAttempted: false` is the unambiguous
+    // shape — `stageB: null` alone (without the attempt flag) used to
+    // also catch the "Stage B was dispatched but its audit row never
+    // landed" anomaly path, which is now disambiguated.
     const rendered = composeMorningRoutineJournalEntry({
       morningDateStr: "2026-05-15",
       yesterdayDateStr: "2026-05-14",
       stageA: STAGE_A_OK,
       stageB: null,
       dailyJournalContent: null,
+      stageBAttempted: false,
     });
     expect(rendered).toContain("- Journal synthesis: skipped (no prior-day data)\n");
     expect(rendered).not.toContain("Journal: daily/");
+  });
+
+  it("emits `Journal synthesis: failed (audit row missing — see daemon log)` when Stage B WAS attempted but produced no row", () => {
+    // Defence-in-depth: with the orchestrator-side failure-row write
+    // in place (`recordStageFailure` → `audit.logError`), the only way
+    // to reach this state is a rare SQLite write failure inside
+    // `audit.logError` itself. Surface the failure loudly rather than
+    // masking it as a first-run skip — that was the exact mode that
+    // hid two consecutive Stage B budget-cap regressions in production
+    // before the audit-trail fix landed.
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: null,
+      dailyJournalContent: null,
+      stageBAttempted: true,
+    });
+    expect(rendered).toContain(
+      "- Journal synthesis: failed (audit row missing — see daemon log)\n",
+    );
+    expect(rendered).not.toContain("no prior-day data");
   });
 
   it("surfaces `Stage B success but daily file missing` when Stage B claims success but the file is absent", () => {
@@ -188,46 +212,52 @@ describe("composeMorningRoutineJournalEntry — initial-flow / Stage-B-failed", 
     // cleanly) but `daily/<yesterday>.md` is not on disk. That means the
     // atomic PUT either lost or was reverted between settle and appender
     // run — surface it explicitly so `pnpm audit` can grep on the distinct
-    // string. Before the fix this branch returned "no prior-day data",
-    // colliding with the legitimate first-run signal above.
+    // string. The verb is `failed` (not `skipped`) so the audit-trail
+    // language matches reality — Stage B ran, the side effect just didn't
+    // land.
     const rendered = composeMorningRoutineJournalEntry({
       morningDateStr: "2026-05-15",
       yesterdayDateStr: "2026-05-14",
       stageA: STAGE_A_OK,
       stageB: STAGE_B_OK,
       dailyJournalContent: null,
+      stageBAttempted: true,
     });
     expect(rendered).toContain(
-      "- Journal synthesis: skipped (Stage B success but daily file missing)\n",
+      "- Journal synthesis: failed (Stage B success but daily file missing)\n",
     );
     expect(rendered).not.toContain("no prior-day data");
   });
 
-  it("emits `Stage B <state>` when Stage B is non-success AND the daily file is missing", () => {
-    // Pre-fix this case rendered as "no prior-day data" — silently
-    // masking a real Stage B failure as a benign first-run. Post-fix
-    // the Stage B terminal state wins so the audit log gets the right
-    // signal.
+  it("emits `Stage B <state>` with the `failed` verb when Stage B is non-success AND the daily file is missing", () => {
+    // Before the verb-correction pass, this rendered as
+    // `skipped (Stage B failed)` — the verb mismatched reality (the
+    // stage ran and failed, it wasn't skipped). The renderer now
+    // promotes the verb to `failed` for every Stage B non-success
+    // state.
     const rendered = composeMorningRoutineJournalEntry({
       morningDateStr: "2026-05-15",
       yesterdayDateStr: "2026-05-14",
       stageA: STAGE_A_OK,
       stageB: { result: "failed", metadata: {} },
       dailyJournalContent: null,
+      stageBAttempted: true,
     });
-    expect(rendered).toContain("- Journal synthesis: skipped (Stage B failed)\n");
+    expect(rendered).toContain("- Journal synthesis: failed (Stage B failed)\n");
     expect(rendered).not.toContain("no prior-day data");
+    expect(rendered).not.toContain("skipped (Stage B");
   });
 
-  it("emits `Journal synthesis: skipped (Stage B failed)` when Stage B terminal but non-success", () => {
+  it("emits `Journal synthesis: failed (Stage B failed)` when Stage B terminal but non-success", () => {
     const rendered = composeMorningRoutineJournalEntry({
       morningDateStr: "2026-05-15",
       yesterdayDateStr: "2026-05-14",
       stageA: STAGE_A_OK,
       stageB: { result: "failed", metadata: {} },
       dailyJournalContent: DAILY_BODY,
+      stageBAttempted: true,
     });
-    expect(rendered).toContain("- Journal synthesis: skipped (Stage B failed)\n");
+    expect(rendered).toContain("- Journal synthesis: failed (Stage B failed)\n");
   });
 
   it("emits `Journal: ...` when Stage B is null (not yet run) but the daily file is present", () => {
@@ -242,7 +272,7 @@ describe("composeMorningRoutineJournalEntry — initial-flow / Stage-B-failed", 
   });
 
   it.each<"partial" | "skipped" | "in_progress">(["partial", "skipped", "in_progress"])(
-    "emits `Journal synthesis: skipped (Stage B %s)` for every non-success terminal state",
+    "emits `Journal synthesis: failed (Stage B %s)` for every non-success terminal state",
     (badResult) => {
       // Existing tests only covered `failed`. The `formatJournalLine`
       // branch is `stageB.result !== "success"` which fires on every
@@ -255,8 +285,9 @@ describe("composeMorningRoutineJournalEntry — initial-flow / Stage-B-failed", 
         stageA: STAGE_A_OK,
         stageB: { result: badResult, metadata: {} },
         dailyJournalContent: DAILY_BODY,
+        stageBAttempted: true,
       });
-      expect(rendered).toContain(`- Journal synthesis: skipped (Stage B ${badResult})\n`);
+      expect(rendered).toContain(`- Journal synthesis: failed (Stage B ${badResult})\n`);
     },
   );
 
@@ -278,6 +309,26 @@ describe("composeMorningRoutineJournalEntry — initial-flow / Stage-B-failed", 
       "- Journal: daily/2026-05-14.md (0 lines, 0 projects referenced)\n",
     );
     expect(rendered).not.toContain("skipped (no prior-day data)");
+  });
+
+  it("falls back to the legacy `skipped (no prior-day data)` render when `stageBAttempted` is omitted (backwards-compat for callers not updated yet)", () => {
+    // Composer-level guarantee: when the caller doesn't supply
+    // `stageBAttempted` (the legacy shape), the renderer treats
+    // `stageB === null` as first-run. This keeps tests focused on
+    // other composer fields terse and lets the end-to-end
+    // `appendMorningRoutineJournalEntry` opt into the disambiguation
+    // by supplying the flag. Don't relax — production callers MUST
+    // pass `stageBAttempted` for the anomaly path to surface;
+    // otherwise we slip back into the masking behaviour the
+    // discriminator was added to fix.
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: null,
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain("- Journal synthesis: skipped (no prior-day data)\n");
   });
 });
 
@@ -857,7 +908,9 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(onIndexable).toHaveBeenCalledWith("agent/journal.md");
   });
 
-  it("emits the `skipped (no prior-day data)` variant when daily/<yesterday>.md is absent", () => {
+  it("emits the `skipped (no prior-day data)` variant when daily/<yesterday>.md is absent AND yesterday.md is absent (legitimate first-run)", () => {
+    // No `yesterday.md` on disk → orchestrator never dispatched Stage B
+    // → `stageBAttempted` resolves to false at the appender boundary.
     seedStageRow({
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday", inboxStats: { triaged: 0, movedToScratch: 0, dmConfirmsSent: 0 } },
@@ -875,6 +928,38 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(result.ok).toBe(true);
     const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
     expect(journal).toContain("- Journal synthesis: skipped (no prior-day data)\n");
+  });
+
+  it("emits the `failed (audit row missing — see daemon log)` variant when yesterday.md is present but Stage B row is absent (anomaly path)", () => {
+    // The exact defence-in-depth anomaly path Fix 3 closes: Stage B
+    // WAS attempted (yesterday.md is on disk so the orchestrator
+    // dispatched it) but no `agent_actions(routine.morning_routine_journal)`
+    // row exists. Without the `stageBAttempted` discriminator the
+    // appender would mask this as a first-run skip.
+    seedStageRow({
+      actionType: STAGE_A_ACTION_TYPE,
+      metadata: { dayType: "weekday", inboxStats: { triaged: 0, movedToScratch: 0, dmConfirmsSent: 0 } },
+    });
+    // Simulate the post-rotation state: today.md was rotated to
+    // yesterday.md at run start. Body is irrelevant — only existence
+    // matters for the `stageBAttempted` derivation.
+    writeFileSync(join(contextDir, "yesterday.md"), "# 2026-05-14 (Wednesday)\n");
+
+    const result = appendMorningRoutineJournalEntry(
+      { db, contextDir },
+      {
+        correlationId: "corr-X",
+        morningDateStr: "2026-05-15",
+        yesterdayDateStr: "2026-05-14",
+        agentDayWindow: EMPTY_AGENT_DAY_WINDOW_FOR_TESTS,
+      },
+    );
+    expect(result.ok).toBe(true);
+    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    expect(journal).toContain(
+      "- Journal synthesis: failed (audit row missing — see daemon log)\n",
+    );
+    expect(journal).not.toContain("no prior-day data");
   });
 
   it("survives invalid metadata JSON without throwing — composer defaults apply", () => {
@@ -998,6 +1083,44 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(result.ok).toBe(true);
     const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
     expect(journal).toContain("- Actions: (none)\n");
+  });
+
+  it("rolls back writeTracker.markWriting and re-throws when the atomic write fails", () => {
+    // Pins the catch arm of the writeFileAtomically try/catch (lines
+    // 359-362): on failure, writeTracker.unmark must fire before the
+    // error propagates so FS-watch consumers don't observe a phantom
+    // "agent wrote this" tag for a write that never landed.
+    seedStageRow({
+      actionType: STAGE_A_ACTION_TYPE,
+      metadata: { dayType: "weekday" },
+    });
+    // Force writeFileAtomically to throw EATOMIC_TARGET_SYMLINK by
+    // placing a symlink at the journal path before the call. The
+    // appender invokes saveSnapshot first (no-op here because no
+    // existing journal content), then markWriting, then the atomic
+    // write — which sees the pre-existing symlink and refuses.
+    const journalAbs = join(contextDir, "agent/journal.md");
+    mkdirSync(dirname(journalAbs), { recursive: true });
+    const symlinkTarget = join(contextDir, "decoy.md");
+    writeFileSync(symlinkTarget, "decoy");
+    symlinkSync(symlinkTarget, journalAbs);
+
+    const markWriting = vi.fn();
+    const unmark = vi.fn();
+    expect(() =>
+      appendMorningRoutineJournalEntry(
+        { db, contextDir, writeTracker: { markWriting, unmark } },
+        {
+          correlationId: "corr-X",
+          morningDateStr: "2026-05-15",
+          yesterdayDateStr: "2026-05-14",
+          agentDayWindow: EMPTY_AGENT_DAY_WINDOW_FOR_TESTS,
+        },
+      ),
+    ).toThrow(/atomic-write: refusing to overwrite symlink/);
+    expect(markWriting).toHaveBeenCalledTimes(1);
+    expect(unmark).toHaveBeenCalledTimes(1);
+    expect(unmark).toHaveBeenCalledWith(journalAbs);
   });
 
   it("tolerates a failed snapshot insert without aborting the journal write", () => {

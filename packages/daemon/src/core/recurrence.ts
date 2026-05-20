@@ -100,9 +100,9 @@ export function computeNextOccurrence(
 
   // daily / weekly / monthly all carry `time`. The schema guarantees it,
   // but `parseRecurrenceRule` in default-schedules-runner forwards stored
-  // rows verbatim — fall back to "—" so a malformed row degrades to a
+  // rows verbatim — fall back to "00:00" so a malformed row degrades to a
   // never-matching candidate rather than NaN.
-  const { hours, minutes } = parseTime(rule.time ?? "00:00");
+  const { hours, minutes } = parseTime(/* c8 ignore next */ rule.time ?? "00:00");
   const local = nowInTimezone(timezone, referenceUtc);
 
   switch (rule.frequency) {
@@ -305,14 +305,14 @@ export function formatRecurrenceLabel(rule: RecurrenceRule): string {
         : `Every ${interval} hours at :${minute}`;
     }
     case "daily":
-      return `Daily at ${rule.time ?? "—"}`;
+      return `Daily at ${/* c8 ignore next */ rule.time ?? "—"}`;
     case "weekly": {
       const days = (rule.daysOfWeek ?? [])
         .slice()
         .sort((a, b) => a - b)
         .map((d) => dayNames[d])
         .join(", ");
-      return `Weekly on ${days} at ${rule.time ?? "—"}`;
+      return `Weekly on ${days} at ${/* c8 ignore next */ rule.time ?? "—"}`;
     }
     case "monthly": {
       const days = (rule.daysOfMonth ?? [])
@@ -326,10 +326,10 @@ export function formatRecurrenceLabel(rule: RecurrenceRule): string {
         : policy === "skip"
         ? " (skips months without that day)"
         : " (falls back to last day of month)";
-      return `Monthly on day ${days} at ${rule.time ?? "—"}${suffix}`;
+      return `Monthly on day ${days} at ${/* c8 ignore next */ rule.time ?? "—"}${suffix}`;
     }
     /* v8 ignore next 2 — closed union exhausted above */
     default:
-      return `${(rule as { frequency: string }).frequency} at ${rule.time ?? "—"}`;
+      return `${(rule as { frequency: string }).frequency} at ${/* c8 ignore next */ rule.time ?? "—"}`;
   }
 }

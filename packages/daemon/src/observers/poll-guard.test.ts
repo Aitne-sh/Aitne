@@ -89,6 +89,32 @@ describe("PollGuard", () => {
     const guard = new PollGuard({ name: "test" });
     expect(() => guard.abortInFlight()).not.toThrow();
   });
+
+  it("logs a 'Resumed after skipping ticks' warning when a tick runs after at least one skip", async () => {
+    // Pins the line-74-80 branch — once skipCount > 0, the next successful
+    // run must emit the warn-level resume log and reset skipCount.
+    const guard = new PollGuard({ name: "test" });
+    let release: (() => void) | null = null;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = guard.run(async () => {
+      await blocker;
+    });
+    // Two concurrent ticks both skip — pushes skipCount to 2.
+    expect(await guard.run(async () => {})).toBe(false);
+    expect(await guard.run(async () => {})).toBe(false);
+    release?.();
+    await first;
+    // Next tick must execute AND reset the skip counter so a subsequent
+    // back-to-back tick takes the non-resumed path again.
+    const fn = vi.fn(async () => {});
+    expect(await guard.run(fn)).toBe(true);
+    expect(fn).toHaveBeenCalledTimes(1);
+    // Second consecutive run with skipCount=0 — exercises the
+    // skipCount===0 branch on line 74 (skipped path NOT taken).
+    expect(await guard.run(async () => {})).toBe(true);
+  });
 });
 
 describe("raceWithAbort", () => {
@@ -131,6 +157,17 @@ describe("raceWithAbort", () => {
     controller.abort("nope");
     await expect(raceWithAbort(Promise.resolve(1), controller.signal)).rejects.toThrow(
       "nope",
+    );
+  });
+
+  it("synthesizes a generic Error when signal.reason is an empty string", async () => {
+    // Drives the `typeof reason === 'string' && reason.length > 0` ternary's
+    // falsy branch in toAbortError — empty-string reasons fall back to the
+    // generic "aborted" message rather than producing a blank Error.
+    const controller = new AbortController();
+    controller.abort("");
+    await expect(raceWithAbort(Promise.resolve(1), controller.signal)).rejects.toThrow(
+      "aborted",
     );
   });
 });

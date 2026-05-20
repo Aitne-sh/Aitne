@@ -309,6 +309,30 @@ describe("applySchema", () => {
     expect(morning.max_turns).toBe(50);
     expect(morning.max_budget_usd).toBe(2.0);
 
+    // morning-routine-optimization.md Phase 5 — Stage A / Stage B seed
+    // rows. Stage B's $0.30 cap is the realigned value after production
+    // observed Stage B's ~21 KB prompt + Haiku cache_creation tripping
+    // the previous $0.10 cap mid-turn (BackendQuotaError(max_budget_usd))
+    // before the daily/<yesterday>.md PUT could fire. Pinned here in
+    // lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in plan-presets.ts.
+    const morningStageA = db
+      .prepare(
+        "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.morning_routine_today'",
+      )
+      .get() as { main_model: string; max_turns: number; max_budget_usd: number };
+    expect(morningStageA.main_model).toBe("claude-sonnet-4-6");
+    expect(morningStageA.max_turns).toBe(50);
+    expect(morningStageA.max_budget_usd).toBe(1.5);
+
+    const morningStageB = db
+      .prepare(
+        "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.morning_routine_journal'",
+      )
+      .get() as { main_model: string; max_turns: number; max_budget_usd: number };
+    expect(morningStageB.main_model).toBe("claude-haiku-4-5-20251001");
+    expect(morningStageB.max_turns).toBe(20);
+    expect(morningStageB.max_budget_usd).toBe(0.3);
+
     const todayRefresh = db
       .prepare(
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.today_refresh'",
