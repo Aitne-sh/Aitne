@@ -1226,6 +1226,237 @@ describe("MailAccountRegistry", () => {
     expect(reg.peekProvider(account.id)).not.toBeNull();
   });
 
+  it("constructor accepts options without providerFactories (defaults to {})", async () => {
+    // Wiring-time defensive default — the dashboard's setup wizard can
+    // construct a registry before any provider factory has been
+    // registered. Calls into provider-needing paths just surface the
+    // existing ProviderNotImplementedError.
+    insertRow(db, { id: "gmail-a" });
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      // providerFactories intentionally omitted.
+    });
+    expect(reg.listAccounts().map((a) => a.id)).toEqual(["gmail-a"]);
+    await expect(reg.getProvider("gmail-a")).rejects.toThrow(
+      ProviderNotImplementedError,
+    );
+  });
+
+  it("onScopeChanged user hook that throws is swallowed (mutations still succeed)", async () => {
+    // A buggy observer must not break account mutations — the registry
+    // wraps the user-provided hook in a try/catch so a throwing hook
+    // doesn't poison addAccount / removeAccount / etc.
+    let callCount = 0;
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: { gmail: (account) => makeStubProvider(account) },
+      onScopeChanged: () => {
+        callCount++;
+        throw new Error("observer is misbehaving");
+      },
+    });
+    const account = await reg.addAccount({
+      kind: "gmail",
+      email: "owner@example.com",
+      authType: "oauth",
+      secretPayload: "x",
+    });
+    expect(callCount).toBe(1);
+    // Mutation still completed despite the hook throwing.
+    expect(reg.getAccount(account.id)).not.toBeNull();
+  });
+
+  it("removeAccount logs and continues when blobStore.remove rejects (orphans bytes but row is gone)", async () => {
+    // After the DB row is deleted the secret is unreachable; a blob
+    // teardown failure only leaks bytes on disk, so the operation
+    // must succeed and `onScopeChanged('account_removed')` must fire.
+    const flakyBlobStore: MemoryBlobStore = new MemoryBlobStore();
+    const removeOrig = flakyBlobStore.remove.bind(flakyBlobStore);
+    let removeCallCount = 0;
+    flakyBlobStore.remove = async (name) => {
+      removeCallCount++;
+      if (removeCallCount === 1) throw new Error("disk error");
+      return removeOrig(name);
+    };
+
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore: flakyBlobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: { gmail: (account) => makeStubProvider(account) },
+    });
+    const account = await reg.addAccount({
+      kind: "gmail",
+      email: "owner@example.com",
+      authType: "oauth",
+      secretPayload: "x",
+    });
+
+    await expect(reg.removeAccount(account.id)).resolves.toBe(true);
+    expect(removeCallCount).toBe(1);
+    expect(reg.getAccount(account.id)).toBeNull();
+  });
+
+  it("refreshImapSecret swallows cached.revoke() throws and proceeds with the rotation", async () => {
+    enabled = ["yahoo"];
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: {
+        yahoo: (account) =>
+          makeStubProvider(account, {
+            revoke: async () => {
+              throw new Error("network gone");
+            },
+          }),
+      },
+    });
+    const account = await reg.addAccount({
+      kind: "yahoo",
+      email: "owner@yahoo.com",
+      authType: "app_password",
+      secretPayload: '{"appPassword":"old","email":"owner@yahoo.com","kind":"yahoo"}',
+    });
+    // Build provider to populate the cache, then refresh — revoke()
+    // throws but the refresh path must still complete.
+    await reg.getProvider(account.id);
+    const refreshed = await reg.refreshImapSecret(
+      account.id,
+      '{"appPassword":"new","email":"owner@yahoo.com","kind":"yahoo"}',
+    );
+    expect(refreshed?.authStatus).toBe("healthy");
+  });
+
+  it("refreshImapSecret persists imap_capabilities_json when capabilities are provided", async () => {
+    enabled = ["yahoo"];
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: { yahoo: (account) => makeStubProvider(account) },
+    });
+    const account = await reg.addAccount({
+      kind: "yahoo",
+      email: "owner@yahoo.com",
+      authType: "app_password",
+      secretPayload: '{"appPassword":"old","email":"owner@yahoo.com","kind":"yahoo"}',
+    });
+
+    const capabilities = {
+      qresync: false,
+      threadReferences: false,
+      specialUse: true,
+      uidplus: true,
+      idle: false,
+      move: true,
+      all: ["IDLE", "MOVE", "SPECIAL-USE", "UIDPLUS"],
+    };
+    await reg.refreshImapSecret(
+      account.id,
+      '{"appPassword":"new","email":"owner@yahoo.com","kind":"yahoo"}',
+      capabilities,
+    );
+
+    const persisted = reg.getCapabilities(account.id);
+    expect(persisted).toMatchObject({ specialUse: true, uidplus: true });
+  });
+
+  it("refreshImapSecret on a healthy account fires `account_reauthed` (not `auth_status_recovered`)", async () => {
+    enabled = ["yahoo"];
+    const events: string[] = [];
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: { yahoo: (account) => makeStubProvider(account) },
+      onScopeChanged: (reason) => events.push(reason),
+    });
+    const account = await reg.addAccount({
+      kind: "yahoo",
+      email: "owner@yahoo.com",
+      authType: "app_password",
+      secretPayload: '{"appPassword":"old","email":"owner@yahoo.com","kind":"yahoo"}',
+    });
+    events.length = 0; // drop the account_added event
+
+    await reg.refreshImapSecret(
+      account.id,
+      '{"appPassword":"new","email":"owner@yahoo.com","kind":"yahoo"}',
+    );
+
+    // Healthy → still healthy after refresh: that's `account_reauthed`,
+    // not the requires_consent → healthy recovery path.
+    expect(events).toEqual(["account_reauthed"]);
+  });
+
+  it("updateAuthStatus fires `auth_status_recovered` when transitioning non-healthy → healthy", async () => {
+    const events: string[] = [];
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: { gmail: (account) => makeStubProvider(account) },
+      onScopeChanged: (reason) => events.push(reason),
+    });
+    const account = await reg.addAccount({
+      kind: "gmail",
+      email: "owner@example.com",
+      authType: "oauth",
+      secretPayload: "x",
+    });
+    // Degrade first so the next flip is non-healthy → healthy.
+    reg.updateAuthStatus(account.id, "requires_consent", "user revoked");
+    events.length = 0;
+
+    expect(reg.updateAuthStatus(account.id, "healthy")).toBe(true);
+    expect(events).toEqual(["auth_status_recovered"]);
+  });
+
+  it("onProviderSelectionChanged announces on the first call even with identical sets (lastAnnouncedKinds=null)", () => {
+    // The `changed` predicate's first disjunct is `lastAnnouncedKinds === null`
+    // — the first invocation always fires regardless of set membership,
+    // so a freshly-constructed registry that's told its enabled kinds
+    // for the first time still notifies downstream consumers.
+    const events: string[] = [];
+    const reg = new MailAccountRegistry({
+      db,
+      blobStore,
+      getEnabledKinds: () => enabled,
+      now: () => new Date("2026-04-16T12:00:00.000Z"),
+      providerFactories: { gmail: (account) => makeStubProvider(account) },
+      onScopeChanged: (reason) => events.push(reason),
+    });
+
+    reg.onProviderSelectionChanged(["gmail"]);
+    expect(events).toEqual(["enabled_providers_changed"]);
+
+    // Same set → silent on the second call.
+    events.length = 0;
+    reg.onProviderSelectionChanged(["gmail"]);
+    expect(events).toEqual([]);
+
+    // Different size → fires.
+    reg.onProviderSelectionChanged(["gmail", "outlook"]);
+    expect(events).toEqual(["enabled_providers_changed"]);
+
+    // Same size but different members → fires (some() branch).
+    events.length = 0;
+    reg.onProviderSelectionChanged(["gmail", "yahoo"]);
+    expect(events).toEqual(["enabled_providers_changed"]);
+  });
+
   it("setActive(false) swallows revoke() errors so the account still disables (line 402 catch block)", async () => {
     enabled = ["gmail", "outlook"];
     const reg = new MailAccountRegistry({

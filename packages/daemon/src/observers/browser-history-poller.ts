@@ -18,6 +18,7 @@ import {
 } from "../services/browser-history/readers/snapshot.js";
 import { readChromiumVisits } from "../services/browser-history/readers/chromium-reader.js";
 import { summarizeVisits } from "../services/browser-history/pipeline/summarizer.js";
+import { buildResearchDomainLists } from "../services/browser-history/pipeline/meaningful-filter.js";
 import { extractClustersFromDb } from "../services/browser-history/pipeline/cluster-extractor.js";
 import {
   applyBrowserHistoryRetention,
@@ -482,11 +483,21 @@ export class BrowserHistoryPoller implements Observer {
       if (rows.length === 0) {
         return { inserted: 0, duplicates: 0 };
       }
+      // BROWSER_HISTORY_INTEGRATION_PLAN §5.F1.meaningful rule 6 —
+      // re-derive the allowlist / denylist on every ingest cycle so
+      // dashboard settings changes take effect without restarting the
+      // daemon. The lists are small (≤10s of entries in practice); the
+      // normalize+set construction is O(n) and runs once per cycle.
+      const researchDomainLists = buildResearchDomainLists(
+        this.config.browserHistoryResearchDomainAllowlist,
+        this.config.browserHistoryResearchDomainDenylist,
+      );
       const summary = summarizeVisits({
         browser: profile.browser,
         profile: profile.profileName,
         rows,
         boundary: this.boundary(),
+        researchDomainLists,
       });
       const insertResult = insertBrowserVisits(this.db, summary.visits);
       inserted = insertResult.inserted;

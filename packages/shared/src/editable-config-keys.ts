@@ -91,6 +91,8 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "browserHistoryRetentionDays",
   "browserHistorySearchQueryRetentionDays",
   "browserHistoryLifecycle",
+  "browserHistoryResearchDomainAllowlist",
+  "browserHistoryResearchDomainDenylist",
   "mcpAutoProbeIntervalMinutes",
   "delegatedProbeIntervalMinutes",
   "enabledMailProviders",

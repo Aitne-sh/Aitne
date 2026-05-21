@@ -1214,10 +1214,14 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // Gate only agent-facing data routes. `/api/browser-history/status` is a
     // dashboard control-plane read and must remain reachable while the
     // integration is still disabled so the consent page can show detection
-    // state before enabling ingest.
+    // state before enabling ingest. The pre-morning-digest route is the
+    // F2-Stage-1 JSON fallback the morning journal calls when the markdown
+    // file is missing — same data contract as `yesterday-summary`, so it
+    // must 410 together with it when the integration is disabled.
     apiRoutesTouched: [
       "/api/browser-history/research-clusters",
       "/api/browser-history/yesterday-summary",
+      "/api/browser-history/pre-morning-digest",
     ],
     userManagedConnector: false,
   },

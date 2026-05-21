@@ -95,6 +95,19 @@ describe("gateOfferRateLimit", () => {
     expect(result).toEqual({ decision: "skip", reason: "same_topic" });
   });
 
+  it("skips with same_topic when a non-most-recent fire matches the candidate (higher cap)", () => {
+    // The most-recent fire is `topic-a`, but `topic-b` also appears
+    // earlier in the 24h window. With a daily cap > 2, daily_cap doesn't
+    // trip; the `recentFires.some(...)` fallback must catch the dupe.
+    seedCluster(db, "topic-b", { lastDmAt: NOW - 10 * HOUR_MS });
+    seedCluster(db, "topic-a", { lastDmAt: NOW - 5 * HOUR_MS });
+    const result = gateOfferRateLimit(db, "topic-b", NOW, {
+      ...baseConfig,
+      globalDailyCap: 5,
+    });
+    expect(result).toEqual({ decision: "skip", reason: "same_topic" });
+  });
+
   it("fires when daily cap clear, interval elapsed, and different topic", () => {
     seedCluster(db, "topic-a", { lastDmAt: NOW - 5 * HOUR_MS });
     seedCluster(db, "topic-b");

@@ -5,6 +5,7 @@ import {
   readCachedAuthStatus,
   recordReactiveAuthFailure,
   recordReactiveAuthSuccess,
+  writeAuthOkDetail,
   type AuthHealthNotifier,
 } from "./auth-health-monitor.js";
 import { AuthTelemetry } from "./auth-telemetry.js";
@@ -1708,5 +1709,232 @@ describe("readCachedAuthStatus (§3.3 pre-flight)", () => {
     const result = readCachedAuthStatus(db, "claude" as BackendId, 10 * 60 * 1000, t5);
     expect(result.status).toBe("expired");
     expect(result.shouldSkip).toBe(true);
+  });
+});
+
+describe("writeAuthOkDetail", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    createBackendsSchema(db);
+  });
+
+  afterEach(() => db.close());
+
+  it("persists a null detail as NULL and clears last_error (no redaction call needed)", () => {
+    // The redact path is exercised by writeAuthFailureDetail; the null
+    // branch here is the dual surface for the "all clear" case where
+    // there's no detail to redact.
+    db.prepare(
+      "UPDATE backends SET auth_detail = ?, last_error = ? WHERE id = ?",
+    ).run("stale detail", "stale error", "claude");
+
+    writeAuthOkDetail(db, "claude" as BackendId, null);
+
+    const row = db
+      .prepare("SELECT auth_detail, last_error FROM backends WHERE id = ?")
+      .get("claude") as { auth_detail: string | null; last_error: string | null };
+    expect(row.auth_detail).toBeNull();
+    expect(row.last_error).toBeNull();
+  });
+
+  it("redacts a non-null detail before writing", () => {
+    writeAuthOkDetail(
+      db,
+      "claude" as BackendId,
+      "Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123",
+    );
+    const row = db
+      .prepare("SELECT auth_detail FROM backends WHERE id = ?")
+      .get("claude") as { auth_detail: string };
+    expect(row.auth_detail).not.toContain("sk-ant-abcdef");
+  });
+});
+
+describe("AuthHealthMonitor — additional branch coverage", () => {
+  let db: Database.Database;
+  let telemetry: AuthTelemetry;
+  let notifier: { send: ReturnType<typeof vi.fn> };
+  const fixedNow = new Date("2026-04-10T10:00:00Z");
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    createBackendsSchema(db);
+    telemetry = new AuthTelemetry(db);
+    notifier = { send: vi.fn().mockResolvedValue(undefined) };
+  });
+
+  afterEach(() => db.close());
+
+  it("readEnabledBackendIds returns [] when the DB read throws (degrades gracefully)", async () => {
+    // The runner uses `readEnabledBackendIds` to decide which backends
+    // to snapshot + probe. If the SELECT throws (locked DB, schema
+    // drift), the tick must skip cleanly rather than crash the hourly
+    // cron, matching the same defensive contract `recordReactiveAuth*`
+    // holds elsewhere.
+    const claudeCore = fakeCore("claude");
+    const monitor = new AuthHealthMonitor(
+      db,
+      { claude: claudeCore },
+      telemetry,
+      { notifier, now: () => fixedNow },
+    );
+
+    const origPrepare = db.prepare.bind(db);
+    const prepareSpy = vi
+      .spyOn(db, "prepare")
+      .mockImplementation((sql: string) => {
+        if (sql.includes("SELECT id FROM backends WHERE enabled")) {
+          throw new Error("simulated SELECT failure");
+        }
+        return origPrepare(sql);
+      });
+    try {
+      await expect(monitor.checkAll()).resolves.toBeUndefined();
+      expect(claudeCore.checkAuthDetailed).not.toHaveBeenCalled();
+    } finally {
+      prepareSpy.mockRestore();
+    }
+  });
+
+  it("logs and continues when stamping notified_at fails after a successful DM", async () => {
+    // §3.5 escalation invariant: the catch wrapping the stamp UPDATE
+    // must not bubble up to the caller — losing the stamp is a soft
+    // failure (the user might get a second copy on next tick), but
+    // failing the entire tick is much worse.
+    const reactiveTime = new Date("2026-04-10T09:00:00Z");
+    recordReactiveAuthFailure(db, "codex", "401", telemetry, reactiveTime);
+
+    const codexCore = fakeCore("codex") as IAgentCore & {
+      checkAuthDetailed: ReturnType<typeof vi.fn>;
+    };
+    codexCore.checkAuthDetailed = vi.fn().mockResolvedValue({
+      ok: false, status: "expired", method: "oauth", detail: "still 401",
+    } as AuthCheckResult);
+    const monitor = new AuthHealthMonitor(
+      db,
+      { codex: codexCore },
+      telemetry,
+      { notifier, now: () => fixedNow },
+    );
+
+    const origPrepare = db.prepare.bind(db);
+    const prepareSpy = vi
+      .spyOn(db, "prepare")
+      .mockImplementation((sql: string) => {
+        if (sql.includes("auth_notified_at = ?")) {
+          throw new Error("simulated stamp UPDATE failure");
+        }
+        return origPrepare(sql);
+      });
+    try {
+      await expect(monitor.checkAll()).resolves.toBeUndefined();
+      expect(notifier.send).toHaveBeenCalledTimes(1);
+    } finally {
+      prepareSpy.mockRestore();
+    }
+  });
+
+  it("buildNotificationMessage falls back to result.status when probe omits detail", async () => {
+    // Branch coverage for `result.detail ?? result.status` — a probe
+    // that returns no `detail` (e.g. a backend whose `checkAuthDetailed`
+    // implementation only sets `status`) must still produce a readable
+    // DM line.
+    const reactiveTime = new Date("2026-04-10T09:00:00Z");
+    recordReactiveAuthFailure(db, "codex", "first detail", telemetry, reactiveTime);
+
+    const codexCore = fakeCore("codex") as IAgentCore & {
+      checkAuthDetailed: ReturnType<typeof vi.fn>;
+    };
+    codexCore.checkAuthDetailed = vi.fn().mockResolvedValue({
+      ok: false, status: "expired", method: "oauth",
+      // detail intentionally omitted to exercise the `?? result.status`
+      // fallback in the DM builder.
+    } as AuthCheckResult);
+    const monitor = new AuthHealthMonitor(
+      db,
+      { codex: codexCore },
+      telemetry,
+      { notifier, now: () => fixedNow },
+    );
+
+    await monitor.checkAll();
+    expect(notifier.send).toHaveBeenCalledTimes(1);
+    const [message] = notifier.send.mock.calls[0];
+    expect(message).toContain("codex: ❌ expired — expired");
+  });
+
+  it("logs and continues when keepalive notifier.send rejects (DB stamp deferred)", async () => {
+    notifier.send = vi.fn().mockRejectedValue(new Error("network down"));
+    const claudeCore = fakeCore("claude");
+    const monitor = new AuthHealthMonitor(
+      db,
+      { claude: claudeCore },
+      telemetry,
+      {
+        notifier,
+        keepaliveThresholdDays: 60,
+        keepaliveDedupeDays: 30,
+        now: () => fixedNow,
+      },
+    );
+    const lastSuccess = new Date(fixedNow.getTime() - 100 * 86_400_000);
+    db.prepare(
+      "UPDATE backends SET auth_status='ok', auth_last_success_at=? WHERE id='claude'",
+    ).run(lastSuccess.toISOString());
+
+    const reminded = await monitor.runKeepaliveSweep();
+    expect(reminded).toEqual([]);
+    expect(notifier.send).toHaveBeenCalledTimes(1);
+
+    // No DB stamp because the notifier failed — next sweep retries.
+    const row = db
+      .prepare(
+        "SELECT auth_keepalive_notified_at FROM backends WHERE id='claude'",
+      )
+      .get() as { auth_keepalive_notified_at: string | null };
+    expect(row.auth_keepalive_notified_at).toBeNull();
+  });
+});
+
+describe("defaultRecoveryCommand — opencode", () => {
+  it("falls through to `opencode auth login` for the opencode backend", async () => {
+    // The DM builder calls `defaultRecoveryCommand` when the probe
+    // result doesn't carry a `recoveryCommand` hint — the opencode
+    // case round-trips here.
+    const db = new Database(":memory:");
+    createBackendsSchema(db);
+    db.exec("ALTER TABLE backends ADD COLUMN dummy_opencode INTEGER DEFAULT 0");
+    db.prepare("INSERT INTO backends (id, enabled) VALUES (?, 1)").run(
+      "opencode",
+    );
+    const telemetry = new AuthTelemetry(db);
+    const notifier = { send: vi.fn().mockResolvedValue(undefined) };
+    const fixedNow = new Date("2026-04-10T10:00:00Z");
+    const reactiveTime = new Date("2026-04-10T09:00:00Z");
+    recordReactiveAuthFailure(db, "opencode" as BackendId, "401", telemetry, reactiveTime);
+
+    const opencodeCore = fakeCore("opencode" as BackendId) as IAgentCore & {
+      checkAuthDetailed: ReturnType<typeof vi.fn>;
+    };
+    opencodeCore.checkAuthDetailed = vi.fn().mockResolvedValue({
+      ok: false, status: "expired", method: "oauth", detail: "still 401",
+    } as AuthCheckResult);
+    const monitor = new AuthHealthMonitor(
+      db,
+      { opencode: opencodeCore } as unknown as Record<BackendId, IAgentCore>,
+      telemetry,
+      { notifier, now: () => fixedNow },
+    );
+
+    try {
+      await monitor.checkAll();
+      expect(notifier.send).toHaveBeenCalledTimes(1);
+      const [message] = notifier.send.mock.calls[0];
+      expect(message).toContain("opencode auth login");
+    } finally {
+      db.close();
+    }
   });
 });

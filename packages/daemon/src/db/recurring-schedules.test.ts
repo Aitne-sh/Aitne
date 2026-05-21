@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { applySchema } from "./schema.js";
 import {
@@ -841,6 +841,291 @@ describe("recurring-schedules DB", () => {
         .get(created.id) as { model: string; backend_id: string };
       expect(newChild.model).toBe("claude-opus-4-7");
       expect(newChild.backend_id).toBe("claude");
+    });
+  });
+
+  describe("rowToDTO — legacy NULL/empty backfills", () => {
+    it("treats a row with NULL task_description as an empty string and rehydrates `{}` from empty task_context", () => {
+      // Defensive fallback for rows hand-crafted by tests, written by
+      // older code paths before `task_description NOT NULL`, or where
+      // a future migration leaves the JSON column as the empty string.
+      const rule = makeRule();
+      db.prepare(
+        "INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled) VALUES (?, NULL, '', ?, 1)",
+      ).run("wake", JSON.stringify(rule));
+
+      const dto = listRecurringSchedules(db)[0]!;
+      expect(dto.description).toBe("");
+      expect(dto.taskContext).toEqual({});
+    });
+  });
+
+  describe("createRecurringSchedule — degenerate rule yielding null nextOccurrence", () => {
+    it("persists the row with `next_run_at = NULL` and skips child materialization when the rule has no future occurrence", () => {
+      // A weekly rule with no days selected is a degenerate input — the
+      // schema's CHECK does not reject it, so the runtime must handle it
+      // gracefully (no INSERT into agent_schedule, no crash).
+      const dto = createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "Degenerate weekly rule with empty daysOfWeek selection",
+        recurrenceRule: {
+          frequency: "weekly",
+          time: "09:00",
+          timezone: TZ,
+          daysOfWeek: [],
+        },
+      });
+
+      expect(dto.nextRunAt).toBeNull();
+      const children = db
+        .prepare(
+          "SELECT COUNT(*) as cnt FROM agent_schedule WHERE recurring_schedule_id = ?",
+        )
+        .get(dto.id) as { cnt: number };
+      expect(children.cnt).toBe(0);
+    });
+  });
+
+  describe("updateRecurringSchedule — empty patch", () => {
+    it("returns the existing row untouched when the PATCH body carries no recognised keys", () => {
+      // The route allows callers to PATCH with an empty body to refresh
+      // computed fields (`recurrenceLabel`) without writing — the code
+      // path early-returns once no `updates` accumulate.
+      const created = createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "No-op PATCH must not bump updated_at or rewrite columns",
+        recurrenceRule: makeRule(),
+      });
+
+      const updatedAtBefore = db
+        .prepare("SELECT updated_at FROM recurring_schedules WHERE id = ?")
+        .get(created.id) as { updated_at: string };
+
+      const result = updateRecurringSchedule(db, created.id, {});
+      expect(result!.id).toBe(created.id);
+
+      const updatedAtAfter = db
+        .prepare("SELECT updated_at FROM recurring_schedules WHERE id = ?")
+        .get(created.id) as { updated_at: string };
+      expect(updatedAtAfter.updated_at).toBe(updatedAtBefore.updated_at);
+    });
+  });
+
+  describe("updateRecurringSchedule — recurrenceRule change with legacy NULL task_description", () => {
+    it("rehydrates NULL task_description as empty string and empty task_context as `{}` when regenerating the child row", () => {
+      // Same legacy-row defensive path as in `reconcileRecurringSchedules`,
+      // but for the PATCH-driven recompute branch.
+      const rule = makeRule();
+      const result = db.prepare(
+        "INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled) VALUES (?, NULL, '', ?, 1)",
+      ).run("wake", JSON.stringify(rule));
+      const id = Number(result.lastInsertRowid);
+
+      const updated = updateRecurringSchedule(db, id, {
+        recurrenceRule: makeRule({ time: "10:00" }),
+      });
+      expect(updated!.description).toBe("");
+      expect(updated!.taskContext).toEqual({});
+
+      const child = db
+        .prepare(
+          "SELECT task_description, task_context FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+        )
+        .get(id) as { task_description: string; task_context: string };
+      expect(child.task_description).toBe("");
+      expect(JSON.parse(child.task_context)).toMatchObject({ recurringScheduleId: id });
+    });
+  });
+
+  describe("reconcileRecurringSchedules — missing table guard", () => {
+    it("returns 0 when the `recurring_schedules` table is absent (partial schema)", () => {
+      // The runner is invoked from `ScheduleWatcher` on every poll. Some
+      // historical test setups still hand-craft a partial schema and the
+      // reconciler must not throw `SqliteError: no such table` and abort
+      // the watcher tick.
+      const partial = new Database(":memory:");
+      try {
+        expect(reconcileRecurringSchedules(partial)).toBe(0);
+      } finally {
+        partial.close();
+      }
+    });
+  });
+
+  describe("reconcileRecurringSchedules — legacy NULL task_description / empty task_context fallback", () => {
+    it("regenerates the child row even when the parent stored NULL description and empty task_context JSON", () => {
+      const rule = makeRule();
+      const result = db.prepare(
+        "INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled) VALUES (?, NULL, '', ?, 1)",
+      ).run("wake", JSON.stringify(rule));
+      const id = Number(result.lastInsertRowid);
+
+      const generated = reconcileRecurringSchedules(db);
+      expect(generated).toBe(1);
+
+      const child = db
+        .prepare(
+          "SELECT task_description, task_context FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+        )
+        .get(id) as { task_description: string; task_context: string };
+      expect(child.task_description).toBe("");
+      expect(JSON.parse(child.task_context)).toMatchObject({ recurringScheduleId: id });
+    });
+  });
+
+  describe("updateRecurringSchedule — tier override", () => {
+    it("sets and then clears the tier override via PATCH (`tier: null` is the explicit clear sentinel)", () => {
+      // Mirrors the `model` / `prompt` / `backendId` PATCH-clear contracts
+      // — `undefined` means "no change", `null` means "drop the override".
+      // The tier_override column is what propagates onto every regenerated
+      // agent_schedule child, so an explicit-clear path is what lets the
+      // operator step back to the process-key default after an override.
+      const created = createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "Operator pins tier to lite, then clears it back to default",
+        recurrenceRule: makeRule(),
+      });
+      expect(created.tier).toBeNull();
+
+      const set = updateRecurringSchedule(db, created.id, { tier: "high" });
+      expect(set!.tier).toBe("high");
+
+      const cleared = updateRecurringSchedule(db, created.id, { tier: null });
+      expect(cleared!.tier).toBeNull();
+
+      const row = db
+        .prepare("SELECT tier_override FROM recurring_schedules WHERE id = ?")
+        .get(created.id) as { tier_override: string | null };
+      expect(row.tier_override).toBeNull();
+    });
+  });
+
+  describe("reconcileRecurringSchedules — malformed row recovery", () => {
+    it("disables a row with a corrupt `recurrence_rule` JSON blob and keeps reconciling the rest", () => {
+      // Defensive branch: a single malformed JSON row otherwise aborts the
+      // whole reconcile tick, blocking healthy schedules behind the bad
+      // one forever. The reconciler must catch per-row, disable the
+      // offender, and continue.
+      const healthy = createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "Healthy schedule that must still reconcile alongside a bad sibling",
+        recurrenceRule: makeRule(),
+      });
+      const bad = createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "Will be corrupted so its rule fails JSON.parse on next tick",
+        recurrenceRule: makeRule(),
+      });
+
+      // Simulate disk corruption / a broken older writer by overwriting
+      // the rule column with non-JSON text directly.
+      db.prepare(
+        "UPDATE recurring_schedules SET recurrence_rule = ? WHERE id = ?",
+      ).run("not-json-{", bad.id);
+
+      // Both rows have an active pending child from creation; complete them
+      // so the reconciler picks both up as orphaned.
+      db.prepare(
+        "UPDATE agent_schedule SET status = 'completed' WHERE recurring_schedule_id IN (?, ?)",
+      ).run(healthy.id, bad.id);
+
+      // Silence the expected per-row error log without losing visibility
+      // into unexpected ones.
+      const consoleErr = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const generated = reconcileRecurringSchedules(db);
+        expect(generated).toBe(1);
+        expect(consoleErr).toHaveBeenCalledTimes(1);
+        expect(consoleErr.mock.calls[0]?.[0]).toContain("reconcile row failed");
+      } finally {
+        consoleErr.mockRestore();
+      }
+
+      const badRow = db
+        .prepare("SELECT enabled FROM recurring_schedules WHERE id = ?")
+        .get(bad.id) as { enabled: number };
+      expect(badRow.enabled).toBe(0);
+
+      const healthyChild = db
+        .prepare(
+          "SELECT COUNT(*) as cnt FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+        )
+        .get(healthy.id) as { cnt: number };
+      expect(healthyChild.cnt).toBe(1);
+    });
+
+    it("swallows a secondary failure when the row-disable UPDATE itself throws", () => {
+      // Defense-in-depth: the inner try/catch around the disable-on-error
+      // UPDATE must not mask the primary error log nor abort the rest of
+      // the reconcile.
+      createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "Row whose recurrence_rule is corrupt and whose UPDATE then throws",
+        recurrenceRule: makeRule(),
+      });
+      const bad = db.prepare("SELECT id FROM recurring_schedules").get() as { id: number };
+
+      db.prepare(
+        "UPDATE recurring_schedules SET recurrence_rule = ? WHERE id = ?",
+      ).run("not-json-{", bad.id);
+      db.prepare(
+        "UPDATE agent_schedule SET status = 'completed' WHERE recurring_schedule_id = ?",
+      ).run(bad.id);
+
+      const origPrepare = db.prepare.bind(db);
+      const prepareSpy = vi
+        .spyOn(db, "prepare")
+        .mockImplementation((sql: string) => {
+          if (sql.includes("SET enabled = 0")) {
+            throw new Error("simulated UPDATE failure");
+          }
+          return origPrepare(sql);
+        });
+      const consoleErr = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        expect(() => reconcileRecurringSchedules(db)).not.toThrow();
+        expect(consoleErr).toHaveBeenCalledTimes(1);
+      } finally {
+        prepareSpy.mockRestore();
+        consoleErr.mockRestore();
+      }
+    });
+
+    it("logs the row id and a non-Error rejection's string representation", () => {
+      // The catch handler stringifies any non-Error throw via the
+      // `String(rowErr)` branch — JSON.parse always throws SyntaxError,
+      // but the branch must still be reachable in case a future
+      // downstream call (e.g. generateNextScheduleRow) rejects with a
+      // primitive. Force the primitive throw by stubbing JSON.parse.
+      const created = createRecurringSchedule(db, {
+        taskType: "wake",
+        description: "Force a non-Error rejection through the catch handler",
+        recurrenceRule: makeRule(),
+      });
+      db.prepare(
+        "UPDATE agent_schedule SET status = 'completed' WHERE recurring_schedule_id = ?",
+      ).run(created.id);
+
+      const origParse = JSON.parse;
+      const parseSpy = vi
+        .spyOn(JSON, "parse")
+        .mockImplementationOnce(() => {
+          throw "string-throw"; // eslint-disable-line @typescript-eslint/only-throw-error
+        });
+      const consoleErr = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        const generated = reconcileRecurringSchedules(db);
+        expect(generated).toBe(0);
+        expect(consoleErr).toHaveBeenCalledTimes(1);
+        const payload = consoleErr.mock.calls[0]?.[1] as { err: string };
+        expect(payload.err).toBe("string-throw");
+      } finally {
+        parseSpy.mockRestore();
+        consoleErr.mockRestore();
+        JSON.parse = origParse;
+      }
     });
   });
 });

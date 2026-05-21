@@ -818,6 +818,8 @@ export interface ConfigResponse {
   browserHistoryRetentionDays: number;
   browserHistorySearchQueryRetentionDays: number;
   browserHistoryLifecycle: BrowserHistoryLifecycleConfig;
+  browserHistoryResearchDomainAllowlist: string[];
+  browserHistoryResearchDomainDenylist: string[];
   mcpAutoProbeIntervalMinutes: number;
   authProbeDisabled: boolean;
   autonomousDailyCostCapUsd: number | null;

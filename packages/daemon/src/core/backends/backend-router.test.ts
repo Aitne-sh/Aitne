@@ -2287,4 +2287,154 @@ describe("BackendRouter", () => {
       expect(binding.fallback?.backendId).toBe("gemini");
     });
   });
+
+  // BROWSER_HISTORY_INTEGRATION_PLAN §10.3 — the safety floor must validate
+  // both `binding.main` and `binding.fallback`. The earlier implementation
+  // only checked main, which silently allowed a `routine.research_dispatch`
+  // (Claude-only) binding to fall back to Codex when Claude failed.
+  describe("safety floor — main + fallback validation", () => {
+    function makeMultiCore(): IAgentCore[] {
+      return [
+        makeCore({ backendId: "claude" }),
+        makeCore({ backendId: "codex" }),
+        makeCore({ backendId: "gemini" }),
+      ];
+    }
+    function dispatchEvent(): Event {
+      return createEvent({
+        type: "routine.research_dispatch",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+    }
+    function pinResearchDispatch(
+      database: Database.Database,
+      mainBackend: string,
+      mainModel: string,
+      fallbackBackend: string | null = null,
+      fallbackModel: string | null = null,
+    ) {
+      database
+        .prepare(
+          `INSERT INTO process_backend_config
+             (process_key, main_backend, main_model, fallback_backend, fallback_model, max_turns, max_budget_usd)
+           VALUES (?, ?, ?, ?, ?, 30, 0.5)
+           ON CONFLICT(process_key) DO UPDATE SET
+             main_backend = excluded.main_backend,
+             main_model = excluded.main_model,
+             fallback_backend = excluded.fallback_backend,
+             fallback_model = excluded.fallback_model`,
+        )
+        .run(
+          "routine.research_dispatch",
+          mainBackend,
+          mainModel,
+          fallbackBackend,
+          fallbackModel,
+        );
+    }
+
+    it("refuses execute when main violates the Claude-only floor for research_dispatch", async () => {
+      applySchema(db);
+      pinResearchDispatch(db, "codex", "gpt-5-codex");
+      const notifier = makeNotifier();
+      const router = new BackendRouter(
+        db,
+        makeConfig(),
+        makeMultiCore(),
+        notifier,
+      );
+      await expect(
+        router.execute({
+          event: dispatchEvent(),
+          prompt: "p",
+          context: "",
+        }),
+      ).rejects.toBeInstanceOf(BackendRouterHandledError);
+      const audit = db
+        .prepare(
+          "SELECT detail FROM agent_actions WHERE action_type = 'backend_floor_refused'",
+        )
+        .get() as { detail: string } | undefined;
+      expect(audit).toBeDefined();
+      const detail = JSON.parse(audit!.detail);
+      expect(detail.side).toBe("main");
+      expect(detail.backendId).toBe("codex");
+    });
+
+    it("refuses execute when fallback violates the floor even if main is eligible", async () => {
+      applySchema(db);
+      pinResearchDispatch(
+        db,
+        "claude",
+        DEFAULT_CLAUDE_MEDIUM_MODEL,
+        "codex",
+        "gpt-5-codex",
+      );
+      const notifier = makeNotifier();
+      const router = new BackendRouter(
+        db,
+        makeConfig(),
+        makeMultiCore(),
+        notifier,
+      );
+      await expect(
+        router.execute({
+          event: dispatchEvent(),
+          prompt: "p",
+          context: "",
+        }),
+      ).rejects.toBeInstanceOf(BackendRouterHandledError);
+      const audit = db
+        .prepare(
+          "SELECT detail FROM agent_actions WHERE action_type = 'backend_floor_refused'",
+        )
+        .get() as { detail: string } | undefined;
+      expect(audit).toBeDefined();
+      const detail = JSON.parse(audit!.detail);
+      expect(detail.side).toBe("fallback");
+      expect(detail.backendId).toBe("codex");
+    });
+
+    it("allows execute when both main and fallback satisfy the floor", async () => {
+      applySchema(db);
+      // research_cluster_update is eligible on claude / gemini / opencode;
+      // codex is forbidden in either mode. Pin claude main + gemini
+      // fallback — both eligible — and confirm execute() proceeds.
+      db.prepare(
+        `INSERT INTO process_backend_config
+           (process_key, main_backend, main_model, fallback_backend, fallback_model, max_turns, max_budget_usd)
+         VALUES (?, ?, ?, ?, ?, 5, 0.02)
+         ON CONFLICT(process_key) DO UPDATE SET
+           main_backend = excluded.main_backend,
+           main_model = excluded.main_model,
+           fallback_backend = excluded.fallback_backend,
+           fallback_model = excluded.fallback_model`,
+      ).run(
+        "routine.research_cluster_update",
+        "claude",
+        DEFAULT_CLAUDE_LITE_MODEL,
+        "gemini",
+        "gemini-2.5-pro",
+      );
+      const router = new BackendRouter(db, makeConfig(), makeMultiCore());
+      const ev = createEvent({
+        type: "routine.research_cluster_update",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      const result = await router.execute({
+        event: ev,
+        prompt: "p",
+        context: "",
+      });
+      expect(result.output).toBe("ok");
+      const audit = db
+        .prepare(
+          "SELECT 1 FROM agent_actions WHERE action_type = 'backend_floor_refused'",
+        )
+        .get();
+      expect(audit).toBeUndefined();
+    });
+  });
 });

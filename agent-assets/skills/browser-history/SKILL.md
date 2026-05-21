@@ -129,8 +129,9 @@ Per-day append shape:
 - agent observation: <one neutral sentence>
 ```
 
-End the session with an internal summary only — no owner DM. Templated
-offers (DMs) are owned by the poller, not by this flow.
+End the session with an internal summary only — no owner DM.
+Engagement offer DMs are owned by the `routine.research_offer_dm`
+agent (poller-triggered), not by this flow.
 
 ## Flow: routine.research_dispatch (accept path)
 

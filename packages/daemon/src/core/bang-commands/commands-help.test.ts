@@ -103,9 +103,13 @@ describe("!help command", () => {
   });
 
   it("appends enabled user commands under a 'Custom:' heading", async () => {
+    // P4b — keep descriptions tight so the assertion fits inside the
+    // 1500-char MOBILE_REPLY_BUDGET alongside the full default registry
+    // (which now carries 20+ built-ins). The test pins the auto-reflection
+    // behaviour, not the exact phrasing.
     createUserBangCommand(db, {
-      name: "summarize",
-      description: "Summarize today's inbox",
+      name: "sum",
+      description: "Sum inbox.",
       prompt: "summarize the inbox",
       backendId: "claude",
       modelId: "claude-sonnet-4-6",
@@ -131,7 +135,7 @@ describe("!help command", () => {
     });
     const reply = notify.mock.calls[0]?.[0] as string;
     expect(reply).toContain("Custom:");
-    expect(reply).toContain("!summarize\n  Summarize today's inbox");
+    expect(reply).toContain("!sum\n  Sum inbox.");
     expect(reply).not.toContain("!draft");
   });
 
@@ -205,9 +209,13 @@ describe("!help command", () => {
     });
     expect(notify1.mock.calls[0]?.[0] as string).not.toContain("!late_bloomer");
 
+    // P4b — keep the late entry short so it fits inside MOBILE_REPLY_BUDGET
+    // alongside the full default registry. The test still pins the
+    // auto-reflection invariant (a newly-created user command appears on
+    // the next !help) — the only thing that changed is the entry's prose.
     createUserBangCommand(db, {
-      name: "late_bloomer",
-      description: "Added after first !help",
+      name: "late",
+      description: "Added late.",
       prompt: "later",
       backendId: "claude",
       modelId: "claude-sonnet-4-6",
@@ -224,7 +232,7 @@ describe("!help command", () => {
       registry,
     });
     const reply2 = notify2.mock.calls[0]?.[0] as string;
-    expect(reply2).toContain("!late_bloomer\n  Added after first !help");
+    expect(reply2).toContain("!late\n  Added late.");
   });
 
   it("auto-reflects a built-in registered after the registry was built", async () => {

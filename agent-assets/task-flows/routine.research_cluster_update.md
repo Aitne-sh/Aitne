@@ -5,8 +5,9 @@
 The daemon enqueued this session because the cluster slug in
 `event.data.slug` has new meaningful activity since the last journal
 update. Your job is mechanical: read the delta, format one block,
-append it. Do NOT compose owner-facing DMs from this flow — templated
-offer DMs are dispatched by the poller, not by you.
+append it. Do NOT compose owner-facing DMs from this flow — engagement
+offer DMs are composed by the `routine.research_offer_dm` agent, not
+by you.
 
 Follow the `browser-history` skill, "Flow: routine.research_cluster_update".
 

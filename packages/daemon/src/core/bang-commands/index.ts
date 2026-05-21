@@ -42,6 +42,7 @@ export {
   wikiStatusCommand,
 } from "./commands-wiki.js";
 export { researchCommand, parseResearchArgs } from "./commands-research.js";
+export { checksCommand, formatChecks } from "./commands-checks.js";
 export {
   buildSystemMarker,
   ensureSystemMarker,
@@ -95,6 +96,7 @@ import {
   wikiStatusCommand,
 } from "./commands-wiki.js";
 import { researchCommand } from "./commands-research.js";
+import { checksCommand } from "./commands-checks.js";
 
 /**
  * Build a registry preloaded with the v1 built-in commands. The registry
@@ -122,5 +124,10 @@ export function createDefaultBangCommandRegistry(): BangCommandRegistry {
   registry.register(connectCommand);
   // BROWSER_HISTORY_INTEGRATION_PLAN P3 — `!research` family.
   registry.register(researchCommand);
+  // BROWSER_HISTORY_INTEGRATION_PLAN P4b — `!checks` (F4 reload-memory
+  // pull surface). Pure DB read on `browser_reload_signals`; the F4
+  // weekly surfacing lives inside `routine.weekly_review` and uses
+  // `/api/browser-history/reloads/weekly` instead.
+  registry.register(checksCommand);
   return registry;
 }

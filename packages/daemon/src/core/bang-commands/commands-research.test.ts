@@ -443,6 +443,39 @@ describe("researchCommand — runtime handlers", () => {
     expect(remaining.n).toBe(1);
   });
 
+  it("wiki without an EventBus wired emits the 'not wired' notice and leaves pending rows intact", async () => {
+    // Symmetric to the accept-path regression test above — the wiki
+    // subcommand must also defer pending-offer deletion until after a
+    // successful enqueue.
+    seedCluster(db, "quantum-mechanics", 1);
+    db.prepare(
+      `INSERT INTO browser_pending_offers (slug, kind, offered_at, expires_at)
+       VALUES ('quantum-mechanics', 'wiki_summary', 0, 9999999999999)`,
+    ).run();
+    let capturedMessage = "";
+    const ctx: BangCommandContext = {
+      event: makeMessageEvent(),
+      db,
+      config: { dayBoundaryHour: 4 } as never,
+      notify: async (text: string) => {
+        capturedMessage = text;
+      },
+      audit: { logBangCommand: () => {} } as never,
+      registry: undefined as never,
+      // No `enqueueBrowserResearchEvent` wired.
+    };
+    await researchCommand.handler(ctx, {
+      subcommand: "wiki",
+      slug: "quantum-mechanics",
+      payload: "",
+    });
+    expect(capturedMessage).toContain("Browser-history dispatch is not wired");
+    const remaining = db
+      .prepare(`SELECT COUNT(*) AS n FROM browser_pending_offers`)
+      .get() as { n: number };
+    expect(remaining.n).toBe(1);
+  });
+
   it("wiki accept does NOT stamp wikiSummaryWrittenAt (agent-owned field)", async () => {
     // BROWSER_HISTORY_INTEGRATION_PLAN §10.6 — `wikiSummaryWrittenAt` is
     // the agent's "wiki note already exists" gate per
@@ -519,5 +552,35 @@ describe("researchCommand — runtime handlers", () => {
       .prepare(`SELECT COUNT(*) AS n FROM browser_pending_offers`)
       .get() as { n: number };
     expect(remaining.n).toBe(0);
+  });
+
+  // Mirror of the API accept test in browser-history.test.ts: bang
+  // wiki acceptance must clear `lastWikiOfferAt` so the rate-limit
+  // gate's decline_backoff cannot trip when the wiki write fails or
+  // /wiki-written is skipped. Without this, accepting via `!research
+  // wiki` would silence the cluster for 30 days despite engagement.
+  it("wiki accept clears last_wiki_offer_at so decline_backoff cannot trip", async () => {
+    seedCluster(db, "quantum-mechanics", 1);
+    const offeredAt = 1_700_000_000_000;
+    db.prepare(
+      `UPDATE browser_research_clusters
+         SET last_research_offer_at = ?, last_wiki_offer_at = ?, last_dm_at = ?
+       WHERE slug = ?`,
+    ).run(offeredAt, offeredAt, offeredAt, "quantum-mechanics");
+    const { ctx, capture } = buildCtx(db);
+    await researchCommand.handler(ctx, {
+      subcommand: "wiki",
+      slug: "quantum-mechanics",
+      payload: "",
+    });
+    expect(capture.events[0].type).toBe("routine.research_wiki_summary");
+    const row = db
+      .prepare(
+        `SELECT last_research_offer_at AS r, last_wiki_offer_at AS w
+           FROM browser_research_clusters WHERE slug = ?`,
+      )
+      .get("quantum-mechanics") as { r: number | null; w: number | null };
+    expect(row.w).toBeNull();
+    expect(row.r).toBe(offeredAt);
   });
 });

@@ -184,6 +184,11 @@ export {
   browserHistoryAcceptOfferRequestSchema,
   browserHistoryAcceptOfferResponseSchema,
   browserHistoryWikiWrittenResponseSchema,
+  preMorningDigestClusterEntrySchema,
+  preMorningDigestShoppingEntrySchema,
+  preMorningDigestReloadEntrySchema,
+  preMorningDigestPendingOfferSchema,
+  preMorningDigestSchema,
 } from "./browser-history-schemas.js";
 export type {
   BrowserHistoryBrowserKey,
@@ -215,6 +220,11 @@ export type {
   BrowserHistoryAcceptOfferRequest,
   BrowserHistoryAcceptOfferResponse,
   BrowserHistoryWikiWrittenResponse,
+  PreMorningDigestClusterEntry,
+  PreMorningDigestShoppingEntry,
+  PreMorningDigestReloadEntry,
+  PreMorningDigestPendingOffer,
+  PreMorningDigest,
 } from "./browser-history-schemas.js";
 
 // Wiki builder shared contract

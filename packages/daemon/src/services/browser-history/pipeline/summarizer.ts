@@ -3,7 +3,11 @@ import { getAgentDayDateStr, type BrowserHistoryBrowserKey } from "@aitne/shared
 import type { ChromiumVisitRow } from "../readers/chromium-reader.js";
 import { classifyVisit } from "./classifier.js";
 import { redactVisit, type RedactedVisit } from "./redactor.js";
-import { classifyMeaningful } from "./meaningful-filter.js";
+import {
+  classifyMeaningful,
+  EMPTY_RESEARCH_DOMAIN_LISTS,
+  type ResearchDomainLists,
+} from "./meaningful-filter.js";
 import { extractAmazonReference } from "./amazon-extractor.js";
 import { isReloadTransition, reloadPatternKey } from "./reload-detector.js";
 
@@ -56,6 +60,14 @@ export interface SummarizeInput {
   profile: string;
   rows: readonly ChromiumVisitRow[];
   boundary?: SummarizeDayBoundary;
+  /**
+   * BROWSER_HISTORY_INTEGRATION_PLAN §5.F1.meaningful rule 6 — user-curated
+   * domain allowlist / denylist. Both default to an empty `Set` (emergent
+   * mode). When the allowlist is non-empty, only visits whose eTLD+1 is
+   * in the allowlist are eligible as meaningful. The denylist always
+   * wins. See `meaningful-filter.ts` for the precedence rules.
+   */
+  researchDomainLists?: ResearchDomainLists;
 }
 
 export interface SummarizeResult {
@@ -77,6 +89,8 @@ function strippedHost(host: string): string {
 
 export function summarizeVisits(input: SummarizeInput): SummarizeResult {
   const boundary = input.boundary ?? DEFAULT_BOUNDARY;
+  const researchDomainLists =
+    input.researchDomainLists ?? EMPTY_RESEARCH_DOMAIN_LISTS;
   const visits: SummarizedVisit[] = [];
   let highestTimestampMs = 0;
   let dropped = 0;
@@ -103,13 +117,16 @@ export function summarizeVisits(input: SummarizeInput): SummarizeResult {
       path: redacted.path,
     });
 
-    const meaningfulVerdict = classifyMeaningful({
-      scheme: redacted.scheme,
-      host: redacted.host,
-      path: redacted.path,
-      category,
-      foregroundSeconds: row.foregroundSec,
-    });
+    const meaningfulVerdict = classifyMeaningful(
+      {
+        scheme: redacted.scheme,
+        host: redacted.host,
+        path: redacted.path,
+        category,
+        foregroundSeconds: row.foregroundSec,
+      },
+      researchDomainLists,
+    );
 
     const amazon =
       category === "shopping"

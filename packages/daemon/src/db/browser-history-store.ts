@@ -659,6 +659,38 @@ export function stampClusterDmFields(
 }
 
 /**
+ * Explicitly NULL out one or more `last_*_offer_at` stamps. Sibling of
+ * `stampClusterDmFields` for the wiki-summary acceptance path: that
+ * path needs to break the rate-limit gate's `decline_backoff` condition
+ * (which trips when `lastWikiOfferAt !== null AND
+ * wikiSummaryWrittenAt === null`), and the gate's bookkeeping has no
+ * separate "user accepted wiki" stamp. `stampClusterDmFields` uses
+ * `COALESCE(?, col)` so passing `null` there is a no-op — it preserves
+ * the prior value to keep concurrent writers idempotent. This function
+ * is the explicit-clear branch.
+ *
+ * Pass `true` for the column(s) to clear. Calling with no flags is a
+ * no-op (skips the UPDATE) so the function is safe to invoke
+ * unconditionally from a switch branch.
+ */
+export function clearClusterOfferStamps(
+  db: Database.Database,
+  slug: string,
+  fields: {
+    lastResearchOfferAt?: boolean;
+    lastWikiOfferAt?: boolean;
+  },
+): void {
+  const sets: string[] = [];
+  if (fields.lastResearchOfferAt) sets.push("last_research_offer_at = NULL");
+  if (fields.lastWikiOfferAt) sets.push("last_wiki_offer_at = NULL");
+  if (sets.length === 0) return;
+  db.prepare(
+    `UPDATE browser_research_clusters SET ${sets.join(", ")} WHERE slug = ?`,
+  ).run(slug);
+}
+
+/**
  * Set the cluster's status with a hard override (rename / conclude /
  * mute / unmute paths). Differs from `stampClusterDmFields` in that
  * it always writes — never COALESCE — and from the poller's upsert in

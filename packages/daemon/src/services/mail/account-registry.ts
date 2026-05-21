@@ -210,7 +210,7 @@ interface SqliteErrorLike {
   code?: string;
 }
 
-/* v8 ignore next 5 — only reachable from TOCTOU catch block below; early duplicate check (line ~292) prevents this in single-threaded tests */
+/* c8 ignore next 5 — only reachable from TOCTOU catch block below; early duplicate check (line ~292) prevents this in single-threaded tests */
 function isUniqueConstraintError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = (err as SqliteErrorLike).code;
@@ -369,14 +369,15 @@ export class MailAccountRegistry {
           createdAt,
           input.capabilities ? serializeCapabilities(input.capabilities) : null,
         );
+      /* c8 ignore start — concurrent insert race: early duplicate check prevents this in single-threaded tests */
     } catch (error) {
-      /* v8 ignore next 5 — concurrent insert race: early duplicate check prevents this in tests */
       await this.blobStore.remove(blobName);
       if (isUniqueConstraintError(error)) {
         throw new DuplicateAccountError(input.kind, input.email);
       }
       throw error;
     }
+    /* c8 ignore stop */
 
     const row = this.db
       .prepare(`SELECT * FROM mail_accounts WHERE id = ?`)
@@ -524,6 +525,10 @@ export class MailAccountRegistry {
       const result = this.db
         .prepare(`UPDATE mail_accounts SET active = ? WHERE id = ?`)
         .run(active ? 1 : 0, accountId);
+      // Defensive: better-sqlite3 is single-threaded so the row read at
+      // `before` is still present here, but keep the guard to cover a
+      // future async race (e.g. a concurrent `removeAccount`).
+      /* c8 ignore next */
       if (result.changes === 0) return null;
       // Disabling an account should shed the cached provider so it does not
       // retain live MSAL/IMAP sessions. Re-enabling simply lazily rebuilds.

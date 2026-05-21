@@ -376,3 +376,127 @@ export const browserHistoryWikiWrittenResponseSchema = z.object({
 export type BrowserHistoryWikiWrittenResponse = z.infer<
   typeof browserHistoryWikiWrittenResponseSchema
 >;
+
+// ── P4a — pre-morning digest (F2 Stage 1) ──
+// BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 + §10.6 step 3. The digest is
+// computed deterministically by the daemon at `day_boundary − 60min`
+// and written to `~/.personal-agent/context/browser/yesterday-<date>.md`
+// so the morning Stage B journal reads a static file (no LLM in the
+// computation path, no API call at 04:00).
+//
+// The same data is served by `GET /api/browser-history/pre-morning-digest/{date}`
+// as a JSON fallback in case the file is missing (daemon stopped at 03:00,
+// fresh install, retention purge). Both surfaces must encode the same
+// shape, hence a shared Zod schema below.
+//
+// Layer 1 invariants preserved:
+//   - `topic` / `displayName` is the cluster's curated label (no raw
+//     title), constrained to `[a-z0-9 /-]+` like `yesterdayResearchSummary.topic`
+//     so an attacker-shaped display_name cannot smuggle prompt prose.
+//   - `topDomains` are eTLD+1 labels (regex-constrained) — never raw URLs.
+//   - `urlPattern` in reloads is `<domain>/<first-path-segment>` —
+//     deterministically derived in `pipeline/reload-detector.ts`, query
+//     strings stripped. Domain-label-shaped check + path-segment cap so
+//     a poisoned History row cannot expand the surface.
+//   - No `search_query`, no raw `urls.title`, no full URL anywhere.
+
+/** Cluster-touched-in-window entry in the pre-morning digest. */
+export const preMorningDigestClusterEntrySchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),
+  /**
+   * Curated display label, same constraint as `yesterdayResearchSummary.topic`
+   * — `[a-z0-9 /-]+`, ≤80 chars. Stored on the cluster row and refreshed by
+   * the deterministic display-name picker until the agent renames it.
+   */
+  displayName: z.string().regex(/^[a-z0-9 /-]+$/i).max(80),
+  status: browserHistoryClusterStatusSchema,
+  /** Total days of meaningful activity across the cluster's lifetime. */
+  daysActive: z.number().int().nonnegative(),
+  /** Meaningful visits inside the digest window (e.g. yesterday's bucket). */
+  meaningfulVisitsInWindow: z.number().int().nonnegative(),
+  /** Foreground time inside the window, rounded to whole seconds. */
+  meaningfulForegroundSecInWindow: z.number().int().nonnegative(),
+  /**
+   * eTLD+1 labels that appear in this window's bucket but did not appear
+   * in any earlier bucket of the same cluster. Bounded at 10.
+   */
+  newDomainsInWindow: z.array(browserHistoryDomainLabelSchema).max(10),
+  /**
+   * Top eTLD+1 labels across the cluster's meaningful visits — useful
+   * for the journal-side renderer to colour the "what was I reading
+   * yesterday" prose. Bounded at 10.
+   */
+  topDomains: z.array(browserHistoryDomainLabelSchema).max(10),
+  /**
+   * True when an offer for this cluster fired inside the digest window —
+   * i.e. a `browser_pending_offers` row exists with `offered_at` between
+   * the agent-day's start and end. Used by the journal as a proxy for
+   * "new threshold crossing"; the proxy is tight in the common case (an
+   * offer fires the moment qualification crosses) and loose only when
+   * the rate-limit gate suppressed the offer despite qualification — in
+   * that case the cluster will still surface here on the next digest
+   * after the gate clears, just one day late. Renaming this field to
+   * `offerFiredOvernight` is the honest long-term direction; preserved
+   * as `qualifiedOvernight` for §10.6 wire-compat with the journal task
+   * flow and the route schema.
+   */
+  qualifiedOvernight: z.boolean(),
+});
+export type PreMorningDigestClusterEntry = z.infer<
+  typeof preMorningDigestClusterEntrySchema
+>;
+
+/** F3 shopping-session summary line carried in the digest. */
+export const preMorningDigestShoppingEntrySchema = z.object({
+  vendor: z.literal("amazon"),
+  /** Number of distinct ASINs compared in the qualifying session(s). */
+  asinCount: z.number().int().min(1).max(50),
+  /** Total comparison minutes across qualifying sessions for the date. */
+  comparisonMinutes: z.number().int().min(1).max(24 * 60),
+  locale: z.string().max(16).nullable(),
+});
+export type PreMorningDigestShoppingEntry = z.infer<
+  typeof preMorningDigestShoppingEntrySchema
+>;
+
+/** F4 reload signal row — informational, never surfaced as a DM. */
+export const preMorningDigestReloadEntrySchema = z.object({
+  urlPattern: z.string().min(1).max(180),
+  reloadCount: z.number().int().min(1),
+});
+export type PreMorningDigestReloadEntry = z.infer<
+  typeof preMorningDigestReloadEntrySchema
+>;
+
+/** Open offer awaiting user response, surfaced in the morning digest. */
+export const preMorningDigestPendingOfferSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),
+  displayName: z.string().regex(/^[a-z0-9 /-]+$/i).max(80),
+  kind: browserHistoryOfferKindSchema,
+  offeredAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+});
+export type PreMorningDigestPendingOffer = z.infer<
+  typeof preMorningDigestPendingOfferSchema
+>;
+
+/**
+ * Whole-digest payload. Mirrors the markdown file 1:1 — the digest
+ * builder writes one and serves the other from the same in-memory
+ * object so the two views never drift. Boot- and shape-resilient
+ * (every collection has a `.max()` cap so an attacker-shaped cluster
+ * fan-out cannot balloon the morning context).
+ */
+export const preMorningDigestSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  generatedAt: z.string(),
+  /** Source of truth tag — `"deterministic"` today; reserved for future modes. */
+  source: z.literal("deterministic"),
+  clusters: z.array(preMorningDigestClusterEntrySchema).max(12),
+  shopping: z.array(preMorningDigestShoppingEntrySchema).max(8),
+  reloads: z.array(preMorningDigestReloadEntrySchema).max(10),
+  pendingOffers: z.array(preMorningDigestPendingOfferSchema).max(20),
+  /** Count of clusters whose `qualifiedOvernight=true` — convenience for the journal. */
+  newThresholdsCount: z.number().int().nonnegative(),
+});
+export type PreMorningDigest = z.infer<typeof preMorningDigestSchema>;

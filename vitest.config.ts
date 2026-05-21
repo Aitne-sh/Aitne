@@ -285,9 +285,6 @@ export default defineConfig({
         //    first activated. Each has tests but exercises branches (SQL
         //    failure modes, error-path fall-throughs) that are I/O-shaped.
         //    Prefer adding targeted tests over expanding this list. ──
-        "packages/daemon/src/core/backends/auth-health-monitor.ts",
-        "packages/daemon/src/db/recurring-schedules.ts",
-        "packages/daemon/src/services/mail/account-registry.ts",
 
         // ── Core orchestration / FS / DB-heavy modules with residual I/O branches ──
         // Each carries a peer *.test.ts pinning the main flows; the

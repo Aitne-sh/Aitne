@@ -128,6 +128,11 @@ describe("Integration registry", () => {
     expect(desc.apiRoutesTouched).toEqual([
       "/api/browser-history/research-clusters",
       "/api/browser-history/yesterday-summary",
+      // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — JSON fallback for
+      // the morning journal. Gated together with `yesterday-summary` so
+      // a `disabled` integration cannot serve digest data through this
+      // route.
+      "/api/browser-history/pre-morning-digest",
     ]);
   });
 

@@ -5,6 +5,7 @@ import {
   applyBrowserHistoryRetention,
   browserHistoryProfileCursorKey,
   bumpClusterAgentSummaryRevision,
+  clearClusterOfferStamps,
   deletePendingOffer,
   deletePendingOffersForCluster,
   getResearchClusterDetail,
@@ -485,6 +486,46 @@ describe("browser-history-store P2 helpers", () => {
       expect(bumpClusterAgentSummaryRevision(db, "rev")).toBe(1);
       expect(bumpClusterAgentSummaryRevision(db, "rev")).toBe(2);
       expect(bumpClusterAgentSummaryRevision(db, "missing")).toBe(0);
+    });
+
+    it("clearClusterOfferStamps nulls the requested last_*_offer_at columns", () => {
+      seedCluster(23, "clear-wiki");
+      stampClusterDmFields(db, "clear-wiki", {
+        lastDmAt: 1_700_000_000_000,
+        lastResearchOfferAt: 1_700_000_000_000,
+        lastWikiOfferAt: 1_700_000_000_000,
+      });
+      clearClusterOfferStamps(db, "clear-wiki", { lastWikiOfferAt: true });
+      const detail = getResearchClusterDetail(db, "clear-wiki");
+      expect(detail?.lastWikiOfferAt).toBeNull();
+      // Adjacent stamps untouched — the call is column-scoped.
+      expect(detail?.lastResearchOfferAt).toBe(1_700_000_000_000);
+      expect(detail?.lastDmAt).toBe(1_700_000_000_000);
+    });
+
+    it("clearClusterOfferStamps clears both columns when both flags are set", () => {
+      seedCluster(25, "clear-both");
+      stampClusterDmFields(db, "clear-both", {
+        lastResearchOfferAt: 1_700_000_000_000,
+        lastWikiOfferAt: 1_700_000_000_000,
+      });
+      clearClusterOfferStamps(db, "clear-both", {
+        lastResearchOfferAt: true,
+        lastWikiOfferAt: true,
+      });
+      const detail = getResearchClusterDetail(db, "clear-both");
+      expect(detail?.lastResearchOfferAt).toBeNull();
+      expect(detail?.lastWikiOfferAt).toBeNull();
+    });
+
+    it("clearClusterOfferStamps is a no-op when no flags are set", () => {
+      seedCluster(27, "clear-none");
+      stampClusterDmFields(db, "clear-none", {
+        lastWikiOfferAt: 1_700_000_000_000,
+      });
+      clearClusterOfferStamps(db, "clear-none", {});
+      const detail = getResearchClusterDetail(db, "clear-none");
+      expect(detail?.lastWikiOfferAt).toBe(1_700_000_000_000);
     });
   });
 

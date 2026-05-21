@@ -24,9 +24,22 @@ aitne start
 
 ---
 
+## A day with Aitne
+
+Aitne is a daemon on your laptop, connected to your calendar, mail (Gmail / Outlook / iCloud / Yahoo), GitHub, Obsidian, and Notion. You talk to it through DMs in Slack / Telegram / Discord / WhatsApp — or through a local dashboard at `:3000`.
+
+- **04:00 — Morning routine.** Aitne reads everything that landed overnight (mail, GitHub activity, calendar changes, vault updates) and writes `today.md` — sample below.
+- **Morning — Brief.** The plan lands in your DMs as a short summary.
+- **Through the day — Nudges.** Meeting reminders with travel time, hourly background checks for the things you care about (eval results, PR review requests, new mail). DMs only when there's something worth your attention.
+- **Evening — Review.** Aitne writes a daily journal: what got done, what slipped, one observation about the week.
+
+You steer it through natural-language DMs ("skip morning routine on Sundays", "ping me when the overnight job finishes") and bang commands (`!cost`, `!ask`, `!ingest`).
+
+---
+
 ## Aitne's plan for today
 
-Every morning, Aitne writes `today.md` into `~/.personal-agent/context/` — plain Markdown you can `cat`, `vim`, or sync to Obsidian. Sample:
+`today.md` — written each morning into `~/.personal-agent/context/`. Plain Markdown you can `cat`, `vim`, or sync to Obsidian. Sample:
 
 ```text
 2026-05-20 (Wednesday)
@@ -75,19 +88,6 @@ Handoff
   2026-05-23 (Sat): Friend's birthday dinner
   2026-05-25 (Mon): Quarterly OKR review
 ```
-
----
-
-## A day with Aitne
-
-Aitne is a daemon on your laptop, connected to your calendar, mail (Gmail / Outlook / iCloud / Yahoo), GitHub, Obsidian, and Notion. You talk to it through DMs in Slack / Telegram / Discord / WhatsApp — or through a local dashboard at `:3000`.
-
-- **04:00 — Morning routine.** Aitne reads everything that landed overnight (mail, GitHub activity, calendar changes, vault updates) and writes `today.md` — the file above.
-- **Morning — Brief.** The plan lands in your DMs as a short summary.
-- **Through the day — Nudges.** Meeting reminders with travel time, hourly background checks for the things you care about (eval results, PR review requests, new mail). DMs only when there's something worth your attention.
-- **Evening — Review.** Aitne writes a daily journal: what got done, what slipped, one observation about the week.
-
-You steer it through natural-language DMs ("skip morning routine on Sundays", "ping me when the overnight job finishes") and bang commands (`!cost`, `!ask`, `!ingest`).
 
 ---
 

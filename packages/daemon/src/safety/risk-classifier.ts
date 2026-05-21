@@ -155,6 +155,12 @@ const API_RISK: Record<string, RiskTier> = {
   "GET /api/browser-history/research-clusters": RiskTier.Autonomous,
   "GET /api/browser-history/research-clusters/{*}": RiskTier.Autonomous,
   "GET /api/browser-history/yesterday-summary": RiskTier.Autonomous,
+  // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
+  // JSON endpoint. Read-only; serves the same Zod-validated shape the
+  // morning Stage B journal already reads from the markdown sidecar.
+  // No raw URLs / titles in the response (Layer 1 invariant), so
+  // Autonomous like the rest of the browser-history read surface.
+  "GET /api/browser-history/pre-morning-digest/{*}": RiskTier.Autonomous,
   "GET /api/browser-history/shopping/{*}": RiskTier.Autonomous,
   "GET /api/browser-history/reloads/today": RiskTier.Autonomous,
   "GET /api/browser-history/reloads/weekly": RiskTier.Autonomous,

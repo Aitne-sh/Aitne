@@ -46,6 +46,60 @@ Read the `<journal_skeleton>` block from your context. It carries:
   user-facing diary; the daemon writes them to `agent/journal.md`
   separately.
 
+### Step 1b — Optional: read the browser-history pre-morning digest
+
+If the `browser_history` integration is active, the daemon writes a
+deterministic digest of yesterday's web activity at
+`dayBoundaryHour − 1` (default 03:00). The file lives at
+`<contextDir>/browser/yesterday-<yesterdayDateStr>.md` and contains
+ONLY structured fields the Layer 1 pipeline already redacted — no raw
+URLs, no raw titles, no search-query strings. See
+`BROWSER_HISTORY_INTEGRATION_PLAN.md` §5.F2 + §10.6 for the contract.
+
+Read order:
+
+1. `GET /api/context/browser/yesterday-<yesterdayDateStr>.md` — the
+   primary surface. Returns 200 with the markdown when the cron fired
+   successfully; 404 when the daemon was stopped at 03:00, the
+   integration is `disabled` (the cron skips the write in that mode),
+   or the file has been purged.
+2. **On any non-200 response from step 1** — `GET /api/browser-history/pre-morning-digest/<yesterdayDateStr>`
+   for the Zod-validated JSON fallback. Same shape as the markdown,
+   served live from SQLite. Note that when `browser_history` is
+   `disabled` this endpoint responds **410 Gone** (the integration
+   route gate short-circuits it via `apiRoutesTouched`), not 404 —
+   treat both as "fallback unavailable".
+3. **Neither available (non-200 on both — 404, 410, network error, or
+   anything else)** — skip the section entirely; do NOT mention the
+   integration in the journal, do not retry, do not surface the
+   failure to the user.
+
+What to surface in the journal body when the digest is present:
+
+- Cluster entries with `meaningful_visits_in_window ≥ 5` and
+  `daysActive ≥ 2` get a sentence each in the "Reading / research"
+  area of the journal — one short line per cluster, in the user's
+  `primaryLanguage` per `<output_language_policy>`. Use the cluster's
+  `displayName` as-is (Layer 1 already constrained it to the
+  `[a-z0-9 /-]+` shape).
+- Surface `pendingOffers` in a single line ("There's an open offer to
+  research X — reply 'research' to accept or 'no thanks' to skip") so
+  the user sees them at the top of their morning DM, not buried in
+  chat history. One line per offer, max 3.
+- `shopping` / `reloads` are informational — fold the shopping line
+  into the "Misc" area only if `comparisonMinutes ≥ 10`; do NOT
+  surface `reloads` at all (it's self-monitoring data, not journal
+  material).
+- Never surface `topDomains` verbatim — Layer 1 redacted them, but
+  domain lists in a daily journal would read as surveillance, not
+  memory. Use them as cluster-naming colour for the LLM only, not
+  output.
+
+Inputs read from the digest do NOT bypass the redaction patterns
+governing the rest of the journal. If a digest field somehow drifts
+into prose that would be a credential / private token, follow the
+`Redaction patterns` policy block above and drop the field.
+
 ### Step 2 — Author the full body per `rules/journal-format.md`
 
 The `Daily journal format spec` policy block appended to this prompt

@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type {
   AgentResult,
   BackendId,
+  BackendSafetyFloor,
   Event,
   IntegrationKey,
   ProcessKey,
@@ -1335,17 +1336,53 @@ export class BackendRouter implements IAgentRouter {
    * static map keyed by process key. When a new high-sensitivity
    * integration ships, it registers its own floor map and routes
    * through a similar lookup; this helper is the single chokepoint.
+   *
+   * Validates BOTH `binding.main` and `binding.fallback`. The earlier
+   * implementation only checked main, which left a security gap: for
+   * `routine.research_dispatch` (Claude-only — non-negotiable per the
+   * design), a main=Claude / fallback=Codex configuration would pass
+   * the gate, but a decisive failure on Claude would then run the
+   * routine on Codex through `executeFallbackCore`, violating the
+   * floor silently. §10.3 is explicit: "There is no fallback to
+   * 'best effort with prose deny' — the design's threat model assumes
+   * the enforcement surface holds; running without it is not a
+   * graceful degradation, it is a security regression."
    */
   private checkSafetyFloor(
     binding: ResolvedBackendRoute,
-  ): { reason: string; backendId: BackendId } | null {
+  ): { reason: string; backendId: BackendId; side: "main" | "fallback" } | null {
     const floor = getBrowserHistorySafetyFloor(binding.processKey);
     if (!floor) return null;
-    const backendId = binding.main.backendId;
+    const mainViolation = this.evaluateSafetyFloorForBackend(
+      binding.processKey,
+      binding.main.backendId,
+      floor,
+      "main",
+    );
+    if (mainViolation) return mainViolation;
+    if (binding.fallback) {
+      const fallbackViolation = this.evaluateSafetyFloorForBackend(
+        binding.processKey,
+        binding.fallback.backendId,
+        floor,
+        "fallback",
+      );
+      if (fallbackViolation) return fallbackViolation;
+    }
+    return null;
+  }
+
+  private evaluateSafetyFloorForBackend(
+    processKey: ProcessKey,
+    backendId: BackendId,
+    floor: BackendSafetyFloor,
+    side: "main" | "fallback",
+  ): { reason: string; backendId: BackendId; side: "main" | "fallback" } | null {
     if (!floor.eligible.includes(backendId)) {
       return {
-        reason: `Process ${binding.processKey} requires one of [${floor.eligible.join(", ")}] but is bound to ${backendId}. ${floor.rationale}`,
+        reason: `Process ${processKey} requires one of [${floor.eligible.join(", ")}] but the ${side} binding is ${backendId}. ${floor.rationale}`,
         backendId,
+        side,
       };
     }
     if (floor.forbiddenModes) {
@@ -1355,8 +1392,9 @@ export class BackendRouter implements IAgentRouter {
       );
       if (forbidden) {
         return {
-          reason: `Process ${binding.processKey} cannot run on ${backendId} in ${mode} mode. ${floor.rationale}`,
+          reason: `Process ${processKey} cannot run on ${backendId} in ${mode} mode (${side} binding). ${floor.rationale}`,
           backendId,
+          side,
         };
       }
     }
@@ -1378,7 +1416,7 @@ export class BackendRouter implements IAgentRouter {
 
   private logSafetyFloorRefusal(
     binding: ResolvedBackendRoute,
-    violation: { reason: string; backendId: BackendId },
+    violation: { reason: string; backendId: BackendId; side: "main" | "fallback" },
   ): void {
     try {
       this.db
@@ -1394,6 +1432,7 @@ export class BackendRouter implements IAgentRouter {
           JSON.stringify({
             processKey: binding.processKey,
             backendId: violation.backendId,
+            side: violation.side,
             executionMode: this.executionModeFor(violation.backendId),
             reason: violation.reason,
           }),
@@ -1418,15 +1457,15 @@ export class BackendRouter implements IAgentRouter {
   // message on the configured owner channel.
   private async dmSafetyFloorOnce(
     binding: ResolvedBackendRoute,
-    violation: { reason: string; backendId: BackendId },
+    violation: { reason: string; backendId: BackendId; side: "main" | "fallback" },
     event: Event,
   ): Promise<void> {
     if (!this.notifier) return;
     const dedupeKey
-      = `backend-floor:${binding.processKey}:${violation.backendId}`;
+      = `backend-floor:${binding.processKey}:${violation.side}:${violation.backendId}`;
     const message =
       `Browser-history routine \`${binding.processKey}\` is paused: `
-      + `your current backend (${violation.backendId}) is not in the safety floor. `
+      + `your configured ${violation.side} backend (${violation.backendId}) is not in the safety floor. `
       + `Adjust the binding in /settings/models and re-run.`;
     logger.warn(
       {

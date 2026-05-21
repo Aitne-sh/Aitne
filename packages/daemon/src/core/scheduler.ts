@@ -165,6 +165,22 @@ export const USER_PROFILE_SWEEP_EVENING_CRON_EXPR = "50 17 * * *";
  */
 export const ROADMAP_MAINTENANCE_CRON_EXPR = "45 17 * * *";
 
+/**
+ * Cron expression for the BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a
+ * pre-morning digest: 60 min before the day boundary, wrapping
+ * backward across midnight (so `dayBoundaryHour = 4` → "0 3 * * *",
+ * `dayBoundaryHour = 0` → "0 23 * * *"). Extracted as a pure helper
+ * so the wrap arithmetic — identical in shape to
+ * `buildUserProfileSweepMorningCronExpr` but at the top of the hour —
+ * is asserted without standing up node-cron in tests.
+ */
+export function buildBrowserHistoryPreMorningDigestCronExpr(
+  dayBoundaryHour: number,
+): string {
+  const hour = (dayBoundaryHour - 1 + 24) % 24;
+  return `0 ${hour} * * *`;
+}
+
 interface ScheduleRow {
   id: number;
   scheduled_for: string;
@@ -251,6 +267,20 @@ export class AgentScheduler {
    * agent/journal.md append.
    */
   private onRoadmapMaintenance: (() => void) | null = null;
+  /**
+   * BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
+   * builder. Fires at `dayBoundaryHour − 1` local each night so the
+   * morning Stage B journal reads a static `context/browser/yesterday-<date>.md`
+   * file (pre-warmed) rather than calling `GET /api/browser-history/
+   * yesterday-summary` at 04:00. The callback is deterministic Node
+   * code (no LLM in the path); the scheduler treats it as
+   * fire-and-forget like the roadmap-maintenance and context-index
+   * callbacks above. A failure here logs but never cascades into the
+   * 04:00 morning routine — the journal task-flow has a documented
+   * fallback to the `/api/browser-history/pre-morning-digest/{date}`
+   * endpoint.
+   */
+  private onBrowserHistoryPreMorningDigest: (() => void) | null = null;
   /**
    * Setup gate — returns a skip reason when autonomous work should be
    * paused (initial setup incomplete, or setup conversation active).
@@ -345,6 +375,19 @@ export class AgentScheduler {
    */
   setRoadmapMaintenanceCallback(fn: () => void): void {
     this.onRoadmapMaintenance = fn;
+  }
+
+  /**
+   * Register the BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a
+   * pre-morning digest cron callback. Fires at `dayBoundaryHour − 1`
+   * local; the callback is fire-and-forget — it builds the digest
+   * from `browser_visits` / `browser_research_clusters` /
+   * `browser_pending_offers` and writes the markdown + JSON sidecar
+   * into the daemon-owned `context/browser/` directory. Failures
+   * inside the callback log but do not throw outward.
+   */
+  setBrowserHistoryPreMorningDigestCallback(fn: () => void): void {
+    this.onBrowserHistoryPreMorningDigest = fn;
   }
 
   /**
@@ -751,6 +794,43 @@ export class AgentScheduler {
       { timezone: tz },
     );
     this.cronJobs.push(reconcilerJob);
+
+    // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 Stage 1 — pre-morning
+    // digest at `dayBoundaryHour − 1` (default 03:00 when
+    // `dayBoundaryHour=4`). Same hour as the context-index reconciler
+    // above (03:45) but at :00 instead of :45 so the digest's snapshot
+    // is taken BEFORE the reconciler nudges the prompt context — the
+    // morning routine's task-flow then sees both the reconciled index
+    // AND the freshly-written digest in its first turn.
+    //
+    // Gated by `autonomousGate` like every other autonomous cron;
+    // setup-incomplete + setup-active states pause the build.
+    // Fire-and-forget: the callback handles its own failure logging
+    // (see `safeRunPreMorningDigestJob`), and any uncaught throw lands
+    // in the local catch block here rather than escaping the cron.
+    const browserDigestCron = buildBrowserHistoryPreMorningDigestCronExpr(
+      this.config.dayBoundaryHour,
+    );
+    const browserDigestJob = cron.schedule(
+      browserDigestCron,
+      () => {
+        const gateReason = this.autonomousGate();
+        if (gateReason !== null) {
+          this.logGateBlock(gateReason, { cron: "browser_history_pre_morning_digest" });
+          return;
+        }
+        try {
+          this.onBrowserHistoryPreMorningDigest?.();
+        } catch (err) {
+          logger.warn(
+            { err },
+            "browser-history pre-morning digest callback threw",
+          );
+        }
+      },
+      { timezone: tz },
+    );
+    this.cronJobs.push(browserDigestJob);
 
     if (this.config.hourlyCheckEnabled) {
       const hourlyExpr = buildHourlyCronExpr(

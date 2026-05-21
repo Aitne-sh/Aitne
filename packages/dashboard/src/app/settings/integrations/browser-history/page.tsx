@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   EyeOff,
+  Filter,
   History,
   Loader2,
   RefreshCw,
@@ -330,6 +331,23 @@ export default function BrowserHistorySettingsPage() {
     if (enabled) current.add(category);
     else current.delete(category);
     await saveField("browserHistoryCategories", Array.from(current));
+  }
+
+  // BROWSER_HISTORY_INTEGRATION_PLAN §5.F1.meaningful rule 6 — split the
+  // textarea blob by line and comma, trim, drop empties. The daemon-side
+  // `buildResearchDomainLists` normalizes each entry to eTLD+1, so we
+  // don't need to pre-normalize on the dashboard. Saving the raw user
+  // text (post-trim/split) is acceptable; if the user later re-opens the
+  // page they see what they typed minus whitespace.
+  function parseDomainList(value: string): string[] {
+    return Array.from(
+      new Set(
+        value
+          .split(/[\n,]/)
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0 && entry.length <= 253),
+      ),
+    );
   }
 
   if (!config || integrationQuery.isLoading) {
@@ -679,6 +697,131 @@ export default function BrowserHistorySettingsPage() {
           </div>
         </Card>
       </div>
+
+      <ResearchDomainFilterCard
+        allowlist={config.browserHistoryResearchDomainAllowlist}
+        denylist={config.browserHistoryResearchDomainDenylist}
+        onSaveAllowlist={(value) =>
+          saveField(
+            "browserHistoryResearchDomainAllowlist",
+            parseDomainList(value),
+          )
+        }
+        onSaveDenylist={(value) =>
+          saveField(
+            "browserHistoryResearchDomainDenylist",
+            parseDomainList(value),
+          )
+        }
+      />
     </div>
+  );
+}
+
+/**
+ * Research domain allowlist / denylist editor — §5.F1.meaningful rule 6.
+ *
+ * The user types eTLD+1 domains (one per line, or comma-separated) into
+ * two free-form textareas. Local state holds the in-progress edit; the
+ * "Save" button writes to PATCH /config and the daemon's filter
+ * (`buildResearchDomainLists`) normalises each entry to eTLD+1. Both
+ * lists default to empty (the integration's "emergent" mode, where
+ * cluster qualification works against any domain that passes rules 1-5);
+ * users only opt in to the lists when they want explicit control.
+ */
+function ResearchDomainFilterCard({
+  allowlist,
+  denylist,
+  onSaveAllowlist,
+  onSaveDenylist,
+}: {
+  allowlist: readonly string[];
+  denylist: readonly string[];
+  onSaveAllowlist: (value: string) => Promise<void>;
+  onSaveDenylist: (value: string) => Promise<void>;
+}) {
+  const initialAllow = allowlist.join("\n");
+  const initialDeny = denylist.join("\n");
+  const [allowDraft, setAllowDraft] = useState(initialAllow);
+  const [denyDraft, setDenyDraft] = useState(initialDeny);
+  const [savingAllow, setSavingAllow] = useState(false);
+  const [savingDeny, setSavingDeny] = useState(false);
+
+  const allowChanged = allowDraft !== initialAllow;
+  const denyChanged = denyDraft !== initialDeny;
+
+  return (
+    <Card>
+      <CardHeader>
+        <SectionLabel
+          icon={Filter}
+          title="Research domain filter"
+          description="Optionally constrain which domains contribute to research-cluster qualification. Leave both lists empty (default) to use automatic detection across all your research domains."
+        />
+      </CardHeader>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div className="space-y-2">
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Allowlist (opt-in)</span>
+            <textarea
+              value={allowDraft}
+              onChange={(event) => setAllowDraft(event.target.value)}
+              placeholder={"arxiv.org\nanthropic.com\nsimonwillison.net"}
+              className="min-h-[140px] w-full resize-y rounded-md border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            When non-empty, only visits whose eTLD+1 is in this list are counted as meaningful research. One domain per line or comma-separated; subdomains and paths are normalised away.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!allowChanged || savingAllow}
+            onClick={async () => {
+              setSavingAllow(true);
+              try {
+                await onSaveAllowlist(allowDraft);
+              } finally {
+                setSavingAllow(false);
+              }
+            }}
+          >
+            {savingAllow ? "Saving…" : allowChanged ? "Save allowlist" : "Saved"}
+          </Button>
+        </div>
+        <div className="space-y-2">
+          <label className="grid gap-1 text-sm">
+            <span className="font-medium">Denylist (always-on)</span>
+            <textarea
+              value={denyDraft}
+              onChange={(event) => setDenyDraft(event.target.value)}
+              placeholder={"news.ycombinator.com\nreddit.com"}
+              className="min-h-[140px] w-full resize-y rounded-md border border-border bg-muted/30 p-3 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Domains here are still recorded in your browser history but never produce offers or wiki summaries. Denylist wins over the allowlist if both contain the same domain.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!denyChanged || savingDeny}
+            onClick={async () => {
+              setSavingDeny(true);
+              try {
+                await onSaveDenylist(denyDraft);
+              } finally {
+                setSavingDeny(false);
+              }
+            }}
+          >
+            {savingDeny ? "Saving…" : denyChanged ? "Save denylist" : "Saved"}
+          </Button>
+        </div>
+      </div>
+      <p className="mt-4 rounded-md border p-3 text-xs text-muted-foreground">
+        Changes apply to new browser visits only; previously-classified visits are not reclassified (they age out via the retention window above).
+      </p>
+    </Card>
   );
 }

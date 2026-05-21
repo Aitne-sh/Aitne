@@ -25,6 +25,7 @@ import type { Event } from "@aitne/shared";
 import type { BangPrefixCommand, BangCommandContext } from "./registry.js";
 import { BangArgError } from "./registry.js";
 import {
+  clearClusterOfferStamps,
   deletePendingOffersForCluster,
   getResearchClusterDetail,
   listBrowserResearchClusters,
@@ -235,13 +236,9 @@ async function handleWiki(
   // (`routine.research_wiki_summary.md` step 3 — "If wikiSummaryWrittenAt
   // is present AND delta shows no new buckets since that timestamp,
   // reply skipped"). Pre-stamping it on acceptance made the agent skip
-  // the very write the user just asked for. The pending-offer deletion +
-  // the cluster's `lastWikiOfferAt` re-fire gate are sufficient to
-  // prevent the templated DM from re-firing immediately; the actual
-  // "wiki note exists" signal is stamped by the agent itself after a
-  // successful write (P3-B will wire a write-back endpoint; today the
-  // field stays null and the materiality check no-ops, which is
-  // correct).
+  // the very write the user just asked for; the actual "wiki note exists"
+  // signal is stamped by the agent itself via /wiki-written after a
+  // successful write.
   const event = createResearchCommandEvent({
     processKey: "routine.research_wiki_summary",
     slug,
@@ -253,6 +250,14 @@ async function handleWiki(
   // rows for the slug (see handleAccept for the rationale; same reasoning
   // applies to the wiki path).
   deletePendingOffersForCluster(ctx.db, slug);
+  // Clear `lastWikiOfferAt` so the rate-limit gate's decline_backoff
+  // (which trips when BOTH options' lastXxxOfferAt are set AND neither
+  // is accepted within 30d) does not falsely silence the cluster if
+  // the wiki write fails or the agent skips the /wiki-written stamp.
+  // Mirrors the API accept handler's wiki_summary branch — both entry
+  // points must apply the same fix so natural-language and bang
+  // acceptance behave identically. See `clearClusterOfferStamps` JSDoc.
+  clearClusterOfferStamps(ctx.db, slug, { lastWikiOfferAt: true });
   await ctx.notify(
     `Queued wiki summary for \`${slug}\`. I'll write it to Obsidian (or Notion / local context, whichever you have) and DM the destination.`,
   );

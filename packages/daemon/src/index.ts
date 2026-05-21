@@ -75,6 +75,8 @@ import {
 } from "./core/roadmap-write-lock.js";
 import { runRoadmapMechanicalMaintenance } from "./core/roadmap-maintenance.js";
 import { fanoutResearchClusterUpdates } from "./core/browser-history/research-cluster-fanout.js";
+import { safeRunPreMorningDigestJob } from "./core/browser-history/pre-morning-digest-job.js";
+import { shouldStartObserversFor } from "./core/integration-lifecycle.js";
 import { sweepExpiredMigrationBackups } from "./api/routes/setup-migrate.js";
 import { PlatformSecretStore } from "./secrets/platform-secret-store.js";
 import { FileEncryptedBlobStore } from "./secrets/encrypted-blob-store.js";
@@ -1344,6 +1346,23 @@ async function startup(): Promise<void> {
     } catch (err) {
       logger.error({ err }, "runRoadmapMechanicalMaintenance threw");
     }
+  });
+  // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
+  // job. Fires at `dayBoundaryHour − 1` local, gated by the same
+  // integration-state check that hides the rest of the browser-history
+  // surface when the user has set `browser_history` to `disabled`.
+  // The callback owns its own try/catch (`safeRunPreMorningDigestJob`)
+  // so a transient SQL or fs failure never crashes the cron tick.
+  scheduler.setBrowserHistoryPreMorningDigestCallback(() => {
+    if (!shouldStartObserversFor(db, "browser_history")) return;
+    safeRunPreMorningDigestJob({
+      db,
+      contextDir: getContextDir(config, db),
+      boundary: {
+        timezone: config.timezone || undefined,
+        dayBoundaryHour: config.dayBoundaryHour,
+      },
+    });
   });
   // Phase 4 auth probe — runs BEFORE the hourly check on each cron
   // tick so auth health detection happens independently of the

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import cron from "node-cron";
 import {
   AgentScheduler,
+  buildBrowserHistoryPreMorningDigestCronExpr,
   buildHourlyCronExpr,
   buildUserProfileSweepMorningCronExpr,
   ROADMAP_MAINTENANCE_CRON_EXPR,
@@ -877,9 +878,10 @@ describe("AgentScheduler", () => {
       // Internals aren't exposed — reach via cast. Morning routine +
       // evening review + morning sweep + evening sweep + roadmap
       // maintenance + weekly review + monthly review + context-index
-      // reconciler + hourly = 9 jobs.
+      // reconciler + browser-history pre-morning digest
+      // (BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a) + hourly = 10 jobs.
       const jobs = (s as unknown as { cronJobs: unknown[] }).cronJobs;
-      expect(jobs.length).toBe(9);
+      expect(jobs.length).toBe(10);
       s.stop();
     });
 
@@ -891,10 +893,11 @@ describe("AgentScheduler", () => {
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       s.start();
       const jobs = (s as unknown as { cronJobs: unknown[] }).cronJobs;
-      // 8 jobs: morning routine, evening review, morning sweep, evening
+      // 9 jobs: morning routine, evening review, morning sweep, evening
       // sweep, roadmap maintenance, weekly review, monthly review,
-      // context-index reconciler (hourly is disabled).
-      expect(jobs.length).toBe(8);
+      // context-index reconciler, browser-history pre-morning digest
+      // (hourly is disabled).
+      expect(jobs.length).toBe(9);
       s.stop();
     });
 
@@ -1001,6 +1004,38 @@ describe("AgentScheduler", () => {
 
     it("evening sweep expression is fixed at 50 17", () => {
       expect(USER_PROFILE_SWEEP_EVENING_CRON_EXPR).toBe("50 17 * * *");
+    });
+  });
+
+  // ── Browser-history pre-morning digest cron (BROWSER_HISTORY_INTEGRATION_PLAN
+  // §5.F2 P4a) ──
+  // Pure function: 60 min before `dayBoundaryHour`, top of the hour,
+  // wrapping backward across midnight. Same shape as the user-profile
+  // sweep above; tests exercise the wrap and the canonical default.
+  describe("buildBrowserHistoryPreMorningDigestCronExpr", () => {
+    it("returns 0 3 * * * for the default dayBoundaryHour = 4", () => {
+      expect(buildBrowserHistoryPreMorningDigestCronExpr(4)).toBe(
+        "0 3 * * *",
+      );
+    });
+
+    it("tracks non-default dayBoundaryHour (e.g. 6 → 0 5)", () => {
+      expect(buildBrowserHistoryPreMorningDigestCronExpr(6)).toBe(
+        "0 5 * * *",
+      );
+    });
+
+    it("wraps to hour 23 when dayBoundaryHour = 0", () => {
+      expect(buildBrowserHistoryPreMorningDigestCronExpr(0)).toBe(
+        "0 23 * * *",
+      );
+    });
+
+    it("wraps cleanly for every valid dayBoundaryHour", () => {
+      for (let h = 0; h < 24; h++) {
+        const expected = `0 ${(h - 1 + 24) % 24} * * *`;
+        expect(buildBrowserHistoryPreMorningDigestCronExpr(h)).toBe(expected);
+      }
     });
   });
 

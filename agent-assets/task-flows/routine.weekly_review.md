@@ -86,6 +86,24 @@ workflow; the skill owns the file contract.
      retrospective observations),
    - what remains incomplete,
    - what needs attention next week.
+4a. Pull this week's browser-reload tally — drives the optional
+    `## This Week You Checked` section in Phase 3a
+    (BROWSER_HISTORY_INTEGRATION_PLAN §5.F4 "Surfacing"):
+
+    ```
+    GET /api/browser-history/reloads/weekly
+    ```
+
+    The endpoint defaults `end` to today and `start` to `end-6d` — which
+    is the trailing-7-day window. Reads from `browser_reload_signals`;
+    returns an empty `entries` array on a fresh install or if the
+    browser-history integration is `disabled`. Treat any 404 / network
+    failure as "no entries" and skip the §3a section accordingly — never
+    abort the review on a browser-history hiccup.
+
+    Use only the top **5** entries by `reloadCount` for the section
+    body. The endpoint already sorts by count DESC then pattern ASC; do
+    not re-rank.
 
 ### Phase 2: Synthesize — split into two buckets
 5. Build TWO separate mental lists before writing anything:
@@ -170,6 +188,10 @@ workflow; the skill owns the file contract.
    ## Lessons for Next Week
    - <observation from this week's data> → <specific next-week action>
    - <observation> → <specific next-week action>
+
+   ## This Week You Checked
+   - <url-pattern>: <reloadCount> reloads across <days> days
+   - <url-pattern>: <reloadCount> reloads across <days> days
    ```
    The `## Metrics` section tracks **user** activity only. Do not add rows
    like "agent plan rows completed", "scheduled tasks fired", "observations
@@ -221,6 +243,35 @@ workflow; the skill owns the file contract.
        `<output_language_policy>`'s body language; the H2 headers
        themselves stay in English per Policy B (skeleton headers fixed,
        prose follows `<settings primary_language>`).
+     - **This Week You Checked** — passive observability section
+       (BROWSER_HISTORY_INTEGRATION_PLAN §5.F4 "Surfacing"). Sourced
+       from Step 4a's `/api/browser-history/reloads/weekly`. **Optional**:
+       if the endpoint returned an empty `entries` array, **omit the
+       entire H2 section** — do not emit a heading with a "(none)"
+       placeholder, do not invent dummy entries. The section is **not**
+       lifted by the morning_routine's `<previous_week>` extractor
+       (which scans only Carry Over / Next Week Focus / Lessons), so
+       omission has no downstream contract impact. Hard rules when the
+       section IS rendered:
+         - Max **5** bullets, ordered by `reloadCount` DESC as returned
+           by the API. Cap stays low: the goal is "name the patterns",
+           not "enumerate the entire browsing surface".
+         - **Neutral observation only**. No recommendations
+           ("consider...", "you should...", "maybe stop..."), no rate
+           framing ("that's a lot"), no judgement ("perhaps habit X").
+           The user reads their own meaning into it; the agent does not
+           moralise. The plan calls this out explicitly: F4's surface
+           is "self-awareness of unconscious habits, with zero agent
+           interference".
+         - Bullet shape exactly:
+           `- <url-pattern>: <reloadCount> reloads across <days> days`.
+           `<url-pattern>` is the API's `urlPattern` verbatim (it has
+           already been stripped of query strings by Layer 1's reload
+           detector and is bounded to `<domain>/<first-path-segment>`);
+           never expand to a full URL, never wrap in markdown links.
+         - When `days == 1`, render `1 day` not `1 days` (the only
+           pluralization the renderer is responsible for — pattern is
+           already a noun the user understands).
 8. If the review reveals roadmap drift or stale project status, update
    roadmap.md and the relevant projects/*.md in the same session.
 
@@ -386,6 +437,13 @@ Output language: follow `<output_language_policy>`. Compose in this order:
     These describe agent mechanics, not user outcomes. The same rule
     applies in whatever language `<output_language_policy>` resolves
     to — do not paste an equivalent meta-phrase.
+  - **Reload tally never enters the notification.** BROWSER_HISTORY_INTEGRATION_PLAN
+    §5.F4 ("Explicit non-action") is unambiguous: "No real-time
+    intervention. No DM on threshold cross. No autonomous push." The
+    `## This Week You Checked` section lives in the weekly file only;
+    do not summarise it in the message body, do not paraphrase it, do
+    not joke about it. The user pulls it via `!checks` or by opening
+    the weekly file directly.
   - Priority `normal`. Respects quiet hours via the notify skill contract.
   - Exactly ONE notification via POST /api/notify. Do not split.
 

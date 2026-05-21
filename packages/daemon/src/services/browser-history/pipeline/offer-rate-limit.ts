@@ -241,6 +241,10 @@ function parseHHMM(value: string): number | null {
   if (!match) return null;
   const h = Number(match[1]);
   const m = Number(match[2]);
+  // Defensive: the regex above only matches ASCII digits, so Number()
+  // always yields a finite integer here. Kept so a future regex tweak
+  // (e.g. accepting full-width digits) can't silently produce NaN.
+  /* c8 ignore next */
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
   if (h < 0 || h > 23 || m < 0 || m > 59) return null;
   return h * 60 + m;

@@ -12,10 +12,12 @@ import {
   browserReloadsWeeklyResponseSchema,
   browserShoppingDateResponseSchema,
   getAgentDayDateStr,
+  preMorningDigestSchema,
   yesterdayResearchSummarySchema,
 } from "@aitne/shared";
 import type { ApiDependencies } from "../server.js";
 import {
+  clearClusterOfferStamps,
   deletePendingOffersForCluster,
   getResearchClusterDetail,
   getYesterdayResearchSummary,
@@ -36,6 +38,9 @@ import {
 import { createHostProfile } from "../../services/browser-history/lifecycle/platform.js";
 import { detectBrowserHistoryCapabilities } from "../../services/browser-history/detectors/registry.js";
 import { createResearchCommandEvent } from "../../core/browser-history/research-events.js";
+import { readPreMorningDigestJsonForDate } from "../../core/browser-history/pre-morning-digest-job.js";
+import { buildPreMorningDigest } from "../../services/browser-history/pipeline/pre-morning-digest.js";
+import { getContextDir } from "../../config.js";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const CLUSTER_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/;
@@ -216,6 +221,21 @@ export function createBrowserHistoryRoutes(deps: ApiDependencies): Hono {
         stampClusterDmFields(deps.db, slug, {
           researchOfferAcceptedAt: now,
         });
+      } else {
+        // wiki_summary acceptance has no permanent "accepted" stamp on
+        // the cluster row — `wikiSummaryWrittenAt` is reserved for the
+        // agent to stamp after a successful write (task-flow step 6
+        // calls /wiki-written). Clearing `lastWikiOfferAt` here closes
+        // the rate-limit gate's decline_backoff path: that gate trips
+        // when BOTH options' lastXxxOfferAt are set AND neither was
+        // accepted within 30d. Without this clear, accepting wiki via
+        // the two-option offer + a wiki write that fails (or the agent
+        // forgets /wiki-written) would falsely look like "user ignored
+        // both options" → 30d cluster silence despite active engagement.
+        // The 7-day per-cluster `dmBudgetMs` still bounds re-firing;
+        // the wiki re-fire window resets only after the next offer
+        // fires and writes a fresh `lastWikiOfferAt`.
+        clearClusterOfferStamps(deps.db, slug, { lastWikiOfferAt: true });
       }
       // BROWSER_HISTORY_INTEGRATION_PLAN seventh-pass — clear ALL
       // pending rows for the slug. The poller may have inserted
@@ -302,6 +322,51 @@ export function createBrowserHistoryRoutes(deps: ApiDependencies): Hono {
         getYesterdayResearchSummary(date),
       ),
     );
+  });
+
+  // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
+  // JSON endpoint. Primary surface is the markdown file written at
+  // `dayBoundaryHour − 1` (`context/browser/yesterday-<date>.md`); this
+  // endpoint is the typed fallback for callers that want the
+  // Zod-validated shape or for days where the cron did not fire
+  // (daemon stopped at 03:00, fresh install, sidecar purged).
+  //
+  // Strategy:
+  //   1. Try the JSON sidecar — Zod-validated on read. Cheap, exact
+  //      same bytes the journal saw if the cron ran.
+  //   2. Sidecar missing / corrupt → rebuild fresh from the DB. The
+  //      digest builder is deterministic and cheap, so a stale request
+  //      cannot cause a thundering-herd problem.
+  //
+  // The handler does NOT write the rebuilt digest back to disk — that
+  // would make the API a side-effect-ful path, and the cron's job is
+  // to own the file. If the operator wants a fresh file, they can
+  // re-run the digest job from the dashboard's manual-trigger surface
+  // (future work; not part of P4a).
+  app.get("/browser-history/pre-morning-digest/:date", (c) => {
+    const requested = c.req.param("date");
+    if (!DATE_PATTERN.test(requested)) {
+      return c.json({ error: "invalid_date" }, 400);
+    }
+    const contextDir = getContextDir(deps.config, deps.db);
+    const sidecar = readPreMorningDigestJsonForDate(contextDir, requested);
+    if (sidecar && sidecar.date === requested) {
+      return c.json(preMorningDigestSchema.parse(sidecar));
+    }
+    // Rebuild fresh — pass the requested date through as "the digest's
+    // agent-day" so the window math doesn't drift onto whatever
+    // agent-day the request happens to land in. Uses the pure builder
+    // directly (not the file-writing job) — the route must never
+    // produce a file as a side effect of a GET. `agentDayBoundary`
+    // reuses the same timezone + dayBoundaryHour resolution every
+    // other route in this file applies, so the rebuild window matches
+    // what the cron writes.
+    const digest = buildPreMorningDigest({
+      db: deps.db,
+      date: requested,
+      boundary: agentDayBoundary(deps),
+    });
+    return c.json(preMorningDigestSchema.parse(digest));
   });
 
   app.get("/browser-history/shopping/:date", (c) => {

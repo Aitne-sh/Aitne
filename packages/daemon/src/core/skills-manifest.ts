@@ -161,26 +161,29 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
   ],
   "routine.roadmap_refresh": ["context", "external-services", "notion", "roadmap"],
   // BROWSER_HISTORY_INTEGRATION_PLAN P3. Each browser-history routine
-  // loads exactly two skills — the agent-facing browser-history skill
-  // (curl chokepoint to /api/browser-history/*) and `context` for the
-  // research-journal / assistance / wiki write paths.
+  // loads the agent-facing browser-history skill (curl chokepoint to
+  // /api/browser-history/*) plus `context` for the research-journal /
+  // assistance / wiki write paths. `notify` is layered on for any
+  // routine that DMs the user — the routine_protocol block tells the
+  // agent that /api/notify is the only user-visible channel for
+  // routines, but only `notify`'s SKILL.md carries the actual curl
+  // shape (host, port, body schema, priority field, awareness-gate
+  // rules). Without it the agent has to guess the API surface, which
+  // breaks the "DM the owner with..." instructions in the task-flows.
   //
-  // No `notify` skill: cluster_update is silent by design (templated
-  // offer DMs are dispatched by the poller, not the agent), and the
-  // accept-path routines (research_dispatch, research_wiki_summary)
-  // emit a single executive-summary DM through the existing universal
-  // message-discipline contract on `context` rather than the broader
-  // `notify` surface.
+  // cluster_update stays silent — it appends to a journal file and
+  // does not DM. The offer DM routine has the curl shape inline in
+  // its task-flow so the narrow skill set is acceptable there; the
+  // two accept-path routines (research_dispatch, research_wiki_summary)
+  // need `notify` because their task-flows just say "DM the owner".
   "routine.research_cluster_update": ["browser-history", "context"],
   // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — offer DM
-  // composition is its own lite-tier session. Same skill set as
-  // cluster_update; the agent reads `event.data` for the cluster
-  // context payload, composes the two-option DM, and POSTs
-  // /api/notify. No browser-history-respond — that skill lives on
+  // composition is its own lite-tier session. The task-flow inlines
+  // the curl shape; no browser-history-respond — that skill lives on
   // the message.dm side where the user's reply lands.
   "routine.research_offer_dm": ["browser-history", "context"],
-  "routine.research_dispatch": ["browser-history", "context"],
-  "routine.research_wiki_summary": ["browser-history", "context"],
+  "routine.research_dispatch": ["browser-history", "context", "notify"],
+  "routine.research_wiki_summary": ["browser-history", "context", "notify"],
   // Dashboard-triggered manual refresh of today.md's User Schedule
   // section. Intentionally narrow — the flow only reads the calendar
   // and PATCHes user_schedule / agent_log. No mail, no roadmap, no

@@ -42,9 +42,9 @@ Follow the `browser-history` skill, "Flow: routine.research_wiki_summary".
    `POST /api/browser-history/research-clusters/<slug>/wiki-written`
    (empty body). This advances `wikiSummaryWrittenAt` on the cluster
    row so step 3's materiality check works on the next refresh and
-   the templated `wiki_summary_offer` does not re-fire after the
-   14-day re-fire window. Skip this call only if step 5 itself
-   failed.
+   the offer-trigger evaluator's `wikiEligible` gate stays closed
+   while a wiki note already exists. Skip this call only if step 5
+   itself failed.
 7. DM the owner with the destination path / page link and a one-line
    "ready for review" prompt.
 

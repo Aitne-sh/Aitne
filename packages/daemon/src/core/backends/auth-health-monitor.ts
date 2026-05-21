@@ -769,6 +769,11 @@ export class AuthHealthMonitor {
         continue;
       }
       const core = this.cores[backendId];
+      // Defensive: the snapshot loop above already filtered backends
+      // without a registered core, so this branch is unreachable in
+      // steady state. Kept as a load-bearing guard if the cores map
+      // ever mutates mid-tick.
+      /* c8 ignore next */
       if (!core) continue;
 
       let result: AuthCheckResult;
@@ -948,6 +953,9 @@ export class AuthHealthMonitor {
     prev: AuthHealthState | null,
     quietHours: boolean,
   ): boolean {
+    // Defensive: caller (runCheckAll) filters ok before invoking. Kept
+    // so a future caller that skips the filter still gets a safe answer.
+    /* c8 ignore next */
     if (current.status === "ok") return false;
     // First observation in this failure session — wait for next tick so
     // the grace period has a non-zero duration to measure against. Also
@@ -955,6 +963,11 @@ export class AuthHealthMonitor {
     if (!prev || prev.status === "ok" || prev.status === "unknown") {
       return false;
     }
+    // Defensive: persistCheckResult stamps firstExpiredAt on every
+    // ok→non-ok transition, so any row whose status is non-ok past the
+    // guard above also has firstExpiredAt set. Kept so a hand-edited
+    // row still produces a safe answer rather than NaN math downstream.
+    /* c8 ignore next */
     if (!prev.firstExpiredAt) return false;
 
     const nowMs = this.now().getTime();
@@ -973,6 +986,10 @@ export class AuthHealthMonitor {
     prev: AuthHealthState,
     nowMs: number,
   ): boolean {
+    // Defensive: only caller `shouldNotify` invokes this AFTER its own
+    // `!prev.notifiedAt` early return, so notifiedAt is always set when
+    // we get here. Kept as a typesafe assertion.
+    /* c8 ignore next */
     if (!prev.notifiedAt) return false;
     const minutesSince = (nowMs - prev.notifiedAt.getTime()) / 60_000;
     // notificationCount starts at 1 after the first DM. Step index
@@ -1005,6 +1022,9 @@ export class AuthHealthMonitor {
     const nowMs = this.now().getTime();
     const sharpTone = items.some((item) => {
       const first = item.prev?.firstExpiredAt;
+      // Defensive: shouldNotify upstream guarantees every item in
+      // `toNotify` has prev.firstExpiredAt set.
+      /* c8 ignore next */
       if (!first) return false;
       return (nowMs - first.getTime()) / 86_400_000 >= URGENT_TONE_DAYS;
     });
@@ -1016,6 +1036,9 @@ export class AuthHealthMonitor {
     const lines: string[] = [header, ""];
     for (const { backendId, result, prev } of items) {
       const detail = result.detail ?? result.status;
+      // Defensive: see sharpTone block above; shouldNotify guarantees
+      // firstExpiredAt is set on every item that reaches this loop.
+      /* c8 ignore next 3 */
       const since = prev?.firstExpiredAt
         ? ` (${formatElapsed(nowMs - prev.firstExpiredAt.getTime())} elapsed)`
         : "";
@@ -1158,13 +1181,18 @@ export class AuthHealthMonitor {
           .run(now.toISOString(), now.toISOString(), backendId);
         this.telemetry.recordKeepaliveReminder(backendId);
         reminded.push(backendId);
+        // DB stamp failure after successful notify; SQLite virtually
+        // never throws after a write completes, but we leave the catch
+        // in place so a hard disk error or schema-locked race surfaces
+        // a warning instead of bubbling up to the caller.
+        /* c8 ignore start */
       } catch (err) {
-        /* v8 ignore next 4 — DB stamp failure after successful notify; SQLite rarely throws after write */
         logger.warn(
           { err, backendId },
           "runKeepaliveSweep: DB stamp failed after notify (may re-send next sweep)",
         );
       }
+      /* c8 ignore stop */
     }
     return reminded;
   }

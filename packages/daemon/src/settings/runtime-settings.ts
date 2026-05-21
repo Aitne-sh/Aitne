@@ -553,6 +553,36 @@ export const runtimeSettingsSchema = z.object({
   browserHistoryRetentionDays: z.number().int().min(1).max(365).default(30),
   browserHistorySearchQueryRetentionDays: z.number().int().min(1).max(90).default(7),
   browserHistoryLifecycle: browserHistoryLifecycleConfigSchema.prefault({}),
+  /**
+   * BROWSER_HISTORY_INTEGRATION_PLAN §5.F1.meaningful rule 6 — user-curated
+   * domain allowlist / denylist for the research-cluster meaningful filter.
+   *
+   * Both default to empty arrays. When empty, the filter runs in "emergent"
+   * mode (the design's default): any domain that passes rules 1-5 is
+   * eligible. When `browserHistoryResearchDomainAllowlist` is non-empty,
+   * the filter switches to allowlist-only: a visit is meaningful ONLY
+   * if its eTLD+1 is in the allowlist AND it passes rules 1-5.
+   * `browserHistoryResearchDomainDenylist` is always-on and wins over
+   * the allowlist (defensive — explicit deny always denies).
+   *
+   * Entries are eTLD+1 strings (`arxiv.org`, `simonwillison.net`). The
+   * meaningful-filter normalises inputs (`https://`/`www.`/paths/case)
+   * to eTLD+1 before lookup, so `arxiv.org`, `https://arxiv.org`, and
+   * `www.arxiv.org/abs/2402.06196` all resolve to the same key.
+   *
+   * Visits filtered out by this rule are still recorded in
+   * `browser_visits` (the integration's row history is unchanged) but
+   * do not contribute to `meaningful_*` totals on cluster rows. Settings
+   * changes take effect on the next poller cycle's new visits only;
+   * already-classified visits are not retroactively re-classified
+   * (they age out via `browserHistoryRetentionDays`).
+   */
+  browserHistoryResearchDomainAllowlist: z
+    .array(z.string().trim().min(1).max(253))
+    .default([]),
+  browserHistoryResearchDomainDenylist: z
+    .array(z.string().trim().min(1).max(253))
+    .default([]),
 
   /**
    * B-003 Phase 4.3 — auto-probe cadence for enabled MCP servers.
@@ -935,6 +965,8 @@ export const RUNTIME_SETTING_KEYS = [
   "browserHistoryRetentionDays",
   "browserHistorySearchQueryRetentionDays",
   "browserHistoryLifecycle",
+  "browserHistoryResearchDomainAllowlist",
+  "browserHistoryResearchDomainDenylist",
   "mcpAutoProbeIntervalMinutes",
   "delegatedProbeIntervalMinutes",
   "enabledMailProviders",
