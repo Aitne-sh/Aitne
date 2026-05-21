@@ -23,12 +23,32 @@ import {
   applyBrowserHistoryRetention,
   incrementReloadSignals,
   insertBrowserVisits,
+  listPendingOffersForCluster,
   readBrowserHistoryIngestCursor,
   replaceShoppingSessions,
+  stampClusterDmFields,
+  upsertPendingOffer,
   upsertResearchClusters,
   writeBrowserHistoryIngestCursor,
   writeBrowserHistoryLastIngestAt,
+  OFFER_DEFAULT_TTL_MS,
 } from "../db/browser-history-store.js";
+import {
+  buildEngagementSnapshot,
+  listActiveClustersForEngagement,
+} from "../services/browser-history/pipeline/cluster-extractor.js";
+import {
+  DEFAULT_OFFER_THRESHOLDS,
+  evaluateOfferTriggers,
+  type OfferTriggerDecision,
+} from "../services/browser-history/pipeline/offer-triggers.js";
+import {
+  DEFAULT_OFFER_RATE_LIMIT_CONFIG,
+  gateOfferRateLimit,
+  type OfferRateLimitConfig,
+} from "../services/browser-history/pipeline/offer-rate-limit.js";
+import { createResearchCommandEvent } from "../core/browser-history/research-events.js";
+import type { Event } from "@aitne/shared";
 import { PollGuard } from "./poll-guard.js";
 
 const logger = createLogger("browser-history-poller");
@@ -113,11 +133,36 @@ export function detectShoppingSessions(
  * supervisor: the supervisor keeps the browser running so the History DB
  * is fresh; the poller reads from it.
  */
+export interface BrowserHistoryPollerOptions {
+  host?: HostProfile;
+  intervalMinutes?: number;
+  /**
+   * BROWSER_HISTORY_INTEGRATION_PLAN §5.F1 (seventh-pass) — replaces
+   * the previous `notifyOwner` callback. When the per-cluster qualifier
+   * AND the rate-limit gate both say "fire", the poller enqueues a
+   * `routine.research_offer_dm` event onto this EventBus. The
+   * subsequent agent session reads the OfferContext payload from
+   * `event.data`, composes the natural-language two-option DM, and
+   * sends it via the standard notifier path (which records the
+   * outbound into the owner DM conversation_sessions so the DM agent
+   * sees it on the user's reply turn — §10.5 invariant). When absent
+   * (test fixtures, daemon early-boot), the poller still computes
+   * candidates but skips the enqueue without advancing `last_dm_at`,
+   * so the offer is retried the next cycle once the bus is up.
+   */
+  enqueueEvent?: (event: Event) => Promise<void>;
+  /** Optional rate-limit config override for tests. */
+  rateLimitConfig?: OfferRateLimitConfig;
+}
+
 export class BrowserHistoryPoller implements Observer {
   readonly name = "browser-history-poller";
 
   private timer: ReturnType<typeof setInterval> | null = null;
   private host: HostProfile;
+  private readonly intervalMinutes: number;
+  private readonly enqueueEvent?: (event: Event) => Promise<void>;
+  private readonly rateLimitConfig: OfferRateLimitConfig;
   private readonly guard = new PollGuard({
     name: this.name,
     tickTimeoutMs: TICK_TIMEOUT_MS,
@@ -126,10 +171,30 @@ export class BrowserHistoryPoller implements Observer {
   constructor(
     private readonly db: Database.Database,
     private readonly config: AgentConfig,
-    host?: HostProfile,
-    private readonly intervalMinutes: number = DEFAULT_INGEST_INTERVAL_MINUTES,
+    options: BrowserHistoryPollerOptions = {},
   ) {
-    this.host = host ?? createHostProfile();
+    this.host = options.host ?? createHostProfile();
+    this.intervalMinutes = options.intervalMinutes ?? DEFAULT_INGEST_INTERVAL_MINUTES;
+    this.enqueueEvent = options.enqueueEvent;
+    this.rateLimitConfig =
+      options.rateLimitConfig ?? this.deriveRateLimitConfig();
+  }
+
+  /**
+   * Build the offer rate-limit config from AgentConfig at construction
+   * time. Quiet-hours + timezone are read from the daemon config; the
+   * cap / interval / decline-backoff / active-conversation values are
+   * the seventh-pass design defaults (2/day, 4h, 30d, 30min). Pulled
+   * into a method so tests can override via `rateLimitConfig` while
+   * production picks up the per-install timezone automatically.
+   */
+  private deriveRateLimitConfig(): OfferRateLimitConfig {
+    return {
+      ...DEFAULT_OFFER_RATE_LIMIT_CONFIG,
+      quietHoursStart: this.config.quietHoursStart ?? null,
+      quietHoursEnd: this.config.quietHoursEnd ?? null,
+      timezone: this.config.timezone || "UTC",
+    };
   }
 
   private boundary() {
@@ -189,12 +254,6 @@ export class BrowserHistoryPoller implements Observer {
     let totalDuplicates = 0;
     for (const browser of capabilities.ingestEnabled) {
       if (signal.aborted) return;
-      if (browser === "safari") {
-        // Safari ingestion lands in P5 — assertSafariHistorySchema already
-        // runs in the supervisor's per-cycle validation step. Skipping
-        // here keeps the rest of the pipeline strictly Chromium-shaped.
-        continue;
-      }
       const result = results.find((entry) => entry.browser === browser);
       if (!result) continue;
       const profiles = this.profilesForBrowser(result);
@@ -223,11 +282,169 @@ export class BrowserHistoryPoller implements Observer {
 
     if (totalInserted > 0) {
       writeBrowserHistoryLastIngestAt(this.db, Date.now());
+      await this.evaluateAndFireOfferTriggers();
     }
     logger.info(
       { totalInserted, totalDuplicates },
       "Browser history poller cycle complete",
     );
+  }
+
+  /**
+   * Walk every active cluster, build its engagement snapshot, evaluate
+   * the offer-trigger ladder, and fire whichever trigger wins. Always
+   * runs AFTER `upsertResearchClusters` so the freshly-upserted row
+   * (with new `last_activity_at`) feeds the budget gate.
+   *
+   * Dispatch order: DM first (via `notifyOwner`), then stamp the row
+   * and write the pending-offer ledger row. If the DM throws, the row
+   * is left untouched so the next cycle retries — at worst a duplicate
+   * DM lands, never a silent suppression. The DM budget gate
+   * (`dmBudgetMs`) keeps duplicates bounded.
+   */
+  private async evaluateAndFireOfferTriggers(): Promise<void> {
+    if (!this.enqueueEvent) {
+      logger.debug(
+        "enqueueEvent not wired; skipping offer-trigger evaluation",
+      );
+      return;
+    }
+    const nowMs = Date.now();
+    const clusters = listActiveClustersForEngagement(this.db);
+    for (const row of clusters) {
+      const snapshot = buildEngagementSnapshot(
+        this.db,
+        row,
+        this.boundary(),
+        nowMs,
+      );
+      if (!snapshot) continue;
+      const decision = evaluateOfferTriggers(
+        snapshot,
+        nowMs,
+        DEFAULT_OFFER_THRESHOLDS,
+      );
+      if (!decision) continue;
+      // Skip if an open `'offered'` row already exists for this
+      // cluster — the per-cluster qualifier inside
+      // `evaluateOfferTriggers` is wall-clock-based on `last_dm_at`;
+      // the pending-offer ledger is the second source of truth that
+      // mutates on accept/decline. Both gates must say "go" before
+      // we re-fire.
+      const open = listPendingOffersForCluster(this.db, row.slug, nowMs);
+      if (open.length > 0) continue;
+
+      // BROWSER_HISTORY_INTEGRATION_PLAN §5.F1 (seventh-pass) —
+      // global rate-limit gate. Layered ON TOP OF the per-cluster
+      // gate above; both must pass. Skip reasons get an audit row
+      // so the operator can see why offers were suppressed (e.g.
+      // "quiet_hours suppressed 3 candidate offers last night").
+      const gate = gateOfferRateLimit(
+        this.db,
+        row.slug,
+        nowMs,
+        this.rateLimitConfig,
+      );
+      if (gate.decision === "skip") {
+        this.logRateLimitSkip(row.slug, gate.reason);
+        continue;
+      }
+      await this.fireDecision(row.slug, decision, nowMs);
+    }
+  }
+
+  private async fireDecision(
+    slug: string,
+    decision: OfferTriggerDecision,
+    nowMs: number,
+  ): Promise<void> {
+    if (!this.enqueueEvent) return; // defensive; caller already checked.
+
+    // Stamp BEFORE enqueue so the rate-limit gate sees the new fire
+    // immediately if a second cluster is also eligible in this tick.
+    // The enqueue is async + downstream-routed; without the up-front
+    // stamp two clusters could both pass the daily-cap check.
+    stampClusterDmFields(this.db, slug, {
+      lastDmAt: decision.stamp.dm ? nowMs : null,
+      lastResearchOfferAt: decision.stamp.researchOffer ? nowMs : null,
+      lastWikiOfferAt: decision.stamp.wikiOffer ? nowMs : null,
+    });
+    upsertPendingOffer(this.db, {
+      slug,
+      kind: decision.pendingOfferKind,
+      offeredAt: nowMs,
+      expiresAt: nowMs + OFFER_DEFAULT_TTL_MS,
+    });
+
+    // The offer DM agent reads the OfferContext fields from
+    // `event.data` directly (displayName, signals, daysActive, etc.).
+    // We spread the context into event.data so the task-flow can
+    // reference `event.data.displayName` etc. — nesting under
+    // `event.data.offerContext` would force the LLM to learn an
+    // extra namespace for no benefit.
+    //
+    // `reply_target` is intentionally absent — the offer DM is
+    // unsolicited (poller-driven, not a user reply), so it routes
+    // through the proactive forward path. The standard notifier
+    // records the outbound into the owner DM scope via
+    // `recordProactiveForwardDeliveries` (notification-manager.ts:504),
+    // satisfying the §10.5 conversation-injection invariant.
+    //
+    // The factory adds `slug` at the top level; OfferContext also
+    // carries a `slug` field — they're the same value (both come
+    // from the cluster row), so the duplicate-key overwrite is a
+    // no-op.
+    const event = createResearchCommandEvent({
+      processKey: "routine.research_offer_dm",
+      slug,
+      data: { ...decision.context },
+    });
+    try {
+      await this.enqueueEvent(event);
+    } catch (err) {
+      // The fire-state is already stamped, so a retry on the next tick
+      // would be blocked by the rate-limit gate (lastDmAt is set). We
+      // log loudly so the operator can investigate; without this branch
+      // the operator would see a stamped offer with no DM.
+      logger.error(
+        { err, slug, kind: decision.kind },
+        "Failed to enqueue routine.research_offer_dm event after stamping; the offer is in a half-fired state. Manual cleanup may be needed.",
+      );
+      return;
+    }
+    logger.info(
+      {
+        slug,
+        kind: decision.kind,
+        assistEligible: decision.context.signals.assist_eligible,
+        wikiEligible: decision.context.signals.wiki_eligible,
+        day3: decision.context.signals.day_3_first_mention,
+        stall48h: decision.context.signals.stall_48h,
+        phaseShift: decision.context.signals.phase_shift,
+      },
+      "Browser-history offer trigger fired — routine.research_offer_dm enqueued",
+    );
+  }
+
+  private logRateLimitSkip(slug: string, reason: string): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO agent_actions (action_type, result, detail)
+           VALUES (?, ?, ?)`,
+        )
+        .run(
+          "offer_dm_rate_limited",
+          "skipped",
+          JSON.stringify({ slug, reason }),
+        );
+    } catch (err) {
+      // Audit write failure must not break the poll loop.
+      logger.debug(
+        { err, slug, reason },
+        "Failed to persist offer_dm_rate_limited audit row",
+      );
+    }
   }
 
   private profilesForBrowser(

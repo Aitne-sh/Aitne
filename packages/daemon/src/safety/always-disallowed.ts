@@ -208,6 +208,60 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Write(~/.personal-agent/whatsapp/auth/**)", "Edit(~/.personal-agent/whatsapp/auth/**)",
   "Write(~/.personal-agent/secrets/**)", "Edit(~/.personal-agent/secrets/**)",
 
+  // ── Browser-history profile directories (BROWSER_HISTORY_INTEGRATION_PLAN §11.4) ──
+  // The browser-history integration's threat model assumes the agent
+  // never reads raw browser profile files directly — all access goes
+  // through the daemon's `curl http://localhost:8321/api/browser-history/*`
+  // chokepoint. These prefix-only patterns deny the canonical shell
+  // exfiltration idioms (cp / sqlite3 / Read / curl file://). Encoded /
+  // shell-expanded forms (`$HOME/Library/...`, backtick-expanded paths)
+  // fall through to the `classifyBrowserProfileAccess` substring scan
+  // below, which is independent of the prefix-glob matcher and runs in
+  // every backend's PreToolUse layer.
+  "Bash(sqlite3 *)",
+  "Bash(cp ~/Library/Application Support/Google/Chrome/*)",
+  "Bash(cp ~/Library/Application Support/Chromium/*)",
+  "Bash(cp ~/Library/Application Support/Microsoft Edge/*)",
+  "Bash(cp ~/Library/Application Support/BraveSoftware/*)",
+  "Bash(cp ~/Library/Application Support/Perplexity Comet/*)",
+  "Bash(cp ~/Library/Application Support/com.openai.atlas/*)",
+  "Bash(cp ~/.config/google-chrome/*)",
+  "Bash(cp ~/.config/chromium/*)",
+  "Bash(cp ~/.config/microsoft-edge/*)",
+  "Bash(cp ~/.config/BraveSoftware/*)",
+  "Bash(cp ~/.var/app/com.google.Chrome/*)",
+  "Bash(cp /mnt/c/Users/*)",
+  "Bash(curl file://*)",
+  "Read(~/Library/Application Support/Google/Chrome/**)",
+  "Read(~/Library/Application Support/Chromium/**)",
+  "Read(~/Library/Application Support/Microsoft Edge/**)",
+  "Read(~/Library/Application Support/BraveSoftware/**)",
+  "Read(~/Library/Application Support/Perplexity Comet/**)",
+  "Read(~/Library/Application Support/com.openai.atlas/**)",
+  "Read(~/.config/google-chrome/**)",
+  "Read(~/.config/chromium/**)",
+  "Read(~/.config/microsoft-edge/**)",
+  "Read(~/.config/BraveSoftware/**)",
+  "Read(~/.var/app/com.google.Chrome/**)",
+  "Read(/mnt/c/Users/**)",
+  // Symmetric Write/Edit twins — the Read/Write symmetry invariant
+  // (security.test.ts) requires every Read(...) pattern carry matching
+  // Write(...) + Edit(...) entries so an agent that cannot read the
+  // file also cannot overwrite it (credential injection / token
+  // replacement is strictly worse than read).
+  "Write(~/Library/Application Support/Google/Chrome/**)", "Edit(~/Library/Application Support/Google/Chrome/**)",
+  "Write(~/Library/Application Support/Chromium/**)", "Edit(~/Library/Application Support/Chromium/**)",
+  "Write(~/Library/Application Support/Microsoft Edge/**)", "Edit(~/Library/Application Support/Microsoft Edge/**)",
+  "Write(~/Library/Application Support/BraveSoftware/**)", "Edit(~/Library/Application Support/BraveSoftware/**)",
+  "Write(~/Library/Application Support/Perplexity Comet/**)", "Edit(~/Library/Application Support/Perplexity Comet/**)",
+  "Write(~/Library/Application Support/com.openai.atlas/**)", "Edit(~/Library/Application Support/com.openai.atlas/**)",
+  "Write(~/.config/google-chrome/**)", "Edit(~/.config/google-chrome/**)",
+  "Write(~/.config/chromium/**)", "Edit(~/.config/chromium/**)",
+  "Write(~/.config/microsoft-edge/**)", "Edit(~/.config/microsoft-edge/**)",
+  "Write(~/.config/BraveSoftware/**)", "Edit(~/.config/BraveSoftware/**)",
+  "Write(~/.var/app/com.google.Chrome/**)", "Edit(~/.var/app/com.google.Chrome/**)",
+  "Write(/mnt/c/Users/**)", "Edit(/mnt/c/Users/**)",
+
   // ── Anthropic-cloud managed/scheduled agents ──
   // Aitne is local-first by design: scheduling lives in `agent_schedule` +
   // `recurring_schedules` and is driven by the daemon's own cron. The Claude
@@ -238,7 +292,8 @@ export type AbsoluteBlockCategory =
   | "pipe_to_shell"
   | "secret_cli"
   | "secret_read"
-  | "secret_write";
+  | "secret_write"
+  | "browser_profile";
 
 export interface AbsoluteBlockMatch {
   category: AbsoluteBlockCategory;
@@ -449,12 +504,31 @@ export function classifyAbsoluteBlock(
     if (/(^|\s)(security|secret-tool|cmdkey)\b/.test(scan)) {
       return { category: "secret_cli", redacted: firstToken(arg) };
     }
+    // Browser-history profile exfiltration (§11.4). The prefix glob
+    // layer catches the canonical `cp ~/Library/...` / `cp ~/.config/...`
+    // forms; this substring scan catches encoded / shell-expanded
+    // variants the prefix matcher cannot express:
+    //   - $HOME-expanded paths           ($HOME/Library/Application Support/Google/Chrome/...)
+    //   - backtick-substituted paths     (`echo ~/Library/...`)
+    //   - $(echo ...)-substituted paths  ($(echo ~/Library/...))
+    //   - filename keywords that only appear inside a real profile
+    //     directory (`Login Data`, `Cookies`, `Web Data`).
+    // The match is case-insensitive over the quote-stripped command
+    // line. False-positive surface is narrow — no Aitne skill needs to
+    // read these literal substrings; the `browser-history` skill
+    // exclusively talks to `localhost:8321`.
+    if (looksLikeBrowserProfileBash(scan)) {
+      return { category: "browser_profile", redacted: firstToken(arg) };
+    }
     return null;
   }
 
   if (toolName === "Read") {
     if (looksLikeSecretPath(arg)) {
       return { category: "secret_read", redacted: redactPath(arg) };
+    }
+    if (looksLikeBrowserProfilePath(arg)) {
+      return { category: "browser_profile", redacted: redactPath(arg) };
     }
     return null;
   }
@@ -463,10 +537,94 @@ export function classifyAbsoluteBlock(
     if (looksLikeSecretPath(arg)) {
       return { category: "secret_write", redacted: redactPath(arg) };
     }
+    if (looksLikeBrowserProfilePath(arg)) {
+      return { category: "browser_profile", redacted: redactPath(arg) };
+    }
     return null;
   }
 
   return null;
+}
+
+/**
+ * Substring scan for shell commands that touch a browser profile
+ * directory. Independent of the prefix-glob matcher — runs on the
+ * stripped command line (single-quoted contents + heredocs already
+ * collapsed by `stripBashStringContent`) and matches case-insensitively.
+ *
+ * Exported so the per-backend tool hook (Claude PreToolUse, Gemini
+ * admin policy translator) can mirror the same coverage. The substring
+ * set is closed: it lists the parent directories every supported
+ * browser writes its profile under, plus the profile-specific
+ * filenames Chromium uses for high-value tokens.
+ */
+export function looksLikeBrowserProfileBash(cmd: string): boolean {
+  const lc = cmd.toLowerCase();
+  // Browser profile *parent* directories — any of these as a substring
+  // means the agent is reaching into a profile root. eTLD+1-like
+  // matching: the fragment is the OS-specific path prefix the browser
+  // owns; nothing legitimate inside Aitne's surface needs to touch
+  // these directories.
+  const parents = [
+    // macOS Application Support roots
+    "library/application support/google/chrome",
+    "library/application support/chromium",
+    "library/application support/microsoft edge",
+    "library/application support/bravesoftware",
+    "library/application support/perplexity comet",
+    "library/application support/com.openai.atlas",
+    // Linux / XDG roots
+    ".config/google-chrome",
+    ".config/chromium",
+    ".config/microsoft-edge",
+    ".config/bravesoftware",
+    ".var/app/com.google.chrome",
+    // Windows / WSL
+    "appdata/local/google/chrome",
+    "appdata/local/chromium",
+    "appdata/local/microsoft/edge",
+    "appdata/local/bravesoftware",
+    "/mnt/c/users/",
+  ];
+  if (parents.some((p) => lc.includes(p))) return true;
+  // Chromium profile-internal filename anchors. Each is matched as a
+  // path segment ending the path (or followed by a delimiter
+  // character) so legitimate names like `cookies-policy.md` or
+  // `/api/web-data` do not false-positive. The `\b` style negative
+  // lookahead — `(?=$|[\s"'`)/])` — captures end-of-string, quote
+  // closers, and shell metacharacters that bound a token.
+  const filenameAnchors: RegExp[] = [
+    /\/login data(?=$|[\s"'`)>;|&])/,
+    /\/web data(?=$|[\s"'`)>;|&])/,
+    /\/cookies(?=$|[\s"'`)>;|&])/,
+  ];
+  return filenameAnchors.some((r) => r.test(lc));
+}
+
+/**
+ * Path-shape sibling of `looksLikeBrowserProfileBash` for the
+ * `Read(...)` / `Write(...)` / `Edit(...)` tool arg. The prefix-glob
+ * layer covers canonical paths; this catches Windows-style paths and
+ * encoded forms that the glob matcher's POSIX-only patterns miss.
+ */
+export function looksLikeBrowserProfilePath(raw: string): boolean {
+  const p = raw.replace(/^["']|["']$/g, "").toLowerCase();
+  const patterns: RegExp[] = [
+    /library\/application support\/google\/chrome/,
+    /library\/application support\/chromium/,
+    /library\/application support\/microsoft edge/,
+    /library\/application support\/bravesoftware/,
+    /library\/application support\/perplexity comet/,
+    /library\/application support\/com\.openai\.atlas/,
+    /\.config\/google-chrome/,
+    /\.config\/chromium/,
+    /\.config\/microsoft-edge/,
+    /\.config\/bravesoftware/,
+    /\.var\/app\/com\.google\.chrome/,
+    /appdata[\\/]local[\\/](google[\\/]chrome|chromium|microsoft[\\/]edge|bravesoftware)/,
+    /\/mnt\/c\/users\//,
+  ];
+  return patterns.some((r) => r.test(p));
 }
 
 function firstToken(cmd: string): string {

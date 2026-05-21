@@ -139,6 +139,27 @@ export const CONFIGURABLE_PROCESS_KEYS = [
   // refresh / git poll loops).
   "routine.today_refresh",
   "git.lifecycle.poll",
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3 — research-cluster engagement.
+  //   routine.research_cluster_update  — nightly per-cluster journal
+  //     append at the agent-day boundary. Lite tier; one row per cluster
+  //     per day with new activity.
+  //   routine.research_offer_dm        — seventh-pass two-option offer
+  //     composition. Poller enqueues this when a cluster qualifies and
+  //     the rate-limit gate passes. Lite tier; one DM per fire, no
+  //     WebFetch.
+  //   routine.research_dispatch        — accept path for the "research"
+  //     option (natural-language reply or `!research accept <slug>`).
+  //     Medium tier; runs WebSearch + WebFetch to compose a parallel
+  //     external research dive. Claude-only per §10.3 backend safety
+  //     floor (attacker-controlled prose surface).
+  //   routine.research_wiki_summary    — accept path for the
+  //     "summarise" option (natural-language reply or `!research wiki
+  //     <slug>`). Medium tier; writes a wiki note into Obsidian inbox
+  //     / Notion / local context per integration availability.
+  "routine.research_cluster_update",
+  "routine.research_offer_dm",
+  "routine.research_dispatch",
+  "routine.research_wiki_summary",
 ] as const;
 
 const DEFAULT_PROCESS_KEYS = [
@@ -371,6 +392,19 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   // queries that POST observations; the main routine session reads the
   // observations table at medium tier (Sonnet) for the decision work.
   "routine.fetch_window": "lite",
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3:
+  //   cluster_update — templated daily journal append; lite tier
+  //     (Haiku-class). Pre-Pass: NO. One-shot per cluster per day.
+  //   research_offer_dm — seventh-pass two-option offer composition.
+  //     Lite tier (Haiku-class); poller-driven, one DM per fire.
+  //   research_dispatch — parallel external research with WebSearch +
+  //     WebFetch. Medium tier (Sonnet-class). Claude-only per §10.3.
+  //   research_wiki_summary — composes a wiki note from the cluster
+  //     journal + delta API. Medium tier.
+  "routine.research_cluster_update": "lite",
+  "routine.research_offer_dm": "lite",
+  "routine.research_dispatch": "medium",
+  "routine.research_wiki_summary": "medium",
 };
 
 export function isProcessKey(value: string): value is KnownProcessKey {

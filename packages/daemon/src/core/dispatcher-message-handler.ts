@@ -520,6 +520,9 @@ export class MessageHandler {
         enqueueWikiEvent: async (wikiEvent) => {
           await this.eventBus.put(wikiEvent);
         },
+        enqueueBrowserResearchEvent: async (researchEvent) => {
+          await this.eventBus.put(researchEvent);
+        },
         enqueueWikiApproval: async (approvalInput) => {
           // WIKI_BUILDER_DESIGN.md §5.5 / §P2.E — escalate to Approve tier
           // via the existing agent_schedule approval queue. The dashboard

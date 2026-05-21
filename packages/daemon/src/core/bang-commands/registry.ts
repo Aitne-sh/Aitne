@@ -68,6 +68,15 @@ export interface BangCommandContext {
   ) => Promise<void>;
   enqueueWikiEvent?: (event: Event) => Promise<void>;
   /**
+   * BROWSER_HISTORY_INTEGRATION_PLAN P3 — wire-through for the
+   * `!research accept` / `!research wiki` paths. The bang handler
+   * constructs an Event via `createResearchCommandEvent` and the
+   * dispatcher-message-handler binds this callback to
+   * `await this.eventBus.put(event)`. Optional so unit-test fixtures
+   * without an EventBus can still exercise list / show / mute / rename.
+   */
+  enqueueBrowserResearchEvent?: (event: Event) => Promise<void>;
+  /**
    * Approval handoff for `!compile full` when the cost estimate exceeds
    * the per-workspace threshold (WIKI_BUILDER_DESIGN.md §5.5). Inserts
    * an `agent_schedule` row with `task_type='approval'`; the dashboard
@@ -374,6 +383,7 @@ export async function tryHandle(
             closeActiveDmSession: ctx.closeActiveDmSession,
             enqueueUserBangCommand: ctx.enqueueUserBangCommand,
             enqueueWikiEvent: ctx.enqueueWikiEvent,
+            enqueueBrowserResearchEvent: ctx.enqueueBrowserResearchEvent,
             enqueueWikiApproval: ctx.enqueueWikiApproval,
           };
           // P2-24: stamp the wall-clock the handler started so we can
@@ -495,6 +505,13 @@ export async function tryHandle(
       closeActiveDmSession: ctx.closeActiveDmSession,
       enqueueUserBangCommand: ctx.enqueueUserBangCommand,
       enqueueWikiEvent: ctx.enqueueWikiEvent,
+      // BROWSER_HISTORY_INTEGRATION_PLAN P3 — `!research accept|wiki` rely
+      // on this wire. The paused branch above forwards it too but never
+      // executes the LLM-dispatching variant (`!research` isn't
+      // `runsWhilePaused`); production runs land here, so omitting the
+      // forward turned every accept/wiki bang into "dispatch not wired"
+      // even when the dispatcher-message-handler caller had supplied it.
+      enqueueBrowserResearchEvent: ctx.enqueueBrowserResearchEvent,
       enqueueWikiApproval: ctx.enqueueWikiApproval,
     };
     // P2-24: stamp wall-clock start so audit rows carry runMs.

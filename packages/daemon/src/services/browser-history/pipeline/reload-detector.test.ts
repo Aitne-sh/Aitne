@@ -46,4 +46,10 @@ describe("reloadPatternKey", () => {
       "github.com/anthropics",
     );
   });
+
+  it("falls back to root for an empty path (|| branch)", () => {
+    expect(reloadPatternKey({ host: "example.com", path: "" })).toBe(
+      "example.com",
+    );
+  });
 });

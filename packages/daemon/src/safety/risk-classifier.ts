@@ -153,10 +153,31 @@ const API_RISK: Record<string, RiskTier> = {
   "/api/config": RiskTier.Approve,
   "GET /api/browser-history/status": RiskTier.Approve,
   "GET /api/browser-history/research-clusters": RiskTier.Autonomous,
+  "GET /api/browser-history/research-clusters/{*}": RiskTier.Autonomous,
   "GET /api/browser-history/yesterday-summary": RiskTier.Autonomous,
   "GET /api/browser-history/shopping/{*}": RiskTier.Autonomous,
   "GET /api/browser-history/reloads/today": RiskTier.Autonomous,
   "GET /api/browser-history/reloads/weekly": RiskTier.Autonomous,
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3 — engagement offers.
+  // Reads (`/offers/pending`) are autonomous; the agent surfaces open
+  // offers in the morning digest. Accept (`POST /offers/{*}/accept`)
+  // queues a process-key dispatch one step removed from external
+  // research / wiki writes — ReadSensitive so the dashboard's bearer
+  // is enforced but the agent's curl from the session workdir still
+  // works (the route enforces token presence via the same middleware
+  // as other ReadSensitive endpoints). Decline and mute are
+  // autonomous DB updates.
+  "GET /api/browser-history/offers/pending": RiskTier.Autonomous,
+  "POST /api/browser-history/offers/{*}/accept": RiskTier.ReadSensitive,
+  "POST /api/browser-history/offers/{*}/decline": RiskTier.Autonomous,
+  "POST /api/browser-history/offers/{*}/mute": RiskTier.Autonomous,
+  // Agent write-back after `routine.research_wiki_summary` successfully
+  // writes the wiki note. Stamps `wikiSummaryWrittenAt`; the only
+  // mutation is on the cluster row the agent is already permitted to
+  // read. Autonomous so the agent's curl from the session workdir works
+  // without a bearer.
+  "POST /api/browser-history/research-clusters/{*}/wiki-written":
+    RiskTier.Autonomous,
   "/api/setup": RiskTier.Approve,
   "POST /api/setup/redetect-browsers": RiskTier.Approve,
   // Management Mode Phase 2 — migration endpoint. Redundant with the

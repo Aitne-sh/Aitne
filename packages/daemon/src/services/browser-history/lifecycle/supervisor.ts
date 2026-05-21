@@ -23,14 +23,12 @@ import type {
 import { createHostProfile } from "./platform.js";
 import { checkBrowserProfileHealth } from "./health-check.js";
 import { launchChromiumProfile } from "./chromium-launcher.js";
-import { launchSafari, quitSafari } from "./safari-launcher.js";
 import { nextBrowserLifecycleState } from "./failure-escalation.js";
 import {
   cleanupStaleBrowserHistorySnapshots,
   createBrowserHistorySnapshot,
 } from "../readers/snapshot.js";
 import { assertChromiumHistorySchema } from "../readers/chromium-reader.js";
-import { assertSafariHistorySchema } from "../readers/safari-reader.js";
 
 const logger = createLogger("browser-lifecycle-supervisor");
 
@@ -71,23 +69,10 @@ function waitSecondsForProfile(
   config: AgentConfig["browserHistoryLifecycle"],
   profile: BrowserProfileCandidate,
 ): number {
-  if (profile.browser === "safari") {
-    return config.per_browser.safari?.sync_flush_wait_seconds ?? 90;
-  }
   if (profile.browser === "comet" || profile.browser === "atlas") {
     return config.per_browser[profile.browser]?.sync_flush_wait_seconds ?? 5;
   }
   return config.per_browser[profile.browser]?.sync_flush_wait_seconds ?? 60;
-}
-
-function shouldQuitAfterIngest(
-  config: AgentConfig["browserHistoryLifecycle"],
-  profile: BrowserProfileCandidate,
-): boolean {
-  if (profile.browser === "safari") {
-    return config.per_browser.safari?.quit_after_ingest ?? true;
-  }
-  return config.per_browser[profile.browser]?.quit_after_ingest ?? false;
 }
 
 async function runWithConcurrency<T>(
@@ -255,13 +240,9 @@ export class BrowserLifecycleSupervisor implements Observer {
         outcome = "skipped";
       } else if (!healthBefore.running) {
         actionTaken = "launch";
-        if (profile.browser === "safari") {
-          await launchSafari(this.host);
-        } else {
-          const launched = await launchChromiumProfile(this.host, profile);
-          if (launched !== "launched") {
-            outcome = "launch_failed";
-          }
+        const launched = await launchChromiumProfile(this.host, profile);
+        if (launched !== "launched") {
+          outcome = "launch_failed";
         }
         if (outcome === "success") {
           await sleep(waitSecondsForProfile(this.config.browserHistoryLifecycle, profile) * 1000);
@@ -294,12 +275,6 @@ export class BrowserLifecycleSupervisor implements Observer {
       if (outcome === "success") {
         await this.validateSnapshot(profile);
         writeBrowserHistoryLastIngestAt(this.db, Date.now());
-      }
-      if (outcome === "success" && shouldQuitAfterIngest(this.config.browserHistoryLifecycle, profile)) {
-        if (profile.browser === "safari") {
-          await quitSafari(this.host);
-          actionTaken = "quit";
-        }
       }
       const healthAfter = await checkBrowserProfileHealth(this.host, profile, Date.now());
       this.applyLifecycleState(profile.browser, outcome, actionTaken, started);
@@ -343,9 +318,6 @@ export class BrowserLifecycleSupervisor implements Observer {
       browserHistoryCacheRoot(this.config.dataDir),
     );
     try {
-      if (profile.browser === "safari") {
-        return assertSafariHistorySchema(snapshot.mainPath).visitCount;
-      }
       return assertChromiumHistorySchema(snapshot.mainPath).visitCount;
     } finally {
       await snapshot.cleanup();

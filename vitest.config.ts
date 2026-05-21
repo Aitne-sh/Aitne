@@ -399,7 +399,6 @@ export default defineConfig({
         // `sanitize.ts` remains in the covered set as pure logic.
         "packages/daemon/src/api/routes/attachments.ts",           // Hono multipart handler (busboy + fs streaming)
         "packages/daemon/src/services/attachments/store.ts",       // fs + SQLite attachment store
-        "packages/daemon/src/services/attachments/hardlink.ts",    // node:fs linkSync / copyFileSync wrapper
 
         // ── Files with partial coverage, added without exclusion entries ──
         // These are I/O-heavy, framework-level, or interactive — not pure-logic.
@@ -588,11 +587,7 @@ export default defineConfig({
         // Get-CimInstance / `which` probes), and the cron-driven
         // supervisor tick. Each matches the existing observer / SDK
         // exclusion rationale above (process-mock-blocked by ESM).
-        "packages/daemon/src/services/browser-history/detectors/atlas.ts",
-        "packages/daemon/src/services/browser-history/detectors/chrome.ts",
         "packages/daemon/src/services/browser-history/detectors/chromium.ts",
-        "packages/daemon/src/services/browser-history/detectors/comet.ts",
-        "packages/daemon/src/services/browser-history/detectors/safari.ts",
         // The I/O orchestrator inside the registry — `detectBrowserHistoryCapabilities` —
         // shells out to every per-browser detector and mkdirs the cache root.
         // Sibling `computeBrowserHistoryIngestEnabled` / `serializeBrowserHistoryCapabilities`
@@ -601,12 +596,9 @@ export default defineConfig({
         // exclusion targets it as a whole rather than splitting into two files.
         "packages/daemon/src/services/browser-history/detectors/registry.ts",
         "packages/daemon/src/services/browser-history/lifecycle/chromium-launcher.ts",
-        "packages/daemon/src/services/browser-history/lifecycle/health-check.ts",
         "packages/daemon/src/services/browser-history/lifecycle/platform.ts",
-        "packages/daemon/src/services/browser-history/lifecycle/safari-launcher.ts",
         "packages/daemon/src/services/browser-history/lifecycle/supervisor.ts",
         "packages/daemon/src/services/browser-history/readers/chromium-reader.ts",
-        "packages/daemon/src/services/browser-history/readers/safari-reader.ts",
         // `readers/snapshot.ts` happy path is pinned by snapshot.test.ts,
         // but the rm/copyFile failure branches are fs-shaped catches that
         // match the snapshot-store rationale. Excluded for consistency

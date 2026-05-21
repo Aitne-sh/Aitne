@@ -108,6 +108,26 @@ describe("classifyVisit", () => {
     ).toBe("other");
   });
 
+  it("classifies cnn.com as news (covers NEWS_DOMAINS branch)", () => {
+    expect(classifyVisit(input("https:", "cnn.com", "/2026/05/world"))).toBe("news");
+  });
+
+  it("returns other when path is exactly '/' (pathHasSegment empty-segments branch)", () => {
+    // No segments → pathHasSegment returns false → falls through to other.
+    expect(classifyVisit(input("https:", "example.invalid", "/"))).toBe("other");
+  });
+
+  it("treats missing scheme/path as empty strings (|| '' and || '/' branches)", () => {
+    // Casts ensure the `input.scheme || ""` / `input.path || "/"` ternaries fire.
+    expect(
+      classifyVisit({ scheme: undefined, host: "example.invalid", path: undefined } as unknown as {
+        scheme: string;
+        host: string;
+        path: string;
+      }),
+    ).toBe("other");
+  });
+
   it("does NOT treat /research/api-keys-paper as app-config (segment-match, not substring)", () => {
     // The classifier's app-config segment list is matched as full
     // segments, not substrings — so paths that merely contain a

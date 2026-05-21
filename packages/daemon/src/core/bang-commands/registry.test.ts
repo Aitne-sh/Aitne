@@ -651,4 +651,35 @@ describe("tryHandle decision tree", () => {
     );
     expect(send.mock.calls[0]?.[0]).toMatch(/^\[SYSTEM · paused\]/);
   });
+
+  it("forwards enqueueBrowserResearchEvent into the not-paused commandCtx", async () => {
+    // BROWSER_HISTORY_INTEGRATION_PLAN P3 — regression for the wiring gap
+    // where the paused branch passed the callback but the not-paused
+    // branch (the production path; `!research` does not opt into
+    // runsWhilePaused) dropped it. Symptom in prod was every
+    // `!research accept|wiki` reply reading "Browser-history dispatch is
+    // not wired" even when the dispatcher-message-handler had supplied
+    // the callback at call time.
+    const seen: { hasCallback: boolean } = { hasCallback: false };
+    const registry2 = new BangCommandRegistry();
+    registry2.register({
+      prefix: "!probe-browser",
+      describe: "probe",
+      handler: async (ctx) => {
+        seen.hasCallback = typeof ctx.enqueueBrowserResearchEvent === "function";
+      },
+    });
+    const send = vi.fn().mockResolvedValue(undefined);
+    const callback = vi.fn().mockResolvedValue(undefined);
+    const result = await tryHandle(registry2, {
+      event: makeDmEvent("!probe-browser arg"),
+      db,
+      config: fakeConfig,
+      audit,
+      rawSend: send,
+      enqueueBrowserResearchEvent: callback,
+    });
+    expect(result).toBe(true);
+    expect(seen.hasCallback).toBe(true);
+  });
 });

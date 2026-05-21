@@ -41,6 +41,7 @@ export {
   wikiHelpCommand,
   wikiStatusCommand,
 } from "./commands-wiki.js";
+export { researchCommand, parseResearchArgs } from "./commands-research.js";
 export {
   buildSystemMarker,
   ensureSystemMarker,
@@ -93,6 +94,7 @@ import {
   wikiHelpCommand,
   wikiStatusCommand,
 } from "./commands-wiki.js";
+import { researchCommand } from "./commands-research.js";
 
 /**
  * Build a registry preloaded with the v1 built-in commands. The registry
@@ -118,5 +120,7 @@ export function createDefaultBangCommandRegistry(): BangCommandRegistry {
   registry.register(lintCommand);
   registry.register(traceCommand);
   registry.register(connectCommand);
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3 — `!research` family.
+  registry.register(researchCommand);
   return registry;
 }

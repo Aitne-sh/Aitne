@@ -209,8 +209,11 @@ describe("getSkillsForEvent", () => {
     // docs/design/appendices/skills-improvement.md §9-§11 merged travel +
     // travel-time + receipts → gmail-lifestyle; §14 merged
     // management-task-{register,modify,stop} → managed-tasks. Net
-    // skill count drops from 26 to 21 (base) + 4 = 25 total.
-    expect(skills).toHaveLength(25);
+    // skill count drops from 26 to 21 (base) + 4 = 25 total. P3
+    // adds `browser-history` (BROWSER_HISTORY_INTEGRATION_PLAN) → 26.
+    // P3c (seventh-pass) adds `browser-history-respond` (narrow accept
+    // surface loaded only for message.received.dm) → 27.
+    expect(skills).toHaveLength(27);
     expect(skills).toContain("context");
     expect(skills).toContain("today");
     expect(skills).toContain("user-profile");
@@ -236,6 +239,7 @@ describe("getSkillsForEvent", () => {
     expect(skills).toContain("wiki-trace");
     expect(skills).toContain("wiki-connect");
     expect(skills).toContain("wiki-graduate");
+    expect(skills).toContain("browser-history");
     // Legacy slugs the merge replaced — fail loud if a regression
     // ever reintroduces them as separate entries.
     expect(skills).not.toContain("travel");
@@ -273,6 +277,12 @@ describe("getSkillsForEvent", () => {
       // weight even though each is wired through EVENT_SKILL_SETS.
       "wiki.ingest_url", "wiki.compile", "wiki.ask",
       "wiki.lint", "wiki.trace", "wiki.connect",
+      // BROWSER_HISTORY_INTEGRATION_PLAN P3 — the three research process
+      // keys each load the `browser-history` skill. Without these
+      // entries the coverage invariant flags it as dead weight.
+      "routine.research_cluster_update",
+      "routine.research_dispatch",
+      "routine.research_wiki_summary",
     ]) {
       for (const skill of getSkillsForEvent(eventType)) {
         assignedSkills.add(skill);
@@ -2144,6 +2154,9 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       "management-policy",
       "managed-tasks",
       "user-interview",
+      // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — narrow
+      // accept-surface for the natural-language reply path.
+      "browser-history-respond",
     ],
     expectedProfileHeading: "# Conversational Agent",
   },

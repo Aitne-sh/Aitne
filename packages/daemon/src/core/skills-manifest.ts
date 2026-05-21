@@ -160,6 +160,27 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "reading",
   ],
   "routine.roadmap_refresh": ["context", "external-services", "notion", "roadmap"],
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3. Each browser-history routine
+  // loads exactly two skills — the agent-facing browser-history skill
+  // (curl chokepoint to /api/browser-history/*) and `context` for the
+  // research-journal / assistance / wiki write paths.
+  //
+  // No `notify` skill: cluster_update is silent by design (templated
+  // offer DMs are dispatched by the poller, not the agent), and the
+  // accept-path routines (research_dispatch, research_wiki_summary)
+  // emit a single executive-summary DM through the existing universal
+  // message-discipline contract on `context` rather than the broader
+  // `notify` surface.
+  "routine.research_cluster_update": ["browser-history", "context"],
+  // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — offer DM
+  // composition is its own lite-tier session. Same skill set as
+  // cluster_update; the agent reads `event.data` for the cluster
+  // context payload, composes the two-option DM, and POSTs
+  // /api/notify. No browser-history-respond — that skill lives on
+  // the message.dm side where the user's reply lands.
+  "routine.research_offer_dm": ["browser-history", "context"],
+  "routine.research_dispatch": ["browser-history", "context"],
+  "routine.research_wiki_summary": ["browser-history", "context"],
   // Dashboard-triggered manual refresh of today.md's User Schedule
   // section. Intentionally narrow — the flow only reads the calendar
   // and PATCHes user_schedule / agent_log. No mail, no roadmap, no
@@ -246,6 +267,14 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "management-policy",
     "managed-tasks",
     "user-interview",
+    // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — narrow
+    // accept-surface for natural-language reply to a research offer
+    // DM. The skill body documents the intent-mapping rules
+    // (research/dig/詳しく → research_assist; summarise/まとめ → wiki_summary;
+    // no thanks → decline). Conditional load is intentionally absent;
+    // the skill itself no-ops when `GET /offers/pending` is empty,
+    // and the cost of having the skill text in DM context is small.
+    "browser-history-respond",
   ],
   // ── Task events ──
   "schedule.approaching": [
@@ -488,6 +517,18 @@ export const ALL_SKILLS = [
   "wiki-trace",
   "wiki-connect",
   "wiki-graduate",
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3 — agent-facing skill for the
+  // /api/browser-history/* surface. Bundled with `context` for the
+  // research-journal write path.
+  "browser-history",
+  // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — narrow
+  // accept-surface skill loaded for `message.received.dm` (which both
+  // `message.dm` and `dashboard.chat` inherit). Exposes only the
+  // pending-offers list + accept/decline endpoints so the standard
+  // DM agent can translate a user's natural-language reply into the
+  // structured dispatch call. The full `browser-history` skill is
+  // intentionally NOT loaded for message.dm — DM agent isolation.
+  "browser-history-respond",
 ];
 
 const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
@@ -504,6 +545,10 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
   "routine.roadmap_refresh": "routine.roadmap_refresh",
   "routine.today_refresh": "routine.today_refresh",
   "routine.user_profile_sweep": "routine.user_profile_sweep",
+  "routine.research_cluster_update": "routine.research_cluster_update",
+  "routine.research_offer_dm": "routine.research_offer_dm",
+  "routine.research_dispatch": "routine.research_dispatch",
+  "routine.research_wiki_summary": "routine.research_wiki_summary",
   "message.dm": "message.received.dm",
   "message.mention": "message.received",
   "dashboard.chat": "message.received.dm",

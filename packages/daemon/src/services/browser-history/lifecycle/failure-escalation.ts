@@ -7,14 +7,18 @@ import type { FailureEscalationInput } from "../types.js";
 const PAUSE_AFTER_FAILURES = 3;
 const PAUSE_MS = 24 * 60 * 60 * 1000;
 
-function stateForOutcome(
-  outcome: FailureEscalationInput["outcome"],
-): BrowserHistoryLifecycleStateValue {
+// "paused", "success", and "skipped" outcomes are handled by early returns
+// in nextBrowserLifecycleState below — narrow the input type here so a
+// future refactor that bypasses those branches surfaces as a type error.
+type FailureOutcome = Exclude<
+  FailureEscalationInput["outcome"],
+  "paused" | "success" | "skipped"
+>;
+
+function stateForOutcome(outcome: FailureOutcome): BrowserHistoryLifecycleStateValue {
   if (outcome === "sync_unresponsive") return "sync_unresponsive";
   if (outcome === "launch_failed") return "launch_failed_recently";
-  if (outcome === "paused") return "lifecycle_paused";
-  if (outcome === "skipped") return "stopped";
-  return outcome === "success" ? "healthy" : "stale";
+  return "stale"; // outcome === "error"
 }
 
 export function nextBrowserLifecycleState(
@@ -34,7 +38,7 @@ export function nextBrowserLifecycleState(
 
   if (input.outcome === "success" || input.outcome === "skipped") {
     return {
-      state: input.outcome === "success" ? "healthy" : stateForOutcome(input.outcome),
+      state: input.outcome === "success" ? "healthy" : "stopped",
       lastLaunchAt: null,
       lastSuccessfulSyncAt: input.outcome === "success" ? input.nowMs : null,
       lastCheckedAt: input.nowMs,

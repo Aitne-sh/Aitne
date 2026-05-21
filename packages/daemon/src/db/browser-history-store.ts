@@ -3,10 +3,14 @@ import {
   browserHistoryCapabilitiesSchema,
   browserHistoryLifecycleStateSchema,
   browserHistoryResearchClustersResponseSchema,
+  getAgentDayDateStr,
   yesterdayResearchSummarySchema,
   type BrowserHistoryBrowserKey,
   type BrowserHistoryCapabilities,
+  type BrowserHistoryClusterDetail,
   type BrowserHistoryLifecycleState,
+  type BrowserHistoryOfferKind,
+  type BrowserHistoryPendingOffer,
   type BrowserHistoryResearchClustersResponse,
   type YesterdayResearchSummary,
 } from "@aitne/shared";
@@ -439,6 +443,427 @@ export function listReloadsForRange(
     .all(rangeStart, rangeEnd, limit) as ReloadWeeklyEntryRow[];
 }
 
+// ── P3 — cluster engagement (DM budget, offers, delta) ──
+
+const CLUSTER_DETAIL_QUERY = `
+  SELECT
+    slug,
+    root_task_id AS rootTaskId,
+    display_name AS displayName,
+    started_at AS startedAt,
+    last_activity_at AS lastActivityAt,
+    visits_total AS visitsTotal,
+    meaningful_visits_total AS meaningfulVisitsTotal,
+    meaningful_foreground_sec_total AS meaningfulForegroundSecTotal,
+    distinct_meaningful_domains AS distinctMeaningfulDomains,
+    status,
+    COALESCE(agent_summary_revision, 0) AS agentSummaryRevision,
+    last_dm_at AS lastDmAt,
+    last_research_offer_at AS lastResearchOfferAt,
+    last_wiki_offer_at AS lastWikiOfferAt,
+    research_offer_accepted_at AS researchOfferAcceptedAt,
+    wiki_summary_written_at AS wikiSummaryWrittenAt
+  FROM browser_research_clusters
+  WHERE slug = ?
+`;
+
+interface ClusterDetailRow {
+  slug: string;
+  rootTaskId: number;
+  displayName: string;
+  startedAt: number;
+  lastActivityAt: number;
+  visitsTotal: number;
+  meaningfulVisitsTotal: number;
+  meaningfulForegroundSecTotal: number;
+  distinctMeaningfulDomains: number;
+  status: BrowserHistoryClusterDetail["status"];
+  agentSummaryRevision: number;
+  lastDmAt: number | null;
+  lastResearchOfferAt: number | null;
+  lastWikiOfferAt: number | null;
+  researchOfferAcceptedAt: number | null;
+  wikiSummaryWrittenAt: number | null;
+}
+
+/**
+ * Read a cluster row with the full P3 engagement field set. Returns null
+ * when the slug does not exist. The result is the *raw* DB shape; the
+ * route layer assembles `topDomains` via a separate query and Zod-parses
+ * the union before returning to the agent / dashboard.
+ */
+export function getResearchClusterDetail(
+  db: Database.Database,
+  slug: string,
+): ClusterDetailRow | null {
+  const row = db.prepare(CLUSTER_DETAIL_QUERY).get(slug) as
+    | ClusterDetailRow
+    | undefined;
+  return row ?? null;
+}
+
+/**
+ * Top eTLD+1 labels (regex-constrained domain shape) observed inside the
+ * cluster, ordered by visit count. Capped at `limit` so the cluster
+ * detail payload stays bounded. The label is never a raw URL — visits
+ * already store `domain` as the eTLD+1, written by `redactor.ts`.
+ */
+export function listTopDomainsForCluster(
+  db: Database.Database,
+  rootTaskId: number,
+  limit = 10,
+): string[] {
+  const rows = db
+    .prepare(
+      `SELECT domain, COUNT(*) AS visits
+       FROM browser_visits
+       WHERE root_task_id = ? AND meaningful = 1
+       GROUP BY domain
+       ORDER BY visits DESC, domain ASC
+       LIMIT ?`,
+    )
+    .all(rootTaskId, limit) as Array<{ domain: string; visits: number }>;
+  return rows.map((row) => row.domain);
+}
+
+export interface ClusterDailyDeltaRow {
+  date: string;
+  meaningfulVisits: number;
+  meaningfulForegroundSec: number;
+  newDomains: string[];
+}
+
+/**
+ * Per-day delta over the cluster's meaningful visits, bucketed by the
+ * agent-day calendar (so a visit at 03:30 lands in the prior day's
+ * bucket when `dayBoundaryHour=4`). `newDomains` is the set of eTLD+1
+ * labels that appear in this day's bucket but did not appear in any
+ * earlier bucket of the same cluster — the "what changed yesterday"
+ * surface the F2 digest pulls into the morning journal.
+ *
+ * Pure aggregation over `browser_visits`. Bounded at the API layer by
+ * `dayLimit` (default 31 days back from today) to keep payloads small.
+ */
+export function listClusterDailyDeltas(
+  db: Database.Database,
+  rootTaskId: number,
+  boundary: { timezone: string | undefined; dayBoundaryHour: number },
+  options: { sinceMs?: number; dayLimit?: number } = {},
+): ClusterDailyDeltaRow[] {
+  const rows = db
+    .prepare(
+      `SELECT ts, domain, foreground_sec AS foregroundSec
+       FROM browser_visits
+       WHERE root_task_id = ? AND meaningful = 1
+         AND (? IS NULL OR ts >= ?)
+       ORDER BY ts ASC`,
+    )
+    .all(
+      rootTaskId,
+      options.sinceMs ?? null,
+      options.sinceMs ?? null,
+    ) as Array<{ ts: number; domain: string; foregroundSec: number | null }>;
+
+  const buckets = new Map<
+    string,
+    { visits: number; foregroundSec: number; domains: Set<string> }
+  >();
+  const seenDomains = new Set<string>();
+  const orderedDays: string[] = [];
+
+  for (const row of rows) {
+    const day = getAgentDayDateStr(
+      boundary.timezone,
+      boundary.dayBoundaryHour,
+      new Date(row.ts),
+    );
+    let bucket = buckets.get(day);
+    if (!bucket) {
+      bucket = { visits: 0, foregroundSec: 0, domains: new Set() };
+      buckets.set(day, bucket);
+      orderedDays.push(day);
+    }
+    bucket.visits += 1;
+    bucket.foregroundSec += row.foregroundSec ?? 0;
+    bucket.domains.add(row.domain);
+  }
+
+  const out: ClusterDailyDeltaRow[] = [];
+  for (const day of orderedDays) {
+    // `orderedDays` is only appended to when a fresh bucket is inserted
+    // above, so the lookup here is guaranteed to hit.
+    const bucket = buckets.get(day)!;
+    const newDomains: string[] = [];
+    for (const domain of bucket.domains) {
+      if (!seenDomains.has(domain)) {
+        newDomains.push(domain);
+      }
+    }
+    for (const domain of bucket.domains) seenDomains.add(domain);
+    out.push({
+      date: day,
+      meaningfulVisits: bucket.visits,
+      meaningfulForegroundSec: bucket.foregroundSec,
+      newDomains: newDomains.sort(),
+    });
+  }
+
+  if (options.dayLimit && out.length > options.dayLimit) {
+    return out.slice(out.length - options.dayLimit);
+  }
+  return out;
+}
+
+/**
+ * Stamp the DM dispatch wall-clock + offer-tracking columns after a
+ * templated DM has been queued through the notification path. All
+ * three columns are optional — pass null to leave a column untouched.
+ *
+ * Idempotent under concurrent writers: every column either retains
+ * its prior value or moves forward (UPDATE … SET col = COALESCE(?, col))
+ * so a double-fire from a poller race cannot regress an earlier
+ * stamp.
+ */
+export function stampClusterDmFields(
+  db: Database.Database,
+  slug: string,
+  fields: {
+    lastDmAt?: number | null;
+    lastResearchOfferAt?: number | null;
+    lastWikiOfferAt?: number | null;
+    researchOfferAcceptedAt?: number | null;
+    wikiSummaryWrittenAt?: number | null;
+    statusOverride?: BrowserHistoryClusterDetail["status"];
+  },
+): void {
+  const stmt = db.prepare(
+    `UPDATE browser_research_clusters
+     SET
+       last_dm_at = COALESCE(?, last_dm_at),
+       last_research_offer_at = COALESCE(?, last_research_offer_at),
+       last_wiki_offer_at = COALESCE(?, last_wiki_offer_at),
+       research_offer_accepted_at = COALESCE(?, research_offer_accepted_at),
+       wiki_summary_written_at = COALESCE(?, wiki_summary_written_at),
+       status = COALESCE(?, status)
+     WHERE slug = ?`,
+  );
+  stmt.run(
+    fields.lastDmAt ?? null,
+    fields.lastResearchOfferAt ?? null,
+    fields.lastWikiOfferAt ?? null,
+    fields.researchOfferAcceptedAt ?? null,
+    fields.wikiSummaryWrittenAt ?? null,
+    fields.statusOverride ?? null,
+    slug,
+  );
+}
+
+/**
+ * Set the cluster's status with a hard override (rename / conclude /
+ * mute / unmute paths). Differs from `stampClusterDmFields` in that
+ * it always writes — never COALESCE — and from the poller's upsert in
+ * that the upsert preserves `muted` / `concluded` against newly
+ * arriving visits, while this path is the source of truth for the
+ * user / bang-command-driven transition.
+ */
+export function setResearchClusterStatus(
+  db: Database.Database,
+  slug: string,
+  status: BrowserHistoryClusterDetail["status"],
+): boolean {
+  const info = db
+    .prepare(`UPDATE browser_research_clusters SET status = ? WHERE slug = ?`)
+    .run(status, slug);
+  return info.changes > 0;
+}
+
+/**
+ * Rename a cluster — only the operator-facing `display_name` changes.
+ * The slug is the PK and is held stable (the user types `!research <slug>`
+ * after rename, but the URL-friendly slug remains the same — a new
+ * slug would orphan the existing context/research/<slug>.md note and
+ * any in-flight DM offer references). `agent_summary_revision` is
+ * bumped so the next cluster_update sees a non-zero revision and
+ * stops re-deriving the display name from top domain + top search
+ * term (preserving the operator's pick).
+ */
+export function renameResearchCluster(
+  db: Database.Database,
+  slug: string,
+  displayName: string,
+): boolean {
+  const info = db
+    .prepare(
+      `UPDATE browser_research_clusters
+       SET display_name = ?,
+           agent_summary_revision = MAX(agent_summary_revision, 1)
+       WHERE slug = ?`,
+    )
+    .run(displayName, slug);
+  return info.changes > 0;
+}
+
+/**
+ * Bump `agent_summary_revision` after a `routine.research_cluster_update`
+ * session writes the day entry to `context/research/<slug>.md`. The
+ * poller-side upsert reads this column to decide whether the operator
+ * has invested in a custom display name yet; the cluster_update
+ * routine reads it to decide whether to skip a no-op run.
+ */
+export function bumpClusterAgentSummaryRevision(
+  db: Database.Database,
+  slug: string,
+): number {
+  const info = db
+    .prepare(
+      `UPDATE browser_research_clusters
+       SET agent_summary_revision = agent_summary_revision + 1
+       WHERE slug = ?`,
+    )
+    .run(slug);
+  if (info.changes === 0) return 0;
+  // The UPDATE just succeeded on this slug, so the SELECT below is
+  // guaranteed to find it (single-writer SQLite, same db handle).
+  const row = db
+    .prepare(
+      `SELECT agent_summary_revision AS rev FROM browser_research_clusters WHERE slug = ?`,
+    )
+    .get(slug) as { rev: number };
+  return row.rev;
+}
+
+/**
+ * Clusters whose `last_activity_at` is newer than the row's most recent
+ * cluster_update session — i.e. the agent has new visits to journal.
+ * Surfaces only `active` rows: muted / concluded / dormant clusters do
+ * not get nightly journal appends. Capped by `limit` so a backlog never
+ * floods the schedule fan-out.
+ */
+export function listClustersNeedingUpdate(
+  db: Database.Database,
+  lookbackMs: number,
+  nowMs: number = Date.now(),
+  limit = 25,
+): Array<{ slug: string; displayName: string }> {
+  const since = nowMs - lookbackMs;
+  return db
+    .prepare(
+      `SELECT slug, display_name AS displayName
+       FROM browser_research_clusters
+       WHERE status = 'active'
+         AND last_activity_at >= ?
+       ORDER BY last_activity_at DESC
+       LIMIT ?`,
+    )
+    .all(since, limit) as Array<{ slug: string; displayName: string }>;
+}
+
+// ── browser_pending_offers — materialised view of open offer state ──
+
+export const OFFER_DEFAULT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+export interface PendingOfferInput {
+  slug: string;
+  kind: BrowserHistoryOfferKind;
+  offeredAt: number;
+  expiresAt: number;
+}
+
+/**
+ * INSERT-OR-REPLACE the open-offer row for (slug, kind). REPLACE keeps the
+ * row idempotent under a poller re-emit: a cluster that re-qualifies after
+ * an expired offer cleanup gets its `expires_at` extended without first
+ * deleting; a cluster that already has an open row keeps its offered_at /
+ * expires_at as-is (the poller's `shouldEmitOffer` check filters before
+ * this path is called).
+ */
+export function upsertPendingOffer(
+  db: Database.Database,
+  input: PendingOfferInput,
+): void {
+  db.prepare(
+    `INSERT INTO browser_pending_offers (slug, kind, offered_at, expires_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT (slug, kind) DO UPDATE SET
+       offered_at = excluded.offered_at,
+       expires_at = excluded.expires_at`,
+  ).run(input.slug, input.kind, input.offeredAt, input.expiresAt);
+}
+
+export function deletePendingOffer(
+  db: Database.Database,
+  slug: string,
+  kind: BrowserHistoryOfferKind,
+): boolean {
+  const info = db
+    .prepare(`DELETE FROM browser_pending_offers WHERE slug = ? AND kind = ?`)
+    .run(slug, kind);
+  return info.changes > 0;
+}
+
+export function deletePendingOffersForCluster(
+  db: Database.Database,
+  slug: string,
+): number {
+  const info = db
+    .prepare(`DELETE FROM browser_pending_offers WHERE slug = ?`)
+    .run(slug);
+  return info.changes;
+}
+
+/**
+ * List open offers joined to their cluster display name. The route layer
+ * returns this verbatim (after Zod parse) for `/api/browser-history/offers/pending`
+ * and the pre-morning digest surfaces it in `pending-offers.md`.
+ *
+ * Expired offers (now > expires_at) are filtered out and lazily purged
+ * — purge runs inline so the next `!research` list does not show a
+ * dangling row. Lazy purge avoids a dedicated cron entry; the table is
+ * small (≤1 row per cluster per kind, capped by the 14-day TTL).
+ */
+export function listPendingOffersWithDisplay(
+  db: Database.Database,
+  nowMs: number = Date.now(),
+): BrowserHistoryPendingOffer[] {
+  db.prepare(`DELETE FROM browser_pending_offers WHERE expires_at < ?`).run(
+    nowMs,
+  );
+  return db
+    .prepare(
+      `SELECT
+         po.slug,
+         c.display_name AS displayName,
+         po.kind,
+         po.offered_at AS offeredAt,
+         po.expires_at AS expiresAt
+       FROM browser_pending_offers po
+       JOIN browser_research_clusters c ON c.slug = po.slug
+       ORDER BY po.offered_at DESC`,
+    )
+    .all() as BrowserHistoryPendingOffer[];
+}
+
+export function listPendingOffersForCluster(
+  db: Database.Database,
+  slug: string,
+  nowMs: number = Date.now(),
+): BrowserHistoryPendingOffer[] {
+  return db
+    .prepare(
+      `SELECT
+         po.slug,
+         c.display_name AS displayName,
+         po.kind,
+         po.offered_at AS offeredAt,
+         po.expires_at AS expiresAt
+       FROM browser_pending_offers po
+       JOIN browser_research_clusters c ON c.slug = po.slug
+       WHERE po.slug = ? AND po.expires_at >= ?
+       ORDER BY po.offered_at DESC`,
+    )
+    .all(slug, nowMs) as BrowserHistoryPendingOffer[];
+}
+
 export function applyBrowserHistoryRetention(
   db: Database.Database,
   retention: RetentionConfig,
@@ -456,8 +881,8 @@ export function applyBrowserHistoryRetention(
       .prepare("DELETE FROM browser_visits WHERE ts < ?")
       .run(visitCutoff);
     return {
-      visitsDeleted: deleted.changes ?? 0,
-      searchQueriesCleared: cleared.changes ?? 0,
+      visitsDeleted: deleted.changes,
+      searchQueriesCleared: cleared.changes,
     };
   });
   return tx();

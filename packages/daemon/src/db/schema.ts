@@ -1096,8 +1096,14 @@ CREATE TABLE IF NOT EXISTS browser_research_clusters (
 
 CREATE TABLE IF NOT EXISTS browser_pending_offers (
     slug TEXT NOT NULL,
+    -- BROWSER_HISTORY_INTEGRATION_PLAN seventh-pass — the 'offered'
+    -- kind is the two-option offer state (user asked, no reply yet);
+    -- accept endpoint narrows it to research_assist / wiki_summary
+    -- on dispatch. P3b-era rows with the kind-specific values still
+    -- parse. Existing installs are migrated via the entry
+    -- 0001-browser-pending-offers-add-offered-kind in migrations.ts.
     kind TEXT NOT NULL
-        CHECK (kind IN ('research_assist', 'wiki_summary')),
+        CHECK (kind IN ('offered', 'research_assist', 'wiki_summary')),
     offered_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
     PRIMARY KEY (slug, kind)
@@ -1599,7 +1605,25 @@ VALUES
     -- real morning fan-outs and tripped BackendQuotaError(max_budget_usd)
     -- mid-fetch, so this envelope is widened via the per-process
     -- override in plan-presets.ts (ENVELOPE_OVERRIDES_BY_PROCESS_KEY).
-    ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 20,  0.50, 'preset');
+    ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 20,  0.50, 'preset'),
+    -- BROWSER_HISTORY_INTEGRATION_PLAN P3:
+    --   research_cluster_update — nightly per-cluster journal append.
+    --     Lite tier (Haiku-class) — templated DM dispatcher with a
+    --     single PUT to context/research/<slug>.md. 5 turns / $0.05 is
+    --     enough headroom; the §10.3 safety floor refuses Codex
+    --     outright, so the seeded claude row is the only eligible
+    --     binding until the operator widens via /settings/models.
+    --   research_dispatch — accept path. Medium tier (Sonnet). Uses
+    --     WebSearch + WebFetch for parallel external research; budget
+    --     mirrors evening_review (50/$1.00) since the work shape is
+    --     similar (multi-source synthesis + structured write).
+    --   research_wiki_summary — accept path for wiki summary. Medium
+    --     tier; smaller envelope (30/$0.50) — the agent composes from
+    --     the cluster journal it already wrote, so WebFetch fan-out is
+    --     bounded.
+    ('routine.research_cluster_update', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',    5,  0.05, 'preset'),
+    ('routine.research_dispatch',       'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50,  1.00, 'preset'),
+    ('routine.research_wiki_summary',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  0.50, 'preset');
 
 INSERT OR IGNORE INTO settings (key, value_json, updated_at)
 VALUES (

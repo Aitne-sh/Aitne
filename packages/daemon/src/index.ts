@@ -74,6 +74,7 @@ import {
   getRoadmapWriteLockTimeoutMs,
 } from "./core/roadmap-write-lock.js";
 import { runRoadmapMechanicalMaintenance } from "./core/roadmap-maintenance.js";
+import { fanoutResearchClusterUpdates } from "./core/browser-history/research-cluster-fanout.js";
 import { sweepExpiredMigrationBackups } from "./api/routes/setup-migrate.js";
 import { PlatformSecretStore } from "./secrets/platform-secret-store.js";
 import { FileEncryptedBlobStore } from "./secrets/encrypted-blob-store.js";
@@ -1258,9 +1259,29 @@ async function startup(): Promise<void> {
   heartbeat.start();
 
   // ── 12. Catchup (recover missed actions after restart) ──
-  // Register day boundary callback: summarize DM sessions at 4 AM before morning routine
+  // Register day boundary callback: summarize DM sessions at 4 AM before
+  // morning routine. Then fan out one
+  // `routine.research_cluster_update` event per active browser-history
+  // research cluster with new activity in the last 24h
+  // (BROWSER_HISTORY_INTEGRATION_PLAN §10.6 step 3). The fan-out is
+  // bounded at 25 clusters / cycle; backlog clusters surface on the
+  // next day-boundary tick.
   scheduler.setDayBoundaryCallback(async () => {
     await dispatcher.summarizeDmSessions();
+    try {
+      const result = await fanoutResearchClusterUpdates(db, eventBus);
+      if (result.enqueuedSlugs.length > 0) {
+        logger.info(
+          { enqueuedSlugs: result.enqueuedSlugs },
+          "Research cluster updates enqueued at day boundary",
+        );
+      }
+    } catch (err) {
+      logger.error(
+        { err },
+        "Research cluster update fan-out failed; will retry next day boundary",
+      );
+    }
   });
 
   // Register direct DM callback: sends scheduled messages without running an agent

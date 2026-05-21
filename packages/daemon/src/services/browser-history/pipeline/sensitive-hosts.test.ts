@@ -40,6 +40,19 @@ describe("classifyHost", () => {
     expect(classifyHost("")).toBeNull();
   });
 
+  it("classifies a single-label host (no dot — registeredDomain fast path) as unrelated", () => {
+    // Exercises the `parts.length < 2` branch in registeredDomain:
+    // "localhost" splits to ["localhost"], so registeredDomain returns
+    // the host as-is and no keyword hit fires.
+    expect(classifyHost("localhost")).toBeNull();
+  });
+
+  it("classifies a co.jp registered domain via keyword on the two-level suffix branch", () => {
+    // Exercises the twoLevelTlds branch in registeredDomain
+    // ("co.jp" suffix → registered label is "myclinic", "clinic" keyword hits).
+    expect(classifyHost("myclinic.co.jp")).toBe("health");
+  });
+
   it("prefers adult over heuristic banking match", () => {
     // Defensive: even if a fictional adult site contains "bank" the
     // adult list is checked first by intent. None of the bundled adult

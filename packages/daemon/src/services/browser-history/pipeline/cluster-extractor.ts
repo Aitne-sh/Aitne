@@ -1,5 +1,8 @@
 import type Database from "better-sqlite3";
 import { getAgentDayDateStr } from "@aitne/shared";
+import type {
+  ClusterEngagementSnapshot,
+} from "./offer-triggers.js";
 
 export interface ClusterVisitRow {
   rootTaskId: number;
@@ -197,10 +200,13 @@ function disambiguateSlug(
   // search term) collide on the `slug` PK in browser_research_clusters
   // and silently merge under the first-inserted root_task_id. Append a
   // stable suffix so each root_task_id keeps its own row.
+  //
+  // `rootTaskId` is the unique grouping key from the caller's `byRoot`
+  // map, so the resulting `<truncated>-<rootTaskId>` is guaranteed
+  // unique across every iteration of `extractClustersFromDb`.
   const suffix = `-${rootTaskId}`;
   const truncated = base.slice(0, Math.max(2, SLUG_MAX_LENGTH * 2 - suffix.length));
-  const candidate = `${truncated}${suffix}`;
-  return used.has(candidate) ? `cluster-${rootTaskId}` : candidate;
+  return `${truncated}${suffix}`;
 }
 
 export function extractClustersFromDb(
@@ -218,8 +224,9 @@ export function extractClustersFromDb(
   const out: ExtractedCluster[] = [];
   const usedSlugs = new Set<string>();
   for (const [, group] of byRoot) {
-    const aggregate = aggregateCluster(group, boundary);
-    if (!aggregate) continue;
+    // `byRoot` only holds non-empty groups (rows are pushed before the
+    // map is updated), so aggregateCluster never returns null here.
+    const aggregate = aggregateCluster(group, boundary)!;
     const baseSlug = deriveClusterSlug(aggregate);
     const slug = disambiguateSlug(baseSlug, aggregate.rootTaskId, usedSlugs);
     usedSlugs.add(slug);
@@ -231,4 +238,155 @@ export function extractClustersFromDb(
     });
   }
   return out;
+}
+
+const ENGAGEMENT_QUERY = `
+  SELECT
+    root_task_id AS rootTaskId,
+    ts,
+    domain,
+    foreground_sec AS foregroundSec
+  FROM browser_visits
+  WHERE root_task_id = ? AND meaningful = 1
+  ORDER BY ts ASC
+`;
+
+const LONG_READ_FOREGROUND_SEC = 120;
+const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+export interface ClusterRowForEngagement {
+  slug: string;
+  displayName: string;
+  rootTaskId: number;
+  status: "active" | "dormant" | "concluded" | "muted";
+  startedAt: number;
+  lastActivityAt: number;
+  meaningfulVisitsTotal: number;
+  meaningfulForegroundSecTotal: number;
+  distinctMeaningfulDomains: number;
+  lastDmAt: number | null;
+  lastResearchOfferAt: number | null;
+  lastWikiOfferAt: number | null;
+  researchOfferAcceptedAt: number | null;
+  wikiSummaryWrittenAt: number | null;
+}
+
+/**
+ * Build the offer-trigger evaluator's input snapshot from a stored
+ * cluster row + the cluster's meaningful-visit history. Returns
+ * `null` when the cluster has no meaningful rows (defensive — the
+ * poller's upsert should have filtered such clusters to dormant, but
+ * a stale row can survive between upserts).
+ *
+ * Pure aggregation over `browser_visits`. The expensive paths (window
+ * scan, day-bucket dedup, long-read counting) are bounded by the per-
+ * cluster row count, which the qualification thresholds keep ≤ a few
+ * hundred for the lifetime of a real research thread.
+ */
+export function buildEngagementSnapshot(
+  db: Database.Database,
+  row: ClusterRowForEngagement,
+  boundary: AgentDayBoundary,
+  nowMs: number,
+): ClusterEngagementSnapshot | null {
+  const visits = db.prepare(ENGAGEMENT_QUERY).all(row.rootTaskId) as Array<{
+    rootTaskId: number;
+    ts: number;
+    domain: string;
+    foregroundSec: number | null;
+  }>;
+  if (visits.length === 0) return null;
+
+  const daySet = new Set<string>();
+  const longReadDaySet = new Set<string>();
+  let longReadVisits = 0;
+  const recentWindowStart = nowMs - RECENT_WINDOW_MS;
+  const priorWindowStart = nowMs - 2 * RECENT_WINDOW_MS;
+  let recentForegroundSec = 0;
+  const recentDomains = new Set<string>();
+  const priorDomains = new Set<string>();
+  // BROWSER_HISTORY_INTEGRATION_PLAN §5.F1 (seventh-pass) — the offer
+  // DM agent reads `topDomains` from event.data to colour its prose
+  // ("you've been deep on the CaMeL paper across arxiv.org,
+  // simonwillison.net, anthropic.com"). Rank by per-domain foreground
+  // time so the labels match what the user actually spent time on,
+  // not raw visit count.
+  const domainForeground = new Map<string, number>();
+
+  for (const visit of visits) {
+    const day = agentDayKey(visit.ts, boundary);
+    daySet.add(day);
+    const fg = visit.foregroundSec ?? 0;
+    if (fg >= LONG_READ_FOREGROUND_SEC) {
+      longReadVisits += 1;
+      longReadDaySet.add(day);
+    }
+    if (visit.ts >= recentWindowStart) {
+      recentForegroundSec += fg;
+      recentDomains.add(visit.domain);
+    } else if (visit.ts >= priorWindowStart) {
+      priorDomains.add(visit.domain);
+    }
+    domainForeground.set(
+      visit.domain,
+      (domainForeground.get(visit.domain) ?? 0) + fg,
+    );
+  }
+
+  const topDomains = [...domainForeground.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([domain]) => domain);
+
+  return {
+    slug: row.slug,
+    displayName: row.displayName,
+    status: row.status,
+    startedAt: row.startedAt,
+    lastActivityAt: row.lastActivityAt,
+    meaningfulVisitsTotal: row.meaningfulVisitsTotal,
+    meaningfulForegroundSecTotal: row.meaningfulForegroundSecTotal,
+    distinctMeaningfulDomains: row.distinctMeaningfulDomains,
+    distinctMeaningfulDays: daySet.size,
+    longReadVisits,
+    longReadDays: longReadDaySet.size,
+    recentForegroundSec,
+    recentDomains,
+    priorDomains,
+    topDomains,
+    lastDmAt: row.lastDmAt,
+    lastResearchOfferAt: row.lastResearchOfferAt,
+    lastWikiOfferAt: row.lastWikiOfferAt,
+    researchOfferAcceptedAt: row.researchOfferAcceptedAt,
+    wikiSummaryWrittenAt: row.wikiSummaryWrittenAt,
+  };
+}
+
+const CLUSTERS_FOR_ENGAGEMENT_QUERY = `
+  SELECT
+    slug,
+    display_name AS displayName,
+    root_task_id AS rootTaskId,
+    status,
+    started_at AS startedAt,
+    last_activity_at AS lastActivityAt,
+    meaningful_visits_total AS meaningfulVisitsTotal,
+    meaningful_foreground_sec_total AS meaningfulForegroundSecTotal,
+    distinct_meaningful_domains AS distinctMeaningfulDomains,
+    last_dm_at AS lastDmAt,
+    last_research_offer_at AS lastResearchOfferAt,
+    last_wiki_offer_at AS lastWikiOfferAt,
+    research_offer_accepted_at AS researchOfferAcceptedAt,
+    wiki_summary_written_at AS wikiSummaryWrittenAt
+  FROM browser_research_clusters
+  WHERE status = 'active'
+  ORDER BY last_activity_at DESC
+`;
+
+export function listActiveClustersForEngagement(
+  db: Database.Database,
+): ClusterRowForEngagement[] {
+  return db
+    .prepare(CLUSTERS_FOR_ENGAGEMENT_QUERY)
+    .all() as ClusterRowForEngagement[];
 }

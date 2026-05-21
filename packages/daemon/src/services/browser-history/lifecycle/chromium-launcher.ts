@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import { readlink, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { BrowserHistoryBrowserKey } from "@aitne/shared";
-import type { BrowserProfileCandidate, ChromiumBrowserKey, HostProfile } from "../types.js";
+import type { BrowserProfileCandidate, HostProfile } from "../types.js";
 
 const CHROMIUM_FLAGS = [
   "--no-first-run",
@@ -19,12 +18,6 @@ const CHROMIUM_SINGLETON_FILES = [
   "SingletonCookie",
   "SingletonSocket",
 ] as const;
-
-function isChromiumBrowser(
-  browser: BrowserHistoryBrowserKey,
-): browser is ChromiumBrowserKey {
-  return browser !== "safari";
-}
 
 export function buildChromiumLaunchArgs(
   host: HostProfile,
@@ -90,7 +83,7 @@ export async function cleanupStaleSingletonLock(
   // If the symlink encoded a pid, check whether it's still alive. If we
   // fell through to the file branch, ask the host abstraction whether
   // any Chromium instance is currently bound to this profile.
-  const binary = host.browserBinaryFor(profile.browser as ChromiumBrowserKey);
+  const binary = host.browserBinaryFor(profile.browser);
   const ownerAlive = await (async (): Promise<boolean> => {
     if (staleOwner !== null) {
       try {
@@ -128,8 +121,7 @@ export async function cleanupStaleSingletonLock(
 export async function launchChromiumProfile(
   host: HostProfile,
   profile: BrowserProfileCandidate,
-): Promise<"launched" | "unsupported" | "missing_binary"> {
-  if (!isChromiumBrowser(profile.browser)) return "unsupported";
+): Promise<"launched" | "missing_binary"> {
   const binary = host.browserBinaryFor(profile.browser);
   if (!binary) return "missing_binary";
   // Recover from a previous crash that left an orphan SingletonLock.

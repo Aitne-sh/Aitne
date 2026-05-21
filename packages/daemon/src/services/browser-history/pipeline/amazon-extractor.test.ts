@@ -79,4 +79,26 @@ describe("extractAmazonReference", () => {
       extractAmazonReference(input("amazon.co.uk", "/dp/B0UKUKUK00")),
     ).toEqual({ asin: "B0UKUKUK00", locale: "co.uk" });
   });
+
+  it("treats a missing host as a non-Amazon host (|| '' fallback)", () => {
+    const result = extractAmazonReference({
+      scheme: "https:",
+      host: undefined as unknown as string,
+      path: "/dp/B08XYZ1234",
+      url: "https://amazon.com/dp/B08XYZ1234",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("swallows URL-parse failures and returns null (catch branch)", () => {
+    // amazon.com host, no ASIN in path, malformed URL → fall through to
+    // the URL search-param branch, which throws and is caught.
+    const result = extractAmazonReference({
+      scheme: "https:",
+      host: "amazon.com",
+      path: "/no-asin-here",
+      url: "::::not a valid URL::::",
+    });
+    expect(result).toBeNull();
+  });
 });

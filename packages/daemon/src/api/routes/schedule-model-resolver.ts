@@ -147,15 +147,16 @@ export function resolveModelToken(args: {
     return { ok: true, model: null, tierOverride: null, backendId: null, warnings: [] };
   }
 
-  // Tier only → store the tier and clear the model pin. Logically `tier`
-  // is defined here (the both-undefined case returned above), but TS does
-  // not propagate that disjunction narrowing through control flow, so the
-  // `?? null` fallback stays.
+  // Tier only → store the tier and clear the model pin. `tier` is
+  // guaranteed defined here (the both-undefined case returned above and
+  // the both-defined case errored above), but TS does not propagate that
+  // narrowing through the disjunction — the non-null assertion is the
+  // narrowest fix and keeps the branch count honest.
   if (model === undefined) {
     return {
       ok: true,
       model: null,
-      tierOverride: tier ?? null,
+      tierOverride: tier!,
       backendId: null,
       warnings: [],
     };

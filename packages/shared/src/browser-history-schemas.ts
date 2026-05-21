@@ -7,7 +7,6 @@ export const browserHistoryBrowserKeySchema = z.enum([
   "brave",
   "comet",
   "atlas",
-  "safari",
 ]);
 export type BrowserHistoryBrowserKey = z.infer<typeof browserHistoryBrowserKeySchema>;
 
@@ -15,10 +14,8 @@ export const browserHistoryDetectionStatusSchema = z.enum([
   "available",
   "available_no_sync",
   "available_sync_broken",
-  "fda_required",
   "permission_denied",
   "not_installed",
-  "safari_not_applicable",
   "error",
 ]);
 export type BrowserHistoryDetectionStatus = z.infer<typeof browserHistoryDetectionStatusSchema>;
@@ -52,7 +49,6 @@ export const browserHistoryPerBrowserLifecycleConfigSchema = z.object({
   enabled: z.boolean().default(true),
   profiles_to_track: z.array(z.string().min(1).max(120)).default([]),
   sync_flush_wait_seconds: z.number().int().min(5).max(300).default(60),
-  quit_after_ingest: z.boolean().default(false),
   check_interval_minutes_override: z
     .number()
     .int()
@@ -260,4 +256,123 @@ export const browserReloadsWeeklyResponseSchema = z.object({
 });
 export type BrowserReloadsWeeklyResponse = z.infer<
   typeof browserReloadsWeeklyResponseSchema
+>;
+
+// ── P3 — cluster engagement schemas ──
+// See BROWSER_HISTORY_INTEGRATION_PLAN §9 / §5.F1. The cluster-detail and
+// /delta responses are agent-callable through the `browser-history` skill,
+// so the field set is intentionally narrow: no raw URLs, no raw titles, no
+// search-query strings. `topDomains` are eTLD+1 labels (regex-constrained)
+// and `recentDomainsAdded` is bucketed by the agent-day calendar.
+
+export const browserHistoryDomainLabelSchema = z
+  .string()
+  .min(1)
+  .max(253)
+  .regex(/^[a-z0-9.-]+$/);
+
+export const browserHistoryClusterDetailSchema = browserHistoryClusterListItemSchema.extend({
+  rootTaskId: z.number().int().nonnegative(),
+  topDomains: z.array(browserHistoryDomainLabelSchema).max(10),
+  lastDmAt: z.number().int().nonnegative().nullable(),
+  lastResearchOfferAt: z.number().int().nonnegative().nullable(),
+  lastWikiOfferAt: z.number().int().nonnegative().nullable(),
+  researchOfferAcceptedAt: z.number().int().nonnegative().nullable(),
+  wikiSummaryWrittenAt: z.number().int().nonnegative().nullable(),
+});
+export type BrowserHistoryClusterDetail = z.infer<
+  typeof browserHistoryClusterDetailSchema
+>;
+
+export const browserHistoryClusterDeltaEntrySchema = z.object({
+  date: dateOnlyString,
+  meaningfulVisits: z.number().int().nonnegative(),
+  meaningfulForegroundSec: z.number().int().nonnegative(),
+  newDomains: z.array(browserHistoryDomainLabelSchema).max(10),
+});
+export const browserHistoryClusterDeltaResponseSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),
+  generatedAt: z.string(),
+  days: z.array(browserHistoryClusterDeltaEntrySchema).max(31),
+});
+export type BrowserHistoryClusterDeltaResponse = z.infer<
+  typeof browserHistoryClusterDeltaResponseSchema
+>;
+
+// `'offered'` is the seventh-pass two-option flow: the offer DM agent
+// has sent a single DM that presents both research-deeper and
+// summarise options, and the user has not yet replied. The accept
+// endpoint narrows it to `'research_assist'` or `'wiki_summary'` on
+// dispatch. `'research_assist'` and `'wiki_summary'` remain in the
+// enum for (a) the accept request body (the user's chosen kind) and
+// (b) P3b-era pending rows that still exist in shipped DBs (these
+// expire naturally via the 14-day TTL).
+export const browserHistoryOfferKindSchema = z.enum([
+  "offered",
+  "research_assist",
+  "wiki_summary",
+]);
+export type BrowserHistoryOfferKind = z.infer<typeof browserHistoryOfferKindSchema>;
+/** The two kinds the accept endpoint accepts as a request body. */
+export const browserHistoryAcceptKindSchema = z.enum([
+  "research_assist",
+  "wiki_summary",
+]);
+export type BrowserHistoryAcceptKind = z.infer<
+  typeof browserHistoryAcceptKindSchema
+>;
+
+export const browserHistoryPendingOfferSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),
+  displayName: z.string().min(1).max(120),
+  kind: browserHistoryOfferKindSchema,
+  offeredAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+});
+export type BrowserHistoryPendingOffer = z.infer<
+  typeof browserHistoryPendingOfferSchema
+>;
+
+export const browserHistoryPendingOffersResponseSchema = z.object({
+  offers: z.array(browserHistoryPendingOfferSchema).max(50),
+  generatedAt: z.string(),
+});
+export type BrowserHistoryPendingOffersResponse = z.infer<
+  typeof browserHistoryPendingOffersResponseSchema
+>;
+
+// The accept endpoint takes only the narrow kinds (research_assist /
+// wiki_summary) — `offered` is a server-side state, not a client
+// choice.
+export const browserHistoryAcceptOfferRequestSchema = z.object({
+  kind: browserHistoryAcceptKindSchema,
+});
+export type BrowserHistoryAcceptOfferRequest = z.infer<
+  typeof browserHistoryAcceptOfferRequestSchema
+>;
+
+export const browserHistoryAcceptOfferResponseSchema = z.object({
+  slug: z.string(),
+  kind: browserHistoryOfferKindSchema,
+  processKey: z.enum(["routine.research_dispatch", "routine.research_wiki_summary"]),
+  enqueued: z.boolean(),
+});
+export type BrowserHistoryAcceptOfferResponse = z.infer<
+  typeof browserHistoryAcceptOfferResponseSchema
+>;
+
+// `wikiSummaryWrittenAt` marks "the wiki note physically exists" — it
+// must only be advanced after the agent has actually written the wiki
+// note (Obsidian / Notion / local context fallback). Stamping it at
+// acceptance time would trip the task-flow's materiality check
+// (`routine.research_wiki_summary.md` step 3) and skip the first
+// write. The accept paths stamp `lastWikiOfferAt` instead (gates the
+// 14-day re-fire window); the task-flow calls this endpoint after a
+// successful write to advance `wikiSummaryWrittenAt`.
+export const browserHistoryWikiWrittenResponseSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),
+  wikiSummaryWrittenAt: z.number().int().nonnegative(),
+});
+export type BrowserHistoryWikiWrittenResponse = z.infer<
+  typeof browserHistoryWikiWrittenResponseSchema
 >;

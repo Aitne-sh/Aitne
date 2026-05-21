@@ -100,6 +100,105 @@ describe("runMigrations", () => {
   });
 });
 
+// BROWSER_HISTORY_INTEGRATION_PLAN seventh-pass — peer test for the
+// `0001-browser-pending-offers-add-offered-kind` migration, per the
+// CLAUDE.md release-status §4: every non-additive migration needs a
+// test covering (a) fresh-DB no-op + applied id recorded, (b) pre-
+// migration-shape ALTER applies, (c) re-run idempotent.
+describe("0001-browser-pending-offers-add-offered-kind", () => {
+  // Pick the migration from MIGRATIONS by id so we test the production
+  // entry, not a parallel copy.
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0001-browser-pending-offers-add-offered-kind",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB where applySchema produced the wider CHECK constraint", () => {
+    const db = openDb();
+    // Fresh-DB shape: wider CHECK constraint already present.
+    db.exec(`
+      CREATE TABLE browser_pending_offers (
+        slug TEXT NOT NULL,
+        kind TEXT NOT NULL
+          CHECK (kind IN ('offered', 'research_assist', 'wiki_summary')),
+        offered_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (slug, kind)
+      );
+      INSERT INTO browser_pending_offers VALUES ('quantum', 'offered', 0, 9999999999999);
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0001-browser-pending-offers-add-offered-kind",
+    ]);
+    // Row survived (no-op rebuild) — pre-existing offered row still there.
+    const count = db
+      .prepare("SELECT COUNT(*) AS n FROM browser_pending_offers")
+      .get() as { n: number };
+    expect(count.n).toBe(1);
+  });
+
+  it("rebuilds the table on a pre-migration-shape DB and preserves existing rows", () => {
+    const db = openDb();
+    // P3b shape: narrower CHECK constraint without 'offered'.
+    db.exec(`
+      CREATE TABLE browser_pending_offers (
+        slug TEXT NOT NULL,
+        kind TEXT NOT NULL
+          CHECK (kind IN ('research_assist', 'wiki_summary')),
+        offered_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (slug, kind)
+      );
+      INSERT INTO browser_pending_offers VALUES ('legacy-cluster', 'research_assist', 100, 9999999999999);
+      INSERT INTO browser_pending_offers VALUES ('legacy-wiki', 'wiki_summary', 200, 9999999999999);
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0001-browser-pending-offers-add-offered-kind",
+    ]);
+    // Rows preserved.
+    const rows = db
+      .prepare(
+        "SELECT slug, kind, offered_at, expires_at FROM browser_pending_offers ORDER BY slug",
+      )
+      .all() as Array<{ slug: string; kind: string }>;
+    expect(rows.map((r) => `${r.slug}/${r.kind}`)).toEqual([
+      "legacy-cluster/research_assist",
+      "legacy-wiki/wiki_summary",
+    ]);
+    // New 'offered' kind now accepted.
+    db.prepare(
+      "INSERT INTO browser_pending_offers VALUES ('new-cluster', 'offered', 300, 9999999999999)",
+    ).run();
+    const count = db
+      .prepare("SELECT COUNT(*) AS n FROM browser_pending_offers")
+      .get() as { n: number };
+    expect(count.n).toBe(3);
+  });
+
+  it("is idempotent — re-running does not duplicate or modify the table", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_pending_offers (
+        slug TEXT NOT NULL,
+        kind TEXT NOT NULL
+          CHECK (kind IN ('research_assist', 'wiki_summary')),
+        offered_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (slug, kind)
+      );
+    `);
+    runMigrations(db, [migration!]);
+    // schema_migrations now has the id; re-running picks up nothing new.
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+  });
+});
+
 describe("schema introspection helpers", () => {
   it("tableExists returns true for an existing table and false otherwise", () => {
     const db = openDb();

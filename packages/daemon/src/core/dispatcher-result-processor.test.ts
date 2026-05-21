@@ -474,6 +474,111 @@ describe("ResultProcessor — processResult notify-dedup", () => {
       },
     );
   });
+
+  // BROWSER_HISTORY_INTEGRATION_PLAN §10.5 (seventh-pass) —
+  // conversation-injection invariant.
+  //
+  // `notificationMgr.send({replyTo})` resolves via `deliverDirect`,
+  // which writes to `notification_log` but NOT to `messages`. Without
+  // the dispatcher-result-processor injection, wiki.* bang commands
+  // (and any future routine that goes through processResult with a
+  // reply_target) deliver to the platform but leave no trace in the
+  // conversation_history that the DM agent will read on the user's
+  // reply turn.
+  //
+  // (Routines that DM via `POST /api/notify` separately are already
+  // covered — `bootstrap/api.ts:sendNotification` calls
+  // recordProactiveForwardDeliveries directly. This test pins the
+  // wiki.*-via-processResult path where the gap actually exists.)
+  it(
+    "records wiki-event outbound to messages when reply_target is set "
+      + "(conversation-injection invariant)",
+    async () => {
+      const event = createEvent({
+        type: "wiki.compile",
+        source: "wiki.bang",
+        priority: EventPriority.HIGH,
+        data: {
+          workspace: "default",
+          reply_target: {
+            platform: "telegram",
+            channel: "chat-7",
+            threadId: null,
+            sender: "owner",
+          },
+        },
+      });
+      const { processor, notificationMgr } = makeProcessor({ db, dataDir });
+      await processor.processResult(
+        makeAgentResult({ output: "Compiled 5 raw notes into 3 wiki pages." }),
+        event,
+      );
+      expect(notificationMgr.send).toHaveBeenCalledWith(
+        "Compiled 5 raw notes into 3 wiki pages.",
+        event,
+        { replyTo: { platform: "telegram", channel: "chat-7", threadId: null } },
+      );
+      const row = db
+        .prepare(
+          `SELECT m.role, m.content, m.platform, m.metadata, s.scope, s.scope_key
+             FROM messages m
+             JOIN conversation_sessions s ON m.session_id = s.id
+            WHERE s.scope = 'owner_dm' AND s.scope_key = 'owner'
+            ORDER BY m.id DESC LIMIT 1`,
+        )
+        .get() as
+        | {
+            role: string;
+            content: string;
+            platform: string;
+            metadata: string;
+            scope: string;
+            scope_key: string;
+          }
+        | undefined;
+      expect(row).toBeDefined();
+      expect(row!.role).toBe("assistant");
+      expect(row!.content).toBe(
+        "Compiled 5 raw notes into 3 wiki pages.",
+      );
+      expect(row!.platform).toBe("telegram");
+      const meta = JSON.parse(row!.metadata) as { notificationType: string };
+      expect(meta.notificationType).toBe("proactive_forward");
+    },
+  );
+
+  // Counter-test: a wiki event WITHOUT reply_target falls through to
+  // `deliverProactive`, which already records to messages — so no
+  // duplicate write should happen from the dispatcher-result-processor
+  // injection (the `explicitReply` guard must be honoured).
+  it(
+    "does not double-record when reply_target is absent — relies on "
+      + "notificationMgr's existing proactive-forward write",
+    async () => {
+      const event = createEvent({
+        type: "wiki.lint",
+        source: "wiki.bang",
+        priority: EventPriority.HIGH,
+        data: { workspace: "default" },
+      });
+      const { processor, notificationMgr } = makeProcessor({ db, dataDir });
+      await processor.processResult(
+        makeAgentResult({ output: "Lint complete." }),
+        event,
+      );
+      expect(notificationMgr.send).toHaveBeenCalledWith(
+        "Lint complete.",
+        event,
+      );
+      // The dispatcher-result-processor must NOT call
+      // `recordProactiveForwardDeliveries`; the proactive path inside
+      // `notificationMgr.send` is responsible for that branch.
+      const count = db
+        .prepare(`SELECT COUNT(*) AS n FROM messages`)
+        .get() as { n: number };
+      expect(count.n).toBe(0);
+    },
+  );
 });
 
 describe("ResultProcessor — wiki.ingest_url write-verification", () => {

@@ -102,4 +102,20 @@ describe("nextBrowserLifecycleState", () => {
     });
     expect(next.pausedUntil).toBe(nowMs + 24 * 60 * 60 * 1000);
   });
+
+  it("maps launch_failed below the pause threshold to launch_failed_recently", () => {
+    const nowMs = Date.UTC(2026, 4, 20, 6);
+    const next = nextBrowserLifecycleState({
+      state: "healthy",
+      consecutiveFailures: 0,
+      nowMs,
+      outcome: "launch_failed",
+    });
+    expect(next).toMatchObject({
+      state: "launch_failed_recently",
+      consecutiveFailures: 1,
+      pausedUntil: null,
+      lastOutcome: "launch_failed",
+    });
+  });
 });

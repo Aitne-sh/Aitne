@@ -174,6 +174,16 @@ export {
   browserReloadEntrySchema,
   browserReloadsTodayResponseSchema,
   browserReloadsWeeklyResponseSchema,
+  browserHistoryDomainLabelSchema,
+  browserHistoryClusterDetailSchema,
+  browserHistoryClusterDeltaEntrySchema,
+  browserHistoryClusterDeltaResponseSchema,
+  browserHistoryOfferKindSchema,
+  browserHistoryPendingOfferSchema,
+  browserHistoryPendingOffersResponseSchema,
+  browserHistoryAcceptOfferRequestSchema,
+  browserHistoryAcceptOfferResponseSchema,
+  browserHistoryWikiWrittenResponseSchema,
 } from "./browser-history-schemas.js";
 export type {
   BrowserHistoryBrowserKey,
@@ -197,6 +207,14 @@ export type {
   BrowserReloadEntry,
   BrowserReloadsTodayResponse,
   BrowserReloadsWeeklyResponse,
+  BrowserHistoryClusterDetail,
+  BrowserHistoryClusterDeltaResponse,
+  BrowserHistoryOfferKind,
+  BrowserHistoryPendingOffer,
+  BrowserHistoryPendingOffersResponse,
+  BrowserHistoryAcceptOfferRequest,
+  BrowserHistoryAcceptOfferResponse,
+  BrowserHistoryWikiWrittenResponse,
 } from "./browser-history-schemas.js";
 
 // Wiki builder shared contract
@@ -357,6 +375,9 @@ export {
   matchRunAllowedToolPattern,
   validateRunAllowedTool,
   validateRunAllowedTools,
+  HIGH_SENSITIVITY_INTEGRATIONS,
+  BROWSER_HISTORY_PROCESS_KEYS,
+  getBrowserHistorySafetyFloor,
 } from "./integrations.js";
 export type { ValidateRunAllowedToolsResult } from "./integrations.js";
 export type {
@@ -371,6 +392,8 @@ export type {
   IntegrationsMap,
   ObservationKind,
   ValidateDeniedToolsResult,
+  BackendSafetyFloor,
+  BackendSafetyFloorBackend,
 } from "./integrations.js";
 
 // INTEGRATION_NATIVE_MODE_DESIGN.md §8.3 — server-side content hash util

@@ -457,7 +457,14 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
         return new BrowserLifecycleSupervisor(db, config);
       }
       if (observerName === "browser-history-poller") {
-        return new BrowserHistoryPoller(db, config);
+        return new BrowserHistoryPoller(db, config, {
+          // BROWSER_HISTORY_INTEGRATION_PLAN §5.F1 (seventh-pass) —
+          // poller enqueues `routine.research_offer_dm` events; the
+          // agent session composes + sends the natural-language DM.
+          enqueueEvent: async (event) => {
+            await eventBus.put(event);
+          },
+        });
       }
       return null;
     };

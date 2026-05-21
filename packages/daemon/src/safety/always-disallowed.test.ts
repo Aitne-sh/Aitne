@@ -304,6 +304,67 @@ describe("classifyAbsoluteBlock", () => {
     });
   });
 
+  describe("Bash — browser profile exfiltration (§11.4)", () => {
+    it.each([
+      // Quote the path to preserve spaces in macOS's `Application Support`.
+      [`cp "$HOME/Library/Application Support/Google/Chrome/Default/History" /tmp/x`],
+      ["cp ~/.config/google-chrome/Default/History /tmp/x"],
+      [`sqlite3 "$HOME/Library/Application Support/Chromium/Default/History" "SELECT 1"`],
+      // Encoded / variable-expanded path (no escapes needed when quoted):
+      [`cp "$HOME/Library/Application Support/Google/Chrome/Default/History" /tmp/y`],
+      // Chromium internal token file names — referenced by quoted path:
+      [`cp "/private/tmp/chrome-clone/Default/Login Data" /tmp/leak`],
+      ["sqlite3 /private/tmp/chrome-clone/Default/Cookies"],
+      [`sqlite3 "/private/tmp/chrome-clone/Default/Web Data"`],
+      // WSL Windows-side profile path:
+      [`cp "/mnt/c/Users/me/AppData/Local/Google/Chrome/User Data/Default/History" /tmp/x`],
+    ])("matches %s", (cmd) => {
+      const m = classifyAbsoluteBlock("Bash", cmd);
+      expect(m?.category).toBe("browser_profile");
+    });
+
+    it("does NOT match an innocuous mention of Chrome that is not a profile path", () => {
+      expect(
+        classifyAbsoluteBlock("Bash", "echo 'chrome bookmarks are useful'"),
+      ).toBeNull();
+    });
+  });
+
+  describe("Read / Write — browser profile paths", () => {
+    it.each([
+      ["~/Library/Application Support/Google/Chrome/Default/History"],
+      ["/Users/alice/Library/Application Support/Chromium/Default/Cookies"],
+      ["~/.config/google-chrome/Default/Login Data"],
+      ["/mnt/c/Users/me/AppData/Local/Google/Chrome/User Data/Default/History"],
+    ])("Read(%s) → browser_profile", (path) => {
+      expect(classifyAbsoluteBlock("Read", path)?.category).toBe(
+        "browser_profile",
+      );
+    });
+
+    it("Write to a browser profile path → browser_profile", () => {
+      expect(
+        classifyAbsoluteBlock(
+          "Write",
+          "~/Library/Application Support/Google/Chrome/Default/History",
+        )?.category,
+      ).toBe("browser_profile");
+    });
+
+    it("Edit to a browser profile path → browser_profile", () => {
+      expect(
+        classifyAbsoluteBlock(
+          "Edit",
+          "~/.config/google-chrome/Default/History",
+        )?.category,
+      ).toBe("browser_profile");
+    });
+
+    it("Read to an unrelated path is not browser_profile", () => {
+      expect(classifyAbsoluteBlock("Read", "src/index.ts")).toBeNull();
+    });
+  });
+
   describe("Write / Edit — secret paths", () => {
     it("classifies Write to .env as secret_write", () => {
       expect(classifyAbsoluteBlock("Write", ".env.local")?.category).toBe(

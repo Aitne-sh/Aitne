@@ -134,6 +134,69 @@ describe("classifyMeaningful — §5.F1.meaningful pinned cases", () => {
     ).toBe(true);
   });
 
+  it("rejects claude.ai/usage as domain_noise (rule fires after global denylist)", () => {
+    // `usage` is in claude.ai's noiseSegments but NOT in the global
+    // PATH_DENYLIST_SEGMENTS, so the verdict is gated by the
+    // domain-noise rule rather than path_denied. Exercises the L146
+    // `if (noise)` true branch.
+    const verdict = classifyMeaningful(
+      build({
+        host: "claude.ai",
+        path: "/usage",
+        category: "dev",
+      }),
+    );
+    expect(verdict.meaningful).toBe(false);
+    expect(verdict.reason).toBe("domain_noise");
+  });
+
+  it("rejects example.com/research/login/page on path-denylist segment match (not prefix)", () => {
+    // Covers the L141 branch: pathContainsSegment hit when neither L138
+    // (pathStartsWithSegment) nor L135 (category) gate the visit first.
+    const verdict = classifyMeaningful(
+      build({
+        host: "example.com",
+        path: "/research/login/page",
+        category: "research",
+      }),
+    );
+    expect(verdict.meaningful).toBe(false);
+    expect(verdict.reason).toBe("path_denied");
+  });
+
+  it("treats an empty path as 'no segments' across both pathStartsWith and pathContains checks", () => {
+    // Covers L94 (segments.length === 0 branch in pathStartsWithSegment)
+    // and the empty-segments early return in pathContainsSegment.
+    const verdict = classifyMeaningful(
+      build({ path: "", host: "arxiv.org", category: "research" }),
+    );
+    expect(verdict.meaningful).toBe(true);
+  });
+
+  it("falls through domain-noise rule when path is empty on a noise host (first ?? '' branch)", () => {
+    // Covers L112 `first ?? ""` — claude.ai with empty path means
+    // `segments[0]` is undefined; the rule should not flag domain_noise.
+    const verdict = classifyMeaningful(
+      build({
+        host: "claude.ai",
+        path: "",
+        category: "research",
+        foregroundSeconds: 120,
+      }),
+    );
+    // Empty path + non-noise category + sufficient dwell → meaningful.
+    expect(verdict.meaningful).toBe(true);
+  });
+
+  it("rejects a missing scheme as scheme_blocked (|| '' fallback)", () => {
+    // Covers L124 `input.scheme || ""` falsy branch.
+    const verdict = classifyMeaningful(
+      build({ scheme: undefined as unknown as string, category: "research" }),
+    );
+    expect(verdict.meaningful).toBe(false);
+    expect(verdict.reason).toBe("scheme_blocked");
+  });
+
   it("classifies claude.ai/chat/* as meaningful when category is dev", () => {
     expect(
       classifyMeaningful(

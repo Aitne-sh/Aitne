@@ -629,7 +629,19 @@ export async function createObservers(
 
   observerManager.register(new BrowserLifecycleSupervisor(db, config));
   if (shouldStartObserversFor(db, "browser_history")) {
-    observerManager.register(new BrowserHistoryPoller(db, config));
+    observerManager.register(
+      new BrowserHistoryPoller(db, config, {
+        // BROWSER_HISTORY_INTEGRATION_PLAN §5.F1 (seventh-pass) —
+        // poller enqueues `routine.research_offer_dm` events instead
+        // of sending templated DMs. The lite-tier agent session
+        // composes the natural-language two-option DM from the
+        // OfferContext payload and dispatches via the standard
+        // notifier path.
+        enqueueEvent: async (event) => {
+          await eventBus.put(event);
+        },
+      }),
+    );
   }
 
   // ── 7.04 Skill-curation observers (P22 — appendix p22-skill-self-optimization.md) ──

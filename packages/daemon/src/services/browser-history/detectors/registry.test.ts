@@ -35,7 +35,7 @@ describe("browser history capability registry", () => {
   it("requires both explicit consent and direct integration mode before ingest is enabled", () => {
     const detections = [
       result("chrome", "available"),
-      result("safari", "fda_required"),
+      result("edge", "permission_denied"),
     ];
 
     expect(
@@ -85,15 +85,15 @@ describe("browser history capability registry", () => {
           browserHistoryConsentAccepted: true,
           browserHistoryBrowserOverrides: {
             chrome: "forced-off",
-            safari: "forced-on",
+            edge: "forced-on",
           },
         },
         [
           result("chrome", "available"),
-          result("safari", "fda_required"),
+          result("edge", "permission_denied"),
         ],
       ),
-    ).toEqual(["safari"]);
+    ).toEqual(["edge"]);
   });
 
   it("serializes a complete browser status map while keeping detail rows scoped to detected browsers", () => {
@@ -121,13 +121,13 @@ describe("browser history capability registry", () => {
     );
 
     expect(payload.browsers.chrome).toBe("available");
-    expect(payload.browsers.safari).toBe("not_installed");
+    expect(payload.browsers.edge).toBe("not_installed");
     expect(payload.ingestEnabled).toEqual(["chrome"]);
     expect(payload.details.chrome).toMatchObject({
       profileCount: 1,
       signedInProfiles: 1,
       lastHistoryMtimeMs: 42,
     });
-    expect(payload.details.safari).toBeUndefined();
+    expect(payload.details.edge).toBeUndefined();
   });
 });

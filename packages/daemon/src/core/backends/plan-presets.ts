@@ -241,6 +241,20 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // worst-case fan-out. 20-turn turn count is unchanged. Keep in
   // lock-step with the corresponding schema-seed row.
   "routine.fetch_window": { maxTurns: 20, maxBudgetUsd: 0.5 },
+  // BROWSER_HISTORY_INTEGRATION_PLAN P3 — keep these in lock-step with
+  // the schema seed rows. cluster_update is a tiny dispatcher (1 PUT
+  // + a list call), so the absolute floor of 5/$0.05 is the right
+  // envelope. research_offer_dm is even tighter — a single DM
+  // composition (GET /research-clusters/<slug> + POST /api/notify),
+  // 5/$0.02 leaves no room for runaway. research_dispatch carries the
+  // WebFetch fan-out; mirrors evening_review (50/$1.00).
+  // research_wiki_summary is tighter (30/$0.50) — it reads the cluster
+  // journal the agent already wrote and composes from it, with
+  // bounded external work.
+  "routine.research_cluster_update": { maxTurns: 5, maxBudgetUsd: 0.05 },
+  "routine.research_offer_dm": { maxTurns: 5, maxBudgetUsd: 0.02 },
+  "routine.research_dispatch": { maxTurns: 50, maxBudgetUsd: 1.0 },
+  "routine.research_wiki_summary": { maxTurns: 30, maxBudgetUsd: 0.5 },
 };
 
 /**

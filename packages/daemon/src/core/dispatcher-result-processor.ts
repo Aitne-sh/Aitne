@@ -61,7 +61,9 @@ import {
   getProactiveForwardType,
   isProactiveForwardMetadata,
   parseMessageMetadata,
+  recordProactiveForwardDeliveries,
 } from "./channel-timeline.js";
+import { randomUUID } from "node:crypto";
 import {
   OWNER_DM_SCOPE,
   OWNER_SCOPE_KEY,
@@ -217,6 +219,49 @@ export class ResultProcessor {
         await this.notificationMgr.send(output, event);
       } else {
         await this.notificationMgr.send(output, event, sendOptions);
+      }
+      // BROWSER_HISTORY_INTEGRATION_PLAN §10.5 (seventh-pass) —
+      // conversation-injection invariant. Outbound DMs from routine
+      // sessions with a `reply_target` must land in the owner DM
+      // scope's `conversation_sessions` so the standard `message.dm`
+      // agent sees them in `<recent_dm_conversation>` on the user's
+      // reply turn. Without this, the natural-language acceptance
+      // flow (user replies "research please" to an offer DM) is
+      // structurally broken — the DM agent has no record of what
+      // offer was sent.
+      //
+      // Mirrors `scheduler.ts:handleDirectDm` which records
+      // `scheduled.dm` outputs the same way. `notificationMgr.send`
+      // by itself writes to `notification_log` (telemetry) only,
+      // not to `messages` (conversation history) — this call closes
+      // the gap. Best-effort: a recording failure must not break
+      // the send itself, so wrap in try/catch.
+      if (explicitReply && output.length > 0) {
+        try {
+          recordProactiveForwardDeliveries({
+            db: this.db,
+            config: this.config,
+            deliveries: [
+              {
+                platform: explicitReply.platform,
+                channel: explicitReply.channel,
+              },
+            ],
+            content: output,
+            dispatchId: randomUUID(),
+            ...(options.originSessionId !== undefined
+              ? { originSessionIds: [options.originSessionId] }
+              : {}),
+            notificationType: "proactive_forward",
+          });
+        } catch (err) {
+          logger.warn(
+            { err, eventType: event.type },
+            "Failed to record outbound DM into channel timeline; "
+              + "next message.dm session will not see this DM in "
+              + "conversation_history. Send itself succeeded.",
+          );
+        }
       }
     }
     this.audit.logAction({

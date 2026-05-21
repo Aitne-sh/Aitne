@@ -45,7 +45,47 @@ export interface Migration {
  * ALTER TABLE or a data backfill, add a row here with the next sequential
  * id prefix.
  */
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    id: "0001-browser-pending-offers-add-offered-kind",
+    description:
+      "BROWSER_HISTORY_INTEGRATION_PLAN seventh-pass (v0.1.8→next) — widen "
+      + "`browser_pending_offers.kind` CHECK constraint to include 'offered'. "
+      + "SQLite can't ALTER a CHECK in place, so we rebuild the table: "
+      + "create *_new with the wider constraint, copy rows, drop, rename.",
+    up(db) {
+      // Idempotent: fresh installs already get the wider CHECK from
+      // schema.ts. We detect that by inspecting the table definition:
+      // PRAGMA table_info doesn't surface CHECK constraints, but
+      // sqlite_master.sql does. If the wider constraint is already
+      // present, skip the rebuild.
+      if (!tableExists(db, "browser_pending_offers")) return;
+      const row = db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='browser_pending_offers'",
+        )
+        .get() as { sql: string | null } | undefined;
+      if (row?.sql && row.sql.includes("'offered'")) {
+        // Wider constraint already present; nothing to do.
+        return;
+      }
+      db.exec(`
+        CREATE TABLE browser_pending_offers_new (
+          slug TEXT NOT NULL,
+          kind TEXT NOT NULL
+            CHECK (kind IN ('offered', 'research_assist', 'wiki_summary')),
+          offered_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL,
+          PRIMARY KEY (slug, kind)
+        );
+        INSERT INTO browser_pending_offers_new (slug, kind, offered_at, expires_at)
+          SELECT slug, kind, offered_at, expires_at FROM browser_pending_offers;
+        DROP TABLE browser_pending_offers;
+        ALTER TABLE browser_pending_offers_new RENAME TO browser_pending_offers;
+      `);
+    },
+  },
+];
 
 export interface MigrationRunResult {
   /** Ids applied during this call, in execution order. Empty on steady state. */

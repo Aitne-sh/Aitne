@@ -10,6 +10,7 @@ import type {
 import {
   backendHasIntegrationConnector,
   delegatedIntegrationsForProcessKey,
+  getBrowserHistorySafetyFloor,
   getDefaultTierForProcessKey,
   isCustomRoutineKey,
   isMessageEvent,
@@ -318,6 +319,30 @@ export class BackendRouter implements IAgentRouter {
       ...(params.requestedBackendId ? { requestedBackendId: params.requestedBackendId } : {}),
       ...(params.requestedModelId ? { requestedModelId: params.requestedModelId } : {}),
     });
+
+    // BROWSER_HISTORY_INTEGRATION_PLAN §10.3 — backend safety floor.
+    // High-sensitivity integrations declare a per-process-key allowlist
+    // of eligible backends + a forbidden-modes list. When the resolved
+    // binding violates the floor, the router refuses to execute, logs
+    // an `agent_actions(action_type='backend_floor_refused')` row, and
+    // surfaces a one-time owner DM directing the operator at
+    // /settings/models. No graceful degradation — the threat model
+    // assumes the enforcement surface holds.
+    const floorViolation = this.checkSafetyFloor(binding);
+    if (floorViolation) {
+      this.logSafetyFloorRefusal(binding, floorViolation);
+      await this.dmSafetyFloorOnce(binding, floorViolation, params.event);
+      const failure = new BackendDecisiveFailure(
+        binding.main.backendId,
+        "policy_denied",
+        floorViolation.reason,
+      );
+      throw new BackendRouterHandledError(
+        `Backend safety floor refused: ${floorViolation.reason}`,
+        failure,
+        failure,
+      );
+    }
 
     // Phase 3.3 — pre-flight auth cache check. When the main backend's
     // cached auth status is recently confirmed bad, skip straight to the
@@ -1299,6 +1324,119 @@ export class BackendRouter implements IAgentRouter {
       )
       .get(name) as { 1: number } | undefined;
     return !!row;
+  }
+
+  /**
+   * BROWSER_HISTORY_INTEGRATION_PLAN §10.3 — backend safety floor check.
+   * Returns null when the resolved binding satisfies the floor (or no
+   * floor applies to the process key); returns a violation otherwise.
+   *
+   * The floor is consulted via `getBrowserHistorySafetyFloor`, a
+   * static map keyed by process key. When a new high-sensitivity
+   * integration ships, it registers its own floor map and routes
+   * through a similar lookup; this helper is the single chokepoint.
+   */
+  private checkSafetyFloor(
+    binding: ResolvedBackendRoute,
+  ): { reason: string; backendId: BackendId } | null {
+    const floor = getBrowserHistorySafetyFloor(binding.processKey);
+    if (!floor) return null;
+    const backendId = binding.main.backendId;
+    if (!floor.eligible.includes(backendId)) {
+      return {
+        reason: `Process ${binding.processKey} requires one of [${floor.eligible.join(", ")}] but is bound to ${backendId}. ${floor.rationale}`,
+        backendId,
+      };
+    }
+    if (floor.forbiddenModes) {
+      const mode = this.executionModeFor(backendId);
+      const forbidden = floor.forbiddenModes.find(
+        (entry) => entry.backend === backendId && entry.mode === mode,
+      );
+      if (forbidden) {
+        return {
+          reason: `Process ${binding.processKey} cannot run on ${backendId} in ${mode} mode. ${floor.rationale}`,
+          backendId,
+        };
+      }
+    }
+    return null;
+  }
+
+  private executionModeFor(backendId: BackendId): "strict" | "allow" {
+    switch (backendId) {
+      case "claude":
+        return this.config.claudeExecutionPermissionMode;
+      case "codex":
+        return this.config.codexExecutionPermissionMode;
+      case "gemini":
+        return this.config.geminiExecutionPermissionMode;
+      case "opencode":
+        return this.config.opencodeExecutionPermissionMode;
+    }
+  }
+
+  private logSafetyFloorRefusal(
+    binding: ResolvedBackendRoute,
+    violation: { reason: string; backendId: BackendId },
+  ): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO agent_actions
+             (action_type, result, error, detail)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(
+          "backend_floor_refused",
+          "failed",
+          violation.reason,
+          JSON.stringify({
+            processKey: binding.processKey,
+            backendId: violation.backendId,
+            executionMode: this.executionModeFor(violation.backendId),
+            reason: violation.reason,
+          }),
+        );
+    } catch (err) {
+      // Defensive: an unexpected schema mismatch (e.g. agent_actions
+      // missing columns in a stale test fixture) must not block the
+      // refusal itself. The throw above still surfaces the policy.
+      logger.warn(
+        { err, processKey: binding.processKey },
+        "Failed to persist backend_floor_refused audit row",
+      );
+    }
+  }
+
+  // BROWSER_HISTORY_INTEGRATION_PLAN §10.3 mandates a one-time DM on
+  // floor refusal so the operator notices the binding is misconfigured.
+  // Without the DM the routine silently stops running and the
+  // `agent_actions` row is only visible through the dashboard activity
+  // panel — easy to miss for a routine that runs nightly. We thread
+  // the originating event through so notifier.send can route the
+  // message on the configured owner channel.
+  private async dmSafetyFloorOnce(
+    binding: ResolvedBackendRoute,
+    violation: { reason: string; backendId: BackendId },
+    event: Event,
+  ): Promise<void> {
+    if (!this.notifier) return;
+    const dedupeKey
+      = `backend-floor:${binding.processKey}:${violation.backendId}`;
+    const message =
+      `Browser-history routine \`${binding.processKey}\` is paused: `
+      + `your current backend (${violation.backendId}) is not in the safety floor. `
+      + `Adjust the binding in /settings/models and re-run.`;
+    logger.warn(
+      {
+        processKey: binding.processKey,
+        backendId: violation.backendId,
+        reason: violation.reason,
+      },
+      message,
+    );
+    await this.notifyConfiguredChannel(message, event, dedupeKey, "high");
   }
 
   private async handleNoFallbackFailure(

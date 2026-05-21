@@ -51,7 +51,6 @@ const BROWSERS: Array<{ key: BrowserHistoryBrowserKey; label: string }> = [
   { key: "brave", label: "Brave" },
   { key: "comet", label: "Comet" },
   { key: "atlas", label: "Atlas" },
-  { key: "safari", label: "Safari" },
 ];
 
 const CATEGORIES: Array<{ key: BrowserHistoryCategory; label: string }> = [
@@ -73,10 +72,8 @@ const STATUS_COPY: Record<
   available: { label: "Available", tone: "default" },
   available_no_sync: { label: "No sync", tone: "amber" },
   available_sync_broken: { label: "Sync stale", tone: "amber" },
-  fda_required: { label: "Full Disk Access", tone: "red" },
   permission_denied: { label: "Permission denied", tone: "red" },
   not_installed: { label: "Not installed", tone: "gray" },
-  safari_not_applicable: { label: "Not applicable", tone: "gray" },
   error: { label: "Error", tone: "red" },
 };
 
@@ -121,13 +118,6 @@ function statusAlert(status: BrowserHistoryDetectionStatus | undefined): {
   variant: "info" | "warning" | "error";
   message: string;
 } | null {
-  if (status === "fda_required") {
-    return {
-      variant: "warning",
-      message:
-        "Safari history needs Full Disk Access for the daemon process before it can be read.",
-    };
-  }
   if (status === "permission_denied") {
     return {
       variant: "error",
@@ -165,8 +155,7 @@ function BrowserStatusIcon({
     return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
   }
   if (
-    status === "fda_required"
-    || status === "permission_denied"
+    status === "permission_denied"
     || status === "available_sync_broken"
   ) {
     return <AlertTriangle className="h-4 w-4 text-amber-600" />;

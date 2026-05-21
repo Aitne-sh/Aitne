@@ -13,13 +13,10 @@ export async function checkBrowserProfileHealth(
   profile: BrowserProfileCandidate,
   nowMs: number = Date.now(),
 ): Promise<BrowserProfileHealth> {
-  let running = false;
-  if (profile.browser !== "safari") {
-    const binary = host.browserBinaryFor(profile.browser);
-    running = binary
-      ? await host.isProcessRunning(binary, profile.userDataDir)
-      : false;
-  }
+  const binary = host.browserBinaryFor(profile.browser);
+  const running = binary
+    ? await host.isProcessRunning(binary, profile.userDataDir)
+    : false;
 
   let historyMtimeMs: number | null = null;
   try {

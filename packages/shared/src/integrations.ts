@@ -1227,6 +1227,87 @@ export const HIGH_SENSITIVITY_INTEGRATIONS = new Set<IntegrationKey>([
   "browser_history",
 ]);
 
+/**
+ * BROWSER_HISTORY_INTEGRATION_PLAN §10.3 — backend safety floor.
+ *
+ * Each process key declares the backends that may run it. The router
+ * (`backend-router.ts:validateSafetyFloor`) refuses to bind a key to a
+ * backend not in `eligible`, or to a backend listed in `forbiddenModes`
+ * under the current execution mode.
+ *
+ * Rationale per key lives next to the entry — see the design doc for the
+ * full argument (attacker-controlled prose surface for WebFetch, deny-
+ * rule layer needed for external writes, etc.). Order in `eligible`
+ * matters: it is the preference list — the first eligible binding wins
+ * when the router cascades a default through `applyDefaultPresets`.
+ *
+ * Codex appears in NO eligibility list. Per the design's "Codex allow
+ * mode is unenforceable; offering only strict mode would make the
+ * routine constantly require user approval" argument, the floor refuses
+ * Codex outright for browser-history surfaces. Operators can widen the
+ * floor per-process from /settings/models with an explicit override
+ * that lands in `agent_actions` — see §10.3 closing paragraph.
+ */
+export type BackendSafetyFloorBackend =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "opencode";
+
+export interface BackendSafetyFloor {
+  eligible: ReadonlyArray<BackendSafetyFloorBackend>;
+  /**
+   * Backend+mode pairs explicitly refused even when the backend appears
+   * in `eligible`. Today only Codex carries mode-scoped refusals (allow
+   * mode is unenforceable; strict mode is operationally hostile for
+   * frequent shell calls). The router checks this AFTER `eligible`.
+   */
+  forbiddenModes?: ReadonlyArray<{
+    backend: BackendSafetyFloorBackend;
+    mode: "strict" | "allow";
+  }>;
+  rationale: string;
+}
+
+export const BROWSER_HISTORY_PROCESS_KEYS: Readonly<
+  Record<string, BackendSafetyFloor>
+> = {
+  "routine.research_cluster_update": {
+    eligible: ["claude", "gemini", "opencode"],
+    forbiddenModes: [
+      { backend: "codex", mode: "allow" },
+      { backend: "codex", mode: "strict" },
+    ],
+    rationale:
+      "Lite-tier journal append; absolute-block layer must cover SQLite/exfil patterns.",
+  },
+  "routine.research_offer_dm": {
+    eligible: ["claude", "gemini", "opencode"],
+    forbiddenModes: [
+      { backend: "codex", mode: "allow" },
+      { backend: "codex", mode: "strict" },
+    ],
+    rationale:
+      "Lite-tier two-option offer DM composition (seventh-pass). Reads cluster snapshot (displayName carries attacker-influenceable title), composes one DM, POSTs /api/notify. Same eligibility as cluster_update — Codex forbidden because allow mode is unenforceable and strict mode is operationally hostile (constant approvals).",
+  },
+  "routine.research_dispatch": {
+    eligible: ["claude"],
+    rationale:
+      "Consumes attacker-controlled prose via WebFetch at scale; requires Claude PreToolUse hook authority.",
+  },
+  "routine.research_wiki_summary": {
+    eligible: ["claude", "opencode"],
+    rationale:
+      "External write path (Obsidian/Notion); needs deny-rule layer covering the write surface.",
+  },
+};
+
+export function getBrowserHistorySafetyFloor(
+  processKey: string,
+): BackendSafetyFloor | null {
+  return BROWSER_HISTORY_PROCESS_KEYS[processKey] ?? null;
+}
+
 export function getIntegrationDescriptor(
   key: IntegrationKey,
 ): IntegrationDescriptor {

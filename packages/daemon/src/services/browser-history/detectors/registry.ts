@@ -12,7 +12,6 @@ import { detectChromiumBrowser } from "./chromium.js";
 import { detectChrome } from "./chrome.js";
 import { detectComet } from "./comet.js";
 import { detectAtlas } from "./atlas.js";
-import { detectSafari } from "./safari.js";
 
 const ALL_BROWSERS: readonly BrowserHistoryBrowserKey[] = [
   "chrome",
@@ -21,7 +20,6 @@ const ALL_BROWSERS: readonly BrowserHistoryBrowserKey[] = [
   "brave",
   "comet",
   "atlas",
-  "safari",
 ];
 
 function isReadableStatus(status: BrowserHistoryDetectionStatus): boolean {
@@ -113,7 +111,6 @@ export async function detectBrowserHistoryCapabilities(params: {
     detectChromiumBrowser("brave", params.host, cacheRoot),
     detectComet(params.host, cacheRoot),
     detectAtlas(params.host, cacheRoot),
-    detectSafari(params.host, cacheRoot),
   ];
   const results = await Promise.all(detectorCalls);
   const ingestEnabled = computeBrowserHistoryIngestEnabled(

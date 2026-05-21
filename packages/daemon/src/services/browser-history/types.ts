@@ -4,7 +4,11 @@ import type {
   BrowserHistoryLifecycleStateValue,
 } from "@aitne/shared";
 
-export type ChromiumBrowserKey = Exclude<BrowserHistoryBrowserKey, "safari">;
+// Every supported browser is Chromium-family today. The alias is kept
+// because `host.browserBinaryFor` and `profileRootFor` are still typed
+// against it — re-introducing a non-Chromium browser would shrink this
+// set back below `BrowserHistoryBrowserKey`.
+export type ChromiumBrowserKey = BrowserHistoryBrowserKey;
 
 export interface BrowserProfileCandidate {
   browser: BrowserHistoryBrowserKey;
@@ -46,7 +50,12 @@ export interface HostProfile {
 export interface BrowserLifecycleTelemetry {
   browser: BrowserHistoryBrowserKey;
   stateBefore: "running" | "stopped" | "stale" | "paused" | "unknown";
-  actionTaken: "noop" | "launch" | "soft_refresh" | "quit" | "skip";
+  // `soft_refresh` is reserved for the §7.4.5 stale-sync recovery path that
+  // the supervisor will grow when failure-escalation learns to recycle a
+  // process instead of waiting for the cooldown. `quit` was removed
+  // alongside Safari ingestion (the only producer); Chromium-family
+  // browsers stay resident on the always-on host.
+  actionTaken: "noop" | "launch" | "soft_refresh" | "skip";
   syncMtimeBefore: number | null;
   syncMtimeAfter: number | null;
   syncAgeAtIngestSeconds: number | null;
