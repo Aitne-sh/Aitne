@@ -47,7 +47,6 @@ import { createScheduleOptionsRoutes } from "./routes/schedule-options.js";
 import { createTriggerRoutes } from "./routes/triggers.js";
 import { createTravelBookingRoutes } from "./routes/travel-bookings.js";
 import { createReceiptRoutes } from "./routes/receipts.js";
-import { createTravelTimeRoutes } from "./routes/travel-time.js";
 import { createBookRoutes } from "./routes/books.js";
 import { createDelegatedRunRoutes } from "./routes/delegated.js";
 import { createDelegatedSyncRoutes } from "./routes/delegated-sync.js";
@@ -61,6 +60,10 @@ import { createVoiceRoutes } from "./routes/voice.js";
 import { createWikiRoutes } from "./routes/wiki.js";
 import { createFsRoutes } from "./routes/fs.js";
 import { createBrowserHistoryRoutes } from "./routes/browser-history.js";
+import { createBrowserHistoryManagedRoutes } from "./routes/browser-history-managed.js";
+import { createBrowserAutomationRoutes } from "./routes/browser-automation.js";
+import { createBrowserAutomationSitesRoutes } from "./routes/browser-automation-sites.js";
+import { createBrowserAutomationPurchaseRoutes } from "./routes/browser-automation-purchase.js";
 import {
   buildManagedTasksRoutesDepsFromApi,
   createManagedTasksRoutes,
@@ -145,7 +148,6 @@ export interface IntegrationStatuses {
   obsidian: IntegrationStatus;
   notion: IntegrationStatus;
   whatsapp: WhatsAppIntegrationStatus;
-  googleMaps: IntegrationStatus;
 }
 
 export interface MessagingHealthStatus {
@@ -253,6 +255,19 @@ export interface ApiDependencies {
   onScheduleConfigChanged?: () => void;
   /** Called after git repository config changes so project-doc init rows can be queued. */
   onGitReposChanged?: () => void | Promise<void>;
+  /**
+   * Phase B-4 — DM-token-gated purchase workflow handler. Null when
+   * B-4 is not wired at startup (the default for any install that has
+   * not flipped the experimental flag on). The workflow runner refuses
+   * `variant: "purchase"` invocations with `purchase_b4_disabled` when
+   * absent; the dashboard / dispatcher inbound classifier are no-ops
+   * without it.
+   *
+   * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17 / §13 step 50.
+   */
+  purchaseHandler?: import(
+    "../services/browser-history/automation/purchase-handler.js"
+  ).PurchaseHandler;
   /** Called when /setup/start arrives so the dispatcher can pause autonomous work. */
   onSetupStart?: (mode: "initial" | "update") => void;
   /** Called after setup/save-rules to clear the setup mode from the dispatcher */
@@ -909,7 +924,6 @@ export function createApp(deps: ApiDependencies): Hono {
   const triggerRoutes = createTriggerRoutes(deps);
   const travelBookingRoutes = createTravelBookingRoutes(deps);
   const receiptRoutes = createReceiptRoutes(deps);
-  const travelTimeRoutes = createTravelTimeRoutes({ services: deps.services });
   const bookRoutes = createBookRoutes(deps);
   const integrationRoutes = createIntegrationRoutes(deps);
   const integrationReconcileRoutes = createIntegrationReconcileRoutes(deps);
@@ -923,6 +937,30 @@ export function createApp(deps: ApiDependencies): Hono {
   const wikiRoutes = createWikiRoutes(deps);
   const fsRoutes = createFsRoutes(deps);
   const browserHistoryRoutes = createBrowserHistoryRoutes(deps);
+  const browserHistoryManagedRoutes = createBrowserHistoryManagedRoutes(deps);
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.10 — Phase B-2 workflow
+  // execution surface (Instance A). Mounted unconditionally because the
+  // GET /workflows endpoint is the dashboard's "available workflows"
+  // probe — it returns `automationEnabled: false` when the parent
+  // managed-Chromium toggle is off rather than 404ing. The runner
+  // itself gates with the same flag so a POST /workflows/:name lands
+  // on a 409 `automation_disabled` when the parent integration isn't
+  // ready, without ever spawning Chromium.
+  const browserAutomationRoutes = createBrowserAutomationRoutes(deps);
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §16.9 — Phase B-2.5
+  // per-site sign-in surface. Same mounting rationale as the parent
+  // automation routes: the per-site list is the dashboard's "available
+  // sites" probe, so it stays mounted unconditionally and gates on the
+  // master managed-chromium toggle inside the connect / reauth handlers.
+  const browserAutomationSitesRoutes = createBrowserAutomationSitesRoutes(deps);
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.8 — Phase B-4
+  // experimental purchase config + audit surface. Mounted
+  // unconditionally; every route checks `getB4Enabled` / per-site
+  // config presence before producing meaningful output, so absent
+  // wiring is benign (returns empty lists + 403-equivalent JSON on
+  // attempted enable).
+  const browserAutomationPurchaseRoutes =
+    createBrowserAutomationPurchaseRoutes(deps);
   // Management Registry & Entities (docs/design/21-management-registry-
   // and-entities.md). The managed-tasks and sot-bindings routes MUST
   // share one lock manager — separate instances would let back-to-back
@@ -968,7 +1006,6 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", triggerRoutes);
   app.route("/api", travelBookingRoutes);
   app.route("/api", receiptRoutes);
-  app.route("/api", travelTimeRoutes);
   app.route("/api", bookRoutes);
   app.route("/api", integrationRoutes);
   app.route("/api", integrationReconcileRoutes);
@@ -982,6 +1019,10 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", wikiRoutes);
   app.route("/api", fsRoutes);
   app.route("/api", browserHistoryRoutes);
+  app.route("/api", browserHistoryManagedRoutes);
+  app.route("/api", browserAutomationRoutes);
+  app.route("/api", browserAutomationSitesRoutes);
+  app.route("/api", browserAutomationPurchaseRoutes);
 
   // ── Chat file attachments (Phase 1) ──
   if (deps.attachmentStore) {

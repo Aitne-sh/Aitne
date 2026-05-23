@@ -181,6 +181,36 @@ describe("ObservationSummarizerWorker", () => {
     await worker.stop();
   });
 
+  it("translates auth_missing into skipped (not failed) so the hourly_check fallback path picks the row up", async () => {
+    // Regression for the user-visible failure on 2026-05-22 where a
+    // missing ANTHROPIC_API_KEY caused 33+ "Summarizer LLM call failed"
+    // warnings and every pending observation got marked failed. The
+    // post-fix behavior matches `unsupported_backend`: row → skipped so
+    // hourly_check legacy fetch handles it, no per-row failure state.
+    const client = new FakeLlmClient(() => ({
+      ok: false,
+      errorClass: "auth_missing",
+      message: "ANTHROPIC_API_KEY not configured",
+    }));
+    const worker = new ObservationSummarizerWorker({ db, client });
+    await worker.start();
+
+    recordObservation(db, {
+      source: "obsidian:primary",
+      ref: "note.md",
+      changeType: "modified",
+      actor: "user",
+      payload: { diffPreview: "x" },
+    });
+
+    await flushQueue(worker);
+
+    const row = db.prepare(`SELECT summary_status FROM observations LIMIT 1`).get() as { summary_status: string };
+    expect(row.summary_status).toBe("skipped");
+
+    await worker.stop();
+  });
+
   it("applies novelty floor for VIP mail senders even when LLM returns lower", async () => {
     const client = new FakeLlmClient(() => ok("FYI from boss", 1));
     const worker = new ObservationSummarizerWorker({

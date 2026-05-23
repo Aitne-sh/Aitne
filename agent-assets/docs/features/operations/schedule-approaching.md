@@ -44,8 +44,6 @@ Pre-event reminders fire 15 minutes before each calendar event.
 - Watches the calendar event queue.
 - Fires a notification ~15 minutes before each event (fixed in
   `imminent-event-scheduler.ts`; not currently a config key).
-- Optionally includes the travel-time estimate when the event has
-  a location and the travel-time skill is enabled.
 - Deduplicates via the `imminent_event_notifications` table so the
   same event never fires twice across reschedules / poll cycles.
 

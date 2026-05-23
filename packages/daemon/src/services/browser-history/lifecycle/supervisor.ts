@@ -241,10 +241,17 @@ export class BrowserLifecycleSupervisor implements Observer {
       } else if (!healthBefore.running) {
         actionTaken = "launch";
         const launched = await launchChromiumProfile(this.host, profile);
-        if (launched !== "launched") {
+        if (launched === "missing_binary") {
           outcome = "launch_failed";
-        }
-        if (outcome === "success") {
+        } else if (launched === "already_running") {
+          // The pre-launch health probe raced a user-initiated start
+          // (Finder / Dock / restored-session). Chromium is up but we
+          // did not spawn it, so the mtime advancement gate below would
+          // false-positive `sync_unresponsive`. Treat as a noop — the
+          // next tick will see the live SingletonLock through
+          // `checkBrowserProfileHealth` and route via the running path.
+          actionTaken = "noop";
+        } else {
           await sleep(waitSecondsForProfile(this.config.browserHistoryLifecycle, profile) * 1000);
           // BROWSER_HISTORY_INTEGRATION_PLAN.md §7.4.3 — post-launch
           // mtime advancement gate. If the History file has not been

@@ -16,6 +16,7 @@ import {
   BACKEND_BADGE_VARIANTS,
   BACKEND_PROVIDER_LABELS,
   BACKEND_WEB_SEARCH_DESCRIPTIONS,
+  getBackendDeprecation,
 } from "@/lib/backend-ui";
 import { AuthStatusBadge } from "./auth-status-badge";
 import { CliInstallPanel } from "./cli-install-panel";
@@ -122,6 +123,7 @@ export function BackendCard(props: BackendCardProps) {
 
   const allowModeActive = isAllowModeActive(permissionMode);
   const recommended = isRecommended(backendId);
+  const deprecation = getBackendDeprecation(backendId);
   const showInstall = !controlsDisabled && shouldShowCliInstall(cliInstalled);
   const verifyEnabled = !controlsDisabled && shouldEnableVerifyInstall(busy);
   // Prominent CTA when the CLI is on PATH but we have not yet confirmed
@@ -176,6 +178,11 @@ export function BackendCard(props: BackendCardProps) {
               </Badge>
             )}
             {controlsDisabled && <Badge variant="gray">Preview</Badge>}
+            {deprecation && (
+              <Badge variant="amber" title={deprecation.reason}>
+                {deprecation.badgeLabel}
+              </Badge>
+            )}
           </div>
         </div>
       </div>
@@ -185,6 +192,11 @@ export function BackendCard(props: BackendCardProps) {
         {controlsDisabled && disabledReason && (
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             {disabledReason}
+          </p>
+        )}
+        {deprecation && (
+          <p className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100">
+            {deprecation.reason}
           </p>
         )}
         {!controlsDisabled && (

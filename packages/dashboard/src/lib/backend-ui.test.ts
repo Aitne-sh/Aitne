@@ -5,6 +5,7 @@ import {
   assignModelColors,
   detectBackendFromModel,
   formatShortModelName,
+  getBackendDeprecation,
   modelBadgeVariant,
   parseModelUsage,
   pickDisplayModel,
@@ -231,6 +232,26 @@ describe("pickDisplayModel", () => {
   it("returns null when both inputs are empty", () => {
     expect(pickDisplayModel(null, null)).toBeNull();
     expect(pickDisplayModel(undefined, undefined)).toBeNull();
+  });
+});
+
+describe("getBackendDeprecation", () => {
+  it("returns the upstream deprecation notice for gemini", () => {
+    // Google I/O 2026: Gemini CLI free/Pro/Ultra sunset on 2026-06-18 in
+    // favor of Antigravity CLI. The advisory has to be visible on every
+    // surface where the operator binds new work to Gemini.
+    const notice = getBackendDeprecation("gemini");
+    expect(notice).not.toBeNull();
+    expect(notice!.badgeLabel).toMatch(/deprecat/i);
+    expect(notice!.shortSuffix).toMatch(/deprecat/i);
+    expect(notice!.reason).toMatch(/2026-06-18/);
+    expect(notice!.reason).toMatch(/Antigravity/);
+  });
+
+  it("returns null for backends with no upstream deprecation", () => {
+    expect(getBackendDeprecation("claude")).toBeNull();
+    expect(getBackendDeprecation("codex")).toBeNull();
+    expect(getBackendDeprecation("opencode")).toBeNull();
   });
 });
 

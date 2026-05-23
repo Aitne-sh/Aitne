@@ -114,7 +114,7 @@ Source of truth: `agent-assets/skills/<slug>/SKILL.md`. A skill that
 exists on disk but is not listed in `EVENT_SKILL_SETS` is **declared
 but not loaded** — the file ships in the repo but no session
 materialises it (today this is the state for `receipts`, `tasks`,
-`travel`, `travel-time`).
+`travel`).
 
 | Step | File | What changes |
 |---|---|---|

@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  _testInternals,
   buildOpencodeRuntimeConfig,
   defensiveInstructionsFromEnv,
 } from "./opencode-config-builder.js";
@@ -293,6 +294,74 @@ describe("buildOpencodeRuntimeConfig — bash merge edge cases", () => {
     // Absolute-block patterns still present (defense-in-depth observability).
     expect(bash["rm -rf *"]).toBe("deny");
     expect(bash["sudo *"]).toBe("deny");
+  });
+});
+
+describe("mergePermissions — future-proof override-wins keys (covers §5.1 forward-compat)", () => {
+  // The absolute-block layer only emits `bash` patterns today; these branches
+  // guard the contract that — should the layer one day emit a triple deny on
+  // a non-bash key — that triple overrides any per-session config without
+  // touching the others. Pinned via the internal helper so the future-proof
+  // code does not silently rot.
+  const { mergePermissions } = _testInternals;
+
+  it("override.edit wins over the base value", () => {
+    const out = mergePermissions(
+      { edit: "allow" },
+      { edit: "deny" },
+    );
+    expect(out.edit).toBe("deny");
+  });
+
+  it("override.webfetch wins over the base value", () => {
+    const out = mergePermissions(
+      { webfetch: "allow" },
+      { webfetch: "deny" },
+    );
+    expect(out.webfetch).toBe("deny");
+  });
+
+  it("override.doom_loop wins over the base value", () => {
+    const out = mergePermissions(
+      { doom_loop: "allow" },
+      { doom_loop: "deny" },
+    );
+    expect(out.doom_loop).toBe("deny");
+  });
+
+  it("override.external_directory wins over the base value", () => {
+    const out = mergePermissions(
+      { external_directory: "allow" },
+      { external_directory: "deny" },
+    );
+    expect(out.external_directory).toBe("deny");
+  });
+
+  it("preserves base entries when the override leaves them undefined", () => {
+    // Mirror of the same contract from the other direction — an empty
+    // override does not erase base entries.
+    const out = mergePermissions(
+      { edit: "allow", webfetch: "ask" },
+      {},
+    );
+    expect(out.edit).toBe("allow");
+    expect(out.webfetch).toBe("ask");
+  });
+});
+
+describe("mergeBash — triple override wins wholesale", () => {
+  // Pinned via the internal helper: today the per-session translator's
+  // `bash` field is either a triple ("deny" via bare `Bash`) or a pattern
+  // map; the absolute-block layer always emits a pattern map. The
+  // `typeof override === "string"` short-circuit kicks in only when a
+  // future caller passes a wholesale triple as the override — at which
+  // point it must win unconditionally over whatever the base was.
+  const { mergeBash } = _testInternals;
+
+  it("returns the override unchanged when it is a wholesale triple", () => {
+    expect(mergeBash({ "npm *": "allow" }, "deny")).toBe("deny");
+    expect(mergeBash("allow", "ask")).toBe("ask");
+    expect(mergeBash(undefined, "deny")).toBe("deny");
   });
 });
 

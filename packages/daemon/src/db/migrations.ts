@@ -85,6 +85,163 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0002-browser-automation-workflows-b3-outcomes",
+    description:
+      "MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-3 (v0.1.9→next) — "
+      + "widen `browser_automation_workflows.outcome` CHECK constraint to "
+      + "include the new B-3 statuses ('needs_approval', 'approval_expired', "
+      + "'approval_token_invalid', 'payment_path_blocked'). SQLite cannot "
+      + "ALTER a CHECK in place, so we rebuild the table: create *_new with "
+      + "the wider constraint, copy rows, drop, rename.",
+    up(db) {
+      // Idempotent: fresh installs already get the wider CHECK from
+      // schema.ts. Detect via sqlite_master.sql — if the constraint string
+      // already mentions 'needs_approval' the rebuild is unnecessary.
+      if (!tableExists(db, "browser_automation_workflows")) return;
+      const row = db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='browser_automation_workflows'",
+        )
+        .get() as { sql: string | null } | undefined;
+      if (row?.sql && row.sql.includes("'needs_approval'")) {
+        return;
+      }
+      db.exec(`
+        CREATE TABLE browser_automation_workflows_new (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          workflow_id       TEXT NOT NULL UNIQUE,
+          workflow_name     TEXT NOT NULL,
+          params_hash       TEXT NOT NULL,
+          target_urls       TEXT NOT NULL,
+          blocked_requests  TEXT NOT NULL,
+          duration_ms       INTEGER NOT NULL,
+          outcome           TEXT NOT NULL CHECK (outcome IN (
+              'success',
+              'unknown_workflow',
+              'input_validation_error',
+              'output_validation_error',
+              'url_not_allowlisted',
+              'user_allowlist_blocked',
+              'host_not_extractable',
+              'rate_limited',
+              'site_not_connected',
+              'playwright_launch_timeout',
+              'playwright_error',
+              'timeout',
+              'needs_approval',
+              'approval_expired',
+              'approval_token_invalid',
+              'payment_path_blocked'
+          )),
+          started_at        INTEGER NOT NULL,
+          finished_at       INTEGER NOT NULL,
+          screenshot_path   TEXT,
+          trace_path        TEXT
+        );
+        INSERT INTO browser_automation_workflows_new
+          (id, workflow_id, workflow_name, params_hash, target_urls,
+           blocked_requests, duration_ms, outcome,
+           started_at, finished_at, screenshot_path, trace_path)
+          SELECT id, workflow_id, workflow_name, params_hash, target_urls,
+                 blocked_requests, duration_ms, outcome,
+                 started_at, finished_at, screenshot_path, trace_path
+            FROM browser_automation_workflows;
+        DROP TABLE browser_automation_workflows;
+        ALTER TABLE browser_automation_workflows_new
+          RENAME TO browser_automation_workflows;
+        CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_started_at
+          ON browser_automation_workflows(started_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_name
+          ON browser_automation_workflows(workflow_name, started_at DESC);
+      `);
+    },
+  },
+  {
+    id: "0003-browser-automation-workflows-b4-outcomes",
+    description:
+      "MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-4 (vX.Y→next) — "
+      + "widen `browser_automation_workflows.outcome` CHECK constraint to "
+      + "include the new B-4 runner-level statuses ('purchase_b4_disabled', "
+      + "'purchase_site_not_enabled', 'purchase_pending_exists', "
+      + "'purchase_daily_cap_exceeded'). SQLite cannot ALTER a CHECK in "
+      + "place, so we rebuild the table: create *_new with the wider "
+      + "constraint, copy rows, drop, rename. The new B-4 tables "
+      + "(browser_automation_purchase_tokens / _replies / "
+      + "browser_automation_b4_site_config / "
+      + "browser_automation_purchase_primary_channels) are CREATE IF NOT "
+      + "EXISTS in schema.ts and need no migration body — they show up on "
+      + "the first boot after the upgrade.",
+    up(db) {
+      // Idempotent: fresh installs already get the B-4-widened CHECK
+      // from schema.ts; the 0002 migration's earlier widening means the
+      // sqlite_master.sql for an upgrader from v0.1.9 carries the B-3
+      // statuses but not the B-4 ones. Detect via the marker we are
+      // adding here — if `purchase_b4_disabled` is already present, the
+      // table is at the target shape and the rebuild is unnecessary.
+      if (!tableExists(db, "browser_automation_workflows")) return;
+      const row = db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='browser_automation_workflows'",
+        )
+        .get() as { sql: string | null } | undefined;
+      if (row?.sql && row.sql.includes("'purchase_b4_disabled'")) {
+        return;
+      }
+      db.exec(`
+        CREATE TABLE browser_automation_workflows_new (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          workflow_id       TEXT NOT NULL UNIQUE,
+          workflow_name     TEXT NOT NULL,
+          params_hash       TEXT NOT NULL,
+          target_urls       TEXT NOT NULL,
+          blocked_requests  TEXT NOT NULL,
+          duration_ms       INTEGER NOT NULL,
+          outcome           TEXT NOT NULL CHECK (outcome IN (
+              'success',
+              'unknown_workflow',
+              'input_validation_error',
+              'output_validation_error',
+              'url_not_allowlisted',
+              'user_allowlist_blocked',
+              'host_not_extractable',
+              'rate_limited',
+              'site_not_connected',
+              'playwright_launch_timeout',
+              'playwright_error',
+              'timeout',
+              'needs_approval',
+              'approval_expired',
+              'approval_token_invalid',
+              'payment_path_blocked',
+              'purchase_b4_disabled',
+              'purchase_site_not_enabled',
+              'purchase_pending_exists',
+              'purchase_daily_cap_exceeded'
+          )),
+          started_at        INTEGER NOT NULL,
+          finished_at       INTEGER NOT NULL,
+          screenshot_path   TEXT,
+          trace_path        TEXT
+        );
+        INSERT INTO browser_automation_workflows_new
+          (id, workflow_id, workflow_name, params_hash, target_urls,
+           blocked_requests, duration_ms, outcome,
+           started_at, finished_at, screenshot_path, trace_path)
+          SELECT id, workflow_id, workflow_name, params_hash, target_urls,
+                 blocked_requests, duration_ms, outcome,
+                 started_at, finished_at, screenshot_path, trace_path
+            FROM browser_automation_workflows;
+        DROP TABLE browser_automation_workflows;
+        ALTER TABLE browser_automation_workflows_new
+          RENAME TO browser_automation_workflows;
+        CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_started_at
+          ON browser_automation_workflows(started_at);
+        CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_name
+          ON browser_automation_workflows(workflow_name, started_at DESC);
+      `);
+    },
+  },
 ];
 
 export interface MigrationRunResult {

@@ -10,7 +10,10 @@ import {
   ScheduledTaskRunner,
   SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS,
   REFRESH_ARCHITECTURE_ALLOWED_TOOLS,
+  appendToWeeklyInterestsJournalSection,
+  pruneWeeklyInterestsJournalBullets,
 } from "./dispatcher-scheduled-tasks.js";
+import { writeIntegrations } from "../db/integrations-store.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import { ResultProcessor } from "./dispatcher-result-processor.js";
 import { DispatcherErrorRouter } from "./dispatcher-error-handling.js";
@@ -1182,3 +1185,456 @@ describe("ScheduledTaskRunner.executeScheduledTask — requestedTier resolution"
     expect(bindCall[1]).toMatchObject({ requestedTier: "lite" });
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.4 — pre-hook for
+// `routine.weekly_review`. Verifies: (a) happy path refreshes the
+// profile.md auto-block before the LLM session runs; (b) disabled
+// integration short-circuits; (c) skip path writes a journal line;
+// (d) helper throw is caught — weekly_review still proceeds.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre-hook", () => {
+  let db: Database.Database;
+  let dataDir: string;
+  let contextDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-st-wir-"));
+    contextDir = join(dataDir, "context");
+    mkdirSync(contextDir, { recursive: true });
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  function stubExecute(router: IAgentRouter): void {
+    (router.resolveBinding as ReturnType<typeof vi.fn>).mockReturnValue({
+      main: { backendId: "claude", modelId: "model", maxTurns: 1 },
+    });
+    (router.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      output: "",
+      isError: false,
+      durationMs: 10,
+      numTurns: 1,
+      sessionId: null,
+      model: "model",
+      backendId: "claude",
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      modelUsage: {},
+      costSource: "backend",
+      contextUpdated: false,
+      advisorCallCount: 0,
+      stopReason: null,
+    });
+  }
+
+  function enableBrowserHistory(): void {
+    writeIntegrations(db, {
+      browser_history: {
+        mode: "direct",
+        deniedTools: [],
+        lastChangedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  function seedQualifyingClusters(count = 3): void {
+    for (let i = 0; i < count; i++) {
+      const slug = `theme-${i}`;
+      const lastActivity = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      db.prepare(
+        `INSERT INTO browser_research_clusters (
+           slug, root_task_id, display_name, started_at, last_activity_at,
+           visits_total, meaningful_visits_total, meaningful_foreground_sec_total,
+           distinct_meaningful_domains, status,
+           research_offer_accepted_at, wiki_summary_written_at,
+           agent_summary_revision
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+      ).run(
+        slug,
+        i + 1,
+        `Theme ${i}`,
+        lastActivity - 86_400_000,
+        lastActivity,
+        30,
+        22,
+        5400 - i * 100,
+        4,
+        "active",
+        null,
+        null,
+      );
+      db.prepare(
+        `INSERT INTO browser_visits (
+           ts, browser, profile, url_hash, domain, category, meaningful,
+           foreground_sec, transition, is_reload, root_task_id
+         ) VALUES (?, 'chrome', 'Default', ?, ?, 'research', 1, ?, 0, 0, ?)`,
+      ).run(lastActivity, `hash-${i}`, `d${i}.example.com`, 600, i + 1);
+    }
+  }
+
+  function makeWeeklyReviewEvent(): Parameters<ScheduledTaskRunner["executeDefault"]>[0] {
+    return {
+      type: "routine.weekly_review",
+      source: "cron",
+      priority: 2,
+      timestamp: new Date(),
+      data: {},
+      correlationId: "evt-wir",
+      routine: "weekly_review",
+    } as unknown as Parameters<ScheduledTaskRunner["executeDefault"]>[0];
+  }
+
+  it("refreshes profile.md before the LLM session when browser_history is enabled", async () => {
+    enableBrowserHistory();
+    seedQualifyingClusters(3);
+    mkdirSync(join(contextDir, "user"), { recursive: true });
+    writeFileSync(
+      join(contextDir, "user", "profile.md"),
+      [
+        "---",
+        "type: user",
+        "owner: user",
+        "---",
+        "# Profile",
+        "",
+        "## Identity",
+        "User identity.",
+      ].join("\n"),
+    );
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault(makeWeeklyReviewEvent());
+
+    const profile = readFileSync(
+      join(contextDir, "user", "profile.md"),
+      "utf-8",
+    );
+    expect(profile).toContain("<!-- BEGIN aitne:browser-interests v1");
+    expect(profile).toContain("## Current research themes (auto)");
+    // User-authored content is untouched.
+    expect(profile).toContain("## Identity");
+
+    // Audit row emitted by the helper — joined to the originating
+    // weekly_review event via the threaded correlationId.
+    const audit = db
+      .prepare(
+        `SELECT event_id, result, trigger FROM agent_actions
+         WHERE action_type = 'browser_interests_reflection_applied'`,
+      )
+      .get() as { event_id: string | null; result: string; trigger: string } | undefined;
+    expect(audit?.result).toBe("success");
+    expect(audit?.trigger).toBe("weekly_interests_reflection:scheduler");
+    expect(audit?.event_id).toBe("evt-wir");
+
+    // The LLM session still ran (executeDefault did not short-circuit).
+    expect(router.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("short-circuits with skipped='no_browser_history' when browser_history is disabled", async () => {
+    // Default integration mode is "disabled" — do NOT enable it.
+    seedQualifyingClusters(3);
+    mkdirSync(join(contextDir, "user"), { recursive: true });
+    writeFileSync(join(contextDir, "user", "profile.md"), "# Profile\n");
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault(makeWeeklyReviewEvent());
+
+    // rev 4 — the disabled gate is enforced INSIDE the helper, so the
+    // audit row now lands uniformly with `skipped.reason='no_browser_history'`.
+    // The previous contract (no audit row at all) was inconsistent with
+    // the < min-themes path and made the dashboard's reason-display
+    // arm need a dead branch for "we didn't hear from the helper".
+    const row = db
+      .prepare(
+        `SELECT result, detail FROM agent_actions
+         WHERE action_type = 'browser_interests_reflection_applied'`,
+      )
+      .get() as { result: string; detail: string };
+    expect(row.result).toBe("skipped");
+    const detail = JSON.parse(row.detail);
+    expect(detail.skipped.reason).toBe("no_browser_history");
+    // profile.md untouched.
+    expect(readFileSync(join(contextDir, "user", "profile.md"), "utf-8")).toBe(
+      "# Profile\n",
+    );
+    // Journal records the skip reason — the dispatcher logs the
+    // human-readable form regardless of helper-emitted audit row.
+    const journal = readFileSync(
+      join(contextDir, "agent", "journal.md"),
+      "utf-8",
+    );
+    expect(journal).toContain("## Weekly interests reflection");
+    expect(journal).toContain("no_browser_history");
+    // LLM session still ran.
+    expect(router.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes a journal line when the helper returns { skipped: fewer_than_min_themes }", async () => {
+    enableBrowserHistory();
+    // Only 2 qualifying clusters — below the MIN_PROFILE_MD_THEMES floor.
+    seedQualifyingClusters(2);
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault(makeWeeklyReviewEvent());
+
+    const audit = db
+      .prepare(
+        `SELECT result FROM agent_actions
+         WHERE action_type = 'browser_interests_reflection_applied'`,
+      )
+      .get() as { result: string } | undefined;
+    expect(audit?.result).toBe("skipped");
+
+    const journal = readFileSync(
+      join(contextDir, "agent", "journal.md"),
+      "utf-8",
+    );
+    expect(journal).toContain("interest reflection skipped: fewer_than_min_themes");
+    expect(router.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not skip the weekly_review when the helper throws", async () => {
+    enableBrowserHistory();
+    seedQualifyingClusters(3);
+    // Drop the table the helper reads — any prepare() call against
+    // it will raise SqliteError. The pre-hook's try/catch must
+    // swallow it and let the LLM session run.
+    db.prepare("DROP TABLE browser_research_clusters").run();
+
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await expect(runner.executeDefault(makeWeeklyReviewEvent())).resolves.toBeUndefined();
+
+    expect(router.execute).toHaveBeenCalledTimes(1);
+
+    const journal = readFileSync(
+      join(contextDir, "agent", "journal.md"),
+      "utf-8",
+    );
+    expect(journal).toContain("interest reflection failed:");
+  });
+
+  it("does not run the pre-hook for non-weekly_review routines", async () => {
+    enableBrowserHistory();
+    seedQualifyingClusters(3);
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault({
+      type: "routine.evening_review",
+      source: "cron",
+      priority: 2,
+      timestamp: new Date(),
+      data: {},
+      correlationId: "evt-ev",
+      routine: "evening_review",
+    } as unknown as Parameters<ScheduledTaskRunner["executeDefault"]>[0]);
+
+    const applied = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM agent_actions
+         WHERE action_type = 'browser_interests_reflection_applied'`,
+      )
+      .get() as { n: number };
+    expect(applied.n).toBe(0);
+    expect(existsSync(join(contextDir, "agent", "journal.md"))).toBe(false);
+  });
+});
+
+describe("appendToWeeklyInterestsJournalSection", () => {
+  it("creates a new journal file with the section header when original is null", () => {
+    const out = appendToWeeklyInterestsJournalSection(
+      null,
+      "- 2026-05-21 09:00: interest reflection skipped: fewer_than_min_themes",
+    );
+    expect(out).toContain("# Agent journal");
+    expect(out).toContain("## Weekly interests reflection");
+    expect(out).toContain(
+      "- 2026-05-21 09:00: interest reflection skipped: fewer_than_min_themes",
+    );
+    expect(out.endsWith("\n")).toBe(true);
+  });
+
+  it("appends under an existing section, preserving prior bullets", () => {
+    const original = [
+      "# Agent journal",
+      "",
+      "## Weekly interests reflection",
+      "",
+      "- 2026-05-14 09:00: interest reflection skipped: no_browser_history",
+      "",
+    ].join("\n");
+    const out = appendToWeeklyInterestsJournalSection(
+      original,
+      "- 2026-05-21 09:00: refresh applied",
+    );
+    expect(out).toContain(
+      "- 2026-05-14 09:00: interest reflection skipped: no_browser_history",
+    );
+    expect(out).toContain("- 2026-05-21 09:00: refresh applied");
+    // Section header appears exactly once.
+    expect(out.match(/## Weekly interests reflection/g)?.length).toBe(1);
+  });
+
+  it("adds the section to an existing journal that has unrelated sections", () => {
+    const original = [
+      "# Agent journal",
+      "",
+      "## Roadmap maintenance",
+      "- 2026-05-14 09:00: status_synced=2, swept=1",
+      "",
+    ].join("\n");
+    const out = appendToWeeklyInterestsJournalSection(
+      original,
+      "- 2026-05-21 09:00: refresh applied",
+    );
+    expect(out).toContain("## Roadmap maintenance");
+    expect(out).toContain("## Weekly interests reflection");
+    expect(out.indexOf("## Roadmap maintenance")).toBeLessThan(
+      out.indexOf("## Weekly interests reflection"),
+    );
+  });
+
+  it("does not duplicate the section when called twice in sequence", () => {
+    const first = appendToWeeklyInterestsJournalSection(
+      null,
+      "- 2026-05-21 09:00: first",
+    );
+    const second = appendToWeeklyInterestsJournalSection(
+      first,
+      "- 2026-05-21 10:00: second",
+    );
+    expect(second.match(/## Weekly interests reflection/g)?.length).toBe(1);
+    expect(second).toContain("- 2026-05-21 09:00: first");
+    expect(second).toContain("- 2026-05-21 10:00: second");
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // rev 4 — monthly rotation. Bullets older than 30 days drop off on
+  // append so the section stays at ~4-5 entries.
+  // ──────────────────────────────────────────────────────────────────
+
+  it("prunes bullets older than 30 days on append", () => {
+    // nowMs = 2026-05-21 12:00 UTC. Cutoff = 30 days prior =
+    // 2026-04-21 12:00 UTC. Anything dated 2026-04-21 or later is
+    // kept; older drops.
+    const nowMs = Date.UTC(2026, 4, 21, 12, 0, 0);
+    const original = [
+      "# Agent journal",
+      "",
+      "## Weekly interests reflection",
+      "",
+      "- 2026-03-15 09:00: way too old",
+      "- 2026-04-20 09:00: barely too old",
+      "- 2026-04-22 09:00: still fresh",
+      "- 2026-05-14 09:00: fresh",
+      "",
+    ].join("\n");
+    const next = appendToWeeklyInterestsJournalSection(
+      original,
+      "- 2026-05-21 12:00: just now",
+      nowMs,
+    );
+    expect(next).not.toContain("2026-03-15");
+    expect(next).not.toContain("2026-04-20");
+    expect(next).toContain("2026-04-22 09:00: still fresh");
+    expect(next).toContain("2026-05-14 09:00: fresh");
+    expect(next).toContain("2026-05-21 12:00: just now");
+  });
+
+  it("preserves user-authored prose (non-bullet lines) inside the section regardless of date", () => {
+    // The rotation only targets daemon-emitted bullets (recognised by
+    // the `- YYYY-MM-DD HH:MM` prefix). Manual prose stays.
+    const nowMs = Date.UTC(2026, 4, 21, 12);
+    const original = [
+      "# Agent journal",
+      "",
+      "## Weekly interests reflection",
+      "",
+      "Operator note: see incident #42.",
+      "- 2026-01-01 09:00: ancient bullet",
+      "",
+    ].join("\n");
+    const next = appendToWeeklyInterestsJournalSection(
+      original,
+      "- 2026-05-21 12:00: fresh",
+      nowMs,
+    );
+    expect(next).toContain("Operator note: see incident #42.");
+    expect(next).not.toContain("2026-01-01");
+    expect(next).toContain("2026-05-21 12:00: fresh");
+  });
+
+  it("keeps a bullet dated exactly 30 days ago (cutoff is inclusive on the kept side)", () => {
+    const nowMs = Date.UTC(2026, 4, 21, 12);
+    // Exactly 30 days before nowMs is 2026-04-21 12:00 UTC. The bullet
+    // for that date is anchored at noon UTC by the parser, so the
+    // condition `dateMs >= cutoffMs` keeps it.
+    const original = [
+      "# Agent journal",
+      "",
+      "## Weekly interests reflection",
+      "",
+      "- 2026-04-21 09:00: exactly on the boundary",
+      "",
+    ].join("\n");
+    const next = appendToWeeklyInterestsJournalSection(
+      original,
+      "- 2026-05-21 12:00: today",
+      nowMs,
+    );
+    expect(next).toContain("2026-04-21 09:00: exactly on the boundary");
+  });
+
+  it("is a no-op when the section is empty (no bullets to prune)", () => {
+    const nowMs = Date.UTC(2026, 4, 21, 12);
+    const original = [
+      "# Agent journal",
+      "",
+      "## Weekly interests reflection",
+      "",
+    ].join("\n");
+    const next = appendToWeeklyInterestsJournalSection(
+      original,
+      "- 2026-05-21 12:00: first",
+      nowMs,
+    );
+    expect(next).toContain("2026-05-21 12:00: first");
+    expect(next.match(/## Weekly interests reflection/g)?.length).toBe(1);
+  });
+
+  it("pruneWeeklyInterestsJournalBullets is pure of its input slice", () => {
+    const nowMs = Date.UTC(2026, 4, 21, 12);
+    const lines = [
+      "intro",
+      "## Section",
+      "",
+      "- 2026-01-01 09:00: ancient",
+      "- 2026-05-01 09:00: recent",
+      "",
+      "trailing",
+    ];
+    const out = pruneWeeklyInterestsJournalBullets(lines, 3, 6, nowMs, 30);
+    // Lines before bodyStart and on/after bodyEnd are passed through.
+    expect(out[0]).toBe("intro");
+    expect(out[1]).toBe("## Section");
+    expect(out[2]).toBe("");
+    expect(out).toContain("trailing");
+    // Ancient bullet dropped, recent kept.
+    expect(out.some((l) => l.includes("ancient"))).toBe(false);
+    expect(out.some((l) => l.includes("recent"))).toBe(true);
+  });
+});
+

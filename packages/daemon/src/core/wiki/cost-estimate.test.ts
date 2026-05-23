@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { approxTokenCount, estimateFullCompileCost } from "./cost-estimate.js";
@@ -159,6 +159,112 @@ describe("estimateFullCompileCost", () => {
       expect(estimate.rawCount).toBe(50);
       expect(estimate.perFile).toEqual([]);
     });
+
+    it("omits the per-file breakdown when perFileBreakdownLimit is 0", () => {
+      writeFileSync(join(rootPath, "10_raw/a.md"), "real file");
+      writeFileSync(join(rootPath, "10_raw/b.md"), "real file");
+      const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath), {
+        perFileBreakdownLimit: 0,
+      });
+      expect(estimate.rawCount).toBe(2);
+      expect(estimate.perFile).toEqual([]);
+    });
+
+    it("recurses into foreign type subdirectories under the raw layer", () => {
+      // walkRawLayer skips `images/` but descends into other subdirs via
+      // walkDirInto so a not-yet-flattened imported vault still reports a
+      // useful per-file breakdown.
+      mkdirSync(join(rootPath, "10_raw/topic"), { recursive: true });
+      mkdirSync(join(rootPath, "10_raw/topic/sub"), { recursive: true });
+      writeFileSync(join(rootPath, "10_raw/root.md"), "root note");
+      writeFileSync(join(rootPath, "10_raw/topic/a.md"), "topic note");
+      writeFileSync(join(rootPath, "10_raw/topic/sub/b.md"), "deep note");
+      // Non-.md file should be skipped, and a deeply-nested .md should
+      // still be reached.
+      writeFileSync(join(rootPath, "10_raw/topic/sub/notes.txt"), "ignored");
+      const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath));
+      const paths = estimate.perFile.map((f) => f.path);
+      expect(paths).toContain("10_raw/root.md");
+      expect(paths).toContain("10_raw/topic/a.md");
+      expect(paths).toContain("10_raw/topic/sub/b.md");
+      expect(estimate.rawCount).toBe(3);
+    });
+
+    it("accounts for unreadable files with the per-call minimum (not silently 0)", () => {
+      if (process.platform === "win32") return; // chmod semantics differ.
+      writeFileSync(join(rootPath, "10_raw/locked.md"), "secret");
+      chmodSync(join(rootPath, "10_raw/locked.md"), 0o000);
+      try {
+        const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath));
+        expect(estimate.rawCount).toBe(1);
+        // Catch branch leaves tokenCount at the PER_FILE_MIN_TOKENS floor.
+        expect(estimate.estimatedInputTokens).toBeGreaterThanOrEqual(200);
+        expect(estimate.perFile[0].estimatedTokens).toBe(200);
+      } finally {
+        chmodSync(join(rootPath, "10_raw/locked.md"), 0o600);
+      }
+    });
+
+    it("returns a zero-row estimate when the raw layer directory is missing entirely (per-file mode)", () => {
+      rmSync(join(rootPath, "10_raw"), { recursive: true });
+      const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath));
+      expect(estimate.rawCount).toBe(0);
+      expect(estimate.estimatedInputTokens).toBe(0);
+      expect(estimate.perFile).toEqual([]);
+    });
+
+    it("returns a zero-row estimate when the raw layer directory is missing entirely (flat-heuristic mode)", () => {
+      rmSync(join(rootPath, "10_raw"), { recursive: true });
+      const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath), {
+        avgInputTokensPerRaw: 1000,
+      });
+      expect(estimate.rawCount).toBe(0);
+      expect(estimate.estimatedInputTokens).toBe(0);
+    });
+
+    it("swallows unreadable subdirectories during per-file walk (walkDirInto catch)", () => {
+      if (process.platform === "win32") return; // chmod semantics differ.
+      writeFileSync(join(rootPath, "10_raw/root.md"), "root");
+      mkdirSync(join(rootPath, "10_raw/topic"), { recursive: true });
+      writeFileSync(join(rootPath, "10_raw/topic/visible.md"), "visible");
+      mkdirSync(join(rootPath, "10_raw/topic/locked"), { recursive: true });
+      writeFileSync(
+        join(rootPath, "10_raw/topic/locked/hidden.md"),
+        "hidden",
+      );
+      // Drop search+read on the locked subdir so readdirSync throws.
+      chmodSync(join(rootPath, "10_raw/topic/locked"), 0o000);
+      try {
+        const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath));
+        // root.md + topic/visible.md should still be picked up.
+        const paths = estimate.perFile.map((f) => f.path);
+        expect(paths).toContain("10_raw/root.md");
+        expect(paths).toContain("10_raw/topic/visible.md");
+        // The hidden child is silently dropped.
+        expect(paths).not.toContain("10_raw/topic/locked/hidden.md");
+      } finally {
+        chmodSync(join(rootPath, "10_raw/topic/locked"), 0o700);
+      }
+    });
+
+    it("flat-heuristic mode recurses into foreign subdirectories via countMarkdownRecursive", () => {
+      // Imported vaults may carry deeper layouts (topic/sub/file.md) until
+      // the flatten migration runs. countRawNotes -> countMarkdownRecursive
+      // must follow them.
+      mkdirSync(join(rootPath, "10_raw/topic"), { recursive: true });
+      mkdirSync(join(rootPath, "10_raw/topic/sub"), { recursive: true });
+      writeFileSync(join(rootPath, "10_raw/root.md"), "root");
+      writeFileSync(join(rootPath, "10_raw/topic/a.md"), "topic");
+      writeFileSync(join(rootPath, "10_raw/topic/sub/deep.md"), "deep");
+      writeFileSync(join(rootPath, "10_raw/topic/sub/skip.txt"), "non-md");
+      // images/ at the top level must still be skipped.
+      mkdirSync(join(rootPath, "10_raw/images"), { recursive: true });
+      writeFileSync(join(rootPath, "10_raw/images/skip-me.md"), "stub");
+      const estimate = estimateFullCompileCost(makeWorkspaceRow(rootPath), {
+        avgInputTokensPerRaw: 1000,
+      });
+      expect(estimate.rawCount).toBe(3);
+    });
   });
 
   describe("approxTokenCount", () => {
@@ -182,6 +288,26 @@ describe("estimateFullCompileCost", () => {
 
     it("never falls below the per-file minimum", () => {
       expect(approxTokenCount("hi")).toBe(200);
+    });
+
+    it("classifies Hangul-majority content as CJK", () => {
+      const hangul = "안녕하세요반갑습니다오늘은좋은하루가될거에요".repeat(40);
+      const tokens = approxTokenCount(hangul);
+      // CJK divisor (1.5) → denser tokens than Latin (4) would yield.
+      expect(tokens).toBeGreaterThan(Math.ceil(hangul.length / 4));
+    });
+
+    it("classifies Bopomofo-majority content as CJK", () => {
+      const bopomofo = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙ".repeat(40);
+      const tokens = approxTokenCount(bopomofo);
+      expect(tokens).toBeGreaterThan(Math.ceil(bopomofo.length / 4));
+    });
+
+    it("classifies extended CJK Han (extension-A range) as CJK", () => {
+      // U+3400–U+4DBF — CJK Unified Ideographs Extension A.
+      const extA = "㐀㐁㐂㐃㐄㐅㐆㐇㐈㐉㐊".repeat(40);
+      const tokens = approxTokenCount(extA);
+      expect(tokens).toBeGreaterThan(Math.ceil(extA.length / 4));
     });
   });
 });

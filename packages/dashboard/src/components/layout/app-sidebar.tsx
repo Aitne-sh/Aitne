@@ -119,11 +119,20 @@ function useCollapsedSections(): ReadonlySet<string> {
   return useSyncExternalStore(subscribeSections, readCollapsedSections, getServerSections);
 }
 
+const subscribeMounted = () => () => {};
+const getMountedSnapshot = () => true;
+const getMountedServerSnapshot = () => false;
+
+function useMounted(): boolean {
+  return useSyncExternalStore(subscribeMounted, getMountedSnapshot, getMountedServerSnapshot);
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const collapsedSections = useCollapsedSections();
   const { theme, setTheme } = useTheme();
+  const mounted = useMounted();
   const { data: config } = useConfig();
 
   const toggleSection = (id: string) => {
@@ -153,7 +162,14 @@ export function AppSidebar() {
     else setTheme("light");
   };
 
-  const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
+  const ThemeIcon = !mounted
+    ? Monitor
+    : theme === "dark"
+      ? Moon
+      : theme === "light"
+        ? Sun
+        : Monitor;
+  const themeLabel = mounted ? (theme ?? "system") : "system";
 
   const pendingApprovals = approvals?.approvals.length ?? 0;
   const newEventCount = streamEvents.length;
@@ -354,7 +370,7 @@ export function AppSidebar() {
           )}
         >
           <ThemeIcon className="h-4 w-4 shrink-0" />
-          {!collapsed && <span className="capitalize">{theme ?? "system"}</span>}
+          {!collapsed && <span className="capitalize">{themeLabel}</span>}
         </button>
       </div>
     </aside>

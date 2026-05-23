@@ -320,7 +320,7 @@ function TriggerEditorContent({
                 >
                   <option value="claude">claude</option>
                   <option value="codex">codex</option>
-                  <option value="gemini">gemini</option>
+                  <option value="gemini">gemini (deprecated)</option>
                   <option value="opencode" disabled>
                     opencode (coming soon)
                   </option>

@@ -1222,12 +1222,42 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
       "/api/browser-history/research-clusters",
       "/api/browser-history/yesterday-summary",
       "/api/browser-history/pre-morning-digest",
+      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.7 — control-plane
+      // route prefix for the opt-in managed Chromium surface. The
+      // route is exposed even when the integration is in `direct` /
+      // `delegated` mode (the dashboard's consent banner needs the
+      // status read to decide what to render), so we expose only the
+      // `status` GET as gated and let the mutation routes go through
+      // the route-level risk-tier gate instead.
+      "/api/browser-history/managed/status",
+      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.10 — Phase B-2 workflow
+      // surface (Instance A). The list endpoint surfaces registered
+      // workflow names + per-workflow risk tier; gate it here so it
+      // only resolves while the parent integration is enabled.
+      // Workflow execution is route-level Approve-tier (see
+      // risk-classifier.ts); the listing GET stays Autonomous so the
+      // dashboard's "available workflows" badge can poll without a
+      // bearer.
+      "/api/browser-automation/workflows",
     ],
     userManagedConnector: false,
   },
 };
 
 export const HIGH_SENSITIVITY_INTEGRATIONS = new Set<IntegrationKey>([
+  "browser_history",
+]);
+
+/**
+ * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §11 / §16.2 — integrations
+ * that carry an additional opt-in surface for the daemon-supervised
+ * Chromium ("managed mode"). Today only `browser_history` participates;
+ * the set is exported so the dashboard consent banner and the manage-
+ * chromium dashboard page can mirror the same gating logic without
+ * hard-coding the integration key. Same shape as
+ * `HIGH_SENSITIVITY_INTEGRATIONS`.
+ */
+export const MANAGED_CHROMIUM_INTEGRATIONS = new Set<IntegrationKey>([
   "browser_history",
 ]);
 
@@ -1303,6 +1333,26 @@ export const BROWSER_HISTORY_PROCESS_KEYS: Readonly<
     eligible: ["claude", "opencode"],
     rationale:
       "External write path (Obsidian/Notion); needs deny-rule layer covering the write surface.",
+  },
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.13 — Phase B-2 scheduler /
+  // routine driven invocations. Workflow outputs include attacker-
+  // controlled prose (article body, page-text, search results) tagged
+  // with `<external-content>` wrappers. Claude's PreToolUse hook + the
+  // `classifyAbsoluteBlock` regex is the strongest enforcement surface
+  // for those payloads; Codex's allow mode cannot apply the absolute
+  // layer to shell commands (documented gap in 09-safety-cost.md §6.4),
+  // so even strict Codex is refused here for the same "constant approvals"
+  // argument cluster_update uses. Gemini is permitted because its admin-
+  // policy TOML carries the curl-flag denylist that closes the in-page
+  // exfiltration shape; opencode shares Claude's PreToolUse mechanic.
+  "routine.browser_automation_request": {
+    eligible: ["claude", "gemini", "opencode"],
+    forbiddenModes: [
+      { backend: "codex", mode: "allow" },
+      { backend: "codex", mode: "strict" },
+    ],
+    rationale:
+      "Medium-tier workflow invocation; workflow outputs carry attacker-influenced prose (`<external-content>` blocks). Requires PreToolUse / admin-policy enforcement; Codex's lack of either is the disqualifier in both modes.",
   },
 };
 

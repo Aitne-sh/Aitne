@@ -79,6 +79,30 @@ describe("BackendCard — header pills", () => {
   });
 });
 
+describe("BackendCard — upstream deprecation notice", () => {
+  it("renders the Gemini upstream-deprecation badge and reason paragraph", () => {
+    // Google I/O 2026 announced Gemini CLI free/Pro/Ultra sunset on
+    // 2026-06-18. Both wizard and /settings/models embed this card, so a
+    // single regression guard here covers every selection surface that
+    // shares the BackendCard.
+    const html = render(
+      <BackendCard {...baseProps({ backendId: "gemini", isMain: false })} />,
+    );
+    expect(html).toContain("Vendor deprecation");
+    expect(html).toContain("2026-06-18");
+    expect(html).toMatch(/Antigravity CLI/);
+  });
+
+  it("does not render the deprecation surface on backends without an upstream notice", () => {
+    const claudeHtml = render(<BackendCard {...baseProps()} />);
+    expect(claudeHtml).not.toContain("Vendor deprecation");
+    const codexHtml = render(
+      <BackendCard {...baseProps({ backendId: "codex", isMain: false })} />,
+    );
+    expect(codexHtml).not.toContain("Vendor deprecation");
+  });
+});
+
 describe("BackendCard — Allow-mode badge", () => {
   it("renders Allow pill with #execution-mode anchor when permissionMode='allow'", () => {
     // Regression guard for the anchor-link behaviour (§3.1 + §3.3):

@@ -233,7 +233,6 @@ describe("Dashboard API", () => {
           error: null,
           state: "not_configured",
         },
-        googleMaps: { configured: false, connected: false, error: null },
       }),
       agentBackends: [
         makeBackendCore(
@@ -734,7 +733,6 @@ describe("Dashboard API", () => {
             error: null,
             state: "not_configured",
           },
-          googleMaps: { configured: false, connected: false, error: null },
         }),
         messagingControls: {
           telegram: {
@@ -824,7 +822,6 @@ describe("Dashboard API", () => {
             error: null,
             state: "not_configured",
           },
-          googleMaps: { configured: false, connected: false, error: null },
         }),
       });
 
@@ -898,7 +895,6 @@ describe("Dashboard API", () => {
             error: null,
             state: "not_configured",
           },
-          googleMaps: { configured: false, connected: false, error: null },
         }),
       });
 
@@ -2073,7 +2069,6 @@ describe("Dashboard API", () => {
             error: null,
             state: "not_configured",
           },
-          googleMaps: { configured: false, connected: false, error: null },
         }),
         onScheduleConfigChanged,
       });
@@ -2234,7 +2229,6 @@ describe("Dashboard API", () => {
             error: null,
             state: "not_configured",
           },
-          googleMaps: { configured: false, connected: false, error: null },
         }),
       });
 
@@ -2566,7 +2560,6 @@ describe("Dashboard API", () => {
               error: null,
               state: "not_configured",
             },
-            googleMaps: { configured: false, connected: false, error: null },
           }),
           messagingControls: {
             slack: {

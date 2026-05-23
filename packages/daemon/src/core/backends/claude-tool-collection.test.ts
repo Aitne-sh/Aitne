@@ -866,6 +866,48 @@ describe("buildSecurityHooks", () => {
       expect((r as { continue?: boolean }).continue).toBe(true);
     });
 
+    // Pipeline-tail false positives reported in production logs on
+    // 2026-05-22: `curl ... | head -c 2000` (9 occurrences) and `curl ... |
+    // python3 -c '...'` were being blocked as `curl --cookie-jar/-c not
+    // allowed`. The short-flag regex was scanning the entire command
+    // line, so a `-c` belonging to head/python in the pipeline tail was
+    // matched as if it belonged to curl. The fix scopes short-flag checks
+    // to the curl segment only (curlScan).
+    it("allows `curl ... | head -c 2000` (head's -c byte limit is not curl's cookie-jar)", async () => {
+      const r = await runHook(
+        "curl -s http://localhost:8321/api/context/today | head -c 2000",
+      );
+      expect((r as { continue?: boolean }).continue).toBe(true);
+    });
+
+    it("allows `curl ... | python3 -c 'pure-read'` for read-only daemon GETs (bashContextWriteHook still blocks writes via interpreter -c)", async () => {
+      // bashCurlHook is the only gatekeeper exercised here; the separate
+      // bashContextWriteHook still vetoes interpreter -c, but THIS hook
+      // must not be the one to block — otherwise its reason gets surfaced
+      // as a curl flag failure rather than the interpreter policy.
+      const r = await runHook(
+        `curl -s http://localhost:8321/api/health | python3 -c "print('ok')"`,
+      );
+      expect((r as { decision?: string; reason?: string }).reason ?? "").not.toContain(
+        "curl --cookie-jar/-c",
+      );
+    });
+
+    it("still blocks an actual curl `-c file` (real cookie-jar write)", async () => {
+      const r = await runHook(
+        "curl -c /tmp/jar http://localhost:8321/api/health",
+      );
+      expect((r as { decision?: string }).decision).toBe("block");
+      expect((r as { reason?: string }).reason).toContain("cookie-jar");
+    });
+
+    it("still blocks `curl -fsc /tmp/jar` (cookie-jar smuggled into a short-flag bundle)", async () => {
+      const r = await runHook(
+        "curl -fsc /tmp/jar http://localhost:8321/api/health",
+      );
+      expect((r as { decision?: string }).decision).toBe("block");
+    });
+
     // Real attacks (with the flag OUTSIDE quotes) must still be blocked.
     it("still blocks an unquoted ` -x http://proxy `", async () => {
       const r = await runHook(

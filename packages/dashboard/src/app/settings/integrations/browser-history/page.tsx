@@ -12,7 +12,9 @@ import {
   Loader2,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   SlidersHorizontal,
+  Trash2,
   XCircle,
   type LucideIcon,
 } from "lucide-react";
@@ -23,7 +25,9 @@ import type {
   BrowserHistoryDetectionStatus,
   BrowserHistoryLifecycleConfig,
   BrowserHistoryStatusResponse,
+  CleanupInterestsReflectionResponse,
   IntegrationMode,
+  RefreshInterestsReflectionResponse,
 } from "@aitne/shared";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -714,6 +718,11 @@ export default function BrowserHistorySettingsPage() {
           )
         }
       />
+
+      <InterestsReflectionCard
+        enabled={currentMode !== "disabled"}
+        onToast={showToast}
+      />
     </div>
   );
 }
@@ -822,6 +831,248 @@ function ResearchDomainFilterCard({
       <p className="mt-4 rounded-md border p-3 text-xs text-muted-foreground">
         Changes apply to new browser visits only; previously-classified visits are not reclassified (they age out via the retention window above).
       </p>
+    </Card>
+  );
+}
+
+/**
+ * Weekly interest reflection management card — WEEKLY_INTERESTS_REFLECTION_PLAN.md §11 / §13.
+ *
+ * No enable/disable toggle by design: the feature runs automatically as
+ * a pre-hook of every `routine.weekly_review` whenever the upstream
+ * browser-history integration is on (§13 "Effective gate"). The two
+ * surfaces here are escape hatches for testing / manual recovery, not
+ * lifecycle controls.
+ *
+ *   - **Refresh now** (Approve tier, bearer-authed) — fires the same
+ *     `refreshInterestsReflection` helper the scheduler invokes. Useful
+ *     for support and for verifying the auto-block appears as expected
+ *     without waiting for Friday evening. Bypasses no gates: a week
+ *     with fewer than three qualifying clusters still returns
+ *     `skipped='fewer_than_min_themes'`, which the result panel
+ *     surfaces verbatim so operators don't think the button silently
+ *     failed.
+ *   - **Clean up auto-blocks** (Approve tier, bearer-authed) — strips
+ *     every `<!-- BEGIN aitne:browser-interests v1 ... -->` block from
+ *     `user/profile.md`, `user/_index.md`, and every `projects/*.md`,
+ *     and optionally deletes the daemon-owned
+ *     `user/research-themes.md` (default on; matches the helper's
+ *     `alsoDeleteResearchThemesFile=true`). The next weekly_review
+ *     re-creates fresh content — this is a *one-shot purge*, not a
+ *     permanent disable.
+ *
+ * When the upstream integration is `disabled`, both buttons are
+ * disabled but the explanatory copy remains visible so the operator
+ * understands why nothing is happening.
+ */
+function InterestsReflectionCard({
+  enabled,
+  onToast,
+}: {
+  enabled: boolean;
+  onToast: (variant: "success" | "error", message: string) => void;
+}) {
+  const [alsoDeleteThemes, setAlsoDeleteThemes] = useState(true);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
+  const [lastRefresh, setLastRefresh] =
+    useState<RefreshInterestsReflectionResponse | null>(null);
+  const [lastCleanup, setLastCleanup] =
+    useState<CleanupInterestsReflectionResponse | null>(null);
+
+  const refresh = useMutation({
+    mutationFn: () =>
+      api.post<RefreshInterestsReflectionResponse>(
+        "/browser-history/refresh-interests-reflection",
+      ),
+    onSuccess: (data) => {
+      setLastRefresh(data);
+      if (data.skipped) {
+        onToast("success", `Reflection refresh skipped (${data.skipped.reason})`);
+      } else {
+        onToast(
+          "success",
+          `Refreshed — ${data.themesSelected.length} themes, ${data.targetsWritten.length} files`,
+        );
+      }
+    },
+    onError: (err) => {
+      onToast(
+        "error",
+        `Failed to refresh: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+    },
+  });
+
+  const cleanup = useMutation({
+    mutationFn: () =>
+      api.post<CleanupInterestsReflectionResponse>(
+        "/browser-history/cleanup-interests-reflection",
+        { alsoDeleteResearchThemesFile: alsoDeleteThemes },
+      ),
+    onSuccess: (data) => {
+      setLastCleanup(data);
+      setConfirmCleanup(false);
+      onToast(
+        "success",
+        `Cleaned up — ${data.blocksRemoved} blocks removed across ${data.filesAffected.length} files`,
+      );
+    },
+    onError: (err) => {
+      onToast(
+        "error",
+        `Failed to clean up: ${err instanceof Error ? err.message : "Unknown error"}`,
+      );
+      setConfirmCleanup(false);
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <SectionLabel
+          icon={Sparkles}
+          title="Research themes (auto-refreshed weekly)"
+          description="Each weekly review refreshes a short `## Current research themes (auto)` block on user/profile.md, the per-cluster snapshot at user/research-themes.md, and matching project files. The feature runs automatically while browser history is enabled; the buttons below are for testing and one-shot cleanup."
+        />
+      </CardHeader>
+
+      {!enabled && (
+        <Alert variant="info" className="mb-4">
+          Browser history is currently disabled, so weekly reflection is
+          paused. Re-enable browser history above to resume the next
+          weekly_review run.
+        </Alert>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-3 rounded-md border p-4">
+          <div className="flex items-start gap-3">
+            <RefreshCw className="mt-0.5 h-4 w-4 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Refresh now</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Re-run the deterministic refresh against the most recent
+                ISO Monday window. Same code path the Friday scheduler
+                tick uses; the helper writes the auto-block in place if
+                three or more qualifying themes are found.
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!enabled || refresh.isPending}
+            onClick={() => refresh.mutate()}
+          >
+            {refresh.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Refresh now
+          </Button>
+          {lastRefresh && (
+            <div className="rounded-md border bg-muted/30 p-3 text-xs">
+              <div className="font-medium text-foreground">
+                Last refresh — week of {lastRefresh.weekStart}
+              </div>
+              {lastRefresh.skipped ? (
+                <div className="mt-1 text-muted-foreground">
+                  Skipped: {lastRefresh.skipped.reason}
+                </div>
+              ) : (
+                <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                  <li>Themes selected: {lastRefresh.themesSelected.length}</li>
+                  <li>Files written: {lastRefresh.targetsWritten.length}</li>
+                  <li>Projects annotated: {lastRefresh.projectsAnnotated}</li>
+                  <li>
+                    Dormant since last week:{" "}
+                    {lastRefresh.clustersDormantSinceLastWeek}
+                  </li>
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 rounded-md border p-4">
+          <div className="flex items-start gap-3">
+            <Trash2 className="mt-0.5 h-4 w-4 text-muted-foreground" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium">Clean up auto-blocks</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Strips every <code>aitne:browser-interests v1</code> block
+                from <code>profile.md</code>, <code>_index.md</code>, and
+                each <code>projects/*.md</code>, and (by default) deletes
+                the wholly daemon-owned <code>user/research-themes.md</code>.
+                One-shot purge — the next weekly_review re-creates fresh
+                content.
+              </p>
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-input"
+              checked={alsoDeleteThemes}
+              onChange={(event) =>
+                setAlsoDeleteThemes(event.target.checked)
+              }
+            />
+            <span>
+              Also delete <code>user/research-themes.md</code>
+            </span>
+          </label>
+          {!confirmCleanup ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cleanup.isPending}
+              onClick={() => setConfirmCleanup(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Clean up auto-blocks
+            </Button>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={cleanup.isPending}
+                onClick={() => cleanup.mutate()}
+              >
+                {cleanup.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Confirm purge
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={cleanup.isPending}
+                onClick={() => setConfirmCleanup(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+          {lastCleanup && (
+            <div className="rounded-md border bg-muted/30 p-3 text-xs">
+              <div className="font-medium text-foreground">Last cleanup</div>
+              <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                <li>Blocks removed: {lastCleanup.blocksRemoved}</li>
+                <li>Files affected: {lastCleanup.filesAffected.length}</li>
+                <li>
+                  research-themes.md deleted:{" "}
+                  {lastCleanup.researchThemesDeleted ? "yes" : "no"}
+                </li>
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
     </Card>
   );
 }

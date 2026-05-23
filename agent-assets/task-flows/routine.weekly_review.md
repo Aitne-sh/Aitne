@@ -35,6 +35,17 @@ This routine produces **two separate artifacts** with strict audience boundaries
 Follow the context skill for file ownership rules. This routine owns the
 workflow; the skill owns the file contract.
 
+> Note: the `## Current research themes (auto)` block in `<user>` is
+> daemon-refreshed by a deterministic pre-hook just before this task-flow
+> fires (`WEEKLY_INTERESTS_REFLECTION_PLAN.md` §10.4 / §7.1). You only
+> *read* it — never edit, append, or duplicate that block. The companion
+> `user/research-themes.md` file is wholly daemon-owned (frontmatter
+> `owner: aitne-browser-history`); leave it alone too. If new themes
+> appeared this week, you may briefly mention it in the Phase 4 notification
+> ("Refreshed your research themes — N new this week") — optional context,
+> not a task to do, and still subject to Phase 4's silence gate, 2–3 line
+> cap, and forbidden-vocabulary rules.
+
 ### Phase 1: Gather the week
 1. Determine the target file name from <current_time>:
    `weekly/YYYY-Www.md` (ISO week in the daemon timezone).

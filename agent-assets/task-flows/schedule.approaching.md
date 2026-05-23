@@ -31,7 +31,6 @@ the user could not see by glancing at their calendar app.
    | Trigger | Priority | Detection mechanism |
    |---|---|---|
    | (a) reschedule arrived in the past 24 hours | `high` | See **Detection mechanism — trigger (a)** section below the table. |
-   | (d) travel-time concern | `critical` | `POST /api/travel-time` with the user's last-known location + the event venue. |
 
    #### Detection mechanism — trigger (a) calendar reschedule
 

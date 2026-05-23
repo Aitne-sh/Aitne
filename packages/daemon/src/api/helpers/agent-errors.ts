@@ -660,6 +660,13 @@ export const AGENT_ERROR_REGISTRY = {
     legacyErrorCode: "validation_error",
     constraint: { type: "object", required: true },
   },
+  "context.invalid_body_field": {
+    expected: "field value matching the route schema",
+    hint:
+      "One or more body fields failed schema validation. Inspect the per-issue `field` (Zod path) and `received` (the value you sent) plus `validValues` for enum fields. For PATCH /api/context/<path> the shape is {section, mode: 'append'|'replace'|'clear'|'clear_before'|'append_to_file', content?, cutoff?, maxEntries?}; for PUT it is {content}. For append-only files like agent/journal.md prefer mode='append_to_file' (section optional).",
+    skillAnchor: "context#request-shape",
+    legacyErrorCode: "validation_error",
+  },
   "context.invalid_json_body": {
     expected: "syntactically valid JSON",
     hint:
@@ -1639,73 +1646,6 @@ export const AGENT_ERROR_REGISTRY = {
     skillAnchor: "gmail-lifestyle#travel-bookings-crud",
     legacyErrorCode: "not_found",
     retryable: false,
-  },
-
-  // ── /api/travel-time/* — Google Maps proxy used by morning/evening
-  //    routines to compute leave-by times for calendar events.
-  "travel_time.google_maps_not_configured": {
-    expected: "Google Maps API key in the OS keychain",
-    hint:
-      "Google Maps is not configured. The user must add `PA_GOOGLE_MAPS_API_KEY` via /settings/integrations → Google Maps. Until then, skip the travel-time branch of the routine and notify the user once.",
-    skillAnchor: "gmail-lifestyle#travel-time-configuration",
-    legacyErrorCode: "google_maps_not_configured",
-    retryable: false,
-  },
-  "travel_time.calendar_not_configured": {
-    expected: "calendar integration available (direct mode)",
-    hint:
-      "GET /travel-time/for-event needs the calendar service to fetch the event. Either no calendar is configured, or it's in delegated/native mode. Use GET /api/travel-time?origin=…&destination=… directly with pre-fetched event location instead.",
-    skillAnchor: "gmail-lifestyle#travel-time-for-event",
-    legacyErrorCode: "calendar_not_configured",
-    retryable: false,
-  },
-  "travel_time.origin_and_destination_required": {
-    expected: "non-empty 'origin' AND 'destination' query parameters",
-    hint:
-      "GET /api/travel-time?origin=<addr>&destination=<addr>. Both fields are mandatory and must be non-empty. Geocodable inputs accepted: street address, plus-code, or `lat,lng`. Empty strings are rejected.",
-    skillAnchor: "gmail-lifestyle#travel-time-query",
-    legacyErrorCode: "origin_and_destination_required",
-    constraint: { type: "string", required: true, minLength: 1 },
-  },
-  "travel_time.invalid_mode": {
-    expected: "one of 'driving' | 'transit' | 'walking' | 'bicycling'",
-    hint:
-      "Google Maps Directions API mode whitelist. Use 'transit' for public transport (default), 'driving' for car/taxi, 'walking' for foot, 'bicycling' for bike. The 400 response carries `validModes` verbatim.",
-    skillAnchor: "gmail-lifestyle#travel-time-mode",
-    legacyErrorCode: "invalid_mode",
-    constraint: { type: "enum", enum: ["driving", "transit", "walking", "bicycling"] },
-  },
-  "travel_time.no_route_found": {
-    expected: "Google Maps Directions API returned a route",
-    hint:
-      "No route could be computed between origin and destination. Common causes: addresses don't geocode (typo, no country/region), mode='transit' but no transit exists between the points, or destination is on a different continent. Try `mode=driving` as a fallback, or omit the call and notify the user.",
-    skillAnchor: "gmail-lifestyle#travel-time-errors",
-    legacyErrorCode: "no_route_found",
-    retryable: false,
-  },
-  "travel_time.event_not_found": {
-    expected: "an existing calendar event matching :eventId",
-    hint:
-      "Calendar.getEvent threw — the eventId is invalid or the event has been deleted. Re-list with GET /api/calendar/events?date=<day> to find the current id, or skip if the event no longer exists.",
-    skillAnchor: "gmail-lifestyle#travel-time-for-event",
-    legacyErrorCode: "event_not_found",
-    retryable: false,
-  },
-  "travel_time.event_has_no_location": {
-    expected: "calendar event with a non-empty `location` field",
-    hint:
-      "The event has no `location` set, so there's nowhere to compute travel time to. Either the event is virtual (Zoom/Meet) or the user forgot to add a location. Skip travel-time for this event; mention in the routine summary that location is missing.",
-    skillAnchor: "gmail-lifestyle#travel-time-for-event",
-    legacyErrorCode: "event_has_no_location",
-    retryable: false,
-  },
-  "travel_time.origin_required": {
-    expected: "non-empty 'origin' query parameter",
-    hint:
-      "GET /travel-time/for-event/:eventId needs `?origin=<addr>` explicitly — there is no implicit home/office default in this build. Look up the user's home address from /api/context/user/profile if needed.",
-    skillAnchor: "gmail-lifestyle#travel-time-for-event",
-    legacyErrorCode: "origin_required",
-    constraint: { type: "string", required: true, minLength: 1 },
   },
 
   // ── /api/receipts/* — receipt attachment registry. Mostly read-only; the

@@ -77,7 +77,10 @@ describe("dashboardRouteHref", () => {
       "/settings/journal",
       "/settings/models",
       "/settings/advanced",
+      "/settings/wiki",
       "/setup",
+      "/wiki",
+      "/wiki/timeline",
     ];
     for (const p of pagePaths) {
       expect(DASHBOARD_ROUTES.has(p)).toBe(true);

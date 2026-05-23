@@ -10,8 +10,8 @@ aliases:
 category: features
 summary: |
   The calendar integration pulls your events into Aitne so the
-  morning routine, schedule files, and travel-time skill can reason
-  about your day. The Connections → Calendar page also picks the
+  morning routine and schedule files can reason about your day.
+  The Connections → Calendar page also picks the
   backend that handles approaching-event notifications and observed
   calendar changes (Calendar Event Model) — that picker only applies
   when the integration runs in direct mode.

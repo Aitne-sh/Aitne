@@ -161,10 +161,6 @@ export class SecretBroker {
     return this.set("googleTokenJson", json);
   }
 
-  getGoogleMapsApiKey(): Promise<string | null> {
-    return this.get("googleMapsApiKey");
-  }
-
   getAppleCalendarCredentialsJson(): Promise<string | null> {
     return this.get("appleCalendarCredentials");
   }

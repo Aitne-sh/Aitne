@@ -9,7 +9,6 @@ export const SECRET_NAMES = [
   "githubWebhookSecret",
   "googleCredentialsJson",
   "googleTokenJson",
-  "googleMapsApiKey",
   "appleCalendarCredentials",
 ] as const;
 

@@ -505,6 +505,38 @@ async function main() {
       idx += 1;
       continue;
     }
+    // Real curl 7.82+ \`--json <body>\` is shorthand for setting
+    // Content-Type: application/json + Accept: application/json + sending
+    // the body. The agent learns this shape from skill prose and from
+    // pa-api (which has its own --json). Matching curl's behavior here
+    // avoids the previous "Unsupported curl flag: --json" failure that
+    // burned budget on every routine.morning_routine_today retry.
+    if (arg === "--json") {
+      const rawBody = args[idx + 1];
+      if (rawBody === undefined) {
+        fail("--json requires a value.");
+      }
+      if (rawBody === "@-") {
+        body = await readAllStdin();
+      } else if (rawBody.length > 0 && rawBody[0] === "@") {
+        fail(\`--json \${rawBody}: @<path> file-read syntax is not allowed; use \\\`--json @-\\\` with a heredoc instead.\`);
+      } else {
+        body = rawBody;
+      }
+      if (!headers.has("content-type")) {
+        headers.set("content-type", "application/json");
+      }
+      headers.set("accept", "application/json");
+      idx += 1;
+      continue;
+    }
+    // Real curl \`-I\` / \`--head\` issues a HEAD request. HEAD is in
+    // ALLOWED_METHODS so this is safe; supporting the flag keeps the
+    // agent's muscle memory working when it probes for existence.
+    if (arg === "-I" || arg === "--head") {
+      method = "HEAD";
+      continue;
+    }
     if (arg === "-o" || arg === "--output") {
       const filePath = args[idx + 1];
       if (!filePath) {

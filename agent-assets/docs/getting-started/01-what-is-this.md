@@ -117,9 +117,8 @@ decides what (if anything) is worth telling you about.
   [reading list](../features/lifestyle/reading.md),
   [receipts](../features/lifestyle/receipts.md), and
   [travel bookings](../features/lifestyle/travel-bookings.md).
-- [Calendar](../features/integrations/calendar.md) — including
-  [travel-time](../features/lifestyle/travel-time.md) lookups before
-  events.
+- [Calendar](../features/integrations/calendar.md) — pre-meeting
+  nudges and same-day briefing context.
 - [Obsidian](../features/integrations/obsidian.md) — watches a vault
   for new notes.
 - [Notion](../features/integrations/notion.md) — watches selected

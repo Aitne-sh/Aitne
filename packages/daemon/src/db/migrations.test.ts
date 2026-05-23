@@ -199,6 +199,332 @@ describe("0001-browser-pending-offers-add-offered-kind", () => {
   });
 });
 
+// MANAGED_CHROMIUM_IMPLEMENTATION_PLAN Phase B-3 — peer test for the
+// `0002-browser-automation-workflows-b3-outcomes` migration. Mirrors
+// the shape of the §0001 peer test above per CLAUDE.md §4: covers
+// fresh-DB no-op, pre-migration-shape ALTER, idempotency.
+describe("0002-browser-automation-workflows-b3-outcomes", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0002-browser-automation-workflows-b3-outcomes",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when the wider B-3 CHECK constraint is already present", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_automation_workflows (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_id       TEXT NOT NULL UNIQUE,
+        workflow_name     TEXT NOT NULL,
+        params_hash       TEXT NOT NULL,
+        target_urls       TEXT NOT NULL,
+        blocked_requests  TEXT NOT NULL,
+        duration_ms       INTEGER NOT NULL,
+        outcome           TEXT NOT NULL CHECK (outcome IN (
+            'success', 'unknown_workflow', 'input_validation_error',
+            'output_validation_error', 'url_not_allowlisted',
+            'user_allowlist_blocked', 'host_not_extractable',
+            'rate_limited', 'site_not_connected',
+            'playwright_launch_timeout', 'playwright_error', 'timeout',
+            'needs_approval', 'approval_expired',
+            'approval_token_invalid', 'payment_path_blocked'
+        )),
+        started_at        INTEGER NOT NULL,
+        finished_at       INTEGER NOT NULL,
+        screenshot_path   TEXT,
+        trace_path        TEXT
+      );
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0002-browser-automation-workflows-b3-outcomes",
+    ]);
+    // New B-3 outcome inserts successfully.
+    db.prepare(
+      `INSERT INTO browser_automation_workflows
+         (workflow_id, workflow_name, params_hash, target_urls,
+          blocked_requests, duration_ms, outcome,
+          started_at, finished_at)
+        VALUES ('aaa', 'wf', 'h', '[]', '[]', 1, 'needs_approval', 1, 2)`,
+    ).run();
+    const count = db
+      .prepare("SELECT COUNT(*) AS n FROM browser_automation_workflows")
+      .get() as { n: number };
+    expect(count.n).toBe(1);
+  });
+
+  it("rebuilds the table on a pre-B-3 narrower CHECK and preserves existing rows", () => {
+    const db = openDb();
+    // Pre-B-3 narrower CHECK — no needs_approval / approval_* / payment.
+    db.exec(`
+      CREATE TABLE browser_automation_workflows (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_id       TEXT NOT NULL UNIQUE,
+        workflow_name     TEXT NOT NULL,
+        params_hash       TEXT NOT NULL,
+        target_urls       TEXT NOT NULL,
+        blocked_requests  TEXT NOT NULL,
+        duration_ms       INTEGER NOT NULL,
+        outcome           TEXT NOT NULL CHECK (outcome IN (
+            'success', 'unknown_workflow', 'input_validation_error',
+            'output_validation_error', 'url_not_allowlisted',
+            'user_allowlist_blocked', 'host_not_extractable',
+            'rate_limited', 'site_not_connected',
+            'playwright_launch_timeout', 'playwright_error', 'timeout'
+        )),
+        started_at        INTEGER NOT NULL,
+        finished_at       INTEGER NOT NULL,
+        screenshot_path   TEXT,
+        trace_path        TEXT
+      );
+      INSERT INTO browser_automation_workflows
+        (workflow_id, workflow_name, params_hash, target_urls,
+         blocked_requests, duration_ms, outcome,
+         started_at, finished_at)
+        VALUES ('legacy', 'wf', 'h', '[]', '[]', 1, 'success', 1, 2);
+    `);
+    runMigrations(db, [migration!]);
+    // Legacy row preserved.
+    const rows = db
+      .prepare(
+        "SELECT workflow_id, outcome FROM browser_automation_workflows ORDER BY id",
+      )
+      .all() as Array<{ workflow_id: string; outcome: string }>;
+    expect(rows).toEqual([{ workflow_id: "legacy", outcome: "success" }]);
+    // New B-3 outcome now accepted.
+    db.prepare(
+      `INSERT INTO browser_automation_workflows
+         (workflow_id, workflow_name, params_hash, target_urls,
+          blocked_requests, duration_ms, outcome,
+          started_at, finished_at)
+        VALUES ('new', 'wf', 'h', '[]', '[]', 1, 'payment_path_blocked', 1, 2)`,
+    ).run();
+    const count = db
+      .prepare("SELECT COUNT(*) AS n FROM browser_automation_workflows")
+      .get() as { n: number };
+    expect(count.n).toBe(2);
+  });
+
+  it("is idempotent — re-running does not re-apply the migration", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_automation_workflows (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_id       TEXT NOT NULL UNIQUE,
+        workflow_name     TEXT NOT NULL,
+        params_hash       TEXT NOT NULL,
+        target_urls       TEXT NOT NULL,
+        blocked_requests  TEXT NOT NULL,
+        duration_ms       INTEGER NOT NULL,
+        outcome           TEXT NOT NULL CHECK (outcome IN (
+            'success', 'unknown_workflow', 'input_validation_error',
+            'output_validation_error', 'url_not_allowlisted',
+            'user_allowlist_blocked', 'host_not_extractable',
+            'rate_limited', 'site_not_connected',
+            'playwright_launch_timeout', 'playwright_error', 'timeout'
+        )),
+        started_at        INTEGER NOT NULL,
+        finished_at       INTEGER NOT NULL,
+        screenshot_path   TEXT,
+        trace_path        TEXT
+      );
+    `);
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+  });
+});
+
+// MANAGED_CHROMIUM_IMPLEMENTATION_PLAN Phase B-4 — peer test for the
+// `0003-browser-automation-workflows-b4-outcomes` migration. Mirrors
+// the shape of the §0002 peer test above per CLAUDE.md §4: covers
+// the no-table no-op, fresh-DB no-op (B-4 statuses already in
+// sqlite_master), pre-migration-shape rebuild that preserves rows
+// and widens the CHECK, and idempotency.
+describe("0003-browser-automation-workflows-b4-outcomes", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0003-browser-automation-workflows-b4-outcomes",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when the browser_automation_workflows table does not exist", () => {
+    // A DB that has never seen any browser-automation work — the
+    // migration must skip cleanly without creating the table itself
+    // (schema.ts is responsible for that on first boot).
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0003-browser-automation-workflows-b4-outcomes",
+    ]);
+    expect(tableExists(db, "browser_automation_workflows")).toBe(false);
+  });
+
+  it("is a no-op when the B-4 widened CHECK is already present (fresh-DB shape)", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_automation_workflows (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_id       TEXT NOT NULL UNIQUE,
+        workflow_name     TEXT NOT NULL,
+        params_hash       TEXT NOT NULL,
+        target_urls       TEXT NOT NULL,
+        blocked_requests  TEXT NOT NULL,
+        duration_ms       INTEGER NOT NULL,
+        outcome           TEXT NOT NULL CHECK (outcome IN (
+            'success', 'unknown_workflow', 'input_validation_error',
+            'output_validation_error', 'url_not_allowlisted',
+            'user_allowlist_blocked', 'host_not_extractable',
+            'rate_limited', 'site_not_connected',
+            'playwright_launch_timeout', 'playwright_error', 'timeout',
+            'needs_approval', 'approval_expired',
+            'approval_token_invalid', 'payment_path_blocked',
+            'purchase_b4_disabled', 'purchase_site_not_enabled',
+            'purchase_pending_exists', 'purchase_daily_cap_exceeded'
+        )),
+        started_at        INTEGER NOT NULL,
+        finished_at       INTEGER NOT NULL,
+        screenshot_path   TEXT,
+        trace_path        TEXT
+      );
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0003-browser-automation-workflows-b4-outcomes",
+    ]);
+    // The migration short-circuited on the `purchase_b4_disabled` marker —
+    // a B-4 outcome inserts successfully without a rebuild having run.
+    db.prepare(
+      `INSERT INTO browser_automation_workflows
+         (workflow_id, workflow_name, params_hash, target_urls,
+          blocked_requests, duration_ms, outcome,
+          started_at, finished_at)
+        VALUES ('a', 'wf', 'h', '[]', '[]', 1, 'purchase_b4_disabled', 1, 2)`,
+    ).run();
+    const count = db
+      .prepare("SELECT COUNT(*) AS n FROM browser_automation_workflows")
+      .get() as { n: number };
+    expect(count.n).toBe(1);
+  });
+
+  it("rebuilds the table on a pre-B-4 (B-3) CHECK and preserves existing rows", () => {
+    const db = openDb();
+    // Pre-B-4 CHECK — has the B-3 widening but not the B-4 statuses.
+    db.exec(`
+      CREATE TABLE browser_automation_workflows (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_id       TEXT NOT NULL UNIQUE,
+        workflow_name     TEXT NOT NULL,
+        params_hash       TEXT NOT NULL,
+        target_urls       TEXT NOT NULL,
+        blocked_requests  TEXT NOT NULL,
+        duration_ms       INTEGER NOT NULL,
+        outcome           TEXT NOT NULL CHECK (outcome IN (
+            'success', 'unknown_workflow', 'input_validation_error',
+            'output_validation_error', 'url_not_allowlisted',
+            'user_allowlist_blocked', 'host_not_extractable',
+            'rate_limited', 'site_not_connected',
+            'playwright_launch_timeout', 'playwright_error', 'timeout',
+            'needs_approval', 'approval_expired',
+            'approval_token_invalid', 'payment_path_blocked'
+        )),
+        started_at        INTEGER NOT NULL,
+        finished_at       INTEGER NOT NULL,
+        screenshot_path   TEXT,
+        trace_path        TEXT
+      );
+      INSERT INTO browser_automation_workflows
+        (workflow_id, workflow_name, params_hash, target_urls,
+         blocked_requests, duration_ms, outcome,
+         started_at, finished_at)
+        VALUES ('legacy', 'wf', 'h', '[]', '[]', 1, 'needs_approval', 1, 2);
+    `);
+    // A pre-B-4 row with a B-4-only outcome must be rejected by the
+    // pre-migration CHECK — this proves we are starting from the
+    // narrower shape.
+    expect(() =>
+      db.prepare(
+        `INSERT INTO browser_automation_workflows
+           (workflow_id, workflow_name, params_hash, target_urls,
+            blocked_requests, duration_ms, outcome,
+            started_at, finished_at)
+          VALUES ('rejected', 'wf', 'h', '[]', '[]', 1, 'purchase_b4_disabled', 1, 2)`,
+      ).run(),
+    ).toThrow(/CHECK constraint failed/);
+
+    runMigrations(db, [migration!]);
+
+    // Legacy row preserved by the table rebuild.
+    const rows = db
+      .prepare(
+        "SELECT workflow_id, outcome FROM browser_automation_workflows ORDER BY id",
+      )
+      .all() as Array<{ workflow_id: string; outcome: string }>;
+    expect(rows).toEqual([{ workflow_id: "legacy", outcome: "needs_approval" }]);
+
+    // Every B-4 status is now accepted by the widened CHECK.
+    for (const outcome of [
+      "purchase_b4_disabled",
+      "purchase_site_not_enabled",
+      "purchase_pending_exists",
+      "purchase_daily_cap_exceeded",
+    ]) {
+      db.prepare(
+        `INSERT INTO browser_automation_workflows
+           (workflow_id, workflow_name, params_hash, target_urls,
+            blocked_requests, duration_ms, outcome,
+            started_at, finished_at)
+          VALUES (?, 'wf', 'h', '[]', '[]', 1, ?, 1, 2)`,
+      ).run(`new-${outcome}`, outcome);
+    }
+    const count = db
+      .prepare("SELECT COUNT(*) AS n FROM browser_automation_workflows")
+      .get() as { n: number };
+    expect(count.n).toBe(5);
+
+    // The supporting indexes survive the rebuild.
+    expect(indexExists(db, "idx_browser_automation_workflows_started_at"))
+      .toBe(true);
+    expect(indexExists(db, "idx_browser_automation_workflows_name")).toBe(true);
+  });
+
+  it("is idempotent — re-running does not re-apply the migration", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_automation_workflows (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_id       TEXT NOT NULL UNIQUE,
+        workflow_name     TEXT NOT NULL,
+        params_hash       TEXT NOT NULL,
+        target_urls       TEXT NOT NULL,
+        blocked_requests  TEXT NOT NULL,
+        duration_ms       INTEGER NOT NULL,
+        outcome           TEXT NOT NULL CHECK (outcome IN (
+            'success', 'unknown_workflow', 'input_validation_error',
+            'output_validation_error', 'url_not_allowlisted',
+            'user_allowlist_blocked', 'host_not_extractable',
+            'rate_limited', 'site_not_connected',
+            'playwright_launch_timeout', 'playwright_error', 'timeout',
+            'needs_approval', 'approval_expired',
+            'approval_token_invalid', 'payment_path_blocked'
+        )),
+        started_at        INTEGER NOT NULL,
+        finished_at       INTEGER NOT NULL,
+        screenshot_path   TEXT,
+        trace_path        TEXT
+      );
+    `);
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+  });
+});
+
 describe("schema introspection helpers", () => {
   it("tableExists returns true for an existing table and false otherwise", () => {
     const db = openDb();

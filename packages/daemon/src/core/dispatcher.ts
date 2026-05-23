@@ -165,6 +165,18 @@ export class EventDispatcher {
    */
   private bangCommandRegistry: import("./bang-commands/registry.js").BangCommandRegistry | null = null;
   /**
+   * Phase B-4 — DM-issued purchase confirmation handler. Wired at
+   * daemon startup from `index.ts` via `setPurchaseHandler`. Null
+   * when B-4 is not enabled at startup; the dispatcher's inbound
+   * classifier no-ops in that case and the workflow runner refuses
+   * `variant: "purchase"` calls with `purchase_b4_disabled`.
+   *
+   * Spec: MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17 / §13 step 50.
+   */
+  private purchaseHandler:
+    | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
+    | null = null;
+  /**
    * Current setup mode — scope-agnostic flag that survives internal
    * direct-message session refresh (day boundary, stale flag, etc). Previously this
    * was a `Map<sessionId, mode>` keyed by `conversation_sessions.id`, but the
@@ -606,6 +618,7 @@ export class EventDispatcher {
       getAuthRecovery: () => this.authRecovery,
       getAuthHealthMonitor: () => this.authHealthMonitor,
       getBangCommandRegistry: () => this.bangCommandRegistry,
+      getPurchaseHandler: () => this.purchaseHandler,
       getCurrentSetupMode: () => this.currentSetupMode,
       beginSetupMode: (mode) => this.beginSetupMode(mode),
       lookupCustomBangCommandForEvent: (event) =>
@@ -642,6 +655,28 @@ export class EventDispatcher {
   /** Set the SignalDetector for implicit feedback collection from user messages. */
   setSignalDetector(detector: SignalDetector): void {
     this.signalDetector = detector;
+  }
+
+  /**
+   * Wire the B-4 purchase-confirmation handler. Called once at startup
+   * from `index.ts` after the messaging hub is up — the handler's
+   * `sender` dependency requires a live MessageHub for outbound DMs.
+   * Calling more than once replaces the prior reference (used by the
+   * dashboard's "Disable B-4" flow which can later re-enable).
+   */
+  setPurchaseHandler(
+    handler: import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler | null,
+  ): void {
+    this.purchaseHandler = handler;
+  }
+
+  /** Read accessor — used by the route layer's wiring to thread the
+   *  same instance into `ApiDependencies.purchaseHandler` without a
+   *  parallel construction path. */
+  getPurchaseHandler():
+    | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
+    | null {
+    return this.purchaseHandler;
   }
 
   /** Set the dashboard stream adapter for real-time response streaming. */

@@ -13,11 +13,25 @@ import type { AgentConfig } from "../config.js";
 import { getContextDir } from "../config.js";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import {
+  deleteApprovalsOlderThan,
+  expireStaleApprovals,
+  scrubConsumedTokenHashes,
+} from "../db/browser-automation-approvals-store.js";
+import {
+  expireStalePurchaseTokens,
+  scrubRotatedPurchaseTokens,
+  sweepOrphanedConsumedPurchaseTokens,
+} from "../db/browser-automation-purchase-tokens-store.js";
+import { deletePurchaseRepliesOlderThan } from "../db/browser-automation-purchase-replies-store.js";
+import { deleteWorkflowRunsOlderThan } from "../db/browser-automation-store.js";
+import {
   cleanupConsumedObservations,
   getStalePendingObservationStats,
 } from "../db/observations.js";
 import { pruneOldMcpToolCalls } from "../services/mcp/tool-audit.js";
 import { AttachmentStore } from "../services/attachments/store.js";
+import { tracesRootDir } from "../services/browser-history/automation/trace-store-paths.js";
+import { TRACE_RETENTION_DAYS } from "../services/browser-history/automation/trace-store.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("retention");
@@ -36,6 +50,34 @@ const RETENTION_DAYS = {
   authTelemetryCounters: 90,
   mailMessagesIndex: 365,
   deletedMailMessagesIndex: 30,
+  /**
+   * Phase B-2 audit rows (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.14).
+   * The audit table mirrors `browser_automation_workflows`; the per-run
+   * `trace_path` references the FS trace dir below, so SQL deletes and
+   * trace prunes run with the SAME cutoff to keep the two side-by-side.
+   * Matches the design's §8.7 `TRACE_RETENTION_DAYS` (14 d).
+   */
+  browserAutomationWorkflows: TRACE_RETENTION_DAYS,
+  /**
+   * Phase B-3 (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step
+   * 43). Audit rows in `browser_automation_approvals` live for 30 d
+   * after they reach a terminal state (consumed / denied / expired).
+   * `token_hash` is rotated to NULL one day after `consumed_at` /
+   * `denied_at` so even the hash does not linger beyond the user-
+   * facing retention window.
+   */
+  browserAutomationApprovals: 30,
+  browserAutomationApprovalTokenHashScrub: 1,
+  /**
+   * Phase B-4 (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.6 / §13 step
+   * 60). The raw `!~xxxxxxxx` string is rotated to NULL 1 day after
+   * the row reaches a terminal state — bounding the window in which a
+   * stale DM-history token could be replayed against a daemon bug.
+   * Reply audit rows live 90 days (longer than B-3 approvals because
+   * the spoofing / replay analysis surfaces the hashed history).
+   */
+  browserAutomationPurchaseTokenScrub: 1,
+  browserAutomationPurchaseReplies: 90,
   mailParseFailures: 30,
   managementParseFailures: 30,
   skillCurationSignals: 180,
@@ -174,6 +216,42 @@ export interface RetentionResult {
   integrationWrites: number;
   /** Stale `imminent_event_notifications` rows pruned (Phase 7 §3.2). */
   imminentEventNotifications: number;
+  /**
+   * Phase B-2 audit rows pruned from `browser_automation_workflows`
+   * (`browserAutomationWorkflows` retention day count). Paired with
+   * `browserAutomationTraceDirs` below; the SQL row goes first so a
+   * partial failure does not leave a row pointing at a missing trace
+   * dir.
+   */
+  browserAutomationWorkflows: number;
+  /** Phase B-2 per-workflow trace directories pruned from
+   *  `<PA_DATA_DIR>/automation-traces/`. Same retention horizon as
+   *  `browserAutomationWorkflows`. */
+  browserAutomationTraceDirs: number;
+  /** Phase B-3 — pending/approved approval rows flipped to expired
+   *  during the sweep (past their 5-min TTL). */
+  browserAutomationApprovalsExpired: number;
+  /** Phase B-3 — terminal approval rows whose `token_hash` was
+   *  rotated to NULL during this sweep. */
+  browserAutomationApprovalsScrubbed: number;
+  /** Phase B-3 — terminal approval rows older than the retention
+   *  horizon, deleted during this sweep. */
+  browserAutomationApprovalsDeleted: number;
+  /** Phase B-4 — pending purchase tokens past their 5-min TTL flipped
+   *  to expired (and their `cancel_reason` set to `timeout`) during
+   *  the sweep. */
+  browserAutomationPurchaseTokensExpired: number;
+  /** Phase B-4 — consumed-but-not-finalized rows older than the
+   *  per-workflow grace window, flipped to cancelled with reason
+   *  `supervisor_orphan_sweep`. Catches daemon-crash mid-flight + any
+   *  post-consume Playwright stall that left the row stranded. */
+  browserAutomationPurchaseTokensOrphaned: number;
+  /** Phase B-4 — terminal purchase-token rows whose raw `token` was
+   *  rotated to NULL during this sweep. */
+  browserAutomationPurchaseTokensScrubbed: number;
+  /** Phase B-4 — `_replies` audit rows older than the retention
+   *  horizon, deleted during this sweep. */
+  browserAutomationPurchaseRepliesDeleted: number;
   /** Whether FTS5 segment optimization ran after content-table deletions. */
   ftsOptimized: boolean;
   /** Whether WAL checkpoint (TRUNCATE) succeeded after all DB operations. */
@@ -221,6 +299,15 @@ export function runRetentionCleanup(
     agentJournalOversizedSections: 0,
     integrationWrites: 0,
     imminentEventNotifications: 0,
+    browserAutomationWorkflows: 0,
+    browserAutomationTraceDirs: 0,
+    browserAutomationApprovalsExpired: 0,
+    browserAutomationApprovalsScrubbed: 0,
+    browserAutomationApprovalsDeleted: 0,
+    browserAutomationPurchaseTokensExpired: 0,
+    browserAutomationPurchaseTokensOrphaned: 0,
+    browserAutomationPurchaseTokensScrubbed: 0,
+    browserAutomationPurchaseRepliesDeleted: 0,
     ftsOptimized: false,
     walCheckpointed: false,
   };
@@ -253,6 +340,14 @@ export function runRetentionCleanup(
     skillCurationRunsAborted: 0,
     integrationWrites: 0,
     imminentEventNotifications: 0,
+    browserAutomationWorkflows: 0,
+    browserAutomationApprovalsExpired: 0,
+    browserAutomationApprovalsScrubbed: 0,
+    browserAutomationApprovalsDeleted: 0,
+    browserAutomationPurchaseTokensExpired: 0,
+    browserAutomationPurchaseTokensOrphaned: 0,
+    browserAutomationPurchaseTokensScrubbed: 0,
+    browserAutomationPurchaseRepliesDeleted: 0,
   };
   db.transaction(() => {
     counts.mdFileSnapshots = deleteOlderThan(
@@ -401,12 +496,120 @@ export function runRetentionCleanup(
         "imminent_event_notifications prune skipped (table missing)",
       );
     }
+
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.7 / §8.14 — Phase B-2
+    // audit rows. Stays inside the transaction so the SQL prune lands
+    // atomically with the rest of the sweep; the paired FS prune runs
+    // outside the transaction once we know the SQL cutoff committed.
+    // try/catch mirrors the integration_writes / imminent_event_notifications
+    // pattern for hand-rolled test schemas that omit the table —
+    // production always has it.
+    try {
+      const cutoff =
+        Date.now() - RETENTION_DAYS.browserAutomationWorkflows * 86_400_000;
+      counts.browserAutomationWorkflows = deleteWorkflowRunsOlderThan(db, cutoff);
+    } catch (err) {
+      /* c8 ignore next 5 */
+      logger.warn(
+        { err },
+        "browser_automation_workflows prune skipped (table missing)",
+      );
+    }
+
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step 43 —
+    // Phase B-3 approvals sweep. Three passes:
+    //   1. Flip stale pending/approved rows past expires_at →
+    //      'expired' so the dashboard's pending panel does not show
+    //      stale entries and a leaked token cannot redeem past TTL.
+    //   2. Rotate token_hash → NULL on terminal rows older than
+    //      `browserAutomationApprovalTokenHashScrub` days. Reduces
+    //      at-rest token-hash footprint.
+    //   3. Delete terminal rows older than
+    //      `browserAutomationApprovals` days. Caps audit-trail size.
+    try {
+      const now = Date.now();
+      counts.browserAutomationApprovalsExpired = expireStaleApprovals(db, now);
+      const scrubCutoff =
+        now -
+        RETENTION_DAYS.browserAutomationApprovalTokenHashScrub *
+          86_400_000;
+      counts.browserAutomationApprovalsScrubbed = scrubConsumedTokenHashes(
+        db,
+        scrubCutoff,
+      );
+      const deleteCutoff =
+        now - RETENTION_DAYS.browserAutomationApprovals * 86_400_000;
+      counts.browserAutomationApprovalsDeleted = deleteApprovalsOlderThan(
+        db,
+        deleteCutoff,
+      );
+    } catch (err) {
+      /* c8 ignore next 5 */
+      logger.warn(
+        { err },
+        "browser_automation_approvals sweep skipped (table missing)",
+      );
+    }
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.6 / §13 step 60 —
+    // Phase B-4 purchase-tokens sweep. Four passes:
+    //   1. Expire PRE-consume pending tokens past their TTL (in case
+    //      the supervisor restart did not catch them at boot OR the
+    //      daemon ran past a token's 5-min window without the
+    //      workflow's `awaitReply` reaching its own deadline check).
+    //   2. Sweep POST-consume orphans — rows where the user typed the
+    //      token but the click never landed (workflow died, daemon
+    //      restarted mid-flight, post-consume Playwright stalled).
+    //      Cutoff is "consumed_at older than ORPHAN_CONSUME_GRACE_MS"
+    //      which is generous enough to never preempt a healthy
+    //      in-flight workflow (its perWorkflowTimeoutMs is 6 min) but
+    //      short enough to reap actual orphans on the next sweep.
+    //   3. Rotate `token` -> NULL on terminal rows older than
+    //      `browserAutomationPurchaseTokenScrub` days. Reduces at-rest
+    //      raw-token footprint.
+    //   4. Delete `_replies` rows older than the retention window.
+    try {
+      const now = Date.now();
+      const expired = expireStalePurchaseTokens(db, now);
+      counts.browserAutomationPurchaseTokensExpired = expired.length;
+      // 10 min — workflow's perWorkflowTimeoutMs is 6 min; the extra
+      // 4 min covers clock skew + a generous slack so an in-flight
+      // workflow we just don't have a reference to is never preempted.
+      const ORPHAN_CONSUME_GRACE_MS = 10 * 60 * 1000;
+      const orphaned = sweepOrphanedConsumedPurchaseTokens(
+        db,
+        now - ORPHAN_CONSUME_GRACE_MS,
+      );
+      counts.browserAutomationPurchaseTokensOrphaned = orphaned.length;
+      const purchaseScrubCutoff =
+        now -
+        RETENTION_DAYS.browserAutomationPurchaseTokenScrub * 86_400_000;
+      counts.browserAutomationPurchaseTokensScrubbed =
+        scrubRotatedPurchaseTokens(db, purchaseScrubCutoff);
+      const replyCutoff =
+        now - RETENTION_DAYS.browserAutomationPurchaseReplies * 86_400_000;
+      counts.browserAutomationPurchaseRepliesDeleted =
+        deletePurchaseRepliesOlderThan(db, replyCutoff);
+    } catch (err) {
+      /* c8 ignore next 5 */
+      logger.warn(
+        { err },
+        "browser_automation_purchase_tokens sweep skipped (table missing)",
+      );
+    }
   })();
   // Transaction committed — safe to copy counts into result.
   result.mdFileSnapshots = counts.mdFileSnapshots;
   result.messages = counts.messages;
   result.agentActions = counts.agentActions;
   result.notificationLog = counts.notificationLog;
+  result.browserAutomationPurchaseTokensExpired =
+    counts.browserAutomationPurchaseTokensExpired ?? 0;
+  result.browserAutomationPurchaseTokensOrphaned =
+    counts.browserAutomationPurchaseTokensOrphaned ?? 0;
+  result.browserAutomationPurchaseTokensScrubbed =
+    counts.browserAutomationPurchaseTokensScrubbed ?? 0;
+  result.browserAutomationPurchaseRepliesDeleted =
+    counts.browserAutomationPurchaseRepliesDeleted ?? 0;
   result.dmConversationLog = counts.dmConversationLog;
   result.observations = counts.observations;
   result.conversationSessions = counts.conversationSessions;
@@ -422,6 +625,27 @@ export function runRetentionCleanup(
   result.skillCurationRunsAborted = counts.skillCurationRunsAborted;
   result.integrationWrites = counts.integrationWrites;
   result.imminentEventNotifications = counts.imminentEventNotifications;
+  result.browserAutomationWorkflows = counts.browserAutomationWorkflows;
+  result.browserAutomationApprovalsExpired =
+    counts.browserAutomationApprovalsExpired;
+  result.browserAutomationApprovalsScrubbed =
+    counts.browserAutomationApprovalsScrubbed;
+  result.browserAutomationApprovalsDeleted =
+    counts.browserAutomationApprovalsDeleted;
+
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.7 — pair the SQL prune
+  // above with the FS prune of `<PA_DATA_DIR>/automation-traces/`.
+  // Runs AFTER the SQL transaction committed: a partial-failure that
+  // leaves rows in the table but FS dirs gone is recoverable (the
+  // dashboard renders the row with a "trace missing" badge); the
+  // opposite — rows missing but FS bloat — silently fills disk.
+  // Same cutoff as the SQL side so the row + dir lifetimes match.
+  const traceCutoff =
+    Date.now() - RETENTION_DAYS.browserAutomationWorkflows * 86_400_000;
+  result.browserAutomationTraceDirs = cleanAutomationTraceDirs(
+    tracesRootDir(config.dataDir),
+    traceCutoff,
+  );
 
   const attachmentCleanup = cleanupAttachments(db, config.dataDir);
   result.attachmentOrphanRows = attachmentCleanup.orphanRows;
@@ -1276,6 +1500,49 @@ function cleanAtomicTempFilesInner(
     }
   }
   return deleted;
+}
+
+/**
+ * Sync prune of per-workflow trace directories under
+ * `<PA_DATA_DIR>/automation-traces/`. Mirrors the async
+ * `trace-store.ts:pruneTraceDirectory` (which the daily retention
+ * cron cannot await — `runRetentionCleanup` is sync, matching every
+ * sibling cleanup), but uses `fs` sync primitives so it slots into the
+ * existing sync sweep without a refactor.
+ *
+ * `cutoffEpochMs` is the same cutoff fed to
+ * `deleteWorkflowRunsOlderThan(db, ...)` above, so a workflow run's
+ * audit row and its on-disk trace dir age out together.
+ *
+ * Each per-workflow directory's mtime is the freshest screenshot or
+ * trace.zip the workflow wrote into it. Directories whose mtime is
+ * BEFORE the cutoff are eligible. Errors on a single entry are logged
+ * and skipped — the cron MUST NOT fail outright because one orphaned
+ * dir refuses to delete.
+ */
+function cleanAutomationTraceDirs(root: string, cutoffEpochMs: number): number {
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    logger.warn({ err, root }, "automation-traces readdir failed");
+    return 0;
+  }
+  let pruned = 0;
+  for (const entry of entries) {
+    const dir = resolve(root, entry);
+    try {
+      const stat = statSync(dir);
+      if (!stat.isDirectory()) continue;
+      if (stat.mtimeMs >= cutoffEpochMs) continue;
+      rmSync(dir, { recursive: true, force: true });
+      pruned++;
+    } catch (err) {
+      logger.warn({ err, dir }, "automation-traces entry prune failed — will retry next run");
+    }
+  }
+  return pruned;
 }
 
 /**

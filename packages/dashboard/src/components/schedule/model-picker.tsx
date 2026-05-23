@@ -15,6 +15,7 @@ import {
 import { useScheduleOptions } from "@/lib/hooks/use-schedule-options";
 import {
   BACKEND_LABELS,
+  getBackendDeprecation,
   isBackendSelectionDisabled,
 } from "@/lib/backend-ui";
 import type {
@@ -89,8 +90,11 @@ export function projectModelOptions(
     if (isBackendSelectionDisabled(backendId)) continue;
     const entries: ScheduleOptionsModelEntry[] = data.models[backendId] ?? [];
     if (entries.length === 0) continue;
+    const backendDeprecation = getBackendDeprecation(backendId);
     groups.push({
-      label: BACKEND_LABELS[backendId],
+      label: backendDeprecation
+        ? `${BACKEND_LABELS[backendId]}${backendDeprecation.shortSuffix}`
+        : BACKEND_LABELS[backendId],
       options: entries.map((entry) => ({
         value: entry.id,
         label: entry.id,

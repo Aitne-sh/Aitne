@@ -793,6 +793,125 @@ export async function createEventPipeline(
   // DM chokepoint that runs ahead of every other interceptor.
   dispatcher.setBangCommandRegistry(createDefaultBangCommandRegistry());
 
+  // ── Phase B-4 purchase handler ────────────────────────────────────────
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 / §13 step 50.
+  //
+  // The handler holds the unforgeable capability that gates
+  // `sendSystemMessage` — see `purchase-handler.ts`. The system-message
+  // sender uses the existing MessageHub to dispatch DMs; we construct
+  // it here once the hub is available, then thread the handler into
+  // the dispatcher (for the inbound classifier hook on `!~xxxxxxxx` /
+  // `!verify` / `!cancel-purchase`). The API server picks up the same
+  // instance via `dispatcher.getPurchaseHandler()` at startup-api.ts.
+  //
+  // Wired unconditionally — every install gets a handler even when the
+  // master toggle is OFF, because the inbound classifier still needs
+  // to recognise + reject token-shaped replies that the user might
+  // send by mistake (and to write the audit row). The handler refuses
+  // issuance internally via `getB4Enabled` so cost is bounded.
+  {
+    const { createPurchaseHandler } = await import(
+      "../services/browser-history/automation/purchase-handler.js"
+    );
+    const { createPurchaseSystemMessageSender } = await import(
+      "../messaging/purchase-system-message-sender.js"
+    );
+    const traceUrlBase =
+      typeof config.apiPort === "number" && config.apiPort > 0
+        ? `http://127.0.0.1:${config.apiPort}`
+        : "";
+    const sender = createPurchaseSystemMessageSender({
+      messageHub,
+      traceUrlBase,
+    });
+    const purchaseHandler = createPurchaseHandler({
+      db,
+      sender,
+    });
+    dispatcher.setPurchaseHandler(purchaseHandler);
+
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 "Daemon crash during
+    // the 5-min window" — on supervisor restart, sweep both flavours of
+    // orphaned token. (a) Pre-consume rows whose 5-min TTL has elapsed
+    // are flipped to `expired` with reason=timeout; (b) post-consume
+    // rows where the click never landed (the previous daemon process
+    // died after the user typed the token but before finalize) are
+    // flipped to `cancelled` with reason=supervisor_orphan_sweep.
+    // Without this the rows sit stranded until the daily retention
+    // sweep. Best-effort: a failure logs but does not abort startup —
+    // the retention sweep is the long-running safety net.
+    try {
+      const {
+        expireStalePurchaseTokens,
+        sweepOrphanedConsumedPurchaseTokens,
+      } = await import(
+        "../db/browser-automation-purchase-tokens-store.js"
+      );
+      const now = Date.now();
+      const expired = expireStalePurchaseTokens(db, now);
+      // 10-min grace mirrors the retention sweep — anything consumed
+      // more than 10 min ago without a finalize must have been
+      // orphaned by a previous daemon process (the workflow's own
+      // perWorkflowTimeoutMs is 6 min).
+      const orphaned = sweepOrphanedConsumedPurchaseTokens(
+        db,
+        now - 10 * 60 * 1000,
+      );
+      if (expired.length > 0 || orphaned.length > 0) {
+        logger.info(
+          { expired: expired.length, orphaned: orphaned.length },
+          "B-4 boot-time orphan recovery: cleaned up stranded purchase tokens",
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        { err },
+        "B-4 boot-time orphan recovery failed (retention sweep will retry)",
+      );
+    }
+
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 row 7 — SIGKILL
+    // every orphan A-purchase Chromium process whose `--user-data-dir`
+    // points at `chromium-automation-purchase/<siteKey>/`. The DB sweep
+    // above flips the token rows to cancelled but the Chromium process
+    // could survive the parent daemon's death (Chromium spawns helper
+    // children; `detached: false` is a best-effort, not a hard
+    // guarantee, and a `nohup` / suspended-launcher path leaves the
+    // child alive with the user's authenticated cart context and an
+    // open CDP debug port on localhost). The kill is OS-agnostic via
+    // the HostProfile abstraction, runs unconditionally regardless of
+    // whether any rows were swept (the DB and the process state can
+    // diverge — e.g. a daemon crash AFTER finalize but before SIGTERM
+    // would leave the process alive without a corresponding pending
+    // row), and is best-effort: a missing `chromium-automation-purchase/`
+    // directory, missing Chromium binary, or a `ps` shell-out failure
+    // is silent.
+    try {
+      const { createHostProfile } = await import(
+        "../services/browser-history/lifecycle/platform.js"
+      );
+      const { killOrphanedPurchaseChromium } = await import(
+        "../services/browser-history/managed-chromium/setup-bootstrap.js"
+      );
+      const host = createHostProfile();
+      const { killedPids } = await killOrphanedPurchaseChromium(
+        host,
+        config.dataDir,
+      );
+      if (killedPids.length > 0) {
+        logger.warn(
+          { killedPids },
+          "B-4 boot-time recovery: killed orphan A-purchase Chromium processes",
+        );
+      }
+    } catch (err) {
+      logger.warn(
+        { err },
+        "B-4 boot-time orphan-Chromium kill failed (process may persist until next OS-level cleanup)",
+      );
+    }
+  }
+
   // P22 — wire the optimizer-workdir hooks. The `materialize` callback
   // captures db, dataDir, workspaceDir, contextDir, and secretStore so
   // the dispatcher branch can invoke it without importing the workdir

@@ -37,6 +37,10 @@ export const PAGE_DOC_MAP: ReadonlyArray<PageDocMapEntry> = [
   { match: { path: "/git" },                                        docId: "features/lifestyle/git" },
   { match: { path: "/analytics" },                                  docId: "concepts/costs-and-quotas" },
 
+  // Wiki — sub-page literal first, then the index page
+  { match: { path: "/wiki/timeline" },                              docId: "features/wiki/dashboard" },
+  { match: { path: "/wiki" },                                       docId: "features/wiki/overview" },
+
   // Connections — specific sub-pages first, then catch-all
   { match: { path: "/connections/calendar" },                       docId: "features/integrations/calendar" },
   { match: { path: "/connections/repositories" },                   docId: "features/integrations/git" },
@@ -56,6 +60,7 @@ export const PAGE_DOC_MAP: ReadonlyArray<PageDocMapEntry> = [
   { match: { path: "/settings/commands" },                          docId: "features/messaging/overview" },
   { match: { path: "/settings/models" },                            docId: "concepts/backends-and-tiers" },
   { match: { path: "/settings/advanced" },                          docId: "concepts/safety-and-execution" },
+  { match: { path: "/settings/wiki" },                              docId: "features/wiki/workspaces" },
   { match: { path: "/settings" },                                   docId: "concepts/agent-day" },
 
   // Setup wizard

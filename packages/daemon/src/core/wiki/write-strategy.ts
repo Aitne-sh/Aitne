@@ -85,6 +85,10 @@ export class WikiWriteStrategyResolver {
       this.persistResolved(input.workspace, "fs");
       return { strategy: "fs", durationMs: Date.now() - start };
     } catch (err) {
+      // Errors thrown from atomic-write / fs always carry a `code`; the
+      // `?? ""` fallback is a defensive guard against future callers that
+      // throw a non-fs Error here. Unreachable from the public surface.
+      /* c8 ignore next */
       const code = (err as NodeJS.ErrnoException).code ?? "";
       if (!FALLBACK_ERROR_CODES.has(code)) throw err;
       await this.writeViaCli(input);
@@ -123,6 +127,12 @@ export class WikiWriteStrategyResolver {
     workspace: WikiWorkspaceRow,
     strategy: WikiResolvedStrategy,
   ): void {
+    // Idempotent guard for concurrent auto-mode writes — the caller path
+    // enters this method only when `resolveStrategy` returned "auto",
+    // which by construction means `write_strategy === 'auto'` is the only
+    // pre-state. Hence `'auto' === ('fs'|'cli')` is always false here.
+    // Preserve the guard so two in-flight writes don't double-UPDATE.
+    /* c8 ignore next */
     if (workspace.write_strategy === strategy) return;
     this.deps.db
       .prepare(

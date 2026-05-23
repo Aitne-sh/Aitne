@@ -152,6 +152,15 @@ export interface MessageHandlerDeps {
   getBangCommandRegistry: () =>
     | import("./bang-commands/registry.js").BangCommandRegistry
     | null;
+  /** Lazily-injected B-4 purchase-handler accessor. Null in tests and
+   *  before B-4 is wired at startup. Used by the inbound classifier at
+   *  the top of `handle()` to short-circuit `!~xxxxxxxx`,
+   *  `!verify <tail>`, and `!cancel-purchase` inputs BEFORE the LLM
+   *  (or the bang-command registry) sees them — see
+   *  MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.4 / §17.7. */
+  getPurchaseHandler?: () =>
+    | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
+    | null;
 
   /** Live getter for the dispatcher's `currentSetupMode` flag. */
   getCurrentSetupMode: () => SetupMode | null;
@@ -198,6 +207,9 @@ export class MessageHandler {
   private readonly getBangCommandRegistry: () =>
     | import("./bang-commands/registry.js").BangCommandRegistry
     | null;
+  private readonly getPurchaseHandler: () =>
+    | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
+    | null;
   private readonly getCurrentSetupMode: () => SetupMode | null;
   private readonly beginSetupMode: (mode: SetupMode) => void;
   private readonly lookupCustomBangCommandForEvent: (
@@ -235,6 +247,7 @@ export class MessageHandler {
     this.getAuthRecovery = deps.getAuthRecovery;
     this.getAuthHealthMonitor = deps.getAuthHealthMonitor;
     this.getBangCommandRegistry = deps.getBangCommandRegistry;
+    this.getPurchaseHandler = deps.getPurchaseHandler ?? ((): null => null);
     this.getCurrentSetupMode = deps.getCurrentSetupMode;
     this.beginSetupMode = deps.beginSetupMode;
     this.lookupCustomBangCommandForEvent = deps.lookupCustomBangCommandForEvent;
@@ -470,6 +483,90 @@ export class MessageHandler {
    * access test casts continue to work.
    */
   async handle(event: MessageEvent): Promise<void> {
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.4 / §17.7 — Phase B-4
+    // structural-anti-spoofing inbound classifier. Runs BEFORE the
+    // bang-command interceptor (and BEFORE any inbound recording on
+    // `conversation_sessions.messages`) so a `!~xxxxxxxx` token reply,
+    // `!verify <tail>` slash, or `!cancel-purchase` slash NEVER reaches
+    // the LLM's conversation log. The plan §17.7 invariant — "the agent
+    // must not see used tokens in its conversation log" — is enforced
+    // structurally here: matched inbounds short-circuit `handle()`
+    // entirely after the purchase-handler records the audit row on
+    // `_replies` and emits the consume / verify / cancel follow-up DM.
+    //
+    // Pre-conditions:
+    //   - event.isDm — non-DM channels never carry tokens (§17.3 / §17.4)
+    //   - getPurchaseHandler() is non-null (false in tests; B-4 wired
+    //     at startup binds it)
+    //
+    // The classifier is pure (`classifyAdapterInbound`); the handler
+    // dispatch is async I/O (DB + outbound DM follow-up). On any
+    // exception the classifier falls through to normal processing —
+    // failing closed on the B-4 path could deadlock a legitimate user
+    // who happens to type a `!~`-shaped message that fails some
+    // downstream DB check, so we log + skip on error.
+    if (event.isDm) {
+      const purchaseHandler = this.getPurchaseHandler();
+      if (purchaseHandler) {
+        try {
+          const { classifyAdapterInbound } = await import(
+            "../services/browser-history/automation/purchase-tokens.js"
+          );
+          const decision = classifyAdapterInbound(event.content);
+          const channelRef = `${event.platform}:${event.channel}`;
+          if (decision.kind === "token_reply") {
+            await purchaseHandler.handleTokenReply({
+              body: event.content,
+              channelRef,
+            });
+            return;
+          }
+          if (decision.kind === "verify") {
+            await purchaseHandler.handleVerifySlash({
+              tail: decision.tail,
+              channelRef,
+            });
+            return;
+          }
+          if (decision.kind === "cancel_purchase") {
+            await purchaseHandler.handleCancelPurchaseSlash({ channelRef });
+            return;
+          }
+          // decision.kind === "passthrough" —
+          // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 row 1
+          // (cancellation table). The user sent something that is
+          // neither the exact token, the `!verify` slash, nor the
+          // `!cancel-purchase` slash. Per the strict rule the user
+          // accepted in rev3 ("それ以外が送られた場合は、決済を取り消しする"),
+          // any non-token reply on a channel with pending tokens
+          // cancels every such token. The cancel runs BEFORE
+          // forwarding the message on to the bang interceptor / LLM
+          // so the user sees the cancellation follow-up DM before any
+          // LLM-generated reply lands. Fire-and-forget: the in-flight
+          // workflow's `awaitReply` poll sees the cancelled_at
+          // timestamp on its next 500ms tick and the SIGTERM of the
+          // parked Chromium happens via the runner's `release()`
+          // path. The inbound message itself still falls through to
+          // normal handling — the agent has no awareness of the
+          // pending token (by design — §17.7) and a silent drop
+          // would be a confusing "I never replied" UX hole.
+          await purchaseHandler
+            .cancelPendingOnNonTokenReply({ channelRef })
+            .catch((err) => {
+              logger.warn(
+                { err, channelRef },
+                "strict-cancel on non-token reply raised (continuing)",
+              );
+            });
+        } catch (err) {
+          logger.warn(
+            { err, correlationId: event.correlationId, platform: event.platform },
+            "B-4 inbound classifier raised — falling through to normal dispatch",
+          );
+        }
+      }
+    }
+
     // Bang-command interceptor — runs first so `!stop` / `!cost` / `!report`
     // succeed even mid-setup, mid-auth-recovery, etc., and so non-bang DMs
     // received while the agent is paused short-circuit before reaching the

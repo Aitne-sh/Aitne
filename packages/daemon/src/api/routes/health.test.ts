@@ -68,7 +68,6 @@ function makeDeps(
         error: null,
         state: "not_configured",
       },
-      googleMaps: { configured: false, connected: false, error: null },
     }),
     ...extra,
   } as unknown as ApiDependencies;

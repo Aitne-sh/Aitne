@@ -121,13 +121,24 @@ export async function cleanupStaleSingletonLock(
 export async function launchChromiumProfile(
   host: HostProfile,
   profile: BrowserProfileCandidate,
-): Promise<"launched" | "missing_binary"> {
+): Promise<"launched" | "missing_binary" | "already_running"> {
   const binary = host.browserBinaryFor(profile.browser);
   if (!binary) return "missing_binary";
   // Recover from a previous crash that left an orphan SingletonLock.
   // Without this Chromium silently refuses to start and the supervisor
   // would mark the browser `launch_failed_recently` forever.
-  await cleanupStaleSingletonLock(host, profile);
+  const lockState = await cleanupStaleSingletonLock(host, profile);
+  if (lockState === "owned") {
+    // A live Chromium instance already holds this profile (e.g. the
+    // user opened it via Finder / Dock between the supervisor's pre-
+    // launch health probe and this call). Spawning a second instance
+    // would either no-op via process-singleton forwarding or exit
+    // silently — neither advances the History mtime, so the supervisor
+    // would then mis-flag the cycle as `sync_unresponsive`. Tell the
+    // caller so it can treat this as "already running" and let the
+    // next tick re-evaluate via `checkBrowserProfileHealth`.
+    return "already_running";
+  }
   const args = buildChromiumLaunchArgs(host, profile);
   const child = spawn(binary, args, {
     detached: true,

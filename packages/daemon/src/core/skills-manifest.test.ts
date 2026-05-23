@@ -1200,7 +1200,6 @@ describe("gmailLifestyleActiveForDm trigger phrases", () => {
     ["hotel reservation for next week", true],
     ["catch the train at 10", true],
     ["my commute is 30 min", true],
-    ["what's the travel time?", true],
     ["estimate departure time", true],
     ["upcoming trip", true],
     ["new booking", true],
@@ -1489,7 +1488,7 @@ describe("per-skill body line-range pin (P1)", () => {
     schedule: { designTarget: 150, regressionCeiling: 240 },           // §5  — batch/recurring/errors/recurrence refs + R4 confirm-subflow extracted
     "external-services": { designTarget: 80, regressionCeiling: 135 }, // §6  — 6 service refs exist
     mail: { designTarget: 180, regressionCeiling: 250 },               // §7  — api/errors/examples/providers/query-grammar refs exist
-    "gmail-lifestyle": { designTarget: 180, regressionCeiling: 235 },  // §9  — merged skill (travel + travel-time + receipts) with 3 refs
+    "gmail-lifestyle": { designTarget: 180, regressionCeiling: 235 },  // §9  — merged skill (travel + receipts) with 2 refs
     "management-policy": { designTarget: 120, regressionCeiling: 245 }, // §13 — policy-workflow ref exists
     "managed-tasks": { designTarget: 250, regressionCeiling: 485 },    // §14 — errors/output-path/recurrence refs exist; bulk is Register/Modify/Stop procedure
   };

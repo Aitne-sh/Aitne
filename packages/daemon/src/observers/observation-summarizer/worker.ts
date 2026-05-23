@@ -87,6 +87,14 @@ export class ObservationSummarizerWorker implements Observer {
   // Sliding-window LLM-call timestamps for rate limiting.
   private readonly callTimestamps: number[] = [];
 
+  // Throttle the auth_missing warning. Without this guard every pending
+  // observation produces a "Summarizer LLM call failed" log line (33
+  // entries in the user's production logs on 2026-05-22 across a single
+  // morning), drowning real signals. The actionable info — "no API key
+  // is configured" — only needs to be surfaced once per cooldown window.
+  private lastAuthMissingWarnAt = 0;
+  private static readonly AUTH_MISSING_WARN_COOLDOWN_MS = 5 * 60_000;
+
   private started = false;
   private stopped = false;
   private workersIdle = 0;
@@ -287,6 +295,28 @@ export class ObservationSummarizerWorker implements Observer {
     const result = await this.callLlm(prompt);
 
     if (!result.ok) {
+      // auth_missing is a user-config issue, not a per-row failure. Mark
+      // the row 'skipped' so the hourly_check fallback path picks it up
+      // (same posture as `unsupported_backend`) and warn at most once
+      // per cooldown window so a missing ANTHROPIC_API_KEY does not spam
+      // the log with one entry per pending observation.
+      if (result.errorClass === "auth_missing") {
+        const now = this.now().getTime();
+        if (now - this.lastAuthMissingWarnAt >= ObservationSummarizerWorker.AUTH_MISSING_WARN_COOLDOWN_MS) {
+          this.lastAuthMissingWarnAt = now;
+          logger.warn(
+            {
+              backend: this.client.backendId,
+              model: this.client.modelId,
+              cooldownMs: ObservationSummarizerWorker.AUTH_MISSING_WARN_COOLDOWN_MS,
+              hint: "Set ANTHROPIC_API_KEY in env or store it via the dashboard. Pending rows are being marked 'skipped' and the hourly_check fallback path will read them directly.",
+            },
+            "Summarizer LLM auth missing — falling back to skip, future warnings suppressed within cooldown",
+          );
+        }
+        this.persist(row.id, { status: "skipped", summaryText: null, novelty: null });
+        return;
+      }
       logger.warn(
         { id, errorClass: result.errorClass, source: row.source },
         "Summarizer LLM call failed — marking row failed",

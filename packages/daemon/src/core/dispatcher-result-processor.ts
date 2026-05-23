@@ -79,6 +79,10 @@ import type {
   MessageReplyTarget,
 } from "./dispatcher-types.js";
 import { createLogger } from "../logging.js";
+import {
+  assertOutboundAllowedForAgent,
+  OutboundPurchaseTemplateError,
+} from "../safety/outbound-purchase-guard.js";
 
 const logger = createLogger("dispatcher-result");
 
@@ -214,6 +218,35 @@ export class ResultProcessor {
           channel: explicitReply.channel,
           threadId: explicitReply.threadId ?? null,
         };
+      }
+      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7 structural-anti-
+      // spoofing layer. The LLM's outbound text reaches the messaging
+      // adapter via this notificationMgr.send chokepoint; refuse any
+      // payload carrying the reserved purchase-confirmation markers
+      // ("🔐 Aitne purchase confirmation", "[purchase-verify:", "Approved
+      // on …"). Those templates are emitted exclusively by
+      // `purchase-system-message-sender` via the unforgeable handler
+      // capability — an LLM-originated text claiming to be a purchase
+      // confirmation is by definition a spoof attempt. The guard audits
+      // the refusal as an `agent_actions(purchase_template_refused)` row
+      // before swallowing — surfacing nothing to the user (the agent
+      // simply receives no DM rather than a structured error, mirroring
+      // the existing notification-suppression contract on this path).
+      try {
+        assertOutboundAllowedForAgent(output, "dispatcher.result", this.db);
+      } catch (err) {
+        if (err instanceof OutboundPurchaseTemplateError) {
+          logger.warn(
+            {
+              marker: err.match.marker,
+              eventType: event.type,
+              correlationId: event.correlationId,
+            },
+            "agent outbound refused — purchase-template marker detected",
+          );
+          return;
+        }
+        throw err;
       }
       if (Object.keys(sendOptions).length === 0) {
         await this.notificationMgr.send(output, event);

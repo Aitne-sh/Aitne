@@ -119,4 +119,84 @@ describe("checkBrowserProfileHealth", () => {
     expect(result.syncAgeSeconds).toBe(0);
     expect(result.stale).toBe(false);
   });
+
+  // SQLite-WAL mode (Chromium's default) routes writes through the
+  // sibling `History-wal` file and only advances the main `History`
+  // file's mtime on checkpoint — for low-activity profiles, that can
+  // mean days. Stat'ing only `History` would mis-flag such a profile
+  // as stale even though the user is actively browsing.
+  it("uses History-wal mtime when newer than History", async () => {
+    const history = join(root, "History");
+    const wal = join(root, "History-wal");
+    writeFileSync(history, "ignored");
+    writeFileSync(wal, "ignored");
+    // History 30h old, WAL 1h old
+    const nowSec = Math.floor(Date.now() / 1000);
+    utimesSync(history, nowSec - 30 * 60 * 60, nowSec - 30 * 60 * 60);
+    utimesSync(wal, nowSec - 60 * 60, nowSec - 60 * 60);
+    const host = makeHost();
+
+    const result = await checkBrowserProfileHealth(host, makeProfile(history));
+
+    expect(result.stale).toBe(false);
+    expect(result.syncAgeSeconds).toBeLessThan(2 * 60 * 60);
+  });
+
+  // SQLite rollback-journal mode (used by some Chromium forks and
+  // post-corruption fallbacks): a long-lived transaction keeps
+  // `History-journal` present and recently touched while `History`
+  // mtime is held fixed at the last commit. Journal presence + recent
+  // mtime is the right freshness signal there.
+  it("uses History-journal mtime when newer than History", async () => {
+    const history = join(root, "History");
+    const journal = join(root, "History-journal");
+    writeFileSync(history, "ignored");
+    writeFileSync(journal, "ignored");
+    const nowSec = Math.floor(Date.now() / 1000);
+    utimesSync(history, nowSec - 40 * 60 * 60, nowSec - 40 * 60 * 60);
+    utimesSync(journal, nowSec - 30 * 60, nowSec - 30 * 60);
+    const host = makeHost();
+
+    const result = await checkBrowserProfileHealth(host, makeProfile(history));
+
+    expect(result.stale).toBe(false);
+    expect(result.syncAgeSeconds).toBeLessThan(60 * 60);
+  });
+
+  it("stays stale when History, History-wal, and History-journal are all > 24h old", async () => {
+    const history = join(root, "History");
+    const wal = join(root, "History-wal");
+    const journal = join(root, "History-journal");
+    writeFileSync(history, "ignored");
+    writeFileSync(wal, "ignored");
+    writeFileSync(journal, "ignored");
+    const oldSec = Math.floor(Date.now() / 1000) - 25 * 60 * 60;
+    utimesSync(history, oldSec, oldSec);
+    utimesSync(wal, oldSec - 60 * 60, oldSec - 60 * 60);
+    utimesSync(journal, oldSec - 30 * 60, oldSec - 30 * 60);
+    const host = makeHost();
+
+    const result = await checkBrowserProfileHealth(host, makeProfile(history));
+
+    expect(result.stale).toBe(true);
+  });
+
+  it("picks the freshest mtime across History / History-wal / History-journal", async () => {
+    const history = join(root, "History");
+    const wal = join(root, "History-wal");
+    const journal = join(root, "History-journal");
+    writeFileSync(history, "ignored");
+    writeFileSync(wal, "ignored");
+    writeFileSync(journal, "ignored");
+    const nowSec = Math.floor(Date.now() / 1000);
+    utimesSync(history, nowSec - 10 * 60 * 60, nowSec - 10 * 60 * 60);
+    utimesSync(wal, nowSec - 5 * 60 * 60, nowSec - 5 * 60 * 60);
+    utimesSync(journal, nowSec - 2 * 60 * 60, nowSec - 2 * 60 * 60);
+    const host = makeHost();
+
+    const result = await checkBrowserProfileHealth(host, makeProfile(history));
+
+    expect(result.syncAgeSeconds).toBeGreaterThanOrEqual(2 * 60 * 60 - 1);
+    expect(result.syncAgeSeconds).toBeLessThan(2 * 60 * 60 + 60);
+  });
 });

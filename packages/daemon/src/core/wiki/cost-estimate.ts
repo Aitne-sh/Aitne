@@ -118,6 +118,11 @@ export function estimateFullCompileCost(
       let tokenCount = PER_FILE_MIN_TOKENS;
       try {
         const stat = statSync(full);
+        // Race-condition defensive: walkRawLayer already filtered for
+        // `entry.isFile()` via dirent, so this can only trip if the file
+        // was replaced with a non-file (e.g. directory, FIFO) between the
+        // readdir and the stat. Unreachable via the public API surface.
+        /* c8 ignore next */
         if (!stat.isFile()) continue;
         const content = readFileSync(full, "utf-8");
         charCount = content.length;
@@ -180,6 +185,10 @@ export function approxTokenCount(content: string): number {
     if (isCjkChar(ch)) cjkChars += 1;
   }
   const totalCodepoints = [...content].length;
+  // Defensive: `content.length === 0` returned early above, and any
+  // non-empty UTF-16 string yields at least one codepoint when iterated.
+  // This guard exists to keep the divide safe under future refactors.
+  /* c8 ignore next */
   const cjkRatio = totalCodepoints === 0 ? 0 : cjkChars / totalCodepoints;
   const divisor = cjkRatio > 0.5 ? CJK_CHARS_PER_TOKEN : LATIN_CHARS_PER_TOKEN;
   const tokens = Math.ceil(content.length / divisor);
@@ -188,6 +197,10 @@ export function approxTokenCount(content: string): number {
 
 function isCjkChar(ch: string): boolean {
   const cp = ch.codePointAt(0);
+  // Defensive: callers iterate `for (const ch of content)`, which always
+  // yields a non-empty 1-2 UTF-16 unit string, so codePointAt(0) cannot
+  // return undefined. Guard preserved for safety under refactor.
+  /* c8 ignore next */
   if (cp === undefined) return false;
   // U+3040–U+309F Hiragana, U+30A0–U+30FF Katakana,
   // U+3400–U+4DBF / U+4E00–U+9FFF Han (CJK Unified Ideographs),
@@ -246,6 +259,13 @@ function countRawNotes(rawDir: string): number {
     if (entry.isDirectory() && entry.name === "images") continue;
     if (entry.isDirectory()) {
       const full = join(rawDir, entry.name);
+      // Defensive: dirent already reported `entry.isDirectory()` true, and
+      // a stat on a direct child of the readable rawDir cannot fail on
+      // permissions. The try/catch + `stat.isDirectory()` guard exists for
+      // the race where the dir is deleted/replaced between readdirSync and
+      // statSync. Wrap the whole block in c8-ignore so v8 doesn't count
+      // the unreachable branch arms.
+      /* c8 ignore start */
       try {
         const stat = statSync(full);
         if (stat.isDirectory()) {
@@ -254,6 +274,7 @@ function countRawNotes(rawDir: string): number {
       } catch {
         /* skip unreadable directory */
       }
+      /* c8 ignore stop */
     }
   }
   return count;

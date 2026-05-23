@@ -10,6 +10,7 @@ import type {
 } from "../types.js";
 import { createBrowserHistorySnapshot } from "../readers/snapshot.js";
 import { assertChromiumHistorySchema } from "../readers/chromium-reader.js";
+import { freshestHistoryMtimeMs } from "../history-mtime.js";
 
 interface LocalStateProfileInfo {
   user_name?: string;
@@ -155,7 +156,10 @@ export async function detectChromiumBrowser(
         localStatePath,
         signedIn: isSignedIn(localState, profileName),
         canonical: true,
-        lastHistoryMtimeMs: historyStat.mtimeMs,
+        // Family-aware mtime — see history-mtime.ts. Stat'ing only
+        // `History` misses WAL writes and rollback-journal transactions
+        // and would mark actively-used profiles as `available_sync_broken`.
+        lastHistoryMtimeMs: (await freshestHistoryMtimeMs(historyPath)) ?? historyStat.mtimeMs,
       });
     }
   }
@@ -205,7 +209,7 @@ async function detectAtlasFallback(
           historyPath: candidate,
           signedIn: false,
           canonical: false,
-          lastHistoryMtimeMs: historyStat.mtimeMs,
+          lastHistoryMtimeMs: (await freshestHistoryMtimeMs(candidate)) ?? historyStat.mtimeMs,
         });
       } catch {
         continue;

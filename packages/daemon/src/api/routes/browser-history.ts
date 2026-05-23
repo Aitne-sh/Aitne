@@ -11,8 +11,12 @@ import {
   browserReloadsTodayResponseSchema,
   browserReloadsWeeklyResponseSchema,
   browserShoppingDateResponseSchema,
+  cleanupInterestsReflectionRequestSchema,
+  cleanupInterestsReflectionResponseSchema,
   getAgentDayDateStr,
   preMorningDigestSchema,
+  refreshInterestsReflectionResponseSchema,
+  weeklyInterestsSummaryResponseSchema,
   yesterdayResearchSummarySchema,
 } from "@aitne/shared";
 import type { ApiDependencies } from "../server.js";
@@ -40,6 +44,11 @@ import { detectBrowserHistoryCapabilities } from "../../services/browser-history
 import { createResearchCommandEvent } from "../../core/browser-history/research-events.js";
 import { readPreMorningDigestJsonForDate } from "../../core/browser-history/pre-morning-digest-job.js";
 import { buildPreMorningDigest } from "../../services/browser-history/pipeline/pre-morning-digest.js";
+import { buildWeeklyInterestsSummary } from "../../services/browser-history/pipeline/weekly-interests-summary.js";
+import { loadProjectKeywords } from "../../services/browser-history/pipeline/project-matcher.js";
+import { cleanupInterestsReflection } from "../../services/browser-history/cleanup-interests-reflection.js";
+import { InterestsReflectionLockBusyError } from "../../services/browser-history/interests-reflection-lock.js";
+import { refreshInterestsReflection } from "../../services/browser-history/refresh-interests-reflection.js";
 import { getContextDir } from "../../config.js";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -413,6 +422,101 @@ export function createBrowserHistoryRoutes(deps: ApiDependencies): Hono {
         entries,
       }),
     );
+  });
+
+  // ── WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.2 / §10.3 / §10.3.1 ──
+  // Three thin wrappers over the pure daemon helpers. The scheduler
+  // pre-hook in `dispatcher-scheduled-tasks.ts` invokes the same
+  // helpers via direct function call; these routes are dashboard-only
+  // surfaces (Approve tier — see `risk-classifier.ts`). No skill
+  // manifest includes them, so an LLM session cannot reach them.
+  app.get("/browser-history/weekly-interests-summary", (c) => {
+    const weekStart = c.req.query("weekStart");
+    if (!weekStart || !DATE_PATTERN.test(weekStart)) {
+      return c.json({ error: "invalid_weekStart" }, 400);
+    }
+    // §10.2 — weekStart must be an ISO Monday. Anchor at noon UTC so a
+    // DST flip cannot move the parsed date into Sunday or Tuesday.
+    const anchor = Date.parse(`${weekStart}T12:00:00Z`);
+    if (Number.isNaN(anchor) || new Date(anchor).getUTCDay() !== 1) {
+      return c.json({ error: "weekStart_must_be_monday" }, 400);
+    }
+    // Load project keywords so `projectMatches` is populated per §10.1.
+    // Without this the builder's `if (options.projectKeywords)` gate
+    // short-circuits and every response carries an empty list — a
+    // spec drift that hides the project-overlap signal a dashboard
+    // consumer is meant to see.
+    const contextDir = getContextDir(deps.config, deps.db);
+    const projectKeywords = loadProjectKeywords(contextDir);
+    const summary = buildWeeklyInterestsSummary(deps.db, weekStart, {
+      boundary: agentDayBoundary(deps),
+      projectKeywords,
+    });
+    // Convert the daemon-internal absolute `projectPath` to the
+    // `projects/<slug>.md` form §10.1 documents. Exposing the absolute
+    // path would leak the daemon's PA_DATA_DIR layout to the dashboard
+    // (and any future external consumer of this Autonomous-tier route).
+    const projected = {
+      ...summary,
+      projectMatches: summary.projectMatches.map((match) => ({
+        ...match,
+        projectPath: `projects/${match.projectSlug}.md`,
+      })),
+    };
+    return c.json(weeklyInterestsSummaryResponseSchema.parse(projected));
+  });
+
+  app.post("/browser-history/refresh-interests-reflection", (c) => {
+    const contextDir = getContextDir(deps.config, deps.db);
+    try {
+      const result = refreshInterestsReflection(deps.db, contextDir, {
+        trigger: "dashboard",
+        boundary: agentDayBoundary(deps),
+        // Pre-mark the daemon's writes so FS-watch consumers attribute
+        // them to the agent (same threading as the scheduler pre-hook in
+        // `dispatcher-scheduled-tasks.ts:runWeeklyInterestsReflectionPreHook`).
+        writeTracker: deps.writeTracker,
+      });
+      return c.json(refreshInterestsReflectionResponseSchema.parse(result));
+    } catch (err) {
+      // rev 4 — lock contention is a documented, expected failure mode
+      // when the scheduler pre-hook is mid-flight as the operator
+      // clicks "Refresh now". 409 (Conflict) signals "try again in a
+      // moment" to the dashboard, which is correct here — the next
+      // call will succeed once the in-flight run releases.
+      if (err instanceof InterestsReflectionLockBusyError) {
+        return c.json(
+          { error: "reflection_in_progress", heldBy: err.heldBy },
+          409,
+        );
+      }
+      throw err;
+    }
+  });
+
+  app.post("/browser-history/cleanup-interests-reflection", async (c) => {
+    const raw = await c.req.json().catch(() => ({}));
+    const parsed = cleanupInterestsReflectionRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      return c.json({ error: "invalid_body" }, 400);
+    }
+    const contextDir = getContextDir(deps.config, deps.db);
+    try {
+      const result = cleanupInterestsReflection(deps.db, contextDir, {
+        alsoDeleteResearchThemesFile: parsed.data.alsoDeleteResearchThemesFile,
+        trigger: "dashboard",
+        writeTracker: deps.writeTracker,
+      });
+      return c.json(cleanupInterestsReflectionResponseSchema.parse(result));
+    } catch (err) {
+      if (err instanceof InterestsReflectionLockBusyError) {
+        return c.json(
+          { error: "reflection_in_progress", heldBy: err.heldBy },
+          409,
+        );
+      }
+      throw err;
+    }
   });
 
   app.post("/setup/redetect-browsers", async (c) => {

@@ -1,26 +1,24 @@
 ---
 name: gmail-lifestyle
-description: Load when the user mentions receipts / expenses / flights / hotels / trains / commute / travel time / a booking — Gmail-observer-derived travel bookings, calendar-event commute calculations, and receipt save-to-external-vault all live here.
+description: Load when the user mentions receipts / expenses / flights / hotels / trains / a booking — Gmail-observer-derived travel bookings and receipt save-to-external-vault both live here.
 allowed-tools:
   - Bash(curl *)
   - Read
 ---
 
-# Gmail Lifestyle — travel bookings, commute, receipts
+# Gmail Lifestyle — travel bookings, receipts
 
-This skill merges three closely-related surfaces that all depend on
-data the daemon's **Gmail observer** has scanned: travel bookings,
-commute / travel-time calculations over calendar events, and receipt
-attachments saved into the user's external Obsidian vault.
+This skill merges two closely-related surfaces that both depend on
+data the daemon's **Gmail observer** has scanned: travel bookings and
+receipt attachments saved into the user's external Obsidian vault.
 
 It is conditionally loaded — see the manifest predicate
 `gmailLifestyleActive(db)` / `gmailLifestyleActiveForDm(db, msg)`
 in `packages/daemon/src/core/skills-manifest.ts`. Routines load it
 when there is fresh-or-pending data; DM events also load it on
-trigger phrases (`receipt`, `expense`, `flight`, `train`,
-`commute`, `travel time`, plus the user's primary-language
-equivalents — the predicate handles both the structured triggers
-and the message-text triggers).
+trigger phrases (`receipt`, `expense`, `flight`, `train`, plus the
+user's primary-language equivalents — the predicate handles both the
+structured triggers and the message-text triggers).
 
 Output language: Policy C for user-facing summaries — see
 `<output_language_policy>`. Path patterns and external API field
@@ -82,77 +80,6 @@ Evening review:
 Booking type display names: flight → Flight, hotel → Hotel,
 restaurant → Restaurant, train → Train, bus → Bus, other →
 Reservation.
-
----
-
-## Travel time / commute
-
-Uses the Google Maps Directions API to estimate travel time between
-locations. Computes departure times for calendar events with a
-`location` field.
-
-**Prerequisite**: `googleMapsApiKey` configured in the daemon's
-secret store, with the Directions API enabled.
-
-### When to use
-
-- **Morning routine** — for today's calendar events with a location,
-  compute departure times and add to today.md `## Commute & Travel`.
-- **User asks about commute / travel time** — query specific routes.
-- **Pre-event reminders** — DM departure-time suggestions.
-
-### Sourcing today's events
-
-The right fetch path depends on Google Calendar's current mode
-(read `<integration_modes>` injected at session start):
-
-<!-- mode:direct:google_calendar -->
-Direct mode → `GET /api/calendar/events?date=today&days=1`
-(see the `external-services` skill).
-<!-- /mode:direct:google_calendar -->
-<!-- mode:delegated-same:google_calendar -->
-Same-backend delegated → use this session backend's native Calendar
-list-events MCP tool. `/api/calendar/events` returns 410.
-<!-- /mode:delegated-same:google_calendar -->
-<!-- mode:delegated-cross:google_calendar -->
-Cross-backend delegated → `POST /api/integrations/google_calendar/exec`
-with a natural-language `task` + `outputSchema` (see the
-`external-services` skill — cross-backend variant for worked
-examples).
-<!-- /mode:delegated-cross:google_calendar -->
-<!-- mode:native:google_calendar -->
-Native mode → use this session backend's native Calendar list-events
-MCP tool (same call shape as `delegated-same`). The materialized
-`external-services` skill body (`SKILL.native.<session-backend>.md`)
-lists the per-backend tool names. The daemon does not proxy in
-native mode; `/api/calendar/events` returns 410 and
-`/api/integrations/google_calendar/exec` returns 410 too.
-<!-- /mode:native:google_calendar -->
-<!-- mode:disabled:google_calendar -->
-Disabled → skip this section; there is no calendar to source events
-from.
-<!-- /mode:disabled:google_calendar -->
-
-### API
-
-Full `/api/travel-time` reference (point-to-point + for-event) is in
-the dedicated reference below.
-
-{{> ref:travel-time-api }}
-
-### Formatting — today.md
-
-```
-## Commute & Travel
-14:00 Team meeting @ WeWork Times Square — depart by 13:15 (transit, 40 min)
-18:30 Dinner @ Restaurant ABC — depart by 18:00 (transit, 25 min)
-```
-
-Only include events that have a `location` field. Omit the section
-when no events have locations today.
-
-Mode display names: transit → Transit, driving → Driving, walking →
-Walking, bicycling → Bicycle.
 
 ---
 

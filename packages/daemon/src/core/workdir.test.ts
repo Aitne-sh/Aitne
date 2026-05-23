@@ -104,7 +104,6 @@ describe("getSkillsForEvent", () => {
     expect(skills).not.toContain("external-services");
     expect(skills).not.toContain("notion");
     expect(skills).not.toContain("travel");
-    expect(skills).not.toContain("travel-time");
   });
 
   it("returns specific skills for message.received", () => {
@@ -207,7 +206,7 @@ describe("getSkillsForEvent", () => {
   it("returns all skills for unknown event type", () => {
     const skills = getSkillsForEvent("unknown.type");
     // docs/design/appendices/skills-improvement.md §9-§11 merged travel +
-    // travel-time + receipts → gmail-lifestyle; §14 merged
+    // receipts → gmail-lifestyle; §14 merged
     // management-task-{register,modify,stop} → managed-tasks. Net
     // skill count drops from 26 to 21 (base) + 4 = 25 total. P3
     // adds `browser-history` (BROWSER_HISTORY_INTEGRATION_PLAN) → 26.

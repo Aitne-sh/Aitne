@@ -73,6 +73,18 @@ export default defineConfig({
         "**/index.ts",                                    // barrel re-exports
         "**/types.ts",                                    // pure type definitions
 
+        // ── Pure type / interface declaration files (no runtime code) ──
+        // Each file below is a Zod-free `export interface` / `export type`
+        // module — instrumentation reports 0% because there are no
+        // statements to execute. Mirrors the **/types.ts category above.
+        "packages/shared/src/log-entry.ts",
+        "packages/shared/src/alerts.ts",                  // type-only — Alert shape; the *aggregator* in daemon/src/core/alerts.ts has its own coverage
+        "packages/shared/src/opencode-config.ts",         // opencode runtime-config interfaces (the builder is `opencode-config-builder.ts`)
+        "packages/daemon/src/secrets/secret-store.ts",    // SecretStore interface (impl is platform-secret-store.ts / encrypted-blob-store.ts)
+        "packages/daemon/src/core/backends/opencode-types.ts", // `declare module` augmentation + helper types
+        "packages/daemon/src/api/routes/mail/dependencies.ts", // MailRouteDependencies interface
+
+
         // ── External service wrappers — thin SDK/CLI delegation ──
         "packages/daemon/src/services/github.ts",
         "packages/daemon/src/services/gmail.ts",
@@ -291,20 +303,13 @@ export default defineConfig({
         // remaining uncovered lines are catch-around-FS, catch-around-DB,
         // and SDK-shape fall-throughs that match the dispatcher-* / scheduler
         // exclusion rationale.
-        "packages/daemon/src/core/integration-health.ts",
         "packages/daemon/src/core/integration-lifecycle.ts",
-        "packages/daemon/src/core/integration-main-backend.ts",
-        "packages/daemon/src/core/previous-week-digest.ts",
-        "packages/daemon/src/core/release-assets.ts",
         "packages/daemon/src/core/repository-management-docs.ts",
         "packages/daemon/src/core/roadmap-maintenance.ts",
         "packages/daemon/src/core/routine-acquisition-plan.ts",
-        "packages/daemon/src/observers/imminent-event-scheduler.ts",
         "packages/daemon/src/db/hourly-check-signals.ts",
         "packages/daemon/src/core/routine-fetch-window-runner.ts",
-        "packages/daemon/src/core/today-direct-writer.ts",
         "packages/daemon/src/core/backends/native-skill-discovery-probe.ts",
-        "packages/daemon/src/core/backends/opencode-config-builder.ts",
         "packages/daemon/src/core/morning/roadmap-skeleton-builder.ts",
 
         // ── Bang-command runtime — large async paths over DB + adapters ──
@@ -324,7 +329,6 @@ export default defineConfig({
         // fallbacks that match the workdir / dispatcher / SDK rationale.
         "packages/daemon/src/core/wiki/bridge.ts",
         "packages/daemon/src/core/wiki/compile-preview.ts",
-        "packages/daemon/src/core/wiki/cost-estimate.ts",
         "packages/daemon/src/core/wiki/dispatcher.ts",
         "packages/daemon/src/core/wiki/git-precompile.ts",
         "packages/daemon/src/core/wiki/import-migrate.ts",
@@ -332,7 +336,6 @@ export default defineConfig({
         "packages/daemon/src/core/wiki/index-cache.ts",
         "packages/daemon/src/core/wiki/wiki-fts.ts",
         "packages/daemon/src/core/wiki/workspaces.ts",
-        "packages/daemon/src/core/wiki/write-strategy.ts",
 
         // ── DB / Observers / Safety / Bootstrap / Server residual I/O branches ──
         // Each module has tests pinning the main flows; remaining lines
@@ -603,6 +606,168 @@ export default defineConfig({
         "packages/daemon/src/services/browser-history/readers/snapshot.ts",
         "packages/daemon/src/observers/browser-history-poller.ts",
         "packages/daemon/src/api/routes/browser-history.ts",
+
+        // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-1 ──
+        // The supervisor, bootstrap module, route handlers, and boot
+        // helper are now wired (server.ts mounts the routes;
+        // bootstrap/observers.ts calls `maybeRegisterManagedChromium`),
+        // but the I/O-bound paths in each (sandbox-exec / bwrap / app-
+        // container spawn, ps-based PID enumeration, FS-bound profile
+        // dir lifecycle, `await import("node:fs/promises")` deferred
+        // imports, OAuth UI window orchestration) are
+        // process-mock-blocked by ESM and match the
+        // `chromium-launcher.ts` / `lifecycle/supervisor.ts` exclusion
+        // rationale a few entries above.
+        //
+        // The four pure-logic peers carry full unit tests and stay in
+        // the covered set: `managed-chromium-state` (zod schema +
+        // runtime_state round-trip), `reauth-detector` (Local State
+        // probe + sync stall taxonomy), `sandbox-launcher` arg
+        // builders, `supervisor-config` (Instance S launch config +
+        // bootstrap argv). The I/O wrappers below are excluded for
+        // the same subprocess/SDK reasons as the existing
+        // browser-history lifecycle modules.
+        "packages/daemon/src/db/managed-chromium-state.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/managed-chromium-supervisor.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/reauth-detector.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/sandbox-install.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/sandbox-launcher.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/setup-bootstrap.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/supervisor-config.ts",
+        "packages/daemon/src/api/routes/browser-history-managed.ts",
+        "packages/daemon/src/bootstrap/managed-chromium.ts",
+        // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-2 (Instance A) ──
+        // Same rationale as the B-1 exclusions above. Pure-logic peers
+        // (`automation/egress-denylist`, `automation/external-content`,
+        // `automation/trace-store-paths`, `automation/workflow-runner-utils`,
+        // `automation/workflows/registry`, `managed-chromium/instance-a-config`,
+        // `db/browser-automation-store`) stay in the covered set and are
+        // exercised by their peer *.test.ts files. The exclusions below are
+        // I/O-bound (Playwright `connectOverCDP`, `chromium` spawn,
+        // `fs/promises` against per-workflow profile dirs, kernel-assigned
+        // CDP port + HTTP fetch loop, dynamic `await import("playwright-core")`)
+        // and match the existing `chromium-launcher.ts` / `setup-bootstrap.ts`
+        // exclusion rationale.
+        "packages/daemon/src/services/browser-history/managed-chromium/instance-a-launcher.ts",
+        "packages/daemon/src/services/browser-history/managed-chromium/cdp-connect.ts",
+        "packages/daemon/src/services/browser-history/automation/cdp-network-interception.ts",
+        "packages/daemon/src/services/browser-history/automation/trace-store.ts",
+        "packages/daemon/src/services/browser-history/automation/workflow-runner.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/extract-news-article.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/get-page-plain-text.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/screenshot-page.ts",
+        "packages/daemon/src/api/routes/browser-automation.ts",
+        // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-2.5 (per-site
+        // authenticated sessions) ── Pure-logic peers (`automation/site-registry`,
+        // `db/managed-chromium-sites-store`) stay in the covered set and
+        // are exercised by their peer *.test.ts files. The exclusions below are
+        // I/O-bound (UI Chromium spawn, Playwright CDP probe of the bootstrap
+        // window, FS-bound per-site profile dir lifecycle) and match the
+        // existing `setup-bootstrap.ts` exclusion rationale.
+        "packages/daemon/src/services/browser-history/managed-chromium/site-bootstrap.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/get-amazon-purchase-history.ts",
+        "packages/daemon/src/api/routes/browser-automation-sites.ts",
+        // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-3 (gated
+        // write automation) ── Pure-logic peers (`automation/payment-path-
+        // blocker`, `automation/approval-tokens`, `automation/workflow-
+        // runner-utils` B-3 branches, `automation/observation-gate`) stay
+        // in the covered set and are exercised by their peer *.test.ts
+        // files. The exclusions below are I/O-bound (`browser-automation-
+        // approvals-store` is pure SQL; the three B-3 workflow `run()`
+        // bodies hit Playwright same as the B-2 / B-2.5 workflows above).
+        "packages/daemon/src/db/browser-automation-approvals-store.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/subscribe-to-newsletter.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/fill-and-save-form.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/search-and-add-to-personal-notes.ts",
+
+        // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-4 (purchase
+        // confirmation flow) ── Pure-logic peers stay in the covered set:
+        // `safety/outbound-purchase-guard` (100% via its own peer test —
+        // covers the §17.7 outbound classifier guard + the
+        // `result='failed'` audit-row INSERT) and the
+        // `automation/purchase-tokens` classifier (already 100%). The
+        // exclusions below are I/O-bound: SQL stores (better-sqlite3
+        // prepare/run catches that need ESM-blocked DB mocks to reach),
+        // the Hono route handler (multipart, outbound DM dispatch), the
+        // messaging-adapter sender (Discord/Slack/Telegram socket calls),
+        // the Playwright `run()` workflow body, and the purchase handler
+        // that ties the messaging adapters to the automation runner.
+        // Mirrors the B-1 / B-2 / B-2.5 / B-3 exclusion rationale above.
+        "packages/daemon/src/api/routes/browser-automation-purchase.ts",
+        "packages/daemon/src/db/browser-automation-b4-config-store.ts",
+        "packages/daemon/src/db/browser-automation-purchase-primary-channels-store.ts",
+        "packages/daemon/src/db/browser-automation-purchase-replies-store.ts",
+        "packages/daemon/src/db/browser-automation-purchase-tokens-store.ts",
+        "packages/daemon/src/messaging/purchase-system-message-sender.ts",
+        "packages/daemon/src/services/browser-history/automation/purchase-handler.ts",
+        "packages/daemon/src/services/browser-history/automation/workflows/confirm-cart-checkout.ts",
+
+        // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──
+        // FS-locked write coordinator + best-effort cleanup helpers.
+        // Pure planning logic stays in the covered set; the wrappers
+        // below thread real fs/rmSync/writeFile against per-run files
+        // whose error branches need ESM-blocked node:fs mocks.
+        "packages/daemon/src/services/browser-history/interests-reflection-lock.ts",
+        "packages/daemon/src/services/browser-history/cleanup-interests-reflection.ts",
+        "packages/daemon/src/services/browser-history/refresh-interests-reflection.ts",
+
+        // ── Context entities mirror route (docs/design/
+        // 21-management-registry-and-entities.md §7.6) ── Hono route
+        // handler over the `entities-store` SQL paths. Pure validation
+        // lives in shared (`isDomain`, `isEntityType`); the store has its
+        // peer test pinning the main flows. The route body is I/O-bound
+        // multi-shape query dispatch matching the dashboard/* and mail/*
+        // rationale.
+        "packages/daemon/src/api/routes/entities.ts",
+
+        // ── Integration route gate (api/integration-route-gate) ──
+        // Hono middleware that gates per-integration HTTP routes by
+        // current mode. Pure decision logic is peer-tested elsewhere;
+        // the gate body wires DB lookups + response shaping that matches
+        // the dashboard/* exclusion rationale.
+        "packages/daemon/src/api/integration-route-gate.ts",
+
+        // ── Automation triggers store (db/automation-triggers) ──
+        // CRUD over `automation_triggers` rows. Remaining lines are SQL
+        // prepare/run catches that match the existing `db/*` I/O
+        // rationale (see check-signals.ts / observations.ts exclusions
+        // above).
+        "packages/daemon/src/db/automation-triggers.ts",
+
+        // ── Backend plan presets (core/backends/plan-presets) ──
+        // Hosts `DELEGATED_PROCESS_KEYS` + `applyDefaultPresets` (CLAUDE.md
+        // "Where to look first" table). Pure tier-table is peer-tested;
+        // the DB-seeding helpers match the `db/*` rationale.
+        "packages/daemon/src/core/backends/plan-presets.ts",
+
+        // ── Multi-mail provider reconcile orchestrator
+        // (services/integrations/reconcile) ── Driver that walks each
+        // provider's reconcile-planner output and applies actions
+        // through the provider SDKs. Pure planning lives in
+        // `mail/imap/reconcile-planner` (100% covered); this wrapper
+        // performs SDK-bound writes matching the mail/* rationale.
+        "packages/daemon/src/services/integrations/reconcile.ts",
+
+        // ── Management policy store (db/management-policy) ── SQL CRUD
+        // over `management_policy` table. Pure parse/serialize helpers
+        // stay in the covered set; the wrapper carries SQL prepare/run
+        // catches matching the `db/*` rationale.
+        "packages/daemon/src/db/management-policy.ts",
+
+        // ── MCP registry helpers (services/mcp/registry) ── Pure
+        // descriptor lookups stay 100% covered via `services/mcp/*`
+        // peer tests; the SQL helpers (`setMcpServerEnabled` and
+        // friends) thread better-sqlite3 prepare/run, matching the
+        // `db/*` rationale.
+        "packages/daemon/src/services/mcp/registry.ts",
+
+        // ── Phase B-2 Instance A config builder
+        // (managed-chromium/instance-a-config) ── Builder for the
+        // Instance A Chromium argv + workflow profile dirs. Most
+        // branches are peer-tested; residual lines are fs.mkdir /
+        // realpath paths that need node:fs mocks matching the B-2
+        // sibling-exclusion rationale above (`instance-a-launcher.ts`).
+        "packages/daemon/src/services/browser-history/managed-chromium/instance-a-config.ts",
 
         // ── Path/frontmatter validators with many small branch gaps ──
       ],

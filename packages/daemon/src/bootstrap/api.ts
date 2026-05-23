@@ -630,6 +630,15 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     },
     onGoogleServicesReady,
     onScheduleConfigChanged: () => scheduler.reloadCrons(),
+    // Phase B-4 — the dispatcher holds the canonical PurchaseHandler
+    // instance (constructed in `event-pipeline.ts` once the message
+    // hub is available). We thread it through the API deps via a
+    // getter so the route layer's `deps.purchaseHandler` reads the
+    // live reference instead of a snapshot — important for the
+    // future "Disable B-4" dashboard flow that swaps the handler out.
+    get purchaseHandler() {
+      return dispatcher.getPurchaseHandler() ?? undefined;
+    },
     onIntegrationModeChange,
     onMainBackendChange,
     onSetupStart: (mode) => {

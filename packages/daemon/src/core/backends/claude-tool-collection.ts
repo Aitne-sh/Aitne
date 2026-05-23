@@ -56,6 +56,38 @@ import { isPathInsideOrEqual, shellPathForms } from "../path-compat.js";
  * `bashContextWriteHook` to defeat symlink-based bypasses that point
  * back into the context dir.
  */
+/**
+ * Slice the curl-relevant portion out of a pre-stripped scan string.
+ *
+ * Production hooks (2026-05) were flagging `curl … | head -c 2000` and
+ * `curl … | python3 -c '…'` as `curl --cookie-jar/-c not allowed`, because
+ * the short-flag regex `-[a-zA-Z]*c(?:\s|=|$)` was matching `-c` from a
+ * pipeline tail command rather than from curl's arg list. The
+ * chained-curl check earlier in `bashCurlHook` already guarantees at most
+ * one `curl` token per Bash invocation, so the curl segment is just the
+ * substring from the first `curl` token up to the next shell separator
+ * (`|`, `;`, `&&`, `||`, newline, end of string). Scoping short-flag
+ * presence checks to that segment eliminates the false positive while
+ * preserving the existing protections against the real curl flags.
+ *
+ * Caller invariant: `scan` is the output of `stripBashStringContent` so
+ * the separators we slice on are unquoted shell separators, not literal
+ * text inside a JSON body.
+ */
+function extractCurlSegment(scan: string): string {
+  const curlIdx = scan.search(/\bcurl\b/);
+  if (curlIdx === -1) return "";
+  const tail = scan.slice(curlIdx);
+  // Stop at the first unquoted pipe / semicolon / newline / `&&` / `||`.
+  // `& ` and `&\n` end the curl invocation too (backgrounding); but a bare
+  // `&` inside an unquoted shell context is rare and chained-curl already
+  // catches the case where a second curl follows it.
+  const stopMatch = tail.match(/[|;\n]|&&|\|\|/);
+  return stopMatch && stopMatch.index !== undefined
+    ? tail.slice(0, stopMatch.index)
+    : tail;
+}
+
 function realpathLenient(absPath: string): string {
   const segments: string[] = [];
   let current = absPath;
@@ -448,6 +480,19 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
     // the body URL, and falsely blocked with "Multiple URL targets".
     const scan = stripBashStringContent(cmd);
     const tokenizable = stripBashHeredocs(cmd);
+    // Scope short-flag presence checks (`-c`, `-w`, `-D`, `-x`, `-L`,
+    // `-T`, …) to just the curl invocation. Without this scoping, pipeline
+    // tail commands that share a short-flag letter with curl trip false
+    // positives — e.g. `curl ... | head -c 2000` (head's `-c N` byte
+    // limit) was getting blocked as "curl --cookie-jar/-c not allowed",
+    // and `curl ... | python3 -c '...'` was also wrong-tripping the
+    // cookie-jar guard. The chained-curl check above guarantees there's
+    // at most one curl invocation, so the curl segment is simply
+    // everything from the `curl` token up to the next shell separator
+    // (`|`, `;`, `&&`, `||`, newline). Full-name flags
+    // (`--cookie-jar`, `--write-out`, …) keep using `scan` because their
+    // names don't collide with anything outside curl.
+    const curlScan = extractCurlSegment(scan);
     if (/\bcurl\b/.test(cmd)) {
       // ── Multi-request defenses (run BEFORE host/port loop) ─────────
       // The SDK `allowedTools` glob is a prefix match against the full
@@ -604,7 +649,7 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       // `-L`. Same shape applied to every short-flag below — without it
       // an attacker can stuff the dangerous letter into a benign-looking
       // flag bundle like `-fs<X>` and bypass the deny rule entirely.
-      if (/(?:^|\s)(?:--upload-file\b|-[a-zA-Z]*T(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--upload-file\b|-[a-zA-Z]*T(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --upload-file / -T not allowed — would read arbitrary files",
@@ -728,7 +773,7 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       // earlier heredoc-body occurrence of `-o /etc/passwd` cannot be
       // captured ahead of the real flag — while quoted paths like
       // `-o "my file.pdf"` are still readable.
-      const hasOutputFlag = /(?:^|\s)(?:--output(?:\b|=)|-[a-zA-Z]*o(?:\s|=|$))/.test(scan);
+      const hasOutputFlag = /(?:^|\s)(?:--output(?:\b|=)|-[a-zA-Z]*o(?:\s|=|$))/.test(curlScan);
       if (hasOutputFlag) {
         // Three capture-group alternatives so quoted paths with spaces
         // are caught — `[^\s'"]+` alone fails on `"my file"`.
@@ -754,19 +799,19 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
           };
         }
       }
-      if (/(?:^|\s)(?:--remote-name(?:-all)?\b|-[a-zA-Z]*O(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--remote-name(?:-all)?\b|-[a-zA-Z]*O(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --remote-name/-O not allowed — would write to URL-derived path",
         };
       }
-      if (/(?:^|\s)(?:--dump-header\b|-[a-zA-Z]*D(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--dump-header\b|-[a-zA-Z]*D(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --dump-header/-D not allowed — writes response headers to disk",
         };
       }
-      if (/(?:^|\s)(?:--cookie-jar\b|-[a-zA-Z]*c(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--cookie-jar\b|-[a-zA-Z]*c(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --cookie-jar/-c not allowed — writes cookie state to disk",
@@ -779,7 +824,7 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       // `-b name=value` would require parsing the value; the simpler
       // safe stance is to refuse the flag outright since the daemon
       // API uses bearer tokens, not cookies.
-      if (/(?:^|\s)(?:--cookie\b|-[a-zA-Z]*b(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--cookie\b|-[a-zA-Z]*b(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason:
@@ -787,13 +832,13 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
             "the file contents are sent as the Cookie header (file read).",
         };
       }
-      if (/(?:^|\s)--trace(?:-ascii)?\b/.test(scan)) {
+      if (/(?:^|\s)--trace(?:-ascii)?\b/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --trace / --trace-ascii not allowed — writes protocol trace to disk",
         };
       }
-      if (/(?:^|\s)(?:--write-out\b|-[a-zA-Z]*w(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--write-out\b|-[a-zA-Z]*w(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --write-out/-w not allowed — format strings include file/stderr sinks",
@@ -802,7 +847,7 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       // Cert / key file references. The daemon API is plain HTTP on
       // loopback; none of these flags are needed for legitimate
       // operation and they all read arbitrary files from disk.
-      if (/(?:^|\s)(?:--cert\b|--key\b|--cacert\b|--capath\b|-[a-zA-Z]*E(?:\s|=|$))/.test(scan)) {
+      if (/(?:^|\s)(?:--cert\b|--key\b|--cacert\b|--capath\b|-[a-zA-Z]*E(?:\s|=|$))/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl --cert/--key/--cacert/--capath/-E not allowed — read arbitrary files",
@@ -815,7 +860,7 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       // Combined-short-flag forms (`-fsSL`, `-vL`) are caught by the
       // `[a-zA-Z]*L` alternation; the literal `--location` and
       // `--location-trusted` long forms are matched explicitly.
-      if (/(?:^|\s)(?:-[a-zA-Z]*L(?:\s|=|$)|--location(?:-trusted)?\b)/.test(scan)) {
+      if (/(?:^|\s)(?:-[a-zA-Z]*L(?:\s|=|$)|--location(?:-trusted)?\b)/.test(curlScan)) {
         return {
           decision: "block" as const,
           reason: "curl -L / --location not allowed — would follow redirects off localhost",

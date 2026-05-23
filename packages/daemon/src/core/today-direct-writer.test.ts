@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -60,6 +60,21 @@ describe("appendBulletToAgentLog", () => {
     const updated = appendBulletToAgentLog(ending, "- 12:00 added");
     expect(updated).not.toBeNull();
     expect(updated).toMatch(/- 09:00 routine ran\n- 12:00 added\n/);
+  });
+
+  it("handles `## Agent Log` at the very start of the file (no leading newline)", () => {
+    const content = [
+      "## Agent Log",
+      "- 09:00 first",
+      "",
+      "## After",
+      "- after",
+      "",
+    ].join("\n");
+    const updated = appendBulletToAgentLog(content, "- 12:00 added");
+    expect(updated).not.toBeNull();
+    expect(updated).toMatch(/^## Agent Log\n- 09:00 first\n- 12:00 added\n/);
+    expect(updated).toContain("\n## After\n- after\n");
   });
 });
 
@@ -143,5 +158,87 @@ describe("appendAgentLogLine", () => {
     expect(result.appended).toBe(true);
     const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
     expect(updated).toMatch(/- 13:30 \[hourly_check\] custom timestamp\n/);
+  });
+
+  it("preserves a message that is already formatted as a bullet (- prefix)", () => {
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = appendAgentLogLine({
+      contextDir,
+      message: "- already a bullet",
+      todayWriteLock: lock,
+    });
+    expect(result.appended).toBe(true);
+    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    expect(updated).toContain("- already a bullet\n");
+  });
+
+  it("respects a custom timezone option when formatting the HH:MM stamp", () => {
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = appendAgentLogLine({
+      contextDir,
+      message: "[hourly_check] tz check",
+      todayWriteLock: lock,
+      // 2026-05-06T03:00:00Z — at UTC the local time is 03:00, but Tokyo
+      // is +09:00 so the formatted bullet should show 12:00.
+      now: new Date(Date.UTC(2026, 4, 6, 3, 0, 0)),
+      timezone: "Asia/Tokyo",
+    });
+    expect(result.appended).toBe(true);
+    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    expect(updated).toMatch(/- 12:00 \[hourly_check\] tz check\n/);
+  });
+
+  it("falls back to a system-clock HH:MM when Intl.DateTimeFormat throws on an invalid timezone", () => {
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = appendAgentLogLine({
+      contextDir,
+      message: "[hourly_check] tz fallback",
+      todayWriteLock: lock,
+      now: new Date(2026, 4, 6, 7, 5, 0),
+      // Bogus IANA zone — Intl.DateTimeFormat throws a RangeError on
+      // construction. The writer should drop into the pad2 fallback
+      // branch and still produce a HH:MM stamp.
+      timezone: "Mars/Phobos",
+    });
+    expect(result.appended).toBe(true);
+    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    expect(updated).toMatch(/- 07:05 \[hourly_check\] tz fallback\n/);
+  });
+
+  it("returns io_error when today.md cannot be read (path is a directory)", () => {
+    // Replace today.md with a directory of the same name — readFileSync
+    // will throw EISDIR while existsSync still reports the path as present.
+    rmSync(join(contextDir, "today.md"));
+    mkdirSync(join(contextDir, "today.md"));
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = appendAgentLogLine({
+      contextDir,
+      message: "should fail",
+      todayWriteLock: lock,
+    });
+    expect(result.appended).toBe(false);
+    expect(result.reason).toBe("io_error");
+    // Lock must be released even on the error path.
+    expect(lock.getHolder()).toBeNull();
+  });
+
+  it("returns io_error when today.md write fails (parent is read-only)", () => {
+    // On macOS/Linux, chmod 0500 (read+execute, no write) on the parent
+    // dir makes writeFileAtomically's rename / open-for-write fail.
+    if (process.platform === "win32") return;
+    chmodSync(contextDir, 0o500);
+    try {
+      const lock = new InMemoryTodayWriteLockManager(60_000);
+      const result = appendAgentLogLine({
+        contextDir,
+        message: "should fail on write",
+        todayWriteLock: lock,
+      });
+      expect(result.appended).toBe(false);
+      expect(result.reason).toBe("io_error");
+    } finally {
+      // Restore so afterEach's rmSync can clean up.
+      chmodSync(contextDir, 0o700);
+    }
   });
 });

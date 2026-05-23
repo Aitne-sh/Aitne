@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import type { MessageEvent } from "@aitne/shared";
+import { getAgentDayDateStr } from "@aitne/shared";
 import { applySchema } from "../../db/schema.js";
 import type { AgentConfig } from "../../config.js";
 import type { IAuditLogger } from "../dispatcher.js";
@@ -76,7 +77,13 @@ describe("!checks", () => {
   });
 
   it("lists today's top patterns sorted by count, then pattern (lexicographic)", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    // Use the same agent-day resolver the handler uses, NOT
+    // `new Date().toISOString().slice(0, 10)`. With `dayBoundaryHour=4`
+    // and `timezone="UTC"`, the agent-day rolls over at 04:00 UTC, so
+    // between 00:00 and 03:59 UTC the agent-day is the previous calendar
+    // date. The plain UTC-date slice produces a mismatch in that window
+    // and the test would intermittently fail near midnight UTC.
+    const today = getAgentDayDateStr("UTC", 4);
     incrementReloadSignals(db, [
       { date: today, urlPattern: "claude.ai/usage", count: 8 },
       { date: today, urlPattern: "twitter.com/home", count: 12 },
@@ -107,10 +114,21 @@ describe("!checks", () => {
   });
 
   it("does not return rows from other agent-days", async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+    // Use the same agent-day resolver the handler uses, NOT
+    // `new Date().toISOString().slice(0, 10)`. With `dayBoundaryHour=4`
+    // and `timezone="UTC"`, the agent-day rolls over at 04:00 UTC, so
+    // between 00:00 and 03:59 UTC the agent-day is the previous calendar
+    // date. The plain UTC-date slice produces a mismatch in that window
+    // and the test would intermittently fail near midnight UTC.
+    const today = getAgentDayDateStr("UTC", 4);
+    // Compute "yesterday" off the agent-day for the same reason — a raw
+    // 24h-ago UTC slice can land on `today` when running near the 04:00
+    // boundary.
+    const yesterday = getAgentDayDateStr(
+      "UTC",
+      4,
+      new Date(Date.now() - 86_400_000),
+    );
     incrementReloadSignals(db, [
       { date: yesterday, urlPattern: "old.example.com/page", count: 99 },
       { date: today, urlPattern: "fresh.example.com/page", count: 3 },
@@ -150,7 +168,13 @@ describe("!checks", () => {
     // operator has not pinned timezone/dayBoundaryHour: getAgentDayDateStr
     // accepts `undefined` for both. The command must still produce a
     // valid ISO date marker — not crash on the optional fields.
-    const today = new Date().toISOString().slice(0, 10);
+    // Use the same agent-day resolver the handler uses, NOT
+    // `new Date().toISOString().slice(0, 10)`. With `dayBoundaryHour=4`
+    // and `timezone="UTC"`, the agent-day rolls over at 04:00 UTC, so
+    // between 00:00 and 03:59 UTC the agent-day is the previous calendar
+    // date. The plain UTC-date slice produces a mismatch in that window
+    // and the test would intermittently fail near midnight UTC.
+    const today = getAgentDayDateStr("UTC", 4);
     incrementReloadSignals(db, [
       { date: today, urlPattern: "x.example.com/y", count: 1 },
     ]);
@@ -177,7 +201,13 @@ describe("!checks", () => {
       source: "!stop",
       byPlatform: "slack",
     });
-    const today = new Date().toISOString().slice(0, 10);
+    // Use the same agent-day resolver the handler uses, NOT
+    // `new Date().toISOString().slice(0, 10)`. With `dayBoundaryHour=4`
+    // and `timezone="UTC"`, the agent-day rolls over at 04:00 UTC, so
+    // between 00:00 and 03:59 UTC the agent-day is the previous calendar
+    // date. The plain UTC-date slice produces a mismatch in that window
+    // and the test would intermittently fail near midnight UTC.
+    const today = getAgentDayDateStr("UTC", 4);
     incrementReloadSignals(db, [
       { date: today, urlPattern: "site.example.com/feed", count: 2 },
     ]);

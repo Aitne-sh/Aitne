@@ -115,6 +115,7 @@ import { MailPoller } from "../observers/mail-poller.js";
 import { MailReconciliationJob } from "../observers/mail-reconciliation.js";
 import { BrowserHistoryPoller } from "../observers/browser-history-poller.js";
 import { BrowserLifecycleSupervisor } from "../services/browser-history/lifecycle/supervisor.js";
+import { maybeRegisterManagedChromium } from "./managed-chromium.js";
 import type { BootstrapSecretState } from "./services.js";
 import { createLogger } from "../logging.js";
 
@@ -628,6 +629,20 @@ export async function createObservers(
   }
 
   observerManager.register(new BrowserLifecycleSupervisor(db, config));
+
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.1 — managed Chromium
+  // supervisor. Registered as a sibling Observer; the boot helper
+  // pre-flights binary + sandbox availability and writes the
+  // diagnostic state-machine value before the supervisor's first tick
+  // so the dashboard surfaces "missing_binary" / "missing_sandbox"
+  // immediately. No-op when the master toggle (runtime_state) is off.
+  await maybeRegisterManagedChromium({
+    db,
+    config,
+    observerManager,
+    messageHub,
+  });
+
   if (shouldStartObserversFor(db, "browser_history")) {
     observerManager.register(
       new BrowserHistoryPoller(db, config, {

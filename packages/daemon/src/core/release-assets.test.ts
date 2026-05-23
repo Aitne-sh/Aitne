@@ -33,6 +33,7 @@ import {
   computeInstructionAssetStatus,
   findBuiltinShadowedUserSkills,
   readInstructionAssetStamp,
+  readInstructionStampManifest,
   readReleaseAssetStatus,
   reconcileDocsCorpus,
   reconcileTemplateAssets,
@@ -268,6 +269,87 @@ describe("release asset reconciliation", () => {
     write(workspaceDir, "agent-assets/skills/mail/SKILL.md", "---\nname: mail\n---\n# Mail\n");
 
     expect(findBuiltinShadowedUserSkills(dataDir, workspaceDir)).toEqual(["travel"]);
+  });
+
+  /* ── readInstructionStampManifest ──────────────────────────────────── */
+
+  it("readInstructionStampManifest returns null when no stamp file exists", () => {
+    const sessionDir = join(tmp, "session-no-stamp");
+    mkdirSync(sessionDir, { recursive: true });
+    expect(readInstructionStampManifest(sessionDir)).toBeNull();
+  });
+
+  it("readInstructionStampManifest round-trips a manifest written by writeInstructionAssetStamp", () => {
+    const workspaceDir = join(tmp, "workspace-rt");
+    const sessionDir = join(tmp, "session-rt");
+    write(workspaceDir, "agent-assets/agent-profiles/task.md", "# Task\n");
+    write(workspaceDir, "agent-assets/task-flows/default.md", "{context}\n");
+    mkdirSync(sessionDir, { recursive: true });
+    const status = computeInstructionAssetStatus(workspaceDir, () => NOW);
+    writeInstructionAssetStamp(sessionDir, status, {
+      processKey: "morning_routine",
+      skillSlugs: ["b-skill", "a-skill"],
+    });
+    const m = readInstructionStampManifest(sessionDir);
+    expect(m).not.toBeNull();
+    expect(m!.processKey).toBe("morning_routine");
+    // writeInstructionAssetStamp sorts the slugs deterministically.
+    expect(m!.skillSlugs).toEqual(["a-skill", "b-skill"]);
+  });
+
+  it("readInstructionStampManifest returns null when the stamp lacks a manifest field", () => {
+    const sessionDir = join(tmp, "session-no-manifest");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, INSTRUCTION_ASSETS_STAMP),
+      JSON.stringify({ fingerprint: "deadbeef" }),
+      "utf-8",
+    );
+    expect(readInstructionStampManifest(sessionDir)).toBeNull();
+  });
+
+  it("readInstructionStampManifest rejects a manifest whose processKey is not a string", () => {
+    const sessionDir = join(tmp, "session-bad-key");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, INSTRUCTION_ASSETS_STAMP),
+      JSON.stringify({ manifest: { processKey: 7, skillSlugs: [] } }),
+      "utf-8",
+    );
+    expect(readInstructionStampManifest(sessionDir)).toBeNull();
+  });
+
+  it("readInstructionStampManifest rejects a manifest whose skillSlugs is not an array", () => {
+    const sessionDir = join(tmp, "session-bad-slugs");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, INSTRUCTION_ASSETS_STAMP),
+      JSON.stringify({ manifest: { processKey: "x", skillSlugs: "not-array" } }),
+      "utf-8",
+    );
+    expect(readInstructionStampManifest(sessionDir)).toBeNull();
+  });
+
+  it("readInstructionStampManifest rejects a manifest with a non-string slug element", () => {
+    const sessionDir = join(tmp, "session-bad-slug-elem");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, INSTRUCTION_ASSETS_STAMP),
+      JSON.stringify({ manifest: { processKey: "x", skillSlugs: ["ok", 42] } }),
+      "utf-8",
+    );
+    expect(readInstructionStampManifest(sessionDir)).toBeNull();
+  });
+
+  it("readInstructionStampManifest returns null when the stamp file is not valid JSON", () => {
+    const sessionDir = join(tmp, "session-bad-json");
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, INSTRUCTION_ASSETS_STAMP),
+      "{not: valid json",
+      "utf-8",
+    );
+    expect(readInstructionStampManifest(sessionDir)).toBeNull();
   });
 
   it("stamps session workdirs with the instruction asset fingerprint", () => {

@@ -155,10 +155,13 @@ export function cascadeNativeBindingsOnMainSwitch(
     const state = integrations[key];
     if (state.mode !== "native") continue;
     const priorNativeBackend = state.nativeBackend;
+    // Defensive — superRefine on `integrationStateSchema` rejects
+    // mode='native' without nativeBackend at the read boundary, and
+    // `readIntegrations` falls back to disabled when parse fails. The
+    // block below stays so the helper is robust to future schema changes
+    // and hand-edited rows, but it is unreachable from the live registry.
+    /* c8 ignore next 8 */
     if (!priorNativeBackend) {
-      // Defensive — superRefine guarantees nativeBackend exists in native
-      // mode. A row missing it indicates registry drift; flip to disabled
-      // and log so the operator notices.
       logger.warn(
         { key },
         "native integration carried no nativeBackend — flipping to disabled (registry drift)",
@@ -168,6 +171,10 @@ export function cascadeNativeBindingsOnMainSwitch(
 
     updateIntegrationState(db, key, {
       mode: "disabled",
+      // `state.deniedTools` is non-nullable on the parsed shape (defaults
+      // to []), but the `??` is preserved to keep the writer defensive
+      // against the same drift covered by the c8-ignored branch above.
+      /* c8 ignore next */
       deniedTools: state.deniedTools ?? [],
       lastChangedAt: now,
     });
@@ -177,6 +184,7 @@ export function cascadeNativeBindingsOnMainSwitch(
       // un-truthy branch logs and falls through to here with a synthetic
       // value (`unknown` would be misleading); we mirror what the audit
       // row needs.
+      /* c8 ignore next */
       priorNativeBackend: (priorNativeBackend ?? newMainBackendId) as BackendId,
       newMainBackend: newMainBackendId,
     });

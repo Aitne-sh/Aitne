@@ -5,6 +5,7 @@ import {
   statSync,
   unlinkSync,
 } from "node:fs";
+import type { ZodError } from "zod";
 import {
   contextPatchSchema,
   contextPutSchema,
@@ -66,6 +67,91 @@ const logger = createLogger("context-api");
  * `readOptionalJsonBody` whose payloads are tiny by construction.
  */
 const CONTEXT_BODY_MAX_BYTES = 1024 * 1024;
+
+const CONTEXT_PATCH_MODE_VALID_VALUES = [
+  "append",
+  "replace",
+  "clear",
+  "clear_before",
+  "append_to_file",
+] as const;
+
+/**
+ * Decompose a failed Zod parse into actionable issues the agent can
+ * self-correct from. Each Zod issue becomes its own AgentErrorIssue with:
+ *   - `field`: dotted Zod path (e.g. "mode")
+ *   - `received`: the value that actually failed validation, so the agent
+ *     sees what it sent — not just the schema's expectation.
+ *   - `validValues`: for enum-like fields, surface the accepted list.
+ *
+ * When the top-level body is not an object (or is null/array), emit a
+ * single `context.body_not_object` issue so the existing hint kicks in.
+ * Otherwise each field-level failure is `context.invalid_body_field` —
+ * a new code introduced because the legacy `body_not_object` was emitted
+ * for both shapes and confused the agent (the prior hint said "wrap in
+ * {}" even when the body was already an object).
+ */
+function buildSchemaIssues(body: unknown, error: ZodError) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return [
+      composeIssue("context.body_not_object", {
+        field: "body",
+        received:
+          body === null
+            ? "null"
+            : Array.isArray(body)
+              ? "array"
+              : typeof body,
+      }),
+    ];
+  }
+  const seen = new Set<string>();
+  const issues = [];
+  for (const issue of error.issues) {
+    const field = issue.path.length === 0 ? "body" : issue.path.join(".");
+    // Zod refinements emit duplicate path entries — dedupe so the response
+    // doesn't repeat the same row-level error.
+    const key = `${field}:${issue.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    // Zod 4 exposes the failing value on issue.input; fall back to walking
+    // the body by path so older issue shapes still surface something useful.
+    const received = readPath(body as Record<string, unknown>, issue.path);
+    const validValues =
+      field === "mode" ? CONTEXT_PATCH_MODE_VALID_VALUES : undefined;
+    issues.push(
+      composeIssue("context.invalid_body_field", {
+        field,
+        received,
+        expected: issue.message,
+        validValues,
+      }),
+    );
+  }
+  // If Zod produced no issues (unreachable from safeParse, but defensive),
+  // emit a single fallback so the agent still gets actionable output.
+  if (issues.length === 0) {
+    issues.push(
+      composeIssue("context.invalid_body_field", {
+        field: "body",
+        received: "(see route schema)",
+      }),
+    );
+  }
+  return issues;
+}
+
+function readPath(
+  root: Record<string, unknown>,
+  path: ReadonlyArray<PropertyKey>,
+): unknown {
+  let cur: unknown = root;
+  for (const seg of path) {
+    if (cur === null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<PropertyKey, unknown>)[seg];
+  }
+  return cur;
+}
 
 export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
   const {
@@ -138,12 +224,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
     const body = parsedBody.body;
     const parsed = contextPutSchema.safeParse(body);
     if (!parsed.success) {
-      return respondWithAgentError(c, 400, [
-        composeIssue("context.body_not_object", {
-          field: "body",
-          received: parsed.error.issues.map((i) => i.message).join("; "),
-        }),
-      ]);
+      return respondWithAgentError(c, 400, buildSchemaIssues(body, parsed.error));
     }
     const roadmapValidationOff = isRoadmapValidationDisabled(
       path,
@@ -397,12 +478,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
     const body = parsedBody.body;
     const parsed = contextPatchSchema.safeParse(body);
     if (!parsed.success) {
-      return respondWithAgentError(c, 400, [
-        composeIssue("context.body_not_object", {
-          field: "body",
-          received: parsed.error.issues.map((i) => i.message).join("; "),
-        }),
-      ]);
+      return respondWithAgentError(c, 400, buildSchemaIssues(body, parsed.error));
     }
     if (target.ext === ".base") {
       return respondWithAgentError(c, 400, [

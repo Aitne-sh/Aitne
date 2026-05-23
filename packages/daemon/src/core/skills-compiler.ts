@@ -1974,6 +1974,14 @@ export const SKILL_DESCRIPTION_MAX_LENGTH = 280;
 export const READ_SENSITIVE_API_PREFIXES = [
   "/api/apple-calendar",
   "/api/books",
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.12 — Phase B-2 trace +
+  // recent-runs reads. The trace handler returns binary screenshot /
+  // trace assets; the recent-runs handler returns audit-row JSON with
+  // hashed params (no raw URLs). Both are ReadSensitive because a
+  // Codex session that lacks the X-Read-Token would 401 silently
+  // without this prefix triggering the banner.
+  "/api/browser-automation/recent-runs",
+  "/api/browser-automation/traces",
   "/api/calendar",
   "/api/context",
   "/api/entities",

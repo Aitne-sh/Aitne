@@ -1,4 +1,5 @@
 import { accessSync, constants, existsSync } from "node:fs";
+import { readlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -70,7 +71,13 @@ const CHROMIUM_METADATA: Record<
     windowsProfileRoots: ["Perplexity Comet\\User Data"],
   },
   atlas: {
-    macApps: ["/Applications/Atlas.app/Contents/MacOS/Atlas"],
+    // OpenAI rebranded the macOS bundle to "ChatGPT Atlas.app" with a
+    // matching binary name. Keep the legacy "Atlas.app" path as a fallback
+    // for users still on a pre-rename build.
+    macApps: [
+      "/Applications/ChatGPT Atlas.app/Contents/MacOS/ChatGPT Atlas",
+      "/Applications/Atlas.app/Contents/MacOS/Atlas",
+    ],
     linuxBins: ["atlas"],
     windowsBins: ["OpenAI\\Atlas\\Application\\atlas.exe"],
     macProfileRoots: ["Library/Application Support/com.openai.atlas/browser-data/host"],
@@ -160,6 +167,31 @@ function isWsl(): boolean {
   }
 }
 
+/**
+ * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §5.4 / §7.4 — per-OS sandbox
+ * primitive resolution.
+ *
+ * macOS: `sandbox-exec -f <profile.sb>`. The `profilePath` is filled in
+ *        by `managed-chromium/sandbox-install.ts` once the .sb asset is
+ *        copied into PA_DATA_DIR. We return an empty string here and
+ *        let the installer rewrite the field — keeps this resolver
+ *        synchronous and free of PA_DATA_DIR coupling.
+ *
+ * Linux: `bwrap` (bubblewrap) is the primary primitive. Falls back to
+ *        `systemd-run --user --scope --property=...` when bwrap is
+ *        absent but systemd is present (common on Debian without
+ *        bubblewrap). Returns `none` on minimal hosts; the bootstrap
+ *        module refuses to start Instance S in that case unless the
+ *        operator has explicitly opted into unsandboxed mode.
+ *
+ * Windows: AppContainer + Job Object via the bundled native helper
+ *          (packages/daemon/native/win-appcontainer/). `profileName` is
+ *          the AppContainer profile name the helper creates / re-uses.
+ *
+ * Detection on Linux uses a synchronous PATH probe (`access(X_OK)`),
+ * not an exec — keeps the cost negligible and avoids spawning
+ * subprocesses at boot.
+ */
 function resolveSandboxPrimitive(os: HostProfile["os"]): SandboxPrimitive {
   if (os === "darwin") {
     return { kind: "sandbox-exec", profilePath: "" };
@@ -167,13 +199,80 @@ function resolveSandboxPrimitive(os: HostProfile["os"]): SandboxPrimitive {
   if (os === "win32") {
     return { kind: "appcontainer-jobobject", profileName: "AitneChromium" };
   }
+  return resolveLinuxSandboxPrimitive();
+}
+
+/**
+ * Order: bwrap > systemd-run > none. bwrap has finer-grained namespace
+ * isolation than systemd-run's transient-unit scope; both beat
+ * unsandboxed, but neither is acceptable to silently substitute for
+ * the other since the launcher emits different argv shapes per kind.
+ */
+function resolveLinuxSandboxPrimitive(): SandboxPrimitive {
+  if (binaryOnPathSync("bwrap")) return { kind: "bubblewrap" };
+  if (binaryOnPathSync("systemd-run")) return { kind: "systemd-run" };
   return { kind: "none" };
+}
+
+function binaryOnPathSync(name: string): boolean {
+  const pathEnv = process.env.PATH ?? "";
+  for (const dir of pathEnv.split(":")) {
+    if (!dir) continue;
+    try {
+      const candidate = join(dir, name);
+      accessSync(candidate, constants.X_OK);
+      return true;
+    } catch {
+      // not in this PATH entry — keep looking.
+    }
+  }
+  return false;
+}
+
+/**
+ * SingletonLock-based liveness probe. Chromium writes
+ * `<userDataDir>/SingletonLock` as a symlink whose target encodes
+ * `<host>-<pid>` for the owning process; the file is removed on clean
+ * shutdown. This is the same mechanism Chromium uses to enforce single
+ * instance, so reading it is the most direct check for "is this profile
+ * in use".
+ *
+ * It is also the only check that catches a Chromium launched without an
+ * explicit `--user-data-dir=` flag (Finder / Dock / Start-menu launches
+ * inherit the platform default and omit the flag from argv), which the
+ * ps-grep below would otherwise miss.
+ *
+ * Returns false on any error — missing file, regular-file lock used by
+ * some Chromium forks, PID not parseable, or dead PID. Callers should
+ * fall through to a process-table probe for those cases.
+ */
+export async function singletonLockHasLiveOwner(userDataDir: string): Promise<boolean> {
+  let target: string;
+  try {
+    target = await readlink(join(userDataDir, "SingletonLock"));
+  } catch {
+    return false;
+  }
+  const match = /-(\d+)$/.exec(target);
+  if (!match) return false;
+  const pid = Number(match[1]);
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function isUnixProcessRunning(
   binaryPath: string,
   userDataDir: string,
 ): Promise<boolean> {
+  // SingletonLock is definitive when present; preferred over ps-grep
+  // because it does not depend on `--user-data-dir=` being present in
+  // argv (it isn't, for user-double-clicked Chromium launches).
+  if (await singletonLockHasLiveOwner(userDataDir)) return true;
   try {
     const { stdout } = await execFileAsync("ps", ["-A", "-o", "pid=,command="], {
       timeout: 2000,
@@ -228,11 +327,21 @@ export function createHostProfile(): HostProfile {
       if (os === "win32") return firstExisting(windowsExecutableCandidates(key));
       const candidates = CHROMIUM_METADATA[key].linuxBins;
       for (const candidate of candidates) {
-        // Keep this path synchronous for callers; only absolute binaries can
-        // be returned synchronously. PATH binaries are launched by name below.
-        if (candidate.includes("/") && existsSync(candidate)) return candidate;
+        // Absolute paths short-circuit existsSync.
+        if (candidate.includes("/")) {
+          if (existsSync(candidate)) return candidate;
+          continue;
+        }
+        // Bare names: probe PATH synchronously. Returning the bare name is
+        // sufficient — child_process.spawn resolves it via PATH at exec time
+        // — but consumers (managed-chromium-supervisor's missing_binary
+        // check, ps-matching in isProcessRunning) need a reliable null when
+        // nothing is installed. The prior fallback (`candidates[0]`)
+        // unconditionally returned the bare name and made `missing_binary`
+        // unreachable on Linux.
+        if (binaryOnPathSync(candidate)) return candidate;
       }
-      return candidates[0] ?? null;
+      return null;
     },
     profileRootFor(key) {
       return firstExisting(this.profileRootCandidatesFor(key));

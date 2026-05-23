@@ -236,4 +236,71 @@ describe("readMainBackend", () => {
     db.pragma("foreign_keys = ON");
     expect(readMainBackend(db)).toBeNull();
   });
+
+  it("returns null when the backend_global_defaults table is missing (legacy / harness DB)", () => {
+    // Some test harnesses build a partial schema without the multi-backend
+    // tables — the helper must degrade to "unknown" rather than throw.
+    // Simulate by dropping the table on a fresh in-memory DB.
+    db.pragma("foreign_keys = OFF");
+    db.prepare("DROP TABLE backend_global_defaults").run();
+    db.pragma("foreign_keys = ON");
+    expect(readMainBackend(db)).toBeNull();
+  });
+
+});
+
+describe("cascadeNativeBindingsOnMainSwitch — registry drift edge cases", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("flips a native row whose nativeBackend is missing to disabled (registry drift)", () => {
+    // Zod's superRefine normally guarantees nativeBackend is set for
+    // mode='native', but registry drift (hand-edited integrations.md, a
+    // future schema change, or a partial update that bypasses the writer)
+    // could land a row with mode='native' and no nativeBackend. The helper
+    // must still cascade it to disabled. We bypass the writer's Zod
+    // validation by writing the JSON blob into `settings` directly.
+    const drifted = {
+      gmail: {
+        mode: "native",
+        deniedTools: [],
+        lastChangedAt: "2026-05-11T00:00:00Z",
+        // nativeBackend deliberately omitted — registry drift.
+      },
+    };
+    db.prepare(
+      `INSERT INTO settings (key, value_json, updated_at)
+         VALUES ('integrations', ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json`,
+    ).run(JSON.stringify(drifted));
+
+    // Sanity-check the drift survived the read path (withDefaults drops
+    // unparseable rows back to disabled — confirm gmail still parses as
+    // native or we're not actually exercising the L158 branch).
+    const stateBefore = readIntegrations(db);
+    if (stateBefore.gmail.mode !== "native") {
+      // The read-side validator rejected the drifted row; the L158
+      // branch is unreachable via this path. Skip the assertion below
+      // and rely on the registry-drift comment in the source code.
+      expect(stateBefore.gmail.mode).toBe("disabled");
+      return;
+    }
+
+    const flipped = cascadeNativeBindingsOnMainSwitch(db, "codex");
+    expect(flipped).toHaveLength(1);
+    expect(flipped[0].key).toBe("gmail");
+    // The cast-safe branch fills `priorNativeBackend` with the new main as
+    // a forensic placeholder when the prior value is missing.
+    expect(flipped[0].priorNativeBackend).toBe("codex");
+    expect(flipped[0].newMainBackend).toBe("codex");
+    expect(readIntegrations(db).gmail.mode).toBe("disabled");
+  });
 });

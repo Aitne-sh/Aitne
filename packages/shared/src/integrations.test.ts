@@ -133,6 +133,23 @@ describe("Integration registry", () => {
       // a `disabled` integration cannot serve digest data through this
       // route.
       "/api/browser-history/pre-morning-digest",
+      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.7 — control-plane
+      // status read used by the dashboard's consent banner before the
+      // operator opts in. Exposed even when the integration is in
+      // `direct` / `delegated` mode so the banner can show detection
+      // state without flipping the gate; the mutation siblings under
+      // `/managed/*` route through the risk-tier gate instead of the
+      // integration gate.
+      "/api/browser-history/managed/status",
+      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.10 — Phase B-2
+      // workflow surface (Instance A). The list endpoint surfaces
+      // registered workflow names + per-workflow risk tier; gating it
+      // through the integration descriptor means a `disabled`
+      // integration cannot serve the workflow list either. The POST
+      // (workflow execution) endpoint stays under the route-level
+      // risk-tier gate so a future automation-only enable path can
+      // narrow access without resurrecting the broader integration.
+      "/api/browser-automation/workflows",
     ]);
   });
 

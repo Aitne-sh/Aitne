@@ -1,0 +1,91 @@
+# Aitne Managed Chromium — AppArmor profile
+#
+# MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §5.4 / §7.4
+#
+# Belt-and-suspenders profile applied when AppArmor is active on the
+# host. Bubblewrap / systemd-run is the primary primitive; AppArmor
+# adds an OS-policy-level guard on top of the namespace isolation.
+#
+# Install:
+#   sudo install -m 0644 aitne-chromium.apparmor /etc/apparmor.d/
+#   sudo apparmor_parser -r /etc/apparmor.d/aitne-chromium
+#
+# The `aa-aitne-chromium` namespace allows multiple per-instance
+# profiles (sync vs. automation) to coexist if we ever split them; for
+# the B-1 surface only `sync` is active.
+
+#include <tunables/global>
+
+profile aa-aitne-chromium-sync flags=(attach_disconnected) {
+  #include <abstractions/base>
+  #include <abstractions/X>
+  #include <abstractions/dbus-session-strict>
+  #include <abstractions/fonts>
+  #include <abstractions/nameservice>
+  #include <abstractions/ssl_certs>
+
+  # Read-only access to the Chromium binary's installed location plus
+  # system libraries it needs at runtime. Allow both Debian-style and
+  # Fedora-style install paths.
+  /usr/bin/chromium                  r,
+  /usr/bin/chromium-browser          r,
+  /usr/lib/chromium/chromium         rmix,
+  /usr/lib64/chromium/chromium       rmix,
+  /usr/lib{,64}/chromium/**          r,
+  /usr/lib{,64}/x86_64-linux-gnu/**  r,
+  /usr/share/chromium/**             r,
+  /usr/share/fonts/**                r,
+  /etc/chromium/**                   r,
+  /etc/passwd                        r,
+  /etc/group                         r,
+  /proc/sys/kernel/**                r,
+  /proc/[0-9]*/stat                  r,
+  /proc/[0-9]*/status                r,
+  /proc/[0-9]*/cmdline               r,
+  /sys/devices/**                    r,
+
+  # Per-instance user data dir — the only writable persistent path. The
+  # path is templated in by sandbox-install.ts; until install rewrites
+  # this profile the rule below denies the entire chromium-sync tree.
+  owner @{HOME}/.personal-agent/chromium-sync/**           rwk,
+  owner @{HOME}/.personal-agent/chromium-sync                rw,
+
+  # Tempfs / runtime dirs.
+  owner /tmp/**                                            rw,
+  owner /var/tmp/**                                        rw,
+  owner @{HOME}/.cache/aitne-chromium/**                   rw,
+
+  # Network — Chromium itself reaches sync endpoints. Fine-grained
+  # filtering happens at the CDP layer in B-2.
+  network inet,
+  network inet6,
+  network netlink,
+  network unix,
+
+  # Capabilities Chromium requires (process management, scheduling).
+  capability sys_admin,
+  capability sys_ptrace,
+  capability sys_chroot,
+  capability sys_resource,
+  capability setuid,
+  capability setgid,
+  capability setpcap,
+
+  # No exec of foreign binaries — Chromium spawns its own helper
+  # processes from the same install dir via `ix`. Reject anything else.
+  audit deny /bin/sh                                       x,
+  audit deny /bin/bash                                     x,
+  audit deny /usr/bin/curl                                 x,
+  audit deny /usr/bin/wget                                 x,
+  audit deny /usr/bin/python*                              x,
+
+  # No reads of OS secret stores from inside Chromium.
+  audit deny /etc/shadow                                   r,
+  audit deny /etc/sudoers                                  r,
+  audit deny /etc/sudoers.d/**                             r,
+  audit deny @{HOME}/.aws/**                               r,
+  audit deny @{HOME}/.ssh/**                               r,
+  audit deny @{HOME}/.gnupg/**                             r,
+  audit deny @{HOME}/.config/gh/**                         r,
+  audit deny @{HOME}/.kube/**                              r,
+}

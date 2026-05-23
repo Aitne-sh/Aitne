@@ -63,7 +63,7 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
   // roadmap skill. See ROADMAP-REDESIGN.md §3.7.
   // Morning routine input cap: the task-flow drives mail + calendar + roadmap
   // walk + today.md write + schedule register. Skills outside that surface
-  // (`external-services`, `notion`, `travel`, `travel-time`) inline 20+ KB of
+  // (`external-services`, `notion`, `travel`) inline 20+ KB of
   // API reference for endpoints the routine never calls — every dropped slug
   // here is one whose endpoints don't appear in routine.morning_routine.md.
   // Notion drain happens via /api/observations (taught by `observations`);
@@ -184,6 +184,31 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
   "routine.research_offer_dm": ["browser-history", "context"],
   "routine.research_dispatch": ["browser-history", "context", "notify"],
   "routine.research_wiki_summary": ["browser-history", "context", "notify"],
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.8 — managed-Chromium
+  // health-check routine. Loads the narrow `browser-history-managed`
+  // skill (status GET only, no profile-dir access) plus `context` for
+  // the agent-journal append step. No `notify` — the supervisor in
+  // `managed-chromium-supervisor.ts` already DMs the user when the
+  // state machine transitions out of `ready`; a second DM from this
+  // routine would be noise.
+  "routine.managed_sync_health_check": ["browser-history-managed", "context"],
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.13 — Phase B-2 Instance A
+  // workflow request. Scheduler / routine driven (DM-driven workflow
+  // invocations stay under `message.received.dm`). Loads:
+  //   - `browser-history-managed` — owner of the curl chokepoint for
+  //     `/api/browser-automation/workflows/*` (workflow list +
+  //     invoke + recent-runs).
+  //   - `context` — vault-path writes are how the session leaves a
+  //     trace of "I ran a screenshot of news.ycombinator.com today"
+  //     in today.md's agent-log.
+  //   - `notify` — the user-facing DM for workflows scheduled to
+  //     report back ("screenshot taken, here it is"). Without `notify`
+  //     the routine has no canonical channel to surface its result.
+  "routine.browser_automation_request": [
+    "browser-history-managed",
+    "context",
+    "notify",
+  ],
   // Dashboard-triggered manual refresh of today.md's User Schedule
   // section. Intentionally narrow — the flow only reads the calendar
   // and PATCHes user_schedule / agent_log. No mail, no roadmap, no
@@ -218,10 +243,9 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "external-services",
     "mail",
     "notion",
-    // docs/design/appendices/skills-improvement.md §9-§11 — merged from travel +
-    // travel-time + receipts. Conditionally loaded via
-    // `gmailLifestyleActiveForDm` so DMs that don't mention
-    // travel / receipts / commute and have no fresh bookings or
+    // docs/design/appendices/skills-improvement.md §9-§11 — merged from travel
+    // + receipts. Conditionally loaded via `gmailLifestyleActiveForDm` so DMs
+    // that don't mention travel / receipts and have no fresh bookings or
     // unsaved receipts don't pay the ~180-line cost.
     "gmail-lifestyle",
     "roadmap",
@@ -499,8 +523,8 @@ export const ALL_SKILLS = [
   "external-services",
   "mail",
   "notion",
-  // docs/design/appendices/skills-improvement.md §9-§11 — merged from travel +
-  // travel-time + receipts. Conditionally loaded for DMs / routines via
+  // docs/design/appendices/skills-improvement.md §9-§11 — merged from travel
+  // + receipts. Conditionally loaded for DMs / routines via
   // `gmailLifestyleActive*` predicates.
   "gmail-lifestyle",
   "roadmap",
@@ -552,6 +576,8 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
   "routine.research_offer_dm": "routine.research_offer_dm",
   "routine.research_dispatch": "routine.research_dispatch",
   "routine.research_wiki_summary": "routine.research_wiki_summary",
+  "routine.managed_sync_health_check": "routine.managed_sync_health_check",
+  "routine.browser_automation_request": "routine.browser_automation_request",
   "message.dm": "message.received.dm",
   "message.mention": "message.received",
   "dashboard.chat": "message.received.dm",
@@ -680,7 +706,6 @@ const GMAIL_LIFESTYLE_TRIGGER_RE = new RegExp(
   "i",
 );
 const GMAIL_LIFESTYLE_PHRASE_TRIGGERS: ReadonlyArray<string> = [
-  "travel time",
   "departure time",
 ];
 function dmMentionsGmailLifestyle(

@@ -33,8 +33,6 @@ keywords:
   - itinerary
   - trains
   - restaurants
-related:
-  - features/lifestyle/travel-time
 ---
 
 # Travel Bookings
@@ -48,12 +46,7 @@ referenced by the morning routine on travel days.
 
 - Captures trip dates, modes, and confirmation numbers.
 - Surfaces in the morning routine on the day of departure.
-- Cross-references the travel-time skill for door-to-airport math.
 
 ## Where in the Dashboard
 
 Surfaces inline in chat and via the morning briefing on travel days.
-
-## Related
-
-- [Travel Time](travel-time.md)

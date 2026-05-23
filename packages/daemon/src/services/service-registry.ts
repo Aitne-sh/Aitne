@@ -11,7 +11,6 @@ import type { GmailService } from "./gmail.js";
 import type { ObsidianService } from "./obsidian.js";
 import type { NotionService } from "./notion.js";
 import type { GitHubService } from "./github.js";
-import type { GoogleMapsService } from "./google-maps.js";
 import type { MailAccountRegistry } from "./mail/account-registry.js";
 import type { JournalMirrorService } from "./journal/writer.js";
 
@@ -23,7 +22,6 @@ export interface ServiceRegistry {
   obsidian: ObsidianService | null;
   notion: NotionService | null;
   github: GitHubService | null;
-  googleMaps: GoogleMapsService | null;
   journal: JournalMirrorService | null;
   /** Error messages from service initialization attempts */
   errors: Record<string, string>;
@@ -38,7 +36,6 @@ export function createServiceRegistry(): ServiceRegistry {
     obsidian: null,
     notion: null,
     github: null,
-    googleMaps: null,
     journal: null,
     errors: {},
   };

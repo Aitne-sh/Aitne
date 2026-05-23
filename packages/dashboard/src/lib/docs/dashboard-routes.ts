@@ -47,8 +47,11 @@ export const DASHBOARD_ROUTES: ReadonlySet<string> = new Set([
   "/settings/processes",
   "/settings/routines",
   "/settings/schedule",
+  "/settings/wiki",
   "/setup",
   "/tasks",
+  "/wiki",
+  "/wiki/timeline",
 ]);
 
 /**

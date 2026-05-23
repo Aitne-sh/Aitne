@@ -73,7 +73,9 @@ The connector is bound to your own session backend. Use the in-session
 connector surface your skills document for Notion; the `<fetch>` row's
 `query` attribute carries the catalog's `delegated` form
 (e.g. `last_edited_time>=<iso>`). Translate it into the args your bound
-surface accepts. POST every returned page as specified above.
+surface accepts. The Notion MCP `notion-search` tool caps `page_size`
+at **25** — page through with `start_cursor` if the window needs more.
+POST every returned page as specified above.
 <!-- /mode:delegated-same:notion -->
 
 <!-- mode:delegated-cross:notion -->
@@ -117,8 +119,9 @@ MCP tool call (or `POST /api/observations/batch` fallback).
 <!-- mode:native:notion -->
 The connector is bound natively to your own session backend. Use the
 in-session connector surface your skills document — same call shape as
-`delegated-same`. The daemon does not proxy. POST every returned page as
-specified above.
+`delegated-same`. The Notion MCP `notion-search` tool caps `page_size`
+at **25** — page through with `start_cursor` if the window needs more.
+The daemon does not proxy. POST every returned page as specified above.
 <!-- /mode:native:notion -->
 
 <!-- mode:disabled:notion -->

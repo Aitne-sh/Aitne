@@ -148,7 +148,7 @@ Open **Connections** and connect the ones you live in:
 | Integration | What it gives the agent |
 |---|---|
 | [Mail](../features/integrations/mail.md) | Reads and locally searches your inbox (Gmail, Outlook, Yahoo, iCloud, IMAP). Auto-files reading lists, receipts, travel bookings. |
-| [Calendar](../features/integrations/calendar.md) | Sees today's and upcoming events. Pre-meeting nudges, plus travel-time lookups. |
+| [Calendar](../features/integrations/calendar.md) | Sees today's and upcoming events. Pre-meeting nudges. |
 | [Obsidian](../features/integrations/obsidian.md) | Watches a vault for new notes — references them in the morning plan. |
 | [Notion](../features/integrations/notion.md) | Watches selected pages and databases for changes. |
 | [Git](../features/integrations/git.md) / [GitHub](../features/integrations/github.md) | Watches local repos and tracked GitHub repos. |

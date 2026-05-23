@@ -24,8 +24,8 @@
  * `...` marker so the LLM can tell when content was elided.
  */
 
-import { existsSync, statSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { nowInTimezone } from "@aitne/shared";
@@ -201,8 +201,14 @@ export async function loadPreviousWeekDigest(
   if (!existsSync(fullPath)) return null;
 
   let body: string;
+  let generatedAt: string;
   try {
-    body = await readFile(fullPath, "utf-8");
+    const [b, st] = await Promise.all([
+      readFile(fullPath, "utf-8"),
+      stat(fullPath),
+    ]);
+    body = b;
+    generatedAt = st.mtime.toISOString();
   } catch {
     return null;
   }
@@ -212,13 +218,6 @@ export async function loadPreviousWeekDigest(
   const focus = extractH2Section(body, NEXT_WEEK_FOCUS_HEADER_RE);
   const lessons = extractH2Section(body, LESSONS_HEADER_RE);
   if (carryOver === null && focus === null && lessons === null) return null;
-
-  let generatedAt: string;
-  try {
-    generatedAt = statSync(fullPath).mtime.toISOString();
-  } catch {
-    generatedAt = new Date().toISOString();
-  }
 
   return {
     period: isoYearWeek,
@@ -265,7 +264,9 @@ export function renderPreviousWeekBlock(digest: PreviousWeekDigest): string {
 }
 
 function indent(text: string, prefix: string): string {
-  if (text === "") return prefix;
+  // `text` is always non-empty here — render sites guard with
+  // `|| "(none recorded)"` and capDigestBodies never produces "" (truncate
+  // returns the explicit `...` marker for zero-byte budgets).
   return text
     .split("\n")
     .map((line) => (line.length === 0 ? line : prefix + line))

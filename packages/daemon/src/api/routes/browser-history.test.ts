@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySchema } from "../../db/schema.js";
 import {
@@ -576,6 +577,470 @@ describe("browser history API routes", () => {
       // Cluster is present and uses the sanitised display name.
       const body = JSON.parse(text) as { clusters: Array<{ slug: string }> };
       expect(body.clusters[0]?.slug).toBe("redaction-check");
+    });
+  });
+
+  // ── WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.2 / §10.3 / §10.3.1 ──
+  // Three thin HTTP wrappers over the daemon-internal helpers. The
+  // helpers themselves are exhaustively covered by
+  // `services/browser-history/{refresh,cleanup}-interests-reflection.test.ts`
+  // and `pipeline/weekly-interests-summary.test.ts`; this block asserts
+  // only the route surface — Zod parse, validation, body forwarding,
+  // and the contextDir resolution path.
+  describe("WEEKLY_INTERESTS_REFLECTION routes", () => {
+    let tmpRoot: string;
+
+    function makeAppInTmp(db: Database.Database): Hono {
+      return makeApp(db, { dataDir: tmpRoot });
+    }
+
+    function seedClusterRow(
+      db: Database.Database,
+      args: {
+        slug: string;
+        rootTaskId: number;
+        displayName: string;
+        lastActivityAt: number;
+      },
+    ): void {
+      db.prepare(
+        `INSERT INTO browser_research_clusters (
+           slug, root_task_id, display_name, started_at, last_activity_at,
+           visits_total, meaningful_visits_total, meaningful_foreground_sec_total,
+           distinct_meaningful_domains, status, agent_summary_revision
+         ) VALUES (?, ?, ?, ?, ?, 30, 22, 5400, 4, 'active', 0)`,
+      ).run(
+        args.slug,
+        args.rootTaskId,
+        args.displayName,
+        args.lastActivityAt - 86_400_000,
+        args.lastActivityAt,
+      );
+    }
+
+    let visitCounter = 0;
+    function seedVisitRow(
+      db: Database.Database,
+      args: {
+        rootTaskId: number;
+        ts: number;
+        domain: string;
+        foregroundSec?: number;
+      },
+    ): void {
+      visitCounter += 1;
+      db.prepare(
+        `INSERT INTO browser_visits (
+           ts, browser, profile, url_hash, domain, category, meaningful,
+           foreground_sec, transition, is_reload, root_task_id
+         ) VALUES (?, 'chrome', 'Default', ?, ?, 'research', 1, ?, 0, 0, ?)`,
+      ).run(
+        args.ts,
+        `route-test-hash-${visitCounter}`,
+        args.domain,
+        args.foregroundSec ?? 1200,
+        args.rootTaskId,
+      );
+    }
+
+    /**
+     * Seed three active clusters with meaningful visits inside the
+     * Monday-aligned 7-day window the test's `weekStart` describes.
+     * Three is the `MIN_PROFILE_MD_THEMES` floor — anything less and
+     * the refresh helper returns `skipped='fewer_than_min_themes'`.
+     */
+    function seedThreeQualifyingClusters(
+      db: Database.Database,
+      weekStartMs: number,
+    ): void {
+      const slugs = [
+        ["prompt-injection-defenses", "Prompt-injection defenses", 101],
+        ["quantum-mechanics-intro", "Quantum mechanics intro", 102],
+        ["rust-borrow-checker", "Rust borrow checker", 103],
+      ] as const;
+      for (const [slug, displayName, rootTaskId] of slugs) {
+        const lastActivity = weekStartMs + 3 * 86_400_000;
+        seedClusterRow(db, {
+          slug,
+          rootTaskId,
+          displayName,
+          lastActivityAt: lastActivity,
+        });
+        // Two visits per cluster, two distinct domains, comfortably
+        // inside the window so `weekly-interests-summary` qualifies
+        // them.
+        seedVisitRow(db, {
+          rootTaskId,
+          ts: weekStartMs + 1 * 86_400_000,
+          domain: `${slug}.example`,
+          foregroundSec: 1800,
+        });
+        seedVisitRow(db, {
+          rootTaskId,
+          ts: weekStartMs + 2 * 86_400_000,
+          domain: `notes.${slug}.example`,
+          foregroundSec: 900,
+        });
+      }
+    }
+
+    beforeEach(() => {
+      tmpRoot = mkdtempSync(join(tmpdir(), "pa-interests-routes-"));
+      // Seed the user/ tree so the refresh helper has its Mode A
+      // targets to write into. `_index.md` is intentionally created so
+      // the test exercises the index-entry block path; tests that want
+      // `_index_missing` semantics omit it.
+      mkdirSync(join(tmpRoot, "context", "user"), { recursive: true });
+      writeFileSync(
+        join(tmpRoot, "context", "user", "profile.md"),
+        "# Profile\n\n## Identity\n- placeholder\n",
+      );
+      writeFileSync(
+        join(tmpRoot, "context", "user", "_index.md"),
+        "# User topics\n\n- `profile.md`\n",
+      );
+      visitCounter = 0;
+    });
+
+    afterEach(() => {
+      rmSync(tmpRoot, { recursive: true, force: true });
+    });
+
+    describe("GET /browser-history/weekly-interests-summary", () => {
+      it("rejects a missing weekStart with 400", async () => {
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/weekly-interests-summary",
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: "invalid_weekStart" });
+      });
+
+      it("rejects a malformed weekStart with 400", async () => {
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/weekly-interests-summary?weekStart=notadate",
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: "invalid_weekStart" });
+      });
+
+      it("rejects a non-Monday weekStart with 400 (Tuesday)", async () => {
+        // 2026-05-19 is Tuesday → reject. The helper itself accepts any
+        // YYYY-MM-DD, but the HTTP route layer enforces the ISO-Monday
+        // contract called out in §10.2.
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/weekly-interests-summary?weekStart=2026-05-19",
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({
+          error: "weekStart_must_be_monday",
+        });
+      });
+
+      it("accepts a Monday weekStart and returns the validated summary shape", async () => {
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/weekly-interests-summary?weekStart=2026-05-18",
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          weekStart: string;
+          weekEnd: string;
+          generatedAt: string;
+          clusters: unknown[];
+          dormantSinceLastWeek: unknown[];
+          projectMatches: unknown[];
+        };
+        expect(body.weekStart).toBe("2026-05-18");
+        expect(Array.isArray(body.clusters)).toBe(true);
+        expect(Array.isArray(body.dormantSinceLastWeek)).toBe(true);
+        expect(Array.isArray(body.projectMatches)).toBe(true);
+        expect(typeof body.generatedAt).toBe("string");
+      });
+
+      it("surfaces seeded active clusters inside the window", async () => {
+        // 2026-05-18 00:00 UTC anchors a Monday-aligned window; place
+        // a meaningful visit at +1 day so it lands cleanly inside.
+        const weekStartMs = Date.UTC(2026, 4, 18, 0, 0, 0);
+        seedClusterRow(db, {
+          slug: "rust-borrow-checker",
+          rootTaskId: 1,
+          displayName: "Rust borrow checker",
+          lastActivityAt: weekStartMs + 2 * 86_400_000,
+        });
+        seedVisitRow(db, {
+          rootTaskId: 1,
+          ts: weekStartMs + 1 * 86_400_000,
+          domain: "doc.rust-lang.org",
+        });
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/weekly-interests-summary?weekStart=2026-05-18",
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          clusters: Array<{ slug: string; meaningfulVisits: number }>;
+        };
+        expect(body.clusters).toHaveLength(1);
+        expect(body.clusters[0]).toMatchObject({
+          slug: "rust-borrow-checker",
+          meaningfulVisits: 1,
+        });
+      });
+
+      it("populates projectMatches with relative paths when a project file matches", async () => {
+        // Regression guard for the §10.1 spec drift the route used to
+        // exhibit: builder was called without `projectKeywords`, so
+        // every response carried an empty projectMatches array. The
+        // route now loads keywords from `<contextDir>/projects/*.md`
+        // and projects the absolute path to the documented
+        // `projects/<slug>.md` form.
+        const weekStartMs = Date.UTC(2026, 4, 18, 0, 0, 0);
+        seedClusterRow(db, {
+          slug: "rust-borrow-checker",
+          rootTaskId: 1,
+          displayName: "Rust borrow checker",
+          lastActivityAt: weekStartMs + 2 * 86_400_000,
+        });
+        seedVisitRow(db, {
+          rootTaskId: 1,
+          ts: weekStartMs + 1 * 86_400_000,
+          domain: "doc.rust-lang.org",
+        });
+        mkdirSync(join(tmpRoot, "context", "projects"), { recursive: true });
+        writeFileSync(
+          join(tmpRoot, "context", "projects", "rust-borrow-checker.md"),
+          [
+            "---",
+            "type: project",
+            "owner: user",
+            "aitne_project_keywords: [rust, borrow, checker]",
+            "---",
+            "# Rust borrow checker project",
+          ].join("\n"),
+        );
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/weekly-interests-summary?weekStart=2026-05-18",
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          projectMatches: Array<{
+            projectSlug: string;
+            projectPath: string;
+            clusters: { slug: string; reason: string }[];
+          }>;
+        };
+        expect(body.projectMatches).toHaveLength(1);
+        expect(body.projectMatches[0]).toMatchObject({
+          projectSlug: "rust-borrow-checker",
+          projectPath: "projects/rust-borrow-checker.md",
+        });
+        // No absolute path / data-dir layout leaks into the response.
+        expect(body.projectMatches[0]!.projectPath.startsWith("/")).toBe(false);
+        expect(body.projectMatches[0]!.projectPath).not.toContain(tmpRoot);
+      });
+    });
+
+    describe("POST /browser-history/refresh-interests-reflection", () => {
+      it("returns skipped=fewer_than_min_themes on an empty DB", async () => {
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/refresh-interests-reflection",
+          { method: "POST" },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          targetsWritten: string[];
+          themesSelected: string[];
+          skipped?: { reason: string };
+        };
+        expect(body.skipped).toEqual({ reason: "fewer_than_min_themes" });
+        expect(body.targetsWritten).toEqual([]);
+        expect(body.themesSelected).toEqual([]);
+      });
+
+      it("writes the four targets when three or more clusters qualify", async () => {
+        // Pin the wall-clock so the helper's `mostRecentMondayFromDate`
+        // resolves deterministically. 2026-05-20T12:00Z is Wednesday;
+        // the most recent ISO Monday (UTC boundary 04:00) is
+        // 2026-05-18, and the 7-day window is [2026-05-18, 2026-05-25).
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+        try {
+          const weekStartMs = Date.UTC(2026, 4, 18, 4, 0, 0); // 04:00 UTC = boundary
+          seedThreeQualifyingClusters(db, weekStartMs);
+
+          const res = await makeAppInTmp(db).request(
+            "/api/browser-history/refresh-interests-reflection",
+            { method: "POST" },
+          );
+          expect(res.status).toBe(200);
+          const body = (await res.json()) as {
+            weekStart: string;
+            targetsWritten: string[];
+            themesSelected: string[];
+            skipped?: { reason: string };
+          };
+          expect(body.weekStart).toBe("2026-05-18");
+          expect(body.skipped).toBeUndefined();
+          expect(body.themesSelected.length).toBeGreaterThanOrEqual(3);
+          // profile.md, research-themes.md, _index.md are all expected
+          // to be written; project files are absent so no project block.
+          expect(body.targetsWritten).toEqual(
+            expect.arrayContaining([
+              "user/profile.md",
+              "user/research-themes.md",
+              "user/_index.md",
+            ]),
+          );
+          // The wholly-daemon-owned snapshot file landed on disk.
+          const themesPath = join(
+            tmpRoot,
+            "context",
+            "user",
+            "research-themes.md",
+          );
+          expect(existsSync(themesPath)).toBe(true);
+          const profileBody = readFileSync(
+            join(tmpRoot, "context", "user", "profile.md"),
+            "utf-8",
+          );
+          expect(profileBody).toContain(
+            "<!-- BEGIN aitne:browser-interests v1",
+          );
+          expect(profileBody).toContain(
+            "<!-- END aitne:browser-interests v1",
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
+      it("records a 'dashboard' trigger on the audit row even when skipped", async () => {
+        // No clusters seeded → helper returns skipped, but still emits
+        // an audit row. The route surface contract is "trigger always
+        // recorded as dashboard" — the skipped path is the cheap way
+        // to assert it without needing fake timers.
+        await makeAppInTmp(db).request(
+          "/api/browser-history/refresh-interests-reflection",
+          { method: "POST" },
+        );
+        const row = db
+          .prepare(
+            `SELECT trigger, result FROM agent_actions
+             WHERE action_type = 'browser_interests_reflection_applied'
+             ORDER BY id DESC LIMIT 1`,
+          )
+          .get() as { trigger: string; result: string } | undefined;
+        expect(row?.trigger).toBe("weekly_interests_reflection:dashboard");
+        expect(row?.result).toBe("skipped");
+      });
+    });
+
+    describe("POST /browser-history/cleanup-interests-reflection", () => {
+      function seedThemesFileAndAutoBlock(): void {
+        writeFileSync(
+          join(tmpRoot, "context", "user", "research-themes.md"),
+          "---\ntype: user\nowner: aitne-browser-history\n---\n# stub\n",
+        );
+        writeFileSync(
+          join(tmpRoot, "context", "user", "profile.md"),
+          [
+            "# Profile",
+            "",
+            "## Identity",
+            "- placeholder",
+            "",
+            "<!-- BEGIN aitne:browser-interests v1 weekStart=2026-05-18 -->",
+            "## Current research themes (auto)",
+            "- **Rust** — 1 day",
+            "<!-- END aitne:browser-interests v1 -->",
+            "",
+          ].join("\n"),
+        );
+      }
+
+      it("accepts a missing body and uses the default (delete themes file)", async () => {
+        seedThemesFileAndAutoBlock();
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/cleanup-interests-reflection",
+          { method: "POST" },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          blocksRemoved: number;
+          filesAffected: string[];
+          researchThemesDeleted: boolean;
+        };
+        expect(body.blocksRemoved).toBe(1);
+        expect(body.researchThemesDeleted).toBe(true);
+        expect(
+          existsSync(
+            join(tmpRoot, "context", "user", "research-themes.md"),
+          ),
+        ).toBe(false);
+        const profileBody = readFileSync(
+          join(tmpRoot, "context", "user", "profile.md"),
+          "utf-8",
+        );
+        expect(profileBody).not.toContain("aitne:browser-interests");
+        // The pre-existing user-authored ## Identity section survives.
+        expect(profileBody).toContain("## Identity");
+      });
+
+      it("respects alsoDeleteResearchThemesFile=false", async () => {
+        seedThemesFileAndAutoBlock();
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/cleanup-interests-reflection",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ alsoDeleteResearchThemesFile: false }),
+          },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          researchThemesDeleted: boolean;
+        };
+        expect(body.researchThemesDeleted).toBe(false);
+        expect(
+          existsSync(
+            join(tmpRoot, "context", "user", "research-themes.md"),
+          ),
+        ).toBe(true);
+      });
+
+      it("rejects an unknown field in the body with 400 (strict schema)", async () => {
+        const res = await makeAppInTmp(db).request(
+          "/api/browser-history/cleanup-interests-reflection",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ destroyEverything: true }),
+          },
+        );
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ error: "invalid_body" });
+      });
+
+      it("is idempotent — a second invocation reports zero blocks removed", async () => {
+        seedThemesFileAndAutoBlock();
+        const app = makeAppInTmp(db);
+        await app.request(
+          "/api/browser-history/cleanup-interests-reflection",
+          { method: "POST" },
+        );
+        const second = await app.request(
+          "/api/browser-history/cleanup-interests-reflection",
+          { method: "POST" },
+        );
+        expect(second.status).toBe(200);
+        const body = (await second.json()) as {
+          blocksRemoved: number;
+          researchThemesDeleted: boolean;
+        };
+        expect(body.blocksRemoved).toBe(0);
+        // Already gone on the second run, so `researchThemesDeleted`
+        // is false — the existsSync gate inside the helper short-
+        // circuits before unlinkSync runs.
+        expect(body.researchThemesDeleted).toBe(false);
+      });
     });
   });
 });

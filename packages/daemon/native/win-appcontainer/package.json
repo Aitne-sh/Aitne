@@ -1,0 +1,18 @@
+{
+  "name": "@aitne/win-appcontainer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aitne managed-Chromium AppContainer + Job Object launcher (Windows-only native addon)",
+  "main": "loader.js",
+  "scripts": {
+    "install": "node-gyp-build || (echo \"non-Windows or addon missing; loader falls back at runtime\" && exit 0)"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.1.0"
+  },
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ]
+}

@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { freshestHistoryMtimeMs } from "../history-mtime.js";
 import type { BrowserProfileCandidate, HostProfile } from "../types.js";
 
 export interface BrowserProfileHealth {
@@ -18,12 +18,7 @@ export async function checkBrowserProfileHealth(
     ? await host.isProcessRunning(binary, profile.userDataDir)
     : false;
 
-  let historyMtimeMs: number | null = null;
-  try {
-    historyMtimeMs = (await stat(profile.historyPath)).mtimeMs;
-  } catch {
-    historyMtimeMs = null;
-  }
+  const historyMtimeMs = await freshestHistoryMtimeMs(profile.historyPath);
   const syncAgeSeconds =
     historyMtimeMs === null
       ? null

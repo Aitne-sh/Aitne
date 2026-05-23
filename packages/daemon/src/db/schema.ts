@@ -1125,6 +1125,366 @@ CREATE TABLE IF NOT EXISTS browser_shopping_sessions (
     locale TEXT
 );
 
+-- ── Managed Chromium Automation (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.14, Phase B-2) ──
+-- Per-workflow run audit row. One INSERT per \`runWorkflow\` call regardless of
+-- outcome; the dashboard's "Recent automations" panel queries this table by
+-- started_at DESC. \`outcome\` is the workflow-runner result tag (see
+-- WorkflowRunOutcome in automation/types.ts) — schema-level CHECK enforces
+-- the closed set so a typo in the runner cannot silently disable filtering.
+-- \`target_urls\` and \`blocked_requests\` are JSON arrays (capped lengths
+-- enforced application-side at write time). \`screenshot_path\` and
+-- \`trace_path\` are NULL when the workflow did not capture either (e.g.,
+-- input_validation_error outcomes that short-circuit before Playwright runs).
+CREATE TABLE IF NOT EXISTS browser_automation_workflows (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    workflow_id       TEXT NOT NULL UNIQUE,
+    workflow_name     TEXT NOT NULL,
+    params_hash       TEXT NOT NULL,
+    target_urls       TEXT NOT NULL,
+    blocked_requests  TEXT NOT NULL,
+    duration_ms       INTEGER NOT NULL,
+    outcome           TEXT NOT NULL CHECK (outcome IN (
+        'success',
+        'unknown_workflow',
+        'input_validation_error',
+        'output_validation_error',
+        'url_not_allowlisted',
+        'user_allowlist_blocked',
+        'host_not_extractable',
+        'rate_limited',
+        'site_not_connected',
+        'playwright_launch_timeout',
+        'playwright_error',
+        'timeout',
+        -- ── Phase B-3 (gated write automation) outcomes ──
+        -- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step 46.
+        -- \`needs_approval\` — workflow was rejected because the caller
+        --   did not present a valid approval token. The runner records
+        --   the audit row AND inserts the matching pending row into
+        --   browser_automation_approvals so the dashboard can surface it.
+        -- \`approval_expired\` — caller presented a token bound to an
+        --   approval whose 5-min TTL elapsed before redemption.
+        -- \`approval_token_invalid\` — token shape was wrong, did not
+        --   match any pending approval, or referenced an approval that
+        --   was already consumed / denied. Folded into a single outcome
+        --   for the LLM-facing surface so timing-based discrimination
+        --   between "expired" and "invalid" cannot leak via outcome
+        --   strings; categorical detail lives only in the audit row.
+        -- \`payment_path_blocked\` — primary URL matched the hard-coded
+        --   payment URL pattern set (/checkout, /payment, /place-order,
+        --   /buy, /place-bid). B-3 cannot touch payment paths even with
+        --   a valid approval token; those belong to B-4 purchase
+        --   workflows (§17.5) which use the DM-token gate.
+        'needs_approval',
+        'approval_expired',
+        'approval_token_invalid',
+        'payment_path_blocked',
+        -- ── Phase B-4 (experimental purchase) runner-level outcomes ──
+        -- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17 / §13 steps 49-60.
+        --
+        -- These fire BEFORE the workflow's run() is invoked — the master
+        -- toggle is off, per-site B-4 is not opted-in, a token is already
+        -- pending for this site_key (per-site concurrency cap 1), or the
+        -- per-site per-day token / spend cap is exhausted. In-flight
+        -- branches (user replied wrong, timeout, page mutated under the
+        -- pause, displayed total mismatch) surface through the workflow's
+        -- structured outputSchema.status and the runner-level outcome
+        -- stays \`success\` for those.
+        --
+        -- The DM-token gate itself is enforced inside the workflow via
+        -- purchase-handler.awaitReply(jti); there is no runner-level
+        -- \`purchase_token_invalid\` outcome because the agent CANNOT
+        -- supply a token at the route layer (B-4's consent model is
+        -- "daemon mints the token AFTER the pre-confirm screenshot;
+        -- the user types it back in DM").
+        'purchase_b4_disabled',
+        'purchase_site_not_enabled',
+        'purchase_pending_exists',
+        'purchase_daily_cap_exceeded'
+    )),
+    started_at        INTEGER NOT NULL,
+    finished_at       INTEGER NOT NULL,
+    screenshot_path   TEXT,
+    trace_path        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_started_at
+    ON browser_automation_workflows(started_at);
+CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_name
+    ON browser_automation_workflows(workflow_name, started_at DESC);
+
+-- Per-domain user allowlist. Deny-on-unknown invariant: a workflow that
+-- targets a host not present here is rejected by the runner with
+-- \`user_allowlist_blocked\`. Empty table = no automation runs at all.
+-- \`domain\` is stored as the lower-cased eTLD+1 to keep the dashboard
+-- "add example.com" UX consistent regardless of whether the agent's
+-- workflow input URL was \`https://www.example.com/\` or \`https://EXAMPLE.com/\`.
+-- \`mode='read'\` is the only value used today; \`'denied'\` is reserved
+-- for a future user-blocklist surface (currently structural denial is
+-- "just delete the row").
+CREATE TABLE IF NOT EXISTS browser_automation_allowlist (
+    domain     TEXT PRIMARY KEY,
+    mode       TEXT NOT NULL CHECK (mode IN ('read', 'denied')),
+    added_at   INTEGER NOT NULL,
+    added_by   TEXT NOT NULL CHECK (added_by IN ('user', 'system'))
+);
+
+-- ── Phase B-3 (gated write automation) — per-action approvals ────────
+--
+-- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step 44.
+--
+-- Every B-3 workflow (riskTier=Approve, variant != purchase) is gated by
+-- a single-use, 5-minute-TTL approval token issued from the dashboard.
+-- The agent (or scheduler) calls POST /workflows/:name; if no token is
+-- present the runner inserts a \`pending\` row here AND returns
+-- \`needs_approval\` to the caller. The dashboard's pending-approvals
+-- panel surfaces \`pending\` rows; the user clicks Approve, the daemon
+-- mints a cryptographically-random token (32 hex chars, 128 bits), and
+-- the row flips to \`approved\` carrying the SHA-256 hash of the token.
+-- The raw token is shown to the user once (never re-readable from the
+-- DB). The agent retries the workflow call with the token; the runner
+-- atomically CAS-consumes the row (\`approved\`→\`consumed\`) before
+-- running Playwright. A token bound to (workflow_name, params_hash)
+-- cannot be used for any other workflow — the runner re-hashes the
+-- caller's params and compares.
+--
+-- Why hash-only at rest: defence-in-depth against DB-file exfiltration.
+-- A read-only attacker who copies personal_agent.db cannot then issue
+-- tokens; only the dashboard, holding the bearer + the live HTTP
+-- response of the approve handler, has the raw token. The retention
+-- sweep rotates \`token_hash\` to NULL after \`consumed_at\` or
+-- \`denied_at\` plus 1 day so even the hash does not linger.
+--
+-- The (workflow_name, params_hash, requested_at) tuple is intentionally
+-- not UNIQUE: a user may legitimately issue the same workflow twice in
+-- a row (re-running a flaky newsletter signup). Dedup is the caller's
+-- responsibility — the runner inserts a new pending row on every
+-- token-less call.
+CREATE TABLE IF NOT EXISTS browser_automation_approvals (
+    id              TEXT PRIMARY KEY,
+    workflow_name   TEXT NOT NULL,
+    params_hash     TEXT NOT NULL,
+    -- Compact JSON snapshot of the params object the runner saw.
+    -- Bounded application-side at insertion time (8 KB cap); not used
+    -- by the runner — surfaced only to the dashboard so the user can
+    -- see "Approve subscribeToNewsletter for https://example.com/?".
+    params_summary  TEXT NOT NULL,
+    -- 'agent' | 'dashboard' | 'schedule' — distinguishes who asked
+    -- for the approval so the dashboard can render the requester
+    -- alongside the row. The agent path inserts \`agent\`; the
+    -- dashboard's "pre-approve" flow (future) would use \`dashboard\`;
+    -- a scheduled-task path would use \`schedule\`. Closed set so
+    -- a future code-path that forgets to set it fails the CHECK.
+    origin          TEXT NOT NULL CHECK (origin IN ('agent', 'dashboard', 'schedule')),
+    status          TEXT NOT NULL CHECK (status IN (
+        'pending',
+        'approved',
+        'consumed',
+        'denied',
+        'expired'
+    )),
+    requested_at    INTEGER NOT NULL,
+    expires_at      INTEGER NOT NULL,
+    -- Populated when the dashboard approves the row; SHA-256 hex hash
+    -- of the raw token (the raw token is delivered to the dashboard
+    -- response only once and never persisted). NULL while pending,
+    -- denied, or expired; rotated back to NULL by the retention sweep
+    -- once consumed_at + 1 day has elapsed.
+    token_hash      TEXT,
+    approved_at     INTEGER,
+    consumed_at     INTEGER,
+    denied_at       INTEGER,
+    denial_reason   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_browser_automation_approvals_status
+    ON browser_automation_approvals(status, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_browser_automation_approvals_token_hash
+    ON browser_automation_approvals(token_hash)
+    WHERE token_hash IS NOT NULL;
+
+-- ── Phase B-4 (experimental purchase) — DM-issued single-use tokens ──
+--
+-- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.6.
+--
+-- Every B-4 workflow (variant='purchase') goes through a strict
+-- screenshot-first DM-confirmation flow. The daemon mints a token
+-- ("!~<8 base32 chars>") AFTER taking the pre-confirm screenshot,
+-- DMs the screenshot + token to the user's primary channels, and the
+-- workflow pauses (§5.5 carve-out) on purchase-handler.awaitReply(jti).
+-- The user reads the actual cart screenshot, types the exact token
+-- back, and the messaging adapter's incoming-token-handler atomically
+-- flips consumed_at from NULL to now. Workflow resumes, re-checks
+-- the cart hasn't mutated, clicks confirm, captures post-confirm
+-- screenshot, persists confirmed_amount_minor + order_id.
+--
+-- Schema invariants:
+--   - jti is the server-side opaque id used for joins / audit; the
+--     dashboard only ever sees jti, never the raw token.
+--   - token carries the raw !~xxxxxxxx string while the row is
+--     pending. The daily cleanup cron rotates token to NULL once
+--     consumed_at or cancelled_at plus 1 day has elapsed, bounding
+--     the window during which a stale DM-history token could be replayed
+--     against a daemon bug. UNIQUE so a colliding mint (cosmically
+--     unlikely under 40-bit entropy but cheap to enforce) fails the
+--     INSERT at issuance time and the handler retries.
+--   - delivered_channels is a JSON array of "<platform>:<channel_id>"
+--     refs the daemon DMed to. The validation path checks the inbound
+--     channel against this list — a reply on a non-delivered channel
+--     cancels with a wrong_channel audit row (§17.4).
+--   - cancel_reason is a closed CHECK set so a hand-written cancel
+--     path cannot land an unrecognised category in the audit trail.
+--   - confirmed_amount_minor / order_id / post_screenshot_path
+--     populate only on the confirmed terminal path; everything else
+--     leaves them NULL.
+--
+-- The runner-level outcome on browser_automation_workflows for any
+-- B-4 invocation is either success (workflow ran to completion;
+-- inspect output schema status for the cart-confirm verdict) or one
+-- of purchase_b4_disabled / purchase_site_not_enabled /
+-- purchase_pending_exists / purchase_daily_cap_exceeded for the
+-- pre-flight rejections.
+CREATE TABLE IF NOT EXISTS browser_automation_purchase_tokens (
+    jti                       TEXT PRIMARY KEY,
+    -- Raw "!~xxxxxxxx" string. NULL after the daily cleanup rotates
+    -- consumed/cancelled rows. UNIQUE while non-null — collision at
+    -- mint time fails the INSERT and the handler retries.
+    token                     TEXT UNIQUE,
+    workflow_invocation_id    TEXT NOT NULL,
+    site_key                  TEXT NOT NULL,
+    url_pattern               TEXT NOT NULL,
+    -- The actually-displayed total at screenshot time, in minor units
+    -- (e.g., yen = JPY x 1; cents = USD x 100). The agent's input
+    -- expectedMaxAmountMinor is a sanity check the workflow uses
+    -- BEFORE minting (abort if exceeds); the token's
+    -- max_amount_minor is the daemon-computed exact figure.
+    max_amount_minor          INTEGER NOT NULL,
+    currency                  TEXT NOT NULL,
+    pre_screenshot_path       TEXT NOT NULL,
+    notes_for_user            TEXT,
+    delivered_channels        TEXT NOT NULL,
+    issued_at                 INTEGER NOT NULL,
+    expires_at                INTEGER NOT NULL,
+    consumed_at               INTEGER,
+    consumed_via_channel      TEXT,
+    cancelled_at              INTEGER,
+    cancel_reason             TEXT CHECK (cancel_reason IS NULL OR cancel_reason IN (
+        'user_reply',
+        'wrong_token',
+        'wrong_channel',
+        'timeout',
+        'explicit',
+        'amount_mismatch',
+        'amount_exceeds_token',
+        'page_changed',
+        'playwright_error',
+        'daily_cap_exceeded',
+        'b4_disabled',
+        'site_not_enabled',
+        'supervisor_orphan_sweep',
+        'dashboard_cancel'
+    )),
+    confirmed_amount_minor    INTEGER,
+    order_id                  TEXT,
+    post_screenshot_path      TEXT,
+    -- Derived status — kept on the row so dashboard filters do not
+    -- have to recompute. The application layer (purchase-tokens-store)
+    -- writes this in lockstep with the timestamp columns; the CHECK
+    -- closes the set so a hand-written status that drifts from the
+    -- timestamps fails at the DB layer.
+    status                    TEXT NOT NULL CHECK (status IN (
+        'pending',
+        'confirmed',
+        'cancelled',
+        'expired'
+    ))
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_tokens_site_at
+    ON browser_automation_purchase_tokens(site_key, issued_at);
+CREATE INDEX IF NOT EXISTS idx_purchase_tokens_status_expires
+    ON browser_automation_purchase_tokens(status, expires_at);
+
+-- ── B-4 reply audit trail ─────────────────────────────────────────────
+--
+-- Every inbound message classified as a !~xxxxxxxx-shaped reply lands
+-- here, whether or not it matched a pending token. Powers the audit
+-- view + spoofing/replay analysis. Stores message_body_hash
+-- (sha256 of the raw body) NOT the raw token — even on the misclassify
+-- path the raw string never persists outside browser_automation_purchase_tokens.token.
+CREATE TABLE IF NOT EXISTS browser_automation_purchase_replies (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    received_at       INTEGER NOT NULL,
+    channel_ref       TEXT NOT NULL,
+    message_body_hash TEXT NOT NULL,
+    matched_jti       TEXT,
+    outcome           TEXT NOT NULL CHECK (outcome IN (
+        'consumed',
+        'wrong_channel',
+        'expired',
+        'already_consumed',
+        'already_cancelled',
+        'no_match',
+        'cancel_workflow',
+        'shape_invalid'
+    ))
+);
+CREATE INDEX IF NOT EXISTS idx_purchase_replies_received_at
+    ON browser_automation_purchase_replies(received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_purchase_replies_matched
+    ON browser_automation_purchase_replies(matched_jti)
+    WHERE matched_jti IS NOT NULL;
+
+-- ── B-4 per-site enable + caps ────────────────────────────────────────
+--
+-- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.8.
+--
+-- Per-site_key row. A site with enabled=0 cannot mint tokens — the
+-- runner returns purchase_site_not_enabled before Playwright is
+-- launched. Caps are enforced atomically at token-issuance time inside
+-- the same transaction that inserts the purchase_tokens row.
+--
+-- currency is the canonical ISO-4217 code for that site (mirrors
+-- the agent's params.currency). Caps are denominated in minor units
+-- of that currency (¥ = JPY × 1; ¢ = USD × 100). Cross-currency math
+-- never happens — every cap query filters on (site_key, currency)
+-- before SUM().
+CREATE TABLE IF NOT EXISTS browser_automation_b4_site_config (
+    site_key                       TEXT PRIMARY KEY,
+    enabled                        INTEGER NOT NULL DEFAULT 0
+        CHECK (enabled IN (0, 1)),
+    currency                       TEXT NOT NULL,
+    daily_token_cap                INTEGER NOT NULL DEFAULT 5
+        CHECK (daily_token_cap >= 1 AND daily_token_cap <= 100),
+    daily_spend_cap_minor          INTEGER NOT NULL DEFAULT 30000
+        CHECK (daily_spend_cap_minor >= 0),
+    per_tx_cap_minor_override      INTEGER
+        CHECK (per_tx_cap_minor_override IS NULL OR per_tx_cap_minor_override >= 0),
+    updated_at                     INTEGER NOT NULL
+);
+
+-- ── B-4 primary-channel selection ─────────────────────────────────────
+--
+-- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.8 "Primary channel
+-- configuration: list of owner DM channels with a primary:boolean flag
+-- per channel. Only primary channels receive B-4 confirmation requests.
+-- At least one primary channel is required for B-4 to be enabled."
+--
+-- One row per (platform, channel_id) pair the user has flagged as
+-- primary. The token-handler reads this set when minting a token; if
+-- the originating channel of the request is primary, the token is
+-- DM'd to that channel only (single-channel ergonomic flow). For
+-- scheduled-task-driven B-4 invocations (no originating channel) the
+-- token is fanned out to every primary channel and the validation
+-- path follows the "approved on <channel>" rule (§17.3).
+--
+-- Stored as a separate table (not a column on owner_channels) so the
+-- additive CREATE-IF-NOT-EXISTS upgrade path applies without an
+-- ALTER on the pre-existing owner_channels table.
+CREATE TABLE IF NOT EXISTS browser_automation_purchase_primary_channels (
+    platform     TEXT NOT NULL,
+    channel_id   TEXT NOT NULL,
+    set_at       INTEGER NOT NULL,
+    PRIMARY KEY (platform, channel_id)
+);
+
 -- INTEGRATION-DRIFT-PHASE-7-PLAN.md §3.2 — persistent dedup for the
 -- 15-minute imminent-meeting reminder. Pre-Phase-7 the scheduler kept
 -- an in-memory Set, which was lost on every daemon restart and re-DMed

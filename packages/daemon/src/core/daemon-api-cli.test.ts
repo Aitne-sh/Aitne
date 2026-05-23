@@ -48,6 +48,11 @@ describe("daemon-api-cli", () => {
     expect(shimContent).toContain("inferMimeFromName");
     expect(shimContent).toContain('"text/markdown"');
     expect(shimContent).toContain('"text/csv"');
+    // Real curl 7.82+ shorthands the agent learns from skill prose. Without
+    // these the shim used to fail with "Unsupported curl flag: --json" /
+    // "--head" and burn budget on routine.morning_routine_today retries.
+    expect(shimContent).toContain('"--json"');
+    expect(shimContent).toContain('"--head"');
     expect(statSync(cliPath).mode & 0o777).toBe(0o700);
     expect(statSync(curlShimPath).mode & 0o777).toBe(0o700);
   });

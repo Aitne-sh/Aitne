@@ -78,7 +78,11 @@ import {
   cleanupSessionWorkdir,
   ensureBackendMaterialized,
 } from "./workdir.js";
-import { readIntegrations } from "../db/integrations-store.js";
+import { readIntegrations, readIntegrationState } from "../db/integrations-store.js";
+import { refreshInterestsReflection } from "../services/browser-history/refresh-interests-reflection.js";
+import { InterestsReflectionLockBusyError } from "../services/browser-history/interests-reflection-lock.js";
+import { findSectionLineBounds } from "./roadmap-validate.js";
+import { writeFileAtomically } from "./atomic-write.js";
 import {
   getRepository,
   getRepositoryByLocalPath,
@@ -1324,6 +1328,21 @@ export class ScheduledTaskRunner {
           };
         }
       }
+      // WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.4 — deterministic
+      // pre-hook for `routine.weekly_review`. Runs synchronously
+      // BEFORE `contextBuilder.build` so the freshly-refreshed
+      // `## Current research themes (auto)` block lands in the
+      // session's `<user>` injection. Failure-isolated: a throw
+      // here is caught (`appendWeeklyInterestsJournalLine`) and the
+      // user-facing weekly artifact still ships. Skip when the
+      // upstream `browser-history` integration is disabled, mirroring
+      // the F1 / F2 / F4 gate.
+      if (
+        isRoutineEvent(effectiveEvent)
+        && (effectiveEvent as RoutineEvent).routine === "weekly_review"
+      ) {
+        this.runWeeklyInterestsReflectionPreHook(effectiveEvent as RoutineEvent);
+      }
       const context = await this.contextBuilder.build(effectiveEvent);
       const processKey = resolveProcessKey(effectiveEvent);
       // Honour run-now's `requestedModel` hint for routine events. Other event
@@ -1426,4 +1445,317 @@ export class ScheduledTaskRunner {
   static formatScheduledFor(date: Date): string {
     return formatSqliteDatetime(date);
   }
+
+  /**
+   * WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.4 pre-hook.
+   *
+   * Synchronous and failure-isolated. The only side-effect the caller
+   * cares about is the freshly-refreshed `context/user/profile.md`
+   * block — which `contextBuilder.build` (called immediately after
+   * this method returns) picks up via its normal read path. Every
+   * branch below routes through a try/catch so a throw cannot abort
+   * the user-facing weekly artifact.
+   *
+   * Three terminal states:
+   *
+   *   - `browser_history` mode is `disabled` → no-op (with a journal
+   *     line for traceability so an operator wondering "why didn't the
+   *     reflection run this week?" finds the answer in
+   *     `agent/journal.md` rather than having to greppling
+   *     `agent_actions`).
+   *   - The helper returns `{ skipped }` → journal line + audit row
+   *     already emitted by the helper.
+   *   - The helper throws → log + journal line. Audit row may or may
+   *     not have been written depending on how far the helper got;
+   *     the journal line is the defensive trace.
+   */
+  private runWeeklyInterestsReflectionPreHook(event: RoutineEvent): void {
+    try {
+      const browserHistory = readIntegrationState(this.db, "browser_history");
+      const integrationDisabled = browserHistory.mode === "disabled";
+
+      // Pass `this.db` so degraded-Obsidian-mode falls back to the
+      // internal `~/.personal-agent/context/` — the rest of this file
+      // (lines 424, 698, 725, 1107, 1135) follows the same convention;
+      // without the db argument the pre-hook would write into the
+      // user's Obsidian vault even when the daemon has decided to skip
+      // it, leaving the LLM's contextBuilder reading from a different
+      // location than the writer wrote to.
+      const contextDir = getContextDir(this.config, this.db);
+      const boundary = {
+        timezone: this.config.timezone ? this.config.timezone : undefined,
+        dayBoundaryHour: this.config.dayBoundaryHour ?? 4,
+      };
+      // rev 4 — the disabled gate is now enforced INSIDE the helper
+      // (via `integrationDisabled`) so the audit-row shape is uniform
+      // across both skip reasons. The helper short-circuits without
+      // taking the lock or touching disk; it still emits the audit
+      // row + returns `{ skipped: { reason: "no_browser_history" } }`.
+      const result = refreshInterestsReflection(this.db, contextDir, {
+        trigger: "scheduler",
+        boundary,
+        integrationDisabled,
+        // Thread the agent-write tracker so each write the helper does
+        // to user/profile.md, user/research-themes.md, user/_index.md,
+        // and projects/*.md is attributed to the agent by FS-watch
+        // consumers (the context-index reconciler chain + future
+        // observers). Without this thread the chokidar `change` events
+        // would be classified as user edits and feed into the hourly-
+        // check pending floor as if the user had typed them.
+        writeTracker: this.writeTracker,
+        // `correlationId` is the routine event's identifier in the
+        // bus; thread it as `event_id` on the audit row so the
+        // dashboard's audit log can join the reflection trace to the
+        // triggering weekly_review event.
+        eventId: event.correlationId,
+      });
+      if (result.skipped) {
+        this.appendWeeklyInterestsJournalLine(
+          `interest reflection skipped: ${result.skipped.reason} (weekStart=${result.weekStart})`,
+        );
+      } else {
+        logger.info(
+          {
+            correlationId: event.correlationId,
+            weekStart: result.weekStart,
+            targetsWritten: result.targetsWritten.length,
+            themesSelected: result.themesSelected.length,
+            projectsAnnotated: result.projectsAnnotated,
+          },
+          "Weekly interests reflection pre-hook completed",
+        );
+      }
+    } catch (err) {
+      // Catch-all: never propagate up to `executeDefault` — the user-
+      // facing weekly artifact must still ship. Lock contention is a
+      // distinct, expected failure mode (e.g. the dashboard's
+      // "Refresh now" button is mid-flight when the scheduler tick
+      // fires) so we tag it separately for operator clarity.
+      if (err instanceof InterestsReflectionLockBusyError) {
+        logger.warn(
+          { err, correlationId: event.correlationId },
+          "Weekly interests reflection pre-hook hit lock contention — yielding to in-flight run",
+        );
+        this.appendWeeklyInterestsJournalLine(
+          `interest reflection deferred: lock busy (${err.heldBy})`,
+        );
+        return;
+      }
+      logger.error(
+        { err, correlationId: event.correlationId },
+        "Weekly interests reflection pre-hook threw — continuing to LLM session",
+      );
+      const message =
+        err instanceof Error ? err.message : String(err);
+      this.appendWeeklyInterestsJournalLine(
+        `interest reflection failed: ${message}`,
+      );
+    }
+  }
+
+  /**
+   * Append a single bullet under `## Weekly interests reflection`
+   * inside `context/agent/journal.md`, creating the section (and the
+   * file) when absent. Mirrors the `appendToJournalSection` pattern
+   * `roadmap-maintenance.ts` uses for its own one-liner trace; kept
+   * inline here because the section header is feature-specific and
+   * the helper has zero call sites outside this module.
+   *
+   * Best-effort: any FS failure is logged and swallowed.
+   */
+  private appendWeeklyInterestsJournalLine(message: string): void {
+    try {
+      // Same `this.db` thread-through as the pre-hook — keep the
+      // journal write in the same file tree the reflection writes to.
+      const contextDir = getContextDir(this.config, this.db);
+      const journalPath = join(
+        contextDir,
+        CONTEXT_RELATIVE_PATHS.agent.journal,
+      );
+      const now = new Date();
+      const tz = this.config.timezone ? this.config.timezone : undefined;
+      const dayStr = getAgentDayDateStr(
+        tz,
+        this.config.dayBoundaryHour ?? 4,
+        now,
+      );
+      const hm = formatJournalTime(now, tz);
+      const bullet = `- ${dayStr} ${hm}: ${message}`;
+
+      const original = existsSync(journalPath)
+        ? readFileSync(journalPath, "utf-8")
+        : null;
+      // Thread `now.getTime()` so the 30-day retention window cuts
+      // deterministically against the same instant the bullet's date
+      // prefix was computed from — without it, prune would default to
+      // `Date.now()` and a long-running test (or a slow disk) could
+      // see the two diverge across the read/append boundary.
+      const next = appendToWeeklyInterestsJournalSection(
+        original,
+        bullet,
+        now.getTime(),
+      );
+
+      // The agent-write tracker must see the new content BEFORE the
+      // rename so a downstream FS-watch consumer attributes the
+      // resulting event to the agent (and not to the user). The same
+      // mark-then-write-then-unmark-on-failure dance the roadmap-
+      // maintenance journal appender uses.
+      this.writeTracker?.markWriting(journalPath, next);
+      try {
+        writeFileAtomically(journalPath, next);
+      } catch (writeErr) {
+        this.writeTracker?.unmark(journalPath);
+        throw writeErr;
+      }
+    } catch (err) {
+      // The journal line is a best-effort trace — never fail the
+      // pre-hook on a journal write hiccup. The structured log is
+      // sufficient for daemon-log triage.
+      logger.error(
+        { err },
+        "Failed to append weekly interests journal line",
+      );
+    }
+  }
+}
+
+const WEEKLY_INTERESTS_JOURNAL_SECTION = "## Weekly interests reflection";
+
+/**
+ * rev 4 — monthly retention window for the `## Weekly interests
+ * reflection` section. Bullets whose date prefix is older than this
+ * window get pruned on the next append. At the weekly cadence the
+ * pre-hook fires, this caps the section at ~4-5 entries.
+ *
+ * Rationale: `context/agent/journal.md` is the operator-facing trace
+ * for "why didn't my reflection fire?" type questions. Six months of
+ * weekly skip/success lines is noise — the load-bearing detail is
+ * "did it work this month and last?", which a 30-day window captures
+ * comfortably. Lines older than that live in git history if needed.
+ */
+const WEEKLY_INTERESTS_JOURNAL_RETENTION_DAYS = 30;
+
+/**
+ * Match the date prefix our journal bullets carry — `- YYYY-MM-DD HH:MM:`
+ * — and capture the date component. Lines that don't match (e.g. a
+ * user-authored note inside the section) are left untouched by the
+ * rotation pass; only daemon-emitted bullets get pruned.
+ */
+const JOURNAL_BULLET_DATE_RE = /^- (\d{4}-\d{2}-\d{2})\s/;
+
+/**
+ * Drop bullets whose date prefix is older than `retentionDays` days
+ * before `nowMs`. Pure of FS/DB; exported for tests.
+ *
+ * Lines that aren't recognisable as daemon-emitted bullets (no
+ * `- YYYY-MM-DD` prefix) are preserved as-is — the rotation only
+ * targets entries we created, never user prose someone may have
+ * dropped into the section by hand.
+ */
+export function pruneWeeklyInterestsJournalBullets(
+  lines: string[],
+  bodyStart: number,
+  bodyEnd: number,
+  nowMs: number,
+  retentionDays: number = WEEKLY_INTERESTS_JOURNAL_RETENTION_DAYS,
+): string[] {
+  const cutoffMs = nowMs - retentionDays * 24 * 60 * 60 * 1000;
+  const kept: string[] = [];
+  for (let i = bodyStart; i < bodyEnd; i++) {
+    const line = lines[i]!;
+    const match = JOURNAL_BULLET_DATE_RE.exec(line);
+    if (!match) {
+      kept.push(line);
+      continue;
+    }
+    // Anchor at noon UTC so a DST flip in the host's local zone
+    // cannot move the parsed date into the day before/after.
+    const dateMs = Date.parse(`${match[1]}T12:00:00Z`);
+    if (Number.isNaN(dateMs) || dateMs >= cutoffMs) {
+      kept.push(line);
+    }
+  }
+  return [...lines.slice(0, bodyStart), ...kept, ...lines.slice(bodyEnd)];
+}
+
+/**
+ * Append `bullet` to the `## Weekly interests reflection` section of
+ * an agent-journal file, creating section + skeleton when absent.
+ * Also prunes bullets older than the retention window (rev 4 — see
+ * `WEEKLY_INTERESTS_JOURNAL_RETENTION_DAYS`).
+ *
+ * The function is pure of FS / DB — exported only for tests.
+ */
+export function appendToWeeklyInterestsJournalSection(
+  original: string | null,
+  bullet: string,
+  nowMs: number = Date.now(),
+): string {
+  if (original === null) {
+    return `# Agent journal\n\n${WEEKLY_INTERESTS_JOURNAL_SECTION}\n\n${bullet}\n`;
+  }
+  const lines = original.split("\n");
+  const bounds = findSectionLineBounds(lines, "Weekly interests reflection");
+  if (bounds) {
+    // Prune first so the section contains only the last `RETENTION_DAYS`
+    // worth of entries BEFORE we compute the insertion point — without
+    // this, a long-stale bullet at the end would push the new bullet
+    // into a section that's about to lose half its content.
+    const pruned = pruneWeeklyInterestsJournalBullets(
+      lines,
+      bounds.bodyStart,
+      bounds.bodyEnd,
+      nowMs,
+    );
+    // Re-resolve bounds after pruning — bodyEnd shifted by the
+    // delta. Section header position is unchanged so re-using
+    // bodyStart is safe; we recompute bodyEnd as the old end minus
+    // the number of lines we dropped.
+    const removedCount = lines.length - pruned.length;
+    const newBodyStart = bounds.bodyStart;
+    const newBodyEnd = bounds.bodyEnd - removedCount;
+    let insertAt = newBodyEnd;
+    while (insertAt > newBodyStart && pruned[insertAt - 1]!.trim() === "") {
+      insertAt -= 1;
+    }
+    const next = [
+      ...pruned.slice(0, insertAt),
+      bullet,
+      ...pruned.slice(insertAt),
+    ];
+    let out = next.join("\n");
+    if (!out.endsWith("\n")) out += "\n";
+    return out;
+  }
+  const trimmed = original.replace(/\n+$/, "");
+  return `${trimmed}\n\n${WEEKLY_INTERESTS_JOURNAL_SECTION}\n\n${bullet}\n`;
+}
+
+/**
+ * Local 2-digit "HH:MM". Mirrors `roadmap-maintenance.ts:formatHm`
+ * (which is module-private) without re-exporting from there — the
+ * roadmap helper has the same posture (best-effort wall-clock for a
+ * journal bullet) but lives in a feature-specific module.
+ */
+function formatJournalTime(now: Date, timezone?: string): string {
+  if (!timezone) {
+    return (
+      `${String(now.getHours()).padStart(2, "0")}:`
+      + `${String(now.getMinutes()).padStart(2, "0")}`
+    );
+  }
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(now);
+  const hh = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const mm = parts.find((p) => p.type === "minute")?.value ?? "00";
+  // Intl can emit "24" for midnight in some locales — guard so the
+  // journal line is stable regardless of host locale.
+  const normalizedHh = hh === "24" ? "00" : hh;
+  return `${normalizedHh}:${mm}`;
 }

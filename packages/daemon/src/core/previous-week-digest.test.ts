@@ -243,6 +243,15 @@ describe("previous-week-digest", () => {
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest!.generatedAt).toBe("2026-05-15T19:00:00.000Z");
     });
+
+    it("returns null when the weekly entry exists but is a directory (readFile throws EISDIR)", async () => {
+      // existsSync passes (the path resolves), but readFile/stat raise
+      // because the entry is a directory — both errors collapse to the
+      // single try/catch and return null.
+      mkdirSync(join(contextDir, "weekly", "2026-W20.md"));
+      const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
+      expect(digest).toBeNull();
+    });
   });
 
   // ── renderPreviousWeekBlock ────────────────────────────────────────
@@ -281,6 +290,63 @@ describe("previous-week-digest", () => {
       });
       expect(rendered).toMatch(/<focus>\n\s+\(none recorded\)\n\s+<\/focus>/);
       expect(rendered).toMatch(/<lessons>\n\s+\(none recorded\)\n\s+<\/lessons>/);
+    });
+
+    it("renders `(none recorded)` for all three sections when the digest is fully empty", () => {
+      // Pins the empty-string branch of `body || \"(none recorded)\"` for
+      // carry_over — the other two sub-blocks were already covered by the
+      // partial-empty test above, but the carry_over arm only fires when
+      // the carryOver field itself is empty.
+      const rendered = renderPreviousWeekBlock({
+        period: "2026-W20",
+        generatedAt: "2026-05-15T19:00:00.000Z",
+        carryOver: "",
+        focus: "",
+        lessons: "",
+      });
+      expect(rendered).toMatch(/<carry_over>\n\s+\(none recorded\)\n\s+<\/carry_over>/);
+      expect(rendered).toMatch(/<focus>\n\s+\(none recorded\)\n\s+<\/focus>/);
+      expect(rendered).toMatch(/<lessons>\n\s+\(none recorded\)\n\s+<\/lessons>/);
+    });
+
+    it("preserves blank lines inside a section body (does not prefix empty lines)", () => {
+      // The `indent` helper short-circuits empty lines so the indented
+      // output keeps the paragraph break visible without trailing
+      // whitespace. Pins the `line.length === 0` truthy branch.
+      const rendered = renderPreviousWeekBlock({
+        period: "2026-W20",
+        generatedAt: "2026-05-15T19:00:00.000Z",
+        carryOver: "- Item A\n\n- Item B",
+        focus: "- Focus",
+        lessons: "- Lesson",
+      });
+      // Each non-empty bullet gets 4-space indent; the blank line between
+      // them stays a bare empty line (no prefix).
+      expect(rendered).toContain("    - Item A\n\n    - Item B");
+    });
+
+    it("preserves sections that fit within their proportional budget and replaces zero-budget sections with the marker", () => {
+      // Total > PREVIOUS_WEEK_BLOCK_MAX_CHARS forces truncation, but the
+      // proportional split allocates effectively zero bytes to the two
+      // tiny sections. truncate() then exercises both edge branches:
+      //   • lessons (budget == text.length == 1) — text-fits-budget short
+      //     circuit, returns the body verbatim.
+      //   • focus (budget == 0) — marker-length floor, returns "...".
+      // The long carryOver section follows the normal slice + marker path.
+      const longCarryOver = "x".repeat(5000);
+      const rendered = renderPreviousWeekBlock({
+        period: "2026-W20",
+        generatedAt: "2026-05-15T19:00:00.000Z",
+        carryOver: longCarryOver,
+        focus: "f",
+        lessons: "l",
+      });
+      const focusBody = rendered.match(/<focus>([\s\S]*?)<\/focus>/)?.[1];
+      const lessonsBody = rendered.match(/<lessons>([\s\S]*?)<\/lessons>/)?.[1];
+      const carryBody = rendered.match(/<carry_over>([\s\S]*?)<\/carry_over>/)?.[1];
+      expect(focusBody?.trim()).toBe("...");
+      expect(lessonsBody?.trim()).toBe("l");
+      expect(carryBody?.trim().endsWith("...")).toBe(true);
     });
 
     it("truncates oversize bodies with an explicit ellipsis marker", () => {

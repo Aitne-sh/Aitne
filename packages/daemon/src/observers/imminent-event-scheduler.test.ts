@@ -451,6 +451,43 @@ describe("ImminentEventScheduler", () => {
     expect(bus.put).not.toHaveBeenCalled();
   });
 
+  it("swallows + logs runTick errors so a failed tick never propagates out of tick()", async () => {
+    // Close the DB while the scheduler still holds a reference — the next
+    // `db.prepare(...)` inside `runTick` throws, the PollGuard re-throws,
+    // and the outer `try/catch` in `tick()` must log + recover. Without
+    // this guard the timer's `() => void this.tick()` would surface an
+    // unhandled rejection on every tick after a transient DB failure.
+    const bus = makeBus();
+    const scheduler = new ImminentEventScheduler(db, bus, "primary", 60, () => NOW);
+    db.close();
+    await expect(scheduler.tick()).resolves.toBeUndefined();
+    expect(bus.put).not.toHaveBeenCalled();
+    // Re-open a fresh DB so afterEach's close() does not throw on the
+    // already-closed handle.
+    db = new Database(":memory:");
+    applySchema(db);
+  });
+
+  it("aborts mid-loop when stop() fires between row emits (signal.aborted breaks the for-loop)", async () => {
+    // Two rows in the imminent window. The first bus.put() invocation
+    // calls scheduler.stop(), which aborts the PollGuard signal. The
+    // `if (signal.aborted) return;` check at the top of the next
+    // iteration short-circuits, so only one event is emitted even though
+    // both rows passed the SQL filter. Without this signal check, a
+    // long-running tick could keep emitting after the observer has
+    // been shut down.
+    const bus = makeBus();
+    insertSnapshot(db, "evt-A", new Date(NOW.getTime() + 5 * 60 * 1000).toISOString());
+    insertSnapshot(db, "evt-B", new Date(NOW.getTime() + 10 * 60 * 1000).toISOString());
+
+    const scheduler = new ImminentEventScheduler(db, bus, "primary", 60, () => NOW);
+    (bus.put as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      await scheduler.stop();
+    });
+    await scheduler.tick();
+    expect(bus.put).toHaveBeenCalledTimes(1);
+  });
+
   it("invokes the periodic tick callback registered by start()", async () => {
     vi.useFakeTimers();
     try {

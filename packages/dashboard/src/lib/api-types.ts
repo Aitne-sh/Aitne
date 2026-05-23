@@ -124,7 +124,6 @@ export interface IntegrationStatuses {
   obsidian: IntegrationStatus;
   notion: IntegrationStatus;
   whatsapp: WhatsAppIntegrationStatus;
-  googleMaps?: IntegrationStatus;
 }
 
 export interface MessagingHealthStatus {

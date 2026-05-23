@@ -187,7 +187,6 @@ describe("SecretBroker", () => {
       githubWebhookSecret: "wh-1",
       googleCredentialsJson: '{"type":"service_account"}',
       googleTokenJson: '{"access_token":"at"}',
-      googleMapsApiKey: "maps-1",
     });
     const broker = new SecretBroker(store, { cacheTtlMs: 0 });
 
@@ -200,7 +199,6 @@ describe("SecretBroker", () => {
     await expect(broker.getGitHubWebhookSecret()).resolves.toBe("wh-1");
     await expect(broker.getGoogleCredentialsJson()).resolves.toBe('{"type":"service_account"}');
     await expect(broker.getGoogleTokenJson()).resolves.toBe('{"access_token":"at"}');
-    await expect(broker.getGoogleMapsApiKey()).resolves.toBe("maps-1");
   });
 
   it("Apple Calendar credentials round-trip and delete via the broker", async () => {

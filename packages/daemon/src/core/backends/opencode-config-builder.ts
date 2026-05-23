@@ -236,6 +236,20 @@ export function buildOpencodeRuntimeConfig(
  * `instructions` glob list. Centralised here so callers don't repeat
  * the env-var-name string.
  */
+/**
+ * Test-only re-export of the internal merge helpers. The future-proof
+ * branches in `mergePermissions` (edit / webfetch / doom_loop /
+ * external_directory) and the `typeof override === "string"` short-circuit
+ * in `mergeBash` are unreachable from the current absolute-block layer
+ * (which only emits bash patterns). Surfacing them keeps the unit tests
+ * able to pin the merge contract that protects future absolute-block
+ * shapes — same convention as `claude-code-core._testInternals`.
+ */
+export const _testInternals = {
+  mergePermissions,
+  mergeBash,
+};
+
 export function defensiveInstructionsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {

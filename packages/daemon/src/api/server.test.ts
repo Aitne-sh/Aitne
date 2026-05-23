@@ -124,7 +124,6 @@ function makeTestDeps(tmpDir: string): {
             error: null,
             state: "not_configured",
           },
-          googleMaps: { configured: false, connected: false, error: null },
         }),
     },
     db,
@@ -293,11 +292,6 @@ describe("Daemon API", () => {
         connected: false,
         error: null,
         state: "not_configured",
-      });
-      expect(data.integrations.googleMaps).toEqual({
-        configured: false,
-        connected: false,
-        error: null,
       });
     });
 
@@ -2783,7 +2777,6 @@ describe("ReadSensitive auth middleware", () => {
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" },
-        googleMaps: { configured: false, connected: false, error: null },
       }),
     });
   }
@@ -2962,7 +2955,6 @@ describe("Host header security (DNS-rebinding guard)", () => {
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-        googleMaps: { configured: false, connected: false, error: null },
         appleCalendar: { configured: false, connected: false, error: null },
       }),
     });
@@ -3051,7 +3043,6 @@ describe("Loopback browser gate additional coverage", () => {
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-        googleMaps: { configured: false, connected: false, error: null },
         appleCalendar: { configured: false, connected: false, error: null },
       }),
     });
@@ -3148,7 +3139,6 @@ describe("Approve-tier 503 when daemon API token is unconfigured", () => {
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-        googleMaps: { configured: false, connected: false, error: null },
         appleCalendar: { configured: false, connected: false, error: null },
       }),
     });
@@ -3189,7 +3179,6 @@ describe("Conditional route mounting", () => {
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-        googleMaps: { configured: false, connected: false, error: null },
         appleCalendar: { configured: false, connected: false, error: null },
       }),
       ...extraDeps,
@@ -3422,7 +3411,6 @@ describe("app.onError handler", () => {
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-        googleMaps: { configured: false, connected: false, error: null },
         appleCalendar: { configured: false, connected: false, error: null },
       }),
     });
@@ -3464,7 +3452,6 @@ describe("Risk-audit boot fingerprint persistence", () => {
           obsidian: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-          googleMaps: { configured: false, connected: false, error: null },
           appleCalendar: { configured: false, connected: false, error: null },
         }),
       });
@@ -3500,7 +3487,6 @@ describe("server.ts line-1015 getChatBinding null branch and line-1001 getContex
         obsidian: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" as const },
-        googleMaps: { configured: false, connected: false, error: null },
         appleCalendar: { configured: false, connected: false, error: null },
       }),
       ...extraDeps,

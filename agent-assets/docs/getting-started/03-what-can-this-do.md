@@ -117,13 +117,12 @@ API so the layout invariants hold.
 
 ## Help with the small lifestyle stuff
 
-Reading lists, receipts, travel bookings, travel-time estimates — the
-agent collects what arrives in mail and surfaces it in the right tab.
+Reading lists, receipts, travel bookings — the agent collects what
+arrives in mail and surfaces it in the right tab.
 
 - [Reading](../features/lifestyle/reading.md)
 - [Receipts](../features/lifestyle/receipts.md)
 - [Travel Bookings](../features/lifestyle/travel-bookings.md)
-- [Travel Time](../features/lifestyle/travel-time.md)
 
 ## Stay in control
 

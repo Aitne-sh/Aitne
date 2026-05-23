@@ -843,22 +843,6 @@ async function startup(): Promise<void> {
     secretState,
   });
 
-  // Google Maps (F-08: commute optimization)
-  {
-    const { GoogleMapsService } = await import("./services/google-maps.js");
-    const mapsService = new GoogleMapsService(secretBroker);
-    try {
-      await mapsService.init();
-      if (mapsService.available) {
-        services.googleMaps = mapsService;
-      }
-    } catch (err) {
-      const msg = (err as Error).message;
-      logger.error({ error: msg }, "Google Maps service init failed, continuing without it");
-      services.errors.googleMaps = msg;
-    }
-  }
-
   // Obsidian
   if (config.externalObsidianVaultName) {
     const obsidianService = new ObsidianService(config);
@@ -948,13 +932,6 @@ async function startup(): Promise<void> {
               ? "WhatsApp logged out"
               : null,
         state: whatsappState,
-      },
-      googleMaps: {
-        configured: services.googleMaps !== null,
-        connected: services.googleMaps !== null,
-        error: services.errors.googleMaps
-          ? toSafeErrorMessage(services.errors.googleMaps)
-          : null,
       },
     };
   };

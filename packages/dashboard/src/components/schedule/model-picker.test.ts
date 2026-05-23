@@ -111,6 +111,21 @@ describe("projectModelOptions", () => {
     const labels = groups.map((g) => g.label);
     expect(labels).not.toContain("OpenAI Codex");
   });
+
+  it("appends the upstream deprecation suffix to the Gemini group label", () => {
+    // Google I/O 2026 sunset advisory — the operator should see Gemini is
+    // about to go dark for free/Pro/Ultra accounts before they bind a
+    // new recurring schedule to a Gemini model.
+    const groups = projectModelOptions(fakeOptions());
+    const labels = groups.map((g) => g.label);
+    const geminiLabel = labels.find((l) => l.startsWith("Gemini CLI"));
+    expect(geminiLabel).toBeDefined();
+    expect(geminiLabel).toMatch(/deprecat/i);
+    // Non-deprecated backends keep their plain label — only the affected
+    // group carries the suffix.
+    expect(labels).toContain("Claude Code");
+    expect(labels).toContain("OpenAI Codex");
+  });
 });
 
 describe("describeModelValue", () => {

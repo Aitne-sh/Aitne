@@ -77,7 +77,6 @@ const SECRET_KEYS = new Set([
   "githubWebhookSecret",
   "googleCredentialsJson",
   "googleTokenJson",
-  "googleMapsApiKey",
   "appleCalendarCredentials",
   "apiToken",
 ] as const);

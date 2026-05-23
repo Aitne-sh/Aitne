@@ -26,7 +26,7 @@ ask_examples:
   - Can I point the wiki at my Obsidian vault?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-17
+updated: 2026-05-21
 keywords:
   - wiki
   - wiki workspace
@@ -34,20 +34,45 @@ keywords:
   - 10_raw
   - 20_wiki
   - 30_outputs
+  - 90_meta
   - wiki layers
   - external vault
+  - internal vault
+  - opt-in
+  - wiki process keys
+  - wiki dispatcher
+  - dashboard wiki page
 related:
   - features/wiki/commands
+  - features/wiki/dashboard
+  - features/wiki/workspaces
+  - features/wiki/search
+  - features/wiki/cost-and-approval
   - concepts/memory-model
   - guides/build-your-wiki
   - guides/use-an-existing-obsidian-vault
   - guides/budget-and-cost-for-wiki
+  - guides/multiple-wikis-for-multiple-domains
+  - guides/maintain-wiki-health
+  - guides/explore-with-trace-and-connect
   - troubleshooting/wiki-write-failed
   - troubleshooting/wiki-ingest-full-blocked
 ui_anchors:
   - /wiki
   - /wiki/timeline
   - /settings/wiki
+api_endpoints:
+  - /api/wiki/workspaces
+  - /api/wiki/:workspace/index
+  - /api/wiki/:workspace/search
+  - /api/wiki/:workspace/estimate
+process_keys:
+  - wiki.ingest_url
+  - wiki.compile
+  - wiki.ask
+  - wiki.lint
+  - wiki.trace
+  - wiki.connect
 ---
 
 # Wiki Overview
@@ -153,3 +178,26 @@ disk until you opt in.
   strategy, git auto-commit toggle, approval threshold, per-command
   model selectors, plus archive / delete. A "Browse wiki" link at the
   top jumps you back to `/wiki`.
+
+## Where to go next
+
+This page is a high-level tour. For depth on a specific surface:
+
+- **[Commands reference](commands.md)** — every wiki bang command
+  (`!ingest`, `!compile`, `!ask`, `!lint`, `!trace`, `!connect`,
+  `!wiki`), the `@<workspace>` addressing token, dispatch modes, and
+  the disabled-state behaviour.
+- **[Dashboard surfaces](dashboard.md)** — what `/wiki`,
+  `/wiki/timeline`, and `/settings/wiki` actually render, where each
+  card reads from on disk, and how the contextual help button maps
+  to this doc set.
+- **[Workspaces, vaults, write strategy](workspaces.md)** — internal
+  vs external, multi-workspace `@<name>` addressing, fs/cli/auto
+  write strategy, dispatch modes, language, and archive vs delete.
+- **[Search and index](search.md)** — how `!ask` / `!trace` /
+  `!connect` find content via `_index.md` and the FTS5 `fts_wiki`
+  virtual table, plus the rebuild path.
+- **[Cost estimation and approval](cost-and-approval.md)** — the
+  bracketed 0.5×/2× cost estimator, the `!compile full` approval
+  threshold, the pre-compile git snapshot, and the `--preview`
+  dry-run.

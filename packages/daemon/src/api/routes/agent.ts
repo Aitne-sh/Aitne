@@ -11,6 +11,10 @@ import { randomUUID } from "node:crypto";
 import { createLogger } from "../../logging.js";
 import type { ApiDependencies } from "../server.js";
 import { loadAuditEventRow } from "../../safety/audit.js";
+import {
+  assertOutboundAllowedForAgent,
+  OutboundPurchaseTemplateError,
+} from "../../safety/outbound-purchase-guard.js";
 import { readJsonBody } from "../json-body.js";
 import {
   composeIssue,
@@ -318,6 +322,32 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
       platforms?: string[];
       priority?: "critical" | "high" | "normal" | "low";
     };
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7 structural-anti-
+    // spoofing layer — refuse outbound messages that carry one of the
+    // reserved purchase-confirmation markers ("🔐 Aitne purchase
+    // confirmation", "[purchase-verify:", "Approved on …"). These are
+    // emitted exclusively by `purchase-system-message-sender` via the
+    // unforgeable module capability; an agent-originated /notify call
+    // claiming to be a purchase confirmation is by definition a spoof
+    // attempt. The classifier audits the refusal so the dashboard's
+    // recent-activity surface flags the agent path that tried.
+    try {
+      assertOutboundAllowedForAgent(message, "api.notify", db);
+    } catch (err) {
+      if (err instanceof OutboundPurchaseTemplateError) {
+        return respondWithAgentError(
+          c,
+          400,
+          [
+            composeIssue("agent.outbound_purchase_template_refused", {
+              field: "message",
+              received: { marker: err.match.marker },
+            }),
+          ],
+        );
+      }
+      throw err;
+    }
     const normalizedPlatforms = platforms ?? (platform ? [platform] : undefined);
     const messageSummary = message.slice(0, 200);
     const originSessionId = parsePositiveIntegerHeader(c.req.header("x-pa-session-id"));

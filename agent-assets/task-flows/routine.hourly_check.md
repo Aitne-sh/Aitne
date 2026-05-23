@@ -190,6 +190,11 @@ This rule applies regardless of integration mode (direct, same-backend delegated
 6. Skip noise: journal-only edits, trivial formatting, auto-generated churn,
    already-processed agent writes, deletion of auto-generated artifacts.
 7. Mark processed observations consumed via POST /api/observations/consume.
+   Shape: `{"ids":[<int>...],"correlationId":"<verbatim from <event_correlation_id>>"}`.
+   Both fields are required and camelCase — `correlation_id` snake_case is
+   rejected. `ids` must be integers (not strings). Copy `correlationId`
+   verbatim from the `<event_correlation_id>…</event_correlation_id>` tag
+   in this prompt; do not paste the angle-bracket placeholder.
 8. Urgency gate for POST /api/notify — the default is SILENCE. At most
    ONE call per run, and only after the dedup pre-check passes AND one
    of (a)(b)(c) holds with its concrete threshold:

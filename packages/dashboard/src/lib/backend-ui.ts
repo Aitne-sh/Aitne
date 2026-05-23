@@ -55,6 +55,46 @@ export const UI_PREVIEW_ONLY_REASON =
 /** Compact suffix appended to dropdown labels for preview-only backends. */
 export const UI_PREVIEW_ONLY_BADGE_SUFFIX = " (coming soon)";
 
+/**
+ * Upstream-deprecation notice surfaced on backend selectors. Today only
+ * Gemini carries one: Google announced at I/O 2026 that Gemini CLI will
+ * stop serving free / Pro / Ultra requests on 2026-06-18 in favor of
+ * Antigravity CLI. Standard / Enterprise license holders keep access,
+ * but the daemon can't tell which tier a user is on, so we surface the
+ * advisory universally and let the user judge.
+ *
+ * Daemon-side wiring (BackendRouter, IAgentCore, RUNTIME_AVAILABLE_BACKEND_IDS)
+ * stays intact — this is purely a UI surface so an operator doesn't bind
+ * new infrastructure to a CLI about to go dark for consumer auth tiers.
+ *
+ * https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/
+ */
+export interface BackendDeprecationNotice {
+  /** Short pill text shown next to the provider badge. */
+  badgeLabel: string;
+  /** Suffix used on compact <option>/group labels (e.g. "(deprecated)"). */
+  shortSuffix: string;
+  /** One-paragraph explanation rendered in cards and tooltips. */
+  reason: string;
+}
+
+export const BACKEND_DEPRECATION_NOTICES: Partial<
+  Record<BackendId, BackendDeprecationNotice>
+> = {
+  gemini: {
+    badgeLabel: "Vendor deprecation",
+    shortSuffix: " (deprecated)",
+    reason:
+      "Google announced Gemini CLI will stop serving free, Pro, and Ultra requests on 2026-06-18 in favor of Antigravity CLI. Standard / Enterprise licenses keep access. Avoid binding new processes to Gemini if you rely on consumer-tier auth.",
+  },
+};
+
+export function getBackendDeprecation(
+  backendId: BackendId,
+): BackendDeprecationNotice | null {
+  return BACKEND_DEPRECATION_NOTICES[backendId] ?? null;
+}
+
 const BACKEND_SHORT_LABELS: Record<BackendId, string> = {
   claude: "Claude",
   codex: "Codex",

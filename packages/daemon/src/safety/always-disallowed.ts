@@ -160,6 +160,14 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Bash(security *)", // macOS Keychain CLI
   "Bash(secret-tool *)", // Linux libsecret CLI
   "Bash(cmdkey *)", // Windows Credential Manager CLI
+  // Windows DPAPI / vault abuse — MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md
+  // §7.11 lists `certutil` (cert + dpapi blob export) and `rundll32.exe`
+  // (loads vault.dll / cryptui.dll for credential dumping). No legitimate
+  // Aitne skill invokes either; blanket-deny so a Windows owner running
+  // allow mode cannot dump credentials via the same vectors macOS/Linux
+  // already block with the `security`/`secret-tool` entries above.
+  "Bash(certutil *)", // Windows DPAPI / cert export
+  "Bash(rundll32.exe *)", // Windows vault.dll / dpapi abuse
 
   // ── Secret-file reads ──
   "Read(.env)",
@@ -262,6 +270,40 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Write(~/.var/app/com.google.Chrome/**)", "Edit(~/.var/app/com.google.Chrome/**)",
   "Write(/mnt/c/Users/**)", "Edit(/mnt/c/Users/**)",
 
+  // ── Managed Chromium profile directories (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11) ──
+  // The daemon-owned Chromium profile dirs under PA_DATA_DIR. Agent
+  // memory writes to `chromium-sync/` would corrupt the OAuth refresh
+  // token; reads would let an LLM-driven exfiltration attack lift the
+  // token out. The chokepoint is the `/api/browser-history/managed/*`
+  // API; the absolute-block layer prevents the agent from reaching
+  // around it.
+  //
+  // PA_DATA_DIR defaults to `~/.personal-agent/` but is operator-
+  // overridable. The prefix globs below hard-code the default; the
+  // substring fallback (`looksLikeBrowserProfileBash` / `…Path` —
+  // extended in the same edit) catches non-default PA_DATA_DIR
+  // installs and encoded forms.
+  "Bash(cp ~/.personal-agent/chromium-*)",
+  "Bash(mv ~/.personal-agent/chromium-*)",
+  "Bash(tar ~/.personal-agent/chromium-*)",
+  "Bash(zip ~/.personal-agent/chromium-*)",
+  "Bash(rsync ~/.personal-agent/chromium-*)",
+  "Bash(cp $HOME/.personal-agent/chromium-*)",
+  "Bash(mv $HOME/.personal-agent/chromium-*)",
+  "Bash(tar $HOME/.personal-agent/chromium-*)",
+  "Bash(zip $HOME/.personal-agent/chromium-*)",
+  "Bash(rsync $HOME/.personal-agent/chromium-*)",
+  "Read(~/.personal-agent/chromium-sync/**)",
+  "Read(~/.personal-agent/chromium-automation/**)",
+  "Read(~/.personal-agent/chromium-automation-anon/**)",
+  "Read(~/.personal-agent/chromium-automation-auth/**)",
+  "Read(~/.personal-agent/chromium-automation-purchase/**)",
+  "Write(~/.personal-agent/chromium-sync/**)", "Edit(~/.personal-agent/chromium-sync/**)",
+  "Write(~/.personal-agent/chromium-automation/**)", "Edit(~/.personal-agent/chromium-automation/**)",
+  "Write(~/.personal-agent/chromium-automation-anon/**)", "Edit(~/.personal-agent/chromium-automation-anon/**)",
+  "Write(~/.personal-agent/chromium-automation-auth/**)", "Edit(~/.personal-agent/chromium-automation-auth/**)",
+  "Write(~/.personal-agent/chromium-automation-purchase/**)", "Edit(~/.personal-agent/chromium-automation-purchase/**)",
+
   // ── Anthropic-cloud managed/scheduled agents ──
   // Aitne is local-first by design: scheduling lives in `agent_schedule` +
   // `recurring_schedules` and is driven by the daemon's own cron. The Claude
@@ -293,7 +335,13 @@ export type AbsoluteBlockCategory =
   | "secret_cli"
   | "secret_read"
   | "secret_write"
-  | "browser_profile";
+  | "browser_profile"
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7 — agent tools cannot
+  // read / write / echo a `!~xxxxxxxx` purchase confirmation token.
+  // Defence-in-depth so a buggy messaging adapter that accidentally
+  // surfaces a live token into the LLM input does not let the LLM
+  // round-trip it back via a Bash arg, file write, etc.
+  | "purchase_token_echo";
 
 export interface AbsoluteBlockMatch {
   category: AbsoluteBlockCategory;
@@ -397,12 +445,52 @@ export function stripBashStringContent(cmd: string): string {
   return stripBashHeredocs(cmd).replace(/'[^']*'/g, "''");
 }
 
+/**
+ * Regex sentinel for the B-4 purchase confirmation token shape —
+ * `!~<8 base32>` (uppercase A-Z + digits 2-7). Used by
+ * `classifyAbsoluteBlock` so any agent-tool arg containing a live (or
+ * stale) token trips a structured `purchase_token_echo` refusal.
+ *
+ * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7 specifies the regex
+ * verbatim. We keep the embed (non-anchored) form here — the
+ * adapter-side classifier uses the anchored `^…$` form to detect a
+ * full token reply, but the absolute-block layer needs the embed form
+ * because an attacker echo could happen as a substring of a larger
+ * Bash arg (e.g. `curl -d '{"note":"!~AAAAAAAA"}' …`). Matching
+ * embedded covers both.
+ */
+const PURCHASE_TOKEN_EMBED = /!~[A-Z2-7]{8}/;
+
+function redactPurchaseTokenMatch(arg: string): string {
+  const m = PURCHASE_TOKEN_EMBED.exec(arg);
+  /* c8 ignore next — guarded by the caller; defensive default */
+  if (!m) return "<redacted-token>";
+  return `${m[0].slice(0, 2)}****${m[0].slice(-3)}`;
+}
+
 export function classifyAbsoluteBlock(
   toolName: string,
   rawArg: string | undefined,
 ): AbsoluteBlockMatch | null {
   if (!rawArg) return null;
   const arg = rawArg.trim();
+
+  // Purchase-token echo — applies to every tool surface. The agent's
+  // tools must never read / write / echo a `!~xxxxxxxx` token even if a
+  // buggy messaging adapter surfaces one to the conversation log.
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7.
+  if (
+    (toolName === "Bash" ||
+      toolName === "Read" ||
+      toolName === "Write" ||
+      toolName === "Edit") &&
+    PURCHASE_TOKEN_EMBED.test(arg)
+  ) {
+    return {
+      category: "purchase_token_echo",
+      redacted: redactPurchaseTokenMatch(arg),
+    };
+  }
 
   if (toolName === "Bash") {
     // Run every pattern check against the quote/heredoc-stripped form
@@ -501,7 +589,7 @@ export function classifyAbsoluteBlock(
     ) {
       return { category: "pipe_to_shell", redacted: firstToken(arg) };
     }
-    if (/(^|\s)(security|secret-tool|cmdkey)\b/.test(scan)) {
+    if (/(^|\s)(security|secret-tool|cmdkey|certutil|rundll32\.exe)\b/.test(scan)) {
       return { category: "secret_cli", redacted: firstToken(arg) };
     }
     // Browser-history profile exfiltration (§11.4). The prefix glob
@@ -585,6 +673,16 @@ export function looksLikeBrowserProfileBash(cmd: string): boolean {
     "appdata/local/microsoft/edge",
     "appdata/local/bravesoftware",
     "/mnt/c/users/",
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11 — the daemon-owned
+    // Chromium profile directories. The path lives under PA_DATA_DIR
+    // which is typically `~/.personal-agent/`, but operators may set
+    // it elsewhere via env var, so we match the trailing component
+    // (which is stable across installs).
+    "chromium-sync",
+    "chromium-automation",
+    "chromium-automation-anon",
+    "chromium-automation-auth",
+    "chromium-automation-purchase",
   ];
   if (parents.some((p) => lc.includes(p))) return true;
   // Chromium profile-internal filename anchors. Each is matched as a
@@ -623,8 +721,41 @@ export function looksLikeBrowserProfilePath(raw: string): boolean {
     /\.var\/app\/com\.google\.chrome/,
     /appdata[\\/]local[\\/](google[\\/]chrome|chromium|microsoft[\\/]edge|bravesoftware)/,
     /\/mnt\/c\/users\//,
+    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11 — daemon-owned
+    // Chromium profile dirs under PA_DATA_DIR. The trailing-component
+    // shape catches paths regardless of where PA_DATA_DIR resolves
+    // (default `~/.personal-agent/`, but operators can override).
+    /(?:^|[\\/])chromium-sync(?:[\\/]|$)/,
+    /(?:^|[\\/])chromium-automation(?:[\\/]|$|-)/,
   ];
   return patterns.some((r) => r.test(p));
+}
+
+/**
+ * Convenience wrapper used by per-backend tool hooks. Identical
+ * coverage to `looksLikeBrowserProfileBash` + `looksLikeBrowserProfilePath`
+ * — re-exposed under the name the implementation plan uses
+ * (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11) so PreToolUse hooks
+ * can import a single function.
+ */
+export function classifyChromiumTokenAccess(
+  toolName: string,
+  rawArg: string | undefined,
+): AbsoluteBlockMatch | null {
+  if (!rawArg) return null;
+  if (toolName === "Bash") {
+    const scan = stripBashStringContent(rawArg.trim());
+    if (looksLikeBrowserProfileBash(scan)) {
+      return { category: "browser_profile", redacted: firstToken(rawArg.trim()) };
+    }
+    return null;
+  }
+  if (toolName === "Read" || toolName === "Write" || toolName === "Edit") {
+    if (looksLikeBrowserProfilePath(rawArg)) {
+      return { category: "browser_profile", redacted: redactPath(rawArg) };
+    }
+  }
+  return null;
 }
 
 function firstToken(cmd: string): string {

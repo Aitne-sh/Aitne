@@ -479,6 +479,60 @@ describe("Context API — optimistic concurrency", () => {
       expect(snapshotCount.count).toBe(0);
     });
 
+    it("PATCH /context/* with an unknown mode returns per-field issue with validValues + received value", async () => {
+      // Production observation (logs 2026-05-22): when an agent typed a mode
+      // outside the enum (e.g. "patch" or capitalized "APPEND"), the previous
+      // body_not_object error joined Zod messages without telling the agent
+      // what it actually sent or which values are accepted. The agent could
+      // not self-correct, so morning_routine_today burned its budget on
+      // identical retries. The new buildSchemaIssues path emits a per-field
+      // context.invalid_body_field issue with the received value + the enum's
+      // validValues so the next retry can fix the mode without guessing.
+      const filePath = join(contextDir, "today.md");
+      writeFileSync(filePath, validTodayContent(), "utf-8");
+
+      const res = await app.request("/api/context/today", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ section: "Agent Log", mode: "PATCH", content: "x" }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as {
+        ok: boolean;
+        errors: Array<{ code: string; field: string; received: unknown; validValues?: unknown }>;
+      };
+      const modeIssue = data.errors.find((e) => e.field === "mode");
+      expect(modeIssue).toBeDefined();
+      expect(modeIssue?.code).toBe("context.invalid_body_field");
+      expect(modeIssue?.received).toBe("PATCH");
+      expect(modeIssue?.validValues).toEqual([
+        "append",
+        "replace",
+        "clear",
+        "clear_before",
+        "append_to_file",
+      ]);
+    });
+
+    it("PATCH /context/* with a non-object body returns body_not_object with the received type", async () => {
+      const filePath = join(contextDir, "today.md");
+      writeFileSync(filePath, validTodayContent(), "utf-8");
+
+      const res = await app.request("/api/context/today", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify("append"),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as {
+        errors: Array<{ code: string; field: string; received: unknown }>;
+      };
+      expect(data.errors[0]?.code).toBe("context.body_not_object");
+      expect(data.errors[0]?.received).toBe("string");
+    });
+
     it("PUT /context/today rejects wrong-date H1 with explicit agent-day error", async () => {
       // End-to-end verification of the route → prepareContextContentForWrite
       // → validateTodayContent agent-day plumbing. Pre-fix, a wrong-date PUT

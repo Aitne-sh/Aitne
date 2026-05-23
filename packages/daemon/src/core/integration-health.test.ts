@@ -200,4 +200,88 @@ describe("buildIntegrationHealthMap", () => {
   // Today every (integrationKey, BackendId) pair has a connector —
   // gemini delegation for gmail / calendar / notion all return populated
   // toolNamespace + subTier values.
+
+  // ── INTEGRATION_NATIVE_MODE_DESIGN.md §9.3 — native-mode entries ──
+  describe("native mode", () => {
+    it("returns nativeBackend + descriptor-default features when no probe is cached", () => {
+      writeIntegrations(db, {
+        gmail: {
+          mode: "native",
+          nativeBackend: "claude",
+          deniedTools: [],
+          lastChangedAt: "2026-05-11T00:00:00Z",
+        },
+      });
+      const map = buildIntegrationHealthMap(db, process.cwd());
+      expect(map.gmail.mode).toBe("native");
+      expect(map.gmail.nativeBackend).toBe("claude");
+      expect(map.gmail.delegatedBackend).toBeNull();
+      // Descriptor default surface still applies in native mode.
+      expect(map.gmail.toolNamespace).toBe("mcp__claude_ai_Gmail__");
+      expect(map.gmail.subTier).toBe("draft-only");
+      expect(map.gmail.lastProbeAt).toBeNull();
+      expect(map.gmail.features?.search).toBe(true);
+      // §4.7 variant check — the workspace ships the native skill body for
+      // gmail+claude in agent-assets/, so the list should be empty here.
+      expect(map.gmail.variantsMissing).toEqual([]);
+    });
+
+    it("uses the cached probe in native mode when one exists", () => {
+      writeIntegrations(db, {
+        gmail: {
+          mode: "native",
+          nativeBackend: "claude",
+          deniedTools: [],
+          lastChangedAt: "2026-05-11T00:00:00Z",
+        },
+      });
+      writeProbe(
+        db,
+        evaluateProbe({
+          tools: [
+            "mcp__claude_ai_Gmail__search_threads",
+            "mcp__claude_ai_Gmail__get_thread",
+          ],
+          integration: "gmail",
+          backend: "claude",
+          probedAt: "2026-05-11T08:00:00Z",
+        }),
+      );
+      const map = buildIntegrationHealthMap(db, process.cwd());
+      expect(map.gmail.lastProbeAt).toBe("2026-05-11T08:00:00Z");
+      expect(map.gmail.features?.search).toBe(true);
+      // Probe did not include the draft tool — that capability is false.
+      expect(map.gmail.features?.draft).toBe(false);
+    });
+
+    it("classifies Codex native gmail as full-auto (registry-driven, not mode-driven)", () => {
+      writeIntegrations(db, {
+        gmail: {
+          mode: "native",
+          nativeBackend: "codex",
+          deniedTools: [],
+          lastChangedAt: "2026-05-11T00:00:00Z",
+        },
+      });
+      const map = buildIntegrationHealthMap(db, process.cwd());
+      expect(map.gmail.subTier).toBe("full-auto");
+      expect(map.gmail.features?.send).toBe(true);
+    });
+
+    it("lists missing native variant paths when the workspace lacks required files", () => {
+      writeIntegrations(db, {
+        notion: {
+          mode: "native",
+          nativeBackend: "claude",
+          deniedTools: [],
+          lastChangedAt: "2026-05-11T00:00:00Z",
+        },
+      });
+      const map = buildIntegrationHealthMap(db, "/tmp/pa-nonexistent-root");
+      expect(map.notion.variantsMissing?.length).toBeGreaterThan(0);
+      for (const p of map.notion.variantsMissing ?? []) {
+        expect(p).toContain("/tmp/pa-nonexistent-root");
+      }
+    });
+  });
 });

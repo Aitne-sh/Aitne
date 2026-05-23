@@ -53,7 +53,7 @@ related:
 | Git / GitHub | `/api/git`, `/api/github` | Git / GitHub proxies. |
 | Skills | `/api/skills` | Skill metadata. |
 | Reading | `/api/books` | Reading list CRUD. |
-| Lifestyle | `/api/receipts`, `/api/travel-bookings`, `/api/travel-time` | Lifestyle data. |
+| Lifestyle | `/api/receipts`, `/api/travel-bookings` | Lifestyle data. |
 | Docs | `/api/docs/*` | Docs corpus + QA pipeline. |
 | Wiki | `/api/wiki/*` | Wiki workspaces, files, search (FTS5), index, estimate, compile preview, reindex. |
 | Dashboard | `/api/dashboard/*` | Dashboard config + state. |

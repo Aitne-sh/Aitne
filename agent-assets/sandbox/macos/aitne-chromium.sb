@@ -1,0 +1,105 @@
+;; Aitne Managed Chromium — sandbox-exec profile
+;;
+;; MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §5.4 / §7.4
+;;
+;; Deny-by-default sandbox for Chromium under macOS. Loaded via:
+;;   sandbox-exec -f aitne-chromium.sb /Applications/Chromium.app/...
+;;
+;; Defence layering:
+;;   - Outer ring (this file): system-call-level deny of arbitrary file
+;;     reads, exec of foreign binaries, raw socket creation, etc.
+;;   - Middle ring: Chromium's own multi-process renderer sandbox.
+;;   - Inner ring (B-2): per-workflow CDP request interception in
+;;     Playwright's `context.route` handler.
+;;
+;; The user-data-dir parameter (`%user_data_dir%`) is substituted by
+;; sandbox-install.ts at install time — sandbox-exec's parameter syntax
+;; (`(param "name")`) is awkward to template, so we ship one profile
+;; with a literal substitution before write.
+
+(version 1)
+
+(deny default)
+(deny file-write* (with no-log))
+
+;; Allow forking + IPC needed for Chromium's multi-process model.
+(allow process-fork)
+(allow process-exec
+  (literal "%binary_path%")
+  (subpath "/Applications/Chromium.app")
+  (subpath "/Applications/Google Chrome.app")
+  (subpath "/System/Library")
+  (subpath "/usr/lib")
+  (subpath "/usr/bin"))
+(allow signal (target same-sandbox))
+(allow mach-priv-host-port)
+(allow mach-lookup)
+(allow ipc-posix-shm*)
+(allow process-info-pidinfo)
+(allow process-info-pidfdinfo)
+(allow process-info-pidfileportinfo)
+(allow process-info-setcontrol)
+(allow process-info-dirtycontrol)
+(allow process-info-rusage)
+
+;; Reads — system frameworks, fonts, locale data, the binary's own
+;; bundle. Read access to the user's general Library tree is denied;
+;; only the explicit chromium-sync/ profile dir is writable.
+(allow file-read*
+  (subpath "/Applications/Chromium.app")
+  (subpath "/Applications/Google Chrome.app")
+  (subpath "/Library/Frameworks")
+  (subpath "/Library/Fonts")
+  (subpath "/Library/Audio")
+  (subpath "/Library/Preferences/.GlobalPreferences.plist")
+  (subpath "/Library/Keychains")
+  (subpath "/System")
+  (subpath "/private/etc")
+  (subpath "/private/var/db/timezone")
+  (subpath "/private/var/folders")    ;; temp / NSCachesDirectory
+  (subpath "/usr/lib")
+  (subpath "/usr/share")
+  (literal "/dev/null")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/zero")
+  (literal "/dev/tty")
+  (literal "/etc")
+  (literal "/var")
+  (literal "/tmp")
+  (literal "/private/tmp"))
+
+;; The per-instance user data dir is the only persistent path the
+;; browser can write to. sandbox-install.ts rewrites %user_data_dir%
+;; to the resolved absolute path before this file is written to
+;; PA_DATA_DIR/sandbox/aitne-chromium.sb.
+(allow file-read* file-write*
+  (subpath "%user_data_dir%"))
+
+;; Temp directories Chromium needs at runtime.
+(allow file-read* file-write*
+  (subpath "/private/var/folders")
+  (subpath "/tmp")
+  (subpath "/private/tmp"))
+
+;; Networking — Chromium needs general network access to reach Google
+;; sync endpoints. The fine-grained allowlist lives at the CDP layer
+;; (B-2); this is the coarse ring.
+(allow network*)
+
+;; System info, sysctls, mach ports Chromium queries on startup.
+(allow sysctl-read)
+(allow system-socket)
+(allow iokit-open (iokit-user-client-class "RootDomainUserClient"))
+(allow iokit-open (iokit-user-client-class "IOSurfaceRootUserClient"))
+(allow iokit-open (iokit-user-client-class "IOSurfaceSendRight"))
+(allow iokit-open (iokit-user-client-class "IOFramebufferSharedUserClient"))
+(allow iokit-open (iokit-user-client-class "IOHIDLibUserClient"))
+(allow iokit-open (iokit-user-client-class "IOAudioControlUserClient"))
+(allow iokit-open (iokit-user-client-class "IOAudioEngineUserClient"))
+
+;; Required for the Chromium UI to function when running with a window
+;; (initial sign-in bootstrap; headless instances never hit this path).
+(allow user-preference-read)
+(allow user-preference-write
+  (preference-domain "%user_data_dir%"))
