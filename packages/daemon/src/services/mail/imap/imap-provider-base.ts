@@ -438,7 +438,19 @@ implements IdleCapableMailProvider {
       const search =
         sinceUid > 0 ? { uid: `${sinceUid}:*` } : { all: true };
       const result = await client.search(search, { uid: true });
-      const uids = Array.isArray(result) ? [...result].sort((a, b) => a - b) : [];
+      // Per imapflow, `search` resolves to a number[] (possibly empty) on
+      // success. A non-array return is a protocol failure or partial parse
+      // — and silently treating that as "the folder is empty" is what the
+      // reconcile planner would interpret as "soft-delete every local row
+      // in the walked window". Throw instead so `reconcileFolder`'s
+      // try/catch logs and skips the folder this tick rather than
+      // declaring a mass deletion on bad evidence.
+      if (!Array.isArray(result)) {
+        throw new Error(
+          "IMAP search returned non-array result; refusing to use as authoritative UID list",
+        );
+      }
+      const uids = [...result].sort((a, b) => a - b);
       return { uidValidity, uids };
     } finally {
       lock.release();

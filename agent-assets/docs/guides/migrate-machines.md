@@ -10,8 +10,9 @@ aliases:
   - move install
 category: guides
 summary: |
-  Move a Aitne install to a new machine — install the daemon,
-  copy the context directory, re-pair messaging apps.
+  Move an Aitne install to a new machine — install the daemon, copy
+  the data directory, re-pair messaging apps. The DB carries cleanly
+  because schema migrations auto-forward at boot.
 section: migrate-machines
 tags:
   - guide
@@ -20,9 +21,10 @@ tags:
 status: stable
 ask_examples:
   - Can I move Aitne to a new laptop?
+  - Will my DB still work after upgrading on the new machine?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-22
 keywords:
   - migrate
   - move install
@@ -36,29 +38,78 @@ related:
 
 # Migrate Machines
 
-## Goal
-
 Carry your Aitne identity to a new machine without losing
-context-file history.
+context-file history or activity logs.
+
+## What Moves and What Doesn't
+
+| Carries cleanly | Re-do on the new machine |
+|---|---|
+| `~/.personal-agent/context/` (Markdown memory) | OS-keychain secrets (Anthropic / OpenAI / Google API keys) |
+| `~/.personal-agent/data/personal_agent.db` (sessions, actions, observations, FTS) | Messaging pairing tokens (Slack / Telegram / Discord / WhatsApp) |
+| `~/.personal-agent/logs/` (optional — for reference) | Integration OAuth grants (Gmail / Google Calendar / Notion) |
+
+The DB carries cleanly even across daemon versions: at boot, Aitne
+runs forward-only migrations from `packages/daemon/src/db/migrations.ts`
+that bring older schemas up to the current shape. As long as you're
+upgrading (not downgrading), the same DB works.
 
 ## Steps
 
-1. On the old machine: `aitne stop`.
-2. Copy `~/.personal-agent/context/` to the new machine.
-3. On the new machine: install per [Install and Run](install-and-run.md).
-4. Optionally copy `data/personal_agent.db` (skip if upgrading daemon versions).
-5. Re-pair messaging apps and re-authorize integrations.
+1. **On the old machine:** stop the daemon.
+   ```bash
+   aitne stop
+   ```
+2. **Copy the data directory** to the new machine — context plus DB.
+   ```bash
+   rsync -av ~/.personal-agent/ user@new-host:~/.personal-agent/
+   ```
+   (Or rsync just `context/` and `data/` if you want to skip logs.)
+3. **On the new machine:** install per [Install and Run](install-and-run.md).
+4. **Re-register secrets and re-pair messaging** through the dashboard:
+   - Re-register each backend's API key (or re-run `claude login` /
+     `codex login` / `gemini auth` for the subscription fallback path).
+   - Walk the setup wizard's messaging pairing steps for each app you
+     had paired.
+   - Re-authorize each integration's OAuth grant (Gmail / Calendar /
+     Notion are the common ones).
+5. Start the daemon.
+   ```bash
+   aitne start
+   ```
 
-## Verification
+On first boot the migration runner brings the carried DB up to the
+new daemon's schema. Check the daemon log if you want to see exactly
+which migrations applied:
 
-- Context files match.
-- Routines fire on the new machine's schedule.
+```bash
+aitne logs -n 200 | grep -i migration
+```
+
+## Verify
+
+- `aitne status` shows the same activity counts you had on the old
+  machine.
+- Routines fire on the new machine's local schedule (timezone follows
+  the OS).
+- The dashboard's activity feed contains your historical rows.
 
 ## If It Fails
 
-- OS-keychain credentials don't move automatically — re-authorize
-  each backend on the new machine.
+- **OS-keychain credentials don't move automatically** — Step 4 is the
+  fix.
+- **The daemon won't start with a SQLite error.** Read
+  `aitne logs -n 200` for the failing migration. If the DB is genuinely
+  corrupt, the last resort is
+  [Reinstall Cleanly](reinstall-cleanly.md) — but context files survive
+  that, so you only lose action history.
+- **You downgraded the daemon by accident.** Migrations are forward-
+  only; reinstall the newer version (`npm i -g @aitne-sh/aitne`) and
+  retry.
 
 ## Related
 
-- [Backup and Restore](backup-and-restore.md)
+- [Backup and Restore](backup-and-restore.md) — the source for the data
+  you carry.
+- [Install and Run](install-and-run.md) — Step 3 in detail.
+- [Schema Migration](../glossary.md#schema-migration)

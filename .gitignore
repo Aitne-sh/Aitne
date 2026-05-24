@@ -72,6 +72,11 @@ MESSAGING_P2_IMPROVEMENT_PLAN.md
 SCHEDULE_API_REDESIGN_PLAN.md
 BROWSER_HISTORY_RESEARCH.md
 BROWSER_HISTORY_INTEGRATION_PLAN.md
+FILE_SPLIT_PLAN_AGENT_ERRORS.md
+FILE_SPLIT_PLAN_SKILLS_COMPILER.md
+FILE_SPLIT_PLAN_CONTEXT_BUILDER.md
+MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md
+WEEKLY_INTERESTS_REFLECTION_PLAN.md
 
 # Local opencode probe/capture artifacts
 /.opencode/
@@ -85,6 +90,9 @@ scripts/poc/
 
 # Experimental / one-off run artifacts
 .codex-pet-runs/
+
+# Antigravity CLI project-local symlinks (per-machine, not project source)
+/.antigravitycli/
 
 # Stray literal '~' directory (typo-created)
 /~/

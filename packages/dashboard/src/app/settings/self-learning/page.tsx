@@ -371,7 +371,7 @@ export default function SelfLearningSettingsPage() {
 
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <CollapsibleTrigger
-            className="flex w-full items-center justify-between gap-2 text-left"
+            className="group flex w-full items-center justify-between gap-2 text-left"
             aria-label="Toggle advanced settings"
           >
             <div className="flex flex-col gap-0.5">
@@ -383,8 +383,7 @@ export default function SelfLearningSettingsPage() {
             </div>
             <span
               aria-hidden
-              className="text-xs text-muted-foreground transition-transform"
-              style={{ transform: advancedOpen ? "rotate(90deg)" : "rotate(0deg)" }}
+              className="text-xs text-muted-foreground transition-transform group-data-[state=open]:rotate-90"
             >
               ▶
             </span>

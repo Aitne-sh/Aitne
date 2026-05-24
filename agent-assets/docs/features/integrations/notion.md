@@ -39,10 +39,10 @@ config_keys:
 
 # Notion
 
-## In One Sentence
-
-A Notion integration polls a configured database / page set and
-records observations on change.
+Aitne polls a configured Notion database or page set, records an
+observation on change, and the hourly check decides whether anything
+warrants surfacing. The agent can also read pages on demand through
+the `notion` skill.
 
 ## What It Does
 

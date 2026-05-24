@@ -62,10 +62,9 @@ process_keys:
 
 # Calendar
 
-## In One Sentence
-
-Pull events from one or more calendars (Google Calendar today, more
-backends planned) so Aitne can plan your day around them.
+Aitne pulls events from one or more calendars (Google Calendar today,
+more backends planned) so it can build today's plan around them and
+DM you ahead of meetings that matter.
 
 ## What It Does
 

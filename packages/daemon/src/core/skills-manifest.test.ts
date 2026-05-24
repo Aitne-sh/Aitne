@@ -806,7 +806,7 @@ describe("native variant existence (Phase B2 content)", () => {
   describe("missingNativeVariants — real agent-assets integrity", () => {
     test("every supported (integration, native backend) pair has every advertised variant on disk", async () => {
       const { INTEGRATION_DESCRIPTORS, INTEGRATION_KEYS } = await import("@aitne/shared");
-      const { missingNativeVariants } = await import("./skills-compiler.js");
+      const { missingNativeVariants } = await import("./skills-compiler-variants.js");
       const repoRoot = REPO_ROOT;
       type BackendId = "claude" | "codex" | "gemini";
       for (const key of INTEGRATION_KEYS) {

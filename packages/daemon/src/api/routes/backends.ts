@@ -1157,11 +1157,60 @@ export function createBackendRoutes(deps: ApiDependencies): Hono {
     }
     const previousMain = readDefaults().default_backend;
 
-    setMainBackend(db, backendId);
-    const result = applyDefaultPresets(db, {
-      defaultBackend: backendId,
-      force: force ?? false,
-    });
+    // All persistent DB mutations for a main-backend switch must succeed
+    // atomically — `default_backend`, the `process_backend_config` re-seed,
+    // the native cascade, and the native_unbound audit rows are mutually
+    // load-bearing. Better-sqlite3 turns nested `db.transaction()` calls
+    // into SAVEPOINTs, so wrapping these composes safely with the inner
+    // transactions inside setMainBackend / applyDefaultPresets. The fs
+    // (`writeManagementMd`) and notification side-effects intentionally
+    // stay outside this tx — they cannot be rolled back.
+    const txOutcome = db.transaction(() => {
+      setMainBackend(db, backendId);
+      const presetResult = applyDefaultPresets(db, {
+        defaultBackend: backendId,
+        force: force ?? false,
+      });
+
+      let cascade: ReturnType<typeof cascadeNativeBindingsOnMainSwitch> = [];
+      if (backendId !== previousMain) {
+        const integrationsBefore = readIntegrations(db);
+        cascade = cascadeNativeBindingsOnMainSwitch(db, backendId);
+        for (const entry of cascade) {
+          try {
+            db.prepare(
+              `INSERT INTO agent_actions
+                 (event_id, action_type, trigger, result, detail, started_at, completed_at)
+               VALUES (?, 'integration.native_unbound', 'reactive', 'success', ?, datetime('now'), datetime('now'))`,
+            ).run(
+              `integration:${entry.key}:native_unbound:${Date.now()}`,
+              JSON.stringify({
+                key: entry.key,
+                priorMode: "native",
+                priorNativeBackend: entry.priorNativeBackend,
+                newMainBackend: entry.newMainBackend,
+                // Carry the deniedTools snapshot so a future re-flip-to-
+                // native restore can be reconstructed without re-querying
+                // the now-cleared row.
+                priorDeniedTools:
+                  integrationsBefore[entry.key].deniedTools ?? [],
+              }),
+            );
+          /* c8 ignore start -- in-memory DB always succeeds; catch is defensive */
+          } catch (err) {
+            logger.warn(
+              { err, key: entry.key },
+              "failed to write integration.native_unbound audit row",
+            );
+          }
+          /* c8 ignore stop */
+        }
+      }
+      return { presetResult, cascade };
+    })();
+
+    const result = txOutcome.presetResult;
+    const nativeCascade = txOutcome.cascade;
 
     const warnings = getAuthWarnings(backendId);
     logger.info(
@@ -1174,46 +1223,7 @@ export function createBackendRoutes(deps: ApiDependencies): Hono {
       "Main backend switched",
     );
 
-    // INTEGRATION_NATIVE_MODE_DESIGN.md §11.4 — main-backend change
-    // cascade. Capture the pre-cascade snapshot of each native row so we
-    // can write `integration.native_unbound` audit rows for any row that
-    // gets flipped to `disabled`. Runs BEFORE the `onMainBackendChange`
-    // notification so the workdir re-materialise step sees the post-
-    // cascade state and the skill bundle reflects the new mode.
-    let nativeCascade: ReturnType<typeof cascadeNativeBindingsOnMainSwitch> = [];
     if (backendId !== previousMain) {
-      const integrationsBefore = readIntegrations(db);
-      nativeCascade = cascadeNativeBindingsOnMainSwitch(db, backendId);
-      for (const entry of nativeCascade) {
-        try {
-          db.prepare(
-            `INSERT INTO agent_actions
-               (event_id, action_type, trigger, result, detail, started_at, completed_at)
-             VALUES (?, 'integration.native_unbound', 'reactive', 'success', ?, datetime('now'), datetime('now'))`,
-          ).run(
-            `integration:${entry.key}:native_unbound:${Date.now()}`,
-            JSON.stringify({
-              key: entry.key,
-              priorMode: "native",
-              priorNativeBackend: entry.priorNativeBackend,
-              newMainBackend: entry.newMainBackend,
-              // Carry the deniedTools snapshot so a future re-flip-to-
-              // native restore can be reconstructed without re-querying
-              // the now-cleared row.
-              priorDeniedTools:
-                integrationsBefore[entry.key].deniedTools ?? [],
-            }),
-          );
-        /* c8 ignore start -- in-memory DB always succeeds; catch is defensive */
-        } catch (err) {
-          logger.warn(
-            { err, key: entry.key },
-            "failed to write integration.native_unbound audit row",
-          );
-        }
-        /* c8 ignore stop */
-      }
-
       // INTEGRATION_NATIVE_MODE_DESIGN.md §11.4 — cascade flipped native
       // rows to `disabled` directly in the DB. Mirror that into the
       // on-disk `integrations.md` so the human-readable file does not

@@ -55,13 +55,18 @@ const WORDS: readonly string[] = [
   "wave", "hill", "rock", "dust",
 ];
 
+// Compile-time-ish guard: if anyone edits the word list and breaks the
+// entropy assumption above, we want to know immediately at startup. The
+// body is unreachable from tests by design — the runtime invariant is
+// the point — so mark the throw as ignored for v8 coverage rather than
+// constructing a fake-import test that doesn't add signal.
+/* c8 ignore start */
 if (WORDS.length !== 64) {
-  // Compile-time-ish guard: if anyone edits the word list and breaks the
-  // entropy assumption above, we want to know immediately at startup.
   throw new Error(
     `magic-phrase word list must contain exactly 64 entries (got ${WORDS.length})`,
   );
 }
+/* c8 ignore stop */
 
 const PHRASE_WORD_COUNT = 4;
 

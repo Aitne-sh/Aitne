@@ -19,7 +19,7 @@ import {
   writeIntegrations,
   type IntegrationsRecord,
 } from "../db/integrations-store.js";
-import { missingDelegatedVariants, missingNativeVariants } from "./skills-compiler.js";
+import { missingDelegatedVariants, missingNativeVariants } from "./skills-compiler-variants.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("management-md");

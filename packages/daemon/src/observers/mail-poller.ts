@@ -339,8 +339,8 @@ export class MailPoller implements Observer {
   private upsertMessages(
     accountId: string,
     messages: MailMessageSummary[],
-  ): void {
-    if (messages.length === 0) return;
+  ): boolean {
+    if (messages.length === 0) return true;
     const nowIso = new Date().toISOString();
     const upsert = this.db.prepare(
       `INSERT INTO mail_messages_index (
@@ -387,16 +387,18 @@ export class MailPoller implements Observer {
     });
     try {
       tx(messages);
+      return true;
     } catch (err) {
       logger.error(
         { err, accountId, count: messages.length },
         "Failed to upsert mail_messages_index rows",
       );
+      return false;
     }
   }
 
-  private softDeleteRemovedIds(accountId: string, providerMsgIds: string[]): void {
-    if (providerMsgIds.length === 0) return;
+  private softDeleteRemovedIds(accountId: string, providerMsgIds: string[]): boolean {
+    if (providerMsgIds.length === 0) return true;
     const uniqueIds = [...new Set(providerMsgIds)];
     const nowIso = new Date().toISOString();
     const update = this.db.prepare(
@@ -411,11 +413,13 @@ export class MailPoller implements Observer {
     });
     try {
       tx(uniqueIds);
+      return true;
     } catch (err) {
       logger.error(
         { err, accountId, removedCount: uniqueIds.length },
         "Failed to soft-delete removed mail rows",
       );
+      return false;
     }
   }
 
@@ -464,8 +468,6 @@ export class MailPoller implements Observer {
       return;
     }
 
-    // Successful pass: persist cursor + reset error counter.
-    if (cursor) this.registry.savePollCursor(account.id, cursor);
     this.registry.recordPollTick(account.id, { success: true });
     // Forget prior re-consent DM cadence so a future failure can DM immediately
     // instead of silently waiting out `mailAuthFailureRetryHours` (§V3).
@@ -499,16 +501,46 @@ export class MailPoller implements Observer {
     // deletion reconcile have something to work against. Idempotent on
     // (account_id, provider_msg_id); the AFTER INSERT trigger keeps
     // `fts_mail_messages` in sync.
-    this.upsertMessages(account.id, userMessages);
+    const upsertOk = this.upsertMessages(account.id, userMessages);
 
     // Classify + ingest travel_bookings / kindle_notebook / parse_failures
     // through the shared pipeline — identical rules as the prior Gmail-only
     // observer path. Receipt detection now flows through the same attachment
     // metadata surface for providers that expose it.
     const ingestion = await this.ingestClassified(account, provider, userMessages);
-    this.softDeleteRemovedIds(account.id, removedAggregated);
+    const softDeleteOk = this.softDeleteRemovedIds(account.id, removedAggregated);
 
-    if (userMessages.length > 0 || removedAggregated.length > 0) {
+    // Persist the cursor only AFTER local writes complete. A crash or DB
+    // failure between `pollSince` and `upsertMessages` would otherwise
+    // advance the cursor and silently drop the in-flight batch. Re-fetching
+    // is idempotent via UNIQUE(account_id, provider_msg_id), so the worst
+    // case on retry is a re-classification pass — no data loss.
+    if (cursor && upsertOk && softDeleteOk) {
+      this.registry.savePollCursor(account.id, cursor);
+    } else if (cursor && (!upsertOk || !softDeleteOk)) {
+      logger.warn(
+        {
+          accountId: account.id,
+          upsertOk,
+          softDeleteOk,
+        },
+        "Skipping mail poll cursor save — local writes failed; next tick will re-fetch",
+      );
+    }
+
+    // Observe only what actually landed in local state. If upsert failed,
+    // `mail_messages_index` has no row for the provider's reported
+    // `userMessages` — emitting the observation anyway would tell the
+    // hourly-check signal compute (and downstream skill flows) that N new
+    // mails exist, and the agent would then query the index and find
+    // zero. Worse: when the next tick retries the upsert successfully it
+    // emits a second observation, double-counting the same batch. Gate
+    // the observation on the actual persistence outcome so the count
+    // reflects what is queryable, and zero out parts that failed to
+    // commit so the payload never points at phantom rows.
+    const hasNew = upsertOk && userMessages.length > 0;
+    const hasRemoved = softDeleteOk && removedAggregated.length > 0;
+    if (hasNew || hasRemoved) {
       recordObservation(this.db, {
         source: "mail:lifecycle",
         ref: `${account.id}-${Date.now()}`,
@@ -525,10 +557,12 @@ export class MailPoller implements Observer {
           accountId: account.id,
           kind: account.kind,
           email: account.email,
-          newMessages: userMessages.length,
-          removedMessages: removedAggregated.length,
-          subjects: userMessages.slice(0, 5).map((m) => m.subject ?? "(no subject)"),
-          fromAgentSuppressed: aggregated.length - userMessages.length,
+          newMessages: hasNew ? userMessages.length : 0,
+          removedMessages: hasRemoved ? removedAggregated.length : 0,
+          subjects: hasNew
+            ? userMessages.slice(0, 5).map((m) => m.subject ?? "(no subject)")
+            : [],
+          fromAgentSuppressed: hasNew ? aggregated.length - userMessages.length : 0,
           travelBookings: ingestion.travelBookingsInserted,
           receipts: ingestion.receiptsDetected,
           kindleBooksCreated: ingestion.kindleBooksCreated,

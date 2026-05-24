@@ -342,13 +342,19 @@ export function createGitTemplatesRoutes(
           : persisted.reason === "correlation_mismatch"
             ? 409
             : 404;
+      // `correlation_mismatch` is only returned by `persistPerFileStatus`
+      // when `options.correlationId !== undefined`, and the route only
+      // spreads `correlationId` into the persist call when
+      // `typeof body.correlationId === "string"`. So when we land here
+      // with `correlation_mismatch`, `body.correlationId` is guaranteed
+      // to be a string — no defensive fallback needed.
       return respondWithAgentError(c, status, [
         composeIssue(registryCode, {
           field: persisted.reason === "correlation_mismatch"
             ? "correlationId"
             : "slug",
           received: persisted.reason === "correlation_mismatch"
-            ? (typeof body.correlationId === "string" ? body.correlationId : null)
+            ? (body.correlationId as string)
             : slug,
         }),
       ]);

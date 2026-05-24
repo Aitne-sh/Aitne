@@ -232,10 +232,10 @@ export class SkillsCompiler {
    * §4.7 "Missing-variant policy": if any paths come back, the caller
    * should refuse to enter delegated mode or at least log a loud warning.
    * The per-integration variant for the hypothetical PATCH path lives in
-   * the standalone `missingDelegatedVariants` helper below; this method
-   * aggregates across every currently-delegated integration using its
-   * declared `delegatedBackend` (not the session backend — see the helper
-   * docstring for the rationale).
+   * `missingDelegatedVariants` in `./skills-compiler-variants.js`; this
+   * method aggregates across every currently-delegated integration using
+   * its declared `delegatedBackend` (not the session backend — see the
+   * helper docstring for the rationale).
    */
   validateDelegatedVariants(): { skills: string[]; taskFlows: string[] } {
     const skills: string[] = [];
@@ -1164,47 +1164,3 @@ export class SkillsCompiler {
   }
 }
 
-// ── Barrel re-exports ─────────────────────────────────────────────────
-// FILE_SPLIT_PLAN_SKILLS_COMPILER.md Phase 1 — every re-export below is
-// `@deprecated`; new code should import directly from the per-concern
-// sibling indicated by the source path. Phase 2 migrates the remaining
-// call sites and drops this block.
-//
-// Per-symbol `@deprecated` tags so IDEs strikethrough at every call site
-// and `git grep '@deprecated Import from'` enumerates the Phase 2 migration
-// surface in one pass. Multi-name `export { … } from …` cannot attach
-// JSDoc per name reliably across TS/IDE versions, so each symbol gets its
-// own statement.
-
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { missingDelegatedVariants } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { missingNativeVariants } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { isValidSkillSlug } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { validateBuiltinSkillSourceTree } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { parseSkillFrontmatter } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { SKILL_DESCRIPTION_MAX_LENGTH } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { READ_SENSITIVE_API_PREFIXES } from "./skills-compiler-variants.js";
-/** @deprecated Import from `./skills-compiler-variants.js` instead. */ export { skillBodyTouchesReadSensitive } from "./skills-compiler-variants.js";
-
-/** @deprecated Import from `./skills-compiler-cli-renderer.js` instead. */ export { cliSkillsDirName } from "./skills-compiler-cli-renderer.js";
-/** @deprecated Import from `./skills-compiler-cli-renderer.js` instead. */ export { cliInstructionFileName } from "./skills-compiler-cli-renderer.js";
-/** @deprecated Import from `./skills-compiler-cli-renderer.js` instead. */ export { rewriteCharacterBlock } from "./skills-compiler-cli-renderer.js";
-
-/** @deprecated Import from `./skills-compiler-skill-index.js` instead. */ export { renderSkillIndexBlock } from "./skills-compiler-skill-index.js";
-/** @deprecated Import from `./skills-compiler-skill-index.js` instead. */ export { refreshSkillIndexBlock } from "./skills-compiler-skill-index.js";
-/** @deprecated Import from `./skills-compiler-skill-index.js` instead. */ export { renderPartialIncludes } from "./skills-compiler-skill-index.js";
-/** @deprecated Import from `./skills-compiler-skill-index.js` instead. */ export { renderReferenceIncludes } from "./skills-compiler-skill-index.js";
-/** @deprecated Import from `./skills-compiler-skill-index.js` instead. */ export { stripUnconfiguredServices } from "./skills-compiler-skill-index.js";
-
-/** @deprecated Import from `./skills-compiler-denied-tools.js` instead. */ export { applyDeniedTools } from "./skills-compiler-denied-tools.js";
-/** @deprecated Import from `./skills-compiler-denied-tools.js` instead. */ export { buildSameBackendDenyBlock } from "./skills-compiler-denied-tools.js";
-/** @deprecated Import from `./skills-compiler-denied-tools.js` instead. */ export { applyAllDeniedToolsForSkill } from "./skills-compiler-denied-tools.js";
-
-/** @deprecated Import from `./skills-compiler-tree.js` instead. */ export { EMPTY_MAIL_ACCOUNTS_MD } from "./skills-compiler-tree.js";
-/** @deprecated Import from `./skills-compiler-tree.js` instead. */ export { renderMailAccountsMd } from "./skills-compiler-tree.js";
-/** @deprecated Import from `./skills-compiler-tree.js` instead. */ export { setWikiWorkspaceTokenResolver } from "./skills-compiler-tree.js";
-/** @deprecated Import from `./skills-compiler-tree.js` instead. */ export { pruneStaleBuiltinSkillDirs } from "./skills-compiler-tree.js";
-
-// `logger` re-export is the spy-target for `skills-compiler.test.ts`'s
-// `renderReferenceIncludes` missing-reference WARN. Production callers
-// don't import it. Phase 2 swaps the test to import from skill-index.
-/** @deprecated Test-only spy target. Import from `./skills-compiler-skill-index.js` as `logger` instead. */ export { logger } from "./skills-compiler-skill-index.js";

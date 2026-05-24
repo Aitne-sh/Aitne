@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import type { MetricsDailyBucket } from "@/lib/api-types";
 import { RECHARTS_TOOLTIP_CURSOR_FILL } from "@/lib/recharts-theme";
+import { cn } from "@/lib/utils";
 
 interface ExecutionBreakdownChartProps {
   data: MetricsDailyBucket[];
@@ -60,8 +61,10 @@ function ExecutionTooltip({
       <div className="mt-1.5 flex items-center gap-2 border-t border-border/60 pt-1.5">
         <span className="text-muted-foreground">Failures</span>
         <span
-          className="ml-auto tabular-nums"
-          style={{ color: datum.failures > 0 ? "#ef4444" : undefined }}
+          className={cn(
+            "ml-auto tabular-nums",
+            datum.failures > 0 && "text-destructive",
+          )}
         >
           {datum.failures}
           {total > 0 && datum.failures > 0 && (

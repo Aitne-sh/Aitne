@@ -214,6 +214,80 @@ describe("delegated-sync API", () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe("empty_patch");
     });
+
+    it("rejects malformed JSON as invalid_body (parseJsonBody catch)", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/cadences/google_calendar:primary:24h", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: "not-valid-json",
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_body");
+    });
+
+    it("rejects a non-object body (array) as invalid_body", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/cadences/google_calendar:primary:24h", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        // JSON.parse of `null` returns null; the route guards against this
+        // shape via `body === null || typeof body !== "object"`.
+        body: "null",
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_body");
+    });
+
+    it("rejects a non-boolean enabled value", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/cadences/google_calendar:primary:24h", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: "yes" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_enabled");
+    });
+
+    it("rejects a non-numeric intervalSeconds as invalid_interval", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/cadences/google_calendar:primary:24h", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ intervalSeconds: "1800" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_interval");
+    });
+
+    it("rejects a non-integer intervalSeconds as invalid_interval", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/cadences/google_calendar:primary:24h", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ intervalSeconds: 1800.5 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_interval");
+    });
+
+    it("rejects a zero / negative intervalSeconds as invalid_interval", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/cadences/google_calendar:primary:24h", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ intervalSeconds: 0 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_interval");
+    });
   });
 
   describe("PATCH /delegated-sync/active-hours", () => {
@@ -254,6 +328,42 @@ describe("delegated-sync API", () => {
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
       expect(body.error).toBe("invalid_start");
+    });
+
+    it("rejects out-of-range endHour as invalid_end", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/active-hours", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ startHour: 0, endHour: 25 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_end");
+    });
+
+    it("rejects a non-integer endHour as invalid_end", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/active-hours", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ startHour: 0, endHour: 12.5 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_end");
+    });
+
+    it("rejects malformed JSON for active-hours as invalid_body", async () => {
+      const app = makeApp({ db, delegatedSyncWorker: makeWorker(db) });
+      const res = await app.request("/delegated-sync/active-hours", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: "not-json",
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("invalid_body");
     });
 
     it("preserves existing config when worker is unwired", async () => {

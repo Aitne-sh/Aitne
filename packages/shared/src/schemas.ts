@@ -58,6 +58,20 @@ export const contextPatchSchema = z.object({
 ).refine(
   (data) => data.mode !== "clear_before" || (data.cutoff !== undefined && CUTOFF_FORMAT_RE.test(data.cutoff)),
   { message: "clear_before requires cutoff in 'YYYY-MM-DD HH:MM:SS' format (zero-padded)" },
+).refine(
+  // Content-bearing modes must carry a defined string. An omitted `content`
+  // silently writes an empty section — agents mis-formatting their PATCH
+  // body (e.g. wrong field name) would clobber the section instead of
+  // getting an actionable 400. Empty string IS allowed; callers that want
+  // to wipe a section should still prefer `clear` for self-documenting
+  // intent, but explicit `content: ""` is a legitimate replace.
+  (data) =>
+    !(data.mode === "append" || data.mode === "replace" || data.mode === "append_to_file")
+    || typeof data.content === "string",
+  {
+    message: "content is required for modes 'append', 'replace', and 'append_to_file'",
+    path: ["content"],
+  },
 );
 
 // ── Agent Internal API ──

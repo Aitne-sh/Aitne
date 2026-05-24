@@ -163,6 +163,60 @@ describe("integrations API routes", () => {
     expect(readProbe(db, "google_calendar", "claude")).not.toBeNull();
   });
 
+  // §14.7 — defense-in-depth: if the user (or the wizard) just probed
+  // and the cached result shows missing required capabilities, the
+  // PATCH refuses to commit a mode flip to that backend. Without this
+  // gate the dispatch would only surface as a runtime "tool not found"
+  // and the operator would have no actionable signal that their flip
+  // was based on a known-failed probe.
+  it("PATCH /integrations/:key rejects mode flip to delegated when cached probe is present=false", async () => {
+    writeProbe(db, {
+      integration: "gmail",
+      backend: "codex",
+      presentTools: [],
+      capabilities: [],
+      missingRequired: ["search-threads", "list-labels"],
+      present: false,
+      probedAt: "2026-04-18T00:00:00Z",
+    });
+    const app = createIntegrationRoutes(makeDeps(db, dir));
+    const res = await app.request("/integrations/gmail", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "delegated", delegatedBackend: "codex" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as {
+      error: string;
+      missingRequired: string[];
+      backend: string;
+    };
+    expect(body.error).toBe("probe_missing_required_capabilities");
+    expect(body.backend).toBe("codex");
+    expect(body.missingRequired).toEqual(["search-threads", "list-labels"]);
+    // The DB state must be untouched — no partial commit.
+    expect(readIntegrations(db).gmail.mode).toBe("disabled");
+    // The cached probe must still be present (the gate ran BEFORE the
+    // probe-eviction step that follows a successful PATCH).
+    expect(readProbe(db, "gmail", "codex")).not.toBeNull();
+  });
+
+  it("PATCH /integrations/:key allows mode flip when no cached probe exists (fallback to POC defaults)", async () => {
+    // No writeProbe call — the cache is empty. §14.7 says /health falls
+    // back to descriptor defaults until the next live probe; the PATCH
+    // mirrors that fallback rather than hard-blocking. CLI / curl
+    // callers accept the runtime feedback path.
+    expect(readProbe(db, "gmail", "codex")).toBeNull();
+    const app = createIntegrationRoutes(makeDeps(db, dir));
+    const res = await app.request("/integrations/gmail", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "delegated", delegatedBackend: "codex" }),
+    });
+    expect(res.status).toBe(200);
+    expect(readIntegrations(db).gmail.mode).toBe("delegated");
+  });
+
   it("PATCH /integrations/:key with identical state does not invalidate probes", async () => {
     writeIntegrations(db, {
       gmail: { mode: "direct", deniedTools: [], lastChangedAt: "2026-04-19T00:00:00Z" },

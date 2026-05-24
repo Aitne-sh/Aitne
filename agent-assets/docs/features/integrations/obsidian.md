@@ -41,10 +41,9 @@ config_keys:
 
 # Obsidian
 
-## In One Sentence
-
-Point Aitne at your Obsidian vault directory; new and changed
-notes record observations the hourly check consumes.
+Point Aitne at your Obsidian vault directory; new and changed notes
+record observations the hourly check consumes. The agent can read and
+write vault notes through the `external-services` skill.
 
 ## What It Does
 

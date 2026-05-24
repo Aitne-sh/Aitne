@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { generateMagicPhrase, buildPhraseMatcher } from "./magic-phrase.js";
+import {
+  buildPhraseMatcher,
+  generateMagicPhrase,
+  isPhraseWrappedInExtraText,
+} from "./magic-phrase.js";
 
 describe("generateMagicPhrase", () => {
   it("returns a 4-word hyphen-joined phrase from the wordlist", () => {
@@ -284,5 +288,70 @@ describe("generate → match round-trip", () => {
       const match = buildPhraseMatcher(a);
       expect(match(b)).toBe(false);
     }
+  });
+});
+
+describe("isPhraseWrappedInExtraText", () => {
+  it("returns true when the phrase is wrapped in meaningful extra prose", () => {
+    expect(
+      isPhraseWrappedInExtraText(
+        "apple-banana-cherry-date",
+        "my pairing phrase is apple-banana-cherry-date please please please",
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false for the exact phrase (handled by the equality matcher)", () => {
+    expect(
+      isPhraseWrappedInExtraText("apple-banana-cherry-date", "apple-banana-cherry-date"),
+    ).toBe(false);
+  });
+
+  it("returns false for an exact phrase with just one trailing character (length within 1.5×)", () => {
+    // 16 expected chars × 1.5 = 24 → ceil = 24. Candidate of length 17
+    // (one extra char) is well within the guard, so no hint should fire.
+    expect(
+      isPhraseWrappedInExtraText("apple-banana-cherry-date", "apple-banana-cherry-date!"),
+    ).toBe(false);
+  });
+
+  it("returns false for a completely wrong phrase, even when long", () => {
+    expect(
+      isPhraseWrappedInExtraText(
+        "apple-banana-cherry-date",
+        "the quick brown fox jumps over the lazy dog and then some more",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false when the expected phrase normalizes to empty", () => {
+    expect(isPhraseWrappedInExtraText("", "any candidate string at all")).toBe(false);
+    expect(isPhraseWrappedInExtraText("!!!---???", "wrapped !!!---??? here")).toBe(false);
+  });
+
+  it("returns false when the candidate normalizes to empty", () => {
+    expect(isPhraseWrappedInExtraText("apple-banana-cherry-date", "")).toBe(false);
+    expect(isPhraseWrappedInExtraText("apple-banana-cherry-date", "   ")).toBe(false);
+    expect(isPhraseWrappedInExtraText("apple-banana-cherry-date", "!!!---???")).toBe(false);
+  });
+
+  it("returns false when the candidate is long but does not contain the phrase", () => {
+    // The candidate is well above the 1.5× length guard, but the phrase
+    // is not a substring of the normalized form. Wrong, not wrapped.
+    expect(
+      isPhraseWrappedInExtraText(
+        "apple-banana-cherry-date",
+        "lots of other words that just happen to be long without phrase",
+      ),
+    ).toBe(false);
+  });
+
+  it("returns true even when the wrapper uses mixed punctuation/case (normalization survives)", () => {
+    expect(
+      isPhraseWrappedInExtraText(
+        "apple-banana-cherry-date",
+        "Hello! My phrase: APPLE / BANANA / CHERRY / DATE — thanks 🙂🙂🙂",
+      ),
+    ).toBe(true);
   });
 });

@@ -42,8 +42,6 @@ config_keys:
 
 # Git
 
-## In One Sentence
-
 Add local git repositories to a watched set; the daemon polls them
 and the hourly check decides whether the recent activity is worth
 flagging.

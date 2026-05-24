@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { getTaskFlow, initTaskFlows } from "./prompts.js";
 import { resolveTemplate, extractEventData } from "./backends/prompt-utils.js";
-import { renderReferenceIncludes } from "./skills-compiler.js";
+import { renderReferenceIncludes } from "./skills-compiler-skill-index.js";
 import { DocsQAAdapter } from "../adapters/docs-qa-adapter.js";
 import type { MessageEvent } from "@aitne/shared";
 import {

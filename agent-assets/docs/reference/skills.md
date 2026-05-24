@@ -34,9 +34,11 @@ keywords:
   - wiki skill
   - notify skill
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-22
 related:
   - concepts/skills
+  - features/integrations/browser-history
+  - features/operations/managed-chromium
 ---
 
 # Built-in Skills
@@ -45,6 +47,9 @@ related:
 |---|---|
 | `agent-actions` | Read the agent action log (`agent_actions` table) for retrospective audits. |
 | `attach` | Attach a generated or downloaded file to the agent's reply when the user expects a file artifact. |
+| `browser-history` | Read normalised browser activity through `/api/browser-history/*`. Used by research-cluster journal updates, accept-path dispatches, owner pulls of shopping / reload traces, and the morning research summary. Never reads browser SQLite or profile dirs directly. |
+| `browser-history-managed` | Read managed-Chromium status (`/api/browser-history/managed/*`) and invoke registered automation workflows (`/api/browser-automation/*`). Loaded only when managed-Chromium is enabled. Covers B-2 anonymous reads, B-2.5 authenticated reads, and B-3 dashboard-approved writes. |
+| `browser-history-respond` | Bridge the owner's natural-language reply to a research-offer DM ("dig deeper" / "summarise") into a structured `/api/browser-history/offers/<slug>/{accept,decline}` call. |
 | `context` | Read / write context Markdown — projects, weekly summaries, agent journal, generic context files. |
 | `docs-search` | Read-only search and fetch over the operator-facing docs corpus. Used for `dashboard.docs_qa`. |
 | `external-services` | Call Google Calendar, the user's Obsidian vault, GitHub, or the agent Skills-management routes through the daemon proxy. |

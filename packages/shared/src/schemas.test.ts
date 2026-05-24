@@ -146,6 +146,35 @@ describe("contextPatchSchema", () => {
       mode: "clear",
     }).success).toBe(false);
   });
+
+  // ── Content-required refinement ──
+
+  it("rejects content-bearing modes when content is omitted", () => {
+    expect(contextPatchSchema.safeParse({
+      section: "## Log", mode: "append",
+    }).success).toBe(false);
+    expect(contextPatchSchema.safeParse({
+      section: "## Log", mode: "replace",
+    }).success).toBe(false);
+    expect(contextPatchSchema.safeParse({
+      mode: "append_to_file",
+    }).success).toBe(false);
+  });
+
+  it("accepts empty string content for replace (explicit clear via replace)", () => {
+    expect(contextPatchSchema.safeParse({
+      section: "## Log", mode: "replace", content: "",
+    }).success).toBe(true);
+  });
+
+  it("does not require content for clear / clear_before", () => {
+    expect(contextPatchSchema.safeParse({
+      section: "## Log", mode: "clear",
+    }).success).toBe(true);
+    expect(contextPatchSchema.safeParse({
+      section: "raw_signals", mode: "clear_before", cutoff: "2026-04-10 02:00:00",
+    }).success).toBe(true);
+  });
 });
 
 describe("notifyRequestSchema", () => {

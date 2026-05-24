@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { EVENT_SKILL_SETS, ALL_SKILLS } from "./core/skills-manifest.js";
-import { renderReferenceIncludes } from "./core/skills-compiler.js";
+import { renderReferenceIncludes } from "./core/skills-compiler-skill-index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../");

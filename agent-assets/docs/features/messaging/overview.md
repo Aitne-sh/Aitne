@@ -56,11 +56,10 @@ ui_anchors:
 
 # Messaging Overview
 
-## In One Sentence
-
-Aitne treats DMs from a paired messaging app as its primary
-reactive surface — you message it, it answers; it messages you when a
-notification fires.
+Aitne treats DMs from a paired messaging app as its primary reactive
+surface — you message it, it answers; it messages you when a
+notification fires. Voice notes are transcribed locally with Whisper
+so you can talk to the agent the same way you'd type.
 
 ## What It Does
 

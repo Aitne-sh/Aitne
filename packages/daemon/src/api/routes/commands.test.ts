@@ -547,6 +547,18 @@ describe("Commands API routes", () => {
 
   // ── listAvailableBuiltinSkillSlugs: filesystem edge cases ───────────────
 
+  it("falls back to process.cwd() when config.workspaceDir is undefined", () => {
+    // Exercises the `config.workspaceDir ?? process.cwd()` fallback at
+    // server-construction time. We don't care about the list contents —
+    // we only need to prove the constructor doesn't throw when the
+    // dashboard config omits workspaceDir entirely.
+    const deps = {
+      db,
+      config: { dataDir: "/tmp/test" },
+    } as unknown as ApiDependencies;
+    expect(() => createCommandsRoutes(deps)).not.toThrow();
+  });
+
   it("listAvailableBuiltinSkillSlugs ignores non-directories, pattern-mismatched dirs, and dirs without SKILL.md", async () => {
     const workspaceDir = mkdtempSync(join(tmpdir(), "pa-cmd-skills-"));
     const skillsRoot = join(workspaceDir, "agent-assets", "skills");

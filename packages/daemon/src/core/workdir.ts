@@ -44,12 +44,12 @@ import {
   OWNER_DM_SCOPE,
 } from "../messaging/constants.js";
 import { createLogger } from "../logging.js";
+import { SkillsCompiler } from "./skills-compiler.js";
 import {
-  SkillsCompiler,
-  renderMailAccountsMd,
-  refreshSkillIndexBlock,
   EMPTY_MAIL_ACCOUNTS_MD,
-} from "./skills-compiler.js";
+  renderMailAccountsMd,
+} from "./skills-compiler-tree.js";
+import { refreshSkillIndexBlock } from "./skills-compiler-skill-index.js";
 import {
   getProfileForEvent,
   resolveSkillManifest,

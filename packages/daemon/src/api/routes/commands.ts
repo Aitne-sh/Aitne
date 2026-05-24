@@ -178,11 +178,17 @@ export function createCommandsRoutes(deps: ApiDependencies): Hono {
     const backendId = parsed.data.backendId as BackendId;
     // Bang commands fire through the BackendRouter at run time. Reject any
     // backend that is type-system-registered but does not have an
-    // `IAgentCore` wired into the router yet (Phase 1 = opencode). Without
-    // this gate, a saved row would persist and dispatch later with
+    // `IAgentCore` wired into the router yet. Without this gate, a saved
+    // row would persist and dispatch later with
     // `BackendDecisiveFailure(model_unavailable)` from
     // `BackendRouter.requireCore` — much harder to debug than a clear
-    // 400 at create time.
+    // 400 at create time. As of this writing every entry in `BACKEND_IDS`
+    // is also in `RUNTIME_AVAILABLE_BACKEND_IDS`, so the body is dead
+    // until a future backend (e.g. antigravity) is registered to the type
+    // system before it has runtime wiring. Coverage is exempted because
+    // exercising the branch requires mocking the shared constants in a
+    // way that doesn't reflect real product state.
+    /* c8 ignore start */
     if (!isRuntimeAvailableBackendId(backendId)) {
       return {
         ok: false,
@@ -195,6 +201,7 @@ export function createCommandsRoutes(deps: ApiDependencies): Hono {
         },
       };
     }
+    /* c8 ignore stop */
     const modelKnown = getModelsForBackend(backendId).some(
       (model) => model.modelId === parsed.data.modelId && model.available,
     );

@@ -16,7 +16,7 @@ import {
 import {
   missingDelegatedVariants,
   missingNativeVariants,
-} from "./skills-compiler.js";
+} from "./skills-compiler-variants.js";
 
 /**
  * Integration delegation framework — `/health.integrationModes` builder

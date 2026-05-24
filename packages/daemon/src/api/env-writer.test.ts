@@ -9,13 +9,67 @@ import { applySchema } from "../db/schema.js";
 import { createSettingsStore, type SettingsStore } from "../settings/settings-store.js";
 import { ensureEnvFilePermissions, getEnvFilePath } from "./env-writer.js";
 
+// The `.env` rewrite path is now atomic: openSync(tmp, "w", 0o600) →
+// writeSync(fd, content) → fsyncSync(fd) → closeSync(fd) → renameSync(tmp,
+// envPath). The tests still capture "what content was written to .env"
+// by inspecting the writeFileSync mock's second argument — `writeSync`
+// inside the mock factory below mirrors its bytes through the
+// writeFileSync proxy so legacy assertions keep working unchanged.
+// `vi.hoisted()` lets the proxy be referenced inside the hoisted
+// `vi.mock()` factory.
+const fsProxies = vi.hoisted(() => ({
+  writeFileSyncProxy: vi.fn(),
+}));
+
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  // Default `lstatSync` returns a non-symlink stat so the env-writer's
+  // symlink refusal check passes through. Individual tests can override
+  // to assert the symlink-refusal path.
+  const nonSymlinkStat = {
+    isSymbolicLink: () => false,
+    isFile: () => true,
+    isDirectory: () => false,
+  } as ReturnType<typeof actual.lstatSync>;
   return {
     ...actual,
-    writeFileSync: vi.fn(),
+    writeFileSync: fsProxies.writeFileSyncProxy,
     readFileSync: vi.fn(() => ""),
     chmodSync: vi.fn(),
+    lstatSync: vi.fn(() => nonSymlinkStat),
+    openSync: vi.fn(() => 42),
+    writeSync: vi.fn(
+      (
+        fd: number,
+        bufOrContent: string | Buffer,
+        offset?: number,
+        length?: number,
+      ) => {
+        // env-writer uses the low-level `writeSync(fd, buf, offset, length)`
+        // signature with a Buffer for partial-write resilience. Tests can
+        // also exercise the simpler string signature. Mirror whichever
+        // form into the legacy `writeFileSync` proxy so existing
+        // assertions on `mockedFs.writeFileSync.mock.calls` keep working,
+        // and return the requested length so the caller's write loop
+        // exits in one iteration. Errors thrown by writeFileSyncProxy
+        // propagate, preserving the "rolls back when .env write fails"
+        // assertion.
+        let chunk: string;
+        if (typeof bufOrContent === "string") {
+          chunk = bufOrContent;
+        } else {
+          const start = offset ?? 0;
+          const end = start + (length ?? bufOrContent.length - start);
+          chunk = bufOrContent.subarray(start, end).toString("utf-8");
+        }
+        fsProxies.writeFileSyncProxy(`<atomic-tmp:${fd}>`, chunk);
+        return length ?? Buffer.byteLength(chunk);
+      },
+    ),
+    fsyncSync: vi.fn(),
+    closeSync: vi.fn(),
+    renameSync: vi.fn(),
+    unlinkSync: vi.fn(),
   };
 });
 
@@ -662,6 +716,58 @@ describe("applyConfigUpdates", () => {
         delegatedProxyMaxConcurrent: 100,
       });
       expect(result.errors).toHaveProperty("delegatedProxyMaxConcurrent");
+    });
+  });
+
+  describe(".env atomic-write safety", () => {
+    // Atomic rename does not follow symlinks like the legacy
+    // `writeFileSync` did. Surfacing the symlink as a clear error keeps
+    // the behavior change from happening silently for any user who
+    // intentionally symlinked `.env` — they get an actionable EENV_TARGET_SYMLINK
+    // instead of waking up to find the symlink replaced with a regular file.
+    it("refuses to overwrite a symlinked .env with EENV_TARGET_SYMLINK", async () => {
+      const config = makeConfig();
+      (mockedFs.lstatSync as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        () => ({
+          isSymbolicLink: () => true,
+          isFile: () => false,
+          isDirectory: () => false,
+        }),
+      );
+
+      await expect(
+        applyConfigUpdates(config, settingsStore, { apiPort: 9001 }),
+      ).rejects.toThrow(/refusing to overwrite symlinked \.env/);
+
+      // The SQLite tx wraps both the runtime settings setMany AND the
+      // .env write. The pre-rename refusal must propagate out of the
+      // tx callback so that no settings_json row is committed when the
+      // .env write was rejected.
+      expect(config.apiPort).toBe(8321);
+      // The proxy write never fires because the refusal short-circuits
+      // before openSync.
+      expect(mockedFs.writeFileSync).not.toHaveBeenCalled();
+    });
+
+    // ENOENT from lstat — fresh install, no .env yet — must NOT throw.
+    // The write proceeds and creates the file via renameSync(tmp, env).
+    it("treats ENOENT from lstat as 'no existing .env' and writes through", async () => {
+      const config = makeConfig();
+      (mockedFs.lstatSync as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+        () => {
+          const err = new Error("ENOENT: no such file or directory") as NodeJS.ErrnoException;
+          err.code = "ENOENT";
+          throw err;
+        },
+      );
+
+      const result = await applyConfigUpdates(config, settingsStore, { apiPort: 9002 });
+      expect(result.errors).toEqual({});
+      expect(result.updated).toContain("apiPort");
+      expect(config.apiPort).toBe(9002);
+      // The atomic-write codepath did fire — writeSync mirrored through
+      // the proxy.
+      expect(mockedFs.writeFileSync).toHaveBeenCalled();
     });
   });
 

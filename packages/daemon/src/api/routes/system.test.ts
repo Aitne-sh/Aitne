@@ -597,3 +597,88 @@ describe("POST /api/system/factory-reset — outer catch", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 });
+
+describe("POST /api/system/factory-reset — hasBlockingFactoryResetFailure branches", () => {
+  // The blocking-failure detector treats remainingTables / remainingSearchIndexes
+  // as hard failures even when `errors` is empty. The two tests below exercise
+  // both branches of `result.remainingTables.length > 0 || result.remainingSearchIndexes.length > 0`
+  // and the empty-`errors` shape of the warnings message ("Factory reset
+  // completed with warnings." with no trailing detail).
+
+  it("returns 500 with empty errors message when remainingTables is non-empty", async () => {
+    const { factoryReset: factoryResetMock } = await import("../../core/system-reset.js");
+    vi.mocked(factoryResetMock as (...args: unknown[]) => unknown).mockResolvedValueOnce({
+      errors: [],
+      remainingTables: ["sessions"],
+      remainingSearchIndexes: [],
+    });
+
+    const dataDir = mkdtempSync(join(tmpdir(), "pa-system-remaining-tables-"));
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+
+    const deps = {
+      db,
+      config: {
+        dataDir,
+        timezone: "UTC",
+        dayBoundaryHour: 4,
+      } as unknown as AgentConfig,
+      secretBroker: { delete: vi.fn(async () => {}) } as unknown as SecretBroker,
+      onSecretChanged: vi.fn(async () => {}),
+    } as unknown as ApiDependencies;
+
+    const localApp = new Hono();
+    localApp.route("/api", createSystemRoutes(deps));
+
+    const res = await localApp.request("/api/system/factory-reset", { method: "POST" });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe("reset_with_errors");
+    expect(body.error).toBe("factory_reset_incomplete");
+    // No errors → no `: ${detail}` suffix on the message.
+    expect(body.message).toBe("Factory reset completed with warnings.");
+    expect(body.remainingTables).toEqual(["sessions"]);
+
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("returns 500 when remainingSearchIndexes is non-empty (second OR branch)", async () => {
+    const { factoryReset: factoryResetMock } = await import("../../core/system-reset.js");
+    vi.mocked(factoryResetMock as (...args: unknown[]) => unknown).mockResolvedValueOnce({
+      errors: [],
+      remainingTables: [],
+      remainingSearchIndexes: ["fts_mail_messages"],
+    });
+
+    const dataDir = mkdtempSync(join(tmpdir(), "pa-system-remaining-fts-"));
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+
+    const deps = {
+      db,
+      config: {
+        dataDir,
+        timezone: "UTC",
+        dayBoundaryHour: 4,
+      } as unknown as AgentConfig,
+      secretBroker: { delete: vi.fn(async () => {}) } as unknown as SecretBroker,
+      onSecretChanged: vi.fn(async () => {}),
+    } as unknown as ApiDependencies;
+
+    const localApp = new Hono();
+    localApp.route("/api", createSystemRoutes(deps));
+
+    const res = await localApp.request("/api/system/factory-reset", { method: "POST" });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.status).toBe("reset_with_errors");
+    expect(body.remainingSearchIndexes).toEqual(["fts_mail_messages"]);
+
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+});

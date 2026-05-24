@@ -140,7 +140,7 @@ import {
   validateDelegatedStartup,
   type RefreshDmSessionWorkdirsResult,
 } from "../core/workdir.js";
-import { validateBuiltinSkillSourceTree } from "../core/skills-compiler.js";
+import { validateBuiltinSkillSourceTree } from "../core/skills-compiler-variants.js";
 
 // Audit / safety / messaging
 import { AuditLogger } from "../safety/audit.js";

@@ -24,7 +24,7 @@ ask_examples:
   - Can I restore on a new machine?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-22
 keywords:
   - backup
   - restore
@@ -57,10 +57,14 @@ Capture all Aitne state in a tar that you can restore later.
 
 ## If It Fails
 
-- A schema-version mismatch: Aitne's policy is "clean
-  reinstall, no data migration" — if the restored DB is from an
-  older daemon version, drop the DB and re-seed from the context
-  files.
+- **Schema mismatch on restore.** Aitne now ships
+  forward-only schema migrations applied automatically at boot
+  (see [Schema Migration](../glossary.md#schema-migration)), so a
+  restored DB from an older daemon version usually just works — the
+  migration runner brings it up to current shape on the next start.
+  Only fall back to dropping the DB (see
+  [Reinstall Cleanly](reinstall-cleanly.md)) if the daemon refuses to
+  start *after* you've checked the log for a real migration error.
 
 ## Related
 

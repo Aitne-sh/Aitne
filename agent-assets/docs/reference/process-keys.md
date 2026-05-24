@@ -41,11 +41,13 @@ keywords:
   - delegated_task
   - gmail_classify
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-22
 related:
   - concepts/process-keys
   - concepts/backends-and-tiers
   - features/operations/backend-routing
+  - features/integrations/browser-history
+  - features/operations/managed-chromium
 ---
 
 # ProcessKeys
@@ -99,6 +101,12 @@ related:
 | `wiki.lint` | Health pass over the wiki — writes `90_meta/health/<date>.md` | medium | yes |
 | `wiki.trace` | Chronological evolution of an idea across raw / wiki / outputs | medium | yes |
 | `wiki.connect` | Bridges two domains — writes `30_outputs/<date>-connect-<slug>.md` | medium | yes |
+| `routine.research_cluster_update` | Nightly per-cluster journal append (one row per cluster per day with new activity) | lite | yes |
+| `routine.research_offer_dm` | Two-Option Offer DM composition when a research cluster qualifies | lite | yes |
+| `routine.research_dispatch` | Accept path for the "research dive" option — WebSearch + WebFetch parallel research. Claude-only per §10.3 backend safety floor. | medium | yes |
+| `routine.research_wiki_summary` | Accept path for the "wiki summary" option — writes a wiki note into Obsidian inbox / Notion / local context per integration availability | medium | yes |
+| `routine.managed_sync_health_check` | B-4 managed-Chromium Instance S health check (6h cadence; agent journal only, never DMs) | lite | yes |
+| `routine.browser_automation_request` | B-4 scheduled / routine-driven Instance A workflow invocation. Claude-only backend floor. | medium | yes |
 
 "Configurable" = the operator can override the backend / tier on
 `/settings/models` (i.e. the key appears in `CONFIGURABLE_PROCESS_KEYS`).
@@ -107,3 +115,31 @@ global default.
 
 This list mirrors `packages/shared/src/process-key.ts`. The codebase
 is the source of truth.
+
+## Reactive vs Autonomous
+
+The set `REACTIVE_PROCESS_KEYS` (owner currently in the loop) is:
+`message.dm`, `message.mention`, `dashboard.chat`, `dashboard.docs_qa`,
+`setup`, `knowledge.import`. Every other key is autonomous and runs
+under the tighter Approve-tier MCP tool-stripping that B-003 Phase 3
+established.
+
+## Tier Locks
+
+`TIER_LOCKED_PROCESS_KEYS` supersedes operator pins. Current entry:
+
+- `dashboard.docs_qa` → `medium` (DOCS_QA_DESIGN.md §10.1).
+
+## Delegated Task Hard Caps
+
+The `delegated_task` / `delegated_task_heavy` request shape is bounded
+by `DELEGATED_TASK_HARD_CAPS` (server-enforced, not user-tunable):
+
+- `maxToolCalls` ≤ 15
+- `maxBudgetUsd` ≤ 0.50
+- `maxTimeoutMs` ≤ 300 000
+- `maxSchemaBytes` ≤ 4096
+
+`config.ts` holds the *defaults* (`delegatedTaskDefaultMaxToolCalls`,
+…); the caps above bound a prompt-injected caller regardless of the
+per-request fields.

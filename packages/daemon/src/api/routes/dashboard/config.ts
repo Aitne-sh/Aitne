@@ -19,7 +19,7 @@ import { upsertManagementRulesAgentIdentity } from "../../../management-rules.js
 import { DEFAULT_DISALLOWED_TOOLS, runtimeSettingsSchema } from "../../../settings/runtime-settings.js";
 import { createSettingsStore } from "../../../settings/settings-store.js";
 import { getSessionWorkdirPath } from "../../../core/workdir.js";
-import { rewriteCharacterBlock } from "../../../core/skills-compiler.js";
+import { rewriteCharacterBlock } from "../../../core/skills-compiler-cli-renderer.js";
 import { readJsonBody } from "../../json-body.js";
 import { getSecretConfigSummary, type SecretConfigSummary } from "./secrets.js";
 

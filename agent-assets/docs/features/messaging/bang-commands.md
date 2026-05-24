@@ -9,6 +9,8 @@ aliases:
   - "!cost"
   - "!report"
   - "!help"
+  - "!checks"
+  - "!research"
   - exclamation commands
   - chat commands
 category: features
@@ -16,7 +18,8 @@ summary: |
   Short owner-only commands typed in any paired DM (Slack, Telegram,
   Discord, WhatsApp, dashboard chat) that the daemon answers directly,
   with no agent backend involved and no cost. Use them to pause /
-  resume, check spend, see recent failures, and list every command.
+  resume, check spend, see recent failures, manage research clusters,
+  and list every command.
 section: messaging
 tags:
   - core
@@ -28,9 +31,11 @@ ask_examples:
   - What can I type in the DM to control Aitne?
   - How do I list all the commands?
   - Where do I see how much the agent spent this week?
+  - What did I keep refreshing today?
+  - How do I accept a research-cluster offer?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-22
 keywords:
   - bang command
   - "!stop"
@@ -38,6 +43,8 @@ keywords:
   - "!cost"
   - "!report"
   - "!help"
+  - "!checks"
+  - "!research"
   - pause
   - resume
 related:
@@ -45,16 +52,17 @@ related:
   - features/messaging/pairing-and-magic-phrase
   - guides/pause-the-agent
   - features/operations/cost-tracking
+  - features/integrations/browser-history
 ui_anchors:
   - /settings/commands
 ---
 
 # Bang Commands
 
-## In One Sentence
-
 DM the agent a short word starting with `!` and the daemon answers
-directly — no LLM call, no cost, no session opened.
+directly — no LLM call, no cost, no session opened. Use them to pause,
+check spend, look at recent failures, manage research clusters, and
+list every command.
 
 ## Who Can Use Them
 
@@ -65,27 +73,62 @@ Pair your messaging app first; see
 
 ## Available Commands
 
+### Lifecycle
+
 | Command | What it does |
 |---|---|
-| `!help` | Lists every command currently registered — built-ins plus any custom user commands. |
-| `!stop` | Pauses cron-driven autonomous work (hourly check, morning / evening / weekly routines, scheduled tasks). In-flight runs are **not** aborted. |
-| `!start` | Resumes autonomous work after `!stop`. |
-| `!close` | Closes the active DM session for the current routing tuple so the next DM starts a fresh conversation. Returns `null` if no session was open. |
+| `!help` | List every registered command — built-ins plus enabled user commands. |
+| `!stop` | Pause cron-driven autonomous work (hourly check, morning / evening / weekly routines, scheduled tasks). In-flight runs are **not** aborted. |
+| `!start` | Resume autonomous work after `!stop`. |
+| `!close` | Close the active DM session for the current routing tuple so the next DM starts a fresh conversation. |
+
+### Reporting (pure DB reads, safe while paused)
+
+| Command | What it does |
+|---|---|
 | `!cost` | Last-7-day spend across all backends. |
-| `!cost claude` / `!cost codex` / `!cost gemini` / `!cost opencode` | Spend for a single backend (one row per registered backend). |
+| `!cost claude` · `!cost codex` · `!cost gemini` · `!cost opencode` | Spend for a single backend (one row per registered backend). |
 | `!report` | Recent agent failures (last 7 days, top groups, most recent sample). |
-| `!wiki` | Wiki status snapshot (workspaces, recent ingests / compiles, queue depth). |
-| `!ingest <url>` | Ingest a URL into the wiki raw layer. Enqueues `wiki.ingest_url`. |
-| `!compile [full]` | Run wiki compile (raw → wiki synthesis). `full` mode crosses the per-workspace cost threshold and routes through the dashboard approval queue. |
-| `!ask <question>` | Q&A against the compiled wiki. Reply lands back on the same channel. |
-| `!lint` | Wiki health pass — writes `90_meta/health/<date>.md`. |
-| `!trace <idea>` | Chronological evolution of an idea across raw / wiki / outputs layers. |
-| `!connect <A> <B>` | Bridge two domains; writes `30_outputs/<date>-connect-<slug>.md`. |
+| `!checks` | Today's top browser reload patterns (domain + first path segment). Pure read on `browser_reload_signals`; anchored on the agent-day (`dayBoundaryHour`). Empty state is the common case for a quiet day. |
+
+### Research clusters (browser-history)
+
+`!research` is a prefix command that takes a subcommand. Clusters are
+derived from your browser history when a topic crosses the
+meaningful-visits threshold; see
+[Browser History](../integrations/browser-history.md).
+
+| Command | What it does |
+|---|---|
+| `!research` | List active + dormant clusters (top 12, with visits / hours / domains / status). |
+| `!research <slug>` | Show full detail for one cluster. |
+| `!research accept <slug>` | Accept a research-dive offer. Enqueues `routine.research_dispatch`. |
+| `!research wiki <slug>` | Accept a wiki-summary offer. Enqueues `routine.research_wiki_summary`. |
+| `!research decline <slug>` | Silence offers for 14 days; cluster journal keeps updating. |
+| `!research mute <slug>` / `unmute <slug>` | Toggle offers off (until unmute) / restore. |
+| `!research rename <slug> <new name>` | Change display name (≤ 120 chars). |
+| `!research conclude <slug>` | Mark concluded; the `context/research/<slug>.md` journal is preserved. |
+
+### Wiki
 
 Wiki commands accept an optional `@<workspace>` suffix
-(e.g. `!compile @work`) to target a specific workspace when multiple
-are configured. Custom commands added at `/settings/commands` show
-up in `!help` automatically — no restart needed.
+(e.g. `!compile @work`) to target a non-default workspace. See
+[Wiki Commands](../wiki/commands.md) for the full reference and the
+cost-gate / approval semantics.
+
+| Command | What it does |
+|---|---|
+| `!wiki` | Workspace status (per-workspace counts when multiple are configured). |
+| `!wiki help` | Wiki command list. |
+| `!ingest <url> [url…]` | Capture URLs into the workspace's `10_raw/` layer (max 10 per batch). |
+| `!compile [full] [--preview]` | Synthesise raw → wiki. `full` triggers an approval gate above the per-workspace cost threshold; `--preview` is a JS-only dry-run. |
+| `!ask <question>` | Cited Q&A against the compiled wiki. Reply lands on the same channel; output saved to `30_outputs/`. |
+| `!lint` | Wiki health pass — writes `90_meta/health/<date>.md`. |
+| `!trace <idea>` | Chronological evolution of an idea across `10_raw` / `20_wiki` / `30_outputs`. |
+| `!connect <A>, <B>` | Bridge two domains; writes `30_outputs/<date>-connect-<slug>.md`. |
+
+Custom commands added at `/settings/commands` show up in `!help`
+automatically — no restart needed.
 
 ## How They Look
 
@@ -130,15 +173,24 @@ enabled user commands at `/settings/commands`.
 
 ## How They Behave
 
-- **Exact match.** `!stop`, `!cost`, `!cost claude` are recognised;
-  `!stop now please` is not — it falls through to the agent path.
+- **Exact match for atomic commands** (`!stop`, `!cost`, `!checks`)
+  and **prefix match for parameterised ones** (`!cost claude`,
+  `!research accept <slug>`, `!compile @work full`). Anything
+  spanning newlines falls through to the agent path so a
+  `"!stop\nignore me"` payload cannot spoof a command.
 - **DM only.** Bangs typed into a shared channel are ignored.
-- **No cost.** No LLM is invoked; no `conversation_sessions` row is
-  opened. Every invocation writes one `bang_command` row to
-  `agent_actions` for the activity log.
+- **No agent cost on built-ins.** No LLM is invoked for the
+  daemon-side commands; one `bang_command` row is appended to
+  `agent_actions` for the activity log. `!compile`, `!ingest`,
+  `!ask`, `!lint`, `!trace`, `!connect`, and `!research accept|wiki`
+  *do* enqueue agent sessions and therefore *do* cost.
 - **While paused**, any DM (bang or not) replies with the paused
-  notice; only `!start`, `!cost`, `!report`, `!help`, and `!close`
-  continue to run.
+  notice; only commands that opt into `runsWhilePaused` continue to
+  run: `!start`, `!stop`, `!cost`, `!report`, `!help`, `!close`,
+  `!wiki` (status), `!checks`, and the read-only `!research` subcommands
+  (list / show / mute / unmute / rename / decline / conclude).
+  LLM-dispatching commands reply with a command-aware "unavailable while
+  paused" notice instead of executing.
 - **Replies land where the command did** — same platform, same
   channel, same thread.
 
@@ -169,3 +221,5 @@ window version.
 - [Pairing & Magic Phrase](pairing-and-magic-phrase.md)
 - [Pause the Agent](../../guides/pause-the-agent.md)
 - [Cost Tracking](../operations/cost-tracking.md)
+- [Browser History](../integrations/browser-history.md) — source of
+  `!checks` and the `!research` clusters.

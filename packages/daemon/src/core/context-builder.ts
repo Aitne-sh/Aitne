@@ -1,28 +1,22 @@
 import { readFile } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type {
   Event,
-  MessageEvent,
   RoutineEvent,
 } from "@aitne/shared";
 import {
   AGENT_ROLE_DESCRIPTOR,
   APP_NAME,
   formatAgentOutboundLabel,
-  formatSqliteDatetime,
   isRoutineEvent,
   isMessageEvent,
   isScheduledDmEvent,
   isScheduledEvent,
-  localDateStr,
   normalizeAgentDisplayName,
   nowInTimezone,
-  getAgentDayBoundsUtc,
   getAgentDayDateStr,
-  getIntegrationDescriptor,
-  parseSqliteUtcMs,
 } from "@aitne/shared";
 import type { AgentConfig } from "../config.js";
 import { getContextDir } from "../config.js";
@@ -36,34 +30,31 @@ import {
   loadPreviousWeekDigest,
   renderPreviousWeekBlock,
 } from "./previous-week-digest.js";
-import {
-  OWNER_DM_SCOPE,
-  OWNER_SCOPE_KEY,
-  DASHBOARD_CHAT_SCOPE,
-  DASHBOARD_SCOPE_KEY,
-  getConversationScope,
-} from "../messaging/constants.js";
 import type { IContextBuilder } from "./dispatcher.js";
 import type { ServiceRegistry } from "../services/service-registry.js";
-import type { CalendarEvent } from "../services/calendar.js";
-import {
-  formatForwardSuffix,
-  getProactiveForwardType,
-  isProactiveForwardMetadata,
-  metadataDispatchIds,
-  parseMessageMetadata,
-} from "./channel-timeline.js";
 import { createLogger } from "../logging.js";
 import { truncateRoadmap } from "./roadmap-truncate.js";
 import {
   readDefaultWikiWorkspace,
   readWikiWorkspaceByName,
 } from "./wiki/workspaces.js";
+import { renderCalendarBlock } from "./context-builder-calendar.js";
+import {
+  getConversationHistoryForEvent,
+  renderOwnerDmConversationHistory,
+  renderRecentDmActivityBlock,
+  renderRecentDmConversationLog,
+  renderRecentOtherSurfaceBlock,
+  renderResumeCatchupContext,
+} from "./context-builder-conversation.js";
+import { renderActiveProjectsSection } from "./context-builder-projects.js";
+import {
+  buildAgentDayDmContext,
+  buildYesterdayContext,
+  truncateAgentLog,
+} from "./context-builder-yesterday.js";
 
 const logger = createLogger("context-builder");
-const YESTERDAY_AGENT_ACTION_LIMIT = 40;
-const YESTERDAY_MESSAGE_LIMIT = 60;
-const YESTERDAY_DM_LOG_LIMIT = 20;
 
 export class ContextBuilder implements IContextBuilder {
   constructor(
@@ -394,8 +385,8 @@ export class ContextBuilder implements IContextBuilder {
         const [yesterdayMd, roadmapMd, activeProjects, yesterdaySqlite] = await Promise.all([
           this.readFile("yesterday.md"),
           this.readFile("roadmap.md"),
-          this.buildActiveProjectsSection(),
-          this.buildYesterdaySqliteContext(),
+          renderActiveProjectsSection(this.readableContextDir),
+          buildYesterdayContext({ db: this.db, config: this.config }),
         ]);
         if (yesterdayMd)
           sections.push(`<yesterday>\n${yesterdayMd}\n</yesterday>`);
@@ -461,7 +452,11 @@ export class ContextBuilder implements IContextBuilder {
         // the observations table instead of emitting a "fetch yourself"
         // directive that would force Sonnet to drive the MCP fan-out.
         sections.push(
-          await this.buildCalendarBlock(7, "calendar_events_7d", true),
+          await renderCalendarBlock(this.calendarDeps(), {
+            days: 7,
+            blockName: "calendar_events_7d",
+            prepassCovers: true,
+          }),
         );
       } else if (event.routine === "morning_routine_journal") {
         // morning-routine-optimization.md Phase 5 — Stage B (daily
@@ -475,12 +470,16 @@ export class ContextBuilder implements IContextBuilder {
         // lite-tier cold-start floor is cleared (see design §"Per-stage
         // input sketches").
         sections.push(
-          await this.buildCalendarBlock(7, "calendar_events_7d", true),
+          await renderCalendarBlock(this.calendarDeps(), {
+            days: 7,
+            blockName: "calendar_events_7d",
+            prepassCovers: true,
+          }),
         );
       } else if (event.routine === "roadmap_refresh") {
         const [roadmapMd, activeProjects] = await Promise.all([
           this.readFile("roadmap.md"),
-          this.buildActiveProjectsSection(),
+          renderActiveProjectsSection(this.readableContextDir),
         ]);
         // Roadmap refresh must see the full file — the session
         // regenerates `## Agent Action Plan` wholesale, so any entry the
@@ -495,7 +494,10 @@ export class ContextBuilder implements IContextBuilder {
         // refresh to incorporate long-horizon intent captured in recent
         // DMs; the rolling summaries in dm_conversation_log are the
         // cheapest source (already AI-condensed by the dispatcher).
-        const dmLog7d = this.buildRecentDmConversationLog(7);
+        const dmLog7d = renderRecentDmConversationLog(
+          { db: this.db, config: this.config },
+          7,
+        );
         sections.push(
           `<recent_dm_conversation_log days="7">\n${dmLog7d}\n</recent_dm_conversation_log>`,
         );
@@ -512,11 +514,16 @@ export class ContextBuilder implements IContextBuilder {
         // 3-arm hardcoded conditional silently filed native bindings under
         // the else branch and emitted "preserve existing roadmap content",
         // bricking roadmap.md generation for native-mode operators.
-        sections.push(await this.buildCalendarBlock(90, "calendar_events_90d"));
+        sections.push(
+          await renderCalendarBlock(this.calendarDeps(), {
+            days: 90,
+            blockName: "calendar_events_90d",
+          }),
+        );
       } else if (event.routine === "evening_review") {
         const [roadmapMd, activeProjects] = await Promise.all([
           this.readFile("roadmap.md"),
-          this.buildActiveProjectsSection(),
+          renderActiveProjectsSection(this.readableContextDir),
         ]);
         if (roadmapMd)
           sections.push(
@@ -530,7 +537,12 @@ export class ContextBuilder implements IContextBuilder {
         // 3-day calendar look-ahead for evening review. Delegated mode emits
         // an MCP-fetch directive inside the same block so the flow works
         // without a routine-specific delegated variant.
-        sections.push(await this.buildCalendarBlock(3, "calendar_events_3d"));
+        sections.push(
+          await renderCalendarBlock(this.calendarDeps(), {
+            days: 3,
+            blockName: "calendar_events_3d",
+          }),
+        );
       } else if (event.routine === "user_profile_sweep") {
         // Both phases read the same current-agent-day bounds at session
         // start — the phase flag is preserved for journaling only and
@@ -542,7 +554,10 @@ export class ContextBuilder implements IContextBuilder {
         // than silently running the sweep with an unlabeled log line.
         const phase = (event.data as { phase?: unknown })?.phase;
         if (phase === "morning" || phase === "evening") {
-          const agentDayDm = this.buildAgentDayDmContext();
+          const agentDayDm = buildAgentDayDmContext({
+            db: this.db,
+            config: this.config,
+          });
           sections.push(
             `<agent_day_messages>\n${agentDayDm.messages}\n</agent_day_messages>`,
           );
@@ -580,7 +595,7 @@ export class ContextBuilder implements IContextBuilder {
       ) {
         const [roadmapMd, activeProjects] = await Promise.all([
           this.readFile("roadmap.md"),
-          this.buildActiveProjectsSection(),
+          renderActiveProjectsSection(this.readableContextDir),
         ]);
         if (roadmapMd)
           sections.push(
@@ -594,10 +609,10 @@ export class ContextBuilder implements IContextBuilder {
 
         const lookaheadDays = event.routine === "monthly_review" ? 30 : 7;
         sections.push(
-          await this.buildCalendarBlock(
-            lookaheadDays,
-            `calendar_events_${lookaheadDays}d`,
-          ),
+          await renderCalendarBlock(this.calendarDeps(), {
+            days: lookaheadDays,
+            blockName: `calendar_events_${lookaheadDays}d`,
+          }),
         );
       }
     }
@@ -611,7 +626,12 @@ export class ContextBuilder implements IContextBuilder {
       // 1-day live calendar — critical for temporal awareness (meetings,
       // conflicts). Delegated mode emits an MCP-fetch directive inside the
       // same block.
-      sections.push(await this.buildCalendarBlock(1, "calendar_today"));
+      sections.push(
+        await renderCalendarBlock(this.calendarDeps(), {
+          days: 1,
+          blockName: "calendar_today",
+        }),
+      );
 
       // Task origin metadata — tells the agent WHO scheduled this
       sections.push(
@@ -626,7 +646,7 @@ export class ContextBuilder implements IContextBuilder {
       if (event.source === "dashboard_regenerate") {
         const [roadmapMd, activeProjects] = await Promise.all([
           this.readFile("roadmap.md"),
-          this.buildActiveProjectsSection(),
+          renderActiveProjectsSection(this.readableContextDir),
         ]);
         if (roadmapMd) sections.push(`<roadmap>\n${roadmapMd}\n</roadmap>`);
         if (activeProjects)
@@ -642,13 +662,19 @@ export class ContextBuilder implements IContextBuilder {
       // pick Variant A (greeting) vs. Variant B (mid-conversation
       // weave) per the scheduled.dm.md task-flow.
       if (isScheduledDmEvent(event)) {
-        const recentDms = this.buildRecentDmActivityBlock(60);
+        const recentDms = renderRecentDmActivityBlock(
+          { db: this.db, config: this.config },
+          60,
+        );
         if (recentDms) {
           sections.push(
             `<recent_dm_messages window="60min">\n${recentDms}\n</recent_dm_messages>`,
           );
         }
-        const dmHistory = this.buildOwnerDmConversationHistory(20);
+        const dmHistory = renderOwnerDmConversationHistory(
+          { db: this.db, config: this.config },
+          20,
+        );
         if (dmHistory) {
           sections.push(
             `<recent_dm_conversation>\n${dmHistory}\n</recent_dm_conversation>`,
@@ -664,7 +690,10 @@ export class ContextBuilder implements IContextBuilder {
     // as well would duplicate the data under two different XML tags.
     if (isMessageEvent(event)) {
       if (!opts.skipActiveHistoryBlock) {
-        const history = this.getConversationHistory(event);
+        const history = getConversationHistoryForEvent(
+          { db: this.db, config: this.config },
+          event,
+        );
         if (history) {
           sections.push(
             `<conversation_history>\n${history}\n</conversation_history>`,
@@ -675,7 +704,10 @@ export class ContextBuilder implements IContextBuilder {
       // suppressed: it covers the OTHER DM surface (dashboard ↔ owner)
       // and never overlaps with the cross-session bridge (which scopes
       // to the current surface).
-      const otherSurface = this.buildRecentOtherSurfaceBlock(event);
+      const otherSurface = renderRecentOtherSurfaceBlock(
+        { db: this.db, config: this.config },
+        event,
+      );
       if (otherSurface) {
         sections.push(
           `<recent_other_surface>\n${otherSurface}\n</recent_other_surface>`,
@@ -687,126 +719,21 @@ export class ContextBuilder implements IContextBuilder {
   }
 
   /**
-   * DM-HISTORY-CONTINUITY-FIX H-2 — narrow companion to `build()` for the
-   * resume path. Emits only the new information the SDK session does not
-   * already have: proactive forwards (including `scheduled_dm`) that
-   * landed in this scope OR the cross-surface DM scope *after* the
-   * resumed session was started.
-   *
-   * Why this is its own builder, not `build()` with a flag:
-   *   - On resume, the SDK ships the cached system prompt (and the
-   *     `<conversation_history>` / `<recent_other_surface>` blocks it
-   *     was built with) untouched. Concatenating the full `build()`
-   *     output onto the user turn re-bills every always-injected
-   *     block against the user-turn payload, killing prompt-cache
-   *     savings AND duplicating `<conversation_history>` content the
-   *     SDK session already holds.
-   *   - The catchup payload is ~few hundred tokens vs. ~10 K for the
-   *     full build, on a hot path that fires whenever there's a
-   *     recent proactive forward (~half of dashboard turns in
-   *     practice).
-   *
-   * `sessionStartedAtMs` should be the session row's `started_at`
-   * (not `last_message_at`) — `started_at` is fixed at session start
-   * and doesn't race with concurrent inserts. Returns `null` when no
-   * forwards landed after the anchor.
+   * IContextBuilder contract delegate. Full doc + rationale live on
+   * `renderResumeCatchupContext` in `context-builder-conversation.ts`
+   * (the catchup block is conversation-history surface area; the
+   * orchestrator forwards the call so the public interface stays on
+   * this class).
    */
   async buildResumeCatchupContext(
     event: Event,
     sessionStartedAtMs: number,
   ): Promise<string | null> {
-    if (!isMessageEvent(event) || !event.isDm) return null;
-    const { scope, scopeKey } = getConversationScope({
-      platform: event.platform,
-      channel: event.channel,
-      threadId: event.threadId,
-      isDm: true,
-      intent: event.intent,
-    });
-    const other =
-      scope === OWNER_DM_SCOPE
-        ? { scope: DASHBOARD_CHAT_SCOPE, scopeKey: DASHBOARD_SCOPE_KEY }
-        : scope === DASHBOARD_CHAT_SCOPE
-          ? { scope: OWNER_DM_SCOPE, scopeKey: OWNER_SCOPE_KEY }
-          : null;
-
-    const sinceUtc = formatSqliteDatetime(new Date(sessionStartedAtMs));
-    const scopeFilters: Array<{ scope: string; scopeKey: string }> = [
-      { scope, scopeKey },
-    ];
-    if (other) scopeFilters.push(other);
-    const placeholders = scopeFilters
-      .map(() => "(s.scope = ? AND s.scope_key = ?)")
-      .join(" OR ");
-    const params: unknown[] = [];
-    for (const filter of scopeFilters) {
-      params.push(filter.scope, filter.scopeKey);
-    }
-    params.push(sinceUtc);
-
-    const rows = this.db
-      .prepare(
-        `SELECT
-           m.session_id,
-           m.role,
-           m.content,
-           m.platform,
-           m.timestamp,
-           m.metadata,
-           s.scope,
-           s.backend_session_id
-         FROM messages m
-         JOIN conversation_sessions s ON m.session_id = s.id
-         WHERE (${placeholders})
-           AND m.role = 'assistant'
-           AND m.timestamp > ?
-         ORDER BY m.timestamp ASC, m.id ASC
-         LIMIT 30`,
-      )
-      .all(...params) as Array<{
-        session_id: number;
-        role: string;
-        content: string;
-        platform: string;
-        timestamp: string;
-        metadata: string | null;
-        scope: string;
-        backend_session_id: string | null;
-      }>;
-
-    const forwards = rows.filter((r) =>
-      isProactiveForwardMetadata(parseMessageMetadata(r.metadata)),
+    return renderResumeCatchupContext(
+      { db: this.db, config: this.config },
+      event,
+      sessionStartedAtMs,
     );
-    if (forwards.length === 0) return null;
-
-    const proactiveRows: Array<{
-      sessionId: number;
-      dispatchIds: string[];
-      sessionResumed: boolean;
-    }> = [];
-    const lines = forwards.map((r) => {
-      const metadata = parseMessageMetadata(r.metadata);
-      proactiveRows.push({
-        sessionId: r.session_id,
-        dispatchIds: metadataDispatchIds(metadata),
-        sessionResumed: r.backend_session_id !== null,
-      });
-      const suffix = formatForwardSuffix(metadata);
-      const scopeTag = r.scope === scope ? "this surface" : "other surface";
-      return `[${r.timestamp}] [assistant → ${r.platform}, ${scopeTag}]${suffix}: ${r.content}`;
-    });
-    if (proactiveRows.length > 0) {
-      this.logProactiveForwardInjected(proactiveRows);
-    }
-
-    return [
-      "<proactive_forwards_since_last_turn>",
-      "Background notifications and scheduled DMs dispatched on your",
-      "behalf while this session was idle. The owner has now replied —",
-      "these may or may not be the referent of that reply.",
-      ...lines,
-      "</proactive_forwards_since_last_turn>",
-    ].join("\n");
   }
 
   /**
@@ -889,676 +816,16 @@ export class ContextBuilder implements IContextBuilder {
   }
 
   /**
-   * Compute the calendar lookahead window anchored at the user-timezone
-   * midnight boundary. Shared by direct-mode fetches and the delegated-mode
-   * MCP-fetch directive so both paths describe exactly the same range.
+   * Bundle the three deps `renderCalendarBlock` consumes into one
+   * object literal so callers in `build()` don't repeat the spread at
+   * every site.
    */
-  private computeCalendarWindow(days: number): { timeMin: string; timeMax: string } {
-    const tz = this.config.timezone || undefined;
-    const dayBounds = getAgentDayBoundsUtc(tz, 0);
-    const startMs = parseSqliteUtcMs(dayBounds.start);
-    return {
-      timeMin: new Date(startMs).toISOString(),
-      timeMax: new Date(startMs + days * 24 * 60 * 60 * 1000).toISOString(),
-    };
-  }
-
-  /**
-   * Build a `<calendar_events_…>` context block honouring every active
-   * calendar provider × mode cell.
-   *
-   * docs/design/appendices/routine-data-acquisition.md §6.6 — the block wraps one
-   * `<provider key="…" mode="…">…</provider>` sub-block per active
-   * provider so the parent routine sees a uniform shape regardless of
-   * which provider(s) the operator has configured. Per-provider body:
-   *
-   *  - **direct + matching service available** → inline formatted event
-   *    list fetched by the daemon's `services.calendar` (Google today;
-   *    Outlook gets the same path once a dedicated `services.outlookCalendar`
-   *    lands — for now Outlook direct mode emits a service-unavailable
-   *    note so the flow degrades gracefully).
-   *  - **delegated** → a structured directive instructing the agent to
-   *    call the relevant MCP tool (same-backend) or the daemon's
-   *    `/api/integrations/<key>/exec` proxy (cross-backend). For
-   *    `userManagedConnector` providers (Outlook today) the proxy
-   *    branch is suppressed — same-backend and cross-backend collapse
-   *    onto the session's MCP.
-   *  - **native** → directive that points at the session backend's MCP
-   *    only. No daemon proxy: native bindings never fall back to the
-   *    daemon (R7 from the design doc).
-   *  - **disabled** → provider sub-block omitted entirely.
-   *
-   * When no provider is active, emit the legacy
-   * `<calendar_status>not available</calendar_status>` so routine flows
-   * that branch on the unavailable marker keep working.
-   *
-   * All callers funnel through this method so the three surfaces
-   * (morning / evening / weekly+monthly and the agent-task path) stay
-   * in lock-step when integration handling changes.
-   */
-  /**
-   * Build a `<calendar_events_*>` context block honouring every active
-   * provider's mode.
-   *
-   * `prepassCovers` — A8 / Finding 5. When `true`, the caller's
-   * `ROUTINE_WINDOWS` entry includes a calendar row, so the
-   * `routine.fetch_window` pre-pass has already POSTed events to
-   * `/api/observations` for every non-direct provider. Non-direct
-   * provider sub-blocks then emit a "read observations" hint instead
-   * of the legacy "fetch yourself" directive. Direct providers are
-   * unchanged — ContextBuilder still pre-fetches inline events via
-   * `services.calendar` (Google) and emits the fallback hint for
-   * Outlook (no daemon-side service yet). The flag has no effect on
-   * direct-mode sub-blocks. Default `false` for callers that don't
-   * have pre-pass coverage (today_refresh, weekly/monthly_review,
-   * roadmap_refresh).
-   */
-  private async buildCalendarBlock(
-    days: number,
-    blockName: string,
-    prepassCovers = false,
-  ): Promise<string> {
-    const integrations = readIntegrations(this.db);
-    const { timeMin, timeMax } = this.computeCalendarWindow(days);
-
-    const subblocks: string[] = [];
-    const googleSub = await this.buildCalendarProviderBlock(
-      "google_calendar",
-      "Google Calendar",
-      integrations.google_calendar?.mode ?? "disabled",
-      days,
-      timeMin,
-      timeMax,
-      prepassCovers,
-    );
-    if (googleSub) subblocks.push(googleSub);
-    const outlookSub = await this.buildCalendarProviderBlock(
-      "outlook_calendar",
-      "Outlook Calendar",
-      integrations.outlook_calendar?.mode ?? "disabled",
-      days,
-      timeMin,
-      timeMax,
-      prepassCovers,
-    );
-    if (outlookSub) subblocks.push(outlookSub);
-
-    if (subblocks.length === 0) {
-      // Match the legacy single-line shape so existing prose that greps
-      // for `<calendar_status>not available` keeps matching.
-      return `<calendar_status>Calendar service not available. No calendar provider is configured for this window.</calendar_status>`;
-    }
-    return [
-      `<${blockName} days="${days}" timeMin="${timeMin}" timeMax="${timeMax}">`,
-      ...subblocks,
-      `</${blockName}>`,
-    ].join("\n");
-  }
-
-  /**
-   * Emit one provider sub-block for `buildCalendarBlock`. Returns null
-   * when the provider is disabled (or, for native mode, the binding
-   * does not apply to a meaningful path — the agent reads
-   * `<integration_modes>` to decide whether its session backend is the
-   * native one).
-   */
-  private async buildCalendarProviderBlock(
-    key: "google_calendar" | "outlook_calendar",
-    displayName: string,
-    mode: "direct" | "delegated" | "native" | "disabled",
-    days: number,
-    timeMin: string,
-    timeMax: string,
-    prepassCovers = false,
-  ): Promise<string | null> {
-    if (mode === "disabled") return null;
-
-    const open = `  <provider key="${key}" mode="${mode}">`;
-    const close = "  </provider>";
-
-    // A8 / Finding 5 — when the parent routine's pre-pass owns the
-    // calendar window AND this provider is non-direct, the pre-pass
-    // has already POSTed events to /api/observations. Replace the
-    // legacy "fetch yourself" directive with a hint pointing at
-    // observations so the main routine session never re-drives the
-    // MCP fan-out (the cost regression that motivated this flag).
-    if (prepassCovers && (mode === "delegated" || mode === "native")) {
-      return [
-        open,
-        `${displayName} ${mode} mode — the routine.fetch_window pre-pass`,
-        `posted events for [${timeMin}, ${timeMax}) to /api/observations`,
-        `under source_prefix \`${key}:\`. Read them via:`,
-        `  GET http://localhost:8321/api/observations?pending=true&source_prefix=${key}:&limit=200`,
-        `Consult \`<fetch_report>\` injected above for pre-pass status; on`,
-        `status="failed" or "skipped" treat this provider as unavailable for`,
-        `the window and log a one-line skip to \`## Agent Log\` instead of`,
-        `re-driving the connector yourself. Do NOT call /api/calendar/* or`,
-        `/api/integrations/*/exec — those return 410 in this mode.`,
-        close,
-      ].join("\n");
-    }
-
-    if (mode === "direct") {
-      // Today only `services.calendar` (Google) is wired. Outlook direct
-      // mode reaches `GET /api/calendar/outlook` from the task flow; the
-      // context block surfaces a service-status hint until a daemon-side
-      // CalendarService for Outlook lands. Either way the agent can fall
-      // back to its own direct REST call from the task flow.
-      if (key === "google_calendar" && this.services.calendar) {
-        const inline = await this.fetchCalendarEvents(days);
-        if (inline !== null) {
-          return [open, inline, close].join("\n");
-        }
-      }
-      return [
-        open,
-        `${displayName}: direct mode, daemon service not initialized for this window.`,
-        `Fetch yourself via the task flow's direct-mode endpoint (Google: /api/calendar/events; Outlook: /api/calendar/outlook).`,
-        close,
-      ].join("\n");
-    }
-
-    if (mode === "delegated") {
-      // CLAUDE.md: "Never hardcode an integration reference outside the
-      // registry." `userManagedConnector` is the registry's source of
-      // truth for whether the daemon ships a `/api/integrations/<key>/
-      // exec` proxy. Reading it from the descriptor means a future
-      // user-managed integration (Proton, custom MCP, etc.) inherits
-      // the right branch without touching this method.
-      const isUserManaged =
-        getIntegrationDescriptor(key).userManagedConnector === true;
-      const lines: string[] = [
-        open,
-        `${displayName} is delegated — see \`<integration_modes>\`. Fetch the window`,
-        `(timeMin=${timeMin}, timeMax=${timeMax}) and treat the returned events as`,
-        `the contents of this provider block for the rest of the task flow.`,
-        "",
-        "  Same-backend (delegated_to == your session backend) — use your",
-        `  session's ${displayName} MCP tool (whichever your skills document).`,
-      ];
-      if (!isUserManaged) {
-        lines.push(
-          "",
-          "  Cross-backend (delegated_to != your session backend) — call",
-          "  the daemon's task-mode endpoint so the configured account is used:",
-          `    POST http://localhost:8321/api/integrations/${key}/exec`,
-          `      task: List every event between ${timeMin} and ${timeMax}.`,
-          `      outputSchema: { events: [ { id, title, start, end } ] }`,
-          `    Do NOT call /api/calendar/* (returns 410 in delegated mode).`,
-        );
-      } else {
-        lines.push(
-          "",
-          "  Cross-backend: not available for Outlook (user-managed connector,",
-          "  no daemon proxy). Fall through to the session's MCP regardless.",
-        );
-      }
-      lines.push(
-        "",
-        "If the call errors out, log one line to `## Agent Log` and proceed",
-        "as if the window were empty.",
-        close,
-      );
-      return lines.join("\n");
-    }
-
-    // mode === "native"
-    return [
-      open,
-      `${displayName} is in native mode — see \`<integration_modes>.${key}_native_to\`.`,
-      `Fetch this window (timeMin=${timeMin}, timeMax=${timeMax}) yourself via your`,
-      `session backend's ${displayName} MCP surface. Do NOT call /api/calendar/*`,
-      `or /api/integrations/*/exec — native mode has no daemon proxy.`,
-      "",
-      `If the native binding does not match your session backend (check`,
-      `\`${key}_native_to\`), treat this provider as unavailable for this turn`,
-      `and log one line to \`## Agent Log\`.`,
-      close,
-    ].join("\n");
-  }
-
-  /**
-   * Fetch calendar events for the next N days and format as markdown.
-   * Groups events by date with day-of-week and Today/Tomorrow labels.
-   * Returns null if CalendarService is not available.
-   */
-  private async fetchCalendarEvents(days: number): Promise<string | null> {
-    if (!this.services.calendar) return null;
-
-    try {
-      const { timeMin, timeMax } = this.computeCalendarWindow(days);
-
-      const events = await this.services.calendar!.listEvents(timeMin, timeMax);
-
-      if (events.length === 0) {
-        return `Calendar connected (Google Calendar). No events found in the next ${days} days.`;
-      }
-
-      return this.formatCalendarEvents(events, days);
-    } catch (err) {
-      logger.warn(
-        { err },
-        "Failed to fetch calendar events for context",
-      );
-      return null;
-    }
-  }
-
-  /** Format calendar events grouped by date */
-  private formatCalendarEvents(events: CalendarEvent[], days: number): string {
-    const now = new Date();
-    const tz = this.config.timezone || undefined;
-    const todayStr = localDateStr(now, tz);
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = localDateStr(tomorrow, tz);
-
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-    // Group events by local date in the configured timezone.
-    const byDate = new Map<string, CalendarEvent[]>();
-    for (const event of events) {
-      if (!event.start) continue;
-      const dateStr =
-        event.start.length === 10
-          ? event.start
-          : localDateStr(new Date(event.start), tz);
-      const group = byDate.get(dateStr) ?? [];
-      group.push(event);
-      byDate.set(dateStr, group);
-    }
-
-    const lines: string[] = [];
-
-    // Generate all dates in range
-    for (let i = 0; i < days; i++) {
-      const date = new Date(now);
-      date.setDate(date.getDate() + i);
-      const dateStr = localDateStr(date, tz);
-      const localInfo = nowInTimezone(tz, date);
-      const dayName = dayNames[localInfo.dayOfWeek];
-
-      let label = "";
-      if (dateStr === todayStr) label = " — Today";
-      else if (dateStr === tomorrowStr) label = " — Tomorrow";
-
-      lines.push(`## ${dateStr} (${dayName})${label}`);
-
-      const dayEvents = byDate.get(dateStr);
-      if (!dayEvents || dayEvents.length === 0) {
-        lines.push("- (no events)");
-      } else {
-        for (const event of dayEvents) {
-          const timeRange = this.formatTimeRange(event);
-          const summary = event.summary ?? "Untitled";
-          const locationPart = event.location ? ` @ ${event.location}` : "";
-          lines.push(`- ${timeRange} ${summary}${locationPart}`);
-        }
-      }
-      lines.push("");
-    }
-
-    return lines.join("\n").trimEnd();
-  }
-
-  /** Format event time range as "HH:MM–HH:MM" or "All day" */
-  private formatTimeRange(event: CalendarEvent): string {
-    if (!event.start || !event.end) return "All day";
-    // All-day events have date format (YYYY-MM-DD) without time component
-    if (event.start.length === 10) return "All day";
-
-    const startDate = new Date(event.start);
-    const endDate = new Date(event.end);
-    const startTime = this.formatLocalTime(startDate);
-    const endTime = this.formatLocalTime(endDate);
-    return `${startTime}\u2013${endTime}`;
-  }
-
-  private formatLocalTime(date: Date): string {
-    const local = nowInTimezone(this.config.timezone || undefined, date);
-    return `${String(local.hours).padStart(2, "0")}:${String(local.minutes).padStart(2, "0")}`;
-  }
-
-  /**
-   * SCHEDULED-DM-IMPLEMENTATION-PLAN §5.7 — return inbound owner-DM
-   * messages received in the last `windowMinutes` across BOTH
-   * owner-facing scopes (`owner_dm` for messaging-app DMs and
-   * `dashboard_chat` for the dashboard chat panel), formatted one per
-   * line oldest first. Returns null when there are no messages so the
-   * caller can omit the block entirely.
-   *
-   * The two-scope query mirrors §3.6's gate set: the briefing
-   * serializes behind both surfaces, so the LLM must see both
-   * surfaces when classifying conversation state. A single-scope read
-   * here would mis-classify state as `asleep` whenever the user is
-   * mid-conversation on the OTHER surface — exactly the
-   * voice-mismatch failure the design exists to fix.
-   *
-   * `docs_qa` is intentionally excluded — that surface is research
-   * lookups, not conversation; gating against it would freeze
-   * briefings during long doc-searches.
-   */
-  private buildRecentDmActivityBlock(windowMinutes: number): string | null {
-    const sinceUtc = formatSqliteDatetime(
-      new Date(Date.now() - windowMinutes * 60_000),
-    );
-    const rows = this.db
-      .prepare(
-        `SELECT m.role, m.content, m.timestamp
-         FROM messages m
-         JOIN conversation_sessions s ON m.session_id = s.id
-         WHERE s.scope IN (?, ?) AND m.role = 'user' AND m.timestamp >= ?
-         ORDER BY m.timestamp ASC
-         LIMIT 30`,
-      )
-      .all(OWNER_DM_SCOPE, DASHBOARD_CHAT_SCOPE, sinceUtc) as {
-        role: string;
-        content: string;
-        timestamp: string;
-      }[];
-
-    if (rows.length === 0) return null;
-    return rows
-      .map((r) => `[${r.timestamp}] ${truncateForBlock(r.content, 200)}`)
-      .join("\n");
-  }
-
-  /**
-   * SCHEDULED-DM-IMPLEMENTATION-PLAN §5.7 — return the last `limit`
-   * owner-facing messages across BOTH `owner_dm` and `dashboard_chat`
-   * scopes (interleaved by timestamp), formatted with role tags. Used
-   * by `<recent_dm_conversation>` for topic awareness in the bridge
-   * phrasing of Variant B briefings.
-   *
-   * Two-scope read — same reasoning as `buildRecentDmActivityBlock`:
-   * the briefing must reconstruct topic context from whichever surface
-   * the user has been using, not just the messaging-app one.
-   */
-  private buildOwnerDmConversationHistory(limit: number): string | null {
-    const rows = this.db
-      .prepare(
-        `SELECT m.role, m.content, m.timestamp, m.metadata
-         FROM messages m
-         JOIN conversation_sessions s ON m.session_id = s.id
-         WHERE (s.scope = ? AND s.scope_key = ?)
-            OR (s.scope = ? AND s.scope_key = ?)
-         ORDER BY m.timestamp DESC, m.id DESC
-         LIMIT ?`,
-      )
-      .all(
-        OWNER_DM_SCOPE,
-        OWNER_SCOPE_KEY,
-        DASHBOARD_CHAT_SCOPE,
-        DASHBOARD_SCOPE_KEY,
-        limit,
-      ) as {
-        role: string;
-        content: string;
-        timestamp: string;
-        metadata: string | null;
-      }[];
-
-    if (rows.length === 0) return null;
-    return rows
-      .reverse()
-      .map((r) => {
-        const forwardSuffix =
-          r.role === "assistant"
-            ? formatForwardSuffix(parseMessageMetadata(r.metadata))
-            : "";
-        return `[${r.timestamp}] [${r.role}]${forwardSuffix}: ${truncateForBlock(r.content, 400)}`;
-      })
-      .join("\n");
-  }
-
-  private getConversationHistory(event: MessageEvent): string | null {
-    const maxMessages = this.config.historyInjectionMaxMessages ?? 50;
-
-    let rows: {
-      session_id: number;
-      timestamp: string;
-      role: string;
-      content: string;
-      platform: string;
-      metadata: string | null;
-      backend: string | null;
-      model_id: string | null;
-      backend_session_id: string | null;
-    }[];
-
-    if (event.isDm) {
-      const { scope, scopeKey } = getConversationScope({
-        platform: event.platform,
-        channel: event.channel,
-        threadId: event.threadId,
-        isDm: true,
-        // Without `intent`, a docs_qa event would query under
-        // `dashboard_chat` and inject chat history into the QA prompt
-        // (or miss its own QA history). Thread it through so each
-        // dashboard scope retrieves only its own conversation.
-        intent: event.intent,
-      });
-      // DM: load the active conversation for the matching DM surface.
-      rows = this.db
-        .prepare(
-          `SELECT
-             m.session_id,
-             m.role,
-             m.content,
-             m.platform,
-             m.timestamp,
-             m.metadata,
-             m.backend,
-             m.model_id,
-             s.backend_session_id
-           FROM messages m
-           JOIN conversation_sessions s ON m.session_id = s.id
-           WHERE s.scope = ? AND s.scope_key = ? AND s.status = 'active'
-           ORDER BY m.timestamp DESC, m.id DESC LIMIT ?`,
-        )
-        .all(scope, scopeKey, maxMessages) as typeof rows;
-    } else {
-      // Non-DM: query by (platform, channel, thread).
-      // Hard-cap at 20 — threads are short-lived and higher limits risk
-      // injecting stale context from unrelated earlier threads.
-      const threadLimit = Math.min(maxMessages, 20);
-      rows = this.db
-        .prepare(
-          `SELECT
-             m.session_id,
-             m.role,
-             m.content,
-             m.platform,
-             m.timestamp,
-             m.metadata,
-             m.backend,
-             m.model_id,
-             s.backend_session_id
-           FROM messages m
-           JOIN conversation_sessions s ON m.session_id = s.id
-           WHERE s.platform = ? AND s.channel_id = ? AND s.thread_id IS ?
-           ORDER BY m.timestamp DESC, m.id DESC LIMIT ?`,
-        )
-        .all(event.platform, event.channel, event.threadId ?? null, threadLimit) as typeof rows;
-    }
-
-    if (rows.length === 0) return null;
-
-    // Truncate by approximate token budget (1 token ≈ 4 chars).
-    const maxTokens = this.config.historyInjectionMaxTokens ?? 8000;
-    const reversed = rows.reverse();
-    const proactiveRows: Array<{
-      sessionId: number;
-      dispatchIds: string[];
-      sessionResumed: boolean;
-    }> = [];
-    let tokenBudget = maxTokens * 4; // chars remaining
-    const lines: string[] = [];
-    for (const r of reversed) {
-      const metadata = parseMessageMetadata(r.metadata);
-      const isForward = isProactiveForwardMetadata(metadata);
-      const tag = r.backend
-        ? `[${r.timestamp}] [${r.role}/${r.backend}:${r.model_id ?? "?"}]`
-        : `[${r.timestamp}] [${r.role}]`;
-      const forwardSuffix =
-        r.role === "assistant" ? formatForwardSuffix(metadata) : "";
-      const line = `${tag}${forwardSuffix}: ${r.content}`;
-      tokenBudget -= line.length;
-      if (tokenBudget < 0 && lines.length > 0) {
-        lines.unshift(`[...${reversed.length - lines.length} older messages omitted]`);
-        break;
-      }
-      if (isForward) {
-        proactiveRows.push({
-          sessionId: r.session_id,
-          dispatchIds: metadataDispatchIds(metadata),
-          sessionResumed: r.backend_session_id !== null,
-        });
-      }
-      lines.push(line);
-    }
-    if (proactiveRows.length > 0) {
-      this.logProactiveForwardInjected(proactiveRows);
-    }
-    return lines.join("\n");
-  }
-
-  private buildRecentOtherSurfaceBlock(event: MessageEvent): string | null {
-    if (!event.isDm || event.intent === "docs_qa") return null;
-    const windowMinutes = this.config.historyOtherSurfaceWindowMinutes ?? 1440;
-    if (!Number.isFinite(windowMinutes) || windowMinutes <= 0) return null;
-
-    const { scope } = getConversationScope({
-      platform: event.platform,
-      channel: event.channel,
-      threadId: event.threadId,
-      isDm: true,
-      intent: event.intent,
-    });
-    const other =
-      scope === OWNER_DM_SCOPE
-        ? { scope: DASHBOARD_CHAT_SCOPE, scopeKey: DASHBOARD_SCOPE_KEY }
-        : scope === DASHBOARD_CHAT_SCOPE
-          ? { scope: OWNER_DM_SCOPE, scopeKey: OWNER_SCOPE_KEY }
-          : null;
-    if (!other) return null;
-
-    const sinceUtc = formatSqliteDatetime(
-      new Date(Date.now() - windowMinutes * 60_000),
-    );
-    const rows = this.db
-      .prepare(
-        `SELECT
-           m.role,
-           m.content,
-           m.platform,
-           m.timestamp,
-           m.metadata,
-           s.scope,
-           s.scope_key
-         FROM messages m
-         JOIN conversation_sessions s ON m.session_id = s.id
-         WHERE s.scope = ?
-           AND s.scope_key = ?
-           AND s.status = 'active'
-           AND m.timestamp >= ?
-         ORDER BY m.timestamp ASC, m.id ASC
-         LIMIT 60`,
-      )
-      .all(other.scope, other.scopeKey, sinceUtc) as Array<{
-      role: string;
-      content: string;
-      platform: string;
-      timestamp: string;
-      metadata: string | null;
-      scope: string;
-      scope_key: string;
-    }>;
-
-    if (rows.length === 0) return null;
-
-    const lines: string[] = [];
-    const ordinaryGroups = new Map<
-      string,
-      { scope: string; count: number; firstMs: number; lastMs: number }
-    >();
-    for (const row of rows) {
-      const metadata = parseMessageMetadata(row.metadata);
-      const forwardType = getProactiveForwardType(metadata);
-      if (forwardType) {
-        lines.push(
-          `[${row.timestamp}] [${forwardType} → ${row.platform}]: ${row.content}`,
-        );
-        continue;
-      }
-
-      const key = `${row.scope}:${row.scope_key}`;
-      const timestampMs = parseSqliteUtcMs(row.timestamp);
-      const existing = ordinaryGroups.get(key);
-      if (existing) {
-        existing.count += 1;
-        existing.firstMs = Math.min(existing.firstMs, timestampMs);
-        existing.lastMs = Math.max(existing.lastMs, timestampMs);
-      } else {
-        ordinaryGroups.set(key, {
-          scope: row.scope,
-          count: 1,
-          firstMs: timestampMs,
-          lastMs: timestampMs,
-        });
-      }
-    }
-
-    for (const group of ordinaryGroups.values()) {
-      const spanMinutes = Math.max(
-        1,
-        Math.ceil((group.lastMs - group.firstMs) / 60_000),
-      );
-      lines.push(
-        `(${group.scope}: ${group.count} turns in last ${spanMinutes} minutes)`,
-      );
-    }
-
-    return lines.length > 0 ? lines.join("\n") : null;
-  }
-
-  private logProactiveForwardInjected(
-    rows: Array<{
-      sessionId: number;
-      dispatchIds: string[];
-      sessionResumed: boolean;
-    }>,
-  ): void {
-    const sessionId = rows[rows.length - 1]?.sessionId;
-    if (sessionId === undefined) return;
-    const dispatchIds = [
-      ...new Set(rows.flatMap((row) => row.dispatchIds)),
-    ];
-    try {
-      this.db
-        .prepare(
-          `INSERT INTO agent_actions (
-             action_type, trigger, result, detail, started_at
-           )
-           VALUES (
-             'proactive_forward_injected',
-             'reactive',
-             'success',
-             ?,
-             CURRENT_TIMESTAMP
-           )`,
-        )
-        .run(
-          JSON.stringify({
-            sessionId,
-            dispatchIds,
-            forwardCount: rows.length,
-            sessionResumed: rows.some((row) => row.sessionResumed),
-          }),
-        );
-    } catch (err) {
-      logger.warn({ err, sessionId }, "Failed to log proactive forward injection");
-    }
+  private calendarDeps(): {
+    db: Database.Database;
+    config: AgentConfig;
+    services: ServiceRegistry;
+  } {
+    return { db: this.db, config: this.config, services: this.services };
   }
 
   private async readFile(relativePath: string): Promise<string | null> {
@@ -1572,563 +839,4 @@ export class ContextBuilder implements IContextBuilder {
       return null;
     }
   }
-
-  private async buildActiveProjectsSection(): Promise<string | null> {
-    const contextDir = this.readableContextDir;
-    if (!contextDir) return null;
-    const projectsDir = join(contextDir, CONTEXT_RELATIVE_PATHS.projects.dir);
-    if (!existsSync(projectsDir)) return null;
-
-    const projectFiles = readdirSync(projectsDir)
-      .filter((name) => name.endsWith(".md"))
-      .filter((name) => !name.startsWith("_"));
-    if (projectFiles.length === 0) return null;
-
-    const summaries = (
-      await Promise.all(
-        projectFiles.map(async (name) => {
-          const content = await this.readFile(
-            `${CONTEXT_RELATIVE_PATHS.projects.dir}/${name}`,
-          );
-          if (!content) return null;
-          return summarizeProjectFile(name, content);
-        }),
-      )
-    )
-      .filter((summary): summary is ProjectSummary => summary !== null)
-      .filter((summary) => summary.state !== "archived");
-
-    if (summaries.length === 0) return null;
-
-    summaries.sort((a, b) => {
-      const aUpdated = a.updated ?? "";
-      const bUpdated = b.updated ?? "";
-      if (aUpdated !== bUpdated) return bUpdated.localeCompare(aUpdated);
-      return a.title.localeCompare(b.title);
-    });
-
-    const lines = ["# Active projects", ""];
-    for (const project of summaries) {
-      const parts = [`state: ${project.state}`];
-      if (project.nextMilestone) {
-        parts.push(`next: ${project.nextMilestone}`);
-      }
-      if (project.due) {
-        parts.push(`due: ${project.due}`);
-      }
-      lines.push(
-        `- ${project.title} (\`${project.slug}\`) — ${parts.join("; ")}`,
-      );
-    }
-
-    return lines.join("\n");
-  }
-
-  /**
-   * Render a rolling 7-day (or N-day) window of DM conversation-log
-   * summaries for roadmap_refresh. Unlike `buildYesterdaySqliteContext`,
-   * which is anchored to the previous agent-day for journal synthesis,
-   * this window is calendar-rolling — refreshes can trigger at any
-   * time, and the prompt needs whatever recent DM context exists.
-   *
-   * Returns a formatted markdown block; falls back to a "(none)" stub
-   * so the prompt can always cite the tag unconditionally.
-   */
-  private buildRecentDmConversationLog(days: number): string {
-    const timezoneLabel = this.config.timezone || "system";
-    const nowMs = Date.now();
-    const startMs = nowMs - days * 24 * 60 * 60 * 1000;
-    const startSqlite = formatSqliteDatetime(new Date(startMs));
-    const endSqlite = formatSqliteDatetime(new Date(nowMs));
-
-    const total = (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM dm_conversation_log
-           WHERE created_at >= ? AND created_at < ?`,
-        )
-        .get(startSqlite, endSqlite) as { cnt: number }
-    ).cnt;
-
-    const rows = (
-      this.db
-        .prepare(
-          `SELECT platform, scope, scope_key, summary, message_count, created_at
-           FROM dm_conversation_log
-           WHERE created_at >= ? AND created_at < ?
-           ORDER BY created_at DESC
-           LIMIT ?`,
-        )
-        .all(
-          startSqlite,
-          endSqlite,
-          YESTERDAY_DM_LOG_LIMIT,
-        ) as YesterdayDmConversationLogRow[]
-    ).reverse();
-
-    const lines = [
-      `- Window: last ${days} days`,
-      `- Timezone: ${timezoneLabel}`,
-      `- Rows: ${total}`,
-    ];
-    if (total > rows.length) {
-      lines.push(`- Showing latest ${rows.length} rows only`);
-    }
-    if (rows.length === 0) {
-      lines.push("- (none)");
-      return lines.join("\n");
-    }
-    for (const row of rows) {
-      const scopeKey =
-        row.scope_key && row.scope_key.length > 0 ? `/${row.scope_key}` : "";
-      lines.push(
-        `- ${formatSqliteTimestampForContext(row.created_at, timezoneLabel)} [${row.platform}:${row.scope}${scopeKey}] (${row.message_count} msgs) ${truncateContextText(row.summary, 220)}`,
-      );
-    }
-    return lines.join("\n");
-  }
-
-  private async buildYesterdaySqliteContext(): Promise<{
-    agentActions: string;
-    messages: string;
-    dmConversationLog: string;
-  }> {
-    const tz = this.config.timezone || undefined;
-    const dayBoundaryHour = this.config.dayBoundaryHour ?? 4;
-    const previousAgentDayRef = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const bounds = getAgentDayBoundsUtc(tz, dayBoundaryHour, previousAgentDayRef);
-    const dayLabel = localDateStr(
-      new Date(parseSqliteUtcMs(bounds.start)),
-      tz,
-    );
-    const timezoneLabel = this.config.timezone || "system";
-
-    const agentActionTotal = (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM agent_actions
-           WHERE started_at >= ? AND started_at < ?`,
-        )
-        .get(bounds.start, bounds.end) as { cnt: number }
-    ).cnt;
-    const agentActionRows = (
-      this.db
-        .prepare(
-          `SELECT action_type, trigger, result, started_at, completed_at, error
-           FROM agent_actions
-           WHERE started_at >= ? AND started_at < ?
-           ORDER BY started_at DESC
-           LIMIT ?`,
-        )
-        .all(
-          bounds.start,
-          bounds.end,
-          YESTERDAY_AGENT_ACTION_LIMIT,
-        ) as YesterdayAgentActionRow[]
-    ).reverse();
-
-    const messageTotal = (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM messages
-           WHERE timestamp >= ? AND timestamp < ?
-             AND role != 'system'`,
-        )
-        .get(bounds.start, bounds.end) as { cnt: number }
-    ).cnt;
-    const messageRows = (
-      this.db
-        .prepare(
-          `SELECT role, content, platform, timestamp
-           FROM messages
-           WHERE timestamp >= ? AND timestamp < ?
-             AND role != 'system'
-           ORDER BY timestamp DESC
-           LIMIT ?`,
-        )
-        .all(
-          bounds.start,
-          bounds.end,
-          YESTERDAY_MESSAGE_LIMIT,
-        ) as YesterdayMessageRow[]
-    ).reverse();
-
-    const dmLogTotal = (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM dm_conversation_log
-           WHERE created_at >= ? AND created_at < ?`,
-        )
-        .get(bounds.start, bounds.end) as { cnt: number }
-    ).cnt;
-    const dmLogRows = (
-      this.db
-        .prepare(
-          `SELECT platform, scope, scope_key, summary, message_count, created_at
-           FROM dm_conversation_log
-           WHERE created_at >= ? AND created_at < ?
-           ORDER BY created_at DESC
-           LIMIT ?`,
-        )
-        .all(
-          bounds.start,
-          bounds.end,
-          YESTERDAY_DM_LOG_LIMIT,
-        ) as YesterdayDmConversationLogRow[]
-    ).reverse();
-
-    return {
-      agentActions: formatYesterdayAgentActions(
-        dayLabel,
-        timezoneLabel,
-        agentActionRows,
-        agentActionTotal,
-      ),
-      messages: formatYesterdayMessages(
-        dayLabel,
-        timezoneLabel,
-        messageRows,
-        messageTotal,
-      ),
-      dmConversationLog: formatYesterdayDmConversationLog(
-        dayLabel,
-        timezoneLabel,
-        dmLogRows,
-        dmLogTotal,
-      ),
-    };
-  }
-
-  /**
-   * Current-agent-day variant of `buildYesterdaySqliteContext` for the
-   * user-profile sweep (§Phase 2). Resolves the day bounds to the
-   * CURRENT agent-day — at 03:50 that window is ~04:00 yesterday →
-   * 03:50 today (the agent-day about to close), and at 17:50 it is
-   * ~04:00 today → 17:50 today. The sweep reads DM traffic + rolling
-   * summaries but not agent_actions (not needed for fact extraction).
-   */
-  private buildAgentDayDmContext(): {
-    messages: string;
-    dmConversationLog: string;
-  } {
-    const tz = this.config.timezone || undefined;
-    const dayBoundaryHour = this.config.dayBoundaryHour ?? 4;
-    const bounds = getAgentDayBoundsUtc(tz, dayBoundaryHour);
-    const dayLabel = localDateStr(
-      new Date(parseSqliteUtcMs(bounds.start)),
-      tz,
-    );
-    const timezoneLabel = this.config.timezone || "system";
-
-    const messageTotal = (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM messages
-           WHERE timestamp >= ? AND timestamp < ?
-             AND role != 'system'`,
-        )
-        .get(bounds.start, bounds.end) as { cnt: number }
-    ).cnt;
-    const messageRows = (
-      this.db
-        .prepare(
-          `SELECT role, content, platform, timestamp
-           FROM messages
-           WHERE timestamp >= ? AND timestamp < ?
-             AND role != 'system'
-           ORDER BY timestamp DESC
-           LIMIT ?`,
-        )
-        .all(
-          bounds.start,
-          bounds.end,
-          YESTERDAY_MESSAGE_LIMIT,
-        ) as YesterdayMessageRow[]
-    ).reverse();
-
-    const dmLogTotal = (
-      this.db
-        .prepare(
-          `SELECT COUNT(*) as cnt FROM dm_conversation_log
-           WHERE created_at >= ? AND created_at < ?`,
-        )
-        .get(bounds.start, bounds.end) as { cnt: number }
-    ).cnt;
-    const dmLogRows = (
-      this.db
-        .prepare(
-          `SELECT platform, scope, scope_key, summary, message_count, created_at
-           FROM dm_conversation_log
-           WHERE created_at >= ? AND created_at < ?
-           ORDER BY created_at DESC
-           LIMIT ?`,
-        )
-        .all(
-          bounds.start,
-          bounds.end,
-          YESTERDAY_DM_LOG_LIMIT,
-        ) as YesterdayDmConversationLogRow[]
-    ).reverse();
-
-    return {
-      messages: formatYesterdayMessages(
-        dayLabel,
-        timezoneLabel,
-        messageRows,
-        messageTotal,
-      ),
-      dmConversationLog: formatYesterdayDmConversationLog(
-        dayLabel,
-        timezoneLabel,
-        dmLogRows,
-        dmLogTotal,
-      ),
-    };
-  }
-}
-
-interface ProjectSummary {
-  slug: string;
-  title: string;
-  state: string;
-  due: string | null;
-  nextMilestone: string | null;
-  updated: string | null;
-}
-
-/**
- * Truncate `value` to at most `max` chars, collapsing newlines so the
- * result fits on one line. Suffix `…` when truncation occurs. Used by
- * the scheduled.dm DM-activity / DM-history blocks.
- */
-function truncateForBlock(value: string, max: number): string {
-  const oneLine = value.replace(/\s+/g, " ").trim();
-  if (oneLine.length <= max) return oneLine;
-  return `${oneLine.slice(0, max - 1)}…`;
-}
-
-function summarizeProjectFile(
-  filename: string,
-  content: string,
-): ProjectSummary | null {
-  const slug = filename.replace(/\.md$/, "");
-  const { frontmatter, body } = splitFrontmatter(content);
-  const state = readFrontmatterScalar(frontmatter, "state") ?? "active";
-  const title = body.match(/^#\s+(.+)$/m)?.[1]?.trim() || slug;
-
-  return {
-    slug,
-    title,
-    state,
-    due: readFrontmatterScalar(frontmatter, "due"),
-    nextMilestone: readFrontmatterScalar(frontmatter, "next_milestone"),
-    updated: readFrontmatterScalar(frontmatter, "updated"),
-  };
-}
-
-function splitFrontmatter(content: string): {
-  frontmatter: string;
-  body: string;
-} {
-  if (!content.startsWith("---\n")) {
-    return { frontmatter: "", body: content };
-  }
-
-  const endIdx = content.indexOf("\n---", 4);
-  if (endIdx < 0) {
-    return { frontmatter: "", body: content };
-  }
-
-  return {
-    frontmatter: content.slice(4, endIdx),
-    body: content.slice(endIdx + 4).replace(/^\n+/, ""),
-  };
-}
-
-interface YesterdayAgentActionRow {
-  action_type: string;
-  trigger: string | null;
-  result: string | null;
-  started_at: string;
-  completed_at: string | null;
-  error: string | null;
-}
-
-interface YesterdayMessageRow {
-  role: string;
-  content: string;
-  platform: string;
-  timestamp: string;
-}
-
-interface YesterdayDmConversationLogRow {
-  platform: string;
-  scope: string;
-  scope_key: string;
-  summary: string;
-  message_count: number;
-  created_at: string;
-}
-
-function readFrontmatterScalar(
-  frontmatter: string,
-  key: string,
-): string | null {
-  if (!frontmatter) return null;
-
-  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = frontmatter.match(
-    new RegExp(`^${escapedKey}:\\s*(.+)$`, "m"),
-  );
-  if (!match) return null;
-
-  return match[1].trim().replace(/^['"]|['"]$/g, "");
-}
-
-/**
- * Truncate the ## Agent Log section of today.md to the last `maxEntries`
- * bullet lines. Operates on the string content only (does not touch disk).
- * Inserts an omission marker pointing to GET /api/context/today.
- */
-function truncateAgentLog(content: string, maxEntries: number): string {
-  // Match "\n## Agent Log\n" to avoid false positives inside code blocks or
-  // quoted text. The leading \n ensures we match a heading at line start, not
-  // a substring of prose. today.md's structure is daemon-controlled, but this
-  // is defence-in-depth against accidental matches in Handoff/Notes.
-  const needle = "\n## Agent Log\n";
-  const needleIdx = content.indexOf(needle);
-  if (needleIdx < 0) return content;
-  const headerIdx = needleIdx + 1; // skip the leading \n to point at "##"
-  const sectionHeader = "## Agent Log";
-
-  // Find the end of the Agent Log section (next ## heading or EOF)
-  const afterHeader = headerIdx + sectionHeader.length;
-  const nextSectionIdx = content.indexOf("\n## ", afterHeader);
-  const sectionEnd = nextSectionIdx >= 0 ? nextSectionIdx : content.length;
-
-  const sectionBody = content.slice(afterHeader, sectionEnd);
-  const lines = sectionBody.split("\n");
-
-  // Extract bullet lines (start with "- ")
-  const bulletLines = lines.filter((l) => l.trimStart().startsWith("- "));
-  if (bulletLines.length <= maxEntries) return content;
-
-  // Keep only the last maxEntries bullets
-  const omitted = bulletLines.length - maxEntries;
-  const kept = bulletLines.slice(-maxEntries);
-  const truncatedBody = [
-    "",
-    `[...${omitted} earlier entries omitted — use GET /api/context/today for full content]`,
-    ...kept,
-    "",
-  ].join("\n");
-
-  return (
-    content.slice(0, headerIdx) +
-    sectionHeader +
-    truncatedBody +
-    content.slice(sectionEnd)
-  );
-}
-
-function formatYesterdayAgentActions(
-  dayLabel: string,
-  timezoneLabel: string,
-  rows: YesterdayAgentActionRow[],
-  total: number,
-): string {
-  const lines = [
-    `- Agent day: ${dayLabel}`,
-    `- Timezone: ${timezoneLabel}`,
-    `- Rows: ${total}`,
-  ];
-  if (total > rows.length) {
-    lines.push(`- Showing latest ${rows.length} rows only`);
-  }
-  if (rows.length === 0) {
-    lines.push("- (none)");
-    return lines.join("\n");
-  }
-  for (const row of rows) {
-    const trigger = row.trigger ? ` (${row.trigger})` : "";
-    const result = row.result ?? "unknown";
-    const error = row.error
-      ? ` — error: ${truncateContextText(row.error, 140)}`
-      : "";
-    lines.push(
-      `- ${formatSqliteTimestampForContext(row.started_at, timezoneLabel)} [${result}] ${row.action_type}${trigger}${error}`,
-    );
-  }
-  return lines.join("\n");
-}
-
-function formatYesterdayMessages(
-  dayLabel: string,
-  timezoneLabel: string,
-  rows: YesterdayMessageRow[],
-  total: number,
-): string {
-  const lines = [
-    `- Agent day: ${dayLabel}`,
-    `- Timezone: ${timezoneLabel}`,
-    `- Rows: ${total}`,
-  ];
-  if (total > rows.length) {
-    lines.push(`- Showing latest ${rows.length} rows only`);
-  }
-  if (rows.length === 0) {
-    lines.push("- (none)");
-    return lines.join("\n");
-  }
-  for (const row of rows) {
-    lines.push(
-      `- ${formatSqliteTimestampForContext(row.timestamp, timezoneLabel)} [${row.platform}/${row.role}] ${truncateContextText(row.content, 180)}`,
-    );
-  }
-  return lines.join("\n");
-}
-
-function formatYesterdayDmConversationLog(
-  dayLabel: string,
-  timezoneLabel: string,
-  rows: YesterdayDmConversationLogRow[],
-  total: number,
-): string {
-  const lines = [
-    `- Agent day: ${dayLabel}`,
-    `- Timezone: ${timezoneLabel}`,
-    `- Rows: ${total}`,
-  ];
-  if (total > rows.length) {
-    lines.push(`- Showing latest ${rows.length} rows only`);
-  }
-  if (rows.length === 0) {
-    lines.push("- (none)");
-    return lines.join("\n");
-  }
-  for (const row of rows) {
-    const scopeKey =
-      row.scope_key && row.scope_key.length > 0 ? `/${row.scope_key}` : "";
-    lines.push(
-      `- ${formatSqliteTimestampForContext(row.created_at, timezoneLabel)} [${row.platform}:${row.scope}${scopeKey}] (${row.message_count} msgs) ${truncateContextText(row.summary, 220)}`,
-    );
-  }
-  return lines.join("\n");
-}
-
-function formatSqliteTimestampForContext(
-  timestamp: string,
-  timezone: string,
-): string {
-  const local = nowInTimezone(
-    timezone === "system" ? undefined : timezone,
-    new Date(parseSqliteUtcMs(timestamp)),
-  );
-  return `${local.year}-${String(local.month).padStart(2, "0")}-${String(local.day).padStart(2, "0")} ${String(local.hours).padStart(2, "0")}:${String(local.minutes).padStart(2, "0")}`;
-}
-
-function truncateContextText(text: string, maxChars: number): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars - 3)}...`;
 }

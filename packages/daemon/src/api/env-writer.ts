@@ -3,7 +3,19 @@
  *
  * Runtime settings live in SQLite; `.env` is reserved for bootstrap fields.
  */
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import type Database from "better-sqlite3";
@@ -256,12 +268,65 @@ export function getEnvFilePath(): string {
   return resolve(process.cwd(), ".env");
 }
 
+/**
+ * Atomically rewrite `.env`. The original `writeFileSync(envPath, ...)` was
+ * not atomic: it truncates to length 0 first, then writes. A crash, signal
+ * (SIGTERM during shutdown), or transient EIO between truncation and write
+ * leaves `.env` empty or partial — and since `.env` carries `PA_API_PORT`,
+ * the daemon may then fail to start on the next launch (a brick-on-upgrade
+ * scenario on a released product).
+ *
+ * Strategy mirrors `packages/daemon/src/core/atomic-write.ts`:
+ *   1. Refuse to write through a symlink at the final path. The legacy
+ *      `writeFileSync` would silently follow it; we surface the symlink
+ *      as a clear error so the caller can investigate (the alternative —
+ *      replacing the symlink with a regular file — silently breaks the
+ *      user's intended indirection). Symlinked `.env` is uncommon; the
+ *      explicit error is preferable to a silent behavior change.
+ *   2. Open a sibling tempfile in the same directory with
+ *      `O_CREAT | O_WRONLY | O_EXCL | O_NOFOLLOW` and mode 0o600 so the
+ *      published file mode is correct from creation, no symlink can be
+ *      raced into our temp path, and a pre-existing tempfile aborts the
+ *      write rather than getting silently clobbered.
+ *   3. Use a crypto-random 64-bit suffix on the tempfile name — pid +
+ *      Date.now() is guessable by a local attacker and would let a
+ *      pre-placed symlink survive.
+ *   4. Write, fsync the bytes (so they're durable before rename), close,
+ *      then atomic `renameSync` over the target.
+ *   5. Best-effort cleanup of the tempfile on any failure path.
+ */
 function updateEnvFile(envPath: string, updates: Record<string, string>): void {
   let content: string;
   try {
     content = readFileSync(envPath, "utf-8");
   } catch {
     content = `# === ${APP_NAME} Configuration ===\n`;
+  }
+
+  // Refuse to overwrite a symlink at the final path. The legacy
+  // `writeFileSync` would follow the symlink and write to its target;
+  // `renameSync` does NOT follow symlinks and would replace the symlink
+  // itself. Surfacing this as an error keeps the behavior change from
+  // happening silently for any user who intentionally symlinked `.env`.
+  // ENOENT is expected when `.env` doesn't exist yet — fall through.
+  try {
+    const stat = lstatSync(envPath);
+    if (stat.isSymbolicLink()) {
+      throw Object.assign(
+        new Error(
+          `env-writer: refusing to overwrite symlinked .env at ${envPath}. ` +
+            `Resolve the symlink to the actual file the daemon should manage.`,
+        ),
+        { code: "EENV_TARGET_SYMLINK" },
+      );
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EENV_TARGET_SYMLINK") throw err;
+    /* c8 ignore start — non-ENOENT lstat errors (EACCES, EIO) are rare;
+       the rethrow is defensive. */
+    if (code !== "ENOENT") throw err;
+    /* c8 ignore stop */
   }
 
   // `.env` files edited in a Windows editor use CRLF line endings. Splitting
@@ -290,8 +355,54 @@ function updateEnvFile(envPath: string, updates: Record<string, string>): void {
     }
   }
 
-  writeFileSync(envPath, newLines.join("\n"), { mode: 0o600 });
+  const finalContent = newLines.join("\n");
+  // 64 bits of entropy in the temp suffix so a local attacker can't
+  // pre-place a symlink at our temp path even with O_NOFOLLOW (defense
+  // in depth — O_NOFOLLOW alone would catch the symlink at open time).
+  const tmpPath = `${envPath}.tmp.${process.pid}.${randomBytes(8).toString("hex")}`;
+  const flags =
+    fsConstants.O_WRONLY
+    | fsConstants.O_CREAT
+    | fsConstants.O_EXCL
+    | fsConstants.O_NOFOLLOW;
+
+  let fd: number | null = null;
   try {
+    fd = openSync(tmpPath, flags, 0o600);
+    const buf = Buffer.from(finalContent, "utf-8");
+    let offset = 0;
+    while (offset < buf.length) {
+      offset += writeSync(fd, buf, offset, buf.length - offset);
+    }
+    // fsync the file content before close so the bytes are durable
+    // before the rename. Without this, a crash between rename and the
+    // kernel's writeback could leave envPath pointing at an inode whose
+    // blocks are still in page cache.
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tmpPath, envPath);
+  } catch (err) {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* ignore — best-effort cleanup */
+      }
+    }
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* ignore — tmp may not exist or rename already consumed it */
+    }
+    throw err;
+  }
+
+  try {
+    // Defensive re-chmod after rename. `openSync(..., 0o600)` already
+    // applied the mode at creation time, but the rename inherits the
+    // tempfile's mode and we want belt-and-suspenders for platforms
+    // where umask or filesystem ACLs might still surprise. Best-effort.
     ensureEnvFilePermissions(envPath);
   } catch {
     // Best-effort.

@@ -23,9 +23,15 @@ ask_examples:
   - What is OpenCode?
   - What is a routine pre-pass?
   - What is the wiki workspace?
+  - What is an integration mode?
+  - What is native mode?
+  - What is B-3 / browser history?
+  - What is B-4 / managed Chromium?
+  - What is a schema migration?
+  - What is execution permission mode?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-22
 keywords:
   - terminology
   - vocabulary
@@ -37,13 +43,24 @@ keywords:
   - observation
   - skill
   - wiki workspace
+  - integration mode
+  - native mode
+  - delegated mode
+  - browser history
+  - managed chromium
+  - schema migration
+  - execution permission mode
+  - research cluster
 related:
   - concepts/agent-day
   - concepts/backends-and-tiers
   - concepts/process-keys
   - concepts/observations
+  - concepts/delegated-mode
+  - concepts/safety-and-execution
   - features/routines/morning-routine
   - features/wiki/overview
+  - features/integrations/browser-history
 ---
 
 # Glossary
@@ -65,6 +82,28 @@ One of the model providers Aitne can dispatch to: `claude`
 per-installation; one is the **main backend**, and the others can be
 enabled as fallbacks.
 
+## Browser History (B-3)
+
+Local-only history poller that reads the browser's own SQLite database
+(Chrome / Safari / Firefox / Arc) and records page visits as
+observations. Drives the **research cluster** derivation, the weekly
+reload-memory block, and the [`!checks`](features/messaging/bang-commands.md)
+on-demand reload tally. No content is uploaded; only URLs, titles, and
+visit timings the browser itself recorded. See
+[Browser History](features/integrations/browser-history.md).
+
+## Managed Chromium (B-4)
+
+Experimental purchase-confirmation flow that drives a daemon-spawned
+Chromium profile to complete a vendor checkout the agent has already
+prepared. **Default-off.** Requires per-site opt-in, the experimental-
+danger acknowledgement modal, at least one DM channel, a single-use
+`!~xxxxxxxx` token, screenshot-first consent, and a 5-min timeout. The
+§23 hard-deny categories (banking, brokerage, government, healthcare,
+identity / legal, generic payment processors) remain denied even with a
+valid token. Operator self-testing only until B-3 has been stable for
+six weeks. See [Managed Chromium](features/operations/managed-chromium.md).
+
 ## Backend Router
 
 The component that resolves a `ProcessKey` to a concrete `(backend,
@@ -83,6 +122,44 @@ matching anchor.
 
 The hour-of-day at which the agent day rolls over. Configured via
 `dayBoundaryHour` (default `4`).
+
+## Execution Permission Mode
+
+Per-backend `Safe` / `Allow` posture, set independently for each
+registered backend via
+`{claude,codex,gemini,opencode}ExecutionPermissionMode`. **Safe** =
+strict per-call permission checks plus the Claude curl/jq hooks,
+Codex `workspace-write` sandbox, and Gemini whitelist TOML. **Allow** =
+SDK bypass / sandbox off / minimal TOML. The absolute-block layer
+(recursive delete, sudo, secret-file reads/writes) is enforced in
+*both* modes — `allowedToolsOverride` cannot widen past it. Codex
+allow mode cannot enforce the absolute-block layer for shell commands
+(no hook surface); the gap is documented in
+`docs/design/09-safety-cost.md`. See
+[Safety and Execution](concepts/safety-and-execution.md).
+
+## Integration Mode
+
+The per-integration posture for how Aitne ingests events from a
+connected service: `direct | delegated | native | disabled`.
+
+- **direct** — the daemon runs its own poller against the integration's
+  API.
+- **delegated** — a lite-tier `delegated-sync-worker` polls on opt-in
+  cadences (see `docs/design/appendices/delegated-sync-opt-in.md`).
+- **native** — no poller; the main backend reaches the integration
+  through its own MCP connector and POSTs observations in-turn via
+  `/api/observations`. Two variants: **descriptor-driven** (the
+  integration ships a `backendConnectors` entry — `gmail`,
+  `google_calendar`, `notion`) and **user-managed** (the descriptor
+  declares `userManagedConnector: true` and the user installs their own
+  MCP / skill harness — `outlook_mail`, `outlook_calendar`).
+- **disabled** — silence; no poller, no native handoff.
+
+Mode lookup goes through `getIntegrationState(db, key)`; never
+hardcode an integration reference outside
+`packages/shared/src/integrations.ts`. See
+[Delegated Mode](concepts/delegated-mode.md).
 
 ## Heavy Tier
 
@@ -135,6 +212,31 @@ The branded string identifier for a class of agent invocation, e.g.
 backend selection, skill manifest, agent profile, and task-flow
 template lookup. Defined in `packages/shared/src/process-key.ts`.
 
+## Research Cluster
+
+A topic the browser-history poller derives from a user's reading
+pattern when meaningful visits, foreground time, and distinct domains
+cross a threshold. Each cluster has a slug, a display name, a journal
+file at `context/research/<slug>.md`, and a status
+(`active | dormant | muted | concluded`). Surfaced via the
+**Two-Option Offer DM** (research dive vs. wiki summary) and the
+[`!research`](features/messaging/bang-commands.md) bang prefix.
+
+## Schema Migration
+
+Forward-only, append-only, idempotent migration entry in
+`packages/daemon/src/db/migrations.ts:MIGRATIONS`. Runs right after
+`applySchema(db)` at boot; applied ids are recorded in
+`schema_migrations` so each runs at most once per DB. Used for any
+non-additive change to a pre-existing structure — `ALTER TABLE ADD
+COLUMN`, `CREATE INDEX` on a column added by a prior migration, data
+backfill, or a `settings_json` shape change whose old value won't parse
+under the new schema. Gating ALTERs behind `columnExists` /
+`tableExists` / `indexExists` keeps a fresh DB (where `applySchema`
+already produced the target state) a no-op. The legacy reinstall
+escape hatch still exists as a last resort, but **migrations are the
+upgrade path** — see [Reinstall Cleanly](guides/reinstall-cleanly.md).
+
 ## QA Panel
 
 The right-side pane on `/docs` and the bottom of the `?`-button
@@ -160,6 +262,15 @@ the row key in `fts_docs`, and the first half of every
 Short for **model tier**: `light` or `heavy`. Each ProcessKey has a
 default tier; per-process pins and per-call requested-tier overrides can
 deviate from that default.
+
+## Two-Option Offer DM
+
+DM pattern used for research-cluster offers and any other follow-up
+where the user has two natural choices. Sends one DM with two distinct
+actions (e.g. "research dive" vs. "wiki summary") instead of a single
+yes/no prompt; the user replies with the matching `!research` subcommand
+to accept either path. Replaces the older single-option offer for
+ambiguous-intent surfaces.
 
 ## Today.md
 

@@ -42,8 +42,6 @@ ui_anchors:
 
 # GitHub
 
-## In One Sentence
-
 The daemon polls GitHub via the local `gh` CLI: review requests, CI
 failures on the default branch, security alerts, and assignments
 become DMs; everything else is recorded for the hourly check.

@@ -43,7 +43,7 @@ import { applySchema } from "../db/schema.js";
 import { runMigrations } from "../db/migrations.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { bootstrapManagedTaskSeq } from "../db/managed-tasks-store.js";
-import { setWikiWorkspaceTokenResolver } from "../core/skills-compiler.js";
+import { setWikiWorkspaceTokenResolver } from "../core/skills-compiler-tree.js";
 import {
   listWikiWorkspaces,
   readDefaultWikiWorkspace,

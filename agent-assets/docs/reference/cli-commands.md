@@ -28,7 +28,7 @@ ask_examples:
   - How do I check my install with aitne doctor?
 locale: en-US
 created: 2026-04-27
-updated: 2026-05-15
+updated: 2026-05-22
 keywords:
   - aitne start
   - aitne stop
@@ -41,6 +41,9 @@ keywords:
   - aitne open
   - aitne update
   - aitne uninstall
+  - aitne run-now
+  - aitne verify
+  - aitne build
   - pnpm start
   - PA_DATA_DIR
   - PA_API_PORT
@@ -48,6 +51,7 @@ related:
   - guides/install-and-run
   - guides/reinstall-cleanly
   - features/wiki/commands
+  - features/messaging/bang-commands
 ---
 
 # CLI Commands
@@ -65,11 +69,12 @@ tables below show both forms.
 
 | Command | What it does |
 |---|---|
-| `aitne start` / `pnpm start` | Build (if stale), then launch daemon + dashboard in the background. |
+| `aitne start [--no-open]` / `pnpm start` | Build (if stale), then launch daemon + dashboard in the background. `--no-open` skips opening the dashboard URL. |
 | `aitne stop` / `pnpm stop` | Graceful shutdown (SIGTERM → SIGKILL after 10s) of both processes. |
-| `aitne restart` | `stop` then `start`. `--clean-context` wipes `context/` after a tarball backup. (Prefer the bin over `pnpm restart` / `npm restart`: those run the npm `stop` → `restart` → `start` lifecycle, which would re-fire each step.) |
+| `aitne restart [--no-open] [--clean-context]` | `stop` then `start`. `--clean-context` wipes `context/` and `md_file_snapshots` rows after a tarball backup (B-007). Prefer the bin over `pnpm restart` / `npm restart`: those run the npm `stop` → `restart` → `start` lifecycle and re-fire each step. |
 | `aitne status` / `pnpm status` | PIDs, uptime, integrations, today's spend, last action timestamp, next scheduled item. |
-| `aitne dev` / `pnpm dev` | Foreground mode — runs the daemon + dashboard with full stdio. |
+| `aitne dev [--no-open]` / `pnpm dev` | Foreground mode — runs the daemon + dashboard with full stdio. |
+| `aitne build` | Build TypeScript explicitly (the same build `aitne start` triggers when sources are stale). |
 
 ## Operations
 
@@ -77,11 +82,14 @@ tables below show both forms.
 |---|---|
 | `aitne setup` | (Re-)open the dashboard `/setup` wizard; auto-starts the daemon if needed. |
 | `aitne open` | Open the dashboard root in the default browser. |
-| `aitne doctor` | Eight install-health checks (Node, ports, OS keychain, backend CLIs, native bindings, …). |
+| `aitne doctor` | Install-health checks (Node, ports, OS keychain, backend CLIs, native bindings, …). |
 | `aitne audit [--since 24h] [--type X] [--result failed]` | Show the agent action log; flags filter by time, action type, result, or backend. `--json` for machine-readable. |
+| `aitne run-now <job>` | Fire a daemon-internal maintenance job on demand (e.g. `roadmap_maintenance`). |
+| `aitne verify [target]` | Run post-launch verification for a shipped design surface (e.g. `evening-review-slimdown`). |
 | `aitne version [--json]` | Print version, Node version, install path, last build time. |
 | `aitne update [--check]` | Print the npm command to upgrade. `--check` makes one network call to compare against the latest published version. |
 | `aitne uninstall [--keep-data\|--wipe-data]` | Stop the services, then offer to wipe `~/.personal-agent`. |
+| `aitne help [cmd]` | Show top-level help, or per-command help for `doctor` / `audit` / `setup` / `open` / `version` / `update` / `uninstall` / `run-now` / `verify`. |
 
 ## Logs
 

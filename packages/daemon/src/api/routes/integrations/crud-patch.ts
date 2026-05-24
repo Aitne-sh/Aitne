@@ -19,13 +19,16 @@ import { writeManagementMd } from "../../../core/management-md.js";
 import {
   missingDelegatedVariants,
   missingNativeVariants,
-} from "../../../core/skills-compiler.js";
+} from "../../../core/skills-compiler-variants.js";
 import {
   acquireIntegrationFlipLock,
   releaseIntegrationFlipLock,
 } from "../../../core/integration-lifecycle.js";
 import { readMainBackend } from "../../../core/integration-main-backend.js";
-import { deleteProbesForIntegration } from "../../../db/integration-probe-store.js";
+import {
+  deleteProbesForIntegration,
+  readProbe,
+} from "../../../db/integration-probe-store.js";
 import {
   knownProxyModels,
   proxyModelIsKnown,
@@ -482,6 +485,54 @@ export async function handleIntegrationPatch(
     parsed.data.nativeSyncEnabled === undefined
       ? previous.nativeSyncEnabled
       : parsed.data.nativeSyncEnabled;
+
+  // §14.7 — synchronously consult the cached probe before committing a
+  // mode flip to delegated/native. Per §14.7 the PATCH response path
+  // intentionally never spawns a live probe ("no blocking subprocess");
+  // POST /api/integrations/:key/probe and the DelegatedProbeObserver own
+  // the live-probe cost. But when the user (or the wizard) HAS recently
+  // probed and the cached row shows missing required capabilities,
+  // committing the mode flip would only surface as a runtime "tool not
+  // found" at the next dispatch — bad UX with no actionable signal.
+  // Refusing here turns an opaque downstream failure into a 400 with
+  // the missing capabilities listed. When no cached row exists
+  // (post-eviction or never-probed) we fall through, mirroring the
+  // /health POC-default fallback — the wizard / dashboard is expected
+  // to probe first; CLI / curl callers accept the runtime feedback
+  // path. User-managed connectors (Outlook) are exempt: their probes
+  // are synthesised via makeUserManagedProbeResult with present=true,
+  // so a cached row from a prior live probe is always
+  // capability-trivial.
+  if (
+    modeChanged
+    && (parsed.data.mode === "delegated" || parsed.data.mode === "native")
+    && !descriptor.userManagedConnector
+  ) {
+    const targetBackend = parsed.data.mode === "delegated"
+      ? effectiveBackend
+      : effectiveNativeBackend;
+    if (targetBackend) {
+      const cached = readProbe(db, key, targetBackend);
+      if (cached !== null && !cached.present) {
+        return c.json(
+          {
+            error: "probe_missing_required_capabilities",
+            key,
+            backend: targetBackend,
+            mode: parsed.data.mode,
+            missingRequired: cached.missingRequired,
+            probedAt: cached.probedAt,
+            message:
+              `Cannot enter ${parsed.data.mode} mode for '${key}' on backend `
+              + `'${targetBackend}' — last probe (${cached.probedAt}) found `
+              + `missing required capabilities: ${cached.missingRequired.join(", ")}. `
+              + `Restore the connector and re-run POST /api/integrations/${key}/probe.`,
+          },
+          400,
+        );
+      }
+    }
+  }
 
   const stamped = new Date().toISOString();
 

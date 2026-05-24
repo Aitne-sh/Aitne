@@ -41,15 +41,14 @@
     --color-popover: hsl(222 30% 11%);
     --color-popover-foreground: hsl(210 40% 96%);
     --color-primary: hsl(217 91% 60%);
-    --color-primary-foreground: hsl(0 0% 100%);
+    /* primary-foreground, destructive, destructive-foreground — identical
+       to light, so omitted: they fall back to the @theme defaults. */
     --color-secondary: hsl(215 22% 19%);
     --color-secondary-foreground: hsl(210 40% 96%);
     --color-muted: hsl(215 20% 16%);
     --color-muted-foreground: hsl(215 16% 60%);
     --color-accent: hsl(215 22% 23%);
     --color-accent-foreground: hsl(210 40% 96%);
-    --color-destructive: hsl(0 84% 60%);
-    --color-destructive-foreground: hsl(0 0% 100%);
     --color-success: hsl(142 71% 45%);
     --color-border: hsl(215 20% 20%);
     --color-input: hsl(215 20% 20%);

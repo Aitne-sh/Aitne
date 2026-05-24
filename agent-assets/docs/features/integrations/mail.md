@@ -27,7 +27,7 @@ ask_examples:
   - How do I add a second mail account?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-22
 keywords:
   - mail
   - gmail
@@ -36,9 +36,14 @@ keywords:
   - icloud
   - inbox
   - labels
+  - native mode
+  - delegated
+  - direct
+  - fts5
 related:
   - guides/connect-a-new-mail-account
   - features/routines/morning-routine
+  - concepts/delegated-mode
 ui_anchors:
   - /connections/mail
 api_endpoints:
@@ -47,11 +52,11 @@ api_endpoints:
 
 # Mail
 
-## In One Sentence
-
-Connect one or more mailboxes; the daemon polls them, classifies
-incoming threads, and lets the agent read / label / search via the
-`mail` skill.
+Connect one or more mailboxes (Gmail, Outlook, Yahoo, iCloud, or any
+IMAP server) and Aitne polls them, classifies incoming threads, and
+lets the agent search / label / read via the `mail` skill. Search is
+local — backed by SQLite FTS5 — so the agent doesn't need to round-trip
+the provider for every query.
 
 ## What It Does
 
@@ -68,12 +73,34 @@ operator action.
 
 ## When It Runs / How It Is Triggered
 
-- A poller pulls new messages every `gmailPollIntervalSeconds` (or the
-  per-provider equivalent) — see Settings → Advanced.
+- In `direct` mode a poller pulls new messages every
+  `gmailPollIntervalSeconds` (or the per-provider equivalent) — see
+  Settings → Advanced.
 - The morning routine reads the labeled queue and decides which need
   surfacing.
 - Reactive turns (you DM "what's in my mail?") use the `mail` skill on
   demand.
+
+## Integration Modes
+
+Mail supports all four integration modes
+(`direct | delegated | native | disabled`); each provider may sit in a
+different mode.
+
+| Provider | Direct | Delegated | Native | Notes |
+|---|---|---|---|---|
+| Gmail | ✓ | ✓ | ✓ (descriptor-driven) | Native mode uses Google's official Gmail MCP connector on the main backend; the connector POSTs observations back via `/api/observations`. |
+| Outlook | ✓ | ✓ | ✓ (user-managed) | Native mode requires you to install your own MCP / skill harness on the main backend (`userManagedConnector: true`); the probe synthesises a user-managed result and skips the missing-variant gate. |
+| Yahoo | ✓ | ✓ | — | IMAP transport. No native MCP variant. |
+| iCloud | ✓ | ✓ | — | IMAP transport. No native MCP variant. |
+| Generic IMAP | ✓ | ✓ | — | IMAP transport. No native MCP variant. |
+
+Mode flips run through the §14.7 live probe + the per-key
+`runtime_state.integration_flip_lock:<key>`. Changing the main
+backend cascades unmatched `native` rows to `disabled`.
+
+See [Delegated Mode](../../concepts/delegated-mode.md) for the full
+mode lifecycle.
 
 ## What It Outputs
 
