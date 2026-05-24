@@ -44,8 +44,7 @@ const TARGET_SAMPLE_RATE = 16000;
  * step failed and the model fell back to its English-decoder placeholder
  * vocabulary. This is the trigger for the primary-language fallback pass.
  *
- * Patterns observed in production (see DB-cached transcripts before this
- * helper landed):
+ * Patterns to detect (model meta-tokens emitted when language ID fails):
  *   - "(speaking in foreign language)"
  *   - "(speaking foreign language)"
  *   - "(silence)" / "(silent)" / "[silence]"
@@ -194,7 +193,6 @@ export interface VoiceTranscriptionResult {
  *
  * Inference strategy (per-attachment):
  *  - **Forced language set** (env override): single pass with `language=forced`.
- *    Same code path that has shipped with the feature.
  *  - **Otherwise (the default)**: pass 1 with auto-detect. If the output
  *    matches a known Whisper placeholder hallucination AND a primary
  *    language is configured, pass 2 retries with `language=primary`.
@@ -462,9 +460,8 @@ export class VoiceTranscriber {
   }
 
   /**
-   * M5 (release-prep): pre-load the Whisper pipeline so the first
-   * inbound voice DM is not the one paying the 800 MB – 2.5 GB model-
-   * download cost on the request path.
+   * Pre-load the Whisper pipeline so the first inbound voice DM does
+   * not pay the 800 MB – 2.5 GB model-download cost on the request path.
    *
    * Wiring contract:
    *   - The daemon bootstrap (`bootstrap/event-pipeline.ts`) kicks this
