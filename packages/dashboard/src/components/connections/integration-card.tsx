@@ -89,7 +89,7 @@ interface Props {
 }
 
 /**
- * Phase 5 §4.9 per-integration card — mode dropdown, feature matrix, probe
+ * Per-integration card (§4.9) — mode dropdown, feature matrix, probe
  * status, direct-mode credential hand-off. Rendered on `/connections/mail`
  * (Gmail) and `/connections/calendar` (Google Calendar) alongside the
  * existing provider / OAuth cards. Registry-driven: adding a new integration

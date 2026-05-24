@@ -20,11 +20,11 @@ import {
 } from "./mcp-stale-rule-warnings";
 
 /**
- * B-003 Phase 3 — editor for `rules/mcp.md`.
+ * Editor for `rules/mcp.md`.
  *
  * The file is the narrative policy the agent consults when deciding *when*
- * to call a given MCP tool. Schema lives in B-006; path + injector in B-007
- * Phase 1. B-003 only owns this editor surface.
+ * to call a given MCP tool. Schema, path, and injector live elsewhere;
+ * this module only owns the editor surface.
  *
  * Writes go through PUT /api/context/rules/mcp via the shared
  * `useUpdateContextFile` hook (same optimistic-concurrency path the Journal
@@ -276,7 +276,7 @@ function LoadedEditor({
 }
 
 /**
- * B-003 Phase 4 — inline warning surface for stale references in the rules
+ * Inline warning surface for stale references in the rules
  * body. We never mutate the file on the user's behalf — disabled-server
  * references may be intentional (e.g. "the user will re-enable monday after
  * billing") and unknown-id references may be typos. Surface, don't silently

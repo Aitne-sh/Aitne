@@ -14,7 +14,7 @@ import { IntegrationCard } from "@/components/connections/integration-card";
  * Gemini, so `userManagedConnector: true` instructs the card to render
  * the "register an Outlook MCP on the chosen backend" notice instead of
  * a feature matrix for both delegated and native — see
- * INTEGRATION_NATIVE_MODE_DESIGN.md §5.3 (2026-05 amendment).
+ * INTEGRATION_NATIVE_MODE_DESIGN.md §5.3.
  *
  * Auth state is shared with Outlook Mail via the MSAL cache key
  * `mail:outlook:<accountId>` — the surrounding card surfaces the

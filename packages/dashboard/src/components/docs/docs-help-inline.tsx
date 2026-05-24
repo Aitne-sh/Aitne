@@ -29,7 +29,7 @@ interface DocsHelpInlineProps {
 /**
  * Small `?` icon for inline placement next to a settings label, an
  * empty-state title, or any other dense control where the global header
- * help button is too far away (DOCS_QA_DESIGN.md §8.4 E6, P5 polish).
+ * help button is too far away (DOCS_QA_DESIGN.md §8.4 E6).
  *
  * Reuses the `<DocsHelpSlideover>` mounted by `<LayoutShell>`; the
  * `?` icon is purely an opener that pushes a state update through the

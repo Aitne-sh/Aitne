@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Phase 5 (P5 §"Multi-account remotes") — manage named credentials the
- * Git/GitHub observers attach to per-repo polls. Two auth modes:
+ * Manage named credentials the Git/GitHub observers attach to per-repo
+ * polls (see git-lifecycle-and-triggers.md "Multi-account remotes"). Two
+ * auth modes:
  *
  *   • `gh-cli-profile` — reuse an existing `gh auth login` profile by
  *     login name. The daemon resolves the token via

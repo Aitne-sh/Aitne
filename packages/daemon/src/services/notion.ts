@@ -212,9 +212,7 @@ export class NotionService {
    * `maxPages` defaults to {@link NOTION_DEFAULT_MAX_PAGES} so a Notion
    * data source with millions of edited rows since the seeded cursor
    * (e.g. cold-cursor on a flip back to direct mode) cannot pin the
-   * poller forever — the audit (2026-05-17) found this loop unbounded
-   * and composed with the missing PollGuard on NotionPoller for an
-   * uncapped fan-out.
+   * poller indefinitely walking the backlog.
    */
   async *queryUpdatedSince(
     databaseId: string,

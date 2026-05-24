@@ -19,10 +19,10 @@ interface DocsQASuggestedProps {
  *   - With an open doc → 2 of its `ask_examples` plus 1 from a `related`
  *     doc when one of the related docs has examples.
  *   - Empty state (no slug) → seeded random sample of 3 from the cached
- *     `allAskExamples`. The tree-payload enrichment (D-3) that would
- *     populate `allAskExamples` has not landed; until it does, the
- *     empty-state stack is hidden rather than synthesised, since
- *     fabricating questions is worse UX than no questions.
+ *     `allAskExamples`. The tree-payload enrichment that would populate
+ *     `allAskExamples` has not landed; until it does, the empty-state
+ *     stack is hidden rather than synthesised, since fabricating
+ *     questions is worse UX than no questions.
  *
  * Cards click → `onSelect(question)`; the panel inserts the text into
  * the composer and focuses it (does not auto-send).
@@ -101,8 +101,9 @@ export function pickCards(input: PickCardsInput): SuggestedCard[] {
     return cards.slice(0, 3);
   }
   // Empty-state path — `tree.allAskExamples` enrichment is the design's
-  // intended source. Until D-3 lands the pool is empty; `seededSample`
-  // returns []. Kept here so the future wiring is structural.
+  // intended source. Until that enrichment lands the pool is empty;
+  // `seededSample` returns []. Kept here so the future wiring is
+  // structural.
   const pool: string[] = [];
   return seededSample(pool, 3, agentDaySeed()).map((q, i) => ({
     id: `empty-${i}`,

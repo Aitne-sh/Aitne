@@ -6,12 +6,11 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useHealth } from "@/lib/hooks/use-health";
 
 /**
- * Phase 5 §4.9 — secondary surface for the Draft-Only Gmail workflow.
- * Appears only when Gmail is delegated on a backend whose sub-tier is
- * `draft-only` (Claude Code today). Static reminder + link in Phase 5;
- * a numeric counter (per Decision #6) needs an agent-side producer that
- * reports `list_drafts` counts, which is Phase 6 scope. Keeping the UX
- * at link-only here avoids shipping a dead counter endpoint.
+ * Secondary surface for the Draft-Only Gmail workflow (§4.9). Appears
+ * only when Gmail is delegated on a backend whose sub-tier is
+ * `draft-only` (Claude Code today). Static reminder + link until an
+ * agent-side producer reports `list_drafts` counts; until then a
+ * numeric counter would be dead.
  */
 export function DraftsAwaitingCard() {
   const { data: health } = useHealth();

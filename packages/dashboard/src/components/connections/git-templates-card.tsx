@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Phase 6 (git-lifecycle-and-triggers.md Decision 8) — owner-facing
- * editor for the project-doc and git-repo templates, plus the explicit
- * "Apply current template to existing projects" action.
+ * Owner-facing editor for the project-doc and git-repo templates, plus
+ * the explicit "Apply current template to existing projects" action
+ * (git-lifecycle-and-triggers.md Decision 8).
  *
  * Scope:
  *   • Two editors stacked: `project.md` and `git-repo.md`.

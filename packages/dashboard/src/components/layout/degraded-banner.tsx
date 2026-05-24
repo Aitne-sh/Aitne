@@ -5,10 +5,9 @@ import { AlertTriangle } from "lucide-react";
 import { useHealth } from "@/lib/hooks/use-health";
 
 /**
- * Phase 3 §section "Banner on every dashboard page when degraded-mode
- * is active". Rendered above `<main>` so it stays put while the page
- * scrolls — the degraded signal is safety-critical (writes are being
- * refused) and must not slide out of view.
+ * Degraded-mode banner. Rendered above `<main>` so it stays put while
+ * the page scrolls — the degraded signal is safety-critical (writes are
+ * being refused) and must not slide out of view.
  *
  * Reads degraded state from `/api/health` (10 s refetch + SSE cache
  * invalidation via `SSEProvider` debouncer).  When `status !== "degraded"`

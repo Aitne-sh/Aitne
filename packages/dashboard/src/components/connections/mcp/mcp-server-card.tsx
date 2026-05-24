@@ -140,7 +140,7 @@ export function McpServerCard({ server, onEdit }: McpServerCardProps) {
         { label: "Last probe", value: formatAgo(server.lastProbeAt) },
       ]}
     >
-      {/* Per-tool enable toggles from the probe snapshot (B-003 Phase 4.2).
+      {/* Per-tool enable toggles from the probe snapshot.
           A `null` toolAllowlist means every tool is implicitly allowed; an
           explicit list narrows that set. Toggling a tool here writes through
           PATCH /api/mcp/servers/:id with the new array (or null when the
@@ -200,7 +200,7 @@ export function McpServerCard({ server, onEdit }: McpServerCardProps) {
         </Alert>
       )}
 
-      {/* B-003 Phase 4.4 — per-server recent activity view. */}
+      {/* Per-server recent activity view. */}
       <McpActivityPanel serverId={server.id} />
 
       {/* Secret slots */}

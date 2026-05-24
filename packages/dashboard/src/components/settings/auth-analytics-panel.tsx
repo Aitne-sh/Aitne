@@ -75,7 +75,7 @@ type TimeRange = 24 | 72;
  * Shows probe results, recovery events, and health metrics per backend
  * with 24h / 72h time range toggle.
  *
- * Phase 8 §7.3.
+ * §7.3 (auth telemetry).
  */
 export function AuthAnalyticsPanel() {
   const [hours, setHours] = useState<TimeRange>(72);

@@ -16,12 +16,11 @@
  * whitespace regex (` `, ` `, ` -​`, ` `, ` `,
  * ` `, ` `, `　`, `﻿`) as `too-complex` and falls through
  * to ask-mode — which under `permissionMode: "dontAsk"` is denied. Mail
- * subjects/snippets from promotional senders (Amazon, marketing lists) and
- * Japanese content routinely contain these characters, which produced a
- * deterministic gmail pre-pass failure on 2026-05-18 (3 attempts, ~$0.16
- * burned, visible as `budget-cap`). The in-process MCP tool sends
- * observations as structured JSON over the MCP transport, completely
- * bypassing the shell parser.
+ * subjects/snippets from promotional senders and non-ASCII content
+ * routinely contain these characters, producing deterministic pre-pass
+ * failures (visible as `budget-cap` after retries). The in-process MCP
+ * tool sends observations as structured JSON over the MCP transport,
+ * completely bypassing the shell parser.
  */
 
 import type Database from "better-sqlite3";
@@ -108,9 +107,9 @@ function extractEmailAddress(raw: string): string | null {
 }
 
 /**
- * HOURLY_CHECK_GATE_REDESIGN_PLAN.md Phase 3 — normalize pre-pass mail
- * payloads at the ingest chokepoint. See the longer comment in the route
- * for the full rationale; the rules:
+ * Normalize pre-pass mail payloads at the ingest chokepoint so the
+ * hourly-check gate can read a canonical shape regardless of mode. See
+ * HOURLY_CHECK_GATE_REDESIGN_PLAN.md for the full rationale; the rules:
  *   - mail integration source AND `payload.raw.from` is a string → set
  *     `is_read = 0` and `from_email = <lowercased extracted address>`
  *     (unless already present, in which case respect the caller).

@@ -297,7 +297,7 @@ function DocsLanding() {
     return <DegradedHero health={health.data} onRetry={() => health.refetch()} />;
   }
   // status === "empty" with errorCount === 0 means seed succeeded but the
-  // corpus contains no docs (only happens before P4 content authoring).
+  // corpus contains no docs.
   if (health.data?.status === "empty" && health.data.errorCount === 0) {
     return <EmptyCorpusHero />;
   }

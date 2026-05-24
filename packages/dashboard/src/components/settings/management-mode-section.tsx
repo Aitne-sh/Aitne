@@ -18,9 +18,8 @@ import { ManagementModeDialog } from "@/components/settings/management-mode-dial
 const TOAST_AUTO_DISMISS_MS = 6000;
 
 /**
- * Phase 3 §section "Management Mode" — settings-page card that
- * displays the current mode + effective context directory and
- * launches the migration dialog.
+ * Management Mode settings-page card that displays the current mode +
+ * effective context directory and launches the migration dialog.
  *
  * Reads:
  *  - `vaultMode`, `primaryVaultPath`, `contextDir` from `/api/config`

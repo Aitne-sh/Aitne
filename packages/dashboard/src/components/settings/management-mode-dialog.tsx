@@ -53,7 +53,7 @@ type ValidationState =
 const VALIDATION_DEBOUNCE_MS = 250;
 
 /**
- * Phase 3 §6 — the dialog that drives the Management Mode migration.
+ * The dialog that drives the Management Mode migration.
  *
  * Flow:
  *  1. User picks mode (plain / obsidian) and, for obsidian, a path.

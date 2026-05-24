@@ -28,7 +28,7 @@ import type { DelegatedSyncCadenceRow } from "@/lib/api-types";
  *    Now button. Toggling persists immediately; the interval persists on
  *    blur / Enter so a user typing intermediate digits doesn't fire 3 PATCHes.
  *  - The active-hours subsection appears only when at least one cadence is
- *    enabled (matches Q2 / "pause all cadences at once"). It mirrors the Hourly Check
+ *    enabled — it lets the user pause all cadences at once. Mirrors the Hourly Check
  *    fields' look but writes to /api/delegated-sync/active-hours rather
  *    than the runtime-settings PATCH path.
  */

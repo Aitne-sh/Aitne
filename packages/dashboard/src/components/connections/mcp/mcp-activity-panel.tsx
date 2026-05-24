@@ -53,11 +53,11 @@ function CallRow({ call }: { call: McpToolCallEntry }) {
 }
 
 /**
- * B-003 Phase 4.4 — collapsible recent-activity panel for an MCP server.
+ * Collapsible recent-activity panel for an MCP server.
  *
  * Reads from GET /api/mcp/servers/:id/activity (read-tier). Each row
  * represents one tool invocation observed in the agent stream. `ok` is null
- * for most Phase 4 rows because success/failure matching is deferred; the
+ * for most rows today because success/failure matching is deferred; the
  * dot is grey in that case.
  */
 export function McpActivityPanel({ serverId }: { serverId: string }) {

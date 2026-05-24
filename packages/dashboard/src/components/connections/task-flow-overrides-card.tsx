@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * Phase 5 (P5 §"User-defined triggers") — owner-facing editor for the
- * per-event task-flow override file at
+ * Owner-facing editor for the per-event task-flow override file at
  * `<dataDir>/task-flows/<key>.md`. The bundled body ships read-only on
  * the side; the owner edits the override on the right and saves to
  * `PUT /api/task-flows/<key>`. Resetting calls `DELETE` and lets the

@@ -45,12 +45,12 @@ import { OpencodeModelPicker } from "@/components/settings/opencode-model-picker
 type ToastType = "success" | "error" | "warning";
 
 /**
- * After the SETUP-UI-CONSOLIDATION-DESIGN.md refactor this component
- * only owns the Process Routing table. The former `defaults` and
- * `backends` sections moved into `BackendsAndPlansSection`, and the
- * `sections` prop narrowed to its single remaining value. The prop is
- * retained so future consumers can re-introduce other sections without
- * a call-site rewrite — today only `"processes"` is accepted.
+ * This component owns only the Process Routing table; the former
+ * `defaults` and `backends` sections moved into `BackendsAndPlansSection`
+ * (see SETUP-UI-CONSOLIDATION-DESIGN.md), and the `sections` prop
+ * narrowed to its single remaining value. The prop is retained so future
+ * consumers can re-introduce other sections without a call-site rewrite
+ * — today only `"processes"` is accepted.
  */
 interface BackendSettingsSectionProps {
   onToast: (type: ToastType, message: string) => void;

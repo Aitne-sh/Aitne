@@ -48,7 +48,7 @@ function formatElapsed(isoDate: string): string {
  * Auth status badge with 5-state color coding, elapsed-time display for
  * failures, and a tooltip showing the detailed auth status information.
  *
- * Phase 8 §7.1.
+ * §7.1 (auth telemetry).
  */
 export function AuthStatusBadge({
   status: rawStatus,

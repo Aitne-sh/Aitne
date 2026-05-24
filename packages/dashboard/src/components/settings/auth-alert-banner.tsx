@@ -9,7 +9,7 @@ import { DocsLearnMore } from "@/components/docs/docs-learn-more";
  * auth telemetry counters (schema_parse_failed, keychain_read_failed,
  * credentials_file_read_failed) are non-zero in the last 24 hours.
  *
- * Phase 8 §7.4.
+ * §7.4 (auth telemetry).
  */
 export function AuthAlertBanner() {
   const { data } = useAuthTelemetry(24);

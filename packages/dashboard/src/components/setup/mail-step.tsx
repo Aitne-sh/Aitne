@@ -24,7 +24,7 @@ import { WizardStepFrame } from "./wizard-step-frame";
  * `userManagedConnector: true`, so the IntegrationCard renders a
  * "register an Outlook MCP on the chosen backend" notice for both
  * delegated and native — INTEGRATION_NATIVE_MODE_DESIGN.md §5.3
- * (2026-05 amendment). IMAP has no delegated/native path (no
+ * IMAP has no delegated/native path (no
  * integration key in the registry); the IMAP cards stay auth-only.
  *
  * Direct-mode Gmail needs a Google OAuth credential. The wizard

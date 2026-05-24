@@ -1,5 +1,5 @@
 /**
- * B-003 Phase 4 — per-tool allowlist transitions.
+ * Per-tool allowlist transitions.
  *
  * `tool_allowlist` has three meaningful states:
  *
