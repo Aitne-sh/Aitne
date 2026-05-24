@@ -30,7 +30,7 @@ function SetupPageInner() {
 
   // Wizard state is persisted in sessionStorage so a page reload mid-setup
   // restores progress. Update mode short-circuits to the rules step (the
-  // chat-driven Customize Rules screen) — SETUP-FLOW-REDESIGN-PLAN §6.5.
+  // chat-driven Customize Rules screen).
   const [step, setStep] = useState<SetupStep>(() =>
     mode === "update"
       ? "rules"
@@ -50,8 +50,8 @@ function SetupPageInner() {
     setModeOverride(next);
   };
 
-  // SETUP-FLOW-REDESIGN-PLAN §5.2 — the chosen primary-vault path is held
-  // here (not committed) until the user enters the Customize Rules step.
+  // The chosen primary-vault path is held here (not committed) until the
+  // user enters the Customize Rules step.
   // Hydrated from sessionStorage only; we don't seed from
   // `config.primaryVaultPath` because (a) initial-mode runs start from a
   // plain default so there's nothing useful to seed, and (b) the
@@ -93,9 +93,9 @@ function SetupPageInner() {
     scrollRef.current?.scrollTo(0, 0);
   }, [step]);
 
-  // SETUP-FLOW-REDESIGN-PLAN §6.5 — `filterInitialSteps` is identity in
-  // v1 (no conditional sub-steps); kept as a function so future
-  // conditional gating has an obvious home.
+  // `filterInitialSteps` is currently identity (no conditional
+  // sub-steps); kept as a function so future conditional gating has an
+  // obvious home.
   const INITIAL_STEPS = useMemo<SetupStep[]>(
     () => filterInitialSteps(),
     [],

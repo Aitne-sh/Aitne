@@ -1,6 +1,6 @@
 "use client";
 
-// P22 §6 — Self-learning skill optimization settings page (Preview).
+// Self-learning skill optimization settings page (Preview).
 //
 // The optimizer runs on the operator's chosen cadence (daily/weekly/monthly)
 // and is gated by `skill_curation.config.enabled` (default OFF). When the
@@ -39,9 +39,8 @@ import { Separator } from "@/components/ui/separator";
 
 type Cadence = "daily" | "weekly" | "monthly";
 // Self-learning runs through the BackendRouter. Only backends with a wired
-// runtime core can drive a curation pass — opencode joins this set when
-// `docs/design/appendices/opencode-backend.md` Phase 2 lands `OpencodeCore`. Until then the
-// shared `RUNTIME_AVAILABLE_BACKEND_IDS` constant gates the picker.
+// runtime core can drive a curation pass — the shared
+// `RUNTIME_AVAILABLE_BACKEND_IDS` constant gates the picker.
 type Backend = (typeof RUNTIME_AVAILABLE_BACKEND_IDS)[number];
 
 interface ConfigPayload {

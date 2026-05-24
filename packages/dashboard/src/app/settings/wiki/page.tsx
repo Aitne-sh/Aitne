@@ -631,7 +631,7 @@ function EmptyState({
 }
 
 // ============================================================================
-// Archived state — workspace exists but inactive (the bug that started this)
+// Archived state — workspace exists but inactive.
 // ============================================================================
 
 function ArchivedState({

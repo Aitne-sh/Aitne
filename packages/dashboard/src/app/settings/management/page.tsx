@@ -10,7 +10,7 @@ import { ManagementHistoryCard } from "@/components/settings/management-history-
 
 /**
  * Settings → Management (docs/design/21-management-registry-and-
- * entities.md §14.1 Phase 6).
+ * entities.md §14.1).
  *
  * The page surfaces the three concerns rendered into
  * `rules/management.md`: A (SoT bindings), B (managed tasks), and the

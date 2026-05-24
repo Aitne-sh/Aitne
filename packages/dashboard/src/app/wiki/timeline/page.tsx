@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * WIKI_BUILDER_DESIGN.md Phase 3 — `/wiki/timeline`.
+ * WIKI_BUILDER_DESIGN.md — `/wiki/timeline`.
  *
  * Two surfaces stacked on this page:
  *   1. Health report viewer (latest `90_meta/health/<date>.md`).

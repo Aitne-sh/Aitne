@@ -16,14 +16,14 @@ import { FileConflictBanner } from "@/components/shared/file-conflict-banner";
 import { formatAbsoluteTime } from "@/lib/utils";
 
 /**
- * B-007 §5.9 + §9 (B-005) — co-edit the two natural-language rule files that
- * drive the 04:00 daily journal synthesis:
+ * Co-edit the two natural-language rule files that drive the 04:00 daily
+ * journal synthesis:
  *
  *  - `rules/journal-format.md` defines the format template (sections, voice,
  *    frontmatter). The morning routine reads it when writing
  *    `daily/YYYY-MM-DD.md`.
  *  - `rules/journal-export.md` defines inclusion / exclusion / redaction for
- *    the B-005 external export (if opted-in).
+ *    the external export (if opted-in).
  *
  * Both files are user-editable prose. Saves go through `PUT /api/context/`
  * with optimistic concurrency via `expectedMtime`.

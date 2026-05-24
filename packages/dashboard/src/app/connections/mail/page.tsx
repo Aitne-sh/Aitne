@@ -65,11 +65,10 @@ export default function MailConnectionsPage() {
             enabledKinds={enabledKinds}
             focusAccountId={focusAccountId}
           />
-          {/* SETUP-FLOW-REDESIGN-PLAN §6.1 — Outlook gains a registry-
-              driven IntegrationCard alongside the existing OutlookCard
-              auth UI. The descriptor's `supportedModes: ["direct",
-              "disabled"]` means the Delegated radio is suppressed
-              automatically. */}
+          {/* Outlook uses a registry-driven IntegrationCard alongside
+              the existing OutlookCard auth UI. The descriptor's
+              `supportedModes: ["direct", "disabled"]` auto-suppresses
+              the Delegated radio. */}
           <IntegrationCard integrationKey="outlook_mail" />
           <OutlookCard
             accounts={grouped.outlook}

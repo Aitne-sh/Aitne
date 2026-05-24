@@ -31,11 +31,11 @@ import { cn } from "@/lib/utils";
 import { previewCronSchedule } from "@/lib/cron-preview";
 
 /**
- * B-007 §5.8 — per-cadence routine rulebooks the agent reads at task-flow
- * assembly time. This page edits them in-place via `/api/context/`. Custom
- * routines (user-defined cron schedules) can be created and deleted here;
- * the daemon's `CustomRoutineScheduler` reloads automatically after each
- * write via `onCustomRoutinesChanged`.
+ * Per-cadence routine rulebooks the agent reads at task-flow assembly
+ * time. This page edits them in-place via `/api/context/`. Custom routines
+ * (user-defined cron schedules) can be created and deleted here; the
+ * daemon's `CustomRoutineScheduler` reloads automatically after each write
+ * via `onCustomRoutinesChanged`.
  */
 
 type BuiltInStem = "_index" | "hourly" | "morning" | "evening" | "weekly" | "monthly";

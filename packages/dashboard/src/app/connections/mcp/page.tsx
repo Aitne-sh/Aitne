@@ -105,8 +105,8 @@ export default function McpConnectionsPage() {
             <GeminiDelegationSetupCard />
           </div>
 
-          {/* B-003 Phase 3 — rules/mcp.md editor. Injected into every
-              task-flow prompt while at least one MCP server is enabled. */}
+          {/* rules/mcp.md editor — injected into every task-flow prompt
+              while at least one MCP server is enabled. */}
           <div className="pt-4">
             <McpRulesEditor />
           </div>
@@ -117,7 +117,7 @@ export default function McpConnectionsPage() {
 }
 
 /**
- * B-003 Phase 3 — global MCP kill switch.
+ * Global MCP kill switch.
  *
  * Two-step confirm by design: clicking the button reveals an inline warning
  * panel with an explicit "Disable all" action, matching the destructive-action

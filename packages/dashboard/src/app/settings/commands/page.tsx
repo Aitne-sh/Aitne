@@ -47,9 +47,9 @@ import {
 import { cn } from "@/lib/utils";
 
 // User bang commands fire through the BackendRouter; the picker exposes only
-// backends with a wired runtime core (`docs/design/appendices/opencode-backend.md` Phase 2
-// adds opencode to `RUNTIME_AVAILABLE_BACKEND_IDS` — this list widens
-// automatically when that ships).
+// backends with a wired runtime core. BACKENDS tracks
+// `RUNTIME_AVAILABLE_BACKEND_IDS`, so the list widens when a new backend
+// joins that registry.
 const BACKENDS: readonly BackendId[] = RUNTIME_AVAILABLE_BACKEND_IDS;
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
