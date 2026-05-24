@@ -346,8 +346,8 @@ describe("ResultProcessor — processResult notify-dedup", () => {
         },
       },
     });
-    // The write-verification helper (added 2026-05 to defend against the
-    // Sonnet 4.6 "claim success without writing" failure) requires an
+    // The write-verification helper (defends against Sonnet's
+    // "claim success without writing" failure) requires an
     // `agent_actions` row recorded by the Wiki API before it lets the
     // agent's success DM through. Seed one so this test continues to
     // exercise the reply_target lift on the unmodified-output path.

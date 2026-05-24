@@ -43,7 +43,7 @@ function newClientId(): string {
  * - Enforces per-file + per-turn caps before firing the network call.
  * - Uses `XMLHttpRequest` (not `fetch`) so upload progress is observable
  *   via `onprogress` — the Fetch API doesn't expose request-body progress
- *   in any current browser (April 2026).
+ *   in any current browser.
  */
 export function useAttachments(): {
   pending: PendingUpload[];

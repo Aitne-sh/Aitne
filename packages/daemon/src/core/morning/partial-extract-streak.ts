@@ -64,8 +64,13 @@ export interface MaybeEmitResult {
   streakDetected: boolean;
   /** Whether a DM was sent on this call. */
   dmSent: boolean;
-  /** Reason the DM was suppressed when streakDetected=true but dmSent=false. */
-  suppressedReason?: "dedup_recent" | "no_notifier";
+  /**
+   * Reason the DM was suppressed when streakDetected=true but dmSent=false.
+   * Three distinct shapes so operators triaging from telemetry can tell a
+   * configuration gap ("no notifier was supplied") apart from a transient
+   * runtime failure ("notifier threw") apart from the normal dedup path.
+   */
+  suppressedReason?: "dedup_recent" | "no_notifier" | "notify_failed";
   /** Reasons gathered from the most-recent 3 rows when the streak fires —
    *  surfaced for tests / ops logging. */
   reasonsInStreak?: ReadonlyArray<string>;
@@ -117,7 +122,10 @@ export async function maybeEmitPartialExtractStreakDm(
     // logged Stage B's outcome via `persistStageAuditRows`. A failed
     // DM is recoverable (next day's streak check fires again with no
     // dedup state recorded), so we DON'T write the timestamp on this
-    // path.
+    // path. Surfaced as `notify_failed` (distinct from `no_notifier`)
+    // so telemetry can tell "notifier threw" apart from "no notifier
+    // configured" — the two states are operationally different even
+    // though both end in dmSent=false.
     logger.warn(
       { err, correlationId: args.correlationId },
       "Partial-extract streak DM emit failed",
@@ -125,7 +133,7 @@ export async function maybeEmitPartialExtractStreakDm(
     return {
       streakDetected: true,
       dmSent: false,
-      suppressedReason: "no_notifier",
+      suppressedReason: "notify_failed",
       reasonsInStreak: reasons,
     };
   }
@@ -197,6 +205,12 @@ function writeDedupTimestamp(
  * frontmatter_tag_missing × 2, frontmatter_invalid_json × 1)`.
  *
  * Dates surfaced are the `started_at` UTC dates (YYYY-MM-DD slice).
+ *
+ * Streak-count rendering: derives the "on all N days" suffix from the
+ * actual `rows.length` rather than hardcoding three, so a future
+ * `STREAK_THRESHOLD` bump (or the SQL LIMIT returning fewer rows than
+ * the threshold under an edge case the caller didn't filter) cannot
+ * print a lie like "on all three days" against four-row input.
  */
 function renderDmMessage(rows: ReadonlyArray<RecentStageBRow>): string {
   const dates = rows
@@ -213,7 +227,7 @@ function renderDmMessage(rows: ReadonlyArray<RecentStageBRow>): string {
     .join(", ");
   return [
     `The daily journal authored OK on ${dates} but the model omitted the`,
-    `projects/people/tags frontmatter on all three days`,
+    `projects/people/tags frontmatter on all ${rows.length} days`,
     `(reasons: ${reasonsRendered}).`,
     `Inspect agent-assets/task-flows/routine.morning_routine_journal.md`,
     `or escalate Stage B's tier from lite to medium under /settings/models.`,

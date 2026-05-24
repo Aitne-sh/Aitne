@@ -91,8 +91,8 @@ describe("PollGuard", () => {
   });
 
   it("logs a 'Resumed after skipping ticks' warning when a tick runs after at least one skip", async () => {
-    // Pins the line-74-80 branch — once skipCount > 0, the next successful
-    // run must emit the warn-level resume log and reset skipCount.
+    // Pins the branch where, once skipCount > 0, the next successful run
+    // emits the warn-level resume log and resets skipCount.
     const guard = new PollGuard({ name: "test" });
     let release: (() => void) | null = null;
     const blocker = new Promise<void>((resolve) => {
@@ -112,7 +112,7 @@ describe("PollGuard", () => {
     expect(await guard.run(fn)).toBe(true);
     expect(fn).toHaveBeenCalledTimes(1);
     // Second consecutive run with skipCount=0 — exercises the
-    // skipCount===0 branch on line 74 (skipped path NOT taken).
+    // skipCount===0 branch (skipped path NOT taken).
     expect(await guard.run(async () => {})).toBe(true);
   });
 });

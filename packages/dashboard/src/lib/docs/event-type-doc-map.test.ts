@@ -26,9 +26,9 @@ describe("event-type-doc-map", () => {
     expect(docIdForEventType("routine.morning_routine_journal")).toBe(
       "features/routines/morning-routine",
     );
-    // Phase 7 (2026-05-16) retired the heavy-tier
-    // `routine.morning_routine_initial`, but the doc map retains the
-    // defensive entry so historical agent_actions rows still resolve.
+    // The heavy-tier `routine.morning_routine_initial` was retired, but
+    // the doc map retains the defensive entry so historical agent_actions
+    // rows still resolve.
     expect(docIdForEventType("routine.morning_routine_initial")).toBe(
       "features/routines/morning-routine",
     );

@@ -251,9 +251,9 @@ describe("ScheduledTaskRunner — handleMorningRoutineRetry gate", () => {
   // The retry wake fast-path skips the morning_routine session only when
   // BOTH today.md is fresh AND a `routine.morning_routine`
   // `agent_actions.result='success'` row exists for the current agent-day.
-  // Skipping on today.md alone was the 2026-05-14 stall-loop failure mode
-  // (handleMorningRoutineRetry-gate): if the audit row was missing
-  // (daemon crash mid-write OR user manually edited today.md) every
+  // Skipping on today.md alone caused a stall-loop failure mode in
+  // handleMorningRoutineRetry-gate: if the audit row is missing (daemon
+  // crash mid-write OR user manually edited today.md) every
   // hourly_check tick would queue a retry, the retry would fast-path
   // skip, and the morning_routine never actually ran — autonomous work
   // silently stalled.

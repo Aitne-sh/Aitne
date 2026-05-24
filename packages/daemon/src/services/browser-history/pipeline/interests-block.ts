@@ -275,10 +275,10 @@ function renderActiveClusterSection(cluster: ClusterSnapshot): string {
     `- **Meaningful visits**: ${cluster.meaningfulVisits}`,
     `- **Foreground time**: ${time}`,
     `- **Top domains**: ${topDomains}`,
-    // rev 4 — drop the `context/` prefix from the display text. The
-    // link target stays `../<clusterJournalPath>` (relative to
+    // Drop the `context/` prefix from the display text. The link target
+    // stays `../<clusterJournalPath>` (relative to
     // `user/research-themes.md`, so it correctly resolves to
-    // `context/research/<slug>.md`); the visible text now matches the
+    // `context/research/<slug>.md`); the visible text matches the
     // path the user would actually navigate to in the vault root.
     // Earlier drafts (§7.2 sample) had a redundant `context/` prefix
     // in the display text that didn't match any real on-disk path.

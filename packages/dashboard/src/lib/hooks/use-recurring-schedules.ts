@@ -40,8 +40,7 @@ export interface RecurringScheduleUpdateInput {
 
 /**
  * The recurring-schedules route always includes `warnings[]` in the
- * 201/200 envelope (Phase D — `recurring-schedules.ts` line ~257 / ~400
- * concatenates `resolved.warnings` with
+ * 201/200 envelope (concatenation of `resolved.warnings` and
  * `detectOnMissingDayUnusedWarnings(rule)`). Dashboard surfaces them
  * inline so the user sees model-deprecation and no-op-onMissingDay
  * advisories without round-tripping the audit log.

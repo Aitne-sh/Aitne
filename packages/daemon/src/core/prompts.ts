@@ -161,7 +161,7 @@ function loadFlowVariant(
 /**
  * INTEGRATION_NATIVE_MODE_DESIGN.md §8.2 — a task-flow variant may
  * include the canonical base flow via the `{{> base }}` directive,
- * mirroring `renderPartialIncludes` for skills (skills-compiler.ts:1296).
+ * mirroring `renderPartialIncludes` for skills in `skills-compiler.ts`.
  * The directive is replaced with the body of `<eventType>.md` with the
  * leading `{context}\n\n` block stripped — the variant carries its own
  * `{context}` at the top, and duplicating the token would double the
@@ -177,8 +177,8 @@ function expandTaskFlowPartials(content: string, eventType: string): string {
   // Resolve against the BUNDLED base file only — the user-override
   // resolution layer is one-way (variants may override; partial includes
   // pin to canonical assets so a malformed override doesn't cascade into
-  // every variant that includes it). This matches the skill partial
-  // resolver's "read from src verbatim" stance (skills-compiler.ts:612).
+  // every variant that includes it). Matches the skill partial
+  // resolver's "read from src verbatim" stance in `skills-compiler.ts`.
   const dir = resolveTaskFlowsDir();
   const basePath = join(dir, `${eventType}.md`);
   if (!existsSync(basePath)) return content.replaceAll("{{> base }}", "");

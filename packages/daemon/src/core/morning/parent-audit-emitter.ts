@@ -9,9 +9,8 @@
  * reads — the pre-routine gate must keep firing on the exact same
  * `action_type` string after the pipeline split.
  *
- * Phase 2 ships this module unwired; Phase 5 wires it into the
- * orchestrator after Stage A's terminal state lands and after
- * `diagnoseTodayMdState` returns its verdict.
+ * The orchestrator calls it after Stage A's terminal state lands and
+ * after `diagnoseTodayMdState` returns its verdict.
  *
  * Emit gate (the orchestrator could enforce this externally, but the
  * module owns it so caller paths cannot drift):

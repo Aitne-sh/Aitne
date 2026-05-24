@@ -649,9 +649,9 @@ export function useChat({ disableHistory = false }: { disableHistory?: boolean }
   }, [getErrorMessage, queryClient, restartClientSession, sessionInfo]);
 
   const continueSession = useCallback(async (sessionId: number) => {
-    // Emit a one-line trace so if the operator reports "my new session
-    // got swallowed by an old one" again, DevTools shows the stack that
-    // initiated the resume. Console-only — no network cost.
+    // Emit a one-line trace so DevTools shows the stack that initiated
+    // the resume — useful when triaging "my new session got swallowed
+    // by an old one" reports. Console-only — no network cost.
     console.debug("[chat] continueSession()", { sessionId });
     try {
       const res = await fetch("/api/chat/continue-session", {

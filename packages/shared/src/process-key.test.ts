@@ -21,9 +21,9 @@ describe("process-key helpers", () => {
   });
 
   it("reserves high tier for opt-in heavy delegated tasks only", () => {
-    // After the 2026-05-16 "no Opus by default" pass, the only `high`-
-    // tagged process key left is `delegated_task_heavy`, which is itself
-    // opt-in (gated by the `delegatedTaskHeavyEnabled` config flag and
+    // The only `high`-tagged process key is `delegated_task_heavy`,
+    // which is itself opt-in (gated by the `delegatedTaskHeavyEnabled`
+    // config flag and
     // never reached unless the operator flips it on per-integration).
     // Quality-sensitive one-shots that previously defaulted to `high`
     // (setup, knowledge.import, git.project.init / .retemplate) now seed
@@ -75,14 +75,14 @@ describe("process-key helpers", () => {
       "git.project.init",
       "git.project.update",
       "git.project.retemplate",
-      // Setup wizard — demoted from high to medium (2026-05-16). The
-      // two-turn contract is enforced by the task-flow's "Hard rules for
+      // Setup wizard — seeded at medium. The two-turn contract is
+      // enforced by the task-flow's "Hard rules for
       // Turn 1" block, not by the model tier; Sonnet handles the Q&A →
       // rules emission cleanly and matches Aitne's "no Opus by default"
       // cost posture.
       "setup",
-      // Knowledge import — demoted from high to medium (2026-05-16) for
-      // the same "no Opus by default" reason. The dashboard upload form
+      // Knowledge import — seeded at medium for the same "no Opus by
+      // default" reason. The dashboard upload form
       // exposes a per-run model picker so operators can opt into Opus
       // for an individual upload when the source is unusually subtle.
       "knowledge.import",
@@ -301,8 +301,8 @@ describe("process-key helpers", () => {
   // at runtime just as silently as a seeded heavy row. This second gate
   // closes that hole.
   //
-  // After `morning-routine-optimization.md` Phase 7 (2026-05-16) NO
-  // `routine.*` key defaults to `high`. The previous allowlist entry
+  // After `morning-routine-optimization.md`, NO `routine.*` key
+  // defaults to `high`. The previous allowlist entry
   // `routine.morning_routine_initial` was retired; the first-run morning
   // branch now runs on medium tier via the parent
   // `routine.morning_routine` envelope with a daemon-prepared

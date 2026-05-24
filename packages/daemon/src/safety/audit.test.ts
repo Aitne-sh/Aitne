@@ -1013,8 +1013,8 @@ describe("AuditLogger", () => {
   });
 
   it("logError prePass persists fallbackTriggered when supplied", () => {
-    // Pins line 661 — the fallbackTriggered spread guard's truthy arm in
-    // logError. The existing prePass test only exercises requestedBackend.
+    // Pins the fallbackTriggered spread guard's truthy arm in logError.
+    // The existing prePass test only exercises requestedBackend.
     const audit = new AuditLogger(db);
     const event = createEvent({
       type: "routine.fetch_window",
@@ -1151,9 +1151,9 @@ describe("AuditLogger", () => {
     }
   });
 
-  // ── morning-routine-optimization.md Phase 6 — UPSERT semantics ────────
+  // ── UPSERT semantics (morning-routine-optimization.md) ──
 
-  describe("insertInProgressRow + logAction UPSERT (Phase 6)", () => {
+  describe("insertInProgressRow + logAction UPSERT", () => {
     it("insertInProgressRow lands a row with result='in_progress' and the supplied identity", () => {
       const audit = new AuditLogger(db);
       const id = audit.insertInProgressRow({
@@ -1550,8 +1550,8 @@ describe("AuditLogger", () => {
     });
 
     it("findInProgressRowId tolerates a null correlationId on the in_progress sentinel and matches by `event_id IS NULL`", () => {
-      // Exercises the `correlationId ?? null` nullish-coalesce branch on
-      // line 442 — when a caller pre-inserts an in_progress row with no
+      // Exercises the `correlationId ?? null` nullish-coalesce branch:
+      // when a caller pre-inserts an in_progress row with no
       // correlationId, the lookup must still resolve via SQLite's NULL-
       // tolerant `IS` predicate so logAction settles in place.
       const audit = new AuditLogger(db);

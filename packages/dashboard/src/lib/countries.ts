@@ -239,7 +239,7 @@ export function getCountryByIso2(iso2: string): Country | undefined {
  * notably the NANP `+1` block and the `+7` block shared by Russia and
  * Kazakhstan). When two countries have the same `dial` string the longest-
  * prefix sort below would otherwise fall back to the (alphabetical) order of
- * `COUNTRIES`, which puts Canada ahead of the United States — that's why a
+ * `COUNTRIES`, which puts Canada ahead of the United States — meaning a
  * San Diego number like `+18589107283` used to detect as Canada.
  *
  * The right fix is data, not heuristics: declare which ISO2 code wins when a

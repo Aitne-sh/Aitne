@@ -118,16 +118,15 @@ export function useEnableMcpServer() {
 }
 
 /**
- * B-003 Phase 3 — global MCP kill switch.
+ * Global MCP kill switch.
  *
  * One-shot flip of every `enabled=1` row to `enabled=0`. Intended for "cut
  * the extensions first, debug later" when an MCP-adjacent failure is
  * observed. Per-server enables stay Approve-tier because they expand the
  * agent's tool surface; this mutation contracts it, so the route is
- * classified Autonomous-tier on the daemon side (DELEGATED-MODE-V2 §4.5
- * collapsed the legacy Notify tier into Autonomous + deniedTools). The
- * dashboard should still gate it behind a confirm dialog so a stray click
- * doesn't silently kill the user's entire MCP fleet.
+ * classified Autonomous-tier on the daemon side per DELEGATED-MODE-V2 §4.5.
+ * The dashboard should still gate it behind a confirm dialog so a stray
+ * click doesn't silently kill the user's entire MCP fleet.
  */
 export function useDisableAllMcpServers() {
   const qc = useQueryClient();
@@ -223,7 +222,7 @@ export interface McpToolCallEntry {
 }
 
 /**
- * B-003 Phase 4.4 — per-server recent MCP tool call history.
+ * Per-server recent MCP tool call history.
  *
  * Polls the `/api/mcp/servers/:id/activity` endpoint (read-tier). Stale
  * after 60 s so the card auto-refreshes without manual reload.

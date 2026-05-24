@@ -6,11 +6,7 @@
  * fetcher (`routine.fetch_window`) and its assembly helper (§6.4)
  * consult to build the `<acquisition-plan>` block.
  *
- * Phase 1 ships the catalog only. The dispatcher hooks that consume it
- * land in Phase 4; the partials that use the `WINDOW_QUERIES` strings
- * land in Phase 2.
- *
- * Design invariants preserved here:
+ * Design invariants:
  *
  *  - **No model IDs.** Routine windows describe *what to fetch*; tier
  *    binding for `routine.fetch_window` lives in
@@ -59,8 +55,8 @@ export const WINDOW_SYMBOLS = [
   // with the matching `ROUTINE_WINDOWS` row.
   "cal_next_24h_drift",
   // `cal_iso_week_to_now` — weekly_review's calendar retrospective.
-  // Renamed from `cal_past_7d` 2026-05-17: the previous semantics was a
-  // rolling 7-day window ending at `now`, which (a) silently included
+  // Previously named `cal_past_7d` with rolling-7-day-ending-at-now
+  // semantics, which (a) silently included
   // last week's Fri–Sun events that did not appear in any current-ISO-week
   // daily/*.md file, forcing the agent to disambiguate, and (b) misaligned
   // the direct-mode UTC `date+days` shape with the delegated/native
@@ -71,8 +67,8 @@ export const WINDOW_SYMBOLS = [
   // same set of days across all three modes.
   "cal_iso_week_to_now",
   "imminent_2h",
-  // morning_routine's 7-day calendar fetch — A8 / Finding 5 (2026-05-13).
-  // ContextBuilder's `<calendar_events_7d>` covers `direct` mode inline,
+  // morning_routine's 7-day calendar fetch. ContextBuilder's
+  // `<calendar_events_7d>` covers `direct` mode inline,
   // but emits a "fetch yourself" directive for `delegated` / `native`
   // modes — which forces the main routine session (Sonnet) to drive the
   // MCP fan-out and burn medium-tier turns on a fetch the Haiku pre-pass
@@ -93,11 +89,10 @@ export type WindowSymbol = (typeof WINDOW_SYMBOLS)[number];
  * acquisition appear here.
  *
  * `routine.morning_routine_initial` was retired by
- * `docs/design/appendices/morning-routine-optimization.md` Phase 7
- * (2026-05-16). Both the recurring and first-run branches now flow
- * through `routine.morning_routine`; the daemon-prepared
- * `<roadmap_skeleton>` block (not a window fetch) handles the
- * first-run roadmap populate.
+ * `docs/design/appendices/morning-routine-optimization.md`. Both the
+ * recurring and first-run branches now flow through
+ * `routine.morning_routine`; the daemon-prepared `<roadmap_skeleton>`
+ * block (not a window fetch) handles the first-run roadmap populate.
  */
 export const ROUTINE_WINDOW_KEYS = [
   "routine.morning_routine",
@@ -269,9 +264,9 @@ export const WINDOW_QUERIES: Readonly<
   // Gmail noise filter (`-category:promotions -category:social`) is baked
   // into every inbox-windowing query. Promotional and social-network
   // emails account for the majority of unread volume in most accounts and
-  // are deterministic to identify (Gmail labels them server-side). The
-  // 2026-05-18 incident that triggered this design — Amazon promo with
-  // an NBSP in the subject — is exactly the kind of payload that's both
+  // are deterministic to identify (Gmail labels them server-side).
+  // Promotional payloads (Amazon promo with NBSP in the subject is a
+  // representative case) are exactly the kind of payload that's both
   // (a) noise the user doesn't want triaged and (b) likely to carry
   // shell-fragile Unicode whitespace. Filtering at the FETCH boundary
   // means the agent never sees these messages at all: zero cost, zero
@@ -379,10 +374,10 @@ export const WINDOW_QUERIES: Readonly<
   },
   // `cal_iso_week_to_now` — weekly_review retrospective spanning the
   // current ISO week's Monday 00:00 local through `now`. Direct mode uses
-  // `timeMin`/`timeMax` (added 2026-05-17 to `/api/calendar/events` for
-  // exactly this row) so the daemon REST path returns the same window the
-  // delegated/native MCP fan-out sees. Before the rename this row used a
-  // UTC `date+days=7` shape, which (a) silently dropped current-day events
+  // `timeMin`/`timeMax` on `/api/calendar/events` so the daemon REST
+  // path returns the same window the delegated/native MCP fan-out sees.
+  // Before the rename this row used a UTC `date+days=7` shape, which
+  // (a) silently dropped current-day events
   // for non-UTC timezones (the window ended at today's UTC midnight, i.e.
   // 09:00 JST) and (b) drifted away from the ISO week boundary that
   // `daily/YYYY-MM-DD.md` is keyed on.

@@ -173,11 +173,11 @@ describe("EventDispatcher", () => {
     db.pragma("foreign_keys = ON");
     applySchema(db);
 
-    // Pre-seed a successful `routine.morning_routine` action for the current
-    // agent-day so the pre-routine gate (sleep-skip recovery, introduced
-    // 2026-05-14 — see `morningRoutineRanToday`) does not trip in tests that
-    // are not specifically exercising it. Tests that want to verify the
-    // gate live in dispatcher-hourly-check.test.ts.
+    // Pre-seed a successful `routine.morning_routine` action for the
+    // current agent-day so the pre-routine gate (sleep-skip recovery,
+    // see `morningRoutineRanToday`) does not trip in tests that are not
+    // specifically exercising it. Tests that want to verify the gate
+    // live in dispatcher-hourly-check.test.ts.
     db
       .prepare(
         `INSERT INTO agent_actions

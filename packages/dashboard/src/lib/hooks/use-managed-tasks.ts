@@ -173,7 +173,7 @@ export function useDeleteManagedTask() {
 }
 
 /**
- * Phase 8 — `/metrics/managed-tasks` (docs/design/21 §14.3).
+ * `/metrics/managed-tasks` (docs/design/21 §14.3).
  *
  * Returned shape mirrors `ManagementMetricsSnapshot` from the daemon
  * core. Kept structurally typed (Record<string, unknown>) so the

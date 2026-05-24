@@ -165,7 +165,7 @@ export interface RefreshOptions {
    * Hoisting the disabled gate INTO the helper keeps the audit-row
    * schema uniform — both skip reasons emit the same row shape and the
    * dashboard's `data.skipped.reason` enum has both arms with no dead
-   * code (rev 4, WEEKLY_INTERESTS_REFLECTION_PLAN.md §22).
+   * code (WEEKLY_INTERESTS_REFLECTION_PLAN.md §22).
    */
   readonly integrationDisabled?: boolean;
 }
@@ -254,9 +254,9 @@ export function refreshInterestsReflection(
     options.weekStart ?? mostRecentMondayFromDate(nowMs, boundary);
   const isoNow = new Date(nowMs).toISOString();
 
-  // Disabled-integration short-circuit — rev 4 hoists the gate INTO
-  // the helper so the audit row shape is uniform across both skip
-  // reasons. No lock needed; nothing is written and the helper returns
+  // Disabled-integration short-circuit — the gate lives in the helper
+  // so the audit row shape is uniform across both skip reasons. No lock
+  // needed; nothing is written and the helper returns
   // before any disk or DB read beyond the audit insert. The dispatcher
   // pre-hook supplies this flag via `readIntegrationState`; HTTP-route
   // callers (dashboard) never set it.
@@ -553,8 +553,8 @@ function emitAuditRow(
   eventId: string | undefined,
   caught: unknown,
 ): void {
-  // rev 4 — four terminal states. `partial` lands only when we threw
-  // mid-write but had already written ≥1 file (the operator can replay
+  // Four terminal states. `partial` lands only when we threw mid-write
+  // but had already written ≥1 file (the operator can replay
   // the run safely; the next refresh idempotently re-applies the
   // same content from the same SQLite snapshot).
   const finalResult: "success" | "skipped" | "partial" | "failed" =
@@ -599,7 +599,7 @@ function emitAuditRow(
       }),
       trigger === "scheduler" ? "cron" : "manual",
       errorMessage,
-      // rev 4 — explicit `metadata: '{}'`. Daemon-write rows leave the
+      // Explicit `metadata: '{}'`. Daemon-write rows leave the
       // structured-metadata side-channel empty (per `agent_actions`
       // schema comment: metadata is the agent-self-report channel,
       // detail is the daemon-write telemetry). Passing the literal

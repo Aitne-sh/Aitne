@@ -3288,6 +3288,55 @@ describe("ClaudeCodeCore", () => {
       const noClampBash = noClampHooks.PreToolUse.find((e) => e.matcher === "Bash");
       expect(noClampBash?.hooks.length).toBe(2);
     });
+
+    it("per-execute allowedToolsOverride: [] really clamps the SDK allowlist to []", async () => {
+      // Regression for the 2026-05-24 gate fix. Before, the
+      // `optimizerClampActive` check required `length > 0`, so an empty
+      // override silently fell through to the default `dontAsk` branch
+      // and the SDK got `CLAUDE_DEFAULT_ALLOWED_TOOLS` (Read / Write /
+      // Edit / Bash(curl *) / …). Callers that PASSED `[]` thinking they
+      // were saying "no tools" — `routine.hourly_check.triage` and Stage
+      // B of the morning-routine pipeline (daily-journal-daemon-write.md
+      // §3 corollary) — were getting the full surface, defeating their
+      // structural-safety guarantee. The fix: `Array.isArray(...)`
+      // activates the clamp regardless of length.
+      mockStreamWith([buildInitMessage(), buildResultMessage()]);
+      const clampCore = new ClaudeCodeCore({
+        ...makeConfig(),
+        claudeExecutionPermissionMode: "allow",
+      } as unknown as AgentConfig);
+      await clampCore.execute({
+        prompt: "test prompt",
+        context: "test context",
+        event: createEvent({
+          type: "test.event",
+          source: "test",
+          priority: EventPriority.NORMAL,
+        }),
+        modelId: "claude-sonnet-4-6",
+        maxTurns: 1,
+        maxBudgetUsd: 0.1,
+        sessionDir: tempSessionDir,
+        processKey: "routine.morning_routine_journal",
+        allowedToolsOverride: [],
+      });
+      const calls = vi.mocked(query).mock.calls;
+      const opts = (calls[0]?.[0] as { options?: Record<string, unknown> })?.options ?? {};
+      // The clamp fires: permissionMode swaps to dontAsk, allowedTools
+      // is EXACTLY the empty list the caller passed (no default merge,
+      // no delegated/native union, no wiki widening). The
+      // ALWAYS_DISALLOWED_TOOLS layer still applies via disallowedTools.
+      expect(opts.permissionMode).toBe("dontAsk");
+      expect(opts.allowedTools).toEqual([]);
+      // ALWAYS_DISALLOWED_TOOLS still arrives — the absolute-block layer
+      // is independent of the clamp.
+      const disallowed = opts.disallowedTools as string[];
+      expect(disallowed.length).toBeGreaterThan(0);
+      // `bypassPermissions` MUST NOT be set even though the operator's
+      // execution mode is "allow" — the per-execute override always
+      // forces strict dontAsk.
+      expect(opts.allowDangerouslySkipPermissions).toBeUndefined();
+    });
   });
 
   describe("bashContextWriteHook (memory-integrity defense-in-depth)", () => {

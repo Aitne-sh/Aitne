@@ -13,7 +13,7 @@ import type {
 } from "@/lib/api-types";
 
 /**
- * Integration Delegation Framework — dashboard client hooks (Phase 5).
+ * Integration Delegation Framework — dashboard client hooks.
  *
  * The list + PATCH + probe endpoints live on the daemon; `/health.integrationModes`
  * carries the registry-keyed delegated-feature matrix alongside. Dashboards that

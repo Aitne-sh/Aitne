@@ -13,9 +13,9 @@ const logger = createLogger("message-recorder");
  * INSERT and the UPDATE run in the same `db.transaction(...)` so the
  * counter cannot drift from the actual row count: if the INSERT rolls
  * back (FK break, disk full, corruption), the UPDATE rolls back too.
- * This replaces the older paired `recordMessage(...); touchSession(...)`
- * calling convention, which was the root cause of the v28 FK regression
- * leaving `message_count` counting phantom turns.
+ * Replaces the older paired `recordMessage(...); touchSession(...)`
+ * calling convention, whose split-transaction shape left
+ * `message_count` counting phantom turns when the INSERT rolled back.
  *
  * Returns `true` on successful persistence, `false` on error (caller
  * decides whether to surface it — the dispatcher, for example, turns an

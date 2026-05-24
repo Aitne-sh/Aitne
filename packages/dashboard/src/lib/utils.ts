@@ -134,8 +134,8 @@ export function formatTokenCount(n: number | null | undefined): string {
  * digits) while the actual prompt sent to the model is tens of thousands
  * of tokens — the bulk arrives as `cache_read_input_tokens`.
  *
- * All four params are required to prevent callers from silently regressing
- * to the buggy uncached-only display.
+ * All four params are required so callers cannot silently fall back to
+ * the uncached-only count.
  */
 export function formatTokens(
   inputUncached: number | null | undefined,

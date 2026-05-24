@@ -138,7 +138,14 @@ export function extractJournalSections(
   }
 
   const body = extractLastTaggedBlock(trimmed, BODY_TAG);
-  if (body === null) {
+  // Treat a missing tag and a tag-with-empty-inner-content as the same
+  // terminal failure. Without this, `<aitne:daily-journal-body>\n\n
+  // </aitne:daily-journal-body>` would land an empty diary file with
+  // valid frontmatter — a phantom user-facing day worse than the honest
+  // "failed (LLM output empty)" surface (the appender renders the latter
+  // via `formatFailureReason("body_tag_missing")`, so the file-on-disk
+  // path stays empty, no degraded data).
+  if (body === null || body.trim().length === 0) {
     return { body: null, frontmatter: null, parseError: "body_tag_missing" };
   }
 

@@ -60,6 +60,40 @@ describe("extractJournalSections", () => {
     });
   });
 
+  it("body tag with empty inner content → body_tag_missing (no phantom diary file)", () => {
+    // `<aitne:daily-journal-body>\n\n</aitne:daily-journal-body>` was
+    // previously treated as success, landing a frontmatter-only daily
+    // file with no body — a phantom user-facing day worse than the
+    // honest "failed (LLM output empty)" surface. Treat empty/whitespace
+    // inner content as body_tag_missing so the composer returns ok:
+    // false and the appender renders the failure reason.
+    const output = [
+      "<aitne:daily-journal-body>",
+      "",
+      "</aitne:daily-journal-body>",
+      "<aitne:daily-journal-frontmatter>",
+      `{"projects": [], "people": [], "tags": []}`,
+      "</aitne:daily-journal-frontmatter>",
+    ].join("\n");
+
+    const result = extractJournalSections(output);
+    expect(result.body).toBeNull();
+    expect(result.parseError).toBe("body_tag_missing");
+  });
+
+  it("body tag with only whitespace inner content → body_tag_missing", () => {
+    const output = [
+      "<aitne:daily-journal-body>",
+      "   ",
+      "\t\t",
+      "</aitne:daily-journal-body>",
+    ].join("\n");
+
+    const result = extractJournalSections(output);
+    expect(result.body).toBeNull();
+    expect(result.parseError).toBe("body_tag_missing");
+  });
+
   it("body only — frontmatter tag missing returns partial reason", () => {
     const output = [
       "<aitne:daily-journal-body>",

@@ -230,8 +230,7 @@ export class AttachmentStore {
           // `'close'` after `destroy()` without a preceding `'end'` or
           // `'error'`. Without this listener, a truncation on such a
           // stream would never resolve the promise — the request would
-          // hang until the caller's timeout fired. See `attachments.test.ts`
-          // "rejects oversize uploads promptly" for the regression check.
+          // hang until the caller's timeout fired.
           settle(() => {
             out.destroy();
             reject(

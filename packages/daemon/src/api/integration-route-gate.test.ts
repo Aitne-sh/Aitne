@@ -283,8 +283,7 @@ describe("createIntegrationRouteGate middleware", () => {
     // The route gate doesn't know the calling agent's session backend, so
     // it cannot tell whether "use your backend's tool" is correct (only
     // true under same-backend delegation). Point at both paths so the
-    // agent can pick. The cross-backend chokepoint is now `/exec` (the
-    // legacy `/invoke` RPC was removed on 2026-05-01).
+    // agent can pick. The cross-backend chokepoint is `/exec`.
     writeIntegrations(db, {
       google_calendar: {
         mode: "delegated",
@@ -310,9 +309,8 @@ describe("createIntegrationRouteGate middleware", () => {
     // message builder. outlook_calendar is single-provider with
     // `apiRoutesTouched: ["/api/calendar/outlook"]` and `userManagedConnector: true` —
     // there is no daemon-side `/api/integrations/outlook_calendar/exec`
-    // proxy (nor was there ever a `/api/integrations/outlook_calendar/invoke`
-    // proxy before its 2026-05-01 retirement), so the message must NOT
-    // suggest one. Instead it should direct the agent at the
+    // proxy, so the message must NOT suggest one. Instead it should
+    // direct the agent at the
     // user-installed MCP/connector on the delegated backend.
     writeIntegrations(db, {
       outlook_calendar: {

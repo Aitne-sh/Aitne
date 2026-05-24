@@ -141,9 +141,9 @@ const EMPTY_USAGE: BackendUsage = {
  * threshold catches a fully hung CLI subprocess (zero stream events)
  * well before `executeTimeoutMinutes` (default 30 min) fires.
  *
- * Audit 2026-05-17: the delegated path had this guard; the reactive
- * path was unprotected and a hung subprocess could pin a session for
- * the full 30-min wall-clock.
+ * The reactive path needs this guard explicitly: without it, a hung
+ * subprocess could pin a session for the full executeTimeoutMinutes
+ * wall-clock.
  */
 const REACTIVE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -897,7 +897,7 @@ export class GeminiCliCore implements IAgentCore {
             }
           }
 
-          // B-003 Phase 4.4 — persist MCP tool call to `mcp_tool_calls`.
+          // Persist MCP tool call to `mcp_tool_calls`.
           // Gemini emits `mcp_<server>_<tool>` (single underscore — see
           // parseMcpToolName); host-installed Gemini MCPs (like
           // `google-workspace` from extensions, or user-added `notion`)
@@ -2212,7 +2212,7 @@ ${fetchClause}`;
       };
     }
 
-    // Daily-request quota gate. Mirrors `runTurn` (line 480-495) — Gemini
+    // Daily-request quota gate. Mirrors `runTurn`'s gate — Gemini
     // meters per-day model requests via plan-preset `dailyRequestCeiling`
     // (900/1350/1800), and proxy invocations consume the same quota as
     // direct execute()s. Without this gate, proxy calls would silently
@@ -2278,10 +2278,8 @@ ${fetchClause}`;
     // Local aborter bridged from the caller's signal so we can also
     // trigger an early abort on wrong-tool detection without polluting
     // the caller's signal. Without early abort, a wrong-tool failure
-    // burns the full 180s gemini wall-clock waiting for natural
-    // completion (audit log 2026-05-01: 9.5s when subprocess completes
-    // naturally, but up to 180s when the model loops on the missing
-    // tool name). Abort caps it at ~5s.
+    // burns the full gemini wall-clock waiting for natural completion;
+    // abort caps it at ~5s.
     const proxyAborter = new AbortController();
     const callerAbortListener = (): void => {
       proxyAborter.abort(abortSignal?.reason);
@@ -2296,14 +2294,14 @@ ${fetchClause}`;
       }
     }
 
-    // Idle / hang watchdog. `gemini-cli` has been observed (audit log
-    // 2026-05-02 / 2026-05-03: 9 / 83 cadence calls) to lock up entirely
-    // — subprocess alive, zero stream-json output, only the 180s wall-
-    // clock fires. The idle detector trips much earlier (75s default,
-    // see `delegated-proxy-config.ts`) by treating each arrived line as
-    // a heartbeat. On trip, we abort with a `DelegatedProxyTimeoutError`
-    // so the post-loop classifier maps to `errorClass="timeout"`,
-    // identical to wall-clock — the cadence retry path stays uniform.
+    // Idle / hang watchdog. `gemini-cli` has been observed to lock up
+    // entirely — subprocess alive, zero stream-json output, only the
+    // wall-clock fires. The idle detector trips much earlier (75s
+    // default, see `delegated-proxy-config.ts`) by treating each
+    // arrived line as a heartbeat. On trip, we abort with a
+    // `DelegatedProxyTimeoutError` so the post-loop classifier maps to
+    // `errorClass="timeout"`, identical to wall-clock — the cadence
+    // retry path stays uniform.
     let idleTimedOut = false;
     const idleTimeoutMs =
       DELEGATED_PROXY_DEFAULTS.idleTimeoutMsByBackend.gemini
@@ -2583,8 +2581,9 @@ ${fetchClause}`;
         };
       }
 
-      // Bump the per-agent-day counter on the success path only, mirroring
-      // `runTurn` line 720. Proxy success consumes one Gemini request
+      // Bump the per-agent-day counter on the success path only,
+      // mirroring `runTurn`'s success-path counter bump. Proxy success
+      // consumes one Gemini request
       // (turn-level approximation; tool fanout still counts as one,
       // matching the existing accounting).
       this.incrementRequestsCount(today);

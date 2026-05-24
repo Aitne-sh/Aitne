@@ -268,8 +268,8 @@ describe("toSubmitPayload", () => {
   });
 
   it("strips a stale onMissingDay value when daysOfMonth no longer contains 29/30/31", () => {
-    // Phase G review pinned the form's hide-but-don't-clear bug: when a
-    // user picked `skip` for daysOfMonth=[31], then removed day 31, the
+    // Hide-but-don't-clear bug: when a user picked `skip` for
+    // daysOfMonth=[31], then removed day 31, the
     // select hid but state retained `skip`. Sending that wire value
     // emits a §5.0.5 `on_missing_day_unused` warning that the user can no
     // longer reach from the form. The build step strips the field at
@@ -451,7 +451,7 @@ describe("monthlyHasOverflowDay", () => {
 
 describe("dtoToFormState", () => {
   // Pure DTO → form-state mapping. Lives in the table module but exercised
-  // here so it stays in sync with the schema. The Phase D daemon normalises
+  // here so it stays in sync with the schema. The daemon normalises
   // legacy aliases server-side; the dashboard receives concrete model ids
   // or empty strings — never `"sonnet"`/`"opus"` — but the round-trip is
   // intentionally lossy-tolerant so a stray legacy row from before the

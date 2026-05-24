@@ -85,7 +85,7 @@ export function useDocsHealth() {
  * §10.4); until the daemon ships it, calls 404 and the consumer renders
  * the §7.1 fallback copy. `retry: false` keeps the 404 from being
  * re-tried on every focus. `refetchOnWindowFocus` is the canonical
- * invalidation trigger (D-2: SSE-driven invalidation deferred).
+ * invalidation trigger; SSE-driven invalidation is deferred.
  */
 export function useDocsQABinding() {
   return useQuery<DocsQABindingResponse, ApiError>({

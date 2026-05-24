@@ -96,6 +96,7 @@ import { parseHandoff, type HandoffParsed } from "./handoff-parser.js";
 import {
   buildJournalSkeleton,
   gatherJournalSkeletonFacts,
+  type JournalSkeletonInputs,
   type SkeletonCalendarEvent,
 } from "./journal-skeleton-builder.js";
 import {
@@ -682,6 +683,14 @@ export class MorningRoutinePipelineOrchestrator {
    * produced the skeleton facts the composer needs. Otherwise return
    * `null` and let the appender fall back to file-presence detection.
    *
+   * Reuses the SAME skeleton + counts cached on `stageBInputs` (the
+   * exact byte stream Stage B's prompt saw) rather than re-deriving
+   * against the live DB. Re-deriving was the previous behaviour and
+   * introduced a drift class: if a new DM or calendar observation
+   * landed during Stage A's wall-clock window, the LLM authored against
+   * Skeleton-V1 while the daemon wrote Skeleton-V2 frontmatter; ditto
+   * `updated:` if the agent day rolled over between the two reads.
+   *
    * Stage B's `AgentResult` may be `null` even when the event was
    * dispatched (the SDK threw mid-stream); the composer handles that
    * explicitly via its `stage_b_null` reason.
@@ -689,25 +698,19 @@ export class MorningRoutinePipelineOrchestrator {
   private async composeDailyJournalIfPossible(args: {
     correlationId: string;
     stageBEvent: RoutineEvent | null;
-    stageBInputs: { block: string; yesterdayDateStr: string } | null;
+    stageBInputs: StageBInputs | null;
     stageBResult: AgentResult | null;
   }): Promise<DailyJournalComposeResult | null> {
     if (this.deps.dailyJournalComposer === undefined) return null;
     if (args.stageBEvent === null) return null;
     if (args.stageBInputs === null) return null;
-    // Re-derive the skeleton + facts for the composer. `buildStageBInputs`
-    // already does this work for the prompt block; reuse its inputs by
-    // re-reading the agent-day window — cheap (two SQLite aggregations
-    // against indexed columns) and keeps the composer self-contained.
     try {
-      const skeleton = this.buildStageBSkeletonInputs(args.stageBInputs.yesterdayDateStr);
-      if (skeleton === null) return null;
       const outcome = await this.deps.dailyJournalComposer.compose({
         correlationId: args.correlationId,
         yesterdayDateStr: args.stageBInputs.yesterdayDateStr,
-        skeleton: skeleton.skeleton,
-        calendarEvents: skeleton.calendarEvents,
-        messagesHandled: skeleton.messagesHandled,
+        skeleton: args.stageBInputs.skeleton,
+        calendarEvents: args.stageBInputs.calendarEventsCount,
+        messagesHandled: args.stageBInputs.messagesHandled,
         stageBResult: args.stageBResult,
       });
       return outcome;
@@ -723,66 +726,6 @@ export class MorningRoutinePipelineOrchestrator {
       );
       return { ok: false, reason: "write_failed" };
     }
-  }
-
-  /**
-   * Re-derive the skeleton + skeleton facts for the daily-journal
-   * composer. Shares the agent-day window + skeleton math with
-   * `buildStageBInputs` so the composer sees byte-identical inputs to
-   * the prompt block Stage B saw. Returns `null` when yesterday.md is
-   * absent (first-run / no prior-day) — same gate as
-   * `buildStageBInputs`.
-   */
-  private buildStageBSkeletonInputs(
-    yesterdayDateStr: string,
-  ): {
-    skeleton: import("./journal-skeleton-builder.js").JournalSkeletonInputs;
-    calendarEvents: number;
-    messagesHandled: number;
-  } | null {
-    const contextDir = getContextDir(this.deps.config, this.deps.db);
-    const yesterdayPath = join(contextDir, "yesterday.md");
-    if (!existsSync(yesterdayPath)) return null;
-    const now = new Date();
-    const yesterdayNow = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const bounds = getAgentDayBoundsUtc(
-      this.deps.config.timezone || undefined,
-      this.deps.config.dayBoundaryHour,
-      yesterdayNow,
-    );
-    const window = { startUtc: bounds.start, endUtc: bounds.end };
-    const updatedDateStr = getAgentDayDateStr(
-      this.deps.config.timezone || undefined,
-      this.deps.config.dayBoundaryHour,
-      now,
-    );
-    const weekday = new Date(`${yesterdayDateStr}T00:00:00Z`).toLocaleDateString("en-US", {
-      weekday: "long",
-      timeZone: "UTC",
-    });
-    let yesterdayMd: string;
-    try {
-      yesterdayMd = readFileSync(yesterdayPath, "utf-8");
-    } catch {
-      return null;
-    }
-    const facts = gatherJournalSkeletonFacts(this.deps.db, window);
-    const calendarEvents = this.readYesterdayCalendarEvents(window);
-    const skeleton: import("./journal-skeleton-builder.js").JournalSkeletonInputs = {
-      dateStr: yesterdayDateStr,
-      weekday,
-      updatedDateStr,
-      yesterdayMd,
-      calendarEvents,
-      ...(this.deps.config.timezone
-        ? { timezone: this.deps.config.timezone }
-        : {}),
-    };
-    return {
-      skeleton,
-      calendarEvents: calendarEvents.length,
-      messagesHandled: facts.messagesHandled,
-    };
   }
 
   /**
@@ -915,7 +858,7 @@ export class MorningRoutinePipelineOrchestrator {
 
   // ── ③ JournalSkeletonBuilder plumbing ────────────────────────────────
 
-  private buildStageBInputs(): { block: string; yesterdayDateStr: string } | null {
+  private buildStageBInputs(): StageBInputs | null {
     const contextDir = getContextDir(this.deps.config, this.deps.db);
 
     // First-run skip: when yesterday.md is absent, there is no prior
@@ -973,22 +916,36 @@ export class MorningRoutinePipelineOrchestrator {
     const facts = gatherJournalSkeletonFacts(this.deps.db, window);
     const calendarEvents = this.readYesterdayCalendarEvents(window);
 
-    const skeleton = buildJournalSkeleton(
-      {
-        dateStr,
-        weekday,
-        updatedDateStr,
-        yesterdayMd,
-        calendarEvents,
-        ...(this.deps.config.timezone
-          ? { timezone: this.deps.config.timezone }
-          : {}),
-      },
-      facts,
-    );
+    const skeletonInputs: JournalSkeletonInputs = {
+      dateStr,
+      weekday,
+      updatedDateStr,
+      yesterdayMd,
+      calendarEvents,
+      ...(this.deps.config.timezone
+        ? { timezone: this.deps.config.timezone }
+        : {}),
+    };
+
+    const skeletonBody = buildJournalSkeleton(skeletonInputs, facts);
     return {
-      block: `<journal_skeleton>\n${skeleton}\n</journal_skeleton>`,
+      block: `<journal_skeleton>\n${skeletonBody}\n</journal_skeleton>`,
       yesterdayDateStr: dateStr,
+      // daily-journal-daemon-write.md §4.11 (drift fix) — cache the
+      // skeleton inputs + pre-aggregated counts here so the post-
+      // `Promise.allSettled` composer can reuse the SAME byte stream
+      // Stage B's prompt saw. Re-deriving on the composer side (as the
+      // initial implementation did via `buildStageBSkeletonInputs`)
+      // re-runs `gatherJournalSkeletonFacts` + `readYesterdayCalendar
+      // Events` against the live DB; if a new DM or calendar observation
+      // landed during Stage A's wall-clock window, or the agent day rolled
+      // over, the LLM authored against Skeleton-V1 while the daemon wrote
+      // Skeleton-V2 frontmatter (`messages_handled` / `calendar_events`
+      // count drift, `updated:` date drift across the 04:00 boundary).
+      // One canonical snapshot eliminates the drift class entirely.
+      skeleton: skeletonInputs,
+      calendarEventsCount: calendarEvents.length,
+      messagesHandled: facts.messagesHandled,
     };
   }
 
@@ -1360,6 +1317,30 @@ export class MorningRoutinePipelineOrchestrator {
           processKey: STAGE_B_PROCESS_KEY,
           preResolvedBinding: binding,
           reassemblePrompt,
+          // daily-journal-daemon-write.md §3 corollary — Stage B's
+          // session must have zero tool requirement. The empty
+          // `skills-manifest.ts` entry suppresses `.claude/skills/*` from
+          // being registered, but the SDK still ships its default
+          // `CLAUDE_DEFAULT_ALLOWED_TOOLS` (Read / Write / Edit /
+          // Bash(curl *) / …). Without this per-execute clamp, Haiku
+          // could still call `Write` on `daily/<date>.md` directly —
+          // bypassing the daemon-side `DailyJournalComposer` chokepoint
+          // and racing it. Mirrors the precedent at
+          // `dispatcher-hourly-check.ts:1003` (`routine.hourly_check.triage`).
+          //
+          // Activation requires the clamp gate in `claude-code-core.ts`
+          // to honour an empty array as "no tools" — fixed in the same
+          // PR as this addition (the prior `length > 0` gate silently
+          // dropped `[]` to the default surface).
+          //
+          // Codex / Gemini have no per-spawn `allowedTools` surface —
+          // the Stage B process key routes to Claude (lite tier / Haiku)
+          // by default, so this clamp is effective on the production
+          // binding. On a Claude→Codex/Gemini fallback the clamp is
+          // not honoured; the `max_turns: 20` / `max_budget_usd: 0.30`
+          // envelope on `routine.morning_routine_journal` remains the
+          // safety floor on those backends.
+          allowedToolsOverride: [],
         }),
       event,
     );
@@ -1412,6 +1393,23 @@ export class MorningRoutinePipelineOrchestrator {
 }
 
 // ── module-level helpers ────────────────────────────────────────────────
+
+/**
+ * What `buildStageBInputs` returns: the prompt-side `<journal_skeleton>`
+ * XML block AND the inputs that produced it (skeleton inputs + the two
+ * pre-aggregated counts that land in the `daily/<date>.md` frontmatter).
+ *
+ * Single canonical snapshot per morning run — the composer reads from
+ * here instead of re-querying SQLite, eliminating the drift class where
+ * Skeleton-V1 went into the prompt but Skeleton-V2 landed in the file.
+ */
+interface StageBInputs {
+  block: string;
+  yesterdayDateStr: string;
+  skeleton: JournalSkeletonInputs;
+  calendarEventsCount: number;
+  messagesHandled: number;
+}
 
 /**
  * Per-stage settled outcome handed to `persistStageAuditRows`. Models

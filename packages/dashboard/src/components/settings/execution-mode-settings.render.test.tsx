@@ -93,9 +93,8 @@ describe("ExecutionModeSettingsCard — render smoke tests", () => {
     // The Allow card states "Dangerous operations are still blocked"
     // for the Claude/Gemini case. Codex Allow has no per-command hook
     // surface so the daemon cannot enforce that layer for Codex; the
-    // caveat surfaces this trade-off at the moment of choice. Audit
-    // reference: M2 / C3, CLAUDE.md "Codex allow mode cannot enforce
-    // this layer".
+    // caveat surfaces this trade-off at the moment of choice. See
+    // CLAUDE.md "Codex allow mode cannot enforce this layer".
     const html = renderCard(unifiedStrict());
     expect(html).toContain("Codex caveat");
     expect(html).toContain("dangerously-bypass-approvals-and-sandbox");
@@ -151,8 +150,8 @@ describe("ExecutionModeSettingsCard — render smoke tests", () => {
   });
 
   it("divergent: Apply is enabled (canApply null-top path)", () => {
-    // Critical regression guard for fix #1 — the old behaviour had
-    // Apply disabled whenever topLevel was null, forcing the user to
+    // Critical regression guard — the old behaviour had Apply disabled
+    // whenever topLevel was null, forcing the user to
     // clobber overrides by first clicking a card. The null-top +
     // all-overrides-set branch of canApply must keep Apply reachable.
     const html = renderCard(divergent());

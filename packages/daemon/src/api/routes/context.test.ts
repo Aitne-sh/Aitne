@@ -480,13 +480,13 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("PATCH /context/* with an unknown mode returns per-field issue with validValues + received value", async () => {
-      // Production observation (logs 2026-05-22): when an agent typed a mode
-      // outside the enum (e.g. "patch" or capitalized "APPEND"), the previous
-      // body_not_object error joined Zod messages without telling the agent
-      // what it actually sent or which values are accepted. The agent could
-      // not self-correct, so morning_routine_today burned its budget on
-      // identical retries. The new buildSchemaIssues path emits a per-field
-      // context.invalid_body_field issue with the received value + the enum's
+      // When an agent types a mode outside the enum (e.g. "patch" or
+      // capitalized "APPEND"), a generic body_not_object error joins
+      // Zod messages without telling the agent what it sent or which
+      // values are accepted. The agent then cannot self-correct and
+      // morning_routine_today burns its budget on identical retries.
+      // buildSchemaIssues emits a per-field context.invalid_body_field
+      // issue with the received value + the enum's
       // validValues so the next retry can fix the mode without guessing.
       const filePath = join(contextDir, "today.md");
       writeFileSync(filePath, validTodayContent(), "utf-8");
@@ -1107,11 +1107,11 @@ describe("Context API — optimistic concurrency", () => {
     });
   });
 
-  // Regression: setup.initial agents constructed curl commands that sent a
-  // literal `@-` as the body (observed 2026-04-18, daemon.log line 577).
-  // Hono's default handler turned the resulting SyntaxError into a 500
-  // `internal_error`, which the agent misread as a permission denial.
-  // Surfacing a 400 `invalid_json_body` keeps the failure diagnosable.
+  // Regression: setup.initial agents have been seen constructing curl
+  // commands that sent a literal `@-` as the body. Hono's default
+  // handler turns the resulting SyntaxError into a 500 `internal_error`,
+  // which the agent misreads as a permission denial. Surfacing a 400
+  // `invalid_json_body` keeps the failure diagnosable.
   describe("PUT/PATCH /context/* — malformed JSON body", () => {
     it("PUT returns 400 invalid_json_body with SyntaxError detail when body is not valid JSON", async () => {
       const res = await app.request("/api/context/user/profile", {

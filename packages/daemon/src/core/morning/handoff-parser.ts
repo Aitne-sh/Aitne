@@ -4,10 +4,9 @@
  * body string and return them as structured arrays.
  *
  * Spec: `docs/design/appendices/morning-routine-optimization.md`
- * §"Daemon-side modules to add" → handoff-parser (②). Phase 2 ships
- * this module unwired; the morning-routine orchestrator (Phase 5+)
- * will call it before Stage A and inject the parsed JSON as
- * `<handoff_parsed>` so Stage A skips Step 1's prose parse.
+ * §"Daemon-side modules to add" → handoff-parser (②). The orchestrator
+ * reads yesterday.md and injects the parsed JSON as `<handoff_parsed>`
+ * so Stage A can skip the prose parse step.
  *
  * Fail-soft contract: any structural anomaly (no `## Handoff` section,
  * input null/empty, unrecoverable parse error) returns `null` rather

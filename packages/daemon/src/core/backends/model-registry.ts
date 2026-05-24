@@ -214,10 +214,9 @@ const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
     modelId: "gpt-5.5-chat-latest",
     label: "GPT-5.5 Instant",
     displayName: "GPT-5.5 Instant",
-    // Non-thinking sibling of gpt-5.5 — released 2026-05-05 as the new
-    // ChatGPT default (replacing GPT-5.3 Instant). Same model family /
-    // pricing as thinking gpt-5.5 but with no reasoning step, so it
-    // returns a token immediately. Registered under `high` to keep the
+    // Non-thinking sibling of gpt-5.5 — ChatGPT's default. Same model
+    // family / pricing as thinking gpt-5.5 but with no reasoning step,
+    // so it returns a token immediately. Registered under `high` to keep the
     // canonical pricing tier honest (latestHighFor still resolves to
     // thinking gpt-5.5 because that entry comes first in this array);
     // operators can pin it from /settings/models when low latency is

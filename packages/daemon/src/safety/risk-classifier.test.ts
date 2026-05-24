@@ -128,9 +128,8 @@ describe("classifyRisk — DELEGATED-TASK-MODE-DESIGN.md §4.2 generic /run", ()
     // blast radius than /exec because there is no per-integration
     // deniedTools to enforce. Diverges from /api/integrations/{*}/exec
     // (Autonomous), where the integration's user-curated deny list
-    // provides the safety floor. (The retired /api/integrations/{*}/invoke
-    // RPC route was likewise Autonomous before its 2026-05-01 retirement.)
-    // Lock the tier explicitly so a refactor cannot silently downgrade
+    // provides the safety floor. Lock the tier explicitly so a refactor
+    // cannot silently downgrade
     // it to Autonomous — the regression would expose a Bearer-less RPC
     // surface to anyone who can hit 127.0.0.1:8321.
     expect(classifyRisk("POST", "/api/delegated/run")).toBe(RiskTier.Approve);
@@ -150,11 +149,10 @@ describe("classifyRisk — B-008 P7 vault health surface", () => {
 
   it("POST /api/context/roadmap/id is Autonomous (pure-utility ID minter)", () => {
     // Without an explicit entry the route falls into the Approve
-    // fail-closed default — observed 2026-04-28 producing 7×401 during
-    // a single roadmap_refresh, which forced Sonnet onto fabricated
-    // placeholder IDs that then failed PUT validation with
-    // `Malformed roadmap id marker`. Lock this down so the regression
-    // doesn't recur.
+    // fail-closed default, producing 401s during roadmap_refresh that
+    // force Sonnet onto fabricated placeholder IDs that then fail PUT
+    // validation with `Malformed roadmap id marker`. Lock this down so
+    // the regression doesn't recur.
     expect(classifyRisk("POST", "/api/context/roadmap/id")).toBe(
       RiskTier.Autonomous,
     );
@@ -165,7 +163,8 @@ describe("classifyRisk — fail-closed default for unknown /api/* routes", () =>
   it("unknown /api/* path falls to Approve (fail-closed)", () => {
     // Newly-added browser-facing routes that the developer forgot to add to
     // API_RISK MUST default to Approve — otherwise an unauthenticated route
-    // becomes silently agent-callable. See risk-classifier.ts ~line 709.
+    // becomes silently agent-callable. See the fail-closed branch in
+    // risk-classifier.ts.
     expect(
       classifyRisk("GET", "/api/this-route-does-not-exist-yet"),
     ).toBe(RiskTier.Approve);
@@ -238,8 +237,8 @@ describe("auditRiskClassifications — startup audit", () => {
 
   it("treats /api as a classifiable surface (not just /api/...)", () => {
     // Edge: bare "/api" without trailing slash is included by the audit
-    // (line 753: `route.path !== "/api"`). Keep this behaviour locked in
-    // so the developer who registers `app.get("/api", ...)` sees an audit
+    // (`route.path !== "/api"`). Keep this behaviour locked in so the
+    // developer who registers `app.get("/api", ...)` sees an audit
     // warning instead of silent default-Autonomous.
     const result = auditRiskClassifications([{ method: "GET", path: "/api" }]);
     expect(result).toEqual([{ method: "GET", path: "/api" }]);
@@ -268,10 +267,10 @@ describe("auditRiskClassifications — boot-time enforcement", () => {
   it("normalizes Hono :param segments so {*}-pattern entries match", () => {
     // `POST /api/integrations/:key/exec` should match the `{*}` pattern
     // entry in API_RISK. Without normalization the audit would falsely
-    // flag every parameterized route. (The 2026-05-01 /exec migration
-    // commented out the /invoke entry; using /exec keeps this test
-    // exercising the same {*}-pattern-normalization invariant against
-    // the agent-active route set.)
+    // flag every parameterized route. (The /exec route replaced the
+    // retired /invoke entry; using /exec keeps this test exercising
+    // the same {*}-pattern-normalization invariant against the
+    // agent-active route set.)
     const routes = [
       { method: "POST", path: "/api/integrations/:key/exec" },
       { method: "POST", path: "/api/integrations/:key/probe" },
@@ -307,12 +306,12 @@ describe("auditRiskClassifications — boot-time enforcement", () => {
     ]);
   });
 
-  // The 33-route baseline that the audit surfaced on its first run
-  // (2026-04-28). Each entry should now match an explicit Approve via
-  // the "Admin / dashboard surfaces" block in API_RISK. If a future
-  // refactor accidentally drops one of those entries, this test
-  // regresses with a precise route-by-route diff.
-  it("classifies the 2026-04-28 admin/dashboard baseline (no regressions)", () => {
+  // The admin/dashboard route baseline that the audit surfaced. Each
+  // entry should match an explicit Approve via the "Admin / dashboard
+  // surfaces" block in API_RISK. If a future refactor accidentally
+  // drops one of those entries, this test regresses with a precise
+  // route-by-route diff.
+  it("classifies the admin/dashboard baseline (no regressions)", () => {
     const baseline = [
       { method: "POST", path: "/api/context/restore-snapshot/:id" },
       { method: "DELETE", path: "/api/context/*" },
@@ -346,11 +345,11 @@ describe("auditRiskClassifications — boot-time enforcement", () => {
       { method: "GET", path: "/api/process-config" },
       { method: "PUT", path: "/api/process-config/:processKey" },
       { method: "PUT", path: "/api/backends/advisor" },
-      // Phase 8.1 baseline addition (2026-05-04). Three dashboard-only
-      // surfaces that were silently relying on the default-Approve fallback
-      // — flagged by the boot audit warning. Adding them here pins the
-      // fingerprint to "0 unclassified" so a future deletion shows up as a
-      // precise route-by-route regression instead of one new line of noise.
+      // Dashboard-only surfaces that were silently relying on the
+      // default-Approve fallback — flagged by the boot audit warning.
+      // Pinning them here keeps the fingerprint at "0 unclassified" so
+      // a future deletion shows up as a precise route-by-route
+      // regression instead of one new line of noise.
       { method: "GET", path: "/api/activity-sources" },
       { method: "GET", path: "/api/voice/status" },
       { method: "POST", path: "/api/voice/install" },
@@ -456,8 +455,8 @@ describe("findExplicitRiskClassification — resolution-order invariants", () =>
     // POST /api/git/templates/retemplate/file is explicitly Autonomous in
     // API_RISK; the path-prefix `/api/git/templates` is Approve. The exact
     // POST entry has to win or the agent's per-file retemplate progress
-    // posts will 401 (the regression locked by `risk-classifier.test.ts`
-    // around line 416 covers behaviour; this one pins the *mechanism*).
+    // posts will 401 (the behaviour test elsewhere in this file covers
+    // the outcome; this one pins the *mechanism*).
     expect(
       findExplicitRiskClassification("POST", "/api/git/templates/retemplate/file"),
     ).toBe(RiskTier.Autonomous);

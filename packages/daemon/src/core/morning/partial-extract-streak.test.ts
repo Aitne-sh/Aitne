@@ -203,7 +203,10 @@ describe("maybeEmitPartialExtractStreakDm", () => {
     });
     expect(result.streakDetected).toBe(true);
     expect(result.dmSent).toBe(false);
-    expect(result.suppressedReason).toBe("no_notifier");
+    // Distinguished from `no_notifier`: notifier was supplied but its
+    // notify() threw. The dedup timestamp must remain unwritten so
+    // tomorrow's check retries the DM.
+    expect(result.suppressedReason).toBe("notify_failed");
     expect(readRuntimeState<string>(db, PARTIAL_EXTRACT_DEDUP_KEY)).toBeNull();
   });
 

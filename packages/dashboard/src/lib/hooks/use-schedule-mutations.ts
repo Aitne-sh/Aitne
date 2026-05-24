@@ -52,9 +52,8 @@ export interface ScheduleUpdateInput {
 
 /**
  * Shape of the daemon's `POST /api/schedule` success response. The
- * `warnings[]` array is always present (Phase D — agent-schedule.ts
- * line ~228 returns an explicit `warnings: resolved.warnings`, never
- * undefined) so the dashboard can surface §5.0.5 advisories
+ * route always returns an explicit `warnings: resolved.warnings`, never
+ * undefined, so the dashboard can surface §5.0.5 advisories
  * (`schedule.model_deprecated`) without branching on shape.
  */
 export interface ScheduleCreateResponse {

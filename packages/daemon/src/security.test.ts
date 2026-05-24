@@ -1,5 +1,5 @@
 /**
- * Phase 4-01: Security Audit Tests
+ * Security Audit Tests
  *
  * Comprehensive tests for the security model:
  * - Prompt injection resistance (template tagging)

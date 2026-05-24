@@ -49,8 +49,8 @@ export const FALLBACK_PLACEHOLDERS: Readonly<Record<string, string>> = Object.fr
   // sentinel — a valid YMD so `roadmap-validate.ts:LAST_SYNCED_RE` accepts
   // mid-seed PATCHes, but obviously-stale so it is never mistaken for a real
   // sync timestamp. `(Not yet configured)` bullets under Annual Goals and
-  // Quarterly Focus cause `config.ts:isRoadmapStale` to flag the file and
-  // trigger the `roadmap_refresh` catch-up (see `index.ts:1857` comment).
+  // Quarterly Focus cause `isRoadmapStale` (in `config.ts`) to flag the file
+  // and trigger the `roadmap_refresh` catch-up.
   [CONTEXT_RELATIVE_PATHS.roadmap]: [
     "# Roadmap",
     "> Last synced: 1970-01-01",

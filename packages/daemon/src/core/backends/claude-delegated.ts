@@ -198,11 +198,11 @@ export async function runDelegatedTool(
         // Canva, Hugging Face, …) the CLI ships only a working set of
         // tool schemas and defers the rest. To call a deferred tool, the
         // model must first call ToolSearch to load its schema. Without
-        // ToolSearch allowed, the proxy's first turn was wasted on a
-        // denied ToolSearch call (audit log 2026-04-29: 1 Notion failure
-        // logged as `wrong_tool=ToolSearch`, 5 logged as
-        // `subprocess_crashed: Reached maximum number of turns (2)` —
-        // the model retried other approaches and exhausted the budget).
+        // ToolSearch allowed, the proxy's first turn is wasted on a
+        // denied ToolSearch call — the model then retries other
+        // approaches and exhausts the budget (logged as
+        // `wrong_tool=ToolSearch` or `subprocess_crashed: Reached
+        // maximum number of turns`).
         //
         // Allowing ToolSearch is safe: allowedTools enforcement still
         // gates which tools can be CALLED, and ToolSearch only loads
@@ -328,9 +328,9 @@ export async function runDelegatedTool(
           // next `readMessages` iteration — wrapping it as
           // `Error("Claude Code returned an error result: <text>")`. That
           // throw would land in the outer catch and misclassify as
-          // `subprocess_crashed`, discarding the captured cost. Audit log
-          // (2026-04-29) showed 5 such failures with num_turns=0,
-          // tokens=0, masking that this was actually `error_max_turns`.
+          // `subprocess_crashed`, discarding the captured cost. Without
+          // this break, `error_max_turns` failures land in the audit log
+          // with num_turns=0 / tokens=0, masking what really happened.
           // Breaking here lets the post-loop classifier run with the
           // captured terminalSubtype, terminalErrors, wrongToolName, and
           // cost intact.

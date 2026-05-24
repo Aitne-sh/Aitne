@@ -137,8 +137,8 @@ describe("roadmap id helpers", () => {
   });
 
   describe("looksFabricatedRoadmapId", () => {
-    // Verbatim Sonnet fabrications observed in roadmap.md after the
-    // 2026-04-28 incident (POST /context/roadmap/id 401 spiral).
+    // Verbatim Sonnet fabrications observed in roadmap.md when the
+    // /context/roadmap/id mint route is unreachable (401 spiral).
     it.each([
       ["1a2b3c", true],
       ["4d5e6f", true],

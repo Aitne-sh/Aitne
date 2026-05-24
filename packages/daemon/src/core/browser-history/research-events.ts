@@ -73,10 +73,10 @@ export function createResearchCommandEvent(
   // `RoutineEvent.routine` is the documented contract on every
   // `routine.*` event (see RoutineEvent in @aitne/shared types.ts). The
   // dispatcher's `isRoutineEvent` branch reads it; omitting the field
-  // and relying on the fall-through `executeDefault` worked by accident
-  // and made the `event as RoutineEvent` cast at dispatcher.ts:1274
-  // lie about the runtime shape. Strip the `routine.` prefix to match
-  // the canonical morning/evening/weekly entries.
+  // and relying on the fall-through `executeDefault` would make the
+  // `event as RoutineEvent` cast in the dispatcher's executeDefault
+  // branch lie about the runtime shape. Strip the `routine.` prefix to
+  // match the canonical morning/evening/weekly entries.
   const routineKey = input.processKey.slice("routine.".length);
   const base = createEvent({
     type: input.processKey,

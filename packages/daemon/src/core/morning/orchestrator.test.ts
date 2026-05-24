@@ -39,6 +39,10 @@ interface CapturedExecute {
   event: Event;
   processKey: ProcessKey | undefined;
   requestedTier?: ProcessModelTier;
+  /** daily-journal-daemon-write.md §3 corollary — Stage B must pass
+   *  `allowedToolsOverride: []`. Captured so the tools-clamp regression
+   *  test can pin both presence (Stage B) and absence (Stage A). */
+  allowedToolsOverride?: readonly string[];
 }
 
 function makeAgentResult(overrides: Partial<AgentResult> = {}): AgentResult {
@@ -130,11 +134,15 @@ describe("MorningRoutinePipelineOrchestrator", () => {
         event: Event;
         processKey?: ProcessKey;
         requestedTier?: ProcessModelTier;
+        allowedToolsOverride?: readonly string[];
       }) => {
         calls.push({
           event: params.event,
           processKey: params.processKey,
           ...(params.requestedTier ? { requestedTier: params.requestedTier } : {}),
+          ...(params.allowedToolsOverride !== undefined
+            ? { allowedToolsOverride: params.allowedToolsOverride }
+            : {}),
         });
         if (params.processKey === STAGE_A_PROCESS_KEY) {
           if (args.stageAThrows) throw args.stageAThrows;
@@ -361,8 +369,8 @@ describe("MorningRoutinePipelineOrchestrator", () => {
     });
 
     it("renders yesterday's calendar events in the operator's timezone in the ## Schedule scratch section", async () => {
-      // Regression guard for the pre-2026-05-16 bug: parseCalendarPayload
-      // used getUTCHours()/getUTCMinutes() to format the journal skeleton's
+      // Regression guard: parseCalendarPayload previously used
+      // getUTCHours()/getUTCMinutes() to format the journal skeleton's
       // `## Schedule` bullet times. For an operator on a non-UTC timezone
       // a 17:00 UTC standup would render as "17:00 — Standup" in the
       // scratch input Stage B then synthesises the daily journal from —
@@ -489,6 +497,26 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       expect(mocks.resultProcessor.processResult).toHaveBeenCalledTimes(1);
       const event = mocks.resultProcessor.processResult.mock.calls[0]![1] as Event;
       expect(event.type).toBe("routine.morning_routine_today");
+    });
+
+    it("clamps Stage B to allowedToolsOverride: [] — Stage A keeps the default surface", async () => {
+      // daily-journal-daemon-write.md §3 corollary — Stage B's session
+      // must have zero tool requirement. The empty skills-manifest entry
+      // only suppresses `.claude/skills/*` registration; the SDK still
+      // ships `CLAUDE_DEFAULT_ALLOWED_TOOLS` (Read / Write / Edit /
+      // Bash(curl *)) unless an explicit per-execute clamp is passed.
+      // Without this clamp Haiku could `Write` directly to
+      // `daily/<date>.md`, bypassing the daemon-side composer chokepoint
+      // and racing it for the same byte stream. Stage A intentionally
+      // keeps the default surface — its task-flow needs the full
+      // curl-PUT + Skill repertoire to author today.md / roadmap.md /
+      // schedule rows.
+      const orch = makeOrchestrator();
+      await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
+      const stageA = mocks.calls.find((c) => c.processKey === STAGE_A_PROCESS_KEY)!;
+      const stageB = mocks.calls.find((c) => c.processKey === STAGE_B_PROCESS_KEY)!;
+      expect(stageB.allowedToolsOverride).toEqual([]);
+      expect(stageA.allowedToolsOverride).toBeUndefined();
     });
   });
 
@@ -939,6 +967,149 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       if (!out!.ok) {
         expect(out!.reason).toBe("stage_a_row_missing");
       }
+    });
+  });
+
+  describe("daily-journal-daemon-write composer wiring", () => {
+    it("passes the SAME skeleton + counts that fed Stage B's prompt — no drift from mid-run DB writes", async () => {
+      // Drift-fix regression guard for daily-journal-daemon-write.md §4.11.
+      //
+      // Before the fix, the composer re-derived its skeleton/facts via a
+      // second `gatherJournalSkeletonFacts` query AFTER
+      // `Promise.allSettled` settled. Any DB write that landed during
+      // Stage A's wall-clock window (a new DM observation, a fresh
+      // calendar event from the pre-pass landing late, etc.) would shift
+      // the counts under the composer's feet — the LLM authored against
+      // Skeleton-V1 while the daemon wrote Skeleton-V2 frontmatter.
+      //
+      // The fix caches the skeleton+counts on `stageBInputs` once at the
+      // top of `run()` and threads the same struct into both the prompt
+      // block AND the composer call. This test pins that invariant by:
+      //   1. Seeding the DB with zero messages,
+      //   2. Mutating the DB DURING Stage A's mocked execute (insert a
+      //      new agent-day-window message → `messagesHandled` SHOULD be
+      //      1 if the composer re-queried),
+      //   3. Asserting the composer was invoked with `messagesHandled:
+      //      0` (the snapshot captured at top-of-run, before the
+      //      mutation).
+      const composerCalls: Array<{
+        messagesHandled: number;
+        calendarEvents: number;
+        skeletonDateStr: string;
+      }> = [];
+      const dailyJournalComposer = {
+        compose: vi.fn(async (args: {
+          messagesHandled: number;
+          calendarEvents: number;
+          skeleton: { dateStr: string };
+        }) => {
+          composerCalls.push({
+            messagesHandled: args.messagesHandled,
+            calendarEvents: args.calendarEvents,
+            skeletonDateStr: args.skeleton.dateStr,
+          });
+          return { ok: "complete" as const, bytesWritten: 100, wroteMode: "put" as const };
+        }),
+      };
+      // Replace the default Stage A mock so it MUTATES the DB during
+      // its (mocked) execute. The mutation must land an `agent_actions`
+      // row inside yesterday's agent-day window (the same window
+      // `gatherJournalSkeletonFacts` reads). The orchestrator's
+      // `gatherJournalSkeletonFacts` counts user-role messages from the
+      // `messages` table; insert one so the would-be re-derived count is
+      // 1 instead of 0.
+      const mocksWithMutator = buildMocks({});
+      mocksWithMutator.agentRouter.execute = vi.fn(async (params: {
+        prompt: string;
+        context: string;
+        event: Event;
+        processKey?: ProcessKey;
+        requestedTier?: ProcessModelTier;
+        allowedToolsOverride?: readonly string[];
+      }) => {
+        mocksWithMutator.calls.push({
+          event: params.event,
+          processKey: params.processKey,
+          ...(params.requestedTier ? { requestedTier: params.requestedTier } : {}),
+          ...(params.allowedToolsOverride !== undefined
+            ? { allowedToolsOverride: params.allowedToolsOverride }
+            : {}),
+        });
+        if (params.processKey === STAGE_A_PROCESS_KEY) {
+          // Land a yesterday-window message during Stage A. If the
+          // composer re-queries (drift bug), it picks this up; if it
+          // reuses the cached snapshot (fix), it does not. The
+          // `messages` table the skeleton builder reads against requires
+          // `role` + `content` + `platform` (NOT NULL); `timestamp` is
+          // the column the window filter checks.
+          const yesterdayIso = new Date(
+            Date.now() - 24 * 60 * 60 * 1000,
+          ).toISOString();
+          db.prepare(
+            `INSERT INTO messages
+               (role, content, platform, timestamp)
+             VALUES ('user', 'mid-stage-a write', 'test', ?)`,
+          ).run(yesterdayIso);
+          return makeAgentResult({ output: "stage-a" });
+        }
+        return makeAgentResult({ output: "stage-b" });
+      });
+      const orch = new MorningRoutinePipelineOrchestrator({
+        db,
+        config,
+        contextBuilder: mocksWithMutator.contextBuilder as never,
+        agentRouter: mocksWithMutator.agentRouter as never,
+        prompt: mocksWithMutator.prompt as never,
+        errorRouter: mocksWithMutator.errorRouter as never,
+        resultProcessor: mocksWithMutator.resultProcessor as never,
+        audit: mocksWithMutator.audit as never,
+        dailyJournalComposer: dailyJournalComposer as never,
+      });
+      await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
+      expect(composerCalls).toHaveLength(1);
+      // The cached snapshot was taken BEFORE the mid-Stage-A insert,
+      // so messagesHandled must be 0. A failing assertion (= 1) means
+      // the composer re-queried the DB and the drift fix regressed.
+      expect(composerCalls[0].messagesHandled).toBe(0);
+    });
+
+    it("skips the composer when Stage B is skipped (first-run / no yesterday.md)", async () => {
+      // First-run gate: when yesterday.md is absent, `buildStageBInputs`
+      // returns null and the composer is never invoked. The appender
+      // falls back to its file-presence-based "skipped (no prior-day
+      // data)" render, which is correct.
+      rmSync(join(tmp, "context", "yesterday.md"));
+      const dailyJournalComposer = { compose: vi.fn() };
+      const orch = new MorningRoutinePipelineOrchestrator({
+        db,
+        config,
+        contextBuilder: mocks.contextBuilder as never,
+        agentRouter: mocks.agentRouter as never,
+        prompt: mocks.prompt as never,
+        errorRouter: mocks.errorRouter as never,
+        resultProcessor: mocks.resultProcessor as never,
+        audit: mocks.audit as never,
+        dailyJournalComposer: dailyJournalComposer as never,
+      });
+      await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
+      expect(dailyJournalComposer.compose).not.toHaveBeenCalled();
+    });
+
+    it("skips the composer on retry runs — Stage B is not re-fired so there is nothing to compose", async () => {
+      const dailyJournalComposer = { compose: vi.fn() };
+      const orch = new MorningRoutinePipelineOrchestrator({
+        db,
+        config,
+        contextBuilder: mocks.contextBuilder as never,
+        agentRouter: mocks.agentRouter as never,
+        prompt: mocks.prompt as never,
+        errorRouter: mocks.errorRouter as never,
+        resultProcessor: mocks.resultProcessor as never,
+        audit: mocks.audit as never,
+        dailyJournalComposer: dailyJournalComposer as never,
+      });
+      await orch.run({ parentEvent: makeParentEvent(), isRetry: true });
+      expect(dailyJournalComposer.compose).not.toHaveBeenCalled();
     });
   });
 

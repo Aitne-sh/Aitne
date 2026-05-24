@@ -1,8 +1,8 @@
 /**
- * Activity → docs concept link map (DOCS_QA_DESIGN.md §8.4 E9, P5 polish).
+ * Activity → docs concept link map (DOCS_QA_DESIGN.md §8.4).
  *
- * `agent_actions.action_type` is set to `event.type` (see
- * `daemon/src/safety/audit.ts:124`), NOT to the ProcessKey resolved later
+ * `agent_actions.action_type` is set to `event.type` (see `recordAgentAction`
+ * in `daemon/src/safety/audit.ts`), NOT to the ProcessKey resolved later
  * in routing. That means several keys that look like obvious entries here
  * are actually purely-routing concepts and never appear in the column:
  *
@@ -24,9 +24,9 @@
  * Iteration: exact-match check first, then prefix rules. The prefix rules
  * cover the dynamic families:
  *   - `routine.custom.<slug>` → custom routines doc
- *   - `setup.*`               → setup wizard walkthrough (defensive — see
- *     dispatcher.ts:2236; `setup.initial`/`setup.update` are prompt keys
- *     today, but the family is reserved as a future event-type namespace)
+ *   - `setup.*`               → setup wizard walkthrough (defensive —
+ *     `setup.initial`/`setup.update` are prompt keys today, but the family
+ *     is reserved as a future event-type namespace)
  *   - `calendar.*`            → calendar integration
  *   - `git.*`                 → git integration
  *
@@ -67,10 +67,9 @@ const EXACT: Record<string, string> = {
 
   // ── Reserved (defensive) ────────────────────────────────────────────
   // `routine.morning_routine_initial` was retired by
-  // `docs/design/appendices/morning-routine-optimization.md` Phase 7
-  // (2026-05-16). The mapping is kept as a defensive entry so any
-  // historical `agent_actions` rows that pre-date the retirement (or a
-  // future re-introduction) still resolve to the morning-routine doc.
+  // `docs/design/appendices/morning-routine-optimization.md`. The mapping
+  // is kept as a defensive entry so historical `agent_actions` rows still
+  // resolve to the morning-routine doc.
   "routine.morning_routine_initial": "features/routines/morning-routine",
   // Stage A (today) and Stage B (journal) both surface under the
   // morning-routine doc.

@@ -222,7 +222,7 @@ export interface HealthResponse {
   /**
    * Integration Delegation Framework — registry-keyed mode + delegated-feature
    * matrix (§4.11). Sibling to the legacy `integrations` field; both coexist
-   * during Phase 5 until the dashboard cards finish their cutover.
+   * until the dashboard cards finish their cutover.
    */
   integrationModes: IntegrationModesMap;
   agentJournal?: {
@@ -1345,7 +1345,7 @@ export interface BooksSummaryResponse {
   totalHighlights: number;
 }
 
-// ── Integration Delegation Framework (Phase 5) ──
+// ── Integration Delegation Framework ──
 
 /**
  * Sub-tier label from `/health.integrationModes.<key>.subTier`. `"draft-only"`
@@ -1682,7 +1682,7 @@ export interface Pagination {
   totalPages: number;
 }
 
-// ── Docs & QA (DOCS_QA_DESIGN.md §10.4 — read endpoints only for P2) ──
+// ── Docs & QA (DOCS_QA_DESIGN.md §10.4 — read endpoints only) ──
 
 export interface DocsTreeItem {
   slug: string;

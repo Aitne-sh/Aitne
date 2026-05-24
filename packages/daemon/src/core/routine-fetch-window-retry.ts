@@ -188,13 +188,12 @@ function isDeterministicError(err: Record<string, unknown>): boolean {
  * and retries (the agent fixes the arg name on retry via the
  * prior-attempt-hint).
  *
- * The motivating Unicode-whitespace failure (2026-05-18 gmail pre-pass)
- * lands as `status="partial"` with `posted === 0` and a
- * `{type:"fetch-failed", status:"permission-denied", message:"Bash tool
- * blocked..."}` — rule (4)'s partial-no-post branch sees the
- * deterministic error and short-circuits to `deterministic-failure`
- * instead of burning two more attempts on bytes the SDK will keep
- * rejecting.
+ * A Unicode-whitespace-in-mail-body failure lands as `status="partial"`
+ * with `posted === 0` and a `{type:"fetch-failed",
+ * status:"permission-denied", message:"Bash tool blocked..."}` —
+ * rule (4)'s partial-no-post branch sees the deterministic error and
+ * short-circuits to `deterministic-failure` instead of burning two more
+ * attempts on bytes the SDK will keep rejecting.
  */
 export const defaultRetryDecision: RetryDecisionFn = (
   report,

@@ -29,11 +29,10 @@ export function isRoadmapId(value: string): boolean {
  * fabrication rather than a daemon-minted random hex?
  *
  * `generateRoadmapId` produces uniformly random `[a-f0-9]{6}`. When
- * the agent is forced to invent IDs inline (e.g. because
- * `POST /api/context/roadmap/id` was misclassified as Approve and
- * 401'd — see incident 2026-04-28), Sonnet's typical fabrications
- * follow an obvious `[0-9][a-f][0-9][a-f][0-9][a-f]` digit-letter
- * alternation: `1a2b3c`, `4d5e6f`, `0d1e2f`, `7a8b9c`, etc.
+ * the agent has to invent IDs inline (e.g. the daemon-mint route is
+ * unreachable or misclassified), Sonnet's typical fabrications follow
+ * an obvious `[0-9][a-f][0-9][a-f][0-9][a-f]` digit-letter alternation:
+ * `1a2b3c`, `4d5e6f`, `0d1e2f`, `7a8b9c`, etc.
  *
  * The heuristic returns true only for that strict alternation. False
  * positive rate against uniformly random suffixes is ≈ 1.3% (per ID),

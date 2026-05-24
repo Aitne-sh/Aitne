@@ -241,7 +241,7 @@ describe("ImminentEventScheduler", () => {
     expect(event.data.endTime).toBeNull();
   });
 
-  // ── Native mode source (Finding 1, 2026-05-13) ────────────────────────────
+  // ── Native mode source ──
   //
   // `INTEGRATION_SNAPSHOT_PARTITIONS_BY_MODE[google_calendar].native = []` —
   // native-mode calendar writes land in the `observations` table via the
@@ -375,9 +375,9 @@ describe("ImminentEventScheduler", () => {
   });
 
   it("matches native observations whose start carries a timezone offset (RFC 3339 -hh:mm form)", async () => {
-    // Issue A1 (2026-05-13) — Google Calendar MCPs typically return
-    // `raw.start` as RFC 3339 with offset (`2026-04-29T08:00:00-04:00`
-    // = 12:00 UTC). A naive lexicographic compare against the UTC-Z
+    // Google Calendar MCPs typically return `raw.start` as RFC 3339
+    // with offset (`2026-04-29T08:00:00-04:00` = 12:00 UTC). A naive
+    // lexicographic compare against the UTC-Z
     // `now.toISOString()` parameter would silently drop this row from
     // the imminent window even though the same UTC instant on the
     // snapshot path would fire. The query wraps both sides in

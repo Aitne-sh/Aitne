@@ -227,10 +227,10 @@ export async function runLineCommand(
  *   escalate to SIGKILL — without this, a Gemini subprocess (or a
  *   grandchild) that catches SIGTERM and is mid-network-call leaves
  *   `runLineCommand` hanging on `child.once("close")` indefinitely.
- *   Observed 2026-04-29: an 18m delegated_proxy.invoke that should have
- *   timed out at 240s (cli-utils.ts:99) because the abort signal landed
- *   but the gemini grandchild ignored SIGTERM until the upstream HTTP
- *   request unblocked.
+ *   Observed: a long-running delegated_proxy.invoke that should have
+ *   timed out at its abort deadline kept going because the gemini
+ *   grandchild ignored SIGTERM until the upstream HTTP request
+ *   unblocked.
  * - **Windows**: no process groups; `taskkill /T /F /PID <pid>` walks
  *   the parent-pid chain to terminate descendants. `/F` is forced
  *   because Windows console apps don't honor a graceful close — Node
@@ -245,10 +245,9 @@ export async function runLineCommand(
  * stdio EOF arrives — so a surviving grandchild leaves runLineCommand's
  * Promise stuck indefinitely. Forcibly destroying our read ends EOFs the
  * readline interfaces locally so close fires as soon as the kernel reaps
- * the (already-SIGKILLed) parent. Observed 2026-05-01: 5×
- * delegated_proxy.invoke rows in the 10–18m range despite the 240s wall
- * clock — every one was Gemini's google-workspace extension grandchild
- * outliving the parent.
+ * the (already-SIGKILLed) parent. Observed: long-running
+ * delegated_proxy.invoke rows despite the wall-clock — Gemini's
+ * google-workspace extension grandchild outlives the parent.
  *
  * The fall-through to `child.kill("SIGTERM")` covers two narrow races:
  * (1) the process already exited between our pid check and the syscall,
@@ -338,7 +337,6 @@ function killTree(child: ReturnType<typeof spawn>): void {
  * but if the child catches and ignores SIGTERM, escalate to SIGKILL after
  * `gracePeriodMs` so the parent's `child.once("close")` listener actually
  * fires. Same hang motivation as {@link killTree}'s SIGKILL escalation
- * (see file-history note for the 2026-04-29 18m delegated_proxy.invoke).
  *
  * Note on `subprocess.killed` semantics: Node sets `killed=true` as soon
  * as `child.kill()` *sends* a signal — even if the child ignores it. So

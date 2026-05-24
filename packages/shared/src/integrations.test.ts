@@ -56,9 +56,9 @@ describe("Integration registry", () => {
     // integrations ship as "user-managed connector" (the daemon trusts the
     // user's MCP wiring on the chosen backend), so they declare delegated AND
     // native while leaving `backendConnectors` empty —
-    // INTEGRATION_NATIVE_MODE_DESIGN.md §5.3 (2026-05 amendment). Browser
-    // History is high-sensitivity local telemetry and intentionally supports
-    // only direct/disabled in P1.
+    // INTEGRATION_NATIVE_MODE_DESIGN.md §5.3. Browser History is
+    // high-sensitivity local telemetry and intentionally supports only
+    // direct/disabled.
     const userManagedKeys = new Set<string>(["outlook_mail", "outlook_calendar"]);
     const directOnlyKeys = new Set<string>(["browser_history"]);
     for (const key of INTEGRATION_KEYS) {

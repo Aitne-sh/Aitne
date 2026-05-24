@@ -67,7 +67,7 @@ describe("projectModelOptions", () => {
     const labels = groups.map((g) => g.label);
     expect(labels[0]).toBe("Tier aliases");
     // Aliases come BEFORE registered backends so the LLM's default picks
-    // map to tier presets (the canonical Phase D persistence path).
+    // map to tier presets (the canonical persistence path).
     expect(labels.indexOf("Claude Code")).toBeGreaterThan(0);
   });
 

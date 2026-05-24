@@ -23,9 +23,9 @@ import type { InvokeParams } from "./delegated-backend-invoker.js";
  * Row lifecycle reference — DELEGATED-TASK-MODE-DESIGN.md §11.1:
  *   - `recordAction` — terminal row for `DelegatedBackendInvoker.invoke()`
  *     (one shot). Today this is reached only via the
- *     `delegated-sync-worker` hourly drift-detection path — the
- *     `/api/integrations/:key/invoke` RPC route that previously also
- *     hit this writer was retired 2026-05-01.
+ *     `delegated-sync-worker` hourly drift-detection path; the legacy
+ *     `/api/integrations/:key/invoke` RPC route that also hit this
+ *     writer has been retired.
  *   - `recordCacheHitAuditRow` — terminal cache-hit row for task / run.
  *   - `recordTaskHeaderInProgress` → `completeTaskHeader` — header for
  *     /exec or /run; step rows FK back to its rowid.

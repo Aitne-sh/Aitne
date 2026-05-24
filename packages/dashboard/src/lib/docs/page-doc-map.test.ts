@@ -360,11 +360,10 @@ describe("PAGE_DOC_MAP entry-ordering invariants", () => {
  *
  * Hard failure mode: a map entry's docId IS in the corpus, but the doc's
  *   `ui_anchors` does not list the mapped path. That's a real drift —
- *   either the map or the frontmatter is wrong, and one will need fixing
- *   before P3 ships the slide-over.
+ *   either the map or the frontmatter is wrong, and one will need fixing.
  *
  * Soft warn modes:
- *   - Map entry's docId is not yet in the corpus (P4 hasn't authored it).
+ *   - Map entry's docId is not yet in the corpus (content not yet authored).
  *   - A corpus doc lists a `ui_anchors` path that no map entry references.
  *
  * Repo-relative seed path: 4 levels up from this file
@@ -468,7 +467,7 @@ describe("PAGE_DOC_MAP bidirectional consistency (seed corpus)", () => {
   });
 
   it("logs (does not fail on) docIds not yet in the corpus", () => {
-    // Soft check — drift expected during P4 content authoring. Use
+    // Soft check — drift expected while content is being authored. Use
     // expect().toBeDefined() so the assertion line is visible in coverage
     // and the warning surfaces when test output is read.
     const missing = PAGE_DOC_MAP.filter(

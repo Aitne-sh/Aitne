@@ -21,8 +21,7 @@
  *
  *  2. {@link probeCliNativeSkillSubcommand} — runs `<cli> --help` once
  *     and scans the output for a top-level `skill` / `skills`
- *     subcommand. This is the ground-truth signal. Verified at
- *     2026-05-15:
+ *     subcommand. This is the ground-truth signal. Verified:
  *       - `gemini --help` already lists `gemini skills <command>`
  *         (aliased `skill`). When this probe is wired, Gemini will be
  *         the first backend to trip the alarm.
@@ -105,9 +104,8 @@ const HELP_PROBE_TIMEOUT_MS = 5_000;
 /**
  * Top-level command-line detector. Two anchors:
  *   - `<cli> skill[s]` literal — every CLI we care about renders its
- *     usage lines that way (e.g. `gemini skills <command>` — verified
- *     2026-05-15, codex's hypothetical future form would be
- *     `codex skill <command>`).
+ *     usage lines that way (e.g. `gemini skills <command>`; codex's
+ *     hypothetical future form would be `codex skill <command>`).
  *   - Indented command-list entry `<indent>skill[s]<space>` — the
  *     "Commands:" block shape both yargs (Gemini) and clap (Codex)
  *     render.

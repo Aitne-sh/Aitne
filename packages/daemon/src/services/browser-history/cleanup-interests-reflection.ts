@@ -101,8 +101,8 @@ export function cleanupInterestsReflection(
   const trigger = options.trigger ?? "dashboard";
   const writeTracker = options.writeTracker;
 
-  // rev 4 — same courtesy mutex as the refresh helper. Contention is
-  // a surface-level error the caller decides how to handle (HTTP 409
+  // Same courtesy mutex as the refresh helper. Contention is a
+  // surface-level error the caller decides how to handle (HTTP 409
   // for the dashboard route). Held until the helper returns (try/
   // finally below) so a concurrent refresh cannot interleave block-
   // strip and block-write on the same files, and so a future
@@ -310,9 +310,9 @@ function emitAuditRow(
         research_themes_deleted: result.researchThemesDeleted,
       }),
       "manual",
-      // rev 4 — explicit `metadata: '{}'`. Same rationale as the
-      // refresh helper: daemon-write rows leave the agent-self-report
-      // side-channel empty per the `agent_actions` schema comment.
+      // Explicit `metadata: '{}'`. Same rationale as the refresh helper:
+      // daemon-write rows leave the agent-self-report side-channel
+      // empty per the `agent_actions` schema comment.
       "{}",
     );
   } catch (err) {

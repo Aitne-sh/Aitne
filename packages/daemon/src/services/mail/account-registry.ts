@@ -210,7 +210,7 @@ interface SqliteErrorLike {
   code?: string;
 }
 
-/* c8 ignore next 5 — only reachable from TOCTOU catch block below; early duplicate check (line ~292) prevents this in single-threaded tests */
+/* c8 ignore next 5 — only reachable from TOCTOU catch block below; the early `isDuplicateInsertionError` short-circuit prevents this in single-threaded tests */
 function isUniqueConstraintError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = (err as SqliteErrorLike).code;

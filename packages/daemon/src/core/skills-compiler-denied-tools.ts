@@ -206,8 +206,8 @@ function appendCliDenyBlock(
  *
  * Hard enforcement of the same deny list for cross-backend delegated
  * calls lives at the `POST /api/integrations/:key/exec` task-mode
- * chokepoint (DELEGATED-MODE-V2-DESIGN.md §4.3.2; the legacy `/invoke`
- * RPC was retired 2026-05-01). For same-backend native MCP it is
+ * chokepoint (DELEGATED-MODE-V2-DESIGN.md §4.3.2). For same-backend
+ * native MCP it is
  * enforced via SDK `disallowedTools` (Claude) / admin policy (Gemini);
  * see `collectSessionDeniedTools` (§4.3.3).
  */

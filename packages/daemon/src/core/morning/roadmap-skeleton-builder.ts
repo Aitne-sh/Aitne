@@ -5,7 +5,7 @@
  * branch.
  *
  * Why this exists — `docs/design/appendices/morning-routine-optimization.md`
- * Phase 7 retires `routine.morning_routine_initial`'s high-tier session.
+ * retires `routine.morning_routine_initial`'s high-tier session.
  * On the first run after setup, the wizard-installed `roadmap.md`
  * carries only the `_(Not yet configured)_` placeholder rows. The
  * legacy initial routine spent a high-tier (Opus) cold-start session

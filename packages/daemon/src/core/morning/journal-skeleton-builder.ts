@@ -43,10 +43,9 @@
  *   - `buildJournalSkeleton(inputs, facts)` — pure markdown composer.
  *
  * The split keeps the I/O-bound queries testable independently and
- * lets the pure builder be exercised with synthesized fixtures.
- *
- * Phase 2 ships this module unwired; the orchestrator wires it after
- * the pre-pass (④) completes and before Stage B fires.
+ * lets the pure builder be exercised with synthesized fixtures. The
+ * orchestrator runs it after the pre-pass (④) completes and before
+ * Stage B fires.
  */
 
 import type Database from "better-sqlite3";
@@ -174,9 +173,9 @@ export function gatherJournalSkeletonFacts(
     count: number;
   }>;
 
-  // `messages_handled` semantic (rev2 — 2026-05-15): count incoming
-  // user messages only. See JournalSkeletonFacts.messagesHandled JSDoc
-  // for why this differs from the rev1 user+assistant total.
+  // `messages_handled` semantic: count incoming user messages only.
+  // See JournalSkeletonFacts.messagesHandled JSDoc for why this differs
+  // from a user+assistant total.
   const messagesRow = db
     .prepare(
       `SELECT COUNT(*) AS n
@@ -229,10 +228,10 @@ export function buildJournalSkeleton(
   lines.push("agent_generated: true");
   lines.push(`calendar_events: ${calendarCount}`);
   lines.push(`messages_handled: ${messagesHandled}`);
-  // `updated` was originally specified as Stage-B-owned in the design,
-  // but the generic context-frontmatter validator requires it on every
-  // `daily/*.md` PUT — leaving it as an empty placeholder produces a
-  // hard 422 every morning. Daemon-emitting today's date is semantically
+  // `updated` cannot be Stage-B-owned: the generic context-frontmatter
+  // validator requires it on every `daily/*.md` PUT — leaving it as an
+  // empty placeholder produces a hard 422 every morning. Daemon-emitting
+  // today's date is semantically
   // equivalent (the journal row WAS last touched by this morning's run)
   // and removes the failure mode entirely. The skeleton's "Stage B
   // preserves byte-for-byte" contract covers it the same way it covers

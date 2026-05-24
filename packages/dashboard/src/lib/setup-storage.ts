@@ -48,10 +48,10 @@ export interface PersistedWizardState {
   notionModeSelection?: string;
   /**
    * SETUP-FLOW-REDESIGN-PLAN §5.8 — the legacy `phase` / `selections`
-   * fields are gone (Phase 1 tool selections were deleted). Kept as
-   * loose-typed leftovers in this interface so a stale sessionStorage
-   * entry from before the redesign deserializes cleanly via the
-   * `readWizardState` JSON.parse path; new writers never set them.
+   * fields are gone. Kept as loose-typed leftovers so a stale
+   * sessionStorage entry from before the redesign deserializes cleanly
+   * via the `readWizardState` JSON.parse path; new writers never set
+   * them.
    */
   phase?: "selections" | "conversation";
   selections?: {

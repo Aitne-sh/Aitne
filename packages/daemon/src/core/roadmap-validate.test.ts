@@ -200,10 +200,10 @@ describe("validateRoadmap", () => {
     expect(result.error?.message).toContain("Malformed Preparation Timeline row");
   });
 
-  // 2026-05 cost-spike fix: the bare "Malformed Preparation Timeline
-  // row" message drove a roadmap_refresh session into 8 PUT retries
-  // because the agent couldn't tell which part of the row was wrong.
-  // The enriched message must carry both the expected shape and the
+  // The bare "Malformed Preparation Timeline row" message gives the
+  // agent zero signal about which part of the row was wrong, so a
+  // roadmap_refresh session retries the PUT until it times out. The
+  // enriched message must carry both the expected shape and the
   // verbatim received line so the agent self-corrects on the next turn.
   it("malformed Preparation Timeline error carries expected shape + received line", () => {
     const body = canonicalRoadmap.replace("[notify]", "[foo]");

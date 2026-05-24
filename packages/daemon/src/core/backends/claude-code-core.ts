@@ -595,8 +595,19 @@ export class ClaudeCodeCore implements IAgentCore {
       // of the operator's per-backend Execution Mode setting. We swap
       // back to strict `dontAsk` + the explicit allowedTools list. The
       // ALWAYS_DISALLOWED_TOOLS layer still applies.
-      const optimizerClampActive =
-        Array.isArray(params.allowedToolsOverride) && params.allowedToolsOverride.length > 0;
+      //
+      // An EMPTY array (`[]`) is a deliberate "no tools" clamp — used by
+      // `routine.hourly_check.triage` (JSON-only triage spawn) and Stage B
+      // of the morning-routine pipeline (daily-journal-daemon-write.md §3
+      // corollary). A pre-2026-05-24 version of this gate required
+      // `length > 0`, which silently fell through to the default `dontAsk`
+      // branch — leaving those callers with the full
+      // `CLAUDE_DEFAULT_ALLOWED_TOOLS` set (Read / Write / Edit /
+      // Bash(curl *)) despite their explicit `[]` request. The fix:
+      // any caller-supplied array (including `[]`) activates the clamp.
+      // Callers who want the default surface MUST pass `undefined` or
+      // omit the field; passing `[]` now means "no tools, strictly."
+      const optimizerClampActive = Array.isArray(params.allowedToolsOverride);
       const stream = query({
         prompt: fullPrompt,
         options: {
@@ -1521,7 +1532,7 @@ export class ClaudeCodeCore implements IAgentCore {
    * `delegatedTools` is UNION'd onto the returned list — even when
    * `allowedToolsOverride` is set. This is a deliberate deviation from the
    * override's otherwise-absolute "replace everything" contract (see
-   * `CRITICAL_OVERRIDE_TOOLS` at line 293, which warns but does not union).
+   * `CRITICAL_OVERRIDE_TOOLS`, which warns but does not union).
    * Rationale: delegated mode is a runtime-configurable axis orthogonal to
    * the dashboard's tool-customization override. If a user set the override
    * before flipping an integration to delegated, silently dropping the

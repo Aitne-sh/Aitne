@@ -131,10 +131,11 @@ export const HOSTNAME_DENYLIST: ReadonlyArray<RegExp> = Object.freeze([
   // browsers route to 127.0.0.1 per RFC6761). Belt-and-braces with the
   // CIDR layer below: `shouldDenyEgress` only walks the CIDR check when
   // (a) the hostname is an IP literal or (b) a DNS resolver was
-  // injected AND the lookup succeeds. The resolver path fails-open on
-  // any DNS error (line ~370 below) — without this hostname entry, a
-  // request to `localhost` with a broken/stubbed resolver would slip
-  // through. Adding the hostname here closes that hole structurally.
+  // injected AND the lookup succeeds. The resolver branch in
+  // `shouldDenyEgress` fails-open on DNS error — without this hostname
+  // entry, a request to `localhost` with a broken/stubbed resolver
+  // would slip through. Adding the hostname here closes that hole
+  // structurally.
   /^localhost$/i,
   /^(?:.*\.)?localhost$/i,
   // Microsoft / corporate Active Directory FQDN tail commonly carved

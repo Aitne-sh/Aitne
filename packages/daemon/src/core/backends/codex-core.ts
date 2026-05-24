@@ -101,10 +101,10 @@ const EMPTY_USAGE: BackendUsage = {
  * stream events) well before `executeTimeoutMinutes` (default 30 min)
  * fires; healthy turns rarely go 5 min silent end-to-end.
  *
- * Audit 2026-05-17: the delegated path already had this guard (see the
- * `runDelegatedTool` wiring lower in this file); the reactive path was
- * unprotected and a single hung subprocess could pin a session for the
- * full 30-min wall-clock, blocking morning-routine / hourly-check
+ * The delegated path already had this guard (see the `runDelegatedTool`
+ * wiring lower in this file); the reactive path needs it explicitly
+ * because a single hung subprocess can pin a session for the full
+ * executeTimeoutMinutes wall-clock, blocking morning-routine / hourly-check
  * dispatch downstream.
  */
 const REACTIVE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -651,10 +651,10 @@ export class CodexCore implements IAgentCore {
     // returned a single multi-block response in one chunk.
     let streamed = false;
 
-    // Reactive idle watchdog (audit 2026-05-17 C1). Declared outside the
-    // outer try so the outer finally below can always call stop() — even
-    // if a setup line between here and runLineCommand throws. Mirrors the
-    // delegated-path wiring in `runDelegatedTool` (~line 1350): each
+    // Reactive idle watchdog. Declared outside the outer try so the
+    // outer finally below can always call stop() — even if a setup line
+    // between here and runLineCommand throws. Mirrors the delegated-path
+    // wiring in `runDelegatedTool`: each
     // arrived stream event resets the timer, and when the gap exceeds
     // REACTIVE_IDLE_TIMEOUT_MS the aborter fires — runLineCommand reaps
     // the subprocess via its existing kill-tree path. Distinct from
@@ -1035,8 +1035,7 @@ export class CodexCore implements IAgentCore {
     // agent to reach the daemon API at http://localhost:${apiPort}/... under
     // the workspace-write sandbox. Without it, Seatbelt/sandbox-exec blocks
     // ALL network egress and `curl http://localhost:8321/api/health` fails
-    // with a connection-refused sandbox denial (verified 2026-04-11, Codex
-    // v0.118.0).
+    // with a connection-refused sandbox denial.
     //
     // HOWEVER: this flag is a binary on/off switch in Codex's sandbox model.
     // There is no host-scoped allowlist. Once enabled, the agent can reach
@@ -1106,9 +1105,8 @@ export class CodexCore implements IAgentCore {
     // (per-integration)` block in AGENTS.md (rendered by
     // `skills-compiler.buildSameBackendDenyBlock`). Cross-backend
     // delegation provides hard enforcement at the
-    // `/api/integrations/:key/exec` task-mode chokepoint (the legacy
-    // `/invoke` RPC was retired 2026-05-01), so users requiring strict
-    // deny should pick a non-Codex DM backend.
+    // `/api/integrations/:key/exec` task-mode chokepoint, so users
+    // requiring strict deny should pick a non-Codex DM backend.
     //
     const sandboxArgs = allowMode
       ? ["--dangerously-bypass-approvals-and-sandbox"]

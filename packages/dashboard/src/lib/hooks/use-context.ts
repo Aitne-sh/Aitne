@@ -117,7 +117,7 @@ export function useUpdateContextFile() {
 
 /**
  * Delete a context file. Currently the daemon only exposes DELETE for
- * `routines/custom/*` (B-007 §5.8 Q3) — other paths return 403.
+ * `routines/custom/*` — other paths return 403.
  */
 export function useDeleteContextFile() {
   const qc = useQueryClient();

@@ -460,10 +460,10 @@ export function composePrePassAllowedTools(
     sessionBackend === "claude" && integrationTools.length > 0;
   // In-process MCP tool `mcp__aitne-observations__submit_observations` is
   // the structural fix for the Unicode-whitespace-in-curl-body class of
-  // failures (2026-05-18 gmail incident: Amazon promo + NBSP/ZWS in the
-  // subject caused the SDK's `Ae6` bash preflight to mark the command
-  // `too-complex` and deny it under dontAsk, burning 3 attempts +
-  // surfacing budget-cap). Server is registered in-process by
+  // failures (promotional senders + NBSP/ZWS in mail subjects cause the
+  // SDK's `Ae6` bash preflight to mark the command `too-complex` and
+  // deny it under dontAsk, burning attempts and surfacing budget-cap).
+  // Server is registered in-process by
   // `ClaudeCodeCore.getObservationsMcpServer`; per-session exposure is
   // controlled here. Claude-only because the SDK MCP transport is
   // Claude-specific; codex/gemini pre-pass sessions retain the curl
@@ -1139,14 +1139,14 @@ export class RoutineFetchWindowRunner {
    * the parent event's `event.data.fetchReportBlock` so ContextBuilder
    * injects it into the parent prompt.
    *
-   * `routineKey` overrides the auto-derived window key. The variant
-   * collapse landed in
-   * `docs/design/appendices/morning-routine-optimization.md` Phase 4
-   * + Phase 7: morning_routine no longer toggles to a separate
-   * `routine.morning_routine_initial` (retired 2026-05-16) — both
-   * branches share the same window plan. The override seam is kept
-   * for callers that already know the canonical RoutineWindowKey and
-   * want to skip the event-shape derivation.
+   * `routineKey` overrides the auto-derived window key. After the
+   * variant collapse documented in
+   * `docs/design/appendices/morning-routine-optimization.md`,
+   * morning_routine no longer toggles to a separate
+   * `routine.morning_routine_initial` — both branches share the same
+   * window plan. The override seam is kept for callers that already
+   * know the canonical RoutineWindowKey and want to skip the event-
+   * shape derivation.
    */
   async run(
     parentEvent: Event,

@@ -62,7 +62,7 @@ export const PAGE_DOC_MAP: ReadonlyArray<PageDocMapEntry> = [
   { match: { path: "/settings/models" },                            docId: "concepts/backends-and-tiers" },
   { match: { path: "/settings/advanced" },                          docId: "concepts/safety-and-execution" },
   { match: { path: "/settings/wiki" },                              docId: "features/wiki/workspaces" },
-  // Settings → Integrations — B-4 sub-page literal first so it wins over the
+  // Managed-chromium sub-page literal first so it wins over the
   // browser-history-managed catch-all that shares its prefix.
   { match: { path: "/settings/integrations/browser-history-managed/b4" }, docId: "features/operations/managed-chromium" },
   { match: { path: "/settings/integrations/browser-history-managed" },    docId: "features/operations/managed-chromium" },
