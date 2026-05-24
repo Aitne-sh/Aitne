@@ -56,11 +56,17 @@ export const PAGE_DOC_MAP: ReadonlyArray<PageDocMapEntry> = [
   { match: { path: "/settings/connections" },                       docId: "features/messaging/overview" },
   { match: { path: "/settings/schedule" },                          docId: "features/operations/quiet-hours" },
   { match: { path: "/settings/routines" },                          docId: "concepts/routines" },
+  { match: { path: "/settings/self-learning" },                     docId: "concepts/skills" },
   { match: { path: "/settings/journal" },                           docId: "features/memory-files/agent-journal" },
   { match: { path: "/settings/commands" },                          docId: "features/messaging/overview" },
   { match: { path: "/settings/models" },                            docId: "concepts/backends-and-tiers" },
   { match: { path: "/settings/advanced" },                          docId: "concepts/safety-and-execution" },
   { match: { path: "/settings/wiki" },                              docId: "features/wiki/workspaces" },
+  // Settings → Integrations — B-4 sub-page literal first so it wins over the
+  // browser-history-managed catch-all that shares its prefix.
+  { match: { path: "/settings/integrations/browser-history-managed/b4" }, docId: "features/operations/managed-chromium" },
+  { match: { path: "/settings/integrations/browser-history-managed" },    docId: "features/operations/managed-chromium" },
+  { match: { path: "/settings/integrations/browser-history" },            docId: "features/integrations/browser-history" },
   { match: { path: "/settings" },                                   docId: "concepts/agent-day" },
 
   // Setup wizard

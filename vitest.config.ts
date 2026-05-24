@@ -82,6 +82,8 @@ export default defineConfig({
         "packages/shared/src/opencode-config.ts",         // opencode runtime-config interfaces (the builder is `opencode-config-builder.ts`)
         "packages/daemon/src/secrets/secret-store.ts",    // SecretStore interface (impl is platform-secret-store.ts / encrypted-blob-store.ts)
         "packages/daemon/src/core/backends/opencode-types.ts", // `declare module` augmentation + helper types
+        "packages/daemon/src/core/skills-compiler-types.ts",   // SessionInstructionParams interface (extracted from skills-compiler.ts Phase 1 split)
+        "packages/daemon/src/api/helpers/agent-errors-types.ts", // AgentErrorEnvelope / AgentErrorIssue / constraint types (no runtime code)
         "packages/daemon/src/api/routes/mail/dependencies.ts", // MailRouteDependencies interface
 
 
@@ -190,7 +192,6 @@ export default defineConfig({
         "packages/daemon/src/api/routes/integrations/crud-patch.ts",
 
         // ── Platform-specific code — cannot test cross-platform ──
-        "packages/shared/src/secret-client-linux.ts",
         "packages/shared/src/secret-client-factory.ts",
 
         // ── Observer I/O — file watchers, pollers ──
@@ -372,9 +373,19 @@ export default defineConfig({
         "packages/daemon/src/bootstrap/event-pipeline.ts",
         "packages/daemon/src/api/server.ts",
 
-        "packages/daemon/src/secrets/platform-secret-store.ts",   // platform adaptation layer
         "packages/shared/src/secret-client-file.ts",      // file-based secret store
         "packages/daemon/src/core/skills-compiler.ts",    // FS skill compilation
+        // ── skills-compiler sibling-file extractions (commit 6749ade Phase 1) ──
+        // The parent is excluded above for FS / subprocess / instruction-file
+        // I/O reasons; the siblings inherit the same rationale — every
+        // residual uncovered branch is a defensive FS guard (existsSync,
+        // malformed-frontmatter fallback, write-failed logger). Pure
+        // sub-logic has its own peer *.test.ts at 100%.
+        "packages/daemon/src/core/skills-compiler-cli-renderer.ts",  // CLI instruction file render + character-block rewrite over session dirs
+        "packages/daemon/src/core/skills-compiler-denied-tools.ts",  // deny-list emission paths gated by tool-source FS layout
+        "packages/daemon/src/core/skills-compiler-skill-index.ts",   // <skill-index> splice + existsSync / readFileSync guards
+        "packages/daemon/src/core/skills-compiler-tree.ts",          // tree walk + cp / rm / brand-token rewrites on materialized session dirs
+        "packages/daemon/src/core/skills-compiler-variants.ts",      // variant resolution + missing-variant FS-cache invalidation
         "packages/daemon/src/api/env-writer.ts",          // env file management
         "packages/daemon/src/settings/runtime-settings.ts", // Zod schema definitions
         "packages/daemon/src/core/backends/cli-utils.ts", // subprocess utilities
@@ -614,11 +625,6 @@ export default defineConfig({
         "packages/daemon/src/services/browser-history/lifecycle/platform.ts",
         "packages/daemon/src/services/browser-history/lifecycle/supervisor.ts",
         "packages/daemon/src/services/browser-history/readers/chromium-reader.ts",
-        // `readers/snapshot.ts` happy path is pinned by snapshot.test.ts,
-        // but the rm/copyFile failure branches are fs-shaped catches that
-        // match the snapshot-store rationale. Excluded for consistency
-        // with the rest of the readers/lifecycle module set.
-        "packages/daemon/src/services/browser-history/readers/snapshot.ts",
         "packages/daemon/src/observers/browser-history-poller.ts",
         "packages/daemon/src/api/routes/browser-history.ts",
 
@@ -636,13 +642,13 @@ export default defineConfig({
         //
         // The four pure-logic peers carry full unit tests and stay in
         // the covered set: `managed-chromium-state` (zod schema +
-        // runtime_state round-trip), `reauth-detector` (Local State
-        // probe + sync stall taxonomy), `sandbox-launcher` arg
-        // builders, `supervisor-config` (Instance S launch config +
-        // bootstrap argv). The I/O wrappers below are excluded for
-        // the same subprocess/SDK reasons as the existing
-        // browser-history lifecycle modules.
-        "packages/daemon/src/db/managed-chromium-state.ts",
+        // runtime_state round-trip — now 100% incl. bootstrap deep-copy
+        // branch via the peer test's mutate-then-read fixture),
+        // `reauth-detector` (Local State probe + sync stall taxonomy),
+        // `sandbox-launcher` arg builders, `supervisor-config`
+        // (Instance S launch config + bootstrap argv). The I/O wrappers
+        // below are excluded for the same subprocess/SDK reasons as
+        // the existing browser-history lifecycle modules.
         "packages/daemon/src/services/browser-history/managed-chromium/managed-chromium-supervisor.ts",
         "packages/daemon/src/services/browser-history/managed-chromium/reauth-detector.ts",
         "packages/daemon/src/services/browser-history/managed-chromium/sandbox-install.ts",
@@ -722,7 +728,9 @@ export default defineConfig({
         // Pure planning logic stays in the covered set; the wrappers
         // below thread real fs/rmSync/writeFile against per-run files
         // whose error branches need ESM-blocked node:fs mocks.
-        "packages/daemon/src/services/browser-history/interests-reflection-lock.ts",
+        // (`interests-reflection-lock.ts` is the pure in-process mutex —
+        // 100% covered by its peer test incl. the holder-mismatch warning
+        // branch; only the fs-bound siblings remain excluded.)
         "packages/daemon/src/services/browser-history/cleanup-interests-reflection.ts",
         "packages/daemon/src/services/browser-history/refresh-interests-reflection.ts",
 

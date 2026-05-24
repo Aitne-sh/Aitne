@@ -56,6 +56,150 @@ import {
 
 const logger = createLogger("context-builder");
 
+/**
+ * Per-event opt-out for the two large "always-injected" blocks
+ * (`<user>` → `user/profile.md`, `<management_rules>` → `rules/management.md`).
+ *
+ * Default for any event NOT listed below: both blocks are injected
+ * (wide-path behaviour). Opting out is explicit — every entry here is
+ * a deliberate decision that the task-flow does not consume the block,
+ * the agent profile does not depend on it, and the skill set is narrow
+ * enough that the bytes are pure dead weight.
+ *
+ * The opt-out is the same input-discipline pattern as the
+ * `routine.fetch_window` slim path (`buildFetchWindowContext` below) and
+ * the existing Stage B (`routine.morning_routine_journal`) carve-out for
+ * `<management_rules>` — fetch_window is the existence proof that
+ * cutting the always-injected set per session-shape is safe and lands
+ * the same saving on every backend.
+ *
+ * Adding a new opt-out — the three checks (in this order) that
+ * justify a row here:
+ *
+ *  1. **Task-flow body does not reference the block name.** Grep
+ *     `agent-assets/task-flows/<eventType>.md` (and any
+ *     `<eventType>.<variant>.md`) for `<user>` / `<management_rules>`.
+ *     A prose pointer like "see <user> for …" must be removed FIRST,
+ *     or the agent will look for a tag that no longer exists.
+ *  2. **Agent profile does not depend on the block.** Profiles in
+ *     `agent-assets/agent-profiles/` resolve via
+ *     `getProfileForEvent`. Persona prose that says "use the operator's
+ *     profile to set tone" is a `<user>` dependency.
+ *  3. **Skill manifest is narrow.** A skill bundle that includes
+ *     `user-profile` (the only skill that reads `<user>` today) blocks
+ *     the `<user>` opt-out. Confirm by reading
+ *     `EVENT_SKILL_SETS[<eventType>]` in `skills-manifest.ts`.
+ *
+ * Past precedents kept here for the next author's benchmark:
+ *
+ *  - **Stage B** (`routine.morning_routine_journal`) — Phase 5 of
+ *    `morning-routine-optimization.md`. Drops `<management_rules>`
+ *    because the journal author reads `<journal_skeleton>` +
+ *    `rules/journal-format.md` and never SoT bindings. Keeps `<user>`
+ *    because the journal author uses the people roster for wikilinks
+ *    and the redaction rules. The parallel opt-out in
+ *    `policy-files.ts:POLICY_KEY_GLOBAL_OPTOUT` strips Stage B from
+ *    the `*` policy-file registry; when adding a new event here,
+ *    consider whether the policy-file side needs the same treatment
+ *    so the two injection paths stay in lock-step.
+ *  - **Hourly check** (`routine.hourly_check`) — task-flow §"Execution
+ *    budget" explicitly tells the agent "Do NOT read roadmap.md,
+ *    projects/*.md, or user/*.md unless an observation warrants it".
+ *    The decision framework consumes `<observations>` + `<today>` +
+ *    `<gate_decision>` + `<fetch_report>` only; SoT bindings are not
+ *    used by the hourly decision tree.
+ *  - **Today refresh** (`routine.today_refresh`) — dashboard-triggered
+ *    manual rewrite of `today.md ## User Schedule` from a calendar
+ *    pre-pass. Skill bundle is `[context, today, external-services]`
+ *    by design (the narrow narrowing in `skills-manifest.ts`); the
+ *    flow patches one section and emits no identity-aware text.
+ *  - **Observer events** (`github.*`, `git.*`, `schedule.approaching`)
+ *    — `observer.md` profile is "evaluate external change events; act,
+ *    skip, or defer." The classification is structural (diff / commit
+ *    / event payload vs. category routing); operator identity does not
+ *    enter the loop. Bundles are narrow (`context, today, notify,
+ *    observations, [external-services|project-doc]`) and none of those
+ *    skills carries a `<user>` reference.
+ *  - **`scheduled.task`** — `task.md` profile is "execute exactly what
+ *    the description says; close the Agent Plan loop." The task-flow
+ *    body consumes `<today>` (Agent Plan grep + day-type filter from
+ *    line 2), `<calendar_today>`, `<task_origin>`, and `<task_context>`;
+ *    `<user>` / `<management_rules>` appear in zero steps. The
+ *    `taskContext.background` field is the per-row contract for "what
+ *    the future session needs to know upfront that it could not derive
+ *    from today.md alone" (see `routine.morning_routine_today.md`
+ *    Step 7's batch contract). Skill bundle is narrow (`context, today,
+ *    notify, schedule, external-services, mail, notion, roadmap,
+ *    scheduled-managed-task`); none reads `<user>`. The
+ *    `dashboard_regenerate` source still adds `<roadmap>` +
+ *    `<active_projects>` further down in `build()` — that branch is
+ *    independent of this opt-out. DM-tone scheduled work runs under
+ *    `scheduled.dm`, which is NOT covered here because the
+ *    `morning_briefing` sub-flow legitimately needs `<user>` for
+ *    `## Notification Preferences` and name resolution; per-sub_flow
+ *    narrowing of `scheduled.dm` belongs in a follow-up.
+ *
+ * Out of scope for this resolver: `<today>` (small + always cited by
+ * the close-the-loop / Agent Log contract), `<agent_identity>` /
+ * `<current_time>` / `<settings>` / `<output_language_policy>` /
+ * `<integration_modes>` (small structured metadata that every prompt
+ * consumes). When a routine has no need for `<today>` either, the
+ * right pattern is a dedicated slim builder (see
+ * `buildFetchWindowContext`), not a third boolean on this struct.
+ */
+interface AlwaysInjectionPolicy {
+  injectUserProfile: boolean;
+  injectManagementRules: boolean;
+}
+
+const ALWAYS_INJECTION_POLICY_DEFAULT: AlwaysInjectionPolicy = {
+  injectUserProfile: true,
+  injectManagementRules: true,
+};
+
+function resolveAlwaysInjectionPolicy(event: Event): AlwaysInjectionPolicy {
+  const eventType = event.type;
+
+  // Stage B (daily journal author) — see precedent comment above.
+  if (eventType === "routine.morning_routine_journal") {
+    return { injectUserProfile: true, injectManagementRules: false };
+  }
+
+  // Hourly check + today_refresh — narrow routines that explicitly do
+  // not consume operator identity or SoT bindings.
+  if (
+    eventType === "routine.hourly_check" ||
+    eventType === "routine.today_refresh"
+  ) {
+    return { injectUserProfile: false, injectManagementRules: false };
+  }
+
+  // Observer bucket — every github.* / git.* event AND the proximity
+  // wake (schedule.approaching) routes through `observer.md`. Prefix
+  // matching mirrors `PROFILE_RULES` in `skills-manifest.ts` so the
+  // injection contract follows the persona contract.
+  if (
+    eventType.startsWith("github.") ||
+    eventType.startsWith("git.") ||
+    eventType === "schedule.approaching"
+  ) {
+    return { injectUserProfile: false, injectManagementRules: false };
+  }
+
+  // scheduled.task — non-DM-tone scheduled work whose task body and
+  // close-the-loop discipline are self-contained via `<today>` +
+  // `<task_context>`. NOT generalised to scheduled.dm: the
+  // morning_briefing sub-flow legitimately reads `<user>` (day-type
+  // filter + name resolution). Per-sub_flow narrowing of scheduled.dm
+  // is a follow-up; the default here keeps scheduled.dm on the wide
+  // path.
+  if (eventType === "scheduled.task") {
+    return { injectUserProfile: false, injectManagementRules: false };
+  }
+
+  return ALWAYS_INJECTION_POLICY_DEFAULT;
+}
+
 export class ContextBuilder implements IContextBuilder {
   constructor(
     private readonly config: AgentConfig,
@@ -129,10 +273,20 @@ export class ContextBuilder implements IContextBuilder {
       );
     }
 
-    // Always injected (all sessions) — B-007 §5.1 canonical paths.
+    // Per-event injection policy for the two heavy "always-injected"
+    // blocks (`<user>`, `<management_rules>`). `<today>` and the
+    // small metadata blocks (`<agent_identity>`, `<current_time>`, …)
+    // are unconditionally injected on the wide path. See
+    // `resolveAlwaysInjectionPolicy` for the opt-out table and the
+    // rationale per event-type.
+    const injectionPolicy = resolveAlwaysInjectionPolicy(event);
     const [userMd, rulesMd, todayMd] = await Promise.all([
-      this.readFile(CONTEXT_RELATIVE_PATHS.user.profile),
-      this.readFile(CONTEXT_RELATIVE_PATHS.rules.management),
+      injectionPolicy.injectUserProfile
+        ? this.readFile(CONTEXT_RELATIVE_PATHS.user.profile)
+        : Promise.resolve(null),
+      injectionPolicy.injectManagementRules
+        ? this.readFile(CONTEXT_RELATIVE_PATHS.rules.management)
+        : Promise.resolve(null),
       this.readFile(CONTEXT_RELATIVE_PATHS.today),
     ]);
     // Capture the read time as the authoritative "as of when did this
@@ -157,18 +311,7 @@ export class ContextBuilder implements IContextBuilder {
     // single-source-of-change). Oversize → skip-with-warn, matching
     // the policy-files behaviour the registry entry previously
     // provided.
-    //
-    // Stage B (morning-routine-optimization.md §"Per-stage input
-    // sketches"): `routine.morning_routine_journal` does NOT read
-    // SoT bindings — it authors the daily journal from the
-    // pre-aggregated `<journal_skeleton>` and `rules/journal-format.md`
-    // alone. Skipping the block here keeps Stage B's prompt under the
-    // lite-tier cold-start floor and matches the policy-files registry
-    // opt-out (`POLICY_KEY_GLOBAL_OPTOUT`) so the two injection paths
-    // agree.
-    const skipManagementRulesForStageB =
-      event.type === "routine.morning_routine_journal";
-    if (rulesMd && !skipManagementRulesForStageB) {
+    if (rulesMd) {
       const rulesBytes = Buffer.byteLength(rulesMd, "utf-8");
       if (rulesBytes > POLICY_FILE_MAX_BYTES) {
         logger.warn(

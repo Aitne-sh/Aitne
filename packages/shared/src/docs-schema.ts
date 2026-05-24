@@ -24,7 +24,7 @@ const DOC_CATEGORIES = [
 ] as const;
 export type DocCategory = (typeof DOC_CATEGORIES)[number];
 
-const DOC_STATUS = ["stable", "beta", "draft", "deprecated"] as const;
+const DOC_STATUS = ["stable", "beta", "experimental", "draft", "deprecated"] as const;
 export type DocStatus = (typeof DOC_STATUS)[number];
 
 /**

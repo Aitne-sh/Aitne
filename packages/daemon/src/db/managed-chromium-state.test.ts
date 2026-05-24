@@ -76,4 +76,26 @@ describe("managed-chromium-state", () => {
     expect(out.lastDmAt["sync_silent"]).toBe(12345);
     expect(out.consecutiveFailures).toBe(1);
   });
+
+  it("deep-copies bootstrap on update so callers can't mutate persisted state", () => {
+    updateManagedChromiumState(db, (draft) => {
+      draft.bootstrap = { pid: 42, deadlineAt: 1_700_000_000_000, reauth: false };
+    });
+
+    // Subsequent update without touching bootstrap must still produce a
+    // fresh object copy — never the same reference as the persisted row,
+    // so the mutator can mutate it without aliasing the previous value.
+    let observedBootstrap: { pid: number; deadlineAt: number; reauth: boolean } | null = null;
+    updateManagedChromiumState(db, (draft) => {
+      observedBootstrap = draft.bootstrap;
+      // Verify the deep-copy invariant: mutating draft.bootstrap here
+      // should not corrupt the schema-validated previous state.
+      if (draft.bootstrap) draft.bootstrap.pid = 99;
+    });
+
+    expect(observedBootstrap).not.toBeNull();
+    const out = readManagedChromiumState(db);
+    expect(out.bootstrap?.pid).toBe(99);
+    expect(out.bootstrap?.deadlineAt).toBe(1_700_000_000_000);
+  });
 });

@@ -76,4 +76,21 @@ describe("acquireInterestsReflectionLock", () => {
     expect(peekInterestsReflectionLockHolder()).toBe("after:reset");
     release();
   });
+
+  it("first-time release after force-reset + re-acquire is a no-op (holder mismatch)", () => {
+    // Set up the rare diagnostic path: acquire A, force-reset to simulate a
+    // crash recovery, then acquire B. Calling A's never-yet-invoked release
+    // must NOT clear B's hold — the `currentHolder !== holder` defensive
+    // branch should log and return without zeroing currentHolder.
+    const releaseA = acquireInterestsReflectionLock("refresh:scheduler");
+    _resetInterestsReflectionLockForTests();
+    const releaseB = acquireInterestsReflectionLock("cleanup:dashboard");
+    expect(peekInterestsReflectionLockHolder()).toBe("cleanup:dashboard");
+
+    releaseA();
+    expect(peekInterestsReflectionLockHolder()).toBe("cleanup:dashboard");
+
+    releaseB();
+    expect(peekInterestsReflectionLockHolder()).toBeNull();
+  });
 });

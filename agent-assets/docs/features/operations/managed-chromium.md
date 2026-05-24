@@ -48,8 +48,8 @@ related:
   - concepts/safety-and-execution
   - reference/disallowed-tools
 ui_anchors:
-  - /settings/browser-automation
-  - /settings/browser-automation/sites
+  - /settings/integrations/browser-history-managed
+  - /settings/integrations/browser-history-managed/b4
 config_keys:
   - "runtime_state.managed_chromium.b4_enabled"
 ---

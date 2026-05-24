@@ -187,4 +187,25 @@ describe("LinuxSecretClient", () => {
     const client = new LinuxSecretClient();
     await expect(client.delete("missing")).resolves.toBeUndefined();
   });
+
+  it("rejects secret names containing path separators on get/set/delete", async () => {
+    const { LinuxSecretClient } = await import("./secret-client-linux.js");
+    const client = new LinuxSecretClient();
+
+    // Cast to any to bypass StoredSecretName type — validateName is the
+    // last-line defence and must reject path separators regardless.
+    await expect(client.get("foo/bar" as never)).rejects.toThrow(
+      /Invalid secret name/,
+    );
+    await expect(client.set("foo\\bar" as never, "x")).rejects.toThrow(
+      /Invalid secret name/,
+    );
+    await expect(client.delete("a/b" as never)).rejects.toThrow(
+      /Invalid secret name/,
+    );
+
+    // None of those calls should have reached the underlying CLI.
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(execWithStdinMock).not.toHaveBeenCalled();
+  });
 });

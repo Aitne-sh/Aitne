@@ -238,6 +238,190 @@ describe("ContextBuilder", () => {
     expect(context).toContain("Stage A reads SoT bindings");
   });
 
+  // Per-event opt-out from the heavy "always-injected" blocks. See
+  // `resolveAlwaysInjectionPolicy` in context-builder.ts for the
+  // rationale per event-type. The cases below are the contract surface
+  // — if any of these regresses, a session pays the prompt-budget
+  // cost for blocks the task-flow does not consume.
+  describe("resolveAlwaysInjectionPolicy — per-event opt-out", () => {
+    // Vault contents are populated identically across cases so the
+    // only variable is the event type. The expected absence is the
+    // contract: the file exists on disk, but the policy must keep its
+    // bytes out of the prompt.
+    const PROFILE_BODY = "# User\nProfile that must NOT leak into observer / hourly / today_refresh prompts";
+    const RULES_BODY = "# Rules\nSoT bindings that must NOT leak into observer / hourly / today_refresh prompts";
+
+    beforeEach(() => {
+      writeFileSync(join(contextDir, "user", "profile.md"), PROFILE_BODY);
+      writeFileSync(join(contextDir, "rules", "management.md"), RULES_BODY);
+      writeFileSync(join(contextDir, "today.md"), "# Today\nseed");
+    });
+
+    it("omits <user> and <management_rules> for routine.hourly_check", async () => {
+      const event = {
+        ...createEvent({
+          type: "routine.hourly_check",
+          source: "cron",
+          priority: EventPriority.NORMAL,
+        }),
+        routine: "hourly_check",
+      } as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).not.toContain("<user>");
+      expect(context).not.toContain(PROFILE_BODY);
+      expect(context).not.toContain("<management_rules>");
+      expect(context).not.toContain(RULES_BODY);
+      // Sanity: the routine still receives its load-bearing blocks.
+      expect(context).toContain("<routine_protocol>");
+      expect(context).toMatch(/<today snapshot_at="[^"]+">/);
+    });
+
+    it("omits <user> and <management_rules> for routine.today_refresh", async () => {
+      const event = {
+        ...createEvent({
+          type: "routine.today_refresh",
+          source: "dashboard",
+          priority: EventPriority.NORMAL,
+        }),
+        routine: "today_refresh",
+      } as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).not.toContain("<user>");
+      expect(context).not.toContain(PROFILE_BODY);
+      expect(context).not.toContain("<management_rules>");
+      expect(context).not.toContain(RULES_BODY);
+      // The pre-pass-driven `<calendar_status>` hint is the routine's
+      // primary cue and stays present.
+      expect(context).toContain("<calendar_status>");
+    });
+
+    it.each([
+      ["github.pull_request.review_requested"],
+      ["github.assigned"],
+      ["github.security_alert"],
+      ["github.workflow_run.failed"],
+      ["git.push.detected"],
+      ["git.branch.created"],
+      ["git.tag.created"],
+      ["git.merge_to_default"],
+      ["git.push.force_pushed"],
+      ["git.local_ahead.stale"],
+      ["git.lifecycle.poll"],
+    ])("omits <user> and <management_rules> for observer event %s", async (eventType) => {
+      const event = createEvent({
+        type: eventType,
+        source: "observer",
+        priority: EventPriority.NORMAL,
+      });
+      const context = await builder.build(event);
+      expect(context).not.toContain("<user>");
+      expect(context).not.toContain(PROFILE_BODY);
+      expect(context).not.toContain("<management_rules>");
+      expect(context).not.toContain(RULES_BODY);
+    });
+
+    it("omits <user> and <management_rules> for schedule.approaching", async () => {
+      const event = createEvent({
+        type: "schedule.approaching",
+        source: "scheduler",
+        priority: EventPriority.NORMAL,
+      });
+      const context = await builder.build(event);
+      expect(context).not.toContain("<user>");
+      expect(context).not.toContain(PROFILE_BODY);
+      expect(context).not.toContain("<management_rules>");
+      expect(context).not.toContain(RULES_BODY);
+    });
+
+    it("omits <user> and <management_rules> for scheduled.task", async () => {
+      // The task-flow body consumes <today> + <task_origin> +
+      // <task_context> only; <user> / <management_rules> appear in zero
+      // steps. taskContext.background is the per-row contract for any
+      // upfront context the future session needs.
+      const event = {
+        ...createEvent({
+          type: "scheduled.task",
+          source: "wake",
+          priority: EventPriority.NORMAL,
+        }),
+        task: "generic close-the-loop reminder",
+        taskContext: {},
+      };
+      const context = await builder.build(event);
+      expect(context).not.toContain("<user>");
+      expect(context).not.toContain(PROFILE_BODY);
+      expect(context).not.toContain("<management_rules>");
+      expect(context).not.toContain(RULES_BODY);
+      // Load-bearing blocks the close-the-loop contract requires must
+      // still be present.
+      expect(context).toContain("<task_origin");
+      expect(context).toContain("<task_context>");
+      expect(context).toMatch(/<today snapshot_at="[^"]+">/);
+    });
+
+    it("still injects <roadmap> + <active_projects> for scheduled.task dashboard_regenerate (regression guard)", async () => {
+      // The dashboard_regenerate source path adds <roadmap> +
+      // <active_projects> independently of the <user> opt-out. Verify
+      // those blocks still land so dashboard-driven regeneration keeps
+      // its richer input set.
+      writeFileSync(join(contextDir, "roadmap.md"), "# Roadmap\nMilestone A");
+      const event = {
+        ...createEvent({
+          type: "scheduled.task",
+          source: "dashboard_regenerate",
+          priority: EventPriority.NORMAL,
+        }),
+        task: "regenerate from dashboard",
+        taskContext: {},
+      };
+      const context = await builder.build(event);
+      // Opt-out still applies.
+      expect(context).not.toContain("<user>");
+      expect(context).not.toContain("<management_rules>");
+      // Source-specific augmentation is unaffected.
+      expect(context).toContain("<roadmap>");
+      expect(context).toContain("Milestone A");
+    });
+
+    // Complement of the scheduled.task opt-out: scheduled.dm intentionally
+    // stays on the wide path because the morning_briefing sub-flow reads
+    // <user> ## Notification Preferences (day-type filter) and the people
+    // roster (name resolution). Per-sub_flow narrowing is tracked in
+    // resolveAlwaysInjectionPolicy's JSDoc as a follow-up.
+    it("still injects <user> and <management_rules> for scheduled.dm (default branch)", async () => {
+      const event = {
+        ...createEvent({
+          type: "scheduled.dm",
+          source: "dm_session",
+          priority: EventPriority.NORMAL,
+        }),
+        task: "morning briefing — daily summary",
+        taskContext: {},
+      };
+      const context = await builder.build(event);
+      expect(context).toContain("<user>");
+      expect(context).toContain(PROFILE_BODY);
+      expect(context).toContain("<management_rules>");
+      expect(context).toContain(RULES_BODY);
+    });
+
+    // Regression guard for the default branch — any event NOT listed in
+    // the resolver must keep the wide-path behaviour. message.received
+    // is the highest-traffic example.
+    it("still injects <user> and <management_rules> for message.received (default branch)", async () => {
+      const event = createEvent({
+        type: "message.received",
+        source: "dashboard",
+        priority: EventPriority.HIGH,
+      });
+      const context = await builder.build(event);
+      expect(context).toContain("<user>");
+      expect(context).toContain(PROFILE_BODY);
+      expect(context).toContain("<management_rules>");
+      expect(context).toContain(RULES_BODY);
+    });
+  });
+
   it("does not read fallback vault files while degraded", async () => {
     writeFileSync(join(contextDir, "user", "profile.md"), "# User\nFallback user");
     writeFileSync(
@@ -2760,7 +2944,15 @@ describe("ContextBuilder", () => {
 
     it("falls through to the wide path for a sibling routine event (regression guard)", async () => {
       // hourly_check is a routine event with routine !== "fetch_window";
-      // it must still receive <routine_protocol> + <user> / <today> etc.
+      // it must still receive `<routine_protocol>` + the small
+      // structured metadata blocks (`<agent_identity>`,
+      // `<current_time>`, …). It does NOT receive `<user>` /
+      // `<management_rules>` — those are opted out per
+      // `resolveAlwaysInjectionPolicy`; the dedicated absence test
+      // (`omits <user> and <management_rules> for routine.hourly_check`)
+      // covers that contract, this case only guards that the slim
+      // fetch_window branch did not accidentally swallow sibling
+      // routines.
       writeFileSync(join(contextDir, "today.md"), "# Today\nseed");
       const event = {
         ...createEvent({

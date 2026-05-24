@@ -46,7 +46,7 @@ related:
   - features/routines/weekly-review
   - features/routines/morning-routine
 ui_anchors:
-  - /settings/browser-history
+  - /settings/integrations/browser-history
 config_keys:
   - browserHistoryConsentAccepted
   - browserHistoryBrowserOverrides
