@@ -2062,11 +2062,13 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
     expectedProfileHeading: "# Routine Agent",
   },
   {
-    // Stage B — single-skill author. Inflating this beyond `context`
-    // defeats the lite-tier viability the split exists to enable.
+    // daily-journal-daemon-write.md §4.10 — Stage B has zero tool
+    // requirement. The daemon-side composer writes daily/<date>.md from
+    // the LLM's tagged final-text output; the manifest is empty so
+    // no `Bash`/`Read`/`Write`/`Edit` are even registered.
     processKey: "routine.morning_routine_journal",
     eventType: "routine.morning_routine_journal",
-    expectedSkills: ["context"],
+    expectedSkills: [],
     expectedProfileHeading: "# Routine Agent",
   },
   {

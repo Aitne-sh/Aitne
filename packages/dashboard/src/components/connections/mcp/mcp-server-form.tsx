@@ -17,10 +17,10 @@ import { BACKEND_IDS, type BackendId } from "@aitne/shared";
 
 const ID_REGEX = /^[a-z0-9][a-z0-9-]*$/;
 
-// B-003 Phase 2 scope: the form only covers the fields needed to get a
-// server probing and enabled. `toolAllowlist` and `riskTier` live in the
-// data model + API but land in the UI in Phase 4 (observability + per-tool
-// toggles). Users who need them today can PATCH via `/api/mcp/servers/:id`.
+// The form intentionally exposes only enablement fields. `toolAllowlist`
+// and `riskTier` live in the data model + API but are not surfaced in the
+// UI yet; operators who need them today can PATCH via
+// `/api/mcp/servers/:id`.
 
 interface BaseFormState {
   id: string;

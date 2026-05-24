@@ -412,7 +412,7 @@ export async function createEventPipeline(
   });
 
   // ── Notification + auth telemetry + shared notifier factory ────────────
-  // P2-16: sweep stale `batched` rows from a prior crash before the new
+  // Sweep stale `batched` rows from a prior crash before the new
   // dispatcher starts producing notifications. A queued (status='batched')
   // row whose flush timer didn't fire (process killed) would otherwise
   // linger forever and confuse the dashboard's notification feed.
@@ -726,9 +726,9 @@ export async function createEventPipeline(
   }, 24 * 60 * 60 * 1000);
   keepaliveTimer.unref?.();
 
-  // Phase 5/6: Interactive auth recovery manager. Uses the same notifier
-  // sink as the AuthHealthMonitor so recovery DMs flow through the same
-  // notification pipeline with the same anti-spam guarantees.
+  // Interactive auth recovery manager. Uses the same notifier sink as the
+  // AuthHealthMonitor so recovery DMs flow through the same notification
+  // pipeline with the same anti-spam guarantees.
   const authRecovery = new AuthRecovery(
     db,
     authTelemetry,

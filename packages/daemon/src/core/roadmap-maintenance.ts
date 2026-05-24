@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { localDateStr } from "@aitne/shared";
 import { writeFileAtomically } from "./atomic-write.js";
+import { serializeContextFileWrite } from "./context-file-serializer.js";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import { stripRoadmapIdComment } from "./roadmap-ids.js";
 import type { RoadmapWriteLockManager } from "./roadmap-write-lock.js";
@@ -161,9 +162,9 @@ export interface RoadmapMaintenanceResult {
  * went wrong. The caller (`scheduler.ts` cron callback) does NOT
  * propagate failure into `routine.evening_review` 15 minutes later.
  */
-export function runRoadmapMechanicalMaintenance(
+export async function runRoadmapMechanicalMaintenance(
   deps: RoadmapMaintenanceDeps,
-): RoadmapMaintenanceResult {
+): Promise<RoadmapMaintenanceResult> {
   const result: RoadmapMaintenanceResult = {
     status: "success",
     statusSynced: 0,
@@ -281,17 +282,29 @@ export function runRoadmapMechanicalMaintenance(
         }
 
         try {
-          saveSnapshot(deps.db, "roadmap", original, "roadmap_maintenance");
-          // Mark before the rename so FS-watch consumers attribute the
-          // resulting event to the agent. Roll back on failure (C2).
-          deps.writeTracker?.markWriting(roadmapPath, working);
-          try {
-            writeFileAtomically(roadmapPath, working);
-          } catch (writeErr) {
-            deps.writeTracker?.unmark(roadmapPath);
-            throw writeErr;
-          }
-          deps.onIndexableContextChange?.(CONTEXT_RELATIVE_PATHS.roadmap);
+          // Per-path serializer fences this write against the HTTP
+          // context routes (PUT/PATCH /api/context/roadmap) and any
+          // other in-process roadmap writer. Without it, an HTTP
+          // PATCH on roadmap.md that arrives between this maintenance
+          // run's read and rename could land its own write AFTER ours,
+          // silently dropping the maintenance sweep's edits.
+          // (`roadmapWriteLock` is the cross-session X-Lock-Id fence —
+          // HTTP returns 409 when held by another session — but the
+          // HTTP route only CHECKS the lock; this serializer is what
+          // adds intra-process atomicity across all writers.)
+          await serializeContextFileWrite(roadmapPath, () => {
+            saveSnapshot(deps.db, "roadmap", original, "roadmap_maintenance");
+            // Mark before the rename so FS-watch consumers attribute the
+            // resulting event to the agent. Roll back on failure (C2).
+            deps.writeTracker?.markWriting(roadmapPath, working);
+            try {
+              writeFileAtomically(roadmapPath, working);
+            } catch (writeErr) {
+              deps.writeTracker?.unmark(roadmapPath);
+              throw writeErr;
+            }
+            deps.onIndexableContextChange?.(CONTEXT_RELATIVE_PATHS.roadmap);
+          });
         } catch (err) {
           logger.error({ err }, "Failed to persist roadmap maintenance write");
           result.errors.push({
@@ -304,7 +317,7 @@ export function runRoadmapMechanicalMaintenance(
       }
 
       try {
-        appendJournalLine(deps, result, now, today);
+        await appendJournalLine(deps, result, now, today);
       } catch (err) {
         logger.warn({ err }, "Failed to append maintenance journal line");
         result.errors.push({
@@ -704,12 +717,12 @@ export function applyLongTermPlansStaleMark(
 
 // ── Journal ────────────────────────────────────────────────────────────────
 
-function appendJournalLine(
+async function appendJournalLine(
   deps: RoadmapMaintenanceDeps,
   result: RoadmapMaintenanceResult,
   now: Date,
   today: string,
-): void {
+): Promise<void> {
   const journalPath = join(deps.contextDir, CONTEXT_RELATIVE_PATHS.agent.journal);
   const time = formatHm(now, deps.timezone);
   const summary =
@@ -718,25 +731,39 @@ function appendJournalLine(
       ? `, errors=${result.errors.length} (${result.errors.map((e) => e.step).join(",")})`
       : "");
 
-  let original: string | null = null;
-  if (existsSync(journalPath)) {
-    original = readFileSync(journalPath, "utf-8");
-  }
+  // Per-path serializer fences this read-modify-write against the HTTP
+  // route's `PATCH /api/context/agent/journal` and the other in-process
+  // journal appenders (morning routine, weekly-interests). Without the
+  // fence, two writers reading the same pre-state would each rename
+  // their own "next" over the file, silently dropping one of the
+  // bullets.
+  //
+  // Awaited (not fire-and-forget) so the maintenance audit row's
+  // emit-on-failure semantics are preserved: a thrown write propagates
+  // to the caller's try/catch which pushes a "journal" error into
+  // `result.errors` (matches pre-fix behaviour where the write was
+  // synchronous and a throw bubbled up through the same path).
+  await serializeContextFileWrite(journalPath, () => {
+    let original: string | null = null;
+    if (existsSync(journalPath)) {
+      original = readFileSync(journalPath, "utf-8");
+    }
 
-  const next = appendToJournalSection(original, summary);
-  if (original !== null) {
-    saveSnapshot(deps.db, "agent/journal", original, "roadmap_maintenance_journal");
-  }
-  // Mark before the rename so FS-watch consumers attribute the
-  // resulting event to the agent. Roll back on failure (C2).
-  deps.writeTracker?.markWriting(journalPath, next);
-  try {
-    writeFileAtomically(journalPath, next);
-  } catch (writeErr) {
-    deps.writeTracker?.unmark(journalPath);
-    throw writeErr;
-  }
-  deps.onIndexableContextChange?.(CONTEXT_RELATIVE_PATHS.agent.journal);
+    const next = appendToJournalSection(original, summary);
+    if (original !== null) {
+      saveSnapshot(deps.db, "agent/journal", original, "roadmap_maintenance_journal");
+    }
+    // Mark before the rename so FS-watch consumers attribute the
+    // resulting event to the agent. Roll back on failure (C2).
+    deps.writeTracker?.markWriting(journalPath, next);
+    try {
+      writeFileAtomically(journalPath, next);
+    } catch (writeErr) {
+      deps.writeTracker?.unmark(journalPath);
+      throw writeErr;
+    }
+    deps.onIndexableContextChange?.(CONTEXT_RELATIVE_PATHS.agent.journal);
+  });
 }
 
 /**

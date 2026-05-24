@@ -26,9 +26,9 @@ export const DEFAULT_JSON_BODY_MAX_BYTES = 1_048_576;
  *
  * Surfacing the parse error (rather than letting Hono's default 500
  * handler swallow it) is how agents learn their body shape is wrong
- * and self-correct. Regression origin: a setup.initial session sent a
- * literal `@-` body and misdiagnosed the resulting 500 as a Bash
- * permission denial (2026-04-18).
+ * and self-correct. A bad body delivered as a 500 has been misdiagnosed
+ * as an unrelated subprocess permission failure, costing several retry
+ * cycles per session before the agent recovers.
  *
  * The body is rejected with a 413 `body_too_large` response if the
  * declared `Content-Length` or the actual decoded byte count exceeds

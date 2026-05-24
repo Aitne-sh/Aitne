@@ -74,9 +74,9 @@ curl -s -X POST http://localhost:8321/api/chat/outbound-attachments \
 
 ### Size and type limits (Phase 1)
 
-- Images: **≤ 5 MB** (PNG, JPEG, WebP, GIF, HEIC, SVG).
+- Images: **≤ 5 MB** (PNG, JPEG, WebP, GIF, HEIC, HEIF, SVG).
 - Other files: **≤ 25 MB** (PDF, DOCX/XLSX/PPTX, ODT, TXT, MD, CSV, JSON, YAML, XML, common source types).
-- **Audio/video** uploads are rejected — Phase 3 work.
+- Audio/video: **≤ 25 MB** (AAC, AMR, FLAC, M4A, MP3, MP4 audio, OGG, OPUS, WAV, WebM audio; MP4 video, MPEG, WebM video, QuickTime, 3GP). Accepted as opaque files — staged into the session workdir and named in the prompt, but only image attachments receive native multimodal argv treatment.
 - Executables, archives (zip/tar/7z/rar), and unknown binary payloads are rejected.
 
 Per-turn total across all attachments is capped at **100 MB**; the endpoint returns 429/`too_many_uploads` if you issue more than 5 concurrent uploads on the same turn.

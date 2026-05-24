@@ -4,9 +4,7 @@
  * Each platform caps outbound message length differently (Discord 2000,
  * Telegram 4096, WhatsApp ~4000) and several need to mint inbound
  * filenames from a MIME type when the platform omits a `file_name` field.
- * Pre-Phase-7 each adapter carried its own copy of these helpers, which
- * drifted in comments and tiny edge-case behaviour over time. Phase 7.8
- * consolidates them here so a future fix lands in exactly one place.
+ * Consolidated here so a future fix lands in exactly one place.
  */
 
 /**
@@ -22,8 +20,8 @@
  * Slack/Telegram/Discord render as U+FFFD or reject outright. Emoji-heavy
  * agent replies (common in JP/zh interfaces) are the typical trigger.
  *
- * Code-fence safety (P2-07): if the chosen split point lands inside an
- * open ```fenced code block``` we back off to a newline OUTSIDE the
+ * Code-fence safety: if the chosen split point lands inside an open
+ * ```fenced code block``` we back off to a newline OUTSIDE the
  * fence so the first chunk is self-contained and the second chunk
  * doesn't start mid-language. Without this, Slack/Discord renders the
  * second chunk's text as a single broken syntax-highlight block until

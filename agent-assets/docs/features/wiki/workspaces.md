@@ -23,7 +23,7 @@ section: wiki
 tags:
   - wiki
   - workspaces
-  - configuration
+  - config
   - core
 status: stable
 ask_examples:

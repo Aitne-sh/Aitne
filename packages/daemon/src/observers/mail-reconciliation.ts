@@ -1,5 +1,5 @@
 /**
- * Mail reconciliation observer (Phase 7, §3.1.1).
+ * Mail reconciliation observer (see appendices/multi-mail-provider.md §3.1.1).
  *
  * Two responsibilities, both run on a daily cadence and both kept out of the
  * real-time {@link MailPoller} path so their slower failure modes don't

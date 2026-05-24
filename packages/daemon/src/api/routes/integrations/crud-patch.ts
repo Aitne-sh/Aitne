@@ -348,9 +348,9 @@ export async function handleIntegrationPatch(
   //       connector doesn't expose (e.g. Claude's `label_message` carried
   //       into a Codex session), so the materializer's stale-drop pass
   //       would empty the disallowedTools array silently — closing the
-  //       same §4.5.4 floor the design wrote (a) to defend. The original
-  //       design framed §4.5.4 as "first delegated setup only" and missed
-  //       this case; surfaced during the 2026-04-26 implementation review.
+  //       same §4.5.4 floor the design wrote (a) to defend. Backend swap
+  //       falls under the same floor: an unsupervised flip can wipe denies
+  //       silently if the materializer drops unknown-tool entries.
   //
   // The wizard UI for the opt-out / "use recommended" / "I'll edit"
   // branches is Phase 4 polish (see §Phase 4.2). For now the API default
@@ -695,15 +695,13 @@ export async function handleIntegrationPatch(
 
     // Auto-enable the global task-mode flag the first time *any*
     // integration enters delegated mode. Rationale:
-    //   - The legacy `/integrations/:key/invoke` RPC is dead (commented
-    //     out 2026-05-01 in this same file); every delegated skill body
-    //     and task flow now talks to `/exec`.
-    //   - `/exec` is gated by `delegatedTaskModeEnabled`, originally a
-    //     Phase-1 canary that defaults `false`. With `/invoke` gone,
-    //     "delegated mode + task mode off" is a degenerate state with
-    //     no productive use — the agent calls `/exec`, gets 503,
-    //     fails. So flipping an integration to delegated *is* the
-    //     enablement signal.
+    //   - The legacy `/integrations/:key/invoke` RPC is dead; every
+    //     delegated skill body and task flow now talks to `/exec`.
+    //   - `/exec` is gated by `delegatedTaskModeEnabled`, which defaults
+    //     `false`. With `/invoke` gone, "delegated mode + task mode off"
+    //     is a degenerate state with no productive use — the agent calls
+    //     `/exec`, gets 503, fails. So flipping an integration to
+    //     delegated *is* the enablement signal.
     //   - We only flip on the transition into delegated, not on every
     //     PATCH against an already-delegated integration. A pure
     //     deniedTools edit must not silently re-enable a flag the

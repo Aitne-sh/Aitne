@@ -37,16 +37,24 @@ const logger = createLogger("context-api");
 
 /**
  * Shared closure bundle passed to every sub-registrar. Hosts the locks,
- * snapshot debounce, write mutex, and the per-request helpers that need
- * factory-time configuration (timezone, body parser). Sub-files import
- * this type with `import type` so there is no runtime cycle with index.ts.
+ * snapshot debounce, and the per-request helpers that need factory-time
+ * configuration (timezone, body parser). Sub-files import this type with
+ * `import type` so there is no runtime cycle with index.ts.
+ *
+ * Note: the legacy per-router `withWriteLock` mutex was retired in favour
+ * of the daemon-singleton {@link serializeContextFileWrite} (per-absolute-
+ * path), which also fences against in-process daemon-direct writers
+ * (today-direct-writer, agent-journal-appender, roadmap-maintenance,
+ * scheduled-tasks weekly-interests appender). The per-router mutex
+ * only covered HTTP-vs-HTTP within a single router instance, leaving
+ * the HTTP-vs-direct race that allowed silent today.md / agent/journal.md
+ * clobbers.
  */
 export interface ContextRouteContext {
   readonly deps: ApiDependencies;
   readonly getCurrentContextDir: () => string;
   readonly morningRoutineLock: TodayWriteLockManager;
   readonly roadmapWriteLock: RoadmapWriteLockManager;
-  readonly withWriteLock: <T>(fn: () => T) => Promise<T>;
   readonly saveSnapshot: (
     filePath: string,
     content: string,
@@ -146,23 +154,6 @@ export function createContextRoutes(deps: ApiDependencies): Hono {
 
   // Per-instance state (not shared across tests)
   const lastSnapshotTimes = new Map<string, number>();
-
-  // Mutex for serialized writes
-  let writeLock: Promise<void> = Promise.resolve();
-  function withWriteLock<T>(fn: () => T): Promise<T> {
-    const prev = writeLock;
-    let resolve: () => void;
-    writeLock = new Promise<void>((r) => {
-      resolve = r;
-    });
-    return prev.then(() => {
-      try {
-        return fn();
-      } finally {
-        resolve!();
-      }
-    });
-  }
 
   function saveSnapshot(
     filePath: string,
@@ -264,7 +255,6 @@ export function createContextRoutes(deps: ApiDependencies): Hono {
     getCurrentContextDir,
     morningRoutineLock,
     roadmapWriteLock,
-    withWriteLock,
     saveSnapshot,
     isRoadmapValidationDisabled,
     logRoadmapValidationBypass,

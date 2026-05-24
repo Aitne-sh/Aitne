@@ -83,8 +83,8 @@ export function estimateFullCompileCost(
   const unitCost = options.unitCostUsdPerKToken ?? DEFAULT_UNIT_COST_USD_PER_KTOKEN;
   const threshold = workspace.full_compile_approval_threshold_usd;
 
-  // Legacy flat-heuristic branch — preserved for existing P2 tests and
-  // any caller that explicitly opts into the cheap mode.
+  // Cheap flat-heuristic branch — opt-in via `avgInputTokensPerRaw`. Use
+  // when a raw-layer scan would cost more than the estimate it produces.
   if (options.avgInputTokensPerRaw !== undefined) {
     const rawCount =
       options.rawCountOverride ?? countRawNotes(join(workspace.root_path, "10_raw"));

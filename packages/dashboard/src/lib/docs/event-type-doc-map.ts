@@ -72,7 +72,7 @@ const EXACT: Record<string, string> = {
   // historical `agent_actions` rows that pre-date the retirement (or a
   // future re-introduction) still resolve to the morning-routine doc.
   "routine.morning_routine_initial": "features/routines/morning-routine",
-  // Phase 5 split keys — both stages route to the same operator-facing
+  // Stage A (today) and Stage B (journal) both surface under the
   // morning-routine doc.
   "routine.morning_routine_today": "features/routines/morning-routine",
   "routine.morning_routine_journal": "features/routines/morning-routine",

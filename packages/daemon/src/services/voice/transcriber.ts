@@ -66,12 +66,14 @@ const PLACEHOLDER_PHRASE_REGEX =
 // Bracketed/parenthesized fallback for meta-tokens we did not enumerate
 // above (e.g. `(***)`, `[♪♪♪]`, `(...)`). Uses Unicode property escapes so
 // the "no word characters" check is script-agnostic — the previous
-// hard-coded whitelist (`A-Za-zĀ-ſ぀-ヿ一-鿿Ѐ-ӿ֐-׿؀-ۿऀ-ॿ`) wrongly
-// flagged short bracketed transcripts in scripts it omitted (Korean,
-// Thai, Greek, Tamil, etc.) as placeholders, causing the cache to be
-// skipped and the message to fall back to a path-only file reference.
-// Trimming has already happened by the time we test, so the bracket
-// characters can be matched directly without an additional `\s` slot.
+// hard-coded whitelist (Latin + Latin-Extended-A + Hiragana/Katakana +
+// CJK Unified Ideographs + Cyrillic + Hebrew + Arabic + Devanagari)
+// wrongly flagged short bracketed transcripts in scripts it omitted
+// (Korean, Thai, Greek, Tamil, etc.) as placeholders, causing the cache
+// to be skipped and the message to fall back to a path-only file
+// reference. Trimming has already happened by the time we test, so the
+// bracket characters can be matched directly without an additional `\s`
+// slot.
 const BRACKETED_NON_LETTER_REGEX = /^[([][^\p{L}\p{N}]*[)\]]$/u;
 
 export function isWhisperPlaceholderOutput(text: string): boolean {

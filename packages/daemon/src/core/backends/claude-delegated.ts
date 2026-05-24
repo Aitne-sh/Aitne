@@ -211,12 +211,12 @@ export async function runDelegatedTool(
         // partial-result trace classifies as `no_tool_call` rather than
         // misleading `wrong_tool=ToolSearch`.
         //
-        // TODO(future): a cleaner architectural fix is to materialize a
-        // session-local `.mcp.json` containing only the relevant
-        // connector's MCP server and pass `strictMcpConfig: true` —
-        // that prevents deferral entirely (one MCP server → schemas fit
-        // in the working set). Punted because it requires extracting
-        // server configs from the user's global file per integration.
+        // Architectural alternative (punted): materialize a session-local
+        // `.mcp.json` containing only the relevant connector's MCP server
+        // and pass `strictMcpConfig: true` — that prevents deferral
+        // entirely (one MCP server → schemas fit in the working set).
+        // Not done because it requires extracting server configs from
+        // the user's global file per integration.
         allowedTools: [toolName, DEFERRED_TOOL_DISCOVERY_TOOL_NAME],
         // Defense-in-depth: even with allowedTools restricted to a tight
         // set, keep the absolute-block layer (rm -rf, sudo, secret file

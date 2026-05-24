@@ -35,10 +35,10 @@ const REVIEW_FLOW_BY_PROCESS_KEY: Record<string, ReviewFlowConfig> = {
     dossierPath: dossierPath("morning"),
     dossierLabel: "Morning dossier",
   },
-  // `routine.morning_routine_initial` retired by Phase 7 (2026-05-16);
-  // the first-run branch routes through `routine.morning_routine_today`
-  // below, which inherits the same dossier.
-  // morning-routine-optimization.md Phase 5 — Stage A inherits the
+  // `routine.morning_routine_initial` is retired; the first-run branch
+  // routes through `routine.morning_routine_today` below, which inherits
+  // the same dossier.
+  // Stage A inherits the
   // morning-routine review context (dossiers/morning.md + the morning
   // section of context-index.md). The task-flow body
   // (`routine.morning_routine_today.md`) refers to "the Vault review

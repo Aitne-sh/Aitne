@@ -193,8 +193,8 @@ export const ROUTINE_WINDOWS: Readonly<
     { kind: "calendar", window: "cal_morning_7d", perAccount: false },
     { kind: "notion", window: "updated_24h", perAccount: false },
   ],
-  // `routine.morning_routine_initial` retired by Phase 7 (2026-05-16);
-  // its plan was identical to `routine.morning_routine` above.
+  // `routine.morning_routine_initial` is retired — its plan was identical
+  // to `routine.morning_routine` above.
   "routine.today_refresh": [
     { kind: "calendar", window: "cal_next_24h_drift", perAccount: false },
   ],

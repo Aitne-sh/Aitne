@@ -33,6 +33,10 @@ keywords:
   - itinerary
   - trains
   - restaurants
+related:
+  - features/integrations/mail
+  - features/lifestyle/receipts
+  - features/routines/morning-routine
 ---
 
 # Travel Bookings

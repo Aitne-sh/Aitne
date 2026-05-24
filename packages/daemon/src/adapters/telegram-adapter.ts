@@ -79,8 +79,8 @@ export interface TelegramAdapterOptions {
    * applyConfigUpdates so the next restart still has the right owner.
    */
   onOwnerDetected?: (chatId: string) => void | Promise<void>;
-  /** Phase 2: canonical attachment store for inbound media download/ingest
-   *  and outbound file delivery. When absent, media is silently skipped. */
+  /** Canonical attachment store for inbound media download/ingest and
+   *  outbound file delivery. When absent, media is silently skipped. */
   attachmentStore?: AttachmentStore;
 }
 
@@ -127,10 +127,8 @@ interface MediaGroupEntry {
  * Group / supergroup traffic is intentionally ignored. This adapter is for
  * owner DMs only; Telegram group mentions are out of scope.
  *
- * Phase 3 — challenge-based pairing only.
- *
- * The adapter no longer has a "first DM wins" discovery mode. Pairing now
- * requires that the daemon register a {@link PairingChallenge} via
+ * Pairing is challenge-based: the daemon must register a
+ * {@link PairingChallenge} via
  * `startPairing()`; only inbound messages whose text passes the matcher
  * (e.g. `/start <random-token>` for QR pairing) capture the owner. This
  * closes the race where any unrelated DM during a 5-minute window could
@@ -185,7 +183,7 @@ export class TelegramAdapter implements MessageAdapter {
       { ttlMs: challenge.expiresAt - Date.now() },
       "telegram pairing challenge registered",
     );
-    // P2-20: TTL sweep — see SlackAdapter.startPairing for rationale.
+    // TTL sweep — see SlackAdapter.startPairing for rationale.
     const ttlMs = Math.max(0, challenge.expiresAt - Date.now());
     const sweep = setTimeout(() => {
       if (this.pairingChallenge === challenge) {
@@ -264,10 +262,9 @@ export class TelegramAdapter implements MessageAdapter {
       logger.warn({ err }, "telegram getMe failed during start");
     }
 
-    // Generic message handler — covers text, photo, document, audio, voice,
-    // video, etc. The Phase 1 text-only handler is replaced here so that
-    // media-with-caption messages (which do NOT fire the "text" event) are
-    // also captured.
+    // Subscribe to `message`, not `text` — media-with-caption messages
+    // don't fire `text` but do carry user content via `caption`, and a
+    // text-only handler would silently drop them.
     this.bot.on("message", async (ctx) => {
       await this.handleMessage(ctx).catch((err) => {
         logger.error({ err }, "telegram message handler threw");
@@ -408,7 +405,7 @@ export class TelegramAdapter implements MessageAdapter {
       // completes before pairing is acknowledged. cancelPairing only
       // fires on success — if the callback throws (e.g. .env unwritable)
       // the matcher stays armed so the user can retry by resending the
-      // phrase. See B-1.
+      // phrase.
       const ok = await this.captureOwner(channelId);
       if (ok) {
         this.cancelPairing();
@@ -758,8 +755,8 @@ export class TelegramAdapter implements MessageAdapter {
 
   /**
    * Atomically promote a chat ID to "owner" and notify the daemon. See
-   * slack-adapter.captureOwner for the full B-1 design rationale — the
-   * env/DB write must complete before we acknowledge pairing, and
+   * slack-adapter.captureOwner for the full rationale — the env/DB
+   * write must complete before we acknowledge pairing, and
    * mutableOwnerId rolls back if the callback throws so a daemon restart
    * doesn't silently lose the binding.
    */

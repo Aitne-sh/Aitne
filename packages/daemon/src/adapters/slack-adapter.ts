@@ -70,8 +70,8 @@ export interface SlackAdapterOptions {
   onMessage: OnMessageCallback;
   /** Called when a matching pairing challenge captures a new owner user ID. */
   onOwnerDetected?: (userId: string) => void | Promise<void>;
-  /** Phase 2: canonical attachment store for inbound media download/ingest
-   *  and outbound file delivery. When absent, media is silently skipped. */
+  /** Canonical attachment store for inbound media download/ingest and
+   *  outbound file delivery. When absent, media is silently skipped. */
   attachmentStore?: AttachmentStore;
 }
 
@@ -85,8 +85,8 @@ export interface SlackPairingChallenge {
   match: (text: string) => boolean;
   expiresAt: number;
   /**
-   * P2-23 — optional reply hint for the case where the inbound DM did NOT
-   * match the matcher but is recoverable with a small operator nudge
+   * Optional reply hint for the case where the inbound DM did NOT match
+   * the matcher but is recoverable with a small operator nudge
    * (e.g. the magic-phrase substring is present but wrapped in extra
    * prose). The adapter calls this AFTER the match check fails; a
    * non-null return becomes a DM reply on the sender's channel so the
@@ -102,8 +102,8 @@ export interface SlackPairingChallenge {
  * Listens for DMs and @mentions via Slack's Socket Mode (WebSocket).
  * Converts Slack events to MessageEvents and pushes them into the EventBus.
  *
- * Phase 3 — challenge-based pairing: an inbound DM only promotes its
- * sender to owner if the daemon has registered a {@link SlackPairingChallenge}
+ * Pairing is challenge-based: an inbound DM only promotes its sender to
+ * owner if the daemon has registered a {@link SlackPairingChallenge}
  * AND the message text satisfies the matcher. Otherwise the strict
  * owner-id filter applies and the message is dropped.
  */
@@ -148,7 +148,7 @@ export class SlackAdapter implements MessageAdapter {
       { ttlMs: challenge.expiresAt - Date.now() },
       "slack pairing challenge registered",
     );
-    // P2-20: schedule the matcher closure for active cleanup at TTL. The
+    // Schedule the matcher closure for active cleanup at TTL. The
     // matcher itself short-circuits past the TTL via `isPairingActive`
     // (security intact), but without this timer the closure (and any
     // captured magic-phrase normalization buffer) sticks around in memory
@@ -372,7 +372,7 @@ export class SlackAdapter implements MessageAdapter {
     if (message.channel_type === "mpim") {
       logger.debug(
         { channel: message.channel },
-        "slack message dropped: multi-person IM rejected (B-4)",
+        "slack message dropped: multi-person IM rejected",
       );
       return;
     }
@@ -400,7 +400,7 @@ export class SlackAdapter implements MessageAdapter {
         // `onOwnerDetected` completes before we acknowledge pairing.
         // `cancelPairing()` only fires on success — if the callback
         // throws (e.g. .env unwritable), the matcher stays armed so the
-        // user can retry by resending the phrase. See B-1.
+        // user can retry by resending the phrase.
         const ok = await this.captureOwner(senderId);
         if (ok) {
           this.cancelPairing();
@@ -411,7 +411,7 @@ export class SlackAdapter implements MessageAdapter {
         // on the phrase itself.
         return;
       }
-      // P2-23: matcher rejected but the input may be a wrapped magic
+      // Matcher rejected but the input may be a wrapped magic
       // phrase. Send a hint so the legitimate user can correct rather
       // than getting silence indistinguishable from an attacker's wrong
       // guess. Best-effort: a send failure is logged but never bubbles.
@@ -584,7 +584,7 @@ export class SlackAdapter implements MessageAdapter {
    * restart would lose the binding and the user would think the pair
    * succeeded. Returns `true` on success so the caller can decide
    * whether to `cancelPairing()` (success) or keep the matcher armed
-   * for retry (failure). See B-1 in the pre-release audit.
+   * for retry (failure).
    */
   private async captureOwner(userId: string): Promise<boolean> {
     const previousOwnerId = this.mutableOwnerId;

@@ -619,6 +619,16 @@ export class ContextBuilder implements IContextBuilder {
             prepassCovers: true,
           }),
         );
+        // daily-journal-daemon-write.md §4.10 — Stage B has zero tool
+        // requirement, so the browser-history digest is fetched
+        // daemon-side by the orchestrator's `buildBrowserDigestBlock`
+        // and forwarded verbatim through `event.data.browserDigestBlock`.
+        // Block is omitted silently when browser-history is `disabled`
+        // or the digest is unavailable for both the file-first and the
+        // in-process fallback paths.
+        if (typeof event.data?.browserDigestBlock === "string") {
+          sections.push(event.data.browserDigestBlock);
+        }
       } else if (event.routine === "roadmap_refresh") {
         const [roadmapMd, activeProjects] = await Promise.all([
           this.readFile("roadmap.md"),

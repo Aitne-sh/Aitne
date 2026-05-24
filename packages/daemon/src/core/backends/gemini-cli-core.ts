@@ -600,8 +600,8 @@ export class GeminiCliCore implements IAgentCore {
     // and therefore can never contain a native CLI skill tool we did
     // not register). The `gemini --help` subcommand probe below is the
     // real detector: `gemini --help` already lists `gemini skills`
-    // natively (verified 2026-05-15), so this is the call site that
-    // will trip on first deploy and surface the cleanup follow-up PR.
+    // natively, so this is the call site that will trip on first deploy
+    // and need cleanup.
     noteNativeSkillToolIfPresent("gemini", deduped);
     void probeCliNativeSkillSubcommand(this.cliPath, "gemini");
     return deduped;

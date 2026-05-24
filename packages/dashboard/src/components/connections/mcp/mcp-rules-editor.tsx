@@ -156,8 +156,8 @@ function LoadedEditor({
 
   const dirty = draft !== baseline.content;
 
-  // B-003 Phase 4 — stale-rule detection. Run against the draft (not the
-  // saved baseline) so the warnings update live as the user edits. A rule
+  // Stale-rule detection runs against the draft (not the saved baseline)
+  // so warnings update live as the user edits. A rule
   // that becomes stale only after save still shows up because `draft`
   // equals the baseline in that state.
   const staleWarnings = useMemo<McpStaleRuleWarning[]>(() => {

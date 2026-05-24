@@ -1123,7 +1123,7 @@ export class AuthRecovery {
         logger.info({ backendId }, "Auth recovery succeeded");
       } else {
         // Write `expired` back — the recovering subprocess no longer
-        // owns the row. Uses FIRST_EXPIRED_CASE_SQL (M4 fix) so that
+        // owns the row. Uses FIRST_EXPIRED_CASE_SQL so that
         // `auth_first_expired_at` is preserved from the pre-recovery
         // state (the ELSE/COALESCE branch handles `recovering` →
         // `expired`). The `WHERE auth_status = 'recovering'` guard

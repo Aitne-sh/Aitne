@@ -536,9 +536,8 @@ export class MessageHandler {
           // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 row 1
           // (cancellation table). The user sent something that is
           // neither the exact token, the `!verify` slash, nor the
-          // `!cancel-purchase` slash. Per the strict rule the user
-          // accepted in rev3 ("それ以外が送られた場合は、決済を取り消しする"),
-          // any non-token reply on a channel with pending tokens
+          // `!cancel-purchase` slash. Per the strict rule accepted in
+          // rev3, any non-token reply on a channel with pending tokens
           // cancels every such token. The cancel runs BEFORE
           // forwarding the message on to the bang interceptor / LLM
           // so the user sees the cancellation follow-up DM before any
@@ -570,7 +569,7 @@ export class MessageHandler {
     // Bang-command interceptor — runs first so `!stop` / `!cost` / `!report`
     // succeed even mid-setup, mid-auth-recovery, etc., and so non-bang DMs
     // received while the agent is paused short-circuit before reaching the
-    // backend (I-3). See docs/design/backlog/messaging-bang-commands.md §6.2.
+    // backend. See docs/design/backlog/messaging-bang-commands.md §6.2.
     const bangCommandRegistry = this.getBangCommandRegistry();
     if (bangCommandRegistry) {
       const handled = await tryHandleBangCommand(bangCommandRegistry, {
@@ -1096,7 +1095,7 @@ export class MessageHandler {
           });
         }
         const resumeTranscripts = await this.prompt.transcribeAttachments(resumeStaged);
-        // P2-13: surface adapter-reported missing attachments (e.g. expired
+        // Surface adapter-reported missing attachments (e.g. expired
         // Discord CDN URLs) so the agent sees a stub describing the file
         // even when the bytes were unreachable.
         const resumeMissing = isMessageEvent(event)

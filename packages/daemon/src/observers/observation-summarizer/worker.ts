@@ -88,10 +88,9 @@ export class ObservationSummarizerWorker implements Observer {
   private readonly callTimestamps: number[] = [];
 
   // Throttle the auth_missing warning. Without this guard every pending
-  // observation produces a "Summarizer LLM call failed" log line (33
-  // entries in the user's production logs on 2026-05-22 across a single
-  // morning), drowning real signals. The actionable info — "no API key
-  // is configured" — only needs to be surfaced once per cooldown window.
+  // observation produces a "Summarizer LLM call failed" log line, drowning
+  // real signals. The actionable info — "no API key is configured" —
+  // only needs to be surfaced once per cooldown window.
   private lastAuthMissingWarnAt = 0;
   private static readonly AUTH_MISSING_WARN_COOLDOWN_MS = 5 * 60_000;
 

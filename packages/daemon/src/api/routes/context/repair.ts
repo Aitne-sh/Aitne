@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomically } from "../../../core/atomic-write.js";
+import { serializeContextFileWrite } from "../../../core/context-file-serializer.js";
 import {
   REPAIRABLE_STUB_TARGETS,
   normalizeRepairStubPath,
@@ -28,7 +29,6 @@ export function registerRepairRoutes(
   const {
     deps,
     getCurrentContextDir,
-    withWriteLock,
     readOptionalJsonBody,
   } = ctx;
   const { config, writeTracker } = deps;
@@ -99,7 +99,7 @@ export function registerRepairRoutes(
       ]);
     }
 
-    return withWriteLock(() => {
+    return serializeContextFileWrite(fullPath, () => {
       if (existsSync(fullPath)) {
         const existingStat = statSync(fullPath);
         return c.json({

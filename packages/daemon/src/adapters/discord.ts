@@ -65,8 +65,8 @@ export interface DiscordAdapterOptions {
   onMessage: OnMessageCallback;
   /** Called when a matching pairing challenge captures a new owner user ID. */
   onOwnerDetected?: (userId: string) => void | Promise<void>;
-  /** Phase 2: canonical attachment store for inbound media download/ingest
-   *  and outbound file delivery. When absent, media is silently skipped. */
+  /** Canonical attachment store for inbound media download/ingest and
+   *  outbound file delivery. When absent, media is silently skipped. */
   attachmentStore?: AttachmentStore;
 }
 
@@ -78,7 +78,7 @@ export interface DiscordAdapterOptions {
 export interface DiscordPairingChallenge {
   match: (text: string) => boolean;
   expiresAt: number;
-  /** P2-23 — see SlackPairingChallenge.hintReply. */
+  /** See SlackPairingChallenge.hintReply. */
   hintReply?: (text: string) => string | null;
 }
 
@@ -145,7 +145,7 @@ export class DiscordAdapter implements MessageAdapter {
       { ttlMs: challenge.expiresAt - Date.now() },
       "discord pairing challenge registered",
     );
-    // P2-20: TTL sweep — see SlackAdapter.startPairing for rationale.
+    // TTL sweep — see SlackAdapter.startPairing for rationale.
     const ttlMs = Math.max(0, challenge.expiresAt - Date.now());
     const sweep = setTimeout(() => {
       if (this.pairingChallenge === challenge) {
@@ -368,16 +368,15 @@ export class DiscordAdapter implements MessageAdapter {
     if (data.author?.bot) return;
 
     // channel_type 1 = DM, 3 = GroupDM. Guild text channels are 0 etc.
-    // B-4: reject GroupDM (type 3) outright. The earlier logic let it
-    // fall through the !isDm + isMention path, so owner @-mentions in a
-    // GroupDM would emit agent replies into a channel visible to
-    // non-owner participants — violating the single-owner scope
-    // invariant in CLAUDE.md. We block the entire packet here, before
-    // any pairing or owner check.
+    // Reject GroupDM (type 3) outright. Otherwise the !isDm + isMention
+    // path would emit agent replies into a channel visible to non-owner
+    // participants — violating the single-owner scope invariant in
+    // CLAUDE.md. Block the entire packet here, before any pairing or
+    // owner check.
     if (data.channel_type === 3) {
       logger.debug(
         { channel: data.channel_id },
-        "discord message dropped: GroupDM rejected (B-4)",
+        "discord message dropped: GroupDM rejected",
       );
       return;
     }
@@ -405,7 +404,7 @@ export class DiscordAdapter implements MessageAdapter {
         // completes before pairing is acknowledged. cancelPairing only
         // fires on success — if the callback throws (e.g. .env unwritable)
         // the matcher stays armed so the user can retry by resending the
-        // phrase. See B-1.
+        // phrase.
         const ok = await this.captureOwner(authorId);
         if (ok) {
           this.cancelPairing();
@@ -470,7 +469,7 @@ export class DiscordAdapter implements MessageAdapter {
               { status: res.status, filename: att.filename },
               "discord file download failed",
             );
-            // P2-13: Discord CDN URLs expire after ~24h. If the daemon is
+            // Discord CDN URLs expire after ~24h. If the daemon is
             // late picking up a DM (queue, restart, throttle), the URL is
             // already dead. Surface a sentinel so the agent prompt can
             // include "attachment couldn't be fetched — please resend"
@@ -555,8 +554,8 @@ export class DiscordAdapter implements MessageAdapter {
 
   /**
    * Atomically promote a user ID to "owner" and notify the daemon. See
-   * slack-adapter.captureOwner for the full B-1 design rationale —
-   * pairing must persist through env/DB before we acknowledge it, and
+   * slack-adapter.captureOwner for the full rationale — pairing must
+   * persist through env/DB before we acknowledge it, and
    * mutableOwnerId rolls back if the callback throws.
    */
   private async captureOwner(userId: string): Promise<boolean> {

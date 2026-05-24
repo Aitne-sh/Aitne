@@ -149,8 +149,8 @@ export interface WhatsAppAdapterOptions {
   authDir: string;
   onMessage: OnMessageCallback;
   onLoggedOut?: () => Promise<void> | void;
-  /** Phase 2: canonical attachment store for inbound media download/ingest
-   *  and outbound file delivery. When absent, media is silently skipped. */
+  /** Canonical attachment store for inbound media download/ingest and
+   *  outbound file delivery. When absent, media is silently skipped. */
   attachmentStore?: AttachmentStore;
 }
 
@@ -251,8 +251,7 @@ function unwrapWhatsAppMessage(
 
 /**
  * WhatsAppAdapter — Baileys-based owner-only WhatsApp DM integration.
- *
- * Phase 1 accepts messages from exactly one configured owner JID.
+ * Accepts messages from exactly one configured owner JID.
  */
 export class WhatsAppAdapter implements MessageAdapter {
   readonly platformName = "whatsapp";
@@ -398,7 +397,7 @@ export class WhatsAppAdapter implements MessageAdapter {
   }
 
   async requestQR(): Promise<void> {
-    // P2-11: a fresh `connect()` from a `logged_out` state cannot succeed
+    // A fresh `connect()` from a `logged_out` state cannot succeed
     // — WhatsApp's relays reject the same auth bundle and the adapter
     // bounces straight back to `logged_out`. Worse, retrying repeatedly
     // is the fast path to an IP-level rate limit. Surface the terminal
@@ -499,7 +498,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    // P2-09: cancel any presence-refresh interval still in flight so
+    // Cancel any presence-refresh interval still in flight so
     // sendPresence("composing") doesn't keep firing against the torn-down
     // socket. The closure inside beginProcessingIndicator owns its `stopped`
     // flag, so a subsequent stop() from the indicator's own caller is a
@@ -666,7 +665,7 @@ export class WhatsAppAdapter implements MessageAdapter {
     };
 
     await sendPresence("composing");
-    // P2-09: clear any previously-active interval before claiming the slot.
+    // Clear any previously-active interval before claiming the slot.
     // The dispatcher invariant is "one indicator at a time per channel",
     // so this branch only triggers if a prior indicator's stop() was
     // skipped (e.g. crashed callsite); cancelling defensively is cheap
@@ -802,7 +801,6 @@ export class WhatsAppAdapter implements MessageAdapter {
         (baileys.generateMessageIDV2 as (userId?: string) => string)();
     }
 
-    // Phase 2 inbound media download helper.
     if (typeof baileys.downloadMediaMessage === "function") {
       this.downloadMediaMessage = baileys.downloadMediaMessage;
     /* v8 ignore next 3 — null branch only reachable with a Baileys build that omits this helper */
@@ -973,7 +971,7 @@ export class WhatsAppAdapter implements MessageAdapter {
         : {}),
     });
     this.sock = sock;
-    // P2-10: clear the self-echo dedup set on every fresh socket. WAMessage
+    // Clear the self-echo dedup set on every fresh socket. WAMessage
     // ids are unique per session, so any id left over from the previous
     // socket would mis-classify an incoming message as our own echo if (in
     // practice, never) WhatsApp redelivered it on the new socket. More

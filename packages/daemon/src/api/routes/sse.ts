@@ -180,9 +180,9 @@ export function createSSERoutes(deps: {
         deps.rebindSessionChannel(resolvedResume.sessionId, channelId);
       }
 
-      // P2-19: pass `client` so the adapter removes only THIS tab's SSE
-      // entry. Today each tab gets a unique channelId so it's equivalent
-      // to a full delete; this guards a future change that lets multiple
+      // Pass `client` so the adapter removes only THIS tab's SSE entry.
+      // Today each tab gets a unique channelId so it's equivalent to a
+      // full delete; this guards a future change that lets multiple
       // tabs share a channelId (e.g. session-shared fan-out) from
       // accidentally reaping every tab when one disconnects.
       stream.onAbort(() => {

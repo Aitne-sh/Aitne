@@ -38,7 +38,7 @@ export interface WikiWorkspaceRow {
   bridge_measurement_only: number;
   bridge_min_confidence: number;
   full_compile_approval_threshold_usd: number;
-  // WIKI_BUILDER_DESIGN.md §P2.A — added in Phase 2.
+  // WIKI_BUILDER_DESIGN.md §P2.A — per-workspace strategy for compile writes.
   write_strategy: "fs" | "cli" | "auto";
   git_pre_compile_enabled: number;
   schema_version: number;

@@ -48,7 +48,7 @@ export interface DocsQAScopeOptions {
    * the time the adapter sees this field both fields are guaranteed
    * to round-trip cleanly through `requestedBackendId` /
    * `requestedModelId` on the MessageEvent. The dispatcher's hard-
-   * override path (`backend-router.ts:618`) then routes the turn on
+   * override path (see `backend-router.ts`) then routes the turn on
    * the picked model regardless of `process_backend_config` pins.
    */
   modelOverride?: {
@@ -59,7 +59,7 @@ export interface DocsQAScopeOptions {
 
 /**
  * DocsQAAdapter — SSE-based MessageAdapter for the operator-facing
- * Docs Q&A panel (DOCS_QA_B7_DESIGN.md §3.2).
+ * Docs Q&A panel (see DOCS_QA_B7_DESIGN.md).
  *
  * Parallel to `DashboardAdapter`: same SSE/HTTP transport, same
  * dispatcher entry point, but a separate channel registry and a
@@ -71,10 +71,10 @@ export interface DocsQAScopeOptions {
  * Implements:
  *   - `IDashboardStream`: dispatcher fans outbound calls out to this
  *     adapter via `CompositeDashboardStream`. The streaming validator
- *     splice lives inside `sendStreamChunk` per §11.3. The
- *     persistence-side `validateAndRewrite` runs in the dispatcher
- *     (gated on `isDocsQAMessage(event)` per §11.1) — not here — so
- *     this adapter never sees the full assembled output.
+ *     splice lives inside `sendStreamChunk`. The persistence-side
+ *     `validateAndRewrite` runs in the dispatcher (gated on
+ *     `isDocsQAMessage(event)`) — not here — so this adapter never
+ *     sees the full assembled output.
  *   - `MessageAdapter`: registered with `MessageHub` so the standard
  *     adapter lifecycle (`start`/`stop`) and `notificationEligible`
  *     contract apply. `sendMessage` is required by the interface but
@@ -109,12 +109,11 @@ export class DocsQAAdapter implements MessageAdapter, IDashboardStream {
   /**
    * Register a new SSE client. Mints a `channelId`, emits the initial
    * `session_info` event so the dashboard knows the id to echo on
-   * subsequent POSTs (D5 — SSE-first channelId minting), and returns
-   * the id for the route's `onAbort` to unregister with.
+   * subsequent POSTs, and returns the id for the route's `onAbort` to
+   * unregister with.
    *
-   * No `resumeSessionId` parameter (§11.6): QA panel state lives in
-   * React state in-memory; the panel does not persist transcripts
-   * across reload.
+   * No `resumeSessionId` parameter: QA panel state lives in React state
+   * in-memory; the panel does not persist transcripts across reload.
    */
   registerClient(client: SSEClient): string {
     const channelId = randomUUID();
@@ -153,7 +152,7 @@ export class DocsQAAdapter implements MessageAdapter, IDashboardStream {
    * Translate an HTTP POST into a `MessageEvent` and feed it to the
    * dispatcher. Forces `intent: "docs_qa"`, `platform: "dashboard"`,
    * `isDm: true` regardless of the body — the route already guarded
-   * the body shape; this is the second forced-fields layer per §3.3.
+   * the body shape; this is the second forced-fields layer.
    */
   handleIncomingMessage(
     channelId: string,
@@ -208,9 +207,10 @@ export class DocsQAAdapter implements MessageAdapter, IDashboardStream {
   /**
    * Forward a streaming text delta through the per-channel citation
    * validator and emit the validated suffix. Unknown channelIds
-   * silently no-op (matches `dashboard-adapter.ts:211-218`) so the
-   * `CompositeDashboardStream` fan-out works without per-channel
-   * ownership tracking — only the adapter that owns the id emits.
+   * silently no-op (matches `dashboard-adapter.ts`'s unknown-channel
+   * no-op) so the `CompositeDashboardStream` fan-out works without
+   * per-channel ownership tracking — only the adapter that owns the
+   * id emits.
    */
   sendStreamChunk(channelId: string, chunk: string): void {
     const entry = this.clients.get(channelId);

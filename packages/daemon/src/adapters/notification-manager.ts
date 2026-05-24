@@ -27,14 +27,13 @@ const SAFETY_CATEGORIES = [
  * Default bounded-retry shape for `deliverReply`. Sized so the operator's
  * worst-case wait for an acknowledged DM is small (~600 ms across two
  * backoffs at 200 ms + 400 ms) while still smoothing over the transient
- * 5xx / socket-reset class of platform failures that the pre-M4 code path
- * silently swallowed.
+ * 5xx / socket-reset class of platform failures.
  */
 const DEFAULT_REPLY_RETRY_ATTEMPTS = 3;
 const DEFAULT_REPLY_RETRY_BACKOFF_BASE_MS = 200;
 
 /**
- * P2-15 per-type rate limit. Sized to allow legitimate bursts of the same
+ * Per-type rate limit. Sized to allow legitimate bursts of the same
  * notification type (e.g. three rapid-fire calendar updates) but stop a
  * stuck-loop emitter from monopolising the global budget. 3 deliveries
  * per 5 minutes per `event.type` matches the upper bound observed in
@@ -110,15 +109,14 @@ export class NotificationManager implements INotificationManager {
   /** Per-`event.type` timestamp of the last actual delivery (ms since epoch). */
   private readonly lastDeliveryAtMs = new Map<string, number>();
   /**
-   * P2-15 — per-event-type rate limiter. A misbehaving emitter for one
-   * event type used to consume the global `maxNotificationsPerHour`
-   * budget and silently starve unrelated notifications. We now also
-   * track a smaller per-type ring buffer of recent delivery timestamps;
-   * if a type exceeds {@link PER_TYPE_RATE_LIMIT} within
-   * {@link PER_TYPE_RATE_WINDOW_MS}, further sends of THAT type are
-   * dropped (logged) without consuming the global budget. Safety
-   * categories (`security`/`deadline`/`error`/`critical`) bypass this
-   * gate as they do the global one.
+   * Per-event-type rate limiter. Tracks a per-type ring buffer of recent
+   * delivery timestamps; if a type exceeds {@link PER_TYPE_RATE_LIMIT}
+   * within {@link PER_TYPE_RATE_WINDOW_MS}, further sends of THAT type are
+   * dropped (logged) without consuming the global budget. Without this
+   * gate, a misbehaving emitter for one event type can monopolise the
+   * global `maxNotificationsPerHour` budget and silently starve unrelated
+   * notifications. Safety categories (`security`/`deadline`/`error`/
+   * `critical`) bypass this gate as they do the global one.
    */
   private readonly perTypeDeliveryWindow = new Map<string, number[]>();
   /**
@@ -144,8 +142,8 @@ export class NotificationManager implements INotificationManager {
     // Defensive clamp: a misconfigured `replyRetryAttempts <= 0` would
     // turn `deliverReply` into a no-op (the for-loop body never runs)
     // and silently break every DM reply. Clamp to a minimum of 1 so the
-    // worst legitimate misconfiguration is "no retries, same as the
-    // pre-M4 contract" rather than "no delivery at all".
+    // worst legitimate misconfiguration is "no retries" rather than "no
+    // delivery at all".
     this.replyRetryAttempts = Math.max(
       1,
       options.replyRetryAttempts ?? DEFAULT_REPLY_RETRY_ATTEMPTS,
@@ -269,13 +267,12 @@ export class NotificationManager implements INotificationManager {
    * Direct reply to a MessageEvent — bypasses quiet-hours, rate-limits,
    * and batching.
    *
-   * M4 (release-prep): bounded retry with exponential backoff to absorb
-   * the transient platform-failure class (Slack 5xx, socket reset, WA
-   * relay flap). The previous one-shot path silently swallowed those
-   * errors, leaving the user with no acknowledgement of their DM while
-   * `agent_actions` showed the turn as completed — the most common
-   * user-visible symptom was "agent feels stuck; user resends; agent
-   * double-runs the same turn".
+   * Bounded retry with exponential backoff absorbs the transient
+   * platform-failure class (Slack 5xx, socket reset, WhatsApp relay flap).
+   * Without it, a one-shot path silently swallows those errors and leaves
+   * the user with no acknowledgement of their DM while `agent_actions`
+   * shows the turn as completed — the symptom is "agent feels stuck;
+   * user resends; agent double-runs the same turn".
    *
    * Final-fallback contract: when the originating platform refuses
    * every attempt, we route the same payload through the proactive
@@ -457,8 +454,8 @@ export class NotificationManager implements INotificationManager {
       return;
     }
 
-    // P2-15: per-event-type secondary gate. Runs AFTER the global limiter
-    // so suppression order is consistent (global → per-type). A burst of
+    // Per-event-type secondary gate. Runs AFTER the global limiter so
+    // suppression order is consistent (global → per-type). A burst of
     // the same type cannot starve unrelated notifications by exhausting
     // the global budget alone — both gates have to allow the send.
     if (!isSafety && this.isTypeRateLimited(event.type)) {
@@ -682,7 +679,7 @@ export class NotificationManager implements INotificationManager {
       const dueAt = lastMs + intervalMs;
       if (dueAt < earliest) earliest = dueAt;
     }
-    // P2-17: if quiet hours are currently active, push the next flush
+    // If quiet hours are currently active, push the next flush
     // attempt to the wall-clock moment they end. Without this guard,
     // `flushBatches` would fire on the cooldown timer, hit `isQuietHours()`
     // inside `deliverProactive`, and log the queued batch as `suppressed`
@@ -746,8 +743,8 @@ export class NotificationManager implements INotificationManager {
   }
 
   /**
-   * P2-17 helper. Returns ms-since-epoch when the current quiet-hours
-   * window ends, or null when quiet hours are not active. Used by
+   * Returns ms-since-epoch when the current quiet-hours window ends, or
+   * null when quiet hours are not active. Used by
    * {@link scheduleBatchFlush} to defer pending batches past the
    * quiet-hours boundary so they actually deliver instead of being
    * suppressed at flush time. Walks forward minute-by-minute (capped at
@@ -829,7 +826,7 @@ export class NotificationManager implements INotificationManager {
   }
 
   /**
-   * P2-15 per-type gate. True when this event type has hit
+   * Per-type gate. True when this event type has hit
    * {@link PER_TYPE_RATE_LIMIT} deliveries in the trailing
    * {@link PER_TYPE_RATE_WINDOW_MS}. Trims expired timestamps inline so
    * the ring buffer stays bounded.

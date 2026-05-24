@@ -310,11 +310,12 @@ function validateAgentActionPlan(
       continue;
     }
     if (inPreparationTimeline && line.startsWith("- ") && !PREP_ROW_RE.test(line)) {
-      // 2026-05 cost-spike fix: the bare "Malformed Preparation Timeline
-      // row" message gave the agent zero signal about which part of the
-      // row was wrong, so a roadmap_refresh session retried the PUT 8x
-      // before timing out. Embed the canonical shape + the failing line
-      // verbatim so the agent can spot the diff on the next turn.
+      // Without a precise error envelope, the bare "Malformed Preparation
+      // Timeline row" message gives the agent zero signal about which
+      // part of the row was wrong, so a roadmap_refresh session retries
+      // the PUT until it times out. Embed the canonical shape + the
+      // failing line verbatim so the agent can spot the diff on the next
+      // turn.
       //
       // Truncate the received line at 200 chars so a pathological line
       // doesn't blow up the error response.

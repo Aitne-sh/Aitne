@@ -160,7 +160,7 @@ lives under `PA_DATA_DIR`, **not** inside the repo.
 │   ├── rules/                # Management registry + policies index
 │   └── …
 ├── logs/                     # Daemon and dashboard logs
-└── pids/                     # Process IDs for aitne start/stop
+└── run/                      # Process IDs for aitne start/stop (daemon.pid, dashboard.pid)
 ```
 
 ## Related

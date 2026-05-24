@@ -198,7 +198,6 @@ export function extractLogParts(args: unknown[]): {
 } {
   if (args.length === 0) return { message: "", data: {} };
 
-  // Single argument
   if (args.length === 1) {
     if (typeof args[0] === "string") return { message: args[0], data: {} };
     if (typeof args[0] === "object" && args[0] !== null) {

@@ -7,8 +7,8 @@ interface SendMessageResult {
 /**
  * Outbound attachment reference — handed to an adapter's `sendMessage` when
  * the agent has generated one or more files during the turn. Each platform
- * adapter translates this into its native upload flow. Phase 1 only wires
- * the Dashboard adapter; other adapters ignore the field until Phase 2.
+ * adapter translates this into its native upload flow. Adapters that have
+ * not yet implemented attachment delivery ignore this field.
  */
 export interface OutboundAttachmentRef {
   id: string;
@@ -70,7 +70,7 @@ export interface MessageAdapter {
     threadId?: string;
     /** Outbound files produced by the agent during this turn. Adapters
      *  that have not yet implemented attachment delivery ignore this
-     *  field; Phase 1 wires only the Dashboard adapter. */
+     *  field. */
     attachments?: OutboundAttachmentRef[];
   }): Promise<SendMessageResult | void>;
 

@@ -83,6 +83,7 @@ import { refreshInterestsReflection } from "../services/browser-history/refresh-
 import { InterestsReflectionLockBusyError } from "../services/browser-history/interests-reflection-lock.js";
 import { findSectionLineBounds } from "./roadmap-validate.js";
 import { writeFileAtomically } from "./atomic-write.js";
+import { serializeContextFileWrite } from "./context-file-serializer.js";
 import {
   getRepository,
   getRepositoryByLocalPath,
@@ -1564,24 +1565,34 @@ export class ScheduledTaskRunner {
    * Best-effort: any FS failure is logged and swallowed.
    */
   private appendWeeklyInterestsJournalLine(message: string): void {
-    try {
-      // Same `this.db` thread-through as the pre-hook — keep the
-      // journal write in the same file tree the reflection writes to.
-      const contextDir = getContextDir(this.config, this.db);
-      const journalPath = join(
-        contextDir,
-        CONTEXT_RELATIVE_PATHS.agent.journal,
-      );
-      const now = new Date();
-      const tz = this.config.timezone ? this.config.timezone : undefined;
-      const dayStr = getAgentDayDateStr(
-        tz,
-        this.config.dayBoundaryHour ?? 4,
-        now,
-      );
-      const hm = formatJournalTime(now, tz);
-      const bullet = `- ${dayStr} ${hm}: ${message}`;
+    // Same `this.db` thread-through as the pre-hook — keep the
+    // journal write in the same file tree the reflection writes to.
+    const contextDir = getContextDir(this.config, this.db);
+    const journalPath = join(
+      contextDir,
+      CONTEXT_RELATIVE_PATHS.agent.journal,
+    );
+    const now = new Date();
+    const tz = this.config.timezone ? this.config.timezone : undefined;
+    const dayStr = getAgentDayDateStr(
+      tz,
+      this.config.dayBoundaryHour ?? 4,
+      now,
+    );
+    const hm = formatJournalTime(now, tz);
+    const bullet = `- ${dayStr} ${hm}: ${message}`;
 
+    // Fire-and-forget through the per-path serializer so the read AND
+    // the write run inside the daemon-wide write fence on
+    // `agent/journal.md`. Mirrors the roadmap-maintenance journal-line
+    // appender — without the fence, two concurrent journal appenders
+    // (this one, the morning routine, or an HTTP PATCH) would read the
+    // same pre-state and the loser's bullet would be silently dropped.
+    //
+    // The journal line is a best-effort trace — never fail the pre-hook
+    // on a journal write hiccup. The structured log is sufficient for
+    // daemon-log triage.
+    void serializeContextFileWrite(journalPath, () => {
       const original = existsSync(journalPath)
         ? readFileSync(journalPath, "utf-8")
         : null;
@@ -1608,15 +1619,12 @@ export class ScheduledTaskRunner {
         this.writeTracker?.unmark(journalPath);
         throw writeErr;
       }
-    } catch (err) {
-      // The journal line is a best-effort trace — never fail the
-      // pre-hook on a journal write hiccup. The structured log is
-      // sufficient for daemon-log triage.
+    }).catch((err: unknown) => {
       logger.error(
         { err },
         "Failed to append weekly interests journal line",
       );
-    }
+    });
   }
 }
 

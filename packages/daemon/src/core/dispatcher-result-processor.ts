@@ -155,6 +155,17 @@ export class ResultProcessor {
         refetchedToday: boolean;
         triggerMatched: boolean;
       };
+      /**
+       * docs/design/appendices/daily-journal-daemon-write.md §4.11 —
+       * daily journal compose outcome for Stage B
+       * (`routine.morning_routine_journal`). Threaded through the
+       * orchestrator's `persistStageAuditRows` so `detail.dailyWrite`
+       * lands on the same INSERT/UPSERT the result-processor's
+       * `audit.logAction` call performs. Optional on all other event
+       * types (and absent on Stage A); the audit logger skips the
+       * field when null/undefined.
+       */
+      dailyWrite?: import("./dispatcher-types.js").DailyWriteAuditDetail | null;
     } = {},
   ): Promise<void> {
     // Notify-dedup: consume the marker (if present) so this method also
@@ -311,6 +322,7 @@ export class ResultProcessor {
       contextUpdated: result.contextUpdated,
       advisorCallCount: result.advisorCallCount,
       ...(options.dmFreshness ? { dmFreshness: options.dmFreshness } : {}),
+      ...(options.dailyWrite ? { dailyWrite: options.dailyWrite } : {}),
     });
     // Observer-event observability: log whether an external-change
     // event actually produced a context-file update. Makes it obvious

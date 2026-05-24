@@ -45,6 +45,10 @@ ui_anchors:
   - /knowledge
   - /connections/mcp
   - /settings/self-learning
+config_keys:
+  - skillCurationEnabled
+  - allowedToolsOverride
+  - disallowedTools
 ---
 
 # Skills

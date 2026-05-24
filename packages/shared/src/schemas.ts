@@ -265,7 +265,7 @@ export const scheduleUpdateRequestSchema = z.object({
 export const scheduleDmRequestSchema = z.object({
   time: z.string(), // ISO8601 with timezone
   message: z.string().min(1, "Message cannot be empty"),
-  platform: notificationPlatformSchema.optional(), // temporary singular form
+  platform: notificationPlatformSchema.optional(), // legacy singular field — new callers should send platforms[]
   platforms: z.array(notificationPlatformSchema).optional(),
   importance: z.enum(["transient", "normal", "strategic"]).optional(),
 }).refine(

@@ -666,23 +666,12 @@ const API_RISK: Record<string, RiskTier> = {
   // misuse can falsify the cached features map until the next live probe
   // overwrites it. Same trust level as the mode flip above.
   "POST /api/integrations/{*}/probe": RiskTier.Approve,
-  // RESERVED — POST /api/integrations/{*}/invoke
-  //
-  // The route handler was retired 2026-05-01 (/exec-only migration) and
-  // the stub file `routes/integrations/invoke.ts` was removed in the
-  // api-route-decomposition.md PR-5 follow-up. The dormant handler body
-  // lives in git history (`git log -- packages/daemon/src/api/routes/integrations.ts`
-  // before the split, then `git log -- packages/daemon/src/api/routes/integrations/invoke.ts`
-  // before its removal). Risk-classifier entries are keyed on the route
-  // pattern, and a request to an unmounted route never reaches this map.
-  // The classification is preserved here so a future reactivation lands
-  // back at the same tier without re-deriving it.
-  //
-  // Original rationale: Autonomous — the agent calls freely from
-  // cross-backend skill prose, and the user's `deniedTools` setting is
-  // the chokepoint enforced inside the handler. Approve is reserved
-  // for daemon-config posture changes (§4.5.2); tool-level safety
-  // stays at the deny list.
+  // RESERVED — POST /api/integrations/{*}/invoke. The route is unmounted
+  // today (superseded by /exec). The classification is preserved
+  // commented-out so a future reactivation lands back at Autonomous tier
+  // without re-deriving the rationale: the agent calls freely from
+  // cross-backend skill prose and the user's `deniedTools` is the
+  // chokepoint; Approve is reserved for daemon-config posture changes.
   // "POST /api/integrations/{*}/invoke": RiskTier.Autonomous,
   // delegated-sync opt-in surface
   // (docs/design/appendices/delegated-sync-opt-in.md). Approve tier:
@@ -717,19 +706,12 @@ const API_RISK: Record<string, RiskTier> = {
   // user-curated deny list is the safety floor.
   "POST /api/delegated/run": RiskTier.Approve,
 
-  // ── Admin / dashboard surfaces (post-audit baseline 2026-04-29) ──
-  // Until `auditRiskClassifications` landed, every entry below would
-  // fall through to the conservative Approve default. The audit then
-  // surfaced 33 such routes at boot — useful as a one-time triage but
-  // noisy as a recurring warning. Listing each surface explicitly
-  // here pins the audit's fingerprint to "0 unclassified" so a single
-  // future regression (the next `roadmap/id`-style oversight) shows
-  // up as exactly one new line, not buried in a 33-row baseline.
-  //
-  // Every entry is Approve by intent (not by default fallback). None
-  // of these routes are agent-callable: secrets / messaging-pairing /
-  // backend-config / dashboard polling are all Bearer-gated UI or
-  // admin operations.
+  // ── Admin / dashboard surfaces ──
+  // Routes below are Approve by intent, not by fallback. Pinning them
+  // explicitly keeps `auditRiskClassifications` at zero so a future
+  // regression surfaces as exactly one new line. None are agent-callable:
+  // secrets / messaging-pairing / backend-config / dashboard polling are
+  // all Bearer-gated UI or admin operations.
 
   // Snapshot restore — rollback via dashboard.
   "POST /api/context/restore-snapshot/": RiskTier.Approve,
@@ -977,10 +959,10 @@ export function classifyRisk(method: string, path: string): RiskTier {
  *
  * Why this exists: `API_RISK` is hand-maintained. When a developer adds
  * a new route in `routes/*.ts` but forgets to update the classifier
- * table, the request hits the runtime warning at line ~480 only after
- * the first call — and then 401s because Approve-tier requires a Bearer
- * the agent can't supply. We saw this with `POST /api/context/roadmap/id`
- * (7×401 + 4×400 retry spiral inside roadmap_refresh, 2026-04-28).
+ * table, the request hits the runtime warning only after the first call
+ * — and then 401s because Approve-tier requires a Bearer the agent can't
+ * supply, producing a user-visible retry spiral. The boot audit catches
+ * the omission before any traffic flows.
  *
  * Hono parameterized segments (`/integrations/:key/exec`) are
  * normalized to a representative literal so `{*}`-pattern entries in

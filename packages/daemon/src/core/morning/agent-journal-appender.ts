@@ -42,6 +42,7 @@ import type Database from "better-sqlite3";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomically } from "../atomic-write.js";
+import { serializeContextFileWrite } from "../context-file-serializer.js";
 import { CONTEXT_RELATIVE_PATHS, dailyJournalPath } from "../context-paths.js";
 import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
 import { createLogger } from "../../logging.js";
@@ -64,7 +65,51 @@ export interface StageActionRow {
   result: "success" | "failed" | "partial" | "skipped" | "in_progress";
   /** Parsed JSON. `{}` when the column was NULL or non-object. */
   metadata: Record<string, unknown>;
+  /**
+   * daily-journal-daemon-write.md §4.7 — Stage B `agent_actions.detail`
+   * carries a discriminated `dailyWrite` block when the daemon-side
+   * composer ran. Three states map to the journal-line verbs:
+   *   - `"complete"` → "Journal: daily/<date>.md (N lines, M projects)"
+   *   - `"partial"`  → "Journal: daily/<date>.md (N lines, **partial — <reason>**)"
+   *   - `false`      → "Journal synthesis: failed (<reason>)"
+   *
+   * Absent on rows written before the §4.11 wiring landed; readers fall
+   * back to the file-presence heuristic for backward compatibility.
+   */
+  dailyWrite?: DailyWriteDetail | null;
 }
+
+/**
+ * Mirror of `DailyWriteAuditDetail` in `dispatcher-types.ts`. Re-declared
+ * here rather than imported to keep the appender's import graph stable
+ * (it sits below the dispatcher in the dep order today). The fields
+ * are read defensively — `parseDailyWriteDetail` validates the shape
+ * before consumption so a malformed row degrades to "field absent"
+ * rather than corrupting the audit line.
+ */
+export type DailyWriteDetail =
+  | {
+      ok: "complete";
+      bytesWritten?: number;
+      wroteMode?: "put" | "append_revision";
+    }
+  | {
+      ok: "partial";
+      bytesWritten?: number;
+      wroteMode?: "put" | "append_revision";
+      partialReason:
+        | "frontmatter_tag_missing"
+        | "frontmatter_invalid_json"
+        | "frontmatter_schema_invalid";
+    }
+  | {
+      ok: false;
+      reason:
+        | "stage_b_null"
+        | "empty_output"
+        | "body_tag_missing"
+        | "write_failed";
+    };
 
 export interface AgentJournalAppenderDeps {
   db: Database.Database;
@@ -139,7 +184,8 @@ export function loadMorningRoutineActionRows(
     .prepare(
       `SELECT action_type AS actionType,
               result AS result,
-              metadata AS metadata
+              metadata AS metadata,
+              detail AS detail
          FROM agent_actions
         WHERE event_id = ?
           AND action_type IN (?, ?)
@@ -149,14 +195,20 @@ export function loadMorningRoutineActionRows(
     actionType: string;
     result: StageActionRow["result"];
     metadata: string | null;
+    detail: string | null;
   }>;
 
   let stageA: StageActionRow | null = null;
   let stageB: StageActionRow | null = null;
   for (const row of rows) {
+    const dailyWrite =
+      row.actionType === STAGE_B_ACTION_TYPE
+        ? parseDailyWriteDetail(row.detail)
+        : null;
     const parsed: StageActionRow = {
       result: row.result,
       metadata: parseJsonObject(row.metadata),
+      ...(dailyWrite ? { dailyWrite } : {}),
     };
     if (row.actionType === STAGE_A_ACTION_TYPE) {
       // Most recent insert wins on a retry — `ORDER BY id ASC` + naive
@@ -168,6 +220,75 @@ export function loadMorningRoutineActionRows(
     }
   }
   return { stageA, stageB };
+}
+
+/**
+ * Pull `dailyWrite` out of an `agent_actions.detail` JSON column.
+ * Returns null when the column is null, malformed, or carries an
+ * unrecognised shape. Strict validation: every required field must be
+ * present with the right type — a partial-shape row degrades to
+ * "field absent" so the appender falls back to file-presence
+ * detection rather than rendering a half-broken line.
+ */
+function parseDailyWriteDetail(raw: string | null): DailyWriteDetail | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  // SQLite's `detail` column has a CHECK(json_valid) constraint, so a
+  // malformed JSON string cannot reach this branch via the INSERT
+  // path. The try/catch is kept as a defence-in-depth guard for a
+  // future migration that relaxes the constraint.
+  /* c8 ignore start */
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  /* c8 ignore stop */
+  if (parsed === null || typeof parsed !== "object") return null;
+  const dw = (parsed as { dailyWrite?: unknown }).dailyWrite;
+  if (dw === null || typeof dw !== "object") return null;
+  const obj = dw as Record<string, unknown>;
+  const ok = obj.ok;
+  if (ok === "complete") {
+    return {
+      ok: "complete",
+      ...(typeof obj.bytesWritten === "number" ? { bytesWritten: obj.bytesWritten } : {}),
+      ...(obj.wroteMode === "put" || obj.wroteMode === "append_revision"
+        ? { wroteMode: obj.wroteMode }
+        : {}),
+    };
+  }
+  if (ok === "partial") {
+    const partialReason = obj.partialReason;
+    if (
+      partialReason !== "frontmatter_tag_missing"
+      && partialReason !== "frontmatter_invalid_json"
+      && partialReason !== "frontmatter_schema_invalid"
+    ) {
+      return null;
+    }
+    return {
+      ok: "partial",
+      partialReason,
+      ...(typeof obj.bytesWritten === "number" ? { bytesWritten: obj.bytesWritten } : {}),
+      ...(obj.wroteMode === "put" || obj.wroteMode === "append_revision"
+        ? { wroteMode: obj.wroteMode }
+        : {}),
+    };
+  }
+  if (ok === false) {
+    const reason = obj.reason;
+    if (
+      reason !== "stage_b_null"
+      && reason !== "empty_output"
+      && reason !== "body_tag_missing"
+      && reason !== "write_failed"
+    ) {
+      return null;
+    }
+    return { ok: false, reason };
+  }
+  return null;
 }
 
 /** Action-breakdown facts used to render the `- Actions: ...` footprint line. */
@@ -299,10 +420,10 @@ function formatActionsLine(summary: ActionsSummaryInput): string {
  * the write tracker + indexer so observers don't tag the write as a
  * user-actor change.
  */
-export function appendMorningRoutineJournalEntry(
+export async function appendMorningRoutineJournalEntry(
   deps: AgentJournalAppenderDeps,
   args: AgentJournalAppenderArgs,
-): AgentJournalAppenderResult {
+): Promise<AgentJournalAppenderResult> {
   const { stageA, stageB } = loadMorningRoutineActionRows(deps.db, args.correlationId);
   if (stageA === null) {
     return { ok: false, reason: "stage_a_row_missing" };
@@ -345,23 +466,34 @@ export function appendMorningRoutineJournalEntry(
 
   const journalRelative = CONTEXT_RELATIVE_PATHS.agent.journal;
   const journalAbs = join(deps.contextDir, journalRelative);
-  const original = existsSync(journalAbs) ? readFileSync(journalAbs, "utf-8") : null;
-  const next = appendBlockToJournal(original, entryText);
 
-  if (original !== null) {
-    saveSnapshot(deps.db, journalRelative.replace(/\.md$/, ""), original, "morning_routine_appender");
-  }
-  // Mark before the rename so FS-watch consumers attribute the resulting
-  // event to the agent. Roll back on failure (C2).
-  deps.writeTracker?.markWriting(journalAbs, next);
-  try {
-    writeFileAtomically(journalAbs, next);
-  } catch (writeErr) {
-    deps.writeTracker?.unmark(journalAbs);
-    throw writeErr;
-  }
-  deps.onIndexableContextChange?.(journalRelative);
-  return { ok: true, entryText };
+  // Read AND write inside the daemon-wide per-path serializer so a
+  // concurrent HTTP PATCH (`/api/context/agent/journal` append_to_file),
+  // a roadmap-maintenance journal-line append, or the weekly-interests
+  // appender cannot race this read-modify-write. Without the fence,
+  // two writers reading the same pre-state would each rename their
+  // own "next" over the file, silently dropping the loser's block.
+  return await serializeContextFileWrite(journalAbs, () => {
+    const original = existsSync(journalAbs)
+      ? readFileSync(journalAbs, "utf-8")
+      : null;
+    const next = appendBlockToJournal(original, entryText);
+
+    if (original !== null) {
+      saveSnapshot(deps.db, journalRelative.replace(/\.md$/, ""), original, "morning_routine_appender");
+    }
+    // Mark before the rename so FS-watch consumers attribute the resulting
+    // event to the agent. Roll back on failure (C2).
+    deps.writeTracker?.markWriting(journalAbs, next);
+    try {
+      writeFileAtomically(journalAbs, next);
+    } catch (writeErr) {
+      deps.writeTracker?.unmark(journalAbs);
+      throw writeErr;
+    }
+    deps.onIndexableContextChange?.(journalRelative);
+    return { ok: true, entryText };
+  });
 }
 
 /**
@@ -511,6 +643,43 @@ function formatJournalLine(
   dailyContent: string | null,
   stageBAttempted: boolean,
 ): string {
+  // daily-journal-daemon-write.md §4.7 — preferred signal is the
+  // structured `detail.dailyWrite.ok` discriminant the §4.11 wiring
+  // lands on the Stage B row. When present, branch by `ok` and skip the
+  // file-presence heuristic entirely. The `dailyContent` branch below
+  // remains the fallback for (a) rows written before §4.11 (no
+  // dailyWrite key) and (b) future migrations where the composer is
+  // bypassed but the file is still on disk.
+  const dailyWrite = stageB?.dailyWrite;
+  if (dailyWrite) {
+    if (dailyWrite.ok === "complete") {
+      if (dailyContent !== null) {
+        const stats = inspectDailyJournal(dailyContent);
+        return `Journal: daily/${yesterdayDateStr}.md (${stats.bodyLineCount} lines, ${stats.projectsCount} projects referenced)`;
+      }
+      // Composer reported complete but file is no longer on disk —
+      // tail-risk shape (manual delete / vault move between settle and
+      // appender). Surface explicitly so a missing file isn't masked as
+      // a benign first-run.
+      return "Journal synthesis: failed (composer reported complete but daily file is missing)";
+    }
+    if (dailyWrite.ok === "partial") {
+      if (dailyContent !== null) {
+        const stats = inspectDailyJournal(dailyContent);
+        const reasonLabel = formatPartialReason(dailyWrite.partialReason);
+        return `Journal: daily/${yesterdayDateStr}.md (${stats.bodyLineCount} lines, **partial — ${reasonLabel}**)`;
+      }
+      // Partial extract means the body landed; missing file is the
+      // same tail-risk shape as above. Surface loudly.
+      return "Journal synthesis: failed (composer reported partial but daily file is missing)";
+    }
+    // ok === false — composer terminated without writing. Map the
+    // reason to a human-readable suffix so `pnpm audit` filters on it.
+    return `Journal synthesis: failed (${formatFailureReason(dailyWrite.reason)})`;
+  }
+
+  // Legacy fallback — rows that pre-date §4.11 have no dailyWrite key.
+  // Use file-presence + Stage B result to render the right verb.
   if (dailyContent !== null) {
     if (stageB !== null && stageB.result !== "success") {
       // Mismatch — daily file is on disk (likely from a prior-attempt
@@ -631,6 +800,37 @@ function countProjectsField(content: string): number {
     return 0;
   }
   return 0;
+}
+
+function formatPartialReason(
+  reason:
+    | "frontmatter_tag_missing"
+    | "frontmatter_invalid_json"
+    | "frontmatter_schema_invalid",
+): string {
+  switch (reason) {
+    case "frontmatter_tag_missing":
+      return "frontmatter tag missing";
+    case "frontmatter_invalid_json":
+      return "frontmatter JSON parse error";
+    case "frontmatter_schema_invalid":
+      return "frontmatter schema mismatch";
+  }
+}
+
+function formatFailureReason(
+  reason: "stage_b_null" | "empty_output" | "body_tag_missing" | "write_failed",
+): string {
+  switch (reason) {
+    case "stage_b_null":
+      return "Stage B did not run";
+    case "empty_output":
+      return "LLM output empty";
+    case "body_tag_missing":
+      return "extraction: no body";
+    case "write_failed":
+      return "write error";
+  }
 }
 
 function parseJsonObject(raw: string | null): Record<string, unknown> {

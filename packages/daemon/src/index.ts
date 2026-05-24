@@ -395,7 +395,7 @@ async function startup(): Promise<void> {
         { platform, ownerId, errors: result.errors },
         "Failed to persist detected owner ID to .env",
       );
-      // B-1: throw so the adapter's captureOwner rolls back mutableOwnerId.
+      // Throw so the adapter's captureOwner rolls back mutableOwnerId.
       // Without this, the adapter would silently accept owner DMs in
       // memory while .env shows no pairing — and the next daemon restart
       // would lose the binding. The user's matcher stays armed
@@ -409,13 +409,10 @@ async function startup(): Promise<void> {
 
     logger.info({ platform, ownerId }, "auto-paired owner from discovery");
 
-    // Greet the user so they know pairing landed. P2-05: the inline
-    // "Pairing successful — this channel is now linked..." line used to
-    // fire here AND `sendSetupWelcomeDm` (WELCOME_DM_TEXT with menu) fired
-    // from the setup wizard's onSetupComplete — the operator got two
-    // greetings in quick succession when pairing happened during setup. We
-    // now prefer the consolidated welcome path so that initial pairing
-    // produces a single, menu-bearing DM rather than ack + welcome.
+    // Greet the user so they know pairing landed. The consolidated
+    // welcome path (via sendSetupWelcomeDm / WELCOME_DM_TEXT) is preferred
+    // over emitting an inline "Pairing successful…" ack: pairing during
+    // setup would otherwise fire two greetings in quick succession.
     //
     // Three-way UX contract:
     //
@@ -1302,10 +1299,14 @@ async function startup(): Promise<void> {
   // agent-originated so the Obsidian / Git observers do not loop on
   // their own output.
   // Shared closure used by both the 17:45 cron callback above and the
-  // synchronous `triggerRoadmapMaintenance` API dependency wired into
-  // `createApp`. Keeping a single fire site means the cron path and
-  // the `aitne run-now roadmap_maintenance` path operate on identical
-  // deps — no drift between the scheduled and the manual surface.
+  // `triggerRoadmapMaintenance` API dependency wired into `createApp`.
+  // Keeping a single fire site means the cron path and the
+  // `aitne run-now roadmap_maintenance` path operate on identical deps
+  // — no drift between the scheduled and the manual surface.
+  //
+  // Async because the runner now wraps its roadmap.md write in the
+  // per-path serializer (avoids HTTP-vs-direct clobbers). Callers
+  // must await or fire-and-forget through `.catch`.
   function fireRoadmapMaintenance() {
     return runRoadmapMechanicalMaintenance({
       db,
@@ -1318,11 +1319,9 @@ async function startup(): Promise<void> {
     });
   }
   scheduler.setRoadmapMaintenanceCallback(() => {
-    try {
-      fireRoadmapMaintenance();
-    } catch (err) {
+    fireRoadmapMaintenance().catch((err: unknown) => {
       logger.error({ err }, "runRoadmapMechanicalMaintenance threw");
-    }
+    });
   });
   // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
   // job. Fires at `dayBoundaryHour − 1` local, gated by the same

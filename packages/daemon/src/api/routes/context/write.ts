@@ -13,7 +13,7 @@ import {
   localDateStr,
 } from "@aitne/shared";
 import { writeFileAtomically } from "../../../core/atomic-write.js";
-import { validateDailySkeletonFrontmatter } from "../../../core/context-frontmatter.js";
+import { serializeContextFileWrite } from "../../../core/context-file-serializer.js";
 import {
   clearEntriesBefore,
   findSection,
@@ -29,6 +29,7 @@ import {
 } from "../../helpers/agent-errors.js";
 import { readJsonBody } from "../../json-body.js";
 import {
+  APPEND_ONLY_PATCH_MODES,
   CREATE_ONLY_PUT,
   isWriteAllowed,
   notifyPromptContextChanged,
@@ -39,6 +40,7 @@ import {
   resolveContextTarget,
   safePath,
 } from "./path-resolve.js";
+import { performContextFileWrite } from "./write-step.js";
 import type { ContextRouteContext } from "./index.js";
 
 const logger = createLogger("context-api");
@@ -160,7 +162,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
     morningRoutineLock,
     roadmapWriteLock,
     saveSnapshot,
-    withWriteLock,
     isRoadmapValidationDisabled,
     logRoadmapValidationBypass,
     roadmapDefaultLongTermPlanSource,
@@ -256,42 +257,12 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       });
     }
 
-    // morning-routine-optimization.md §"PUT /api/context/daily/<date>
-    // skeleton-preservation validator" — only runs once generic
-    // frontmatter validation (type/owner/updated/H1) has passed.
-    // Returns per-field structured drift errors for the five
-    // skeleton-owned frontmatter fields (date, weekday,
-    // agent_generated, calendar_events, messages_handled) so Stage B
-    // can fix every missing/malformed field in a single retry rather
-    // than discovering them one at a time. Body is NOT validated —
-    // Stage B authors body per rules/journal-format.md.
-    if (target.base.startsWith("daily/")) {
-      const dailyRelativePath = `${target.base}${target.ext}`;
-      const driftErrors = validateDailySkeletonFrontmatter(
-        preflight.content,
-        dailyRelativePath,
-      );
-      if (driftErrors.length > 0) {
-        return respondWithAgentError(
-          c,
-          422,
-          driftErrors.map((drift) =>
-            composeIssue("context.daily_skeleton_field_drift", {
-              field: drift.field,
-              received: drift.received ?? "<missing>",
-              expected: drift.expected,
-            }),
-          ),
-        );
-      }
-    }
-
     const sessionId = c.req.header("X-Session-Id");
 
-    return withWriteLock(() => {
+    return serializeContextFileWrite(fullPath, () => {
       // Append-only files: PUT is only allowed for initial creation.
       // Once the file exists, all writes must go through PATCH to preserve
-      // the append-only contract. This check MUST be inside withWriteLock
+      // the append-only contract. This check MUST be inside the serializer
       // to prevent TOCTOU races where two concurrent PUTs both pass an
       // outer existsSync check and then sequentially overwrite.
       if (CREATE_ONLY_PUT.has(path) && existsSync(fullPath)) {
@@ -308,7 +279,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       // compare against the current file. On mismatch, return 409 with
       // the current state so the UI can surface a conflict dialog without
       // a second round-trip.
-      let snapshotId: number | null = null;
       let contentToWrite = preflight.content;
       if (existsSync(fullPath)) {
         const currentStat = statSync(fullPath);
@@ -362,8 +332,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           });
         }
         contentToWrite = prepared.content;
-
-        snapshotId = saveSnapshot(path, existing, "api_put", true, sessionId);
       } else if (parsed.data.expectedMtime !== undefined) {
         // Client expected a specific mtime but the file is gone
         return c.json(
@@ -385,16 +353,51 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
         );
       }
 
-      // Symlink-safe atomic write — protects against a TOCTOU swap of
-      // `fullPath` to a symlink between safePath validation and the write.
-      // Mark before the rename so FS-watch consumers attribute the
-      // resulting event to the agent. Roll back on failure (C2).
-      writeTracker?.markWriting(fullPath, contentToWrite);
-      try {
-        writeFileAtomically(fullPath, contentToWrite);
-      } catch (writeErr) {
-        writeTracker?.unmark(fullPath);
-        throw writeErr;
+      // Shared write step — daily-skeleton frontmatter validation,
+      // atomic write, snapshot, writeTracker, indexable hint. See
+      // `write-step.ts:performContextFileWrite` for the contract.
+      const writeResult = performContextFileWrite(
+        {
+          saveSnapshot,
+          ...(writeTracker ? { writeTracker } : {}),
+          onIndexableContextChange: deps.onIndexableContextChange ?? undefined,
+        },
+        {
+          absolutePath: fullPath,
+          relativePath: `${path}${target.ext}`,
+          snapshotKey: path,
+          mode: "put",
+          content: contentToWrite,
+          trigger: "api_put",
+          forceSnapshot: true,
+          sessionId: sessionId ?? null,
+          validateDailySkeleton: true,
+        },
+      );
+      if (!writeResult.ok) {
+        if (writeResult.reason === "daily_skeleton_drift") {
+          return respondWithAgentError(
+            c,
+            422,
+            writeResult.driftErrors.map((drift) =>
+              composeIssue("context.daily_skeleton_field_drift", {
+                field: drift.field,
+                received: drift.received ?? "<missing>",
+                expected: drift.expected,
+              }),
+            ),
+          );
+        }
+        // `missing_for_append` is unreachable in the PUT branch — the
+        // helper only returns it for `mode = "append_block"`. Defensive
+        // fall-through keeps the type narrow.
+        /* c8 ignore next 6 */
+        return respondWithAgentError(c, 500, [
+          composeIssue("context.write_failed", {
+            field: "path",
+            received: path,
+          }),
+        ]);
       }
       if (shouldRefreshPromptContext(path, "PUT")) {
         notifyPromptContextChanged(
@@ -407,15 +410,19 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       if (path.startsWith("routines/custom/")) {
         deps.onCustomRoutinesChanged?.();
       }
-      deps.onIndexableContextChange?.(`${path}${target.ext}`);
       const writtenStat = statSync(fullPath);
       logger.info(
-        { path, method: "PUT", bytesWritten: writtenStat.size, snapshotId: snapshotId ?? undefined },
+        {
+          path,
+          method: "PUT",
+          bytesWritten: writeResult.bytesWritten,
+          snapshotId: writeResult.snapshotId ?? undefined,
+        },
         "Context file updated",
       );
       return c.json({
         status: "updated",
-        snapshotId: snapshotId ?? 0,
+        snapshotId: writeResult.snapshotId ?? 0,
         lastModified: writtenStat.mtime.toISOString(),
       });
     });
@@ -490,6 +497,33 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
     }
 
     const { section, mode, content: newContent, cutoff, maxEntries } = parsed.data;
+
+    // Append-only enforcement — see `permissions.ts:CREATE_ONLY_PUT` /
+    // `APPEND_ONLY_PATCH_MODES`. The PUT-side gate at line ~267 rejects
+    // re-creates of these files; this gate is the PATCH-side half. Without
+    // it, a prompt-injected agent could PATCH `agent/journal` with
+    // `mode:"replace"` (or `"clear"` / `"clear_before"`) and silently erase
+    // historical entries. We check OUTSIDE the per-path serializer
+    // because the decision is body-only and we want to fail fast before
+    // queueing behind any in-flight write to the same file.
+    if (CREATE_ONLY_PUT.has(path) && !APPEND_ONLY_PATCH_MODES.has(mode)) {
+      logger.warn(
+        { path, mode },
+        "Context PATCH rejected — append-only path requires append mode",
+      );
+      return respondWithAgentError(c, 409, [
+        composeIssue("context.append_only_violation", {
+          field: "mode",
+          received: {
+            path,
+            mode,
+            hint: `${path} is append-only. Use mode:"append" or "append_to_file" — existing sections cannot be replaced or cleared.`,
+            validModes: Array.from(APPEND_ONLY_PATCH_MODES),
+          },
+        }),
+      ]);
+    }
+
     const sessionId = c.req.header("X-Session-Id");
     const roadmapValidationOff = isRoadmapValidationDisabled(
       path,
@@ -502,7 +536,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       ? getAgentDayDateStr(config.timezone || undefined, config.dayBoundaryHour ?? 4)
       : undefined;
 
-    return withWriteLock(() => {
+    return serializeContextFileWrite(fullPath, () => {
       if (!existsSync(fullPath)) {
         return respondWithAgentError(c, 404, [
           composeIssue("context.path_not_found", {
@@ -522,6 +556,12 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       if (mode === "append_to_file") {
         const separator = fileContent.endsWith("\n") ? "" : "\n";
         const updated = fileContent + separator + (newContent ?? "") + "\n";
+        // Run the same content-validation chain as before — this is
+        // call-site-specific (allowLegacyToday flag, previousRoadmapContent)
+        // and intentionally lives on the HTTP route. The shared helper
+        // then performs the raw atomic-write step against the already-
+        // validated byte stream so HTTP and the in-process daemon
+        // composer share one snapshot/writeTracker/indexable invariant.
         const prepared = prepareContextContentForWrite(target, updated, {
           timezone: config.timezone || undefined,
           disableRoadmapValidation: roadmapValidationOff,
@@ -544,15 +584,43 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
             },
           });
         }
-        saveSnapshot(path, fileContent, "api_patch", false, sessionId);
-        // Mark before the rename so FS-watch consumers attribute the
-        // resulting event to the agent. Roll back on failure (C2).
-        writeTracker?.markWriting(fullPath, prepared.content);
-        try {
-          writeFileAtomically(fullPath, prepared.content);
-        } catch (writeErr) {
-          writeTracker?.unmark(fullPath);
-          throw writeErr;
+        // The validator may rewrite content; PUT the rewritten bytes
+        // directly rather than re-running the append through the helper
+        // (which would otherwise double-append). The PATCH-side caller
+        // ALREADY did the read-modify-write — we just need the atomic-
+        // replace at this point. Hence `mode: "put"` even though this is
+        // the PATCH route — what's atomic from the helper's perspective
+        // is the disk-replace step, not the source operation.
+        const writeResult = performContextFileWrite(
+          {
+            saveSnapshot,
+            ...(writeTracker ? { writeTracker } : {}),
+            onIndexableContextChange: deps.onIndexableContextChange ?? undefined,
+          },
+          {
+            absolutePath: fullPath,
+            relativePath: `${path}${target.ext}`,
+            snapshotKey: path,
+            mode: "put",
+            content: prepared.content,
+            trigger: "api_patch",
+            forceSnapshot: false,
+            sessionId: sessionId ?? null,
+            // append_to_file is used for agent/journal.md and other
+            // non-daily files; the daily-skeleton validator is not
+            // applicable. (The composer's daily-file revision branch
+            // calls the helper with `mode: "append_block"` directly.)
+            validateDailySkeleton: false,
+          },
+        );
+        if (!writeResult.ok) {
+          /* c8 ignore next 6 — defensive guard for unreachable branches */
+          return respondWithAgentError(c, 500, [
+            composeIssue("context.write_failed", {
+              field: "path",
+              received: path,
+            }),
+          ]);
         }
         if (shouldRefreshPromptContext(path, "PATCH")) {
           notifyPromptContextChanged(
@@ -572,7 +640,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
         if (path.startsWith("routines/custom/")) {
           deps.onCustomRoutinesChanged?.();
         }
-        deps.onIndexableContextChange?.(`${path}${target.ext}`);
         logger.info({ path, method: "PATCH", mode }, "Content appended to file");
         return c.json({ status: "appended" });
       }
@@ -735,7 +802,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       ]);
     }
 
-    return withWriteLock(() => {
+    return serializeContextFileWrite(fullPath, () => {
       if (!existsSync(fullPath)) {
         return respondWithAgentError(c, 404, [
           composeIssue("context.path_not_found", {

@@ -255,6 +255,49 @@ export interface IMessageRecorder {
   }): boolean;
 }
 
+/**
+ * `agent_actions.detail.dailyWrite` shape — see
+ * `docs/design/appendices/daily-journal-daemon-write.md` §4.3.
+ *
+ * Persisted on the Stage B (`routine.morning_routine_journal`) row both
+ * on the success path (`audit.logAction(.., dailyWrite)`) and on the
+ * failure path (`audit.logError(.., { dailyWrite })`) so downstream
+ * readers — `agent-journal-appender.formatJournalLine`, the §4.7b
+ * partial-extract streak detector — can branch on `detail.dailyWrite.ok`
+ * for a single source of truth.
+ *
+ * Discriminated union on `ok`:
+ *   - `"complete"` — both XML blocks extracted, frontmatter parsed,
+ *     daily file written.
+ *   - `"partial"` — body extracted but frontmatter parsing failed; the
+ *     daily file IS on disk with empty projects/people/tags arrays.
+ *     `partialReason` identifies which sub-shape failed.
+ *   - `false` — no daily file written. `reason` identifies why.
+ */
+export type DailyWriteAuditDetail =
+  | {
+      ok: "complete";
+      bytesWritten: number;
+      wroteMode: "put" | "append_revision";
+    }
+  | {
+      ok: "partial";
+      bytesWritten: number;
+      wroteMode: "put" | "append_revision";
+      partialReason:
+        | "frontmatter_tag_missing"
+        | "frontmatter_invalid_json"
+        | "frontmatter_schema_invalid";
+    }
+  | {
+      ok: false;
+      reason:
+        | "stage_b_null"
+        | "empty_output"
+        | "body_tag_missing"
+        | "write_failed";
+    };
+
 /** Interface for AuditLogger — implemented in Phase 1D */
 export interface IAuditLogger {
   logAction(params: {
@@ -350,6 +393,22 @@ export interface IAuditLogger {
        */
       requestedBackend?: BackendId;
     };
+    /**
+     * docs/design/appendices/daily-journal-daemon-write.md §4.11 — daily
+     * journal compose outcome for `routine.morning_routine_journal`
+     * (Stage B) rows. The orchestrator threads it through
+     * `persistStageAuditRows` so `detail.dailyWrite` lands on the same
+     * INSERT/UPSERT as the row's terminal `result` — no post-UPDATE
+     * needed. `agent-journal-appender.formatJournalLine` reads
+     * `detail.dailyWrite.ok` to render the "complete" / "partial" /
+     * "failed" verbs without grepping the fs.
+     *
+     * Shape mirrors `DailyJournalComposeResult` — we copy it inline
+     * rather than importing the morning module to keep audit decoupled
+     * from the morning pipeline's import graph (audit is at the bottom
+     * of the dep stack).
+     */
+    dailyWrite?: DailyWriteAuditDetail | null;
   }): void;
   logSkip(event: Event, reason: string, trigger: "reactive" | "autonomous"): void;
   logError(
@@ -388,6 +447,14 @@ export interface IAuditLogger {
         fallbackTriggered?: boolean;
         requestedBackend?: BackendId;
       };
+      /**
+       * See `logAction.dailyWrite` JSDoc. Mirrored on the failure path
+       * so a Stage B `recordStageFailure` row also carries the
+       * dailyWrite outcome — useful for the §4.7b streak detector when
+       * Stage B's session threw but a prior attempt's daily file is on
+       * disk.
+       */
+      dailyWrite?: DailyWriteAuditDetail | null;
     },
   ): void;
   /**

@@ -47,11 +47,11 @@ export function formatHelp(
   );
   const totalCommands = sortedBuiltIns.length + enabledUserCommands.length;
 
-  // P2-22: lead with the total count so the operator can detect at a
-  // glance whether truncation hid entries. The full body still renders
-  // below — `truncateForMobile` (via `makeNotify`) only cuts when the
-  // assembled text exceeds MOBILE_REPLY_BUDGET, and the count line
-  // survives because it precedes any truncation point.
+  // Lead with the total count so the operator can detect at a glance
+  // whether truncation hid entries. The full body still renders below —
+  // `truncateForMobile` (via `makeNotify`) only cuts when the assembled
+  // text exceeds MOBILE_REPLY_BUDGET, and the count line survives
+  // because it precedes any truncation point.
   const lines: string[] = [
     "[SYSTEM · !help]",
     `${totalCommands} command${totalCommands === 1 ? "" : "s"} total`,
@@ -75,8 +75,8 @@ export function formatHelp(
     }
   }
 
-  // P2-22: when we know the body will overflow the mobile budget, append
-  // a dashboard-pointer footer BEFORE `truncateForMobile` snips the tail.
+  // When the body will overflow the mobile budget, append a
+  // dashboard-pointer footer BEFORE `truncateForMobile` snips the tail.
   // The generic `… (truncated)` marker doesn't tell the operator that the
   // dashboard has the rest; this footer does. `ensureSystemMarker` is a
   // no-op here because the body already starts with `[SYSTEM · !help]`,
@@ -95,7 +95,7 @@ export function formatHelp(
       return body;
     }
     // Avoid splitting a surrogate pair at the boundary, mirroring
-    // truncateForMobile (P2-03).
+    // truncateForMobile.
     if (
       room > 0
       && body.charCodeAt(room - 1) >= 0xd800

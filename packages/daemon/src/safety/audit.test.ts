@@ -221,6 +221,75 @@ describe("AuditLogger", () => {
     expect(row.error).toContain("max_budget_usd");
   });
 
+  // daily-journal-daemon-write.md §4.11 — dailyWrite block lands on
+  // both the success path (logAction) and the failure path (logError)
+  // INSERT/UPSERT for Stage B's row, so a single atomic write carries
+  // the discriminated outcome alongside the row's terminal result.
+  it("logAction persists dailyWrite into detail JSON when supplied", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.morning_routine_journal",
+      source: "cron",
+      priority: EventPriority.HIGH,
+    });
+
+    audit.logAction({
+      event,
+      model: "claude-haiku-4-5",
+      costUsd: 0.05,
+      usage: {
+        inputTokens: 1000,
+        outputTokens: 200,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 5000,
+      numTurns: 1,
+      trigger: "autonomous",
+      dailyWrite: {
+        ok: "partial",
+        bytesWritten: 1234,
+        wroteMode: "put",
+        partialReason: "frontmatter_tag_missing",
+      },
+    });
+
+    const row = db.prepare(`SELECT detail FROM agent_actions LIMIT 1`).get() as {
+      detail: string | null;
+    };
+    expect(row.detail).not.toBeNull();
+    const detail = JSON.parse(row.detail!) as { dailyWrite: unknown };
+    expect(detail.dailyWrite).toEqual({
+      ok: "partial",
+      bytesWritten: 1234,
+      wroteMode: "put",
+      partialReason: "frontmatter_tag_missing",
+    });
+  });
+
+  it("logError persists dailyWrite into detail JSON when supplied", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.morning_routine_journal",
+      source: "cron",
+      priority: EventPriority.HIGH,
+    });
+
+    audit.logError(event, new Error("Stage B threw"), "autonomous", {
+      durationMs: 1000,
+      backendId: "claude",
+      dailyWrite: { ok: false, reason: "write_failed" },
+    });
+
+    const row = db.prepare(`SELECT detail FROM agent_actions LIMIT 1`).get() as {
+      detail: string | null;
+    };
+    expect(row.detail).not.toBeNull();
+    const detail = JSON.parse(row.detail!) as { dailyWrite: unknown };
+    expect(detail.dailyWrite).toEqual({ ok: false, reason: "write_failed" });
+  });
+
   it("publishes persisted rows when a callback is configured", () => {
     const onRowInserted = vi.fn();
     const audit = new AuditLogger(db, { onRowInserted });

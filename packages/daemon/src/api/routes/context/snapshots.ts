@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { localDateStr } from "@aitne/shared";
 import { writeFileAtomically } from "../../../core/atomic-write.js";
+import { serializeContextFileWrite } from "../../../core/context-file-serializer.js";
 import { validateContextContent } from "../../../core/context-validation/index.js";
 import { createLogger } from "../../../logging.js";
 import {
@@ -29,7 +30,6 @@ export function registerSnapshotsRoutes(
     morningRoutineLock,
     roadmapWriteLock,
     saveSnapshot,
-    withWriteLock,
   } = ctx;
   const { db, writeTracker } = deps;
 
@@ -41,38 +41,51 @@ export function registerSnapshotsRoutes(
   // returns the previous date so the agent can write the new `today.md`
   // in the same flow.
   app.post("/context/archive-today", (c) => {
-    return withWriteLock(() => {
-      const contextDir = getCurrentContextDir();
-      const todayPath = join(contextDir, "today.md");
-      if (!existsSync(todayPath)) {
-        return respondWithAgentError(c, 404, [
-          composeIssue("context.path_not_found", {
-            field: "path",
-            received: "today",
-          }),
-        ]);
-      }
+    const contextDir = getCurrentContextDir();
+    const todayPath = join(contextDir, "today.md");
+    const yesterdayPath = join(contextDir, "yesterday.md");
+    // Acquire today.md FIRST, then yesterday.md inside. The fixed
+    // lock order (alphabetical by absolute path is the convention)
+    // prevents deadlock against any other caller that needs both.
+    // Both gates are required: the SOURCE (today.md) read must not
+    // race with a concurrent today.md writer (else we'd snapshot
+    // a half-written state), and the DESTINATION (yesterday.md)
+    // write must not race with a concurrent yesterday.md PATCH
+    // (else the rotation could be clobbered by — or could clobber —
+    // an in-flight user edit). The legacy in-router `withWriteLock`
+    // serialized ALL writes so this race was masked; the new
+    // per-path serializer requires explicit composition.
+    return serializeContextFileWrite(todayPath, () =>
+      serializeContextFileWrite(yesterdayPath, () => {
+        if (!existsSync(todayPath)) {
+          return respondWithAgentError(c, 404, [
+            composeIssue("context.path_not_found", {
+              field: "path",
+              received: "today",
+            }),
+          ]);
+        }
 
-      const content = readFileSync(todayPath, "utf-8");
-      const dateStr =
-        content.match(/^#.*(\d{4}-\d{2}-\d{2})/)?.[1] ??
-        localDateStr(new Date());
+        const content = readFileSync(todayPath, "utf-8");
+        const dateStr =
+          content.match(/^#.*(\d{4}-\d{2}-\d{2})/)?.[1] ??
+          localDateStr(new Date());
 
-      const yesterdayPath = join(contextDir, "yesterday.md");
-      // Atomic write through O_NOFOLLOW + rename so a symlink swap at
-      // `yesterday.md` between request validation and the write cannot
-      // redirect the rotation into an attacker-controlled path. The
-      // legacy `copyFileSync` would silently follow such a symlink.
-      writeFileAtomically(yesterdayPath, content);
+        // Atomic write through O_NOFOLLOW + rename so a symlink swap at
+        // `yesterday.md` between request validation and the write cannot
+        // redirect the rotation into an attacker-controlled path. The
+        // legacy `copyFileSync` would silently follow such a symlink.
+        writeFileAtomically(yesterdayPath, content);
 
-      saveSnapshot("today", content, "rotate-to-yesterday", true);
+        saveSnapshot("today", content, "rotate-to-yesterday", true);
 
-      return c.json({
-        status: "archived",
-        archivePath: "yesterday.md",
-        rotatedFrom: dateStr,
-      });
-    });
+        return c.json({
+          status: "archived",
+          archivePath: "yesterday.md",
+          rotatedFrom: dateStr,
+        });
+      }),
+    );
   });
 
   // POST /context/restore-snapshot/:id — restore a prior md_file_snapshots
@@ -167,7 +180,7 @@ export function registerSnapshotsRoutes(
       });
     }
 
-    return withWriteLock(() => {
+    return serializeContextFileWrite(fullPath, () => {
       let backupSnapshotId: number | null = null;
       if (existsSync(fullPath)) {
         const current = readFileSync(fullPath, "utf-8");

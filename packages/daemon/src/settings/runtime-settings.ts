@@ -351,8 +351,8 @@ export const runtimeSettingsSchema = z.object({
   // Monthly Review kill switch — default OFF pre-release. The current
   // task-flow synthesises 30 days of daily files + 4-5 weekly files into
   // a user-facing snapshot whose downstream leverage is unimplemented
-  // (`<previous_month>` injection is documented as "未実装" in
-  // docs/design/06-memory.md §6.2.8). Cost-to-value ratio is therefore
+  // (`<previous_month>` injection is documented as not-yet-implemented
+  // in docs/design/06-memory.md §6.2.8). Cost-to-value ratio is therefore
   // poor in the current shape; the routine stays in-tree as a concept
   // pending the Mirror+Prune redesign (one trend observation + aged
   // carry-over kill/keep decisions, scoped to feed day-1-of-month

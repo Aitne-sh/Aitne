@@ -137,7 +137,7 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
       ]);
     }
     try {
-      const result = deps.triggerRoadmapMaintenance();
+      const result = await deps.triggerRoadmapMaintenance();
       return c.json({ ok: true, result });
     } catch (err) {
       logger.error({ err }, "Manual roadmap maintenance fire threw");

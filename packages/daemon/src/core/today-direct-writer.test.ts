@@ -93,9 +93,9 @@ describe("appendAgentLogLine", () => {
     rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  it("appends a bullet to today.md Agent Log atomically", () => {
+  it("appends a bullet to today.md Agent Log atomically", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "[hourly_check] Quiet — 0 obs",
       todayWriteLock: lock,
@@ -107,11 +107,11 @@ describe("appendAgentLogLine", () => {
     expect(lock.getHolder()).toBeNull();
   });
 
-  it("rejects when today-write-lock is already held", () => {
+  it("rejects when today-write-lock is already held", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const acquired = lock.acquire();
     expect(acquired.ok).toBe(true);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "should be skipped",
       todayWriteLock: lock,
@@ -120,10 +120,10 @@ describe("appendAgentLogLine", () => {
     expect(result.reason).toBe("lock_unavailable");
   });
 
-  it("returns today_missing when today.md does not exist", () => {
+  it("returns today_missing when today.md does not exist", async () => {
     rmSync(join(contextDir, "today.md"));
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "noop",
       todayWriteLock: lock,
@@ -132,13 +132,13 @@ describe("appendAgentLogLine", () => {
     expect(result.reason).toBe("today_missing");
   });
 
-  it("returns agent_log_section_missing when section absent", () => {
+  it("returns agent_log_section_missing when section absent", async () => {
     writeFileSync(
       join(contextDir, "today.md"),
       sampleToday.replace("## Agent Log\n- 09:00 routine ran\n", ""),
     );
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "noop",
       todayWriteLock: lock,
@@ -147,9 +147,9 @@ describe("appendAgentLogLine", () => {
     expect(result.reason).toBe("agent_log_section_missing");
   });
 
-  it("preserves an explicit HH:MM prefix instead of stamping a new one", () => {
+  it("preserves an explicit HH:MM prefix instead of stamping a new one", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "13:30 [hourly_check] custom timestamp",
       todayWriteLock: lock,
@@ -160,9 +160,9 @@ describe("appendAgentLogLine", () => {
     expect(updated).toMatch(/- 13:30 \[hourly_check\] custom timestamp\n/);
   });
 
-  it("preserves a message that is already formatted as a bullet (- prefix)", () => {
+  it("preserves a message that is already formatted as a bullet (- prefix)", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "- already a bullet",
       todayWriteLock: lock,
@@ -172,9 +172,9 @@ describe("appendAgentLogLine", () => {
     expect(updated).toContain("- already a bullet\n");
   });
 
-  it("respects a custom timezone option when formatting the HH:MM stamp", () => {
+  it("respects a custom timezone option when formatting the HH:MM stamp", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "[hourly_check] tz check",
       todayWriteLock: lock,
@@ -188,9 +188,9 @@ describe("appendAgentLogLine", () => {
     expect(updated).toMatch(/- 12:00 \[hourly_check\] tz check\n/);
   });
 
-  it("falls back to a system-clock HH:MM when Intl.DateTimeFormat throws on an invalid timezone", () => {
+  it("falls back to a system-clock HH:MM when Intl.DateTimeFormat throws on an invalid timezone", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "[hourly_check] tz fallback",
       todayWriteLock: lock,
@@ -205,13 +205,13 @@ describe("appendAgentLogLine", () => {
     expect(updated).toMatch(/- 07:05 \[hourly_check\] tz fallback\n/);
   });
 
-  it("returns io_error when today.md cannot be read (path is a directory)", () => {
+  it("returns io_error when today.md cannot be read (path is a directory)", async () => {
     // Replace today.md with a directory of the same name — readFileSync
     // will throw EISDIR while existsSync still reports the path as present.
     rmSync(join(contextDir, "today.md"));
     mkdirSync(join(contextDir, "today.md"));
     const lock = new InMemoryTodayWriteLockManager(60_000);
-    const result = appendAgentLogLine({
+    const result = await appendAgentLogLine({
       contextDir,
       message: "should fail",
       todayWriteLock: lock,
@@ -222,14 +222,14 @@ describe("appendAgentLogLine", () => {
     expect(lock.getHolder()).toBeNull();
   });
 
-  it("returns io_error when today.md write fails (parent is read-only)", () => {
+  it("returns io_error when today.md write fails (parent is read-only)", async () => {
     // On macOS/Linux, chmod 0500 (read+execute, no write) on the parent
     // dir makes writeFileAtomically's rename / open-for-write fail.
     if (process.platform === "win32") return;
     chmodSync(contextDir, 0o500);
     try {
       const lock = new InMemoryTodayWriteLockManager(60_000);
-      const result = appendAgentLogLine({
+      const result = await appendAgentLogLine({
         contextDir,
         message: "should fail on write",
         todayWriteLock: lock,
@@ -240,5 +240,33 @@ describe("appendAgentLogLine", () => {
       // Restore so afterEach's rmSync can clean up.
       chmodSync(contextDir, 0o700);
     }
+  });
+
+  it("serializes against a concurrent direct write to the same today.md", async () => {
+    // The bug this fix addresses: without serializeContextFileWrite,
+    // two concurrent appendAgentLogLine calls could read the same
+    // pre-state and the second rename would clobber the first bullet.
+    // With the serializer, both bullets land in order.
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const lock2 = new InMemoryTodayWriteLockManager(60_000);
+    const [first, second] = await Promise.all([
+      appendAgentLogLine({
+        contextDir,
+        message: "[bullet-A] first",
+        todayWriteLock: lock,
+        now: new Date(2026, 4, 6, 12, 0, 0),
+      }),
+      appendAgentLogLine({
+        contextDir,
+        message: "[bullet-B] second",
+        todayWriteLock: lock2,
+        now: new Date(2026, 4, 6, 12, 1, 0),
+      }),
+    ]);
+    expect(first.appended).toBe(true);
+    expect(second.appended).toBe(true);
+    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    expect(updated).toContain("- 12:00 [bullet-A] first\n");
+    expect(updated).toContain("- 12:01 [bullet-B] second\n");
   });
 });

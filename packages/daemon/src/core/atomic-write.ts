@@ -82,7 +82,11 @@ export function writeFileAtomically(fullPath: string, content: string): void {
   // Refuse to overwrite a symlink at the final path. lstat is racy on its
   // own — the actual TOCTOU defense is the rename below — but surfacing
   // the symlink early gives a clearer error than letting rename quietly
-  // replace an attacker's link.
+  // replace an attacker's link. Also reuse the lstat result to preserve
+  // the existing file's permission bits — a fresh `openSync(..., 0o644)`
+  // would silently widen a 0o600 file (e.g. sensitive dossier / policy)
+  // on every write.
+  let createMode = 0o600;
   try {
     const targetStat = lstatSync(fullPath);
     if (targetStat.isSymbolicLink()) {
@@ -91,6 +95,9 @@ export function writeFileAtomically(fullPath: string, content: string): void {
         { code: "EATOMIC_TARGET_SYMLINK" },
       );
     }
+    if (targetStat.isFile()) {
+      createMode = targetStat.mode & 0o777;
+    }
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EATOMIC_TARGET_SYMLINK") throw err;
@@ -98,7 +105,10 @@ export function writeFileAtomically(fullPath: string, content: string): void {
        the rethrow is a defensive guard, not a tested path. */
     if (code !== "ENOENT") throw err;
     /* c8 ignore stop */
-    // ENOENT is expected when the file does not exist yet.
+    // ENOENT is expected when the file does not exist yet — `createMode`
+    // stays at the conservative 0o600 default. Context MD files contain
+    // operator PII / plans; defaulting to owner-only is safer than the
+    // historical 0o644.
   }
 
   // Random suffix prevents an attacker from pre-placing a symlink at our
@@ -111,7 +121,7 @@ export function writeFileAtomically(fullPath: string, content: string): void {
     fsConstants.O_EXCL |
     fsConstants.O_NOFOLLOW;
 
-  const fd = openSync(tempPath, flags, 0o644);
+  const fd = openSync(tempPath, flags, createMode);
   try {
     const buf = Buffer.from(content, "utf-8");
     let offset = 0;

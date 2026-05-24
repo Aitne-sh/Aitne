@@ -73,8 +73,26 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
  * Subsequent writes must go through PATCH (append). This enforces the
  * append-only contract at the API level rather than relying on prompt
  * compliance alone.
+ *
+ * The contract has two sides — PUT-after-creation is denied here; the
+ * PATCH handler additionally restricts these paths to {@link APPEND_ONLY_PATCH_MODES},
+ * so `mode:"replace"` / `"clear"` / `"clear_before"` cannot erase existing
+ * sections behind the agent's back.
  */
 export const CREATE_ONLY_PUT = new Set(["agent/journal"]);
+
+/**
+ * PATCH modes that count as "append-style" for paths in {@link CREATE_ONLY_PUT}.
+ * Every other mode (`"replace"`, `"clear"`, `"clear_before"`) MUST be
+ * rejected on append-only paths — otherwise a prompt-injected agent (or
+ * any caller with a valid bearer token) could PATCH `agent/journal` with
+ * `mode:"replace"` against a section and destroy historical entries the
+ * "create-only PUT" gate was meant to protect.
+ */
+export const APPEND_ONLY_PATCH_MODES = new Set<string>([
+  "append",
+  "append_to_file",
+]);
 
 /**
  * Slug regex shared by `{slug}` and `{date}` placeholders. Matches the

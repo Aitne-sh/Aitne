@@ -11,8 +11,8 @@ export enum EventPriority {
 }
 
 // ── Base Event ──
-// Note: Node.js 15+ has a global Event class.
-// Use `AgentEvent` alias when exporting to avoid collision.
+// Note: Node.js 15+ exposes a global `Event` class; importing this one
+// must come through the package barrel or be aliased at the call site.
 export interface Event {
   type: string; // e.g., "message.received", "routine.hourly_check"
   source: string; // e.g., "slack", "obsidian", "cron"

@@ -25,6 +25,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { writeFileAtomically } from "./atomic-write.js";
+import { serializeContextFileWrite } from "./context-file-serializer.js";
 import { fullPath, CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import { createLogger } from "../logging.js";
 import type { TodayWriteLockManager } from "./today-write-lock.js";
@@ -65,10 +66,20 @@ export interface AppendAgentLogLineResult {
  * Append a single bullet line to today.md `## Agent Log`. Idempotent
  * shape — repeated calls each add a new bullet (the gate guarantees at
  * most one call per cron tick anyway).
+ *
+ * Async because the read-modify-write block runs inside the daemon-wide
+ * {@link serializeContextFileWrite} so it cannot interleave with the HTTP
+ * Context API's PUT/PATCH on the same today.md file. Without that fence
+ * a concurrent HTTP PATCH could read the pre-bullet bytes, compute its
+ * update, and rename over the file AFTER this writer's rename, silently
+ * dropping the bullet. The cross-session `todayWriteLock` is still
+ * acquired around the serialized block so the morning routine (which
+ * holds the lock + passes X-Lock-Id) continues to fence other direct
+ * writers cleanly.
  */
-export function appendAgentLogLine(
+export async function appendAgentLogLine(
   input: AppendAgentLogLineInput,
-): AppendAgentLogLineResult {
+): Promise<AppendAgentLogLineResult> {
   const lock = input.todayWriteLock.acquire();
   if (!lock.ok) {
     logger.info(
@@ -80,35 +91,40 @@ export function appendAgentLogLine(
 
   try {
     const path = fullPath(input.contextDir, CONTEXT_RELATIVE_PATHS.today);
-    if (!existsSync(path)) {
-      logger.warn({ path }, "Daemon-direct Agent Log append skipped — today.md missing");
-      return { appended: false, reason: "today_missing" };
-    }
+    return await serializeContextFileWrite(path, () => {
+      if (!existsSync(path)) {
+        logger.warn({ path }, "Daemon-direct Agent Log append skipped — today.md missing");
+        return { appended: false, reason: "today_missing" } as AppendAgentLogLineResult;
+      }
 
-    let content: string;
-    try {
-      content = readFileSync(path, "utf-8");
-    } catch (err) {
-      logger.error({ err, path }, "Failed to read today.md for Agent Log append");
-      return { appended: false, reason: "io_error" };
-    }
+      let content: string;
+      try {
+        content = readFileSync(path, "utf-8");
+      } catch (err) {
+        logger.error({ err, path }, "Failed to read today.md for Agent Log append");
+        return { appended: false, reason: "io_error" } as AppendAgentLogLineResult;
+      }
 
-    const updated = appendBulletToAgentLog(content, formatBullet(input));
-    if (updated === null) {
-      logger.warn(
-        { path },
-        "Daemon-direct Agent Log append skipped — `## Agent Log` heading missing",
-      );
-      return { appended: false, reason: "agent_log_section_missing" };
-    }
+      const updated = appendBulletToAgentLog(content, formatBullet(input));
+      if (updated === null) {
+        logger.warn(
+          { path },
+          "Daemon-direct Agent Log append skipped — `## Agent Log` heading missing",
+        );
+        return {
+          appended: false,
+          reason: "agent_log_section_missing",
+        } as AppendAgentLogLineResult;
+      }
 
-    try {
-      writeFileAtomically(path, updated);
-      return { appended: true };
-    } catch (err) {
-      logger.error({ err, path }, "Failed to write today.md for Agent Log append");
-      return { appended: false, reason: "io_error" };
-    }
+      try {
+        writeFileAtomically(path, updated);
+        return { appended: true } as AppendAgentLogLineResult;
+      } catch (err) {
+        logger.error({ err, path }, "Failed to write today.md for Agent Log append");
+        return { appended: false, reason: "io_error" } as AppendAgentLogLineResult;
+      }
+    });
   } finally {
     input.todayWriteLock.release(lock.lockId);
   }

@@ -29,9 +29,12 @@ ask_examples:
   - What is B-4 / managed Chromium?
   - What is a schema migration?
   - What is execution permission mode?
+  - What is a bang command?
+  - What is deniedTools?
+  - What is an observation?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-24
 keywords:
   - terminology
   - vocabulary
@@ -51,6 +54,9 @@ keywords:
   - schema migration
   - execution permission mode
   - research cluster
+  - bang command
+  - deniedTools
+  - safety model
 related:
   - concepts/agent-day
   - concepts/backends-and-tiers
@@ -58,9 +64,11 @@ related:
   - concepts/observations
   - concepts/delegated-mode
   - concepts/safety-and-execution
+  - concepts/safety-model
   - features/routines/morning-routine
   - features/wiki/overview
   - features/integrations/browser-history
+  - features/messaging/bang-commands
 ---
 
 # Glossary
@@ -104,6 +112,15 @@ identity / legal, generic payment processors) remain denied even with a
 valid token. Operator self-testing only until B-3 has been stable for
 six weeks. See [Managed Chromium](features/operations/managed-chromium.md).
 
+## Bang Command
+
+Short, owner-only command typed in a paired DM that starts with `!`
+(e.g. `!help`, `!stop`, `!cost`, `!report`, `!checks`, `!research`,
+`!ingest`, `!compile`, `!ask`). Handled by the daemon directly — no
+LLM call, no cost, no session opened. Built-in commands plus operator-
+enabled custom commands appear in `!help`. See
+[Bang Commands](features/messaging/bang-commands.md).
+
 ## Backend Router
 
 The component that resolves a `ProcessKey` to a concrete `(backend,
@@ -122,6 +139,16 @@ matching anchor.
 
 The hour-of-day at which the agent day rolls over. Configured via
 `dayBoundaryHour` (default `4`).
+
+## deniedTools
+
+Per-integration deny list of tool names (or prefix globs like
+`send_*`) the agent must not call. The primary defense against
+unwanted destructive actions in the [Safety Model](concepts/safety-model.md).
+Editable in **Connections → \<integration\> → Tool Permissions**;
+seeded with a recommended starter list on first delegated setup.
+Patterns are validated against the connector's `capabilityTools` set
+at PATCH time so typos fail fast.
 
 ## Execution Permission Mode
 
@@ -204,6 +231,16 @@ It fetches each routine's mail / calendar / Notion window
 main routine then consumes the resulting `<fetch_report>` block and
 pending observations instead of calling upstream APIs itself. Introduced
 in 2026-05 to trim morning-routine input tokens by ~24%.
+
+## Observation
+
+One row in the `observations` table. A change record a polling
+integration (Obsidian, Git, Notion, calendar, mail, browser history)
+or a `routine.fetch_window` pre-pass wrote into SQLite. The
+`routine.hourly_check` is the consumer — there is no per-change
+notification. `actor='agent'` rows are filtered out by the consumer
+to break the agent-observing-its-own-writes loop. See
+[Observations](concepts/observations.md).
 
 ## ProcessKey
 

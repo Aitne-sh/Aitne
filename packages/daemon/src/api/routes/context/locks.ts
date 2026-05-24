@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import { existsSync, readFileSync } from "node:fs";
 import { localDateStr } from "@aitne/shared";
+import { serializeContextFileWrite } from "../../../core/context-file-serializer.js";
 import { isValidYmd } from "../../../core/roadmap-horizon.js";
 import {
   extractRoadmapIds,
@@ -22,7 +23,6 @@ export function registerLockRoutes(app: Hono, ctx: ContextRouteContext): void {
     deps,
     morningRoutineLock,
     roadmapWriteLock,
-    withWriteLock,
     getCurrentContextDir,
     readOptionalJsonBody,
   } = ctx;
@@ -122,18 +122,18 @@ export function registerLockRoutes(app: Hono, ctx: ContextRouteContext): void {
       ]);
     }
 
-    return withWriteLock(() => {
-      const contextDir = getCurrentContextDir();
-      const fullPath = safePath(contextDir, "roadmap");
-      if (!fullPath) {
-        return respondWithAgentError(c, 400, [
-          composeIssue("context.path_invalid", {
-            field: "path",
-            received: "roadmap",
-          }),
-        ]);
-      }
+    const contextDir = getCurrentContextDir();
+    const fullPath = safePath(contextDir, "roadmap");
+    if (!fullPath) {
+      return respondWithAgentError(c, 400, [
+        composeIssue("context.path_invalid", {
+          field: "path",
+          received: "roadmap",
+        }),
+      ]);
+    }
 
+    return serializeContextFileWrite(fullPath, () => {
       const content = existsSync(fullPath)
         ? readFileSync(fullPath, "utf-8")
         : "";

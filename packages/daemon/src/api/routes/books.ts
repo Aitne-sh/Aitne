@@ -88,11 +88,11 @@ export function parseKindleClippings(text: string): {
       }
     }
 
-    // Line 2 is blank, content starts at line 3
     const content = lines.slice(3).join("\n").trim();
     if (!content) continue;
 
-    // Skip bookmarks (they have no content or are just location markers)
+    // Skip bookmarks — Kindle exports them as entries with the same shape
+    // as highlights but no body, only a location marker.
     if (metaLine.includes("Bookmark")) continue;
 
     highlights.push({ bookKey, content, location, highlightedAt });
@@ -371,7 +371,6 @@ export function createBookRoutes(deps: ApiDependencies): Hono {
        LIMIT ? OFFSET ?`,
     ).all(...params, limit, offset) as BookRow[];
 
-    // Attach highlight count per book
     const bookIds = rows.map((r) => r.id);
     const highlightCounts = new Map<number, number>();
     if (bookIds.length > 0) {
@@ -593,7 +592,6 @@ export function createBookRoutes(deps: ApiDependencies): Hono {
 
     const { books: bookMap, highlights } = parseKindleClippings(body.data);
 
-    // Upsert books
     const insertHighlight = db.prepare(
       `INSERT INTO reading_highlights (book_id, content, location, highlighted_at)
        VALUES (?, ?, ?, ?)`,
@@ -603,7 +601,6 @@ export function createBookRoutes(deps: ApiDependencies): Hono {
     let highlightsInserted = 0;
 
     const importAll = db.transaction(() => {
-      // Map bookKey → book id
       const bookIdMap = new Map<string, number>();
       for (const [key, { title, author }] of bookMap) {
         // Use COALESCE to match the UNIQUE index on (title, COALESCE(author, ''))
@@ -624,12 +621,12 @@ export function createBookRoutes(deps: ApiDependencies): Hono {
         }
       }
 
-      // Insert highlights (check for duplicates by content + book_id)
       for (const h of highlights) {
         const bookId = bookIdMap.get(h.bookKey);
         if (!bookId) continue;
 
-        // Simple dedup: check if identical content exists for this book
+        // Dedup by exact content match within the same book — Kindle
+        // exports duplicate every highlight on each re-export.
         const exists = db.prepare(
           `SELECT 1 FROM reading_highlights WHERE book_id = ? AND content = ?`,
         ).get(bookId, h.content);

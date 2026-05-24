@@ -709,11 +709,22 @@ export class HourlyCheckCoordinator {
           ? `[hourly_check] Quiet (${decision.reason}) — ${pendingCount} obs consumed silently`
           : `[hourly_check] Stage 2 log-only (${decision.reason}) — ${pendingCount} obs consumed silently`;
       if (this.todayWriteLock) {
-        appendAgentLogLine({
+        // Fire-and-forget: the silent-path return is a sync object the
+        // gate caller needs immediately to bookkeep observations. The
+        // Agent Log bullet is a best-effort trace (skipping is already
+        // an accepted outcome per AppendAgentLogLineResult.reason), so
+        // we don't await it. The serializer inside ensures the write
+        // does not race with HTTP context PATCHes on today.md.
+        void appendAgentLogLine({
           contextDir: getContextDir(this.config, this.db),
           message,
           todayWriteLock: this.todayWriteLock,
           timezone: this.config.timezone || undefined,
+        }).catch((err: unknown) => {
+          logger.error(
+            { err },
+            "Daemon-direct Agent Log append threw — silent-path observations were still consumed",
+          );
         });
       }
 

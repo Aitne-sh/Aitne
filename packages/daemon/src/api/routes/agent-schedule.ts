@@ -213,12 +213,11 @@ export function registerAgentScheduleRoutes(
       deps.triggerRoadmapRefresh,
       "scheduled_task_created",
     );
-    // 2026-05 skill/API consistency: `/schedule/dm` returns
-    // `scheduledFor` so the caller can confirm the normalized UTC
-    // timestamp without a round-trip GET. The wake-task variant did
-    // not, forcing callers that wanted to log the scheduled time to
-    // either re-parse the input `time` themselves or query the table.
-    // Returning it here is additive and matches the DM variant.
+    // Skill / API consistency: `/schedule/dm` returns `scheduledFor` so
+    // the caller can confirm the normalized UTC timestamp without a
+    // round-trip GET. This variant matches so callers that want to log
+    // the scheduled time don't need to re-parse the input `time` or
+    // query the table.
     //
     // Phase D — `warnings` carries the §5.0.5 advisory channel. The
     // most common entry is `schedule.model_deprecated` for a

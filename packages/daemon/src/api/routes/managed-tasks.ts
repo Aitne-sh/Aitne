@@ -973,7 +973,7 @@ export function createManagedTasksRoutes(deps: ManagedTasksRoutesDeps): Hono {
   // `entity_source_keys` mirror) and rewrites its frontmatter
   // `sources.<oldKey>` to `sources.<newKey>`. Per-file failures are
   // isolated and surfaced in the response so the dashboard can flag
-  // them. Followups doc Issue 2 — prerequisite is now wired.
+  // them.
 
   app.post("/managed-tasks/:id/rename-app", async (c) => {
     const id = c.req.param("id");

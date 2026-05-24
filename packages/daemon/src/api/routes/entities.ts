@@ -171,7 +171,8 @@ export function createEntitiesRoutes(deps: EntitiesRoutesDeps): Hono {
       });
     }
 
-    // tier-2
+    // Tier-2 fallback — domain/type/date triple is required for the
+    // structured lookup below.
     if (!domain || !type || !date) {
       return respondWithAgentError(c, 400, [
         composeIssue("entities.validation_error", {

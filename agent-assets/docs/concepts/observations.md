@@ -45,6 +45,11 @@ related:
   - features/routines/morning-routine
   - concepts/process-keys
   - concepts/routines
+ui_anchors:
+  - /activity
+config_keys:
+  - hourlyCheckIntervalMinutes
+  - hourlyCheckPrePassFreshnessMinutes
 ---
 
 # Observations

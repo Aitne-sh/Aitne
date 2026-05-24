@@ -193,12 +193,10 @@ export function registerExecRoutes(app: Hono, deps: ApiDependencies): void {
         409,
       );
     }
-    // Codex task mode landed in Phase 1.5 — daemon-side stream pre-emption
-    // (see codex-core.ts `runDelegatedTask`) gates allowed-tools / destructive
-    // calls without relying on a CLI-level allowedTools surface. The 501
-    // short-circuit that previously fired here for `state.delegatedBackend
-    // === "codex"` is gone; Codex /exec requests now flow through the
-    // invoker like Claude and Gemini.
+    // Codex task mode uses daemon-side stream pre-emption (see
+    // codex-core.ts `runDelegatedTask`) to gate allowed-tools / destructive
+    // calls without relying on a CLI-level allowedTools surface. Codex
+    // /exec requests flow through the invoker like Claude and Gemini.
     const sessionBackendHeader = c.req.header("x-session-backend");
     if (
       sessionBackendHeader
@@ -400,14 +398,10 @@ function mapTaskErrorClassToHttpStatus(errorClass: string): TaskHttpStatus {
  *     create_event / notion-create-pages are recovered in addition to
  *     id-in-args deletes / updates / labels).
  *
- * The historical `/invoke` route called the same helper once per call
- * with the full upstream `result.toolResult`; it was retired 2026-05-01
- * (/exec-only migration) and the dormant stub file was removed in the
- * api-route-decomposition.md PR-5 follow-up. The internal guards on
- * `connector` / `destructiveTools` membership are retained as
- * defense-in-depth (c8 ignored) so a reactivation — or any future
- * second caller — can re-share the helper safely without re-deriving
- * the pre-filter contract.
+ * The internal guards on `connector` / `destructiveTools` membership are
+ * retained as defense-in-depth (c8 ignored) so any future second caller
+ * can re-share the helper safely without re-deriving the pre-filter
+ * contract.
  *
  * Idempotent on extraction miss: returning early without any mark is the
  * documented degradation path (causes one self-noticed observation, not

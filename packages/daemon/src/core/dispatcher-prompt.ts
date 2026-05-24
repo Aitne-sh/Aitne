@@ -182,8 +182,8 @@ export class PromptAssembler {
     if (!event.attachments || event.attachments.length === 0) return [];
     const staged: StoreAttachmentRow[] = [];
     for (const ref of event.attachments) {
-      // P2-13: skip adapter-marked missing refs — they have no underlying
-      // row to stage, just metadata for the prompt builder.
+      // Skip adapter-marked missing refs — they have no underlying row
+      // to stage, just metadata for the prompt builder.
       if (ref.missing) continue;
       const row = attachmentStore.get(ref.id);
       if (!row) continue;
@@ -283,7 +283,7 @@ export class PromptAssembler {
       }
     }
     if (missing.length > 0) {
-      // P2-13: adapter-reported attachments that couldn't be ingested
+      // Adapter-reported attachments that couldn't be ingested
       // (e.g. Discord CDN URL expired on a stale message). The agent
       // can't see the bytes but should still acknowledge them and ask
       // the user to resend rather than pretending nothing was attached.

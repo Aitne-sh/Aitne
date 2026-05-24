@@ -78,7 +78,7 @@ function HighlightedSnippet({ html }: { html: string }) {
   return <>{elements}</>;
 }
 
-// B-007 §5.1 layout.
+// Order matches the user-visible nav order on the Knowledge page.
 const TOP_FILES = [
   "_index",
   "user/profile",

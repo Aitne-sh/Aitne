@@ -539,11 +539,11 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
    *     batching shape blocks with "curl command must contain an explicit
    *     localhost URL" — the URL lives in the stdin payload, not argv.
    *
-   * Production telemetry on 2026-05-13 morning routine showed Haiku
-   * burning four budget cycles and posting zero observations because every
-   * batching shape it tried was blocked, leaving `today.md` empty. The
-   * single-curl-with-array endpoint resolves the cardinality mismatch
-   * without weakening either hook.
+   * Without this single-curl-with-array endpoint Haiku burns budget
+   * cycles trying every batching shape (each blocked by one of the hooks)
+   * and posts zero observations, leaving `today.md` empty. The bulk
+   * endpoint resolves the cardinality mismatch without weakening either
+   * hook.
    *
    * Body: `{ "observations": [...] }` with up to 200 entries per call.
    * Per-item validation mirrors POST /observations exactly. The whole
@@ -682,15 +682,14 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
   /**
    * Field-level validation contract for `POST /observations/consume`.
    *
-   * Production telemetry (2026-05) showed a single Stage-3 hourly_check
-   * burning $0.58 / 25 turns retrying this endpoint with shape variants
+   * Without per-field error envelopes, a single Stage-3 hourly_check can
+   * burn turns retrying this endpoint with shape variants
    * (`correlation_id` snake_case, stringified ids, the angle-bracket
    * placeholder copied verbatim, per-id paths, etc.). The legacy
-   * `{ error: "validation_error" }` response gave the agent zero signal
-   * about which field was wrong, so it would mutate a random field and
-   * retry. Returning the full schema + the specific issue + a one-line
-   * hint lets the agent self-correct on the next turn instead of the
-   * eighth.
+   * `{ error: "validation_error" }` response gives the agent zero signal
+   * about which field was wrong, so it mutates a random field and retries.
+   * Returning the full schema + the specific issue + a one-line hint lets
+   * the agent self-correct on the next turn instead of the eighth.
    */
   const CONSUME_EXPECTED_SHAPE =
     '{"ids": number[], "correlationId": string}';
@@ -828,8 +827,8 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
   });
 
   /**
-   * Helpful 405 for the per-id consume shape the agent has reached for in
-   * production (`POST /api/observations/:id/consume`). Without an explicit
+   * Helpful 405 for the per-id consume shape the agent commonly reaches
+   * for (`POST /api/observations/:id/consume`). Without an explicit
    * handler this path falls through to Hono's 404 with body
    * `"404 Not Found"`, which gives the agent nothing to act on. Returning
    * a 405 with the canonical bulk-endpoint hint pulls the agent back onto

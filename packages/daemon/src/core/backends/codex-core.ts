@@ -2365,10 +2365,10 @@ function nonCachedInputTokens(
 // **Verified shapes** (covered by existing tests, observed in the
 // wild): `reasoning` (codex 0.121+), `agent_reasoning` (older builds).
 //
-// **Defensive entries** (added by the file-fallback hardening,
-// 2026-05-16, not yet confirmed from codex-rs source — additions are
-// safe because the names are reasoning-specific enough that a false
-// positive is implausible): `reasoning_summary` — plausible naming if
+// **Defensive entries** (not yet confirmed from codex-rs source —
+// additions are safe because the names are reasoning-specific enough
+// that a false positive is implausible): `reasoning_summary` —
+// plausible naming if
 // codex-rs ever differentiates the summary item from the in-progress
 // reasoning stream. Drop this entry if a future codex release
 // repurposes the name for something else.
@@ -2386,10 +2386,10 @@ const CODEX_REASONING_ITEM_TYPES = new Set([
 // `agent_reasoning_section_break` — emitted by older codex builds and
 // covered by the existing reasoning-filter regression tests.
 //
-// **Defensive entries** (added 2026-05-16 — NOT confirmed against
-// codex-rs source, included because the bug surface is real and the
-// false-positive risk is near-zero given how reasoning-specific the
-// names are): the `response.reasoning_summary_*` family follows
+// **Defensive entries** (NOT confirmed against codex-rs source,
+// included because the bug surface is real and the false-positive risk
+// is near-zero given how reasoning-specific the names are): the
+// `response.reasoning_summary_*` family follows
 // OpenAI's Responses API streaming schema, which codex CLI is known
 // to relay verbatim in some configurations (GPT-5 / o-series models
 // against certain backends). The bare `reasoning_*` short forms hedge

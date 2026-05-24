@@ -1704,6 +1704,118 @@ describe("Context API — optimistic concurrency", () => {
       expect(content).toContain("## Weekly 2026-W14");
       expect(content).not.toContain("## Weekly 2026-W15");
     });
+
+    // The PUT-side gate above prevents re-creating the file. These tests
+    // pin the PATCH-side gate that prevents `mode:"replace"` / `"clear"` /
+    // `"clear_before"` from erasing sections of an append-only file. Without
+    // this gate a prompt-injected agent (or any caller with a valid bearer
+    // token) could PATCH `agent/journal` with mode:"replace" and silently
+    // destroy historical entries — defeating the append-only contract the
+    // PUT-side gate was meant to enforce.
+    it("rejects PATCH mode=replace on agent/journal with 409 append_only_violation", async () => {
+      writeFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "# Agent Journal\n\n## Weekly 2026-W14\n- protected note\n",
+        "utf-8",
+      );
+
+      const res = await app.request("/api/context/agent/journal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section: "Weekly 2026-W14",
+          mode: "replace",
+          content: "- erased!",
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toBe("append_only");
+
+      // Original content fully preserved — `replace` never landed.
+      const content = readFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "utf-8",
+      );
+      expect(content).toContain("- protected note");
+      expect(content).not.toContain("- erased!");
+    });
+
+    it("rejects PATCH mode=clear on agent/journal with 409", async () => {
+      writeFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "# Agent Journal\n\n## Weekly 2026-W14\n- protected note\n",
+        "utf-8",
+      );
+
+      const res = await app.request("/api/context/agent/journal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section: "Weekly 2026-W14",
+          mode: "clear",
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      const content = readFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "utf-8",
+      );
+      expect(content).toContain("- protected note");
+    });
+
+    it("rejects PATCH mode=clear_before on agent/journal with 409", async () => {
+      writeFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "# Agent Journal\n\n## Weekly 2026-W14\n- 2026-04-01 10:00:00 entry\n",
+        "utf-8",
+      );
+
+      const res = await app.request("/api/context/agent/journal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section: "Weekly 2026-W14",
+          mode: "clear_before",
+          cutoff: "2026-05-01 00:00:00",
+        }),
+      });
+
+      expect(res.status).toBe(409);
+      const content = readFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "utf-8",
+      );
+      expect(content).toContain("entry");
+    });
+
+    it("still allows PATCH mode=append on agent/journal (the legitimate path)", async () => {
+      writeFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "# Agent Journal\n\n## Weekly 2026-W14\n- existing note\n",
+        "utf-8",
+      );
+
+      const res = await app.request("/api/context/agent/journal", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section: "Weekly 2026-W14",
+          mode: "append",
+          content: "- new note",
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const content = readFileSync(
+        join(contextDir, "agent", "journal.md"),
+        "utf-8",
+      );
+      expect(content).toContain("- existing note");
+      expect(content).toContain("- new note");
+    });
   });
 
   describe("PATCH /context/* — append_to_file mode", () => {

@@ -55,6 +55,11 @@ related:
   - features/operations/backend-routing
 ui_anchors:
   - /settings/models
+config_keys:
+  - claudeExecutionPermissionMode
+  - codexExecutionPermissionMode
+  - geminiExecutionPermissionMode
+  - opencodeExecutionPermissionMode
 ---
 
 # Backends and Tiers

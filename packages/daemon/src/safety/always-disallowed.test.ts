@@ -13,6 +13,7 @@ import {
   buildOpencodeAbsoluteBlockPermission,
   classifyAbsoluteBlock,
   classifyChromiumTokenAccess,
+  looksLikeBashSecretRead,
   looksLikeSecretPath,
   stripBashHeredocs,
   stripBashStringContent,
@@ -954,6 +955,173 @@ describe("classifyAbsoluteBlock — adversarial bypass attempts", () => {
       expect(looksLikeSecretPath("~/.personal-agent/context/today.md")).toBe(false);
       expect(looksLikeSecretPath("~/.config/aitne/aitne.toml")).toBe(false);
     });
+
+    // ── Case-insensitive matching (bypass-closure regression) ─────────
+    // macOS (HFS+/APFS default) and Windows resolve paths case-
+    // insensitively, so `Read("~/.SSH/id_rsa")` opens the real
+    // `~/.ssh/id_rsa`. The SDK-side `Read(~/.ssh/**)` glob is minimatch-
+    // style (case-sensitive) and would miss the uppercase variant,
+    // letting the PreToolUse hook be the only line of defense — which
+    // before this fix also missed because the regex table was case-
+    // sensitive. Pin the contract so a future refactor that drops the
+    // `/i` flag breaks these tests rather than reopening the bypass.
+    it("matches case-insensitively (closes macOS/Windows FS bypass)", () => {
+      expect(looksLikeSecretPath("~/.SSH/id_rsa")).toBe(true);
+      expect(looksLikeSecretPath("~/.SSH/config")).toBe(true);
+      expect(looksLikeSecretPath("ID_RSA")).toBe(true);
+      expect(looksLikeSecretPath("~/.SSH/ID_ED25519")).toBe(true);
+      expect(looksLikeSecretPath(".ENV")).toBe(true);
+      expect(looksLikeSecretPath(".Env.Production")).toBe(true);
+      expect(looksLikeSecretPath("~/.AWS/credentials")).toBe(true);
+      expect(looksLikeSecretPath("~/.GnuPG/secring.gpg")).toBe(true);
+      expect(looksLikeSecretPath("~/.NETRC")).toBe(true);
+      // Library/Keychains is mixed-case on macOS — case-insensitive
+      // matching means lowercase variants also catch.
+      expect(looksLikeSecretPath("~/library/keychains/login.keychain-db")).toBe(true);
+      expect(looksLikeSecretPath("~/LIBRARY/KEYCHAINS/login.keychain-db")).toBe(true);
+      // gh hosts.yml — mixed casing in either segment still flags.
+      expect(looksLikeSecretPath("~/.Config/GH/hosts.YML")).toBe(true);
+    });
+
+    it("case-insensitivity does not over-match on benign mixed-case substrings", () => {
+      // `Library` substring in an unrelated path must not trigger
+      // (it's specifically `Library/Keychains` that's secret).
+      expect(looksLikeSecretPath("~/Library/Application Support/Foo/data.db")).toBe(false);
+      // `.config` appears in many non-secret config paths; only
+      // `.config/gcloud/` and `.config/gh/hosts.yml` are flagged.
+      expect(looksLikeSecretPath("~/.config/foo/settings.toml")).toBe(false);
+    });
+  });
+});
+
+// ── Bash secret-read classifier (closes Bash-side bypass) ────────────────
+// The `Read(~/.ssh/**)` glob layer denies the Read TOOL. Before the fix,
+// an agent could `Bash(cat ~/.ssh/id_rsa)` and exfiltrate the file
+// silently — neither the SDK `disallowedTools` list (which only carries
+// per-reader bash globs in the opencode translator, not the Claude SDK)
+// nor `classifyAbsoluteBlock("Bash", ...)` would fire, so the operator
+// never even saw an `agent_actions.action_type='blocked_absolute'` row.
+//
+// The Bash-side classifier now routes `cat` / `less` / `head` / `xxd` /
+// etc. invocations through `looksLikeBashSecretRead` and emits the same
+// `secret_read` category an SDK Read deny would.
+describe("looksLikeBashSecretRead — Bash-side reader denylist", () => {
+  it("flags canonical reader + ~/.ssh/ key paths", () => {
+    expect(looksLikeBashSecretRead("cat ~/.ssh/id_rsa")).toBe(true);
+    expect(looksLikeBashSecretRead("less ~/.ssh/config")).toBe(true);
+    expect(looksLikeBashSecretRead("head ~/.ssh/id_ed25519")).toBe(true);
+    expect(looksLikeBashSecretRead("xxd ~/.ssh/id_rsa")).toBe(true);
+    expect(looksLikeBashSecretRead("hexdump ~/.ssh/id_dsa")).toBe(true);
+  });
+
+  it("flags reader + every other documented secret-file family", () => {
+    expect(looksLikeBashSecretRead("cat ~/.aws/credentials")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.gnupg/secring.gpg")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.netrc")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.config/gcloud/access_tokens.db")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.config/gh/hosts.yml")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/Library/Keychains/login.keychain-db")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.local/share/keyrings/login.keyring")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.personal-agent/secrets/master.key")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.personal-agent/backups/snapshot.tar")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.personal-agent/whatsapp/auth/creds.json")).toBe(true);
+  });
+
+  it("flags reader + .env in every realistic shell context", () => {
+    // .env at start, after slash, after space, with extension suffix —
+    // each shape exercises a different branch of the bounded regex.
+    expect(looksLikeBashSecretRead("cat .env")).toBe(true);
+    expect(looksLikeBashSecretRead("cat .env.production")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ./.env")).toBe(true);
+    expect(looksLikeBashSecretRead("cat foo/.env")).toBe(true);
+    // Pipe / redirect bounds: the path is followed by a shell metachar.
+    expect(looksLikeBashSecretRead("cat .env | base64")).toBe(true);
+    expect(looksLikeBashSecretRead("cat .env > /tmp/out")).toBe(true);
+  });
+
+  it("flags case-mismatched paths (macOS/Windows FS bypass)", () => {
+    expect(looksLikeBashSecretRead("cat ~/.SSH/id_rsa")).toBe(true);
+    expect(looksLikeBashSecretRead("CAT ~/.aws/credentials".toLowerCase())).toBe(true);
+    expect(looksLikeBashSecretRead("less ~/Library/KEYCHAINS/login.keychain-db".toLowerCase())).toBe(true);
+  });
+
+  it("flags `id_rsa_backup` and similar suffixed key files (Bash-context tightening)", () => {
+    // The path-side `looksLikeSecretPath` skips `id_rsa_backup` because
+    // its regex requires `\b` or `.` after the key name and `_` doesn't
+    // produce a word boundary. The Bash-side classifier tightens this:
+    // `cat id_rsa_backup` is unambiguously a key-file read.
+    expect(looksLikeBashSecretRead("cat id_rsa_backup")).toBe(true);
+    expect(looksLikeBashSecretRead("cat id_ed25519.old")).toBe(true);
+  });
+
+  it("does NOT flag a reader against a non-secret path", () => {
+    expect(looksLikeBashSecretRead("cat README.md")).toBe(false);
+    expect(looksLikeBashSecretRead("less src/config.ts")).toBe(false);
+    expect(looksLikeBashSecretRead("head package.json")).toBe(false);
+  });
+
+  it("does NOT flag a non-reader command even if the secret path is mentioned", () => {
+    // Pin the reader-anchor invariant: only commands in
+    // SECRET_READ_BASH_COMMANDS trigger this category. `ls` / `stat` /
+    // `find` may legitimately need to traverse a profile dir; they
+    // would route through other defenses if they actually opened a
+    // sensitive file.
+    expect(looksLikeBashSecretRead("ls -la ~/.ssh/")).toBe(false);
+    expect(looksLikeBashSecretRead("stat ~/.ssh/id_rsa")).toBe(false);
+    expect(looksLikeBashSecretRead("file ~/.aws/credentials")).toBe(false);
+  });
+
+  it("does NOT flag prose-only mention of a secret path inside an echo / printf", () => {
+    // `echo "see ~/.ssh/config for details"` is a documentation /
+    // help-text emission, not an exfiltration. echo / printf are not
+    // in the reader set, so the early gate rejects them.
+    expect(looksLikeBashSecretRead(`echo "see ~/.ssh/config for details"`)).toBe(false);
+    expect(looksLikeBashSecretRead(`printf '%s\\n' "found .env"`)).toBe(false);
+  });
+
+  it("strips a leading absolute path on the reader executable (`/usr/bin/cat …`)", () => {
+    // An agent might invoke the absolute path of the reader. The
+    // executable-basename extraction is what keeps the reader-anchor
+    // robust to that variation.
+    expect(looksLikeBashSecretRead("/usr/bin/cat ~/.ssh/id_rsa")).toBe(true);
+    expect(looksLikeBashSecretRead("/bin/less ~/.aws/credentials")).toBe(true);
+  });
+});
+
+describe("classifyAbsoluteBlock — Bash secret_read wire-up", () => {
+  it("returns `secret_read` for `cat ~/.ssh/id_rsa` (was returning null before fix)", () => {
+    const match = classifyAbsoluteBlock("Bash", "cat ~/.ssh/id_rsa");
+    expect(match?.category).toBe("secret_read");
+    expect(match?.redacted).toBe("cat");
+  });
+
+  it("returns `secret_read` for `cat .env`", () => {
+    const match = classifyAbsoluteBlock("Bash", "cat .env");
+    expect(match?.category).toBe("secret_read");
+  });
+
+  it("returns `secret_read` for a case-mismatched `cat ~/.SSH/id_rsa`", () => {
+    const match = classifyAbsoluteBlock("Bash", "cat ~/.SSH/id_rsa");
+    expect(match?.category).toBe("secret_read");
+  });
+
+  it("preserves the existing classifier categories — secret_read does not shadow recursive_delete", () => {
+    // `rm -rf ~/.ssh` must still classify as recursive_delete (the more
+    // specific danger), not secret_read. Order-of-checks invariant.
+    const match = classifyAbsoluteBlock("Bash", "rm -rf ~/.ssh");
+    expect(match?.category).toBe("recursive_delete");
+  });
+
+  it("preserves the existing classifier categories — secret_read does not shadow privilege_escalation", () => {
+    const match = classifyAbsoluteBlock("Bash", "sudo cat ~/.ssh/id_rsa");
+    expect(match?.category).toBe("privilege_escalation");
+  });
+
+  it("preserves the existing classifier categories — secret_cli still fires first", () => {
+    // `security` is the macOS Keychain CLI — its own `secret_cli` category
+    // is a stronger signal than the generic `cat`-style secret_read.
+    const match = classifyAbsoluteBlock("Bash", "security find-generic-password -s foo");
+    expect(match?.category).toBe("secret_cli");
   });
 });
 

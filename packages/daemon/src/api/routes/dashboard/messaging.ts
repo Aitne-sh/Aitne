@@ -10,9 +10,8 @@ export function registerMessagingRoutes(app: Hono, deps: ApiDependencies): void 
    * POST /messaging/whatsapp/pair
    *
    * Triggers Baileys pairing and waits up to ~10s for the first scannable QR.
-   * If WhatsApp isn't enabled yet, returns 409 with a clear hint instead of
-   * silently 404'ing — this surfaces the original setup-flow bug where users
-   * clicked Pair without first enabling.
+   * Returns 409 (not 404) when WhatsApp isn't enabled yet so the dashboard
+   * can show an actionable hint instead of a generic not-found.
    */
   app.post("/messaging/whatsapp/pair", async (c) => {
     if (!deps.whatsappControls) {

@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
   readlinkSync,
@@ -117,6 +119,45 @@ describe("writeFileAtomically", () => {
       const content = "Café résumé naïve — emoji ✅ 🎉 — symbols €£$\n## Sección\n- Niño\n";
       writeFileAtomically(target, content);
       expect(readFileSync(target, "utf-8")).toBe(content);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the existing file's permission mode when overwriting", () => {
+    // Regression: before this guard, `openSync(..., 0o644)` silently
+    // widened a 0o600 file (e.g. sensitive dossier / policy) on every
+    // write. The fix is to lstat the existing file and reuse its mode
+    // bits for the temp file open.
+    const root = makeTempDir();
+    try {
+      const target = join(root, "secret.md");
+      writeFileSync(target, "v1", "utf-8");
+      chmodSync(target, 0o600);
+      // Sanity — the test platform must honour 0o600 (skip elsewhere).
+      const beforeMode = statSync(target).mode & 0o777;
+      if (beforeMode !== 0o600) return;
+
+      writeFileAtomically(target, "v2");
+
+      expect(readFileSync(target, "utf-8")).toBe("v2");
+      expect(statSync(target).mode & 0o777).toBe(0o600);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("defaults new files to owner-only (0o600) — context MD files carry operator PII", () => {
+    const root = makeTempDir();
+    try {
+      const target = join(root, "fresh.md");
+      writeFileAtomically(target, "hello");
+      const mode = statSync(target).mode & 0o777;
+      // The kernel honours the requested mode AND'd with the inverse
+      // of umask, so the assertion is "mode is a subset of 0o600" —
+      // we never want world-readable or group-readable as a default.
+      expect(mode & 0o077).toBe(0);
+      expect(mode & 0o600).toBe(0o600);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

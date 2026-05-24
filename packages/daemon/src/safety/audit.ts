@@ -8,6 +8,7 @@ import type {
 } from "@aitne/shared";
 import type {
   BangCommandDetail,
+  DailyWriteAuditDetail,
   IAuditLogger,
 } from "../core/dispatcher.js";
 import { createLogger } from "../logging.js";
@@ -129,6 +130,7 @@ export class AuditLogger implements IAuditLogger {
       fallbackTriggered?: boolean;
       requestedBackend?: BackendId;
     };
+    dailyWrite?: DailyWriteAuditDetail | null;
   }): void {
     const {
       event,
@@ -145,6 +147,7 @@ export class AuditLogger implements IAuditLogger {
       advisorCallCount = 0,
       dmFreshness,
       prePass,
+      dailyWrite,
     } = params;
     try {
       const modelUsageJson = Object.keys(modelUsage).length > 0
@@ -265,6 +268,12 @@ export class AuditLogger implements IAuditLogger {
             ? { requestedBackend: prePass.requestedBackend }
             : {}),
         };
+      }
+      // daily-journal-daemon-write.md §4.11 — Stage B daily journal
+      // compose outcome. Lands on the same INSERT/UPSERT as the row's
+      // terminal `result`, no post-UPDATE required.
+      if (dailyWrite) {
+        detailPayload.dailyWrite = dailyWrite;
       }
       if (Object.keys(detailPayload).length > 0) {
         columns.splice(columns.length - 2, 0, "detail");
@@ -552,10 +561,9 @@ export class AuditLogger implements IAuditLogger {
      * Optional partial-run context the dispatcher recovers from the catch
      * site (wall-clock duration) and from `BackendRouterHandledError`
      * (backend / model / failure kind+code). Without this, the row is a
-     * black hole: the dashboard shows "Duration: 0ms" for a 60-second run
-     * that hit `max_budget_usd` because the row was written with no
-     * timing/backend/model info — see drift-effects regression
-     * 2026-05-04 (today_refresh hit the $0.10 cap; row 62 was unfilled).
+     * black hole: the dashboard shows "Duration: 0ms" for a long run that
+     * hit `max_budget_usd` because the row was written with no
+     * timing/backend/model info.
      *
      * Tokens / cost / num_turns are intentionally NOT passed: an aborted
      * SDK stream doesn't surface a usable AgentResult, so any value here
@@ -594,6 +602,7 @@ export class AuditLogger implements IAuditLogger {
         fallbackTriggered?: boolean;
         requestedBackend?: BackendId;
       };
+      dailyWrite?: DailyWriteAuditDetail | null;
     },
   ): void {
     try {
@@ -664,6 +673,13 @@ export class AuditLogger implements IAuditLogger {
             ? { requestedBackend: context.prePass.requestedBackend }
             : {}),
         };
+      }
+      // daily-journal-daemon-write.md §4.11 — Stage B daily journal
+      // compose outcome (failure-path twin of the success-path block
+      // above). Lets the streak detector see `ok: false, reason: ...`
+      // rows when Stage B threw mid-flight.
+      if (context?.dailyWrite) {
+        detailPayload.dailyWrite = context.dailyWrite;
       }
       if (Object.keys(detailPayload).length > 0) {
         columns.splice(columns.length - 2, 0, "detail");

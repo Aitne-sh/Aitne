@@ -358,8 +358,8 @@ export interface PurchaseHandler {
    * recognised shapes (`!~xxxxxxxx` reply, `!verify <tail>`,
    * `!cancel-purchase`), every pending token delivered to that channel
    * is cancelled with reason `user_reply`. The user explicitly accepted
-   * this strict UX in rev3's directive ("それ以外が送られた場合は、決済を
-   * 取り消しする") — anything but the exact token aborts the workflow.
+   * this strict UX in rev3's directive — anything but the exact token
+   * aborts the workflow.
    *
    * Returns the rows that were cancelled (empty if none pending on the
    * channel). Best-effort — DM dispatch failures are logged but do not

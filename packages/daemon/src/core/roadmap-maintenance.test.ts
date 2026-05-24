@@ -442,8 +442,8 @@ describe("roadmap-maintenance", () => {
       return path;
     }
 
-    it("skips when roadmap.md is missing", () => {
-      const result = runRoadmapMechanicalMaintenance({
+    it("skips when roadmap.md is missing", async () => {
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),
@@ -460,13 +460,13 @@ describe("roadmap-maintenance", () => {
       expect(auditRow.result).toBe("skipped");
     });
 
-    it("skips when the roadmap write lock is already held", () => {
+    it("skips when the roadmap write lock is already held", async () => {
       seedRoadmap(buildRoadmap({}));
       const lock = freshLock();
       const held = lock.acquire();
       expect(held.ok).toBe(true);
 
-      const result = runRoadmapMechanicalMaintenance({
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: lock,
@@ -477,10 +477,10 @@ describe("roadmap-maintenance", () => {
       expect(result.skipReason).toBe("roadmap_write_lock_held");
     });
 
-    it("releases the lock on a successful run", () => {
+    it("releases the lock on a successful run", async () => {
       seedRoadmap(buildRoadmap({}));
       const lock = freshLock();
-      runRoadmapMechanicalMaintenance({
+      await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: lock,
@@ -491,7 +491,7 @@ describe("roadmap-maintenance", () => {
       expect(lock.acquire().ok).toBe(true);
     });
 
-    it("applies all three substeps end-to-end and persists the result", () => {
+    it("applies all three substeps end-to-end and persists the result", async () => {
       const taskId = insertSchedule(db, "completed");
       const body = buildRoadmap({
         longTerm: [
@@ -510,7 +510,7 @@ describe("roadmap-maintenance", () => {
       seedRoadmap(body);
       const writeTracker = new AgentWriteTracker();
       const indexHints: string[] = [];
-      const result = runRoadmapMechanicalMaintenance({
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),
@@ -562,9 +562,9 @@ describe("roadmap-maintenance", () => {
       expect(indexHints).toContain("agent/journal.md");
     });
 
-    it("writes a journal entry even when no roadmap mutation occurred", () => {
+    it("writes a journal entry even when no roadmap mutation occurred", async () => {
       seedRoadmap(buildRoadmap({}));
-      const result = runRoadmapMechanicalMaintenance({
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),
@@ -589,7 +589,7 @@ describe("roadmap-maintenance", () => {
       expect(snapshots.n).toBe(0);
     });
 
-    it("rejects the rewrite and surfaces validate error if the maintained body is invalid", () => {
+    it("rejects the rewrite and surfaces validate error if the maintained body is invalid", async () => {
       // Seed a malformed roadmap: header line wrong so validateRoadmap fails.
       // We still seed something existsSync detects, but the body fails validation
       // BEFORE our mutations would land on disk.
@@ -601,7 +601,7 @@ describe("roadmap-maintenance", () => {
       const path = join(contextDir, "roadmap.md");
       writeFileSync(path, malformed, "utf-8");
 
-      const result = runRoadmapMechanicalMaintenance({
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),
@@ -625,7 +625,7 @@ describe("roadmap-maintenance", () => {
       expect(audit[0].result).toBe("failed");
     });
 
-    it("emits an audit row when the transition validator rejects the rewrite", () => {
+    it("emits an audit row when the transition validator rejects the rewrite", async () => {
       // Hand-craft a state the in-process mutations can't reach on
       // their own: a future-dated event entry that 2b would normally
       // skip (because future-event removal IS allowed) — so we instead
@@ -646,7 +646,7 @@ describe("roadmap-maintenance", () => {
       // is "wired in" + "fail emits audit". A full integration test for
       // every guard branch lives in roadmap-validate.test.ts.
       seedRoadmap(buildRoadmap({}));
-      const result = runRoadmapMechanicalMaintenance({
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),
@@ -659,7 +659,7 @@ describe("roadmap-maintenance", () => {
       expect(result.errors).toEqual([]);
     });
 
-    it("does NOT remove a still-pending scheduled entry whose prep rows are stale", () => {
+    it("does NOT remove a still-pending scheduled entry whose prep rows are stale", async () => {
       // End-to-end version of the applyAgentActionPlanSweep unit test:
       // the orchestrator must also keep the entry on disk and surface a
       // sweep count of 0.
@@ -674,7 +674,7 @@ describe("roadmap-maintenance", () => {
           ],
         }),
       );
-      const result = runRoadmapMechanicalMaintenance({
+      const result = await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),
@@ -688,9 +688,9 @@ describe("roadmap-maintenance", () => {
       expect(after).toContain("Status: pending");
     });
 
-    it("emits the audit row even when only the journal append fired", () => {
+    it("emits the audit row even when only the journal append fired", async () => {
       seedRoadmap(buildRoadmap({}));
-      runRoadmapMechanicalMaintenance({
+      await runRoadmapMechanicalMaintenance({
         db,
         contextDir,
         roadmapWriteLock: freshLock(),

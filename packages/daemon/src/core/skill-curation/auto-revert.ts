@@ -6,10 +6,10 @@
 // did not "settle" the drift and is rolled back automatically. The section
 // is then marked `frozen` for two cadence cycles to prevent thrashing.
 //
-// This is the ONLY roll-back path. Owner-driven approve/reject/revert
-// endpoints were removed alongside the approval queue (P22 preview-scope
-// note); the operator's only manual escape is the on/off toggle, which
-// stops new runs and tells SkillsCompiler to render seeds only.
+// This is the ONLY roll-back path. There is no owner-driven approve /
+// reject / revert API — the operator's only manual handle is the on/off
+// toggle (which stops new runs and tells SkillsCompiler to render seeds
+// only).
 //
 // Detection heuristic (deterministic, no LLM):
 //   - Walk every `applied` proposal whose `decided_at` falls within the

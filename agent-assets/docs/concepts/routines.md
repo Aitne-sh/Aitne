@@ -52,6 +52,14 @@ related:
 ui_anchors:
   - /connections/routines
   - /settings/routines
+config_keys:
+  - dayBoundaryHour
+  - hourlyCheckEnabled
+  - hourlyCheckIntervalMinutes
+  - hourlyCheckPrePassFreshnessMinutes
+  - activeHoursStart
+  - activeHoursEnd
+  - monthlyReviewEnabled
 ---
 
 # Routines

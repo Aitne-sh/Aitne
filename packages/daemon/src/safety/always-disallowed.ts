@@ -592,6 +592,17 @@ export function classifyAbsoluteBlock(
     if (/(^|\s)(security|secret-tool|cmdkey|certutil|rundll32\.exe)\b/.test(scan)) {
       return { category: "secret_cli", redacted: firstToken(arg) };
     }
+    // Bash-side secret-file read (EXECUTION-MODE-DESIGN.md §6, scope
+    // bullet "secret-file reads"). The `Read(~/.ssh/**)` glob layer
+    // only matches the Read tool — without this branch, an agent can
+    // `Bash(cat ~/.ssh/id_rsa)` and silently sidestep both the SDK
+    // glob list AND the absolute-block audit. `SECRET_READ_BASH_COMMANDS`
+    // is the existing reader denylist; here we mirror it for Claude /
+    // Codex (opencode already emits per-reader Bash globs via
+    // `buildOpencodeAbsoluteBlockPermission`).
+    if (looksLikeBashSecretRead(scan)) {
+      return { category: "secret_read", redacted: firstToken(arg) };
+    }
     // Browser-history profile exfiltration (§11.4). The prefix glob
     // layer catches the canonical `cp ~/Library/...` / `cp ~/.config/...`
     // forms; this substring scan catches encoded / shell-expanded
@@ -632,6 +643,74 @@ export function classifyAbsoluteBlock(
   }
 
   return null;
+}
+
+/**
+ * Substring scan for shell commands that read a known secret-file
+ * path via a file-reader command. Mirrors `looksLikeBashSecretRead`'s
+ * sibling pattern for browser-profile paths — runs on the
+ * single-quote/heredoc-stripped command and matches case-insensitively
+ * to close the same macOS/Windows FS bypass that `looksLikeSecretPath`
+ * closes for Read/Write/Edit args.
+ *
+ * Detection shape: the command's first executable token is in
+ * `SECRET_READ_BASH_COMMANDS` (`cat` / `less` / `head` / `xxd` / …) AND
+ * the rest of the command contains a recognised secret-file fragment
+ * (`.ssh/`, `~/.aws/`, `.env`-extension, `/library/keychains/`, …).
+ * Skipping the command anchor would over-block on innocent prose like
+ * `echo "see ~/.ssh/config for details"`; pinning the reader keeps the
+ * false-positive surface to commands that actually exfiltrate the file.
+ *
+ * NOT a substitute for the Read-tool glob list — that layer remains
+ * the authoritative block for the Read tool. This helper closes the
+ * Bash-side hole the glob list cannot express.
+ */
+export function looksLikeBashSecretRead(cmd: string): boolean {
+  const lc = cmd.toLowerCase();
+  const first = firstToken(lc);
+  // The "executable" we care about is the first token, optionally
+  // stripped of a leading path (`/usr/bin/cat` → `cat`). The reader
+  // set is intentionally narrow — any reader not in the list is an
+  // accepted gap (documented alongside `SECRET_READ_BASH_COMMANDS`).
+  const exec = first.includes("/") ? first.slice(first.lastIndexOf("/") + 1) : first;
+  const isReader = (SECRET_READ_BASH_COMMANDS as readonly string[]).includes(exec);
+  if (!isReader) return false;
+  // Path fragments that uniquely identify a secret file / directory.
+  // Each fragment is a substring lookup (case-insensitive via the
+  // pre-lowercased `lc`). Mirrors the regex table in
+  // `looksLikeSecretPath` — kept as plain substrings here because we
+  // are scanning an entire command line, not a single path arg.
+  const fragments = [
+    "/.ssh/",
+    "/.ssh ",
+    "/.gnupg/",
+    "/.gnupg ",
+    "/.aws/",
+    "/.aws ",
+    "/.config/gcloud/",
+    "/.config/gh/hosts.yml",
+    "/.netrc",
+    "/library/keychains/",
+    "/.local/share/keyrings/",
+    "/.personal-agent/backups/",
+    "/.personal-agent/whatsapp/auth/",
+    "/.personal-agent/secrets/",
+  ];
+  if (fragments.some((f) => lc.includes(f))) return true;
+  // `.env` / `.env.*` — the `looksLikeSecretPath` regex requires `$`
+  // anchor; in a Bash command, the path is followed by a space, pipe,
+  // redirect, or end-of-string. Match each of those bounds explicitly.
+  if (/(?:^|[\s/"'])\.env(?:\.[a-z0-9_-]+)?(?=$|[\s|;&<>"'`])/i.test(cmd)) {
+    return true;
+  }
+  // SSH private keys by basename — caught by a path-segment regex so
+  // `id_rsa_backup` style suffixes that the path classifier
+  // intentionally skips still surface here (the Bash reader context
+  // is unambiguous — `cat id_rsa_backup` is not benign).
+  if (/(?:^|[\s/"'])id_(?:rsa|ed25519|ecdsa|dsa)(?:[\b._-][^\s|;&<>"'`]*)?(?=$|[\s|;&<>"'`])/i.test(cmd)) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -773,23 +852,31 @@ function firstToken(cmd: string): string {
  * read-side denylist enforcement) can mirror this layer without
  * duplicating the pattern table — see
  * `docs/design/appendices/cost-reduction-structural.md` §A "Privacy".
+ *
+ * Patterns match **case-insensitively** to close a bypass on case-
+ * insensitive filesystems (macOS default, Windows): an agent that submits
+ * `Read("~/.SSH/id_rsa")` resolves to the real `~/.ssh/id_rsa` on disk
+ * and would otherwise sidestep the absolute-block audit because the
+ * SDK's minimatch glob (`Read(~/.ssh/**)`) is case-sensitive. Mirrors
+ * the `.toLowerCase()`-on-input strategy already used by
+ * `looksLikeBrowserProfilePath`.
  */
 export function looksLikeSecretPath(raw: string): boolean {
   // Trim obvious quoting. We deliberately don't resolve `~` / relative
   // paths — the classifier runs against the string the agent passed.
   const p = raw.replace(/^["']|["']$/g, "");
   const patterns: RegExp[] = [
-    /(^|\/)\.env(\..+)?$/,
-    /(^|\/)id_(rsa|ed25519|ecdsa|dsa)(\b|\.)/,
-    /\.ssh(\/|$)/,
-    /\.gnupg(\/|$)/,
-    /\.aws(\/|$)/,
-    /\.config\/gcloud(\/|$)/,
-    /\.config\/gh\/hosts\.yml$/,
-    /\.netrc$/,
-    /Library\/Keychains(\/|$)/,
-    /\.local\/share\/keyrings(\/|$)/,
-    /\.personal-agent\/(backups|whatsapp\/auth|secrets)(\/|$)/,
+    /(^|\/)\.env(\..+)?$/i,
+    /(^|\/)id_(rsa|ed25519|ecdsa|dsa)(\b|\.)/i,
+    /\.ssh(\/|$)/i,
+    /\.gnupg(\/|$)/i,
+    /\.aws(\/|$)/i,
+    /\.config\/gcloud(\/|$)/i,
+    /\.config\/gh\/hosts\.yml$/i,
+    /\.netrc$/i,
+    /Library\/Keychains(\/|$)/i,
+    /\.local\/share\/keyrings(\/|$)/i,
+    /\.personal-agent\/(backups|whatsapp\/auth|secrets)(\/|$)/i,
   ];
   return patterns.some((r) => r.test(p));
 }

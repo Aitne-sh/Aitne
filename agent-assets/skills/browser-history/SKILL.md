@@ -37,7 +37,7 @@ their own destination policy — see the cluster-update flow below.
 ## Endpoint reference
 
 All endpoints respond with JSON validated against
-`packages/shared/src/browser-history-schemas.ts`. The 11 routes below
+`packages/shared/src/browser-history-schemas.ts`. The 13 routes below
 are the entire agent-facing surface.
 
 | Method | Path | Purpose |

@@ -138,11 +138,11 @@ export const POLICY_FILE_REGISTRY: Record<string, PolicyFileRef[]> = {
       label: "Journal export rules",
     },
   ],
-  // `routine.morning_routine_initial` retired by
-  // morning-routine-optimization.md Phase 7 (2026-05-16) — first-run
-  // branch routes through `routine.morning_routine_today` below.
-  // morning-routine-optimization.md Phase 5 — Stage A inherits the
-  // global `*` set (redaction + mcp when enabled) PLUS the user-editable
+  // `routine.morning_routine_initial` is retired — first-run branches
+  // through `routine.morning_routine_today` below. See
+  // morning-routine-optimization.md.
+  // Stage A inherits the global `*` set (redaction + mcp when enabled)
+  // PLUS the user-editable
   // morning checks. Journal-format / journal-export are deliberately
   // NOT injected on Stage A — those are Stage B's policy blocks now.
   // The Vault review context (dossiers/morning.md) is injected by the

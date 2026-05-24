@@ -123,8 +123,8 @@ interface DelegatedSyncRuntimeConfig {
    *   - "primary:imminent" (integration-local, kept for backwards compat)
    *
    * The integration-local form was introduced when calendar was the only
-   * cadence; Phase 5 added gmail (`inbox:7d`) and notion (`recently_updated`)
-   * cadences. Their window keys are unique across integrations today, so
+   * cadence; gmail (`inbox:7d`) and notion (`recently_updated`) later
+   * joined. Their window keys are unique across integrations today, so
    * the integration-local fallback still resolves unambiguously, but
    * operators should prefer the canonical fully-qualified form
    * (`<integration>:<windowKey>`) — a future cadence collision would
@@ -169,10 +169,9 @@ export interface DelegatedSyncCadenceContext {
   /** Calendar id from worker options. Calendar cadences forward this; gmail
    *  and notion ignore it. */
   calendarId: string;
-  /** Operator-tunable cap. Phase 1 used a per-cadence `maxResults` field;
-   *  Phase 5 generalises it through the context object so a future cadence
-   *  can drop the cap (Gemini Calendar `maxResults` is silently ignored
-   *  upstream — the arg is a hint). */
+  /** Operator-tunable cap. Generalised through the context object so a
+   *  future cadence can drop the cap (Gemini Calendar `maxResults` is
+   *  silently ignored upstream — the arg is a hint). */
   maxResults: number;
 }
 
@@ -576,7 +575,7 @@ export class DelegatedSyncWorker implements Observer {
       this.tickIntervalSeconds * 1000,
     );
     this.timer.unref?.();
-    // Phase 7 (h): seed per-cadence state from the most recent successful
+    // Seed per-cadence state from the most recent successful
     // delegated_sync row in agent_actions before the first tick. Daemon
     // restarts no longer re-spawn every cadence's subprocess when a sync
     // ran shortly before the restart; the natural cadenceDue check picks
@@ -860,10 +859,10 @@ export class DelegatedSyncWorker implements Observer {
       if (!force && !isCadenceEnabled(def, runtimeConfig)) continue;
 
       const normalizer = getSnapshotNormalizer(def.integration);
-      // Defensive: every IntegrationKey ships a normalizer after Phase 5.
-      // The branch survives so a future integration whose connector
-      // wiring lands before its normalizer doesn't crash the worker; the
-      // cadence is silently skipped instead.
+      // Defensive: every IntegrationKey should ship a normalizer. This
+      // guard catches a registry regression where a future integration's
+      // connector wiring lands before its normalizer — the cadence is
+      // silently skipped instead of crashing the worker.
       /* c8 ignore start */
       if (!normalizer) {
         logger.debug(
@@ -978,7 +977,7 @@ export class DelegatedSyncWorker implements Observer {
             timezone: this.options.timezone,
             todayWriteLock: this.options.todayWriteLock,
             triggerRoadmapRefresh: this.options.triggerRoadmapRefresh,
-            // Phase 7: forward the worker's clock so today-drift detection
+            // Forward the worker's clock so today-drift detection
             // is deterministic in tests (the worker uses an injected now()
             // for window construction; without this forwarder drift-effects
             // would call real `new Date()` and the test would flap across
@@ -1195,8 +1194,8 @@ export class DelegatedSyncWorker implements Observer {
   }
 
   /**
-   * Phase 7 (h): rebuild per-cadence `lastAttemptAt` / `lastSuccessAt` from
-   * the most recent `delegated_sync` row in `agent_actions` so a daemon
+   * Rebuild per-cadence `lastAttemptAt` / `lastSuccessAt` from the most
+   * recent `delegated_sync` row in `agent_actions` so a daemon
    * restart shortly after a successful sync does not re-spawn a subprocess
    * for that cadence. Idempotent — re-running on an already-warm states
    * map only overwrites with same-or-newer timestamps. Failures during
@@ -1246,7 +1245,7 @@ export class DelegatedSyncWorker implements Observer {
   }
 
   /**
-   * Phase 7 (g) + (c): emit a single warn at start when the operator's
+   * Emit a single warn at start when the operator's
    * `runtime_state.delegatedSync.intervals` includes typo'd keys or when a
    * resolved cadence violates the TTL × 1.5 contract. Both checks fire
    * once per `start()` to avoid log spam; they are also exposed via
@@ -1356,7 +1355,7 @@ export function isWithinActiveHours(
  * must outlive the slowest reconcile cadence by ~1.5×, otherwise an
  * agent-originated write at T0 has its mark expire just before the next
  * worker tick re-fetches and the diff resolves `actor='user'` instead of
- * `'agent'`. Phase 7 (c) tightens both halves: the TTL constants
+ * `'agent'`. Two halves keep this safe: the TTL constants
  * (INTEGRATION_WRITE_TTL_MS, in @aitne/shared) cover the default
  * cadences with margin, and this ratio is the daemon-side check that fires
  * a warn when an operator-tuned cadence pushes past the boundary.

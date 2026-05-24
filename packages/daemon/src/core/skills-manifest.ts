@@ -87,10 +87,9 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // for a natural opportunity. See profile-interview-queue.md §3.1.
     "user-interview",
   ],
-  // `routine.morning_routine_initial` retired by
-  // morning-routine-optimization.md Phase 7 (2026-05-16). The first-run
-  // branch flows through `routine.morning_routine_today` (Stage A) below.
-  // morning-routine-optimization.md Phase 5/6 — split morning routine.
+  // `routine.morning_routine_initial` is retired. The first-run branch
+  // flows through `routine.morning_routine_today` (Stage A) below. See
+  // morning-routine-optimization.md for the split rationale.
   // Stage A (today.md synthesis) inherits the legacy bundle PLUS
   // `agent-actions` for the structured self-report Step 9 makes through
   // `PATCH /api/agent-actions/self`. The skill is small (~120 lines of
@@ -108,13 +107,14 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "user-interview",
     "agent-actions",
   ],
-  // Stage B (daily journal author) is intentionally minimal — only the
-  // context skill for vault-path writes to `daily/<date>.md` (the
-  // single PUT/PATCH this stage emits). No mail / schedule / roadmap /
-  // observations: those are Stage A's territory and inflating Stage B's
-  // bundle would defeat the cold-start floor that makes lite-tier
-  // viable for the journal-author workload.
-  "routine.morning_routine_journal": ["context"],
+  // docs/design/appendices/daily-journal-daemon-write.md §4.10 — Stage B
+  // no longer needs the `context` skill (or any other skill). The
+  // daemon-side composer (`core/morning/daily-journal-composer.ts`)
+  // performs the daily-journal write deterministically from the LLM's
+  // tagged final-text output; Stage B has zero tool requirement so the
+  // `dontAsk` denial layer that previously trapped Haiku's
+  // `cat > /tmp/...` attempts becomes structurally moot.
+  "routine.morning_routine_journal": [],
   // `evening-review-slimdown.md` §2.1 — Phase 2 dropped `travel`
   // unconditionally (was only kept for Step 4's "newly detected bookings"
   // path, deleted alongside Step 4). `notify` is loaded *conditionally* via
@@ -297,7 +297,7 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — narrow
     // accept-surface for natural-language reply to a research offer
     // DM. The skill body documents the intent-mapping rules
-    // (research/dig/詳しく → research_assist; summarise/まとめ → wiki_summary;
+    // (research/dig → research_assist; summarise → wiki_summary;
     // no thanks → decline). Conditional load is intentionally absent;
     // the skill itself no-ops when `GET /offers/pending` is empty,
     // and the cost of having the skill text in DM context is small.

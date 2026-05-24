@@ -134,17 +134,16 @@ export default function ManagedChromiumPage() {
 
   const bootstrapInProgress = Boolean(data?.bootstrapInProgress);
   const setupPoll = useSetupStatus(bootstrapInProgress);
-  // B-2.5 — per-site authenticated profiles list. Only meaningful when
-  // the master managed-Chromium flow is `ready`; when it isn't, the
-  // per-site UI is hidden (the user has to finish the B-1 sign-in
-  // first because the underlying Chromium binary / sandbox primitive
-  // checks are shared).
+  // Per-site authenticated profiles list. Only meaningful once the master
+  // managed-Chromium flow is `ready` — the underlying Chromium binary /
+  // sandbox primitives are shared with the master sign-in, so the
+  // per-site UI is hidden until that prerequisite is satisfied.
   const sitesEnabled = data?.state === "ready";
   const sitesQuery = useSites(Boolean(sitesEnabled));
-  // B-3 surfaces — approvals + observation gate panels are visible once
-  // the managed Chromium flow is ready. The agent's needs_approval
-  // responses surface here; the §10 readiness panel reports whether
-  // B-3 is on track to ship behind a green / amber / red rollup.
+  // Approvals + observation-gate panels are visible once the managed
+  // Chromium flow is ready. The agent's needs_approval responses surface
+  // here; the readiness panel reports whether the experimental purchase
+  // flow is on track to ship behind a green / amber / red rollup.
   const approvalsEnabled = sitesEnabled;
   const approvalsQuery = useApprovals(Boolean(approvalsEnabled));
   const observationGateQuery = useObservationGate(Boolean(approvalsEnabled));

@@ -888,7 +888,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
   });
 
   describe("Phase 6 appendAgentJournalEntry", () => {
-    it("returns the appender outcome with the correct morning/yesterday date strs", () => {
+    it("returns the appender outcome with the correct morning/yesterday date strs", async () => {
       // Seed a Stage A row with metadata so the appender has something
       // to compose from. correlationId matches the test invocation.
       db.prepare(
@@ -905,7 +905,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
         }),
       );
       const orch = makeOrchestrator();
-      const out = orch.appendAgentJournalEntry({
+      const out = await orch.appendAgentJournalEntry({
         correlationId: "journal-append-test",
       });
       expect(out).not.toBeNull();
@@ -929,9 +929,9 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       }
     });
 
-    it("returns the appender's skip reason when no Stage A row exists", () => {
+    it("returns the appender's skip reason when no Stage A row exists", async () => {
       const orch = makeOrchestrator();
-      const out = orch.appendAgentJournalEntry({
+      const out = await orch.appendAgentJournalEntry({
         correlationId: "no-such-correlation",
       });
       expect(out).not.toBeNull();

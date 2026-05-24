@@ -307,7 +307,7 @@ export interface ApiDependencies {
    * debugging and the parallel-verification rollout phase. Returns
    * the structured maintenance result so the CLI can surface counts.
    */
-  triggerRoadmapMaintenance?: () => RoadmapMaintenanceResult;
+  triggerRoadmapMaintenance?: () => Promise<RoadmapMaintenanceResult>;
   /**
    * Emit a `routine.roadmap_refresh` event. Internal callers (post-morning,
    * google-auth-ready, schedule-insert hook) honor the 5-minute dedup guard.
@@ -1225,8 +1225,8 @@ export function createApp(deps: ApiDependencies): Hono {
   // rely on the default-Approve fallback. Most are intentional admin
   // surfaces (secrets, pairing, restore-snapshot, dashboard-only
   // controls) for which fail-closed is correct — but the same fallback
-  // historically masked the `POST /api/context/roadmap/id` regression
-  // that 7×401'd inside roadmap_refresh on 2026-04-28.
+  // can mask a missing classifier entry on an agent-callable route,
+  // producing a 401 retry spiral inside the routine that hits it.
   //
   // Gating: log only when the unclassified set CHANGES from the last
   // boot. A warning that fires identically on every restart turns into

@@ -116,6 +116,20 @@ import {
   STAGE_B_ACTION_TYPE,
   type AgentJournalAppenderResult,
 } from "./agent-journal-appender.js";
+import type {
+  DailyJournalComposeResult,
+  DailyJournalComposer,
+} from "./daily-journal-composer.js";
+import type { DailyWriteAuditDetail } from "../dispatcher-types.js";
+import {
+  maybeEmitPartialExtractStreakDm,
+  type PartialExtractStreakNotifier,
+} from "./partial-extract-streak.js";
+import { readIntegrationState } from "../../db/integrations-store.js";
+import {
+  buildPreMorningDigest,
+  renderPreMorningDigestMarkdown,
+} from "../../services/browser-history/pipeline/pre-morning-digest.js";
 import { createLogger } from "../../logging.js";
 
 const logger = createLogger("morning-pipeline-orchestrator");
@@ -163,6 +177,30 @@ export interface MorningPipelineOrchestratorDeps {
    * the chokidar fallback path covers it without an explicit hint.
    */
   writeTracker?: AgentWriteTracker;
+  /**
+   * daily-journal-daemon-write.md §4.11 — Stage B's daily journal
+   * compose step. The orchestrator invokes the composer AFTER
+   * `Promise.allSettled` settles both stages and BEFORE
+   * `persistStageAuditRows` so the compose outcome lands on the same
+   * INSERT/UPSERT as the Stage B audit row (`detail.dailyWrite`).
+   *
+   * Optional so the Phase 5 test fixtures that don't exercise the
+   * daily-write path can construct the orchestrator without a real
+   * composer. Production wiring always supplies it; when omitted the
+   * orchestrator skips the compose call entirely (Stage B's audit row
+   * lands without `detail.dailyWrite` and `agent-journal-appender`
+   * falls back to the file-presence heuristic).
+   */
+  dailyJournalComposer?: DailyJournalComposer;
+  /**
+   * daily-journal-daemon-write.md §4.7b — owner-DM emitter the
+   * partial-extract streak detector uses. The orchestrator passes the
+   * existing `sendNotification` chain via a thin adapter so the
+   * detector doesn't depend on Hono / messaging adapters directly.
+   * Optional: when omitted the streak detector still runs (SQL is
+   * cheap, the result is logged), but no DM is emitted.
+   */
+  partialExtractStreakNotifier?: PartialExtractStreakNotifier;
 }
 
 export interface MorningPipelineRunInputs {
@@ -282,6 +320,7 @@ export class MorningRoutinePipelineOrchestrator {
           parentEvent,
           correlationId,
           stageBInputs.block,
+          stageBInputs.yesterdayDateStr,
         );
 
     // Pre-resolve each stage's binding up front so the failure-path
@@ -336,6 +375,23 @@ export class MorningRoutinePipelineOrchestrator {
             .finally(() => { stageBCompletedAtMs = Date.now(); }),
     ]);
 
+    // daily-journal-daemon-write.md §4.11 — invoke the daemon-side
+    // daily-journal composer BEFORE persistStageAuditRows so the
+    // compose outcome lands on the same INSERT/UPSERT as the Stage B
+    // row's terminal result (no post-UPDATE race). When the composer
+    // dep is absent (Phase 5 test fixtures) or Stage B wasn't
+    // dispatched (retry path / first-run skip), we skip the call and
+    // the audit row lands without `detail.dailyWrite` — the appender
+    // falls back to file-presence detection in that case.
+    const stageBResultIfFulfilledForCompose =
+      stageB.status === "fulfilled" ? stageB.value : null;
+    const dailyComposeOutcome = await this.composeDailyJournalIfPossible({
+      correlationId,
+      stageBEvent,
+      stageBInputs,
+      stageBResult: stageBResultIfFulfilledForCompose,
+    });
+
     // Land Stage A / Stage B `agent_actions` rows BEFORE deciding whether
     // to re-throw on Stage A failure. The rows are what
     // `parent-audit-emitter.readStageSummaries` reads via SQL, what the
@@ -380,11 +436,38 @@ export class MorningRoutinePipelineOrchestrator {
             binding: stageBBinding,
             startedAtMs: stageBStartedAtMs,
             completedAtMs: stageBCompletedAtMs,
+            // §4.11 — plumb the dailyWrite outcome onto the Stage B
+            // outcome so persistStageAuditRows can include it in the
+            // single INSERT/UPSERT that lands the row.
+            ...(dailyComposeOutcome
+              ? { dailyWrite: toDailyWriteAuditDetail(dailyComposeOutcome) }
+              : {}),
             ...(stageB.status === "fulfilled"
               ? { result: stageBResultIfFulfilled }
               : { error: stageB.reason }),
           },
     });
+
+    // §4.7b — after the Stage B row has landed (so its just-written
+    // `detail.dailyWrite` is visible to the streak query), check for
+    // a 3-day all-partial streak and emit the owner DM (subject to
+    // the 24h dedup window). Runs only when Stage B was attempted on
+    // this morning; first-run / retry skips don't add a row and the
+    // SQL filter excludes them naturally.
+    if (dailyComposeOutcome !== null) {
+      try {
+        await maybeEmitPartialExtractStreakDm({
+          db: this.deps.db,
+          correlationId,
+          notifier: this.deps.partialExtractStreakNotifier ?? null,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, correlationId },
+          "Partial-extract streak check threw — continuing",
+        );
+      }
+    }
 
     if (stageA.status === "rejected") {
       // Re-throw so the runner's existing finally / retry path fires.
@@ -502,7 +585,12 @@ export class MorningRoutinePipelineOrchestrator {
       if ("result" in outcome && outcome.result !== null) {
         tasks.push(
           this.deps.resultProcessor
-            .processResult(outcome.result, outcome.event)
+            .processResult(outcome.result, outcome.event, false, {
+              // Thread dailyWrite into the result-processor's options
+              // so its `audit.logAction` call lands `detail.dailyWrite`
+              // on the same INSERT/UPSERT as the row's terminal result.
+              ...(outcome.dailyWrite ? { dailyWrite: outcome.dailyWrite } : {}),
+            })
             .catch((err) => {
               logger.warn(
                 { err, correlationId: outcome.event.correlationId, stage: label },
@@ -559,6 +647,7 @@ export class MorningRoutinePipelineOrchestrator {
       modelId?: string;
       failureKind?: string;
       failureCode?: string;
+      dailyWrite?: DailyWriteAuditDetail;
     } = { durationMs };
     const backendId =
       outcome.binding?.main.backendId ?? quotaError?.backendId ?? undefined;
@@ -569,12 +658,131 @@ export class MorningRoutinePipelineOrchestrator {
       context.failureKind = "quota";
       context.failureCode = quotaError.originalCode;
     }
+    // §4.11 — Stage B's failure-path row also carries the dailyWrite
+    // outcome when one was computed. Useful for the streak detector
+    // when Stage B threw but `composeDailyJournalIfPossible` was
+    // dispatched anyway (e.g. session crashed AFTER emitting valid
+    // body / frontmatter tags in its final text — uncommon but
+    // representable).
+    if (outcome.dailyWrite) {
+      context.dailyWrite = outcome.dailyWrite;
+    }
     // Morning routine fires from cron — never reactive — same trigger
     // shape as `preInsertStageAInProgressRow`. Keeping the trigger value
     // consistent with the pre-insert row also keeps the UPSERT idempotent
     // (Stage A's in_progress row has `trigger='autonomous'`; we don't
     // want the UPSERT to flip it).
     this.deps.audit.logError(outcome.event, error, "autonomous", context);
+  }
+
+  /**
+   * daily-journal-daemon-write.md §4.11 — invoke the daily-journal
+   * composer when (a) the orchestrator has a composer dep, (b) Stage B
+   * was actually dispatched (event built), and (c) `buildStageBInputs`
+   * produced the skeleton facts the composer needs. Otherwise return
+   * `null` and let the appender fall back to file-presence detection.
+   *
+   * Stage B's `AgentResult` may be `null` even when the event was
+   * dispatched (the SDK threw mid-stream); the composer handles that
+   * explicitly via its `stage_b_null` reason.
+   */
+  private async composeDailyJournalIfPossible(args: {
+    correlationId: string;
+    stageBEvent: RoutineEvent | null;
+    stageBInputs: { block: string; yesterdayDateStr: string } | null;
+    stageBResult: AgentResult | null;
+  }): Promise<DailyJournalComposeResult | null> {
+    if (this.deps.dailyJournalComposer === undefined) return null;
+    if (args.stageBEvent === null) return null;
+    if (args.stageBInputs === null) return null;
+    // Re-derive the skeleton + facts for the composer. `buildStageBInputs`
+    // already does this work for the prompt block; reuse its inputs by
+    // re-reading the agent-day window — cheap (two SQLite aggregations
+    // against indexed columns) and keeps the composer self-contained.
+    try {
+      const skeleton = this.buildStageBSkeletonInputs(args.stageBInputs.yesterdayDateStr);
+      if (skeleton === null) return null;
+      const outcome = await this.deps.dailyJournalComposer.compose({
+        correlationId: args.correlationId,
+        yesterdayDateStr: args.stageBInputs.yesterdayDateStr,
+        skeleton: skeleton.skeleton,
+        calendarEvents: skeleton.calendarEvents,
+        messagesHandled: skeleton.messagesHandled,
+        stageBResult: args.stageBResult,
+      });
+      return outcome;
+    } catch (err) {
+      // The composer's own try/catch returns `ok: false, reason:
+      // "write_failed"` for write errors — anything that escapes is a
+      // construction bug. Surface it as a structured `write_failed`
+      // outcome so the audit row still carries a discriminated reason
+      // rather than going silent.
+      logger.error(
+        { err, correlationId: args.correlationId },
+        "Daily journal composer threw past its own catch — recording as write_failed",
+      );
+      return { ok: false, reason: "write_failed" };
+    }
+  }
+
+  /**
+   * Re-derive the skeleton + skeleton facts for the daily-journal
+   * composer. Shares the agent-day window + skeleton math with
+   * `buildStageBInputs` so the composer sees byte-identical inputs to
+   * the prompt block Stage B saw. Returns `null` when yesterday.md is
+   * absent (first-run / no prior-day) — same gate as
+   * `buildStageBInputs`.
+   */
+  private buildStageBSkeletonInputs(
+    yesterdayDateStr: string,
+  ): {
+    skeleton: import("./journal-skeleton-builder.js").JournalSkeletonInputs;
+    calendarEvents: number;
+    messagesHandled: number;
+  } | null {
+    const contextDir = getContextDir(this.deps.config, this.deps.db);
+    const yesterdayPath = join(contextDir, "yesterday.md");
+    if (!existsSync(yesterdayPath)) return null;
+    const now = new Date();
+    const yesterdayNow = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const bounds = getAgentDayBoundsUtc(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      yesterdayNow,
+    );
+    const window = { startUtc: bounds.start, endUtc: bounds.end };
+    const updatedDateStr = getAgentDayDateStr(
+      this.deps.config.timezone || undefined,
+      this.deps.config.dayBoundaryHour,
+      now,
+    );
+    const weekday = new Date(`${yesterdayDateStr}T00:00:00Z`).toLocaleDateString("en-US", {
+      weekday: "long",
+      timeZone: "UTC",
+    });
+    let yesterdayMd: string;
+    try {
+      yesterdayMd = readFileSync(yesterdayPath, "utf-8");
+    } catch {
+      return null;
+    }
+    const facts = gatherJournalSkeletonFacts(this.deps.db, window);
+    const calendarEvents = this.readYesterdayCalendarEvents(window);
+    const skeleton: import("./journal-skeleton-builder.js").JournalSkeletonInputs = {
+      dateStr: yesterdayDateStr,
+      weekday,
+      updatedDateStr,
+      yesterdayMd,
+      calendarEvents,
+      ...(this.deps.config.timezone
+        ? { timezone: this.deps.config.timezone }
+        : {}),
+    };
+    return {
+      skeleton,
+      calendarEvents: calendarEvents.length,
+      messagesHandled: facts.messagesHandled,
+    };
   }
 
   /**
@@ -627,9 +835,9 @@ export class MorningRoutinePipelineOrchestrator {
    * orchestrator was constructed without the deps the appender needs
    * (Phase 5-only test fixtures) — caller treats `null` as a no-op.
    */
-  appendAgentJournalEntry(args: {
+  async appendAgentJournalEntry(args: {
     correlationId: string;
-  }): AgentJournalAppenderResult | null {
+  }): Promise<AgentJournalAppenderResult | null> {
     const contextDir = getContextDir(this.deps.config, this.deps.db);
     const now = new Date();
     const yesterdayNow = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -1017,6 +1225,7 @@ export class MorningRoutinePipelineOrchestrator {
     parent: Event,
     correlationId: string,
     journalSkeletonBlock: string,
+    yesterdayDateStr: string,
   ): RoutineEvent {
     // Stage B does NOT inherit the parent's `todayWriteLockId` or
     // `fetchReportBlock`. The lock gates today.md only (Stage B never
@@ -1033,6 +1242,15 @@ export class MorningRoutinePipelineOrchestrator {
     }
     stripped.morningPipelineStage = "journal";
     stripped.journalSkeletonBlock = journalSkeletonBlock;
+    // daily-journal-daemon-write.md §4.10 — browser-history digest now
+    // fetched daemon-side and injected as `<browser_digest>` (Stage B
+    // has zero tool requirement so it cannot fetch it itself). The
+    // four-step chain in `buildBrowserDigestBlock` mirrors the LLM
+    // logic the task-flow used to perform.
+    const browserDigestBlock = this.buildBrowserDigestBlock(yesterdayDateStr);
+    if (browserDigestBlock !== null) {
+      stripped.browserDigestBlock = browserDigestBlock;
+    }
     return {
       type: STAGE_B_PROCESS_KEY,
       source: parent.source,
@@ -1042,6 +1260,82 @@ export class MorningRoutinePipelineOrchestrator {
       data: stripped,
       routine: STAGE_B_ROUTINE_SLUG,
     };
+  }
+
+  /**
+   * Resolve the `<browser_digest>` block Stage B used to fetch via
+   * `GET /api/context/browser/yesterday-<date>.md`. Now daemon-driven
+   * since Stage B has no tools:
+   *
+   *  1. Gate on integration mode — `browser_history` `disabled` →
+   *     return `null` (no block injection).
+   *  2. File-first — `<contextDir>/browser/yesterday-<date>.md` written
+   *     by the 03:00 cron is the primary surface.
+   *  3. In-process JSON fallback — if the file is absent (daemon was
+   *     down at 03:00 or the file was purged), call
+   *     `runPreMorningDigestJob` in-process to rebuild from SQLite +
+   *     render the markdown shape (no HTTP loopback).
+   *  4. Both unavailable → return `null` (silent skip; the task-flow
+   *     omits the block).
+   *
+   * The block is wrapped in `<browser_digest>...</browser_digest>` to
+   * match the inbound-XML idiom every other ContextBuilder injection
+   * uses (`<fetch_report>`, `<journal_skeleton>`, etc.).
+   */
+  private buildBrowserDigestBlock(yesterdayDateStr: string): string | null {
+    try {
+      const integrationState = readIntegrationState(this.deps.db, "browser_history");
+      if (integrationState.mode === "disabled") return null;
+    } catch (err) {
+      // Read failure on the integration registry is rare (corrupt
+      // settings JSON). Log + skip — Stage B should still author the
+      // journal without browser-history context if the registry is in
+      // a bad state.
+      logger.warn(
+        { err },
+        "browser_history integration state read failed — omitting <browser_digest>",
+      );
+      return null;
+    }
+    const contextDir = getContextDir(this.deps.config, this.deps.db);
+    // §10.6 / §5.F2 — the cron writes `browser/yesterday-<date>.md`.
+    const filePath = join(contextDir, "browser", `yesterday-${yesterdayDateStr}.md`);
+    if (existsSync(filePath)) {
+      try {
+        const body = readFileSync(filePath, "utf-8");
+        return `<browser_digest>\n${body}\n</browser_digest>`;
+      } catch (err) {
+        logger.warn(
+          { err, filePath },
+          "browser digest file read failed — falling back to in-process rebuild",
+        );
+      }
+    }
+    // In-process fallback — rebuild the digest from SQLite using the
+    // same pure builder the cron uses. Avoids the HTTP loopback that
+    // hits the `@hono/node-server` globalThis.Response pitfall
+    // (`project_hono_global_response_pitfall` memory). The result is
+    // rendered into the same markdown shape the file-first path would
+    // have produced.
+    try {
+      const boundary = {
+        timezone: this.deps.config.timezone || undefined,
+        dayBoundaryHour: this.deps.config.dayBoundaryHour ?? 4,
+      };
+      const digest = buildPreMorningDigest({
+        db: this.deps.db,
+        date: yesterdayDateStr,
+        boundary,
+      });
+      const markdown = renderPreMorningDigestMarkdown(digest);
+      return `<browser_digest>\n${markdown}\n</browser_digest>`;
+    } catch (err) {
+      logger.warn(
+        { err, yesterdayDateStr },
+        "browser digest in-process rebuild failed — omitting <browser_digest>",
+      );
+      return null;
+    }
   }
 
   private async runStageB(
@@ -1139,6 +1433,13 @@ interface StageSuccessOutcome {
   completedAtMs: number;
   /** `null` is the Stage B first-run skip — no execute call happened. */
   result: AgentResult | null;
+  /**
+   * daily-journal-daemon-write.md §4.11 — Stage B's compose outcome,
+   * threaded into the row's `detail.dailyWrite` field. Absent on Stage
+   * A and on Stage B runs where `composeDailyJournalIfPossible`
+   * short-circuited.
+   */
+  dailyWrite?: DailyWriteAuditDetail;
 }
 
 interface StageFailureOutcome {
@@ -1147,6 +1448,8 @@ interface StageFailureOutcome {
   startedAtMs: number;
   completedAtMs: number;
   error: unknown;
+  /** Mirror of `StageSuccessOutcome.dailyWrite` on the failure path. */
+  dailyWrite?: DailyWriteAuditDetail;
 }
 
 /**
@@ -1163,6 +1466,20 @@ function extractQuotaError(error: unknown): BackendQuotaError | null {
     if (error.cause instanceof BackendQuotaError) return error.cause;
   }
   return null;
+}
+
+/**
+ * Map the composer's `DailyJournalComposeResult` to the
+ * `agent_actions.detail.dailyWrite` JSON shape audit persists. The two
+ * types are structurally identical today — but the mapper localises
+ * the coupling so a future schema change to the audit shape doesn't
+ * silently drift from the composer's API. Inlined at the call site
+ * via `import type` would also work but loses the assertion site.
+ */
+function toDailyWriteAuditDetail(
+  result: DailyJournalComposeResult,
+): DailyWriteAuditDetail {
+  return result;
 }
 
 function renderHandoffParsedBlock(parsed: HandoffParsed): string {

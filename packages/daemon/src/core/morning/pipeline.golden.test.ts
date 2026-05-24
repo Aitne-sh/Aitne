@@ -198,8 +198,8 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
     expect(skeleton).not.toContain("hourly_check: ");
   });
 
-  it("appendMorningRoutineJournalEntry emits the Step-9 byte-shape the current task-flow produces", () => {
-    const result = appendMorningRoutineJournalEntry(
+  it("appendMorningRoutineJournalEntry emits the Step-9 byte-shape the current task-flow produces", async () => {
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: CORRELATION_ID,

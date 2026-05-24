@@ -32,12 +32,10 @@ export class DashboardAdapter implements MessageAdapter {
   }
 
   /**
-   * P2-19 — channel → set of SSE clients. Previously a `Map<channelId,
-   * SSEClient>` where a second `registerClient(channelId, ...)` for an
-   * existing key silently replaced the first; the original tab kept its
-   * EventSource open but received no further chunks. Switching to a set
-   * lets the SSE route opt-in to fan-out (multiple tabs on one channel)
-   * without changing callers that pass a fresh UUID per connect.
+   * Channel → set of SSE clients. Multiple tabs on one channel get
+   * fan-out; a second `registerClient(channelId, ...)` for an existing
+   * key never silently replaces an open EventSource. Callers that pass a
+   * fresh UUID per connect get the equivalent of a 1:1 mapping for free.
    */
   private readonly clients = new Map<string, Set<SSEClient>>();
   private onMessage: OnMessageCallback;
@@ -47,9 +45,8 @@ export class DashboardAdapter implements MessageAdapter {
     this.onMessage = onMessage;
   }
 
-  /** Inject the AttachmentStore. Optional — callers without attachment
-   *  support (older tests) skip this and POST /chat/messages rejects
-   *  attachmentIds with 503. */
+  /** Inject the AttachmentStore. Optional — without it,
+   *  POST /chat/messages rejects attachmentIds with 503. */
   setAttachmentStore(store: AttachmentStore): void {
     this.attachmentStore = store;
   }

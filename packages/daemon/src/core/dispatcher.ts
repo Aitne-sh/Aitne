@@ -78,6 +78,7 @@ import {
   type IMessageRecorder,
   type IAuditLogger,
   type BangCommandDetail,
+  type DailyWriteAuditDetail,
   type TriggerHourlyCheckSkipReason,
   type SetupMode,
   type TriggerHourlyCheckOptions,
@@ -97,6 +98,7 @@ export type {
   IMessageRecorder,
   IAuditLogger,
   BangCommandDetail,
+  DailyWriteAuditDetail,
   TriggerHourlyCheckSkipReason,
   SetupMode,
   TriggerHourlyCheckOptions,
@@ -125,6 +127,8 @@ const REVIEW_ROUTINES_REQUIRING_MORNING = new Set<string>([
 ]);
 import { MorningRoutineRunner } from "./dispatcher-morning-routine.js";
 import { MorningRoutinePipelineOrchestrator } from "./morning/orchestrator.js";
+import { DailyJournalComposer } from "./morning/daily-journal-composer.js";
+import { randomUUID } from "node:crypto";
 import { RoutineFetchWindowRunner } from "./routine-fetch-window-runner.js";
 import {
   ScheduledTaskRunner,
@@ -542,6 +546,62 @@ export class EventDispatcher {
     // owns Stage A (today.md) + Stage B (daily journal). It is the only
     // dispatch path for `routine.morning_routine`; the legacy monolithic
     // executor was retired once the orchestrator stabilised.
+    // daily-journal-daemon-write.md §4.11 — wired daily-journal
+    // composer fed into the orchestrator. The composer shares its
+    // snapshot insert with the agent-journal-appender pattern: direct
+    // INSERT into `md_file_snapshots` (no debounce, no session id —
+    // morning-routine daemon-mediated writes aren't user-initiated so
+    // the per-request bookkeeping the HTTP route does is N/A).
+    const dailyJournalComposer = new DailyJournalComposer({
+      db: this.db,
+      contextDir: getContextDir(this.config, this.db),
+      saveSnapshot: (filePath, content, trigger) => {
+        try {
+          const result = this.db
+            .prepare(
+              "INSERT INTO md_file_snapshots (file_path, content, trigger, session_id) VALUES (?, ?, ?, ?)",
+            )
+            .run(filePath, content, trigger, null);
+          return Number(result.lastInsertRowid);
+        } catch (err) {
+          logger.warn(
+            { err, filePath, trigger },
+            "DailyJournalComposer: failed to save md_file_snapshots row",
+          );
+          return null;
+        }
+      },
+      ...(this.writeTracker ? { writeTracker: this.writeTracker } : {}),
+      // No `onIndexableContextChange` — Dispatcher doesn't carry the
+      // context-index reconciler hook today. Chokidar's fallback fs
+      // watch will detect the daemon-mediated PUT on its own. If we
+      // ever wire the reconciler through Dispatcher, daily/*.md is in
+      // the indexable set and should get the hint.
+    });
+    // daily-journal-daemon-write.md §4.7b — operator DM for the
+    // partial-extract streak. Synthesises a `routine.morning_routine_journal`
+    // event so it routes through `notificationMgr.send`'s existing
+    // proactive path (quiet hours, configured destinations, etc.).
+    const partialExtractStreakNotifier = {
+      notify: async (args: { message: string }): Promise<void> => {
+        const event = {
+          type: "routine.morning_routine_journal",
+          source: "daemon",
+          priority: 1,
+          timestamp: new Date(),
+          correlationId: randomUUID(),
+          data: {},
+        } as Event;
+        await this.notificationMgr.send(args.message, event, {
+          priority: "normal",
+          category: "agent",
+        });
+      },
+    };
+    // morning-routine-optimization.md Phase 5/6/7 — pipeline orchestrator
+    // owns Stage A (today.md) + Stage B (daily journal). It is the only
+    // dispatch path for `routine.morning_routine`; the legacy monolithic
+    // executor was retired once the orchestrator stabilised.
     const pipelineOrchestrator = new MorningRoutinePipelineOrchestrator({
       db: this.db,
       config: this.config,
@@ -558,6 +618,8 @@ export class EventDispatcher {
       // user-actor change by the obsidian / git observers.
       audit: this.audit,
       ...(this.writeTracker ? { writeTracker: this.writeTracker } : {}),
+      dailyJournalComposer,
+      partialExtractStreakNotifier,
     });
     this.morningRoutine = new MorningRoutineRunner({
       db: this.db,

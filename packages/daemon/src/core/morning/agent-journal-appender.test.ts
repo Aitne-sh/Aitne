@@ -786,6 +786,363 @@ describe("loadMorningRoutineActionRows", () => {
     seedRow({ eventId: "corr-1", actionType: STAGE_B_ACTION_TYPE, metadata: { foo: "second" } });
     expect(loadMorningRoutineActionRows(db, "corr-1").stageB?.metadata.foo).toBe("second");
   });
+
+  // daily-journal-daemon-write.md §4.11 — dailyWrite parsing.
+  function seedRowWithDetail(values: {
+    eventId: string;
+    actionType: string;
+    detail: unknown;
+  }): void {
+    db.prepare(
+      `INSERT INTO agent_actions (event_id, action_type, result, detail, started_at, completed_at)
+       VALUES (?, ?, 'success', ?, datetime('now'), datetime('now'))`,
+    ).run(values.eventId, values.actionType, JSON.stringify(values.detail));
+  }
+
+  it("parses dailyWrite ok='complete' on Stage B row", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: "complete", bytesWritten: 1234, wroteMode: "put" } },
+    });
+    const rows = loadMorningRoutineActionRows(db, "c");
+    expect(rows.stageB?.dailyWrite).toEqual({
+      ok: "complete",
+      bytesWritten: 1234,
+      wroteMode: "put",
+    });
+  });
+
+  it("parses dailyWrite ok='partial' with reason", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: {
+        dailyWrite: {
+          ok: "partial",
+          bytesWritten: 1000,
+          wroteMode: "put",
+          partialReason: "frontmatter_tag_missing",
+        },
+      },
+    });
+    const rows = loadMorningRoutineActionRows(db, "c");
+    expect(rows.stageB?.dailyWrite).toEqual({
+      ok: "partial",
+      bytesWritten: 1000,
+      wroteMode: "put",
+      partialReason: "frontmatter_tag_missing",
+    });
+  });
+
+  it("parses dailyWrite ok=false with reason", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: false, reason: "body_tag_missing" } },
+    });
+    const rows = loadMorningRoutineActionRows(db, "c");
+    expect(rows.stageB?.dailyWrite).toEqual({ ok: false, reason: "body_tag_missing" });
+  });
+
+  it("ignores malformed dailyWrite (unknown partial reason)", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: "partial", partialReason: "not-a-real-reason" } },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  it("ignores dailyWrite on Stage A rows (only Stage B carries it)", () => {
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_A_ACTION_TYPE,
+      detail: { dailyWrite: { ok: "complete" } },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageA?.dailyWrite).toBeUndefined();
+  });
+
+  it("absent detail column means dailyWrite is absent (backward compat)", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRow({ eventId: "c", actionType: STAGE_B_ACTION_TYPE });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  // Note: SQLite's `detail` column carries a CHECK(json_valid(detail))
+  // constraint, so malformed JSON cannot land via the INSERT path —
+  // `parseDailyWriteDetail`'s try/catch is a defence-in-depth guard
+  // for a future migration that relaxes the constraint, not a
+  // reachable production shape today.
+
+  it("dailyWrite with an unrecognised ok value is rejected", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: "weird" } },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  it("dailyWrite ok='complete' with missing wroteMode drops the field but keeps the row", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: "complete", bytesWritten: 100 } },
+    });
+    const rows = loadMorningRoutineActionRows(db, "c");
+    expect(rows.stageB?.dailyWrite).toEqual({
+      ok: "complete",
+      bytesWritten: 100,
+    });
+  });
+
+  it("dailyWrite ok='complete' with missing bytesWritten + wroteMode parses with only ok", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: "complete" } },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toEqual({
+      ok: "complete",
+    });
+  });
+
+  it("dailyWrite parsing rejects a top-level JSON null detail", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    db.prepare(
+      `INSERT INTO agent_actions (event_id, action_type, result, detail, started_at, completed_at)
+       VALUES (?, ?, 'success', json('null'), datetime('now'), datetime('now'))`,
+    ).run("c", STAGE_B_ACTION_TYPE);
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  it("dailyWrite ok='partial' with missing wroteMode + missing bytesWritten still parses", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: {
+        dailyWrite: {
+          ok: "partial",
+          partialReason: "frontmatter_schema_invalid",
+        },
+      },
+    });
+    const rows = loadMorningRoutineActionRows(db, "c");
+    expect(rows.stageB?.dailyWrite).toEqual({
+      ok: "partial",
+      partialReason: "frontmatter_schema_invalid",
+    });
+  });
+
+  it("dailyWrite is rejected when it's null", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: null },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  it("dailyWrite is rejected when detail is a JSON array (not object)", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: [1, 2, 3],
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  it("dailyWrite ok=false with unrecognised reason is rejected", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { dailyWrite: { ok: false, reason: "made-up" } },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+
+  it("detail with no dailyWrite key returns absent dailyWrite", () => {
+    seedRow({ eventId: "c", actionType: STAGE_A_ACTION_TYPE });
+    seedRowWithDetail({
+      eventId: "c",
+      actionType: STAGE_B_ACTION_TYPE,
+      detail: { failureKind: "quota" },
+    });
+    expect(loadMorningRoutineActionRows(db, "c").stageB?.dailyWrite).toBeUndefined();
+  });
+});
+
+// daily-journal-daemon-write.md §4.7 — formatJournalLine branches keyed
+// on detail.dailyWrite. These tests pin every line variant in the
+// design's §4.7 table without exercising the SQLite roundtrip.
+describe("composeMorningRoutineJournalEntry — dailyWrite-driven Journal line", () => {
+  it("ok='complete' → standard Journal line with line + projects count", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: "complete", bytesWritten: 1234, wroteMode: "put" },
+      },
+      dailyJournalContent: DAILY_BODY,
+    });
+    expect(rendered).toMatch(/- Journal: daily\/2026-05-14\.md \(\d+ lines, 2 projects referenced\)\n/);
+  });
+
+  it("ok='partial' frontmatter_tag_missing → bolded partial line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: "partial", partialReason: "frontmatter_tag_missing" },
+      },
+      dailyJournalContent: DAILY_BODY,
+    });
+    expect(rendered).toContain("**partial — frontmatter tag missing**");
+  });
+
+  it("ok='partial' frontmatter_invalid_json renders JSON parse error label", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: "partial", partialReason: "frontmatter_invalid_json" },
+      },
+      dailyJournalContent: DAILY_BODY,
+    });
+    expect(rendered).toContain("**partial — frontmatter JSON parse error**");
+  });
+
+  it("ok='partial' frontmatter_schema_invalid renders schema-mismatch label", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: "partial", partialReason: "frontmatter_schema_invalid" },
+      },
+      dailyJournalContent: DAILY_BODY,
+    });
+    expect(rendered).toContain("**partial — frontmatter schema mismatch**");
+  });
+
+  it("ok=false body_tag_missing → 'extraction: no body' failed line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: false, reason: "body_tag_missing" },
+      },
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain("- Journal synthesis: failed (extraction: no body)");
+  });
+
+  it("ok=false empty_output → 'LLM output empty' failed line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: false, reason: "empty_output" },
+      },
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain("- Journal synthesis: failed (LLM output empty)");
+  });
+
+  it("ok=false write_failed → 'write error' failed line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: false, reason: "write_failed" },
+      },
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain("- Journal synthesis: failed (write error)");
+  });
+
+  it("ok=false stage_b_null → 'Stage B did not run' failed line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: false, reason: "stage_b_null" },
+      },
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain("- Journal synthesis: failed (Stage B did not run)");
+  });
+
+  it("ok='complete' but daily file missing → tail-risk failure line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: "complete" },
+      },
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain(
+      "- Journal synthesis: failed (composer reported complete but daily file is missing)",
+    );
+  });
+
+  it("ok='partial' but daily file missing → tail-risk partial-missing line", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      stageB: {
+        ...STAGE_B_OK,
+        dailyWrite: { ok: "partial", partialReason: "frontmatter_tag_missing" },
+      },
+      dailyJournalContent: null,
+    });
+    expect(rendered).toContain(
+      "- Journal synthesis: failed (composer reported partial but daily file is missing)",
+    );
+  });
+
+  it("absent dailyWrite falls back to file-presence heuristic (legacy)", () => {
+    const rendered = composeMorningRoutineJournalEntry({
+      morningDateStr: "2026-05-15",
+      yesterdayDateStr: "2026-05-14",
+      stageA: STAGE_A_OK,
+      // No dailyWrite — pre-§4.11 row shape.
+      stageB: STAGE_B_OK,
+      dailyJournalContent: DAILY_BODY,
+    });
+    expect(rendered).toMatch(/- Journal: daily\/2026-05-14\.md \(\d+ lines, 2 projects referenced\)\n/);
+  });
 });
 
 // ── end-to-end appendMorningRoutineJournalEntry ─────────────────────
@@ -821,8 +1178,8 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     ).run("corr-X", values.actionType, values.result ?? "success", JSON.stringify(values.metadata));
   }
 
-  it("returns stage_a_row_missing when Stage A row is absent", () => {
-    const result = appendMorningRoutineJournalEntry(
+  it("returns stage_a_row_missing when Stage A row is absent", async () => {
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -835,7 +1192,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(existsSync(join(contextDir, "agent/journal.md"))).toBe(false);
   });
 
-  it("creates agent/journal.md when absent, writes the H1 header + entry, and snapshots nothing", () => {
+  it("creates agent/journal.md when absent, writes the H1 header + entry, and snapshots nothing", async () => {
     seedStageRow({
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday", inboxStats: { triaged: 1, movedToScratch: 1, dmConfirmsSent: 0 } },
@@ -843,7 +1200,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     seedStageRow({ actionType: STAGE_B_ACTION_TYPE, metadata: {} });
     writeFileSync(join(contextDir, "daily/2026-05-14.md"), DAILY_BODY);
 
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -865,7 +1222,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(snapshots.n).toBe(0);
   });
 
-  it("appends to an existing journal, snapshots the prior content, and notifies write tracker + indexer", () => {
+  it("appends to an existing journal, snapshots the prior content, and notifies write tracker + indexer", async () => {
     seedStageRow({
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday", inboxStats: { triaged: 0, movedToScratch: 0, dmConfirmsSent: 0 } },
@@ -877,7 +1234,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
 
     const markWriting = vi.fn();
     const onIndexable = vi.fn();
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       {
         db,
         contextDir,
@@ -908,7 +1265,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(onIndexable).toHaveBeenCalledWith("agent/journal.md");
   });
 
-  it("emits the `skipped (no prior-day data)` variant when daily/<yesterday>.md is absent AND yesterday.md is absent (legitimate first-run)", () => {
+  it("emits the `skipped (no prior-day data)` variant when daily/<yesterday>.md is absent AND yesterday.md is absent (legitimate first-run)", async () => {
     // No `yesterday.md` on disk → orchestrator never dispatched Stage B
     // → `stageBAttempted` resolves to false at the appender boundary.
     seedStageRow({
@@ -916,7 +1273,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       metadata: { dayType: "weekday", inboxStats: { triaged: 0, movedToScratch: 0, dmConfirmsSent: 0 } },
     });
 
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -930,7 +1287,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(journal).toContain("- Journal synthesis: skipped (no prior-day data)\n");
   });
 
-  it("emits the `failed (audit row missing — see daemon log)` variant when yesterday.md is present but Stage B row is absent (anomaly path)", () => {
+  it("emits the `failed (audit row missing — see daemon log)` variant when yesterday.md is present but Stage B row is absent (anomaly path)", async () => {
     // The exact defence-in-depth anomaly path Fix 3 closes: Stage B
     // WAS attempted (yesterday.md is on disk so the orchestrator
     // dispatched it) but no `agent_actions(routine.morning_routine_journal)`
@@ -945,7 +1302,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     // matters for the `stageBAttempted` derivation.
     writeFileSync(join(contextDir, "yesterday.md"), "# 2026-05-14 (Wednesday)\n");
 
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -962,13 +1319,13 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(journal).not.toContain("no prior-day data");
   });
 
-  it("survives invalid metadata JSON without throwing — composer defaults apply", () => {
+  it("survives invalid metadata JSON without throwing — composer defaults apply", async () => {
     db.prepare(
       `INSERT INTO agent_actions (event_id, action_type, result, metadata, started_at, completed_at)
        VALUES (?, ?, 'success', ?, datetime('now'), datetime('now'))`,
     ).run("corr-X", STAGE_A_ACTION_TYPE, "not-json");
 
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -983,7 +1340,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(journal).toContain("- Inbox: 0 files triaged, 0 moved to scratch, 0 DM-confirmations sent\n");
   });
 
-  it("calls writeTracker.markWriting independently of onIndexableContextChange (each is optional)", () => {
+  it("calls writeTracker.markWriting independently of onIndexableContextChange (each is optional)", async () => {
     // The two optional callbacks have independent guards (`?.`). Cover
     // the writeTracker-only variant — the no-indexer path would crash
     // silently if the guard were ever changed to call both unconditionally.
@@ -992,7 +1349,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       metadata: { dayType: "weekday" },
     });
     const markWriting = vi.fn();
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir, writeTracker: { markWriting } },
       {
         correlationId: "corr-X",
@@ -1005,13 +1362,13 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(markWriting).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onIndexableContextChange independently of writeTracker", () => {
+  it("calls onIndexableContextChange independently of writeTracker", async () => {
     seedStageRow({
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday" },
     });
     const onIndexable = vi.fn();
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir, onIndexableContextChange: onIndexable },
       {
         correlationId: "corr-X",
@@ -1024,7 +1381,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(onIndexable).toHaveBeenCalledWith("agent/journal.md");
   });
 
-  it("aggregates the agent-action breakdown into the Actions line when `agentDayWindow` is supplied", () => {
+  it("aggregates the agent-action breakdown into the Actions line when `agentDayWindow` is supplied", async () => {
     // End-to-end pin for the user-diary refocus: the agent-action
     // breakdown that used to live in the user-facing
     // `daily/<yesterday>.md` `## Actions` section now lands in
@@ -1045,7 +1402,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     insertAction.run("hourly_check", "2026-05-14 06:00:00", "2026-05-14 06:00:00");
     insertAction.run("evening_review", "2026-05-14 22:00:00", "2026-05-14 22:00:00");
 
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -1062,13 +1419,13 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(journal).toContain("- Actions: 3 total (hourly_check: 2, evening_review: 1)\n");
   });
 
-  it("renders `Actions: (none)` when `agentDayWindow` is supplied but the window has zero matching rows", () => {
+  it("renders `Actions: (none)` when `agentDayWindow` is supplied but the window has zero matching rows", async () => {
     seedStageRow({
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday" },
     });
 
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",
@@ -1085,7 +1442,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     expect(journal).toContain("- Actions: (none)\n");
   });
 
-  it("rolls back writeTracker.markWriting and re-throws when the atomic write fails", () => {
+  it("rolls back writeTracker.markWriting and re-throws when the atomic write fails", async () => {
     // Pins the catch arm of the writeFileAtomically try/catch (lines
     // 359-362): on failure, writeTracker.unmark must fire before the
     // error propagates so FS-watch consumers don't observe a phantom
@@ -1107,7 +1464,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
 
     const markWriting = vi.fn();
     const unmark = vi.fn();
-    expect(() =>
+    await expect(
       appendMorningRoutineJournalEntry(
         { db, contextDir, writeTracker: { markWriting, unmark } },
         {
@@ -1117,20 +1474,20 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
           agentDayWindow: EMPTY_AGENT_DAY_WINDOW_FOR_TESTS,
         },
       ),
-    ).toThrow(/atomic-write: refusing to overwrite symlink/);
+    ).rejects.toThrow(/atomic-write: refusing to overwrite symlink/);
     expect(markWriting).toHaveBeenCalledTimes(1);
     expect(unmark).toHaveBeenCalledTimes(1);
     expect(unmark).toHaveBeenCalledWith(journalAbs);
   });
 
-  it("tolerates a failed snapshot insert without aborting the journal write", () => {
+  it("tolerates a failed snapshot insert without aborting the journal write", async () => {
     seedStageRow({
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday" },
     });
     writeFileSync(join(contextDir, "agent/journal.md"), "# Agent journal\n\n## prev\n");
     db.exec("DROP TABLE md_file_snapshots");
-    const result = appendMorningRoutineJournalEntry(
+    const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
       {
         correlationId: "corr-X",

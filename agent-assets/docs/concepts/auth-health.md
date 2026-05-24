@@ -43,6 +43,9 @@ related:
   - concepts/backends-and-tiers
   - concepts/costs-and-quotas
   - troubleshooting/auth-failed
+ui_anchors:
+  - /settings/models
+  - /
 config_keys:
   - authProbeDisabled
   - authPreflightFreshnessMs

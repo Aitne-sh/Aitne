@@ -11,7 +11,8 @@ import type { AgentConfig } from "../../config.js";
  */
 export const MOBILE_REPLY_BUDGET = 1500;
 
-/** First-line marker (I-10). */
+/** Prefix every SYSTEM-origin reply with this marker so the agent can
+ *  recognize its own output on round-trip. */
 export function buildSystemMarker(
   command: string,
   window?: string,

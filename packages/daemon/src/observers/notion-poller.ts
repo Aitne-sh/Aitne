@@ -16,8 +16,8 @@ const logger = createLogger("notion-poller");
  * `NotionService.queryUpdatedSince` we walk at most 50 pages × 2 passes
  * (active + trashed) × N databases. A 4-minute cap absorbs API slowness
  * on a long cursor without letting one tick block the next interval.
- * Combined with PollGuard's overlap guard this is the audit-fix for
- * H1+M4 (2026-05-17) — pre-fix the poller had neither.
+ * Combined with PollGuard's overlap guard this prevents both unbounded
+ * tick concurrency and silent hangs.
  */
 const TICK_TIMEOUT_MS = 4 * 60 * 1000;
 

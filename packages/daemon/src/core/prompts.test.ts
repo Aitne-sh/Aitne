@@ -287,12 +287,17 @@ describe("getTaskFlow", () => {
     expect(morning).toContain("[provisional");
   });
 
-  // Phase 5/6 V2 split — journal authoring lives in Stage B, not Stage A.
-  it("morning routine journal stage (Stage B) authors yesterday's daily diary", () => {
+  // daily-journal-daemon-write.md §4.10 — journal authoring lives in
+  // Stage B and emits two namespaced XML wrappers as final text; the
+  // daemon composer writes the file.
+  it("morning routine journal stage (Stage B) emits the namespaced wrappers and consumes the skeleton", () => {
     const journal = getTaskFlow("routine.morning_routine_journal");
-    // Stage B reads the daemon-prepared skeleton and PUTs `daily/<yesterday>.md`.
-    expect(journal).toContain("daily/<yesterdayDateStr>.md");
+    expect(journal).toContain("<aitne:daily-journal-body>");
+    expect(journal).toContain("<aitne:daily-journal-frontmatter>");
     expect(journal).toContain("journal_skeleton");
+    // Stage B has no tools — the task-flow must NOT instruct an HTTP
+    // call to the chokepoint.
+    expect(journal).not.toContain("PUT /api/context/daily");
   });
 
   it("morning routine keeps the day-type filter contract derived from Notification Preferences", () => {

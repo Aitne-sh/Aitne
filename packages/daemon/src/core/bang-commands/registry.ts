@@ -328,7 +328,7 @@ export async function tryHandle(
 ): Promise<boolean> {
   const { event, db, audit, rawSend } = ctx;
   if (event.source === CUSTOM_BANG_COMMAND_SOURCE) return false;
-  // I-1: only DMs participate. Adapter-side owner gating is the single
+  // Only DMs participate. Adapter-side owner gating is the single
   // source of truth (matches the `/auth` precedent — see design §6.3).
   if (!event.isDm) return false;
   // §5.1 docs-QA exemption: docs-QA traffic is a side-channel and bypasses
@@ -341,7 +341,7 @@ export async function tryHandle(
   const paused = isUserPaused(db);
 
   // §6.3 pause branch — runs BEFORE the bang-prefix check so ANY DM while
-  // paused short-circuits without reaching the agent backend (I-3).
+  // paused short-circuits without reaching the agent backend.
   //
   // We use the full `resolve()` matcher (exact + prefix) rather than the
   // exact-only `match()`. Without this, every `BangPrefixCommand` (e.g.
@@ -386,8 +386,8 @@ export async function tryHandle(
             enqueueBrowserResearchEvent: ctx.enqueueBrowserResearchEvent,
             enqueueWikiApproval: ctx.enqueueWikiApproval,
           };
-          // P2-24: stamp the wall-clock the handler started so we can
-          // back-fill runMs into the audit row on success/failure.
+          // Stamp the wall-clock the handler started so we can back-fill
+          // runMs into the audit row on success/failure.
           const startedAtMs = Date.now();
           try {
             const args =
@@ -484,7 +484,7 @@ export async function tryHandle(
   if (!isBang) return false;
 
   // §7 spoof guard: a multi-line message that happens to start with `!stop`
-  // is "treated as agent input" — bang-command parsing is exact-match (I-2),
+  // is "treated as agent input" — bang-command parsing is exact-match,
   // so anything spanning newlines never produces a registry hit and must
   // fall through to the agent path instead of emitting the unknown-bang
   // help. Mirrors the intent of "Avoids spoofing by users embedding
@@ -514,7 +514,7 @@ export async function tryHandle(
       enqueueBrowserResearchEvent: ctx.enqueueBrowserResearchEvent,
       enqueueWikiApproval: ctx.enqueueWikiApproval,
     };
-    // P2-24: stamp wall-clock start so audit rows carry runMs.
+    // Stamp wall-clock start so audit rows carry runMs.
     const startedAtMs = Date.now();
     try {
       const args =

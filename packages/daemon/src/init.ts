@@ -31,7 +31,6 @@ export function initDirectories(config: AgentConfig): void {
     mkdirSync(resolve(fallbackContextDir, sub), { recursive: true });
   }
 
-  // Create other required directories
   mkdirSync(dataDbDir, { recursive: true });
   mkdirSync(logsDir, { recursive: true });
   mkdirSync(tmpDir, { recursive: true });

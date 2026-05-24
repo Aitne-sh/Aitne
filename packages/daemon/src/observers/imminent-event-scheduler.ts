@@ -178,7 +178,7 @@ export class ImminentEventScheduler implements Observer {
     // consumed (the pending-observations filter). Direct/delegated
     // snapshots have no consumed_at column — the writer reconciles
     // in-place, so the snapshot row always reflects the current state.
-    // Timestamp normalisation rationale (Issue A1, 2026-05-13).
+    // Timestamp normalisation rationale:
     //
     // Snapshot path: the writer normalises `item_start` to UTC ISO with
     // Z suffix via `normalizeTimeForRange` (integrations-snapshot.ts)

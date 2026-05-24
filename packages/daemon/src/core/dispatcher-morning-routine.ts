@@ -357,7 +357,7 @@ export class MorningRoutineRunner {
       // row presence — it returns `stage_a_row_missing` (not throws)
       // when the row is absent, so we just log the skip reason.
       try {
-        const appenderOutcome = this.pipelineOrchestrator.appendAgentJournalEntry({
+        const appenderOutcome = await this.pipelineOrchestrator.appendAgentJournalEntry({
           correlationId: effectiveEvent.correlationId,
         });
         if (appenderOutcome === null) {

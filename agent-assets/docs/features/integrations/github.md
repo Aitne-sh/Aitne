@@ -7,6 +7,7 @@ aliases:
   - github integration
   - github poller
   - github notifications
+  - github delegated mode
 category: features
 summary: |
   GitHub is the remote-side counterpart to the Git integration. The
@@ -25,7 +26,7 @@ ask_examples:
   - Can the agent reply to GitHub issues?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-28
+updated: 2026-05-24
 keywords:
   - github
   - issue
@@ -33,11 +34,18 @@ keywords:
   - PR review
   - workflow run
   - security alert
+  - delegated mode
+  - gh cli
 related:
   - features/integrations/git
   - concepts/observations
+  - concepts/delegated-mode
 ui_anchors:
   - /connections/repositories
+config_keys:
+  - githubPollIntervalSeconds
+  - gitRepos
+  - githubRepos
 ---
 
 # GitHub
@@ -128,13 +136,28 @@ New failures landing after that warm-up are surfaced normally.
   poller pre-checks `observations(source, ref)` before every emit. If
   it does, file a bug with the notification id.
 
-## Delegated mode (coming soon)
+## Modes
 
-A future release will let Claude Code, Codex, or Gemini CLI handle
-GitHub directly via their native MCP / `gh` integrations, optionally
-replacing the daemon-side poller. Most users won't need this — the
-built-in poller already covers the common surface — but it'll be
-useful if you'd rather skip the daemon-side polling entirely.
+GitHub supports three integration modes: `direct` (default),
+`delegated`, and `disabled`. Native mode is not offered — the
+backend-side connectors are read-only `gh` CLI wrappers that do not
+need a daemon-spawned poller's bookkeeping.
+
+- **direct** — the daemon's `GitHubPoller` runs as described above.
+  Use this when you want the daemon to own the poll schedule and to
+  emit DMs without the main backend having to wake up.
+- **delegated** — the delegated-sync worker invokes the chosen
+  backend's read-only `gh` CLI surface on opt-in cadences (see
+  [Delegated Mode](../../concepts/delegated-mode.md) and
+  `docs/design/appendices/delegated-sync-opt-in.md`). The daemon
+  poller stays off; the lite-tier delegated session takes the polling
+  cost.
+- **disabled** — neither the poller nor the delegated worker runs;
+  the integration is silent.
+
+Pick the mode at **Connections → GitHub**. Mode changes go through
+the standard `PATCH /api/integrations/github` flip-lock so the poller
+and the delegated worker never run simultaneously.
 
 ## Related
 

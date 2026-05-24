@@ -23,7 +23,7 @@ interface AuthRecoveryDialogProps {
   onRefresh: () => Promise<void>;
 }
 
-// ── Claude sub-view (browser OAuth — Phase 9) ──
+// ── Claude sub-view (browser OAuth) ──
 
 interface ClaudeRecoveryViewProps {
   backendId: BackendId;

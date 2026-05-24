@@ -62,6 +62,9 @@ context_files:
   - rules/management.md
   - rules/policies/<slug>.md
   - rules/policies/_index.md
+config_keys:
+  - dayBoundaryHour
+  - dataDir
 ---
 
 # Memory Model

@@ -40,14 +40,14 @@ export type StopAndUnregisterResult =
  * - ObsidianWatcher (chokidar file system events)
  * - GitWatcher (git log polling)
  * - CalendarPoller (Google Calendar API polling)
- * - NotionPoller (Notion API polling, Phase 3)
+ * - NotionPoller (Notion API polling)
  */
 export class ObserverManager {
   private readonly observers: Observer[] = [];
   /**
-   * Management Mode Phase 2: pause-state tracks which observers were
-   * running at the moment `pauseAll()` was invoked so `resumeAll()` only
-   * restarts the ones it stopped — not observers that the user had
+   * Pause-state tracks which observers were running at the moment
+   * `pauseAll()` was invoked so `resumeAll()` only restarts the ones it
+   * stopped — not observers that the user had
    * already disabled or that failed to start in the first place. A set
    * of names is enough because each observer's identity is its name.
    */
@@ -89,9 +89,9 @@ export class ObserverManager {
   }
 
   /**
-   * Management Mode Phase 2 migration hook — stops every registered
-   * observer and remembers the set so `resumeAll()` can restart exactly
-   * those observers once the migration commits or rolls back.
+   * Migration hook — stops every registered observer and remembers the
+   * set so `resumeAll()` can restart exactly those observers once the
+   * migration commits or rolls back.
    *
    * Idempotent: a second `pauseAll()` before `resumeAll()` is a no-op
    * and preserves the original paused set. The migration endpoint uses

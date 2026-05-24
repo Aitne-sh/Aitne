@@ -212,7 +212,7 @@ export interface BootstrapApiDeps {
     summary: RefreshDmSessionWorkdirsResult;
     mailAccounts: ReadonlyArray<unknown>;
   } | null;
-  readonly fireRoadmapMaintenance: () => RoadmapMaintenanceResult;
+  readonly fireRoadmapMaintenance: () => Promise<RoadmapMaintenanceResult>;
 
   // ── Observer builders (returned from `bootstrap/observers.ts`) ────────
   // All five hot-register builders are wired through because
