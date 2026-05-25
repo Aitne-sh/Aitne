@@ -21,6 +21,8 @@
 
 import { Hono } from "hono";
 import {
+  chromiumInstallStartResponseSchema,
+  chromiumInstallStatusResponseSchema,
   managedChromiumActionResponseSchema,
   managedChromiumEnableRequestSchema,
   managedChromiumSetupStatusResponseSchema,
@@ -40,6 +42,10 @@ import {
   killManagedChromiumBackground,
   startBootstrap,
 } from "../../services/browser-history/managed-chromium/setup-bootstrap.js";
+import {
+  getChromiumInstallStatus,
+  startChromiumInstall,
+} from "../../services/browser-history/lifecycle/chromium-install.js";
 import { createHostProfile } from "../../services/browser-history/lifecycle/platform.js";
 import type { ApiDependencies } from "../server.js";
 
@@ -49,6 +55,28 @@ export function createBrowserHistoryManagedRoutes(deps: ApiDependencies): Hono {
   const app = new Hono();
   const host = createHostProfile();
   const paDataDir = deps.config.dataDir;
+
+  // ── POST /install-chromium ── Opt-in Playwright Chromium download
+  //
+  // Triggers `playwright install chromium` in a child process and
+  // returns immediately. Progress is observable via the `/status`
+  // sibling. Concurrency: at most one install in flight daemon-wide.
+  app.post("/browser-history/managed/install-chromium", (c) => {
+    const result = startChromiumInstall();
+    return c.json(
+      chromiumInstallStartResponseSchema.parse({
+        ok: result.ok,
+        ...(result.ok ? {} : { reason: result.reason }),
+      }),
+      result.ok ? 202 : 409,
+    );
+  });
+
+  // ── GET /install-chromium/status ── poll progress
+  app.get("/browser-history/managed/install-chromium/status", (c) => {
+    const status = getChromiumInstallStatus();
+    return c.json(chromiumInstallStatusResponseSchema.parse(status));
+  });
 
   app.get("/browser-history/managed/status", (c) => {
     const state = readManagedChromiumState(deps.db);

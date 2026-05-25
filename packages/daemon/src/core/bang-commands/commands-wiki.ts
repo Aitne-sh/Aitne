@@ -248,15 +248,25 @@ export const compileCommand: BangPrefixCommand = {
         await ctx.notify(renderCompileInProgressDm(lock.holder, workspace.name));
         return;
       }
-      const queued = await enqueueOrNotify(
-        ctx,
-        createWikiCommandEvent({
-          processKey: "wiki.compile",
-          workspace: workspace.name,
-          sourceEvent: ctx.event,
-          data: { mode: "incremental" },
-        }),
-      );
+      let queued = false;
+      try {
+        queued = await enqueueOrNotify(
+          ctx,
+          createWikiCommandEvent({
+            processKey: "wiki.compile",
+            workspace: workspace.name,
+            sourceEvent: ctx.event,
+            data: { mode: "incremental" },
+          }),
+        );
+      } catch (err) {
+        // Any throw here (event bus full, notify failure) leaves the
+        // dispatcher's `finally` unreached because no event ever
+        // enqueued. Without this release, the lock TTL of 1h blocks all
+        // subsequent compiles for the workspace.
+        releaseWikiCompileLock(workspace.name);
+        throw err;
+      }
       if (queued) {
         await ctx.notify(
           `Queued incremental wiki compile for workspace \`${workspace.name}\`.`,
@@ -356,9 +366,19 @@ export const compileCommand: BangPrefixCommand = {
     // attribution map before GitWatcher's next poll cycle observes it
     // (C1) — closes the daemon-side self-trigger loop where the wiki
     // pre-compile commit would otherwise feed back as user activity.
-    const gitOutcome = await runGitPreCompile(workspace, {
-      writeTracker: ctx.writeTracker,
-    });
+    //
+    // From here on we hold the compile lock; any throw before the event
+    // is enqueued must release it (the dispatcher's `finally` won't fire
+    // because no event ever reached the queue).
+    let gitOutcome;
+    try {
+      gitOutcome = await runGitPreCompile(workspace, {
+        writeTracker: ctx.writeTracker,
+      });
+    } catch (err) {
+      releaseWikiCompileLock(workspace.name);
+      throw err;
+    }
     if (gitOutcome.status === "refused") {
       // Extremely narrow race: the tree turned dirty between preview and
       // commit (e.g. a parallel `!ingest` writing to `10_raw/`). Surface and
@@ -378,15 +398,21 @@ export const compileCommand: BangPrefixCommand = {
       lines.push(`- pre-compile git commit: ${gitOutcome.commitSha.slice(0, 7)}`);
     }
 
-    const queued = await enqueueOrNotify(
-      ctx,
-      createWikiCommandEvent({
-        processKey: "wiki.compile",
-        workspace: workspace.name,
-        sourceEvent: ctx.event,
-        data: { mode: "full", estimate, git: gitOutcome },
-      }),
-    );
+    let queued = false;
+    try {
+      queued = await enqueueOrNotify(
+        ctx,
+        createWikiCommandEvent({
+          processKey: "wiki.compile",
+          workspace: workspace.name,
+          sourceEvent: ctx.event,
+          data: { mode: "full", estimate, git: gitOutcome },
+        }),
+      );
+    } catch (err) {
+      releaseWikiCompileLock(workspace.name);
+      throw err;
+    }
     if (queued) {
       await ctx.notify(
         [

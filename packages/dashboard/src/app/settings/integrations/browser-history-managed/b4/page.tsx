@@ -24,6 +24,7 @@
  *     audit, never issuance.
  */
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   useMutation,
@@ -32,6 +33,7 @@ import {
 } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowLeft,
   CheckCircle2,
   Loader2,
   ShieldAlert,
@@ -199,6 +201,14 @@ export default function B4Page(): React.ReactElement {
 
   return (
     <div className="space-y-6">
+      <Link
+        href="/settings/integrations/browser-history-managed"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Back to Managed Chromium
+      </Link>
+
       <PageHeader
         title="Experimental purchase (B-4)"
         description="DM-token-gated checkout workflows. Aitne can be tricked. The DM-token guard is experimental and bypassable if the daemon or messaging platform is compromised. Money lost via approved purchases cannot be recovered."

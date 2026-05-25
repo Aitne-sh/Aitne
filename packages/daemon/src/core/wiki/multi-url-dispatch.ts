@@ -79,19 +79,29 @@ export async function dispatchWikiUrlBatch(
 
   const cap = Math.max(1, Math.min(10, Math.floor(input.concurrencyCap)));
   let cursor = 0;
+  let aborted = false;
 
   async function worker(): Promise<void> {
-    while (cursor < urls.length) {
+    while (!aborted && cursor < urls.length) {
       const url = urls[cursor++];
-      await input.enqueue(
-        createWikiCommandEvent({
-          processKey: "wiki.ingest_url",
-          workspace: input.workspace,
-          sourceEvent: input.sourceEvent,
-          batchId,
-          data: { url },
-        }),
-      );
+      try {
+        await input.enqueue(
+          createWikiCommandEvent({
+            processKey: "wiki.ingest_url",
+            workspace: input.workspace,
+            sourceEvent: input.sourceEvent,
+            batchId,
+            data: { url },
+          }),
+        );
+      } catch (err) {
+        // Honour the "abort the rest of the batch" contract: one failed
+        // enqueue stops sibling workers from claiming more URLs. Without
+        // this flag, Promise.all rejects fast but the other workers keep
+        // running, producing partial-then-unobserved enqueues.
+        aborted = true;
+        throw err;
+      }
     }
   }
 

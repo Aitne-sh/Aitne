@@ -1209,7 +1209,13 @@ function searchWikiFiles(rootPath: string, query: string, limit: number) {
   for (const file of files) {
     if (!file.path.endsWith(".md")) continue;
     const full = join(rootPath, file.path);
-    const content = readFileSync(full, "utf-8");
+    let content: string;
+    try {
+      content = readFileSync(full, "utf-8");
+    } catch {
+      // Race / permissions — skip rather than 500ing the whole search.
+      continue;
+    }
     const lower = content.toLowerCase();
     const idx = query ? lower.indexOf(query) : 0;
     if (idx < 0) continue;
@@ -1227,10 +1233,13 @@ function searchWikiFiles(rootPath: string, query: string, limit: number) {
 function listWikiIndex(rootPath: string) {
   const out: Array<{ path: string; sizeBytes: number; mtime: string }> = [];
   for (const rel of walkFiles(rootPath)) {
-    if (rel.startsWith(".snapshots/")) continue;
     const full = join(rootPath, rel);
-    const stat = statSync(full);
-    out.push({ path: rel, sizeBytes: stat.size, mtime: stat.mtime.toISOString() });
+    try {
+      const stat = statSync(full);
+      out.push({ path: rel, sizeBytes: stat.size, mtime: stat.mtime.toISOString() });
+    } catch {
+      // Race: file vanished between readdir and stat. Skip rather than 500.
+    }
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
 }
@@ -1239,8 +1248,23 @@ function walkFiles(rootPath: string, relDir = ""): string[] {
   const dir = join(rootPath, relDir);
   if (!existsSync(dir)) return [];
   const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    // Permission-denied / vanished mid-walk. Sibling helpers in
+    // `cost-estimate.ts` and `wiki-fts.ts:walkWikiTree` swallow the same
+    // condition; matching that behaviour keeps `/index` returning partial
+    // results instead of 500-ing on a single unreadable subdir.
+    return out;
+  }
+  for (const entry of entries) {
     const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+    // `.snapshots/` is the internal-mode backup tree (§14 Q3) and must
+    // never appear in `/index` or `/search` — its entries duplicate the
+    // live wiki and would explode walk cost on long-lived workspaces.
+    // Skip at walk time so the recursion doesn't pay for them.
+    if (rel === ".snapshots" || rel.startsWith(".snapshots/")) continue;
     if (entry.isDirectory()) {
       out.push(...walkFiles(rootPath, rel));
     } else if (entry.isFile()) {

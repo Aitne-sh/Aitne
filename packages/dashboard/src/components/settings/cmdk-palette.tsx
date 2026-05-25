@@ -105,6 +105,14 @@ const SETTINGS_INDEX: SettingsEntry[] = [
   { kind: "setting", label: "Autonomous Daily Cost Cap", configKey: "autonomousDailyCostCapUsd", page: "/settings/models", section: "Cost Guardrails", keywords: "daily cost cap autonomous routines budget" },
   { kind: "setting", label: "Autonomous Monthly Cost Cap", configKey: "autonomousMonthlyCostCapUsd", page: "/settings/models", section: "Cost Guardrails", keywords: "monthly cost cap autonomous notification alert budget" },
 
+  // -- Managed Chromium (/settings/integrations/browser-history-managed) — page-level navigation only --
+  { kind: "setting", label: "Managed Chromium (master toggle)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Managed Chromium", keywords: "chromium browser automation managed sync oauth instance s playwright sandbox bwrap" },
+  { kind: "setting", label: "Authenticated Sites (B-2.5)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Managed Chromium", keywords: "amazon netflix site auth sign-in profile connect reauth disconnect" },
+  { kind: "setting", label: "Workflow Approvals (B-3)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Managed Chromium", keywords: "approval token write workflow approve deny queue pending" },
+  { kind: "setting", label: "Purchase Workflows (B-4, experimental)", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Managed Chromium", keywords: "purchase b4 buy checkout cart token caps daily spend experimental danger" },
+  { kind: "setting", label: "B-4 Per-site caps", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Managed Chromium", keywords: "currency daily token cap spend cap per transaction limit site b4" },
+  { kind: "setting", label: "B-4 Primary DM channels", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Managed Chromium", keywords: "primary dm channel token delivery slack telegram discord whatsapp b4" },
+
   // -- Connections (top-level /connections) — page-level navigation only --
   { kind: "setting", label: "Slack", configKey: "", page: "/connections/messaging", section: "Messaging", keywords: "slack bot token channel messaging" },
   { kind: "setting", label: "Telegram", configKey: "", page: "/connections/messaging", section: "Messaging", keywords: "telegram bot chat messaging" },
@@ -147,6 +155,8 @@ const PAGE_LABELS: Record<string, string> = {
   "/settings/schedule": "Schedule",
   "/settings/models": "Models",
   "/settings/advanced": "Advanced",
+  "/settings/integrations/browser-history-managed": "Managed Chromium",
+  "/settings/integrations/browser-history-managed/b4": "Managed Chromium — B-4",
   "/connections/messaging": "Connections — Messaging",
   "/connections/repositories": "Connections — Repositories",
   "/connections/knowledge": "Connections — Knowledge",

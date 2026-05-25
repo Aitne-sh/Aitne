@@ -89,11 +89,18 @@ export function createGitRoutes(deps: GitRouteDependencies): Hono {
       ], { legacyErrorCode: "invalid or missing repo", legacyFields: { allowed: listAllowed() } });
     }
 
-    const count = Math.min(Number(c.req.query("count") ?? "5"), 200);
+    const countRaw = Number.parseInt(c.req.query("count") ?? "5", 10);
+    const count =
+      Number.isFinite(countRaw) && countRaw >= 1
+        ? Math.min(countRaw, 200)
+        : 5;
+    // ASCII Unit Separator — git commit fields (subject/author) cannot contain it,
+    // so it's a safer delimiter than `|` which naturally appears in commit subjects.
+    const FS = "\x1f";
     try {
       const { stdout } = await execFileAsync(
         "git",
-        ["log", "--format=%H|%h|%s|%an|%ar", `-${count}`],
+        ["log", `--format=%H${FS}%h${FS}%s${FS}%an${FS}%ar`, `-${count}`],
         { cwd: repo, timeout: 10_000 },
       );
       const commits = stdout
@@ -101,7 +108,7 @@ export function createGitRoutes(deps: GitRouteDependencies): Hono {
         .split("\n")
         .filter(Boolean)
         .map((line) => {
-          const [hash, short, subject, author, ago] = line.split("|");
+          const [hash, short, subject, author, ago] = line.split(FS);
           return { hash, short, subject, author, ago };
         });
       return c.json({ commits });

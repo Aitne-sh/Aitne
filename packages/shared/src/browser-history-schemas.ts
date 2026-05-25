@@ -748,6 +748,46 @@ export type ManagedChromiumActionResponse = z.infer<
   typeof managedChromiumActionResponseSchema
 >;
 
+/**
+ * Opt-in Chromium download — Playwright-managed binary install.
+ *
+ * The dashboard's "Download Chromium" button hits
+ * `POST /api/browser-history/managed/install-chromium`, then polls
+ * `GET .../install-chromium-status` every second while
+ * state ∈ {downloading, verifying}. `state` mirrors the
+ * `ChromiumInstallState` enum in the daemon's install service.
+ */
+export const chromiumInstallStateSchema = z.enum([
+  "idle",
+  "downloading",
+  "verifying",
+  "completed",
+  "failed",
+]);
+export type ChromiumInstallState = z.infer<typeof chromiumInstallStateSchema>;
+
+export const chromiumInstallStatusResponseSchema = z.object({
+  state: chromiumInstallStateSchema,
+  progressPercent: z.number().min(0).max(100).nullable(),
+  totalMib: z.number().nonnegative().nullable(),
+  downloadedMib: z.number().nonnegative().nullable(),
+  startedAt: z.number().int().nonnegative().nullable(),
+  completedAt: z.number().int().nonnegative().nullable(),
+  binaryPath: z.string().nullable(),
+  errorMessage: z.string().nullable(),
+});
+export type ChromiumInstallStatusResponse = z.infer<
+  typeof chromiumInstallStatusResponseSchema
+>;
+
+export const chromiumInstallStartResponseSchema = z.object({
+  ok: z.boolean(),
+  reason: z.enum(["already_running", "spawn_failed"]).optional(),
+});
+export type ChromiumInstallStartResponse = z.infer<
+  typeof chromiumInstallStartResponseSchema
+>;
+
 // ─────────────────────────────────────────────────────────────────────
 // Browser Automation — Instance A workflow surface (Phase B-2).
 // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.3–§8.10.

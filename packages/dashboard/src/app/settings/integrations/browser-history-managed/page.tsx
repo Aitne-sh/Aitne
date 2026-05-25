@@ -2,10 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Clock3,
+  Download,
   Loader2,
   PlugZap,
   RefreshCw,
@@ -22,6 +25,8 @@ import type {
   BrowserAutomationSiteActionResponse,
   BrowserAutomationSitesResponse,
   BrowserAutomationSiteStatusResponse,
+  ChromiumInstallStartResponse,
+  ChromiumInstallStatusResponse,
   ManagedChromiumActionResponse,
   ManagedChromiumSetupStatusResponse,
   ManagedChromiumStatusResponse,
@@ -40,6 +45,9 @@ const SITES_QUERY_KEY = ["browser-automation-sites"] as const;
 const APPROVALS_QUERY_KEY = ["browser-automation-approvals"] as const;
 const OBSERVATION_GATE_QUERY_KEY = [
   "browser-automation-observation-gate",
+] as const;
+const INSTALL_STATUS_QUERY_KEY = [
+  "managed-chromium-install-status",
 ] as const;
 
 function useManagedStatus(refetchIntervalMs?: number) {
@@ -111,6 +119,26 @@ function useApprovals(enabled: boolean) {
   });
 }
 
+/** Playwright Chromium install — progress poller. The cadence ramps
+ *  up to 1 s while a download is mid-flight (so the progress bar feels
+ *  live) and falls back to 5 s otherwise. The query is always mounted
+ *  so the dashboard can read the "completed" / "failed" terminal state
+ *  even after the user navigates away and comes back. */
+function useInstallStatus() {
+  return useQuery({
+    queryKey: INSTALL_STATUS_QUERY_KEY,
+    queryFn: () =>
+      api.get<ChromiumInstallStatusResponse>(
+        "/browser-history/managed/install-chromium/status",
+      ),
+    refetchInterval: (query) => {
+      const s = query.state.data?.state;
+      return s === "downloading" || s === "verifying" ? 1_000 : 5_000;
+    },
+    staleTime: 500,
+  });
+}
+
 /** Phase B-3 — observation-gate panel data. Polled at a slow cadence
  *  (60 s) — the underlying aggregates change at the workflow run
  *  granularity, which is on the order of minutes. */
@@ -147,6 +175,25 @@ export default function ManagedChromiumPage() {
   const approvalsEnabled = sitesEnabled;
   const approvalsQuery = useApprovals(Boolean(approvalsEnabled));
   const observationGateQuery = useObservationGate(Boolean(approvalsEnabled));
+
+  // Install state — auto-ramps cadence to 1 s when downloading.
+  const installStatusQuery = useInstallStatus();
+  const installActive =
+    installStatusQuery.data?.state === "downloading" ||
+    installStatusQuery.data?.state === "verifying";
+  const installStatusData = installStatusQuery.data;
+
+  const installMutation = useMutation({
+    mutationFn: () =>
+      api.post<ChromiumInstallStartResponse>(
+        "/browser-history/managed/install-chromium",
+        {},
+      ),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: INSTALL_STATUS_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+    },
+  });
 
   const enableMutation = useMutation({
     mutationFn: (body: { enabled: boolean; unsandboxedOptIn?: boolean }) =>
@@ -277,9 +324,20 @@ export default function ManagedChromiumPage() {
             <Alert variant="error">
               <div className="font-medium">Chromium binary not found.</div>
               <p className="mt-1">
-                Install Chromium first. On macOS: <code>brew install --cask chromium</code>.
-                On Debian/Ubuntu: <code>sudo apt install chromium</code>. On Fedora: <code>
-                  sudo dnf install chromium</code>.
+                Aitne can download the Playwright-managed Chromium build
+                (~150 MiB) into your Playwright cache, or you can install
+                Chromium via your OS package manager.
+              </p>
+              <InstallChromiumPanel
+                status={installStatusData ?? null}
+                onInstall={() => installMutation.mutate()}
+                pending={installMutation.isPending}
+              />
+              <p className="mt-3 text-xs text-muted-foreground">
+                OS-package alternative — macOS:{" "}
+                <code>brew install --cask chromium</code>; Debian/Ubuntu:{" "}
+                <code>sudo apt install chromium</code>; Fedora:{" "}
+                <code>sudo dnf install chromium</code>.
               </p>
             </Alert>
           )}
@@ -354,9 +412,127 @@ export default function ManagedChromiumPage() {
               isLoading={observationGateQuery.isLoading}
             />
           )}
+
+          {approvalsEnabled && <B4SubpageCard />}
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Inline panel surfacing the Playwright opt-in install button + live
+ * progress bar. Re-used inside the `missing_binary` alert and inside
+ * the ConsentCard's sandbox-warning block so the operator can trigger
+ * the download in either place.
+ */
+function InstallChromiumPanel({
+  status,
+  onInstall,
+  pending,
+}: {
+  status: ChromiumInstallStatusResponse | null;
+  onInstall: () => void;
+  pending: boolean;
+}) {
+  const state = status?.state ?? "idle";
+  const downloading = state === "downloading" || state === "verifying";
+  const percent = status?.progressPercent ?? 0;
+  const total = status?.totalMib;
+  const downloaded = status?.downloadedMib;
+  return (
+    <div className="mt-3 space-y-2">
+      {state === "completed" ? (
+        <div className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800">
+          <CheckCircle2 className="h-4 w-4" />
+          Chromium installed
+          {status?.binaryPath ? (
+            <code className="ml-1 text-xs text-emerald-900/70">
+              {shortPath(status.binaryPath)}
+            </code>
+          ) : null}
+        </div>
+      ) : downloading ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              {state === "verifying"
+                ? "Verifying download…"
+                : "Downloading Chromium…"}
+            </span>
+            <span>
+              {percent}%
+              {downloaded != null && total != null
+                ? ` (${downloaded} / ${total} MiB)`
+                : null}
+            </span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-[width] duration-500"
+              style={{ width: `${Math.max(2, percent)}%` }}
+              aria-label={`Install progress ${percent}%`}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            onClick={onInstall}
+            disabled={pending}
+          >
+            {pending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {state === "failed"
+              ? "Retry download (~150 MiB)"
+              : "Download Chromium (~150 MiB)"}
+          </Button>
+          {state === "failed" && status?.errorMessage ? (
+            <span className="text-xs text-red-700">{status.errorMessage}</span>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function shortPath(p: string): string {
+  if (p.length <= 60) return p;
+  return `…${p.slice(p.length - 57)}`;
+}
+
+function B4SubpageCard() {
+  return (
+    <Card className="border-amber-200">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-base font-semibold">
+              <ShieldAlert className="h-4 w-4 text-amber-600" />
+              Experimental purchase workflows (B-4)
+            </div>
+            <p className="text-sm text-muted-foreground">
+              DM-token-gated checkout flows. Default off — every safety
+              gate (master toggle, per-site caps, primary DM channel,
+              §23 hard-deny categories) is configured on a dedicated
+              page.
+            </p>
+          </div>
+          <Link
+            href="/settings/integrations/browser-history-managed/b4"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
+          >
+            Open B-4 settings
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      </CardHeader>
+    </Card>
   );
 }
 

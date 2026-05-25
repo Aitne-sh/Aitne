@@ -238,13 +238,19 @@ export class GitWatcher implements Observer {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
     }
+    const interval = this.getCurrentInterval();
+    // Track the active interval so `maybeAdjustFrequency` doesn't re-restart on
+    // its next tick — without this, callers that go through `restartTimer`
+    // directly (e.g. `enableWebhookMode`) leave `lastUsedInterval` stale and
+    // cause one redundant restart per webhook transition.
+    this.lastUsedInterval = interval;
     this.pollTimer = setInterval(
       () => {
         void this.poll();
         // Check if we need to switch frequency
         this.maybeAdjustFrequency();
       },
-      this.getCurrentInterval() * 1000,
+      interval * 1000,
     );
   }
 

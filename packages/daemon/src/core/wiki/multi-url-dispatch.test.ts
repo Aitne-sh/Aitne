@@ -76,6 +76,50 @@ describe("dispatchWikiUrlBatch", () => {
     ]);
   });
 
+  it("aborts the batch on enqueue failure (parallel, with sibling workers)", async () => {
+    // The point of the abort flag is to stop *sibling* workers from
+    // claiming more URLs after one of them throws. With cap=3 and 6 URLs,
+    // three workers each grab one URL synchronously (cursor=0,1,2) before
+    // any await fires. Worker A's enqueue throws synchronously for the
+    // bad URL — sets aborted=true and rethrows. Workers B and C are
+    // awaiting their own (resolving) enqueues; once those resolve, the
+    // `!aborted` check at the loop head bounces them out before they
+    // grab urls[3..5]. Without the flag, Promise.all would reject fast
+    // but B and C would silently continue the loop, enqueueing all 6.
+    const enqueue = vi.fn().mockImplementation(async (event) => {
+      if (event.data.url === "https://bad.test/") {
+        throw new Error("eventbus full");
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    await expect(
+      dispatchWikiUrlBatch({
+        workspace: "default",
+        urls: [
+          "https://bad.test/",
+          "https://ok-1.test/",
+          "https://ok-2.test/",
+          "https://skip-1.test/",
+          "https://skip-2.test/",
+          "https://skip-3.test/",
+        ],
+        mode: "parallel",
+        concurrencyCap: 3,
+        enqueue,
+      }),
+    ).rejects.toThrow(/eventbus full/);
+    // Three urls are claimed before A throws (one per worker); the three
+    // `skip-*` urls must never be enqueued. Without the abort flag this
+    // would be 6.
+    expect(enqueue).toHaveBeenCalledTimes(3);
+    const seen = enqueue.mock.calls.map((call) => call[0].data.url).sort();
+    expect(seen).toEqual([
+      "https://bad.test/",
+      "https://ok-1.test/",
+      "https://ok-2.test/",
+    ]);
+  });
+
   it("aborts the batch on enqueue failure (serial)", async () => {
     const enqueue = vi.fn().mockImplementation(async (event) => {
       if (event.data.url === "https://bad.test/") {

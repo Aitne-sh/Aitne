@@ -145,11 +145,7 @@ function TriggerEditorContent({
     setFilters((prev) => prev.filter((f) => f.id !== id));
   };
 
-  type FiltersResult =
-    | { ok: true; filters: Record<string, unknown> }
-    | { ok: false; error: string };
-
-  const buildFiltersJson = (): FiltersResult => {
+  const buildFiltersJson = (): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const f of filters) {
       const k = f.key.trim();
@@ -168,7 +164,7 @@ function TriggerEditorContent({
       else if (v !== "" && !Number.isNaN(Number(v))) out[k] = Number(v);
       else out[k] = v;
     }
-    return { ok: true, filters: out };
+    return out;
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -185,17 +181,11 @@ function TriggerEditorContent({
       return setError("This repository has no local clone.");
     }
 
-    const filtersBuilt = buildFiltersJson();
-    if (!filtersBuilt.ok) {
-      setError(filtersBuilt.error);
-      return;
-    }
-
     const body: RepositoryTriggerCreateInput = {
       name: name.trim(),
       enabled,
       eventType,
-      filters: filtersBuilt.filters,
+      filters: buildFiltersJson(),
       backend,
       model: model.trim(),
       workdirMode,

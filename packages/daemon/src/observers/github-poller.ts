@@ -536,14 +536,27 @@ export class GitHubPoller implements Observer {
     });
 
     if (classification.emitEvent && isFresh) {
-      this.eventBus.put(
+      // `eventBus.put` is async; fire-and-forget but explicitly handle
+      // rejection so a queue-eviction failure can't surface as an unhandled
+      // promise rejection (which would crash the daemon under Node's default
+      // `--unhandled-rejections=throw`).
+      void this.eventBus.put(
         createEvent({
           type: classification.eventType,
           source: "github-poller",
           priority: classification.priority,
           data: classification.payload,
         }),
-      );
+      ).catch((err) => {
+        logger.error(
+          {
+            err,
+            eventType: classification.eventType,
+            ref: classification.ref,
+          },
+          "Failed to emit GitHub event",
+        );
+      });
       logger.info(
         {
           eventType: classification.eventType,

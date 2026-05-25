@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ObsidianService } from "../../services/obsidian.js";
 import type { WikiWorkspaceRow } from "./workspaces.js";
 import { writeFileAtomically } from "../atomic-write.js";
@@ -182,7 +182,13 @@ function ensureTrailingNewline(content: string): string {
 
 function ensureWithinRoot(root: string, fullPath: string): boolean {
   const rel = relative(root, fullPath);
-  return !rel.startsWith("..") && !rel.startsWith("/");
+  // `relative()` returns an absolute path when the two paths are on
+  // different Windows drive letters (e.g. C:\ → D:\evil). The `..` and
+  // empty-string checks are not sufficient there — `isAbsolute` catches
+  // it across platforms. An empty `rel` means fullPath === root, which
+  // is a directory write and never a legal file target.
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+  return true;
 }
 
 /**

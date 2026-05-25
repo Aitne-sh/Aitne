@@ -38,6 +38,7 @@ import {
   useRetemplateStatus,
   useSaveGitTemplate,
 } from "@/lib/hooks/use-git-templates";
+import { useRepositories } from "@/lib/hooks/use-repositories";
 import {
   buildApplyWarning,
   buildFileGridRows,
@@ -109,11 +110,32 @@ function TemplateEditor({ kind }: { kind: GitTemplateKind }) {
   const detail = useGitTemplate(kind);
   const save = useSaveGitTemplate(kind);
   const apply = useApplyGitTemplate(kind);
+  const repos = useRepositories();
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [applyResult, setApplyResult] =
     useState<GitRetemplateApplyResponse | null>(null);
+
+  // Count repositories that this `kind`'s re-template would touch — the
+  // confirm dialog title surfaces the number so the user knows the blast
+  // radius before clicking through. Mirrors `selectRetemplateTargets` →
+  // `classifyTemplateKind` on the server (TemplateKind `git-repo` maps to
+  // classification `repo-only`, not the literal `git-repo`).
+  //
+  // Upper bound: the server additionally requires the per-repo context file
+  // to exist on disk before targeting it, which the dashboard cannot check.
+  // A repo whose overview/journal hasn't been initialized yet will be
+  // counted here but skipped on the server. The number stays useful for
+  // signalling the dialog's blast radius, even if a few targets fall out.
+  const wantClassification = kind === "project" ? "project" : "repo-only";
+  const targetCount = useMemo(
+    () =>
+      (repos.data?.repositories ?? []).filter(
+        (r) => r.classification === wantClassification,
+      ).length,
+    [repos.data?.repositories, wantClassification],
+  );
 
   const active = detail.data?.active ?? "";
   const bundled = detail.data?.bundled ?? "";
@@ -136,7 +158,7 @@ function TemplateEditor({ kind }: { kind: GitTemplateKind }) {
     setDraft(bundled);
   };
 
-  const warning = buildApplyWarning(kind, 0); // count fills in once apply runs
+  const warning = buildApplyWarning(kind, targetCount);
   const onConfirmApply = async () => {
     setError(null);
     try {

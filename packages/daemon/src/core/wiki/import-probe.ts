@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -131,9 +132,12 @@ function inventoryLayer(rootPath: string, dir: LayerDir): LayerInventory {
       lastModifiedAt: null,
     };
   }
-  let stat;
+  // `lstatSync` does NOT follow symlinks; `statSync` does. The probe
+  // needs the symlink-itself state so the wizard can flag a layer-dir
+  // symlink (§7 — refusing the import is the safe default).
+  let lstat;
   try {
-    stat = statSync(full);
+    lstat = lstatSync(full);
   } catch {
     return {
       dir,
@@ -165,7 +169,7 @@ function inventoryLayer(rootPath: string, dir: LayerDir): LayerInventory {
   return {
     dir,
     exists: true,
-    isSymlink: stat.isSymbolicLink(),
+    isSymlink: lstat.isSymbolicLink(),
     fileCount,
     subdirectories: subdirectories.sort(),
     lastModifiedAt,

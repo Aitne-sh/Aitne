@@ -215,6 +215,12 @@ const API_RISK: Record<string, RiskTier> = {
   "POST /api/browser-history/managed/reconnect": RiskTier.ReadSensitive,
   "POST /api/browser-history/managed/disconnect": RiskTier.Approve,
   "POST /api/browser-history/managed/enable": RiskTier.Approve,
+  // Opt-in Playwright Chromium download. Approve-tier because the
+  // install touches the network and writes ~150 MiB into the user's
+  // Playwright cache — an autonomous agent must not trigger this on
+  // its own. The status sibling is autonomous-safe (read-only state).
+  "POST /api/browser-history/managed/install-chromium": RiskTier.Approve,
+  "GET /api/browser-history/managed/install-chromium/status": RiskTier.Autonomous,
 
   // ── Browser Automation (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.12) ──
   // Phase B-2 Instance A workflow surface. `GET /workflows` is the

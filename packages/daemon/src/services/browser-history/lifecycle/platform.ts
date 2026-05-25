@@ -1,4 +1,4 @@
-import { accessSync, constants, existsSync } from "node:fs";
+import { accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { readlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -214,6 +214,69 @@ function resolveLinuxSandboxPrimitive(): SandboxPrimitive {
   return { kind: "none" };
 }
 
+/**
+ * Locate a Chromium binary inside the Playwright managed cache, if
+ * `playwright install chromium` has been run on this host (either by
+ * the daemon's opt-in install button or by an operator manually).
+ *
+ * Probes the OS-conventional cache root, enumerates `chromium-<build>`
+ * subdirs (excluding `chromium_headless_shell-*` — Aitne needs the
+ * headed binary for interactive sign-in), and returns the executable
+ * inside the newest build that actually exists on disk. Returns null
+ * when nothing matches.
+ *
+ * Side-effect-free; synchronous. Called from `browserBinaryFor` as the
+ * fallback path AFTER the OS-package probe so a system-installed
+ * Chromium (brew / apt / dnf) still wins when present.
+ */
+function playwrightChromiumCacheCandidate(): string | null {
+  const home = homedir();
+  const cacheRoot =
+    process.platform === "darwin"
+      ? join(home, "Library", "Caches", "ms-playwright")
+      : process.platform === "win32"
+        ? join(windowsLocalAppData(), "ms-playwright")
+        : join(
+            process.env.XDG_CACHE_HOME ?? join(home, ".cache"),
+            "ms-playwright",
+          );
+  if (!existsSync(cacheRoot)) return null;
+  let entries: string[];
+  try {
+    entries = readdirSync(cacheRoot);
+  } catch {
+    return null;
+  }
+  const chromiumBuilds = entries.filter(
+    (name) =>
+      name.startsWith("chromium-") && !name.startsWith("chromium_headless_shell-"),
+  );
+  chromiumBuilds.sort((a, b) => {
+    const aN = Number.parseInt(a.replace(/^chromium-/, ""), 10);
+    const bN = Number.parseInt(b.replace(/^chromium-/, ""), 10);
+    if (!Number.isFinite(aN) || !Number.isFinite(bN)) return b.localeCompare(a);
+    return bN - aN;
+  });
+  for (const build of chromiumBuilds) {
+    const exe =
+      process.platform === "darwin"
+        ? join(
+            cacheRoot,
+            build,
+            "chrome-mac",
+            "Chromium.app",
+            "Contents",
+            "MacOS",
+            "Chromium",
+          )
+        : process.platform === "win32"
+          ? join(cacheRoot, build, "chrome-win", "chrome.exe")
+          : join(cacheRoot, build, "chrome-linux", "chrome");
+    if (existsSync(exe)) return exe;
+  }
+  return null;
+}
+
 function binaryOnPathSync(name: string): boolean {
   const pathEnv = process.env.PATH ?? "";
   for (const dir of pathEnv.split(":")) {
@@ -323,24 +386,29 @@ export function createHostProfile(): HostProfile {
     hasDisplay,
     sandboxPrimitive: resolveSandboxPrimitive(os),
     browserBinaryFor(key) {
-      if (os === "darwin") return firstExisting(CHROMIUM_METADATA[key].macApps);
-      if (os === "win32") return firstExisting(windowsExecutableCandidates(key));
-      const candidates = CHROMIUM_METADATA[key].linuxBins;
-      for (const candidate of candidates) {
-        // Absolute paths short-circuit existsSync.
-        if (candidate.includes("/")) {
-          if (existsSync(candidate)) return candidate;
-          continue;
-        }
-        // Bare names: probe PATH synchronously. Returning the bare name is
-        // sufficient — child_process.spawn resolves it via PATH at exec time
-        // — but consumers (managed-chromium-supervisor's missing_binary
-        // check, ps-matching in isProcessRunning) need a reliable null when
-        // nothing is installed. The prior fallback (`candidates[0]`)
-        // unconditionally returned the bare name and made `missing_binary`
-        // unreachable on Linux.
-        if (binaryOnPathSync(candidate)) return candidate;
-      }
+      // OS-installed candidate wins when present — it's centrally
+      // updated by brew / apt / dnf and avoids the per-daemon
+      // Playwright cache duplicating disk on hosts that already have
+      // Chromium. The Playwright cache fallback below only fires when
+      // the OS path resolves to null AND the operator is asking
+      // specifically for "chromium" (the managed-mode key).
+      const osMatch =
+        os === "darwin"
+          ? firstExisting(CHROMIUM_METADATA[key].macApps)
+          : os === "win32"
+            ? firstExisting(windowsExecutableCandidates(key))
+            : (() => {
+                for (const candidate of CHROMIUM_METADATA[key].linuxBins) {
+                  if (candidate.includes("/")) {
+                    if (existsSync(candidate)) return candidate;
+                    continue;
+                  }
+                  if (binaryOnPathSync(candidate)) return candidate;
+                }
+                return null;
+              })();
+      if (osMatch) return osMatch;
+      if (key === "chromium") return playwrightChromiumCacheCandidate();
       return null;
     },
     profileRootFor(key) {

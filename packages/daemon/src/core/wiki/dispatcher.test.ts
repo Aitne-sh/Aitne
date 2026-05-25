@@ -5,7 +5,7 @@ import {
   type Event,
   type MessageEvent,
 } from "@aitne/shared";
-import { createWikiCommandEvent, readWikiReplyTarget } from "./dispatcher.js";
+import { createWikiCommandEvent, readEventReplyTarget } from "./dispatcher.js";
 
 function makeSourceMessage(over: Partial<MessageEvent> = {}): MessageEvent {
   return {
@@ -25,7 +25,7 @@ function makeSourceMessage(over: Partial<MessageEvent> = {}): MessageEvent {
   } as MessageEvent;
 }
 
-describe("createWikiCommandEvent / readWikiReplyTarget", () => {
+describe("createWikiCommandEvent / readEventReplyTarget", () => {
   it("populates data.reply_target from a MessageEvent source", () => {
     // WIKI_BUILDER_DESIGN.md §3.4 — wiki sessions started from a DM
     // remember the originating channel so the completion DM lands on
@@ -36,7 +36,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
       sourceEvent: makeSourceMessage(),
       data: { url: "https://example.com" },
     });
-    const target = readWikiReplyTarget(event);
+    const target = readEventReplyTarget(event);
     expect(target).toEqual({
       platform: "slack",
       channel: "D-original",
@@ -52,7 +52,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
       sourceEvent: makeSourceMessage({ threadId: "thread-1" }),
       data: { url: "https://example.com" },
     });
-    expect(readWikiReplyTarget(event)?.threadId).toBe("thread-1");
+    expect(readEventReplyTarget(event)?.threadId).toBe("thread-1");
   });
 
   it("works across all platforms (telegram/discord/dashboard)", () => {
@@ -62,7 +62,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
         workspace: "default",
         sourceEvent: makeSourceMessage({ platform, channel: `${platform}-channel` }),
       });
-      const target = readWikiReplyTarget(event);
+      const target = readEventReplyTarget(event);
       expect(target?.platform).toBe(platform);
       expect(target?.channel).toBe(`${platform}-channel`);
     }
@@ -70,14 +70,14 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
 
   it("omits data.reply_target when no source event is supplied", () => {
     // A hypothetical routine-triggered wiki session has no originating
-    // MessageEvent. In that case `readWikiReplyTarget` returns null and
+    // MessageEvent. In that case `readEventReplyTarget` returns null and
     // the ResultProcessor falls back to proactive delivery (configured
     // destinations).
     const event = createWikiCommandEvent({
       processKey: "wiki.lint",
       workspace: "default",
     });
-    expect(readWikiReplyTarget(event)).toBeNull();
+    expect(readEventReplyTarget(event)).toBeNull();
     expect((event.data as Record<string, unknown>).reply_target).toBeUndefined();
   });
 
@@ -94,10 +94,10 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
       workspace: "default",
       sourceEvent: routineEvent,
     });
-    expect(readWikiReplyTarget(event)).toBeNull();
+    expect(readEventReplyTarget(event)).toBeNull();
   });
 
-  it("readWikiReplyTarget returns null for a corrupt payload", () => {
+  it("readEventReplyTarget returns null for a corrupt payload", () => {
     // A daemon that was downgraded from a future schema might read a
     // reply_target shape it doesn't recognise. The helper validates
     // via Zod and returns null rather than throwing.
@@ -107,17 +107,17 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
       priority: EventPriority.HIGH,
       data: { reply_target: { platform: "", channel: "" } },
     });
-    expect(readWikiReplyTarget(event)).toBeNull();
+    expect(readEventReplyTarget(event)).toBeNull();
   });
 
-  it("readWikiReplyTarget returns null on a wiki event with no reply_target field", () => {
+  it("readEventReplyTarget returns null on a wiki event with no reply_target field", () => {
     const event: Event = createEvent({
       type: "wiki.compile",
       source: "wiki.bang",
       priority: EventPriority.HIGH,
       data: { workspace: "default" },
     });
-    expect(readWikiReplyTarget(event)).toBeNull();
+    expect(readEventReplyTarget(event)).toBeNull();
   });
 
   it("multi-URL fan-out: every child event carries the same reply_target", () => {
@@ -135,7 +135,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
       }),
     );
     for (const e of events) {
-      const t = readWikiReplyTarget(e);
+      const t = readEventReplyTarget(e);
       expect(t?.platform).toBe("telegram");
       expect(t?.channel).toBe("T1");
     }
@@ -163,7 +163,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
     });
     expect((event.data as Record<string, unknown>).workspace).toBe("default");
     expect((event.data as Record<string, unknown>).batch_id).toBe("real-batch");
-    const target = readWikiReplyTarget(event);
+    const target = readEventReplyTarget(event);
     expect(target?.platform).toBe("slack");
     expect(target?.channel).toBe("D-original");
     // The caller-supplied `url` field IS preserved — it's neither a
@@ -172,7 +172,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
     expect((event.data as Record<string, unknown>).url).toBe("https://example.com");
   });
 
-  it("readWikiReplyTarget tolerates missing sender on stored payload", () => {
+  it("readEventReplyTarget tolerates missing sender on stored payload", () => {
     // Forward-compat: the schema allows optional sender. A payload
     // without it should still round-trip cleanly.
     const event: Event = createEvent({
@@ -183,7 +183,7 @@ describe("createWikiCommandEvent / readWikiReplyTarget", () => {
         reply_target: { platform: "slack", channel: "D1", threadId: null },
       },
     });
-    const target = readWikiReplyTarget(event);
+    const target = readEventReplyTarget(event);
     expect(target).toEqual({
       platform: "slack",
       channel: "D1",

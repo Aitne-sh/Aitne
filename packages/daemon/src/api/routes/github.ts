@@ -83,6 +83,11 @@ export function createGitHubRoutes(deps: GitHubRouteDependencies): {
     const githubToken = await secretBroker.getGitHubToken();
     if (!githubToken) return null;
     if (octokit && cachedToken === githubToken) return octokit;
+    // No pending-promise coalescing: the only cost of a concurrent miss is one
+    // extra `new Octokit({...})` (the dynamic import is module-cached after
+    // the first call). Coalescing would also mean that a caller whose token
+    // was rotated mid-flight could receive an Octokit auth'd with the prior
+    // token — losing the cache-by-token guarantee this function provides.
     const { Octokit } = await import("@octokit/rest");
     octokit = new Octokit({ auth: githubToken });
     cachedToken = githubToken;
@@ -686,6 +691,7 @@ class RateLimiter {
   private readonly maxRequests: number;
   private readonly windowMs: number;
   private readonly windows = new Map<string, number[]>();
+  private lastSweepAt = 0;
 
   constructor(maxRequests: number, windowMs: number) {
     this.maxRequests = maxRequests;
@@ -696,21 +702,27 @@ class RateLimiter {
     const now = Date.now();
     const cutoff = now - this.windowMs;
 
+    // Periodic full sweep — bounds map size against the floods-of-unique-keys
+    // case where the old per-key cleanup never runs because each key never
+    // returns. Throttled to once per windowMs and only when the map has grown
+    // past the threshold, so steady-state per-request cost stays O(W).
+    if (this.windows.size > 1000 && now - this.lastSweepAt >= this.windowMs) {
+      this.lastSweepAt = now;
+      for (const [k, ts] of this.windows) {
+        while (ts.length > 0 && ts[0] < cutoff) ts.shift();
+        if (ts.length === 0) this.windows.delete(k);
+      }
+    }
+
     let timestamps = this.windows.get(key);
     if (!timestamps) {
       timestamps = [];
       this.windows.set(key, timestamps);
     }
 
-    // Remove expired timestamps
+    // Remove expired timestamps for this key
     while (timestamps.length > 0 && timestamps[0] < cutoff) {
       timestamps.shift();
-    }
-
-    // Clean up empty entries to prevent memory leak from unique IPs
-    if (timestamps.length === 0 && this.windows.size > 1000) {
-      this.windows.delete(key);
-      return true;
     }
 
     if (timestamps.length >= this.maxRequests) return false;

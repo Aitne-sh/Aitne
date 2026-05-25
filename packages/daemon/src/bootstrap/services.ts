@@ -239,15 +239,7 @@ export function createServiceReloaders(
       return;
     }
 
-    const githubService = new GitHubService(token, webhookSecret);
-    try {
-      await githubService.init();
-      services.github = githubService;
-    } catch (err) {
-      const msg = (err as Error).message;
-      logger.error({ error: msg }, "GitHub service init failed, continuing without it");
-      services.errors.github = msg;
-    }
+    services.github = new GitHubService(token, webhookSecret);
   }
 
   return {

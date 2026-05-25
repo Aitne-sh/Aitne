@@ -108,21 +108,14 @@ export function ensureDefaultWikiWorkspace(
   // rather than "first active workspace". With multiple active rows,
   // `readDefaultWikiWorkspace` returns the oldest active row by id,
   // which may not be the named default at all.
+  //
+  // If the row exists (in any state — including archived `active=0` or
+  // re-targeted to an external path) we leave it alone: the operator
+  // owns that state. Only insert when the row is genuinely missing.
   const existing = readWikiWorkspaceByName(db, DEFAULT_WIKI_WORKSPACE_NAME);
   if (!existing) {
-    const existingNamed = readWikiWorkspaceByName(db, DEFAULT_WIKI_WORKSPACE_NAME);
-    if (existingNamed) {
-      db.prepare(
-        `UPDATE wiki_workspaces
-         SET active = 1,
-             kind = 'internal',
-             root_path = ?,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE name = ?`,
-      ).run(rootPath, DEFAULT_WIKI_WORKSPACE_NAME);
-    } else {
-      db.prepare(
-        `INSERT INTO wiki_workspaces (
+    db.prepare(
+      `INSERT INTO wiki_workspaces (
          name,
          kind,
          root_path,
@@ -136,14 +129,13 @@ export function ensureDefaultWikiWorkspace(
          active,
          updated_at
         ) VALUES (?, 'internal', ?, ?, 'parallel', 3, 0, 0, ?, ?, 1, CURRENT_TIMESTAMP)`,
-      ).run(
-        DEFAULT_WIKI_WORKSPACE_NAME,
-        rootPath,
-        DEFAULT_WIKI_LANGUAGE,
-        DEFAULT_WIKI_FULL_COMPILE_APPROVAL_USD,
-        DEFAULT_WIKI_SCHEMA_VERSION,
-      );
-    }
+    ).run(
+      DEFAULT_WIKI_WORKSPACE_NAME,
+      rootPath,
+      DEFAULT_WIKI_LANGUAGE,
+      DEFAULT_WIKI_FULL_COMPILE_APPROVAL_USD,
+      DEFAULT_WIKI_SCHEMA_VERSION,
+    );
   }
   seedWikiWorkspaceFiles(rootPath, config.workspaceDir);
   return readWikiWorkspaceByName(db, DEFAULT_WIKI_WORKSPACE_NAME) ?? {

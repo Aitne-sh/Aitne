@@ -11,6 +11,7 @@ import {
   BookOpenText,
   BookText,
   History,
+  MonitorCog,
   SlidersHorizontal,
   Repeat,
   ClipboardList,
@@ -88,6 +89,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Browser History",
     icon: History,
     description: "Consent, browser detection, lifecycle",
+  },
+  {
+    href: "/settings/integrations/browser-history-managed",
+    label: "Managed Chromium",
+    icon: MonitorCog,
+    description: "Daemon-supervised browser for sync + automation",
   },
   {
     href: "/settings/commands",

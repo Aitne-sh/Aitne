@@ -4,34 +4,9 @@ import {
   isMessageEvent,
   wikiReplyTargetSchema,
   type Event,
+  type WikiProcessKey,
   type WikiReplyTarget,
 } from "@aitne/shared";
-
-/**
- * Every wiki-tier process key the daemon dispatches. Kept ordered by
- * Phase (P1 ingest/compile/ask, P3 operational triad lint/trace/connect)
- * so a quick visual scan tells you which surfaces ship in which phase.
- */
-export const WIKI_PROCESS_KEYS = [
-  "wiki.ingest_url",
-  "wiki.compile",
-  "wiki.ask",
-  "wiki.lint",
-  "wiki.trace",
-  "wiki.connect",
-] as const;
-
-/** Back-compat alias for the P1 surface. Prefer {@link WIKI_PROCESS_KEYS}. */
-export const WIKI_P1_PROCESS_KEYS = WIKI_PROCESS_KEYS;
-
-export type WikiProcessKey = (typeof WIKI_PROCESS_KEYS)[number];
-
-/** @deprecated use {@link WikiProcessKey}. */
-export type WikiP1ProcessKey = WikiProcessKey;
-
-export function isWikiProcessKey(value: string): value is WikiProcessKey {
-  return (WIKI_PROCESS_KEYS as readonly string[]).includes(value);
-}
 
 export interface WikiCommandEventInput {
   processKey: WikiProcessKey;
@@ -100,10 +75,6 @@ export function createWikiCommandEvent(input: WikiCommandEventInput): Event {
  *     or wiki event minted without a sourceEvent), or
  *   - the field shape is corrupt (defensive — a daemon downgrade reading
  *     a payload from a future schema version).
- *
- * `readWikiReplyTarget` is exported as a back-compat alias so older
- * external consumers keep working; new code should prefer
- * `readEventReplyTarget`.
  */
 export function readEventReplyTarget(event: Event): WikiReplyTarget | null {
   const raw = (event.data as { reply_target?: unknown } | undefined)?.reply_target;
@@ -111,8 +82,4 @@ export function readEventReplyTarget(event: Event): WikiReplyTarget | null {
   const parsed = wikiReplyTargetSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
-
-/** @deprecated Renamed to {@link readEventReplyTarget} — kept as an
- *  alias to avoid breaking external callers during the rename window. */
-export const readWikiReplyTarget = readEventReplyTarget;
 

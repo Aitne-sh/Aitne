@@ -37,15 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { useSaveConfig } from "@/lib/hooks/use-save-config";
 import { formatCurrency } from "@/lib/utils";
-
-const WIKI_PROCESS_KEYS = [
-  "wiki.ingest_url",
-  "wiki.compile",
-  "wiki.ask",
-  "wiki.lint",
-  "wiki.trace",
-  "wiki.connect",
-] as const;
+import { WIKI_PROCESS_KEYS } from "@aitne/shared";
 
 const WIKI_LANGUAGE_OPTIONS: Array<{ tag: string; label: string }> = [
   { tag: "en", label: "English" },
