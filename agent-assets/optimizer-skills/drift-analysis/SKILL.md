@@ -16,7 +16,7 @@ Each is one row from `skill_curation_signals`:
   "skill_slug": "user-profile",
   "section_id": "topic-files",
   "signal_type": "structure_diff",
-  "payload": { "sub_kind": "heading_add", "target": "user/personal.md#health-log" },
+  "payload": { "sub_kind": "heading_add", "target": "identity/personal.md#health-log" },
   "observed_at": 1717000000000
 }
 ```

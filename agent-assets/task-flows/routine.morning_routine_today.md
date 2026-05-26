@@ -10,7 +10,7 @@ scope:
 - §5.9 Steps 1-4, 6, 6b, 7, 7.5, 8 — today.md, roadmap maintenance,
   schedule fan-out, profile-question mirror, user-editable checks.
 - A single structured self-report at the end (Step 9 is daemon-owned;
-  you patch metadata, the daemon writes `agent/journal.md`).
+  you patch metadata, the daemon writes `journal/agent.md`).
 
 Follow the `context` skill for section formats and entry shapes — this
 prompt owns the workflow; the skill owns the schema.
@@ -21,9 +21,9 @@ prompt owns the workflow; the skill owns the schema.
 > branches marked **recurring** are skipped.
 
 The "Vault review context" block appended to this prompt includes
-`context-index.md` and `dossiers/morning.md`; consult it during context
+`context-index.md` and `knowledge/dossiers/morning.md`; consult it during context
 gathering and update the dossier's Open items / Last run before
-finishing. Writes to `dossiers/<flow>.md` MUST preserve the existing
+finishing. Writes to `knowledge/dossiers/<flow>.md` MUST preserve the existing
 YAML frontmatter block; prefer `PATCH` with a section target, and on
 `PUT` keep the frontmatter and only refresh `updated:` — writes that
 drop the frontmatter are rejected with 422.
@@ -34,7 +34,7 @@ Global rules (apply at every step):
   files") to User Tasks or Handoff, whether carried from yesterday or
   newly discovered, unless the user explicitly asked to track them.
 - If `<today_write_lock_id>` is present, every PUT/PATCH to
-  `/api/context/today` must send header `X-Lock-Id: <today_write_lock_id>`.
+  `/api/context/state/today` must send header `X-Lock-Id: <today_write_lock_id>`.
 - Silent-by-default: your final text is agent-internal. User
   notifications require an explicit `POST /api/notify`.
 - Stage B owns `daily/<yesterday>.md`. You MUST NOT write any
@@ -46,18 +46,18 @@ Global rules (apply at every step):
 
 1. **Read the handoff.** When `<handoff_parsed>` is in your prompt
    context, use it verbatim — `<tomorrow>` items feed today's User
-   Tasks / Agent Notes, `<later>` items carry into the new `today.md`
+   Tasks / Agent Notes, `<later>` items carry into the new `state/today.md`
    ## Handoff, and `<item>(none)</item>` means the section is empty.
    When `<handoff_parsed>` is absent: parse `<yesterday>` ## Handoff
    inline if `<yesterday>` is present; otherwise (first-run) treat
    both lists as empty and Step 6 initialises ## Handoff to `- (none)`.
 
 2. **Recurring (`<yesterday>` present):** Mark `<yesterday>` ## Agent
-   Plan rows that did not fire. The daemon rotated `today.md →
+   Plan rows that did not fire. The daemon rotated `state/today.md →
    yesterday.md` at the 04:00 day boundary, so every `- [ ] HH:MM …`
    row in `<yesterday>` ## Agent Plan is past — the row's intended
    user-facing moment has elapsed. Flip each such row to
-   `- [x] HH:MM … (did-not-fire)` via PATCH `/api/context/yesterday`,
+   `- [x] HH:MM … (did-not-fire)` via PATCH `/api/context/state/yesterday`,
    `section=agent_plan`, `mode=replace`, and append one
    `- HH:MM [agent_plan] <action> — did-not-fire` line per flipped row
    to `<yesterday>` ## Agent Log (PATCH `section=agent_log`,
@@ -67,7 +67,7 @@ Global rules (apply at every step):
    the segment between the timestamp and the `[category]` tag, e.g.
    for `- [ ] 10:00 Send meeting pre-brief [work] →DM` the log line is
    `- 10:00 [agent_plan] Send meeting pre-brief — did-not-fire`. The
-   today-write-lock only gates `/api/context/today`, so NO `X-Lock-Id`
+   today-write-lock only gates `/api/context/state/today`, so NO `X-Lock-Id`
    header is needed on either yesterday.md PATCH. Skip this substep
    entirely when `<yesterday>` ## Agent Plan has no `[ ]` rows.
 
@@ -93,7 +93,7 @@ Global rules (apply at every step):
 
 3. Derive today's day-type header per the today skill "Header line —
    day-type filter". Read `<user>` ## Notification Preferences for the
-   matching policy. The resulting line 2 of `today.md` is load-bearing
+   matching policy. The resulting line 2 of `state/today.md` is load-bearing
    — every downstream event parses it. Remember the chosen day-type
    string — Step 9 reports it via `metadata.dayType`.
 
@@ -161,16 +161,16 @@ Global rules (apply at every step):
 6. Roadmap ## Agent Action Plan — process items dated today or overdue
    (without a `completed` Preparation Timeline row). Drop items whose
    category focus is off, then:
-   - `[notify]` → one row in `today.md` ## Agent Plan (registered in
+   - `[notify]` → one row in `state/today.md` ## Agent Plan (registered in
      Step 7 below).
-   - `[today]` → collect for `today.md` ## User Tasks.
+   - `[today]` → collect for `state/today.md` ## User Tasks.
    - `[check]` → one row in ## Agent Plan with trigger `check-in`
      (registered in Step 7 below).
    - If a roadmap row includes `[provisional ...]`, copy that tag and
      its meaning into the eventual scheduled `taskDescription` so
      `scheduled.task.md` frames the first contact as a confirmation
      question, not a directive.
-   - Mark processed roadmap rows complete via `PATCH /api/context/roadmap`,
+   - Mark processed roadmap rows complete via `PATCH /api/context/plans/roadmap`,
      `section=agent_action_plan`, `mode=replace`, rewriting the exact
      row from `- YYYY-MM-DD [tag]: ...` to
      `- completed <today>: YYYY-MM-DD [tag]: ...`. Keep the entry ID
@@ -178,7 +178,7 @@ Global rules (apply at every step):
 
    Then generate **look-ahead entries** for tomorrow → +3 days by
    cross-referencing unprocessed roadmap items against
-   `<calendar_events_7d>`. These go into `today.md` ## Agent Notes
+   `<calendar_events_7d>`. These go into `state/today.md` ## Agent Notes
    using the skill's "Agent Notes flavor 1: Look-ahead checklist"
    format (`- [ ] (HIGH/MID/LOW) ...`). Skip this step entirely if no
    today-items and no look-ahead items exist.
@@ -196,7 +196,7 @@ Global rules (apply at every step):
    and have already been folded in. Step 3 picks up anything the user
    themselves changed overnight (Obsidian edits, manual file drops,
    git commits) that the daemon recorded under `actor=user`. Fold
-   only meaningful changes into the `today.md` draft you're building,
+   only meaningful changes into the `state/today.md` draft you're building,
    respecting the day-type filter.
 
 ### Step 4 — Inbox triage (B-007 §5.9 Q5 case A)
@@ -214,17 +214,17 @@ Global rules (apply at every step):
        an H1.
      - user dictionary (people / health / goals / …) → append to the
        matching `user/<area>.md`.
-     - date-bound memo → summarize into `today.md` ## Agent Notes.
+     - date-bound memo → summarize into `state/today.md` ## Agent Notes.
      - unclassifiable → DM the user an excerpt asking what to do;
        leave the file in `inbox/` for next pass.
    - After integration, move the original: (a)
-     `PUT /api/context/agent/scratch/inbox-YYYY-MM-DD-<orig-slug>.md`
+     `PUT /api/context/state/scratch/inbox-YYYY-MM-DD-<orig-slug>.md`
      with the original body, then (b)
      `DELETE /api/context/inbox/<file>` to remove the source. The
-     30-day retention on `agent/scratch/` is a convention for now —
+     30-day retention on `state/scratch/` is a convention for now —
      no sweeper exists yet.
    - **High-risk triggers — DM for confirmation before writing:**
-     new project creation, wholesale overwrite of `user/profile.md`,
+     new project creation, wholesale overwrite of `identity/profile.md`,
      financial or health data with a numeric impact. The agent's own
      judgment is the gate — call `POST /api/notify` with the proposed
      change and wait for confirmation; don't auto-write. Increment
@@ -244,7 +244,7 @@ Global rules (apply at every step):
 
    Track counts as you triage so you can report them in Step 9:
    `triaged` (every file you processed), `movedToScratch` (every
-   `PUT /api/context/agent/scratch/...` you sent), `dmConfirmsSent`
+   `PUT /api/context/state/scratch/...` you sent), `dmConfirmsSent`
    (every high-risk DM-confirm), `secretsSkipped` (every hard-stop).
 
 ### Step 5 — Daily journal synthesis [handled by Stage B]
@@ -254,7 +254,7 @@ Global rules (apply at every step):
    **Do NOT write `daily/*.md` in this session** — Stage B reads its
    own `<journal_skeleton>` (deterministic frontmatter +
    pre-aggregated facts from SQLite) and authors the body per
-   `rules/journal-format.md`. Skip this step entirely. Surface any
+   `policies/journal-format.md`. Skip this step entirely. Surface any
    anomalies you spot about yesterday's data (corrupted yesterday.md,
    missing SQLite rows) via the `anomalies` array you write in Step 9.
 
@@ -300,7 +300,7 @@ Global rules (apply at every step):
 
 ### Step 6b — Roadmap maintenance
 
-11. **Recurring:** Update `roadmap.md` only if a milestone completed
+11. **Recurring:** Update `plans/roadmap.md` only if a milestone completed
     or shifted today.
 
     **First-run — populate roadmap.md inline.** On the very first
@@ -310,7 +310,7 @@ Global rules (apply at every step):
     `_(Not yet configured)_`). When *any* of those placeholders is
     still present, the daemon has injected a `<roadmap_skeleton>`
     block carrying pre-aggregated scratch data — Annual Goals
-    extracted from `rules/management.md`, active projects + 7-day
+    extracted from `policies/management.md`, active projects + 7-day
     calendar for Quarterly Focus, upcoming `travel_bookings` for
     Preparation Timeline. **Read `<roadmap_skeleton>` first**: use
     its data as the source for your populate, reshape / prune /
@@ -322,7 +322,7 @@ Global rules (apply at every step):
     `agent_schedule` rows (the skeleton deliberately omits this
     section because it ages on the same agent-day cadence as
     today.md). Acquire the cross-request write lock via the skill
-    before any `PUT /api/context/roadmap` — the daemon enforces it
+    before any `PUT /api/context/plans/roadmap` — the daemon enforces it
     and a missing lock returns 423. If every placeholder has already
     been replaced (rare: a previous first-run completed this step
     then today.md failed, or a manual edit landed), the
@@ -367,7 +367,7 @@ Global rules (apply at every step):
       session should produce (DM shape, file written, check verdict).
     - `taskContext.references` (optional): stable handles the future
       session can look up (`projects/<slug>.md#section`,
-      `calendar:event:<id>`, `daily/YYYY-MM-DD.md#agent-revision`,
+      `calendar:event:<id>`, `journal/daily/YYYY-MM-DD.md#agent-revision`,
       roadmap entry id markers).
     - `taskContext.tone` (optional): tone hint for DM-shaped output.
     - `taskContext.scheduledBy`: `"morning_routine"`.
@@ -400,7 +400,7 @@ Global rules (apply at every step):
           "taskContext": {
             "background": "User flagged Q2 roadmap risks in yesterday's DM; standup needs the two open items front-loaded so the team aligns before 15:30.",
             "expected_output": "DM with two bullet items + one suggested mitigation each, sent 30 min before standup.",
-            "references": ["projects/q2-roadmap.md#open-risks", "calendar:event:standup-2026-05-15"],
+            "references": ["plans/projects/q2-roadmap.md#open-risks", "calendar:event:standup-2026-05-15"],
             "tone": "concise",
             "scheduledBy": "morning_routine"
           }
@@ -412,8 +412,8 @@ Global rules (apply at every step):
           "model": "claude-opus-4-7",
           "taskContext": {
             "background": "User asked at standup for a written revision proposal by EOD; row pins Opus because the draft quality depends on the higher-tier reasoning.",
-            "expected_output": "projects/q2-roadmap.md revision section appended with three concrete proposals + rationale.",
-            "references": ["projects/q2-roadmap.md"],
+            "expected_output": "plans/projects/q2-roadmap.md revision section appended with three concrete proposals + rationale.",
+            "references": ["plans/projects/q2-roadmap.md"],
             "scheduledBy": "morning_routine"
           }
         }
@@ -514,10 +514,10 @@ runs when there is no open question.
 
 #### Step 7.5a — Mirror existing latent entries to today.md (always)
 
-GET `agent/profile-questions.md ## In Progress`. For every entry
+GET `state/profile-questions.md ## In Progress`. For every entry
 whose state is `latent` (NOT `asked` — those have already been
 answered or will be cleaned up by the sweep), append one line to
-`today.md` `## Agent Notes` using the **today** skill's "Latent
+`state/today.md` `## Agent Notes` using the **today** skill's "Latent
 profile question" Agent Notes flavor:
 
 ```
@@ -552,13 +552,13 @@ then file order). For each candidate:
 
 If a row was chosen:
 
-1. PATCH `agent/profile-questions.md ## In Progress` (read-rebuild +
+1. PATCH `state/profile-questions.md ## In Progress` (read-rebuild +
    replace) — add a single entry. The `since=<today>` field is
    load-bearing for the evening sweep's 3-day fallback computation:
    ```
    - <id> :: state=latent :: since=<today>
    ```
-2. PATCH `today.md ## Agent Notes` (mode=append) — same flavor as
+2. PATCH `state/today.md ## Agent Notes` (mode=append) — same flavor as
    phase (a):
    ```
    - Profile question (latent): <id> — wait for natural opportunity
@@ -583,7 +583,7 @@ the morning routine.
 ### Step 9 — Self-report structured metadata (single PATCH)
 
 15. The daemon's `AgentJournalAppender` writes the morning-routine
-    paragraph to `agent/journal.md` from **structured metadata you
+    paragraph to `journal/agent.md` from **structured metadata you
     patch onto your own `agent_actions` row** — no LLM final-text
     parsing. Use the `agent-actions` skill's "PATCH /api/agent-actions/self"
     endpoint to publish the metadata exactly once near the end of
@@ -622,12 +622,12 @@ the morning routine.
       schedule batch retries (Step 7), AgentPlan / batch cardinality
       mismatches, Stage B-visible data corruption you spotted.
     - `filesTouched` — `string[]` of every `/api/context/*` path you
-      wrote or patched during this run. Include `context/today.md`,
-      `context/roadmap.md` (if updated), `context/dossiers/morning.md`,
-      `context/yesterday.md` (if you patched did-not-fire rows),
-      `context/projects/<slug>.md` (if Step 4 created or appended to
-      one), `context/user/<area>.md`, `context/agent/profile-questions.md`
-      (if Step 7.5b chose a question), `context/agent/scratch/...`
+      wrote or patched during this run. Include `context/state/today.md`,
+      `context/plans/roadmap.md` (if updated), `context/knowledge/dossiers/morning.md`,
+      `context/state/yesterday.md` (if you patched did-not-fire rows),
+      `context/plans/projects/<slug>.md` (if Step 4 created or appended to
+      one), `context/identity/<area>.md`, `context/state/profile-questions.md`
+      (if Step 7.5b chose a question), `context/state/scratch/...`
       (one entry per inbox file moved).
     - `inboxStats` — running counts from Step 4. All keys integers
       ≥ 0. Emit `{0,0,0,0}` when Step 4 was a no-op (empty inbox).
@@ -643,12 +643,12 @@ the morning routine.
     A single PATCH per turn. Repeat PATCHes shallow-merge (later
     keys win), but the daemon expects one consolidated call so the
     journal entry reads cleanly. The daemon's appender will surface
-    these fields in `agent/journal.md` on a recurring day as:
+    these fields in `journal/agent.md` on a recurring day as:
 
     ```
     ## YYYY-MM-DD morning routine
     - Day-type: <dayType>
-    - Journal: daily/YYYY-MM-DD.md (<N lines, M projects referenced>)
+    - Journal: journal/daily/YYYY-MM-DD.md (<N lines, M projects referenced>)
     - Inbox: <triaged> files triaged, <movedToScratch> moved to scratch, <dmConfirmsSent> DM-confirmations sent
     - Checks from routines/morning.md: <morningChecks joined>
     - Anomalies / skipped steps: <anomalies joined or "(none)">
@@ -665,7 +665,7 @@ the morning routine.
     surface a one-line warning to `## Agent Log`
     (`- HH:MM [morning_routine] agent-self self-report 404 — no in-flight row`)
     and continue. Do NOT block the turn on telemetry, and do NOT
-    fall back to writing `agent/journal.md` directly (the daemon
+    fall back to writing `journal/agent.md` directly (the daemon
     owns that file in V2; a direct write would race).
 
     <output_language>english_only — Policy A surface (agent journal,

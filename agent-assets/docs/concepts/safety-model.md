@@ -248,7 +248,7 @@ This **replaces** the rejected daily-digest pattern. Reasons:
 - The operator does not have to manage the agent's reporting calendar.
 
 The optional fallback — extending the existing morning routine to
-summarize yesterday's `agent_actions` into `agent/journal.md` — is
+summarize yesterday's `agent_actions` into `journal/agent.md` — is
 deferred until the on-demand path proves insufficient.
 
 ## What Stayed Approve-Tier

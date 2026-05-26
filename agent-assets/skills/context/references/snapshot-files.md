@@ -8,7 +8,7 @@ description: Weekly / monthly review snapshots, rules / routines files — who w
 
 These files live in the primary management vault under
 `weekly/`, `monthly/`, `rules/`, and `routines/`. They are not part
-of the day-to-day context churn (`today.md`, `roadmap.md`,
+of the day-to-day context churn (`state/today.md`, `plans/roadmap.md`,
 `projects/*.md`); they accumulate slowly and are written by routines
 or by explicit user request.
 
@@ -22,7 +22,7 @@ or by explicit user request.
 Notes:
 
 - Monthly files are **user-facing only** — agent-side metrics (cost,
-  retry counts, self-critique) go to `agent/journal.md`, not here.
+  retry counts, self-critique) go to `journal/agent.md`, not here.
 - Weekly file name uses ISO week (`YYYY-Www` — `2026-W19`, not
   `2026-W5`); pad the week to two digits.
 - Never write `weekly/*.md` or `monthly/*.md` on any other day. The
@@ -65,10 +65,10 @@ explicitly asks to change the policy or routine itself.
 
 - Preserve unrelated sections verbatim. PATCH the one section the
   user is changing; do not full-body PUT.
-- `rules/management.md` is the durable management policy file —
+- `policies/management.md` is the durable management policy file —
   modify only when the user explicitly asks.
 
-### `rules/policies/<slug>.md` and `rules/policies/_index.md`
+### `policies/management-captures/<slug>.md` and `policies/management-captures/_index.md`
 
 Route to the `management-policy` skill. It owns the read-before-write,
 similarity-detection, and pause/resume fan-out for durable policies.
@@ -82,7 +82,7 @@ similarity check and the dossier / routine fan-out.
 - Append or edit `### <label>` blocks under `## Checks`; each block
   is one user-authored rule the cadence runs.
 
-### `routines/custom/<slug>.md`
+### `policies/routines/custom/<slug>.md`
 
 Full-file `PUT` is usually safest. Required frontmatter:
 
@@ -98,6 +98,6 @@ max_budget_usd: <number>
 
 The file body must also contain a `## Checks` section.
 
-Deleting a custom routine uses `DELETE /api/context/routines/custom/<slug>`
+Deleting a custom routine uses `DELETE /api/context/policies/routines/custom/<slug>`
 **only** after the user asks to retire it. The daemon snapshots the
 prior content for restore.

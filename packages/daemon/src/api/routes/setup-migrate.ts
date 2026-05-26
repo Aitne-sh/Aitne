@@ -293,11 +293,13 @@ export function createSetupMigrateRoutes(deps: MigrateDeps): Hono {
     }
     // Best-effort detection of whether templates were applied vs. only
     // placeholders — checked by looking for a representative template
-    // file (`rules/management.md` in plain mode indicates the templates
-    // tree was available).
-    const templatesUsed = existsSync(
-      join(contextDir, "rules", "redaction.md"),
-    );
+    // file. `policies/redaction.md` (post-CONTEXT_VAULT_REDESIGN) is the
+    // canonical post-migration target; the legacy `rules/redaction.md` // drift-allow
+    // is still recognized so a vault that has not yet been migrated by
+    // the 0004 migration also flips this flag correctly.
+    const templatesUsed =
+      existsSync(join(contextDir, "policies", "redaction.md")) ||
+      existsSync(join(contextDir, "rules", "redaction.md"));
     return c.json({
       status: "seeded" as const,
       contextDir,

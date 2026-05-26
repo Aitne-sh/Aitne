@@ -65,9 +65,9 @@ export function GitTemplatesCard() {
       <div className="mt-2 space-y-3">
         <p className="text-xs text-muted-foreground">
           Edit the templates the agent uses when it (re)writes
-          {" "}<code className="rounded bg-muted px-1">context/projects/&lt;slug&gt;.md</code>
+          {" "}<code className="rounded bg-muted px-1">plans/projects/&lt;slug&gt;.md</code>
           {" "}and{" "}
-          <code className="rounded bg-muted px-1">context/git-repos/&lt;slug&gt;.md</code>.
+          <code className="rounded bg-muted px-1">knowledge/repos/&lt;slug&gt;/overview.md</code>.
           Changes are forward-only — existing files keep their old shape until
           the next git lifecycle event touches them, or until you press
           &ldquo;Apply&rdquo; below to re-conform every existing file at once.

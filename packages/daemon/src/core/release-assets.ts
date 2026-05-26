@@ -637,24 +637,31 @@ function listSkillSlugs(root: string): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * `userSkillsRoot` is the absolute user-skills directory. Production callers
+ * derive it via `resolveUserSkillsRoot(config)` from `core/user-skills-root.ts`
+ * (CONTEXT_VAULT_REDESIGN_PLAN.md v4 V11 — post-migration this resolves to
+ * `<contextDir>/policies/skills`). Tests may pass any directory directly so
+ * the helper remains decoupled from `AgentConfig`.
+ */
 export function findBuiltinShadowedUserSkills(
-  dataDir: string,
+  userSkillsRoot: string,
   workspaceDir: string,
 ): string[] {
-  const userSkills = new Set(listSkillSlugs(join(dataDir, "skills")));
+  const userSkills = new Set(listSkillSlugs(userSkillsRoot));
   const builtinSkills = listSkillSlugs(join(workspaceDir, "agent-assets", "skills"));
   return builtinSkills.filter((slug) => userSkills.has(slug));
 }
 
 export function recordSkillAssetStatus(
   db: Database.Database,
-  dataDir: string,
+  userSkillsRoot: string,
   workspaceDir: string,
   now?: () => Date,
 ): SkillAssetStatus {
   const status: SkillAssetStatus = {
     checkedAt: iso(now),
-    builtinShadowedUserSkills: findBuiltinShadowedUserSkills(dataDir, workspaceDir),
+    builtinShadowedUserSkills: findBuiltinShadowedUserSkills(userSkillsRoot, workspaceDir),
   };
   updateReleaseAssetStatus(db, { skills: status }, status.checkedAt);
   return status;

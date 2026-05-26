@@ -4,7 +4,7 @@ import { createLogger } from "../logging.js";
 const logger = createLogger("management-md-write-lock");
 
 /**
- * `rules/management.md` write-lock manager — docs/design/21-management-
+ * `policies/management.md` write-lock manager — docs/design/21-management-
  * registry-and-entities.md §11.1.
  *
  * Mirrors the {@link InMemoryTodayWriteLockManager} pattern (see

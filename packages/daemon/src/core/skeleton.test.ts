@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -38,53 +39,51 @@ function withFrontmatter(type: string, owner: string, title: string): string {
 
 function seedTemplateTree(workspaceDir: string): void {
   const root = join(workspaceDir, "agent-assets", "templates");
-  mkdirSync(join(root, "rules"), { recursive: true });
-  mkdirSync(join(root, "rules", "policies"), { recursive: true });
-  mkdirSync(join(root, "user"), { recursive: true });
-  mkdirSync(join(root, "routines"), { recursive: true });
+  mkdirSync(join(root, "policies"), { recursive: true });
+  mkdirSync(join(root, "policies", "management-captures"), { recursive: true });
+  mkdirSync(join(root, "policies", "routines"), { recursive: true });
+  mkdirSync(join(root, "identity"), { recursive: true });
   writeFileSync(join(root, "_index.md"), "# Vault index\n");
   writeFileSync(
-    join(root, "rules", "management.md"),
+    join(root, "policies", "management.md"),
     withFrontmatter("rule", "shared", "Management"),
   );
   writeFileSync(
-    join(root, "rules", "redaction.md"),
+    join(root, "policies", "redaction.md"),
     withFrontmatter("rule", "shared", "Redaction"),
   );
   // MANAGEMENT-POLICY-CAPTURE-PLAN §5.3 — policies sub-index is
   // agent-owned; make sure the seeded fixture mirrors the real
-  // `agent-assets/templates/rules/policies/_index.md` shape so a
-  // regression in skeleton seeding (e.g. recursive copy stops at the
-  // first directory level) is caught.
+  // `agent-assets/templates/policies/management-captures/_index.md`.
   writeFileSync(
-    join(root, "rules", "policies", "_index.md"),
+    join(root, "policies", "management-captures", "_index.md"),
     withFrontmatter("index", "agent", "Active Policies"),
   );
   writeFileSync(
-    join(root, "user", "profile.md"),
+    join(root, "identity", "profile.md"),
     withFrontmatter("user", "shared", "Profile"),
   );
   writeFileSync(
-    join(root, "user", "people.md"),
+    join(root, "identity", "people.md"),
     withFrontmatter("user", "shared", "People"),
   );
   writeFileSync(
-    join(root, "user", "work.md"),
+    join(root, "identity", "work.md"),
     withFrontmatter("user", "shared", "Work"),
   );
   writeFileSync(
-    join(root, "user", "expertise.md"),
+    join(root, "identity", "expertise.md"),
     withFrontmatter("user", "shared", "Expertise"),
   );
   writeFileSync(
-    join(root, "user", "personal.md"),
+    join(root, "identity", "personal.md"),
     withFrontmatter("user", "shared", "Personal"),
   );
   writeFileSync(
-    join(root, "user", "goals.md"),
+    join(root, "identity", "goals.md"),
     withFrontmatter("user", "shared", "Goals"),
   );
-  writeFileSync(join(root, "routines", "hourly.md"), "# Hourly\n");
+  writeFileSync(join(root, "policies", "routines", "hourly.md"), "# Hourly\n");
   // README.md at top level — must be skipped by copy helper.
   writeFileSync(join(root, "README.md"), "# repo docs only\n");
 }
@@ -111,10 +110,10 @@ describe("ensureSkeletonFiles", () => {
     }
     // Placeholders still land even when templates are unavailable, so
     // the dashboard and `/api/context/*` can immediately PATCH them.
-    expect(existsSync(join(contextDir, "today.md"))).toBe(true);
-    expect(existsSync(join(contextDir, "roadmap.md"))).toBe(true);
-    const roadmap = readFileSync(join(contextDir, "roadmap.md"), "utf-8");
-    expect(roadmap).toMatch(/^# Roadmap\n> Last synced: /);
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(true);
+    expect(existsSync(join(contextDir, "plans", "roadmap.md"))).toBe(true);
+    const roadmap = readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8");
+    expect(roadmap).toMatch(/# Roadmap\n> Last synced: /);
     expect(roadmap).toContain("## Agent Action Plan");
     // Fresh-install roadmap MUST contain `(Not yet configured)` so that
     // `config.ts:isRoadmapStale` correctly flags it and the
@@ -144,7 +143,7 @@ describe("ensureSkeletonFiles", () => {
 
     expect(isRoadmapStale(contextDir)).toBe(true);
 
-    const roadmap = readFileSync(join(contextDir, "roadmap.md"), "utf-8");
+    const roadmap = readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8");
     const validation = validateRoadmap(roadmap);
     expect(validation.ok).toBe(true);
     expect(validation.error).toBeUndefined();
@@ -181,7 +180,7 @@ describe("ensureSkeletonFiles", () => {
     const workspaceDir = tmpRoot;
     seedTemplateTree(workspaceDir);
     const contextDir = join(tmpRoot, "vault");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
     // Pre-existing user edit must survive the seed. The content already
     // carries a valid frontmatter block so the backfill leaves it alone.
     const existingManagement = withFrontmatter(
@@ -190,16 +189,16 @@ describe("ensureSkeletonFiles", () => {
       "User Edited Management",
     );
     writeFileSync(
-      join(contextDir, "rules", "management.md"),
+      join(contextDir, "policies", "management.md"),
       existingManagement,
     );
 
     ensureSkeletonFiles(contextDir, workspaceDir);
 
-    expect(readFileSync(join(contextDir, "rules", "management.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "policies", "management.md"), "utf-8")).toBe(
       existingManagement,
     );
-    expect(readFileSync(join(contextDir, "rules", "redaction.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "policies", "redaction.md"), "utf-8")).toBe(
       withFrontmatter("rule", "shared", "Redaction"),
     );
     // MANAGEMENT-POLICY-CAPTURE-PLAN §5.3 — the agent-owned policies
@@ -207,26 +206,26 @@ describe("ensureSkeletonFiles", () => {
     // exist as an empty directory created by `CONTEXT_DIR_NAMES`.
     expect(
       readFileSync(
-        join(contextDir, "rules", "policies", "_index.md"),
+        join(contextDir, "policies", "management-captures", "_index.md"),
         "utf-8",
       ),
     ).toBe(withFrontmatter("index", "agent", "Active Policies"));
-    expect(readFileSync(join(contextDir, "user", "profile.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "profile.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "Profile"),
     );
-    expect(readFileSync(join(contextDir, "user", "people.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "people.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "People"),
     );
-    expect(readFileSync(join(contextDir, "user", "work.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "work.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "Work"),
     );
-    expect(readFileSync(join(contextDir, "user", "expertise.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "expertise.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "Expertise"),
     );
-    expect(readFileSync(join(contextDir, "user", "personal.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "personal.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "Personal"),
     );
-    expect(readFileSync(join(contextDir, "user", "goals.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "goals.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "Goals"),
     );
     expect(readFileSync(join(contextDir, "_index.md"), "utf-8")).toBe(
@@ -243,14 +242,14 @@ describe("ensureSkeletonFiles", () => {
 
     ensureSkeletonFiles(contextDir, workspaceDir, { skipManagementRules: true });
 
-    expect(existsSync(join(contextDir, "rules", "management.md"))).toBe(false);
-    expect(readFileSync(join(contextDir, "rules", "redaction.md"), "utf-8")).toBe(
+    expect(existsSync(join(contextDir, "policies", "management.md"))).toBe(false);
+    expect(readFileSync(join(contextDir, "policies", "redaction.md"), "utf-8")).toBe(
       withFrontmatter("rule", "shared", "Redaction"),
     );
-    expect(readFileSync(join(contextDir, "user", "profile.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "profile.md"), "utf-8")).toBe(
       withFrontmatter("user", "shared", "Profile"),
     );
-    expect(existsSync(join(contextDir, "today.md"))).toBe(true);
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(true);
   });
 
   it("honors PA_TEMPLATES_DIR over the workspace and module-derived fallbacks", () => {
@@ -281,7 +280,7 @@ describe("ensureSkeletonFiles", () => {
         "from env override\n",
       );
       // Workspace-tree-only fixture must NOT have leaked through.
-      expect(existsSync(join(contextDir, "rules", "redaction.md"))).toBe(
+      expect(existsSync(join(contextDir, "policies", "redaction.md"))).toBe(
         false,
       );
     } finally {
@@ -299,7 +298,7 @@ describe("ensureSkeletonFiles", () => {
     vi.stubEnv("PA_TEMPLATES_DIR", "");
     try {
       ensureSkeletonFiles(contextDir, tmpRoot);
-      expect(readFileSync(join(contextDir, "rules", "redaction.md"), "utf-8")).toBe(
+      expect(readFileSync(join(contextDir, "policies", "redaction.md"), "utf-8")).toBe(
         withFrontmatter("rule", "shared", "Redaction"),
       );
     } finally {
@@ -313,15 +312,53 @@ describe("ensureSkeletonFiles", () => {
     const contextDir = join(tmpRoot, "vault");
 
     ensureSkeletonFiles(contextDir, workspaceDir);
-    const firstTodayBytes = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const firstTodayBytes = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
 
     // User edits today.md — second pass must NOT clobber it.
-    writeFileSync(join(contextDir, "today.md"), "# My custom today\n");
+    writeFileSync(join(contextDir, "state", "today.md"), "# My custom today\n");
     ensureSkeletonFiles(contextDir, workspaceDir);
 
-    expect(readFileSync(join(contextDir, "today.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "state", "today.md"), "utf-8")).toBe(
       "# My custom today\n",
     );
     expect(firstTodayBytes).not.toBe("# My custom today\n");
+  });
+});
+
+/**
+ * CONTEXT_VAULT_REDESIGN_PLAN.md v3.1 V4 / §11.3.5a — the shipped
+ * templates tree on disk is the source `ensureSkeletonFiles` reads on
+ * every boot. Without this guard a future PR could re-introduce a
+ * legacy top-level (`user/`, `rules/`, `routines/`, …) and silently
+ * resurrect the pre-restructure shape on fresh installs (the migration
+ * is a no-op there). CI failure on drift.
+ */
+describe("agent-assets/templates topology — six-class invariant", () => {
+  const ALLOWED_TOP_LEVEL_ENTRIES = new Set([
+    "identity",
+    "state",
+    "plans",
+    "journal",
+    "knowledge",
+    "policies",
+    "_index.md",
+    "_manifest.json",
+    "README.md",
+  ]);
+
+  it("only the six class dirs + _index.md + _manifest.json + README.md exist at the templates root", () => {
+    const repoRoot = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "..",
+    );
+    const templatesRoot = join(repoRoot, "agent-assets", "templates");
+    const entries = readdirSync(templatesRoot);
+    const unexpected = entries.filter(
+      (entry) => !ALLOWED_TOP_LEVEL_ENTRIES.has(entry),
+    );
+    expect(unexpected).toEqual([]);
   });
 });

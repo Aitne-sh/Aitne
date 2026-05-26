@@ -105,9 +105,10 @@ describe("createSystemRoutes", () => {
 
   it("GET /api/system/reinstall-context/plan enumerates files + snapshot rows without side effects", async () => {
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "rules");
-    writeFileSync(join(contextDir, "today.md"), "today");
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "rules");
+    writeFileSync(join(contextDir, "state", "today.md"), "today");
     db.prepare(
       "INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)",
     ).run("today", "old", "test");
@@ -120,7 +121,7 @@ describe("createSystemRoutes", () => {
     expect(body.snapshotRowCount).toBe(1);
     expect(body.backupPath).toContain("context-pre-reinstall-");
     // Side-effect-free: files and DB row still present.
-    expect(existsSync(join(contextDir, "today.md"))).toBe(true);
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(true);
     const { n } = db
       .prepare("SELECT COUNT(*) as n FROM md_file_snapshots")
       .get() as { n: number };
@@ -140,9 +141,10 @@ describe("createSystemRoutes", () => {
 
   it("POST /api/system/reinstall-context wipes context/ and md_file_snapshots after CLEAN confirm", async () => {
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "rules");
-    writeFileSync(join(contextDir, "today.md"), "today");
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "rules");
+    writeFileSync(join(contextDir, "state", "today.md"), "today");
     db.prepare(
       "INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)",
     ).run("today", "old", "test");
@@ -158,7 +160,7 @@ describe("createSystemRoutes", () => {
     expect(body.restartRequired).toBe(true);
     expect(body.filesDeleted).toBe(2);
     expect(body.snapshotRowsDeleted).toBe(1);
-    expect(existsSync(join(contextDir, "today.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(false);
     const { n } = db
       .prepare("SELECT COUNT(*) as n FROM md_file_snapshots")
       .get() as { n: number };
@@ -171,7 +173,8 @@ describe("createSystemRoutes", () => {
     // Seed files so the tarball step actually runs (empty context dir short-circuits).
     const contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
-    writeFileSync(join(contextDir, "today.md"), "today");
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "state", "today.md"), "today");
 
     // Point PATH at an empty dir so the `tar` CLI lookup fails, forcing
     // createTarballBackup to throw. Restore after.
@@ -188,7 +191,7 @@ describe("createSystemRoutes", () => {
       const body = (await res.json()) as Record<string, any>;
       expect(body.error).toBe("reinstall_failed");
       // Context stays intact when backup fails (the wipe is gated on success).
-      expect(existsSync(join(contextDir, "today.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "state", "today.md"))).toBe(true);
     } finally {
       process.env.PATH = originalPath;
     }
@@ -197,22 +200,25 @@ describe("createSystemRoutes", () => {
   it("POST /api/system/wipe-context removes context entries", async () => {
     const contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "rules");
-    writeFileSync(join(contextDir, "today.md"), "today");
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "rules");
+    writeFileSync(join(contextDir, "state", "today.md"), "today");
 
     const res = await app.request("/api/system/wipe-context", { method: "POST" });
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, any>;
     expect(body.status).toBe("wiped");
     expect(body.removed).toBe(2);
-    expect(existsSync(join(contextDir, "rules", "management.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "policies", "management.md"))).toBe(false);
   });
 
   it("POST /api/system/wipe-context clears setup/degraded runtime markers", async () => {
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "rules");
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "rules");
     db.prepare(
       `INSERT INTO runtime_state (key, value_json)
        VALUES ('management_mode.setup_completed', 'true'),
@@ -436,6 +442,7 @@ describe("createSystemRoutes", () => {
 
     const contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
     writeFileSync(join(contextDir, "x.md"), "x");
     await app.request("/api/system/wipe-context", { method: "POST" });
 

@@ -318,5 +318,5 @@ repository has a `localPath`:
 - [GitHub integration](../integrations/github.md) — remote-side data
   (notifications, workflow runs) reachable via `gh` even without a
   local clone.
-- [Hourly check](../routines/hourly-check.md) — the routine that
+- [Hourly check](../policies/routines/hourly-check.md) — the routine that
   consumes the observations this page's polling generates.

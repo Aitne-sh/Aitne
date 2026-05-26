@@ -32,15 +32,15 @@ or the dashboard's Settings → Management page._
 ## C. Active Policies
 
 Auto-maintained by the daemon (do not edit). Source files live under
-`rules/policies/<slug>.md`; capture new policies via the
-`management-policy` skill. Full index: [[rules/policies/_index.md]]
+`policies/management-captures/<slug>.md`; capture new policies via the
+`management-policy` skill. Full index: [[policies/management-captures/_index.md]]
 
 _No active policies yet._
 
 ## Notes
 
 - The agent cannot use `Edit` / `Write` tools on this file — writes go
-  through `/api/context/rules/management` (locked + snapshotted) or the
+  through `/api/context/policies/management` (locked + snapshotted) or the
   managed-tasks / sot-bindings API surfaces.
 - This file is injected into every flow via `policy-files.ts`. Keep it
   concise so prompt assembly stays cheap.

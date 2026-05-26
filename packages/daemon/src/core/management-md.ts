@@ -25,15 +25,18 @@ import { createLogger } from "../logging.js";
 const logger = createLogger("management-md");
 
 const FILE_NAME = "integrations.md";
+const VAULT_RELATIVE_PATH = "policies/integrations.md";
 
 /**
  * Integration Delegation Framework — `integrations.md` render + parse + watch
  * (Phase 1).
  *
- * `integrations.md` lives at `<dataDir>/integrations.md` (top-level, alongside
- * `.env` and `data.db`). It is the human-editable view of the integrations
- * map; the DB (`settings` table, key `"integrations"`) is the authoritative
- * source for the daemon.
+ * After the CONTEXT_VAULT_REDESIGN restructure (§11.5), `integrations.md`
+ * lives at `<contextDir>/policies/integrations.md` — inside the vault,
+ * under the policies class. The legacy `~/.personal-agent/integrations.md`
+ * location is migrated on the first boot post-upgrade by the
+ * `0004-context-vault-restructure` migration. The DB (`settings` table,
+ * key `"integrations"`) remains the authoritative source for the daemon.
  *
  * Write paths:
  *   - `PATCH /api/integrations/:key` → DB update → `renderManagementMd()`
@@ -50,9 +53,27 @@ const FILE_NAME = "integrations.md";
  * parser produce identical bytes on the next render (no churn).
  */
 
-export function getManagementMdPath(dataDir: string): string {
-  return resolve(dataDir, FILE_NAME);
+/**
+ * Resolve the canonical absolute path to the management/integrations
+ * markdown file under the vault: `<contextDir>/policies/integrations.md`.
+ *
+ * `contextDir` is the preferred input — production callers thread
+ * `getContextDir(config, db)` through so the path is correct in both
+ * plain and Obsidian-vault modes. The optional `(dataDir)` fallback to
+ * `<dataDir>/context` exists for test fixtures that don't construct a
+ * full `AgentConfig`; it is NOT correct for Obsidian users (V18) and is
+ * scheduled for removal once every test thread has been audited.
+ */
+export function getManagementMdPath(
+  dataDir: string,
+  contextDir?: string,
+): string {
+  const root = contextDir ?? resolve(dataDir, "context");
+  return resolve(root, VAULT_RELATIVE_PATH);
 }
+
+/** Filename portion only — preserved for callers that need to mirror it. */
+export const MANAGEMENT_MD_FILENAME = FILE_NAME;
 
 const pendingSelfWrites = new Set<string>();
 
@@ -683,8 +704,9 @@ export async function writeManagementMd(
   dataDir: string,
   integrations: IntegrationsRecord,
   notes?: NoteSourcesInput,
+  contextDir?: string,
 ): Promise<string> {
-  const path = getManagementMdPath(dataDir);
+  const path = getManagementMdPath(dataDir, contextDir);
   await mkdir(dirname(path), { recursive: true });
   const body = renderManagementMd(integrations, notes);
   markSelfWrite(path);
@@ -698,8 +720,9 @@ export async function writeManagementMd(
  */
 export async function readAndParseManagementMd(
   dataDir: string,
+  contextDir?: string,
 ): Promise<ParseResult | null> {
-  const path = getManagementMdPath(dataDir);
+  const path = getManagementMdPath(dataDir, contextDir);
   try {
     const body = await readFile(path, "utf-8");
     return parseManagementMd(body);
@@ -739,8 +762,9 @@ export async function bootstrapManagementMd(
   db: Database.Database,
   workspaceDir?: string,
   notes?: NoteSourcesInput,
+  contextDir?: string,
 ): Promise<ManagementMdBootResult> {
-  const path = getManagementMdPath(dataDir);
+  const path = getManagementMdPath(dataDir, contextDir);
   const dbState = readIntegrations(db);
 
   let fileExists = true;
@@ -755,18 +779,18 @@ export async function bootstrapManagementMd(
   }
 
   if (!fileExists) {
-    await writeManagementMd(dataDir, dbState, notes);
+    await writeManagementMd(dataDir, dbState, notes, contextDir);
     logger.info({ path }, "integrations.md created with default integrations map");
     return { path, created: true, integrations: dbState, rejections: [] };
   }
 
-  const parsed = await readAndParseManagementMd(dataDir);
+  const parsed = await readAndParseManagementMd(dataDir, contextDir);
   if (!parsed || !parsed.ok) {
     logger.warn(
       { path, errors: parsed?.errors, warnings: parsed?.warnings },
       "integrations.md did not parse cleanly; re-rendering from DB",
     );
-    await writeManagementMd(dataDir, dbState, notes);
+    await writeManagementMd(dataDir, dbState, notes, contextDir);
     return { path, created: false, integrations: dbState, rejections: [] };
   }
 
@@ -794,7 +818,7 @@ export async function bootstrapManagementMd(
   // Always re-render so daemon-owned columns are canonical — and so any
   // reverted rows are visibly corrected in the file even when the user
   // doesn't re-edit.
-  await writeManagementMd(dataDir, filtered, notes);
+  await writeManagementMd(dataDir, filtered, notes, contextDir);
   if (parsed.warnings.length > 0) {
     logger.warn({ warnings: parsed.warnings }, "integrations.md boot warnings");
   }
@@ -975,8 +999,9 @@ export function startManagementMdWatcher(
   dataDir: string,
   db: Database.Database,
   options: ManagementMdWatcherOptions = {},
+  contextDir?: string,
 ): ManagementMdWatcherHandle {
-  const path = getManagementMdPath(dataDir);
+  const path = getManagementMdPath(dataDir, contextDir);
   const watcher = chokidar.watch(path, {
     persistent: true,
     ignoreInitial: true,
@@ -992,7 +1017,7 @@ export function startManagementMdWatcher(
       return;
     }
     try {
-      const parsed = await readAndParseManagementMd(dataDir);
+      const parsed = await readAndParseManagementMd(dataDir, contextDir);
       if (!parsed) return;
       if (!parsed.ok) {
         logger.warn(
@@ -1000,7 +1025,7 @@ export function startManagementMdWatcher(
           "integrations.md parse failed — rewriting from DB",
         );
         const dbState = readIntegrations(db);
-        await writeManagementMd(dataDir, dbState, options.getNoteSources?.());
+        await writeManagementMd(dataDir, dbState, options.getNoteSources?.(), contextDir);
         return;
       }
       const dbState = readIntegrations(db);
@@ -1036,13 +1061,13 @@ export function startManagementMdWatcher(
         );
         // Re-render so timestamps the parser stamped with `now` become
         // the canonical serialized form.
-        await writeManagementMd(dataDir, filtered, options.getNoteSources?.());
+        await writeManagementMd(dataDir, filtered, options.getNoteSources?.(), contextDir);
       } else if (rejections.length > 0) {
         // The only change was a rejected delegated flip — filtered
         // equals dbState, so no DB write, but we still want the file to
         // visibly reflect the reverted state (otherwise the user's edit
         // would appear to "stick" on disk).
-        await writeManagementMd(dataDir, filtered, options.getNoteSources?.());
+        await writeManagementMd(dataDir, filtered, options.getNoteSources?.(), contextDir);
       } else if (parsed.warnings.length > 0) {
         logger.warn(
           { warnings: parsed.warnings },

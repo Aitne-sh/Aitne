@@ -121,7 +121,7 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
   // `resolveSkillManifest` — the built-in steps emit no user-facing output,
   // so the universal message-discipline contract is only needed when the
   // user has authored at least one `### ` rule in
-  // `routines/evening.md` that may call `POST /api/notify`. Callers MUST go
+  // `policies/routines/evening.md` that may call `POST /api/notify`. Callers MUST go
   // through `resolveSkillManifest(event, { contextDir })` to apply the gate;
   // direct `EVENT_SKILL_SETS[event]` reads see the static (`notify`-on)
   // shape and are intentionally conservative for tooling that doesn't have
@@ -607,7 +607,7 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
  * The slim built-in evening steps (Handoff, Long-term Plans promotion,
  * Review-date fire, Raw Signals graduation) emit no user-facing output.
  * `notify` is only load-bearing when the operator has written at least
- * one `### <label>` rule into `routines/evening.md` that may post to
+ * one `### <label>` rule into `policies/routines/evening.md` that may post to
  * `/api/notify` — the universal message-discipline contract in the
  * notify skill is the binding format guide for those rules.
  *

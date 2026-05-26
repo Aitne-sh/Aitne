@@ -16,12 +16,12 @@ morning briefing). This skill is how every callsite touches that queue.
 
 ## Source-of-truth file
 
-**`agent/profile-questions.md`** — agent-internal markdown. Three
+**`state/profile-questions.md`** — agent-internal markdown. Three
 top-level sections: `## Pending`, `## In Progress`, `## Answered`.
 Never auto-injected into prompts; load only when this skill is in use.
 
 ```bash
-curl -s http://localhost:8321/api/context/agent/profile-questions
+curl -s http://localhost:8321/api/context/state/profile-questions
 ```
 
 ### Pending row format
@@ -34,7 +34,7 @@ curl -s http://localhost:8321/api/context/agent/profile-questions
 |---|---|
 | `PRIO`        | `HIGH` / `MID` / `LOW` — selection priority |
 | `<id>`        | snake_case unique. Doubles as the correlation id in any scheduled DM description (`profile_interview:<id> — <hint>`) |
-| `target_path` | which user file the answer should land in, e.g. `user/profile.md` |
+| `target_path` | which user file the answer should land in, e.g. `identity/profile.md` |
 | `## Section`  | optional — narrows to a section within the target file |
 | `match=<anchor>` | optional — bullet key (English, like `Name`, `Timezone`, `Sleep`, `Working hours`). Required when multiple rows share a section, or when setup pre-seeds the section with an unrelated bullet |
 | `ask-hint`    | English brief of WHAT to ask (agent-internal, Policy A). Render the actual DM per `<output_language_policy>` — this skill intentionally splits the two surfaces |
@@ -150,11 +150,11 @@ composing the reply.
      b. After the reply is ready (final assistant text already includes
         the question), issue **two PATCH replaces** (separate calls —
         they target different files):
-        - `PATCH /api/context/agent/profile-questions` section=in_progress
+        - `PATCH /api/context/state/profile-questions` section=in_progress
           — flip the entry to
           `state=asked :: since=<unchanged> :: asked_at=<current_time>`
           (preserve the original `since=` date).
-        - `PATCH /api/context/today` section=agent_notes — replace the
+        - `PATCH /api/context/state/today` section=agent_notes — replace the
           parenthetical from `(latent)` to `(asked HH:MM)` and append
           `(asked HH:MM)` to the same line; preserve every other Agent
           Notes line byte-for-byte.
@@ -231,7 +231,7 @@ The heuristic anchor lookup matches against bullet keys written by the
 - Sleep: 23:00–07:00
 ```
 
-Anchors in `agent/profile-questions.md` MUST match these English keys —
+Anchors in `state/profile-questions.md` MUST match these English keys —
 not the user's primary-language phrasing. If a future `user-profile`
 schema change introduces non-English keys, Layers 1–3 silently miss
 those bullets and the system degrades to Layer-4-only protection
@@ -255,13 +255,13 @@ those bullets and the system degrades to Layer-4-only protection
 
 ```bash
 # Read the queue
-curl -s http://localhost:8321/api/context/agent/profile-questions
+curl -s http://localhost:8321/api/context/state/profile-questions
 
 # Slot-filled probe
 curl -s "http://localhost:8321/api/profile-questions/slot-filled?path=user/profile.md&section=Identity&anchor=Name"
 
 # Section-level edit (queue file uses the standard context API)
-curl -s -X PATCH http://localhost:8321/api/context/agent/profile-questions \
+curl -s -X PATCH http://localhost:8321/api/context/state/profile-questions \
   -H 'Content-Type: application/json' \
   -d '{"section": "in_progress", "mode": "replace", "content": "- name :: state=latent"}'
 

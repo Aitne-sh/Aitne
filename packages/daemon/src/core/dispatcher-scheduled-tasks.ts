@@ -1106,7 +1106,10 @@ export class ScheduledTaskRunner {
    * failure modes (process crash vs. format-confusion bug).
    */
   diagnoseTodayMdState(): TodayMdState {
-    const todayPath = join(getContextDir(this.config, this.db), "today.md");
+    const todayPath = join(
+      getContextDir(this.config, this.db),
+      CONTEXT_RELATIVE_PATHS.today,
+    );
     if (!existsSync(todayPath)) {
       return { kind: "missing" };
     }
@@ -1135,7 +1138,7 @@ export class ScheduledTaskRunner {
    */
   rotateDayFiles(): void {
     const contextDir = getContextDir(this.config, this.db);
-    const todayPath = join(contextDir, "today.md");
+    const todayPath = join(contextDir, CONTEXT_RELATIVE_PATHS.today);
 
     if (!existsSync(todayPath)) return;
 
@@ -1162,7 +1165,7 @@ export class ScheduledTaskRunner {
         .prepare(
           "INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)",
         )
-        .run("today", content, "day_rotation");
+        .run("state/today", content, "day_rotation");
     } catch (err) {
       logger.warn({ err }, "Failed to save rotation snapshot");
     }
@@ -1451,7 +1454,7 @@ export class ScheduledTaskRunner {
    * WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.4 pre-hook.
    *
    * Synchronous and failure-isolated. The only side-effect the caller
-   * cares about is the freshly-refreshed `context/user/profile.md`
+   * cares about is the freshly-refreshed `context/identity/profile.md`
    * block — which `contextBuilder.build` (called immediately after
    * this method returns) picks up via its normal read path. Every
    * branch below routes through a try/catch so a throw cannot abort
@@ -1462,7 +1465,7 @@ export class ScheduledTaskRunner {
    *   - `browser_history` mode is `disabled` → no-op (with a journal
    *     line for traceability so an operator wondering "why didn't the
    *     reflection run this week?" finds the answer in
-   *     `agent/journal.md` rather than having to greppling
+   *     `journal/agent.md` rather than having to greppling
    *     `agent_actions`).
    *   - The helper returns `{ skipped }` → journal line + audit row
    *     already emitted by the helper.
@@ -1556,7 +1559,7 @@ export class ScheduledTaskRunner {
 
   /**
    * Append a single bullet under `## Weekly interests reflection`
-   * inside `context/agent/journal.md`, creating the section (and the
+   * inside `context/journal/agent.md`, creating the section (and the
    * file) when absent. Mirrors the `appendToJournalSection` pattern
    * `roadmap-maintenance.ts` uses for its own one-liner trace; kept
    * inline here because the section header is feature-specific and
@@ -1584,7 +1587,7 @@ export class ScheduledTaskRunner {
 
     // Fire-and-forget through the per-path serializer so the read AND
     // the write run inside the daemon-wide write fence on
-    // `agent/journal.md`. Mirrors the roadmap-maintenance journal-line
+    // `journal/agent.md`. Mirrors the roadmap-maintenance journal-line
     // appender — without the fence, two concurrent journal appenders
     // (this one, the morning routine, or an HTTP PATCH) would read the
     // same pre-state and the loser's bullet would be silently dropped.
@@ -1636,7 +1639,7 @@ const WEEKLY_INTERESTS_JOURNAL_SECTION = "## Weekly interests reflection";
  * window get pruned on the next append. At the weekly cadence the
  * pre-hook fires, this caps the section at ~4-5 entries.
  *
- * Rationale: `context/agent/journal.md` is the operator-facing trace
+ * Rationale: `context/journal/agent.md` is the operator-facing trace
  * for "why didn't my reflection fire?" type questions. Six months of
  * weekly skip/success lines is noise — the load-bearing detail is
  * "did it work this month and last?", which a 30-day window captures

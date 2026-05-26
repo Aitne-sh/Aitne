@@ -8,21 +8,21 @@ allowed-tools:
 
 # User Profile Update Guide
 
-Output language: `user/profile.md` and `user/*.md` are Policy B — see `<output_language_policy>`. Template H2 headers stay English skeleton; the facts under them are in `<settings primary_language>`. Preserve user-customized headers verbatim.
+Output language: `identity/profile.md` and `user/*.md` are Policy B — see `<output_language_policy>`. Template H2 headers stay English skeleton; the facts under them are in `<settings primary_language>`. Preserve user-customized headers verbatim.
 
-`user/profile.md` stores the user's identity, preferences, and learned behavioral patterns. It is injected into every agent session via `<user>` tags — keep it concise (target: under ~600 tokens total).
+`identity/profile.md` stores the user's identity, preferences, and learned behavioral patterns. It is injected into every agent session via `<user>` tags — keep it concise (target: under ~600 tokens total).
 
-Detailed, dictionary-like background belongs under `user/*.md`. Read `user/_index.md` first, then fetch only the topic file you need.
+Detailed, dictionary-like background belongs under `user/*.md`. Read `identity/_index.md` first, then fetch only the topic file you need.
 
 ## When to Update
 
 **Immediately (same turn) when the user shares:**
 - Identity or role — "I'm a …", "I work at …", "my title is …" → `profile.md ## Identity`
-- People they know — names + relationship, e.g. "my sister", "my manager Sarah" → `user/people.md`
-- Workplace specifics — company, team, tech stack, tools — "I use Postgres at work" → `user/work.md`
-- Expertise or tools they use habitually — "I've been writing Go for ten years", "I'm new to React" → `user/expertise.md` (add a one-line summary in `profile.md ## Expertise` when the fact also shapes how the agent should explain things)
-- Hobbies, habits, health, lifestyle (factual) — "I run every morning", "I don't eat meat" → `user/personal.md`
-- Goals or learning targets — "I want to get better at Rust", "I want to read 20 books this year" → `user/goals.md`
+- People they know — names + relationship, e.g. "my sister", "my manager Sarah" → `identity/people.md`
+- Workplace specifics — company, team, tech stack, tools — "I use Postgres at work" → `identity/work.md`
+- Expertise or tools they use habitually — "I've been writing Go for ten years", "I'm new to React" → `identity/expertise.md` (add a one-line summary in `profile.md ## Expertise` when the fact also shapes how the agent should explain things)
+- Hobbies, habits, health, lifestyle (factual) — "I run every morning", "I don't eat meat" → `identity/personal.md`
+- Goals or learning targets — "I want to get better at Rust", "I want to read 20 books this year" → `identity/goals.md`
 - A notification or day-type preference — "no work notifications on weekends" → `profile.md ## Notification Preferences`
 - A self-reported behavioral pattern the agent should adapt to — "I'm not a morning person", "I tend to skim long messages" → `profile.md ## Learned Context` with today's `[YYYY-MM-DD]` prefix
 
@@ -35,7 +35,7 @@ Detailed, dictionary-like background belongs under `user/*.md`. Read `user/_inde
 **Routing edge cases** (for shapes the trigger list above doesn't disambiguate):
 - "my name is Alex" — explicit identity statement goes to `profile.md ## Identity`, not a topic file.
 - "user has been unusually curt over the last week" — a pattern inferred across multiple turns with no single user statement. Written to `profile.md ## Learned Context` by Evening Review Step 3a only; the DM handler and sweep do not write inferred patterns.
-- "my sister just had a baby" → `user/people.md ## Family`. If the section doesn't exist yet (fresh topic file with only the H1), the PATCH returns `section_not_found` — retry with `mode: "append_to_file"` and include `"\n## Family\n- <bullet>"` in `content`. The next write to that section succeeds normally.
+- "my sister just had a baby" → `identity/people.md ## Family`. If the section doesn't exist yet (fresh topic file with only the H1), the PATCH returns `section_not_found` — retry with `mode: "append_to_file"` and include `"\n## Family\n- <bullet>"` in `content`. The next write to that section succeeds normally.
 
 The decision rule (profile.md vs `user/<topic>.md` tie-breakers, `section_not_found` → `append_to_file` first-write fallback, and the read-before-write `curl` recipe) is documented in full in this skill — see §"Section ownership", §"File schema", and §"Worked example" below.
 
@@ -78,7 +78,7 @@ full-file PUT, update `updated` to today's date.
 - Working hours: Weekdays 09:00–18:00
 ```
 
-The `user-interview` skill's queue (`agent/profile-questions.md`)
+The `user-interview` skill's queue (`state/profile-questions.md`)
 matches against these English keys. If you introduce a non-English
 label here, the queue's slot-filled probe silently misses the bullet
 and re-asks the same question on the next opportunity. See
@@ -106,7 +106,7 @@ If the user says "I don't want work notifications on weekends", paraphrase into 
 preferences are NOT profile content.** Route them to the `character`
 runtime-config field via `PATCH /api/config/character` (narrow
 endpoint, 1000-char cap, read-before-write). Never write tone /
-style preferences into `user/profile.md` or any `user/*.md`.
+style preferences into `identity/profile.md` or any `user/*.md`.
 
 Full recipe — triggers, merge rules, endpoint note, cap-handling, and
 where the value ends up — is in the character-preferences reference
@@ -122,7 +122,7 @@ See _safety.md "Common Patterns" for the general rule. Section name in PATCH is 
 
 User: `"I want to read 20 books this year."` → GET user/profile.md (or topic file), merge new bullet into the right section. For a top-level goal summary bullet:
 ```bash
-curl -s -X PATCH http://localhost:8321/api/context/user/profile \
+curl -s -X PATCH http://localhost:8321/api/context/identity/profile \
   -H 'Content-Type: application/json' \
   -d '{"section": "learned_context", "mode": "append", "content": "- [2026-04-23] Reading goal: 20 books/year"}'
 ```
@@ -130,7 +130,7 @@ For a full-section replace, GET first, merge with existing bullets, then PATCH w
 
 **WRONG** (erases existing bullets): `curl -s -X PATCH ... -d '{"section": "learned_context", "mode": "replace", "content": "- [2026-04-23] Reading goal: ..."}'` when the section already held other bullets.
 
-For writes to `user/<topic>.md` (people / work / expertise / personal / goals), the same decision rule applies — §"Routing edge cases" above documents the `section_not_found` → `append_to_file` first-write fallback (with a worked `curl` example against `user/people.md`). The read-before-write rule applies identically when merging into an existing `user/<topic>.md` section.
+For writes to `user/<topic>.md` (people / work / expertise / personal / goals), the same decision rule applies — §"Routing edge cases" above documents the `section_not_found` → `append_to_file` first-write fallback (with a worked `curl` example against `identity/people.md`). The read-before-write rule applies identically when merging into an existing `user/<topic>.md` section.
 
 ## Learned Context entry format
 
@@ -155,9 +155,9 @@ Review can prune entries older than 30 days:
 
 ## Initial Setup
 
-Populate `user/profile.md` (Identity, Work Pattern, Platforms, Expertise summary, Notification Preferences — leave Learned Context/Raw Signals empty). Read skeleton first → prefer `mode: "append"` → `mode: "replace"` only for full merged body. Tone / style preferences do NOT go into profile.md — see §"Tone / character preferences".
+Populate `identity/profile.md` (Identity, Work Pattern, Platforms, Expertise summary, Notification Preferences — leave Learned Context/Raw Signals empty). Read skeleton first → prefer `mode: "append"` → `mode: "replace"` only for full merged body. Tone / style preferences do NOT go into profile.md — see §"Tone / character preferences".
 
-*During setup, seed `user/profile.md` only. The topic files (`user/people.md`, `work.md`, `expertise.md`, `personal.md`, `goals.md`) stay empty and grow from lived conversation via the DM handler and `routine.user_profile_sweep`.*
+*During setup, seed `identity/profile.md` only. The topic files (`identity/people.md`, `work.md`, `expertise.md`, `personal.md`, `goals.md`) stay empty and grow from lived conversation via the DM handler and `routine.user_profile_sweep`.*
 
 ---
 
@@ -165,7 +165,7 @@ Populate `user/profile.md` (Identity, Work Pattern, Platforms, Expertise summary
 
 The generic GET / PATCH surface (modes, fields, error envelopes) is
 documented in the **context** skill `references/api.md`. user-profile
-writes target the two paths `/api/context/user/profile` (the injected
+writes target the two paths `/api/context/identity/profile` (the injected
 summary file) and `/api/context/user/:topic` (one of `people` /
 `work` / `expertise` / `personal` / `goals`).
 
@@ -176,7 +176,7 @@ Two user-profile-specific notes layered on top of the generic surface:
   concurrent appends. Pass a SQLite-format `cutoff`:
 
   ```bash
-  curl -s -X PATCH http://localhost:8321/api/context/user/profile \
+  curl -s -X PATCH http://localhost:8321/api/context/identity/profile \
     -H 'Content-Type: application/json' \
     -d '{"section": "raw_signals", "mode": "clear_before", "cutoff": "2026-04-10 02:33:00"}'
   ```

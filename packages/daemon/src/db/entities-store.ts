@@ -40,7 +40,7 @@ interface EntityRow {
 /**
  * Public entity DTO. `sources` is the parsed `frontmatter.sources` map
  * — keys are user-typed app labels, matching the `App` column in
- * `rules/management.md`. The route layer serializes this directly.
+ * `policies/management.md`. The route layer serializes this directly.
  */
 export interface EntityRecord {
   path: string;

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AgentConfig } from "../../config.js";
-import { validatePrimaryVaultPath } from "../../config.js";
+import { getContextDir, validatePrimaryVaultPath } from "../../config.js";
 import { writeFileAtomically } from "../atomic-write.js";
 
 export const DEFAULT_WIKI_WORKSPACE_NAME = "default";
@@ -95,15 +95,34 @@ const FALLBACK_SEEDS: Record<string, string> = {
   ].join("\n"),
 };
 
-export function defaultWikiRoot(dataDir: string): string {
-  return resolve(dataDir, "wiki");
+/**
+ * Fresh-install default root for internal wiki workspaces.
+ *
+ * CONTEXT_VAULT_REDESIGN_PLAN.md v4 V12 — the internal wiki workspace
+ * tree moves under the vault at `<contextDir>/knowledge/wiki/`. The
+ * vault-restructure migration moves any pre-existing internal
+ * workspaces and rewrites `wiki_workspaces.root_path` for them. Fresh
+ * installs land directly on the new layout via this helper.
+ *
+ * The function accepts an `AgentConfig` so it can resolve the runtime
+ * `contextDir` (which may live inside an external Obsidian vault when
+ * `vaultMode="obsidian"`). The legacy `defaultWikiRoot(dataDir)` shape
+ * is preserved for callers that haven't been migrated yet — it falls
+ * back to `<dataDir>/context/knowledge/wiki`, matching the canonical
+ * destination of pre-migration `<dataDir>/wiki/` content.
+ */
+export function defaultWikiRoot(configOrDataDir: AgentConfig | string): string {
+  if (typeof configOrDataDir === "string") {
+    return resolve(configOrDataDir, "context", "knowledge", "wiki");
+  }
+  return resolve(getContextDir(configOrDataDir), "knowledge", "wiki");
 }
 
 export function ensureDefaultWikiWorkspace(
   db: Database.Database,
   config: AgentConfig,
 ): WikiWorkspaceRow {
-  const rootPath = defaultWikiRoot(config.dataDir);
+  const rootPath = defaultWikiRoot(config);
   // §P5.C — multi-workspace: check the named default specifically
   // rather than "first active workspace". With multiple active rows,
   // `readDefaultWikiWorkspace` returns the oldest active row by id,

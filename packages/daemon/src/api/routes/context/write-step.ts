@@ -1,3 +1,6 @@
+// drift-allow-file: documents the `daily/*.md` legacy validator path —
+// the docstring is the load-bearing reference for callers porting from
+// the pre-restructure layout.
 /**
  * `performContextFileWrite` — the shared write chokepoint for both the
  * HTTP context API (`PUT /api/context/*`, `PATCH /api/context/* mode=append_to_file`)
@@ -40,7 +43,11 @@ import { join } from "node:path";
 import { writeFileAtomically } from "../../../core/atomic-write.js";
 import { validateDailySkeletonFrontmatter } from "../../../core/context-frontmatter.js";
 import { CONTEXT_RELATIVE_PATHS } from "../../../core/context-paths.js";
+import { parseVaultFrontmatter } from "../../../core/context-validation/frontmatter.js";
+import { createLogger } from "../../../logging.js";
 import type { AgentWriteTracker } from "../../../safety/agent-write-tracker.js";
+
+const logger = createLogger("context-write-step");
 
 export interface PerformContextFileWriteDeps {
   /** Snapshot helper. Pass through `ctx.saveSnapshot` for HTTP callers; the
@@ -139,7 +146,7 @@ export function performContextFileWrite(
   args: PerformContextFileWriteArgs,
 ): PerformContextFileWriteResult {
   if (args.mode === "put" && args.validateDailySkeleton === true) {
-    if (args.relativePath.startsWith("daily/")) {
+    if (args.relativePath.startsWith("journal/daily/")) {
       const driftErrors = validateDailySkeletonFrontmatter(
         args.content,
         args.relativePath,
@@ -147,6 +154,27 @@ export function performContextFileWrite(
       if (driftErrors.length > 0) {
         return { ok: false, reason: "daily_skeleton_drift", driftErrors };
       }
+    }
+  }
+
+  // CONTEXT_VAULT_REDESIGN_PLAN.md §5.3 — Phase 1 advisory parse of the
+  // new vault contract fields (kind / authority / mutability / slug /
+  // title). Advisories log a warning; nothing rejects the write. The
+  // Phase 2 cut-over swaps these warnings for a structured 422 once
+  // `runtimeSettings.contextVault.enforceFrontmatter` lands.
+  if (args.mode === "put") {
+    const advisory = parseVaultFrontmatter(args.content, args.relativePath);
+    if (advisory.advisories.length > 0) {
+      logger.warn(
+        {
+          relativePath: args.relativePath,
+          advisories: advisory.advisories.map((a) => ({
+            code: a.code,
+            message: a.message,
+          })),
+        },
+        "Vault frontmatter advisory (Phase 1 non-blocking)",
+      );
     }
   }
 
@@ -236,7 +264,7 @@ export function dailyJournalAbsolutePath(
   contextDir: string,
   dateStr: string,
 ): string {
-  return join(contextDir, "daily", `${dateStr}.md`);
+  return join(contextDir, "journal", "daily", `${dateStr}.md`);
 }
 
 /**
@@ -245,7 +273,7 @@ export function dailyJournalAbsolutePath(
  * snapshot + indexable, `snapshotKey` for the snapshot column.)
  */
 export function dailyJournalSnapshotKey(dateStr: string): string {
-  return `daily/${dateStr}`;
+  return `journal/daily/${dateStr}`;
 }
 
 // Re-export so the agent-journal-appender (which shares the snapshot

@@ -1,3 +1,6 @@
+// drift-allow-file: values are documentation slug paths under
+// `docs/user/features/routines/...`, not vault paths — the drift scanner
+// flags them because they share the legacy `routines/` substring.
 /**
  * Activity → docs concept link map (DOCS_QA_DESIGN.md §8.4).
  *

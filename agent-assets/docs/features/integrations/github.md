@@ -79,7 +79,7 @@ depending on your notify-skill settings) on:
   observation-only — they're the normal developer feedback loop).
 
 Each DM follows the notify skill's awareness-gate: if the agent already
-sees you triaging it in `today.md`, it stays silent and just logs.
+sees you triaging it in `state/today.md`, it stays silent and just logs.
 
 ## Setup
 
@@ -162,5 +162,5 @@ and the delegated worker never run simultaneously.
 ## Related
 
 - [Git](git.md) — local repo file watcher (separate observer).
-- [Hourly Check](../routines/hourly-check.md) — the consumer of
+- [Hourly Check](../policies/routines/hourly-check.md) — the consumer of
   non-DM-priority observations.

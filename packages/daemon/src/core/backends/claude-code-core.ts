@@ -55,6 +55,7 @@ import {
 } from "./claude-delegated.js";
 import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
 import { createSessionWorkdir, cleanupSessionWorkdir } from "../workdir.js";
+import { resolveUserSkillsRoot } from "../user-skills-root.js";
 import { buildDaemonApiCliEnv } from "../daemon-api-cli.js";
 import { createLogger } from "../../logging.js";
 import {
@@ -548,7 +549,7 @@ export class ClaudeCodeCore implements IAgentCore {
     const useSessionDir = sessionDir ?? createSessionWorkdir(
       this.config.workspaceDir,
       event.type,
-      `${this.config.dataDir}/skills`,
+      resolveUserSkillsRoot(this.config),
       {
         backendId: this.backendId,
         processKey: params.processKey,

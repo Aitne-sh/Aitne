@@ -181,7 +181,7 @@ Two active wiki workspaces cannot point at overlapping paths. Neither
 can overlap:
 
 - `primaryVaultPath` — your reactive-memory vault (`knowledge/`,
-  `today.md`, etc.).
+  `state/today.md`, etc.).
 - `externalObsidianVaultPath` — your owner-facing Obsidian vault.
 - `$PA_DATA_DIR` — the daemon's data home.
 

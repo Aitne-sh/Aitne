@@ -9,7 +9,7 @@ template_version: 1
 
 Edit this file to control what's included when the agent mirrors your
 synthesized `daily/*.md` entries to an external backend (B-005). These
-rules run *on top of* the built-in `rules/redaction.md` patterns.
+rules run *on top of* the built-in `policies/redaction.md` patterns.
 
 ## Inclusion defaults
 

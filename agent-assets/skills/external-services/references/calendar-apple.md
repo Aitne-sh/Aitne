@@ -7,7 +7,7 @@ description: Apple Calendar (iCloud CalDAV) reference — list/get/create/update
 <!-- service:apple-calendar -->
 ## Apple Calendar (iCloud CalDAV)
 
-Use this section **only when `rules/management.md` Schedule = Apple Calendar**. The provider-routing table at the top of this skill is non-negotiable.
+Use this section **only when `policies/management.md` Schedule = Apple Calendar**. The provider-routing table at the top of this skill is non-negotiable.
 
 The route shape mirrors `/api/calendar/*` so prose patterns transfer: list → get → patch / create / delete. Differences are flagged below.
 

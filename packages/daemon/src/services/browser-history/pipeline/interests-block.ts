@@ -12,7 +12,7 @@ import type {
  *
  * - **Mode A** — embed a `<!-- BEGIN aitne:browser-interests v1 … --> …
  *   <!-- END … -->` block in a file that has user-authored content
- *   (`user/profile.md`, `user/_index.md`, `projects/<slug>.md`). The
+ *   (`identity/profile.md`, `identity/_index.md`, `projects/<slug>.md`). The
  *   block is replaced in place on every refresh; if absent, it's
  *   appended once with a leading blank line so it never welds onto the
  *   prior section.
@@ -116,7 +116,7 @@ function renderClusterBullet(cluster: ClusterSnapshot): string {
 
 /**
  * Render the `## Current research themes (auto)` block bytes for
- * `user/profile.md`.
+ * `identity/profile.md`.
  *
  * Inputs:
  * - `clusters`: the post-`selectProfileMdThemes` list (3-7 entries).

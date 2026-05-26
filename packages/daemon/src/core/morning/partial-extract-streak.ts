@@ -227,7 +227,7 @@ function renderDmMessage(rows: ReadonlyArray<RecentStageBRow>): string {
     .join(", ");
   return [
     `The daily journal authored OK on ${dates} but the model omitted the`,
-    `projects/people/tags frontmatter on all ${rows.length} days`,
+    `plans/projects/people/tags frontmatter on all ${rows.length} days`,
     `(reasons: ${reasonsRendered}).`,
     `Inspect agent-assets/task-flows/routine.morning_routine_journal.md`,
     `or escalate Stage B's tier from lite to medium under /settings/models.`,

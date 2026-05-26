@@ -761,7 +761,7 @@ export const runtimeSettingsSchema = z.object({
 
   /**
    * B-004 Phase 1 — dossier injection for routine ProcessKeys. When true
-   * (default), `dossiers/<flow>.md` is appended to routine prompts as a
+   * (default), `knowledge/dossiers/<flow>.md` is appended to routine prompts as a
    * carry-forward state block. Flag exists to allow a fast disable if the
    * injection misbehaves in production; the design treats Phase 1 as
    * always-on once B-007 Phase 1 is shipped.

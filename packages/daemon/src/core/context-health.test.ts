@@ -41,14 +41,16 @@ function validFrontmatter(type: string, owner: string, title: string): string {
 function seedValidVault(contextDir: string): void {
   mkdirSync(contextDir, { recursive: true });
 
-  write(CONTEXT_RELATIVE_PATHS.rootIndex, contextDir, validFrontmatter("index", "shared", "Vault"));
+  // CONTEXT_VAULT_REDESIGN merged contextIndex into rootIndex (`_index.md`).
+  // Write it ONCE with the agent-owned shape so the reconciler block can
+  // be folded in later without violating the strict frontmatter contract.
+  write(
+    CONTEXT_RELATIVE_PATHS.rootIndex,
+    contextDir,
+    validFrontmatter("index", "agent", "Vault"),
+  );
   write(CONTEXT_RELATIVE_PATHS.today, contextDir, "# Today\n");
   write(CONTEXT_RELATIVE_PATHS.roadmap, contextDir, "# Roadmap\n");
-  write(
-    CONTEXT_RELATIVE_PATHS.contextIndex,
-    contextDir,
-    validFrontmatter("index", "agent", "Context Index"),
-  );
 
   write(CONTEXT_RELATIVE_PATHS.user.index, contextDir, validFrontmatter("index", "shared", "User"));
   write(CONTEXT_RELATIVE_PATHS.user.profile, contextDir, validFrontmatter("user", "shared", "Profile"));
@@ -65,12 +67,38 @@ function seedValidVault(contextDir: string): void {
   write(CONTEXT_RELATIVE_PATHS.rules.journalExport, contextDir, validFrontmatter("rule", "shared", "Journal Export"));
   write(CONTEXT_RELATIVE_PATHS.rules.redaction, contextDir, validFrontmatter("rule", "shared", "Redaction"));
 
-  write(CONTEXT_RELATIVE_PATHS.routines.index, contextDir, "# Routines\n");
-  write(CONTEXT_RELATIVE_PATHS.routines.hourly, contextDir, "# Hourly\n");
-  write(CONTEXT_RELATIVE_PATHS.routines.morning, contextDir, "# Morning\n");
-  write(CONTEXT_RELATIVE_PATHS.routines.evening, contextDir, "# Evening\n");
-  write(CONTEXT_RELATIVE_PATHS.routines.weekly, contextDir, "# Weekly\n");
-  write(CONTEXT_RELATIVE_PATHS.routines.monthly, contextDir, "# Monthly\n");
+  // Routines live under `policies/routines/` post-restructure, so they
+  // need the rule-shaped frontmatter the policies/* prefix enforces.
+  write(
+    CONTEXT_RELATIVE_PATHS.routines.index,
+    contextDir,
+    validFrontmatter("index", "shared", "Routines"),
+  );
+  write(
+    CONTEXT_RELATIVE_PATHS.routines.hourly,
+    contextDir,
+    validFrontmatter("rule", "shared", "Hourly"),
+  );
+  write(
+    CONTEXT_RELATIVE_PATHS.routines.morning,
+    contextDir,
+    validFrontmatter("rule", "shared", "Morning"),
+  );
+  write(
+    CONTEXT_RELATIVE_PATHS.routines.evening,
+    contextDir,
+    validFrontmatter("rule", "shared", "Evening"),
+  );
+  write(
+    CONTEXT_RELATIVE_PATHS.routines.weekly,
+    contextDir,
+    validFrontmatter("rule", "shared", "Weekly"),
+  );
+  write(
+    CONTEXT_RELATIVE_PATHS.routines.monthly,
+    contextDir,
+    validFrontmatter("rule", "shared", "Monthly"),
+  );
 
   write(
     CONTEXT_RELATIVE_PATHS.projects.index,
@@ -88,6 +116,10 @@ function seedValidVault(contextDir: string): void {
     write(p, contextDir, validFrontmatter("dossier", "agent", "Dossier"));
   }
 
+  // Agent journal lives under `journal/agent.md` and falls under the
+  // journal/ class; it doesn't need the strict policies-style
+  // frontmatter, but the validator doesn't require one for raw journal
+  // entries either (no rule prefix matches `journal/agent`).
   write(CONTEXT_RELATIVE_PATHS.agent.journal, contextDir, "# Agent Journal\n");
 }
 
@@ -193,7 +225,7 @@ describe("buildContextHealthReport", () => {
     seedValidVault(contextDir);
     const bigJournal = "b".repeat(POLICY_FILE_MAX_BYTES + 4096);
     write(
-      "daily/2026-04-21.md",
+      "journal/daily/2026-04-21.md",
       contextDir,
       `${validFrontmatter("daily", "agent", "Day")}${bigJournal}`,
     );
@@ -201,7 +233,7 @@ describe("buildContextHealthReport", () => {
     const report = buildContextHealthReport(contextDir);
 
     expect(
-      report.sizeWarnings.find((issue) => issue.path === "daily/2026-04-21.md"),
+      report.sizeWarnings.find((issue) => issue.path === "journal/daily/2026-04-21.md"),
     ).toBeUndefined();
   });
 
@@ -276,7 +308,9 @@ describe("buildContextHealthReport", () => {
       CONTEXT_RELATIVE_PATHS.rootIndex,
       contextDir,
       [
-        validFrontmatter("index", "shared", "Vault"),
+        // rootIndex is agent-owned after CONTEXT_VAULT_REDESIGN
+        // (reconciler maintains the `<!-- reconciler-section -->` block).
+        validFrontmatter("index", "agent", "Vault"),
         "- [[missing-one]]",
       ].join("\n"),
     );
@@ -329,7 +363,7 @@ describe("buildContextHealthReport", () => {
     // reach a sibling — this exercises the stack-pop branch of the
     // relative-path resolver.
     write(
-      "rules/policies/_index.md",
+      "policies/management-captures/_index.md",
       contextDir,
       [
         validFrontmatter("index", "agent", "Active Policies"),
@@ -341,11 +375,11 @@ describe("buildContextHealthReport", () => {
 
     const report = buildContextHealthReport(contextDir);
     // Both the sibling (rules/management.md) and the up-two
-    // (user/profile.md) targets exist in the seeded vault — they must
+    // (identity/profile.md) targets exist in the seeded vault — they must
     // NOT be reported as broken links.
     const targets = report.indexLinkIssues.map((i) => i.target);
-    expect(targets).not.toContain("rules/management.md");
-    expect(targets).not.toContain("user/profile.md");
+    expect(targets).not.toContain("policies/management.md");
+    expect(targets).not.toContain("identity/profile.md");
     // The escape attempt must be silently dropped (resolver returned
     // null for popping past the root) — no broken-link warning either.
     expect(targets.find((t) => t.includes("escape"))).toBeUndefined();
@@ -376,8 +410,8 @@ describe("buildContextHealthReport", () => {
       contextDir,
       [
         validFrontmatter("index", "shared", "Vault"),
-        "Aliased: [[user/profile|Profile]]",
-        "Anchored: [[user/profile#Goals]]",
+        "Aliased: [[identity/profile|Profile]]",
+        "Anchored: [[identity/profile#Goals]]",
         "Missing aliased: [[no-such|alias]]",
       ].join("\n"),
     );
@@ -395,9 +429,9 @@ describe("normalizeRepairStubPath", () => {
   });
 
   it("preserves explicit .md / .base extensions", () => {
-    expect(normalizeRepairStubPath("dossiers/hourly.md")).toBe("dossiers/hourly.md");
-    expect(normalizeRepairStubPath("projects/_active.base")).toBe(
-      "projects/_active.base",
+    expect(normalizeRepairStubPath("knowledge/dossiers/hourly.md")).toBe("knowledge/dossiers/hourly.md");
+    expect(normalizeRepairStubPath("plans/projects/_active.base")).toBe(
+      "plans/projects/_active.base",
     );
   });
 

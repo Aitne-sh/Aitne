@@ -32,7 +32,7 @@ const DEDUP_TTL_MS = 10 * 60 * 1000;
  *
  * Detects behavioral patterns from messaging platforms and appends
  * structured entries to user/profile.md's "Raw Signals" section via the
- * Context File API (PATCH /api/context/user/profile).
+ * Context File API (PATCH /api/context/identity/profile).
  *
  * All writes go through the Daemon's own HTTP API to:
  * - Respect the Context File API mutex (no race conditions)
@@ -198,7 +198,7 @@ export class SignalDetector {
 
   /**
    * Append a raw signal to user/profile.md's "## Raw Signals" section
-   * via the Context File API (PATCH /api/context/user/profile).
+   * via the Context File API (PATCH /api/context/identity/profile).
    *
    * Uses the Daemon's own HTTP API to ensure:
    * - Write serialization via context mutex
@@ -225,7 +225,7 @@ export class SignalDetector {
 
     try {
       const response = await fetch(
-        `${this.apiBaseUrl}/api/context/user/profile`,
+        `${this.apiBaseUrl}/api/context/identity/profile`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

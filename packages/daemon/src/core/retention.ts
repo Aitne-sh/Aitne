@@ -109,7 +109,7 @@ const RETENTION_DAYS = {
 } as const;
 
 /**
- * Retention policy for `agent/journal.md` content-level rollup.
+ * Retention policy for `journal/agent.md` content-level rollup.
  *
  * The journal is append-only — Weekly/Monthly Review routines add new
  * `## Weekly YYYY-Www` and `## Monthly YYYY-MM` sections over time. Without
@@ -770,7 +770,7 @@ export function runRetentionCleanup(
  * newer, zero if equal. Suitable as a sort comparator.
  *
  * Why not a plain string comparison? The `## Weekly YYYY-Www` header in
- * `agent/journal.md` is written by an LLM following the review prompt.
+ * `journal/agent.md` is written by an LLM following the review prompt.
  * The prompt asks for zero-padded ISO week numbers, but compliance is
  * probabilistic — the model may emit `2026-W5` instead of `2026-W05`,
  * or a backfill may use a different convention. Lexicographic compare
@@ -1028,7 +1028,7 @@ function cleanupAttachments(
 }
 
 /**
- * Roll up `agent/journal.md` in place. Three independent passes applied in
+ * Roll up `journal/agent.md` in place. Three independent passes applied in
  * order to a single parsed section list:
  *
  *   1. **Dedup (last-write-wins).** If the same `## Weekly YYYY-Www` or
@@ -1294,7 +1294,7 @@ export function rollupAgentJournal(
 }
 
 /**
- * Read-only health check for `agent/journal.md`. Returns section counts and
+ * Read-only health check for `journal/agent.md`. Returns section counts and
  * any oversized sections without modifying the file. Intended for the health
  * endpoint so the dashboard can surface journal bloat without requiring the
  * operator to watch structured logs.

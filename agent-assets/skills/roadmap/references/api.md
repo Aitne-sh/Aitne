@@ -22,7 +22,7 @@ context. Other flows (DM handler, evening sweeper) may acquire and
 release manually.
 
 Include `X-Lock-Id: <roadmap_write_lock_id>` on every PUT / PATCH to
-`/api/context/roadmap` when the tag is in your context. Other
+`/api/context/plans/roadmap` when the tag is in your context. Other
 sessions get `409 roadmap_write_lock_held` while the lock is held —
 back off 30 s and retry up to 3 times.
 
@@ -31,18 +31,18 @@ back off 30 s and retry up to 3 times.
 These return `404 {"error":"unknown_route", …}` with a hint pointing
 at the correct path:
 
-- `POST /api/context/roadmap/lock` — order reversed
-- `POST /api/context/roadmap/write-lock` — order reversed and wrong noun
+- `POST /api/context/plans/roadmap/lock` — order reversed
+- `POST /api/context/plans/roadmap/write-lock` — order reversed and wrong noun
 - `POST /api/context/lock/roadmap-write` — wrong noun
 
 A `401 {"error":"unauthorized"}` from a path you believe is correct
 means the path is still wrong (the lock endpoints are Autonomous-tier
 so no bearer token is required).
 
-## ID mint — `POST /api/context/roadmap/id`
+## ID mint — `POST /api/context/plans/roadmap/id`
 
 ```bash
-curl -s -X POST http://localhost:8321/api/context/roadmap/id \
+curl -s -X POST http://localhost:8321/api/context/plans/roadmap/id \
   -H 'Content-Type: application/json' \
   -H 'X-Lock-Id: <roadmap_write_lock_id>' \
   -d '{"creationDate":"YYYY-MM-DD"}'
@@ -64,7 +64,7 @@ The roadmap API validates two invariants on every PUT / PATCH:
    file. Duplicate ids return:
 
    ```json
-   {"error":"validation_error","message":"duplicate roadmap id rm-YYYYMMDD-abcdef","path":"roadmap.md"}
+   {"error":"validation_error","message":"duplicate roadmap id rm-YYYYMMDD-abcdef","path":"plans/roadmap.md"}
    ```
 
    Recovery: re-GET `roadmap`, mint a fresh id **for the colliding
@@ -78,7 +78,7 @@ The roadmap API validates two invariants on every PUT / PATCH:
    row returns:
 
    ```json
-   {"error":"validation_error","message":"transition_guard: completed row for rm-… changed","path":"roadmap.md"}
+   {"error":"validation_error","message":"transition_guard: completed row for rm-… changed","path":"plans/roadmap.md"}
    ```
 
    This is intentional: completed prep rows are the audit trail for

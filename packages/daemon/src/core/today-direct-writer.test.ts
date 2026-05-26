@@ -86,7 +86,8 @@ describe("appendAgentLogLine", () => {
     tempRoot = mkdtempSync(join(tmpdir(), "today-direct-writer-"));
     contextDir = join(tempRoot, "context");
     mkdirSync(contextDir, { recursive: true });
-    writeFileSync(join(contextDir, "today.md"), sampleToday);
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "state", "today.md"), sampleToday);
   });
 
   afterEach(() => {
@@ -102,7 +103,7 @@ describe("appendAgentLogLine", () => {
       now: new Date(2026, 4, 6, 12, 0, 0),
     });
     expect(result.appended).toBe(true);
-    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toMatch(/- 12:00 \[hourly_check\] Quiet — 0 obs\n/);
     expect(lock.getHolder()).toBeNull();
   });
@@ -121,7 +122,7 @@ describe("appendAgentLogLine", () => {
   });
 
   it("returns today_missing when today.md does not exist", async () => {
-    rmSync(join(contextDir, "today.md"));
+    rmSync(join(contextDir, "state", "today.md"));
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const result = await appendAgentLogLine({
       contextDir,
@@ -134,7 +135,7 @@ describe("appendAgentLogLine", () => {
 
   it("returns agent_log_section_missing when section absent", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       sampleToday.replace("## Agent Log\n- 09:00 routine ran\n", ""),
     );
     const lock = new InMemoryTodayWriteLockManager(60_000);
@@ -156,7 +157,7 @@ describe("appendAgentLogLine", () => {
       now: new Date(2026, 4, 6, 12, 0, 0),
     });
     expect(result.appended).toBe(true);
-    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toMatch(/- 13:30 \[hourly_check\] custom timestamp\n/);
   });
 
@@ -168,7 +169,7 @@ describe("appendAgentLogLine", () => {
       todayWriteLock: lock,
     });
     expect(result.appended).toBe(true);
-    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toContain("- already a bullet\n");
   });
 
@@ -184,7 +185,7 @@ describe("appendAgentLogLine", () => {
       timezone: "Asia/Tokyo",
     });
     expect(result.appended).toBe(true);
-    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toMatch(/- 12:00 \[hourly_check\] tz check\n/);
   });
 
@@ -201,15 +202,15 @@ describe("appendAgentLogLine", () => {
       timezone: "Mars/Phobos",
     });
     expect(result.appended).toBe(true);
-    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toMatch(/- 07:05 \[hourly_check\] tz fallback\n/);
   });
 
   it("returns io_error when today.md cannot be read (path is a directory)", async () => {
     // Replace today.md with a directory of the same name — readFileSync
     // will throw EISDIR while existsSync still reports the path as present.
-    rmSync(join(contextDir, "today.md"));
-    mkdirSync(join(contextDir, "today.md"));
+    rmSync(join(contextDir, "state", "today.md"));
+    mkdirSync(join(contextDir, "state", "today.md"));
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const result = await appendAgentLogLine({
       contextDir,
@@ -226,7 +227,8 @@ describe("appendAgentLogLine", () => {
     // On macOS/Linux, chmod 0500 (read+execute, no write) on the parent
     // dir makes writeFileAtomically's rename / open-for-write fail.
     if (process.platform === "win32") return;
-    chmodSync(contextDir, 0o500);
+    const stateDir = join(contextDir, "state");
+    chmodSync(stateDir, 0o500);
     try {
       const lock = new InMemoryTodayWriteLockManager(60_000);
       const result = await appendAgentLogLine({
@@ -238,7 +240,7 @@ describe("appendAgentLogLine", () => {
       expect(result.reason).toBe("io_error");
     } finally {
       // Restore so afterEach's rmSync can clean up.
-      chmodSync(contextDir, 0o700);
+      chmodSync(stateDir, 0o700);
     }
   });
 
@@ -265,7 +267,7 @@ describe("appendAgentLogLine", () => {
     ]);
     expect(first.appended).toBe(true);
     expect(second.appended).toBe(true);
-    const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+    const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toContain("- 12:00 [bullet-A] first\n");
     expect(updated).toContain("- 12:01 [bullet-B] second\n");
   });

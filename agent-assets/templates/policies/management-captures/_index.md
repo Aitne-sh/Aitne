@@ -8,8 +8,8 @@ template_version: 2
 
 Auto-maintained by the daemon's policy-index reconciler. Direct edits
 are overwritten on the next reconcile pass — to add or modify a policy,
-edit its `rules/policies/<slug>.md` file (or use the `management-policy`
-skill).
+edit its `policies/management-captures/<slug>.md` file (or use the
+`management-policy` skill).
 
 ## Active
 

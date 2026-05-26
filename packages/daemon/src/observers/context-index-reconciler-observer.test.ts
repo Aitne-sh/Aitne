@@ -57,14 +57,19 @@ describe("ContextIndexReconcilerObserver", () => {
     tmp = mkdtempSync(join(tmpdir(), "reconciler-observer-"));
     contextDir = join(tmp, "context");
     mkdirSync(contextDir, { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
     db = new Database(":memory:");
     applySchema(db);
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
   });
 
   afterEach(() => {
@@ -113,14 +118,14 @@ describe("ContextIndexReconcilerObserver", () => {
     await vi.runOnlyPendingTimersAsync();
 
     // Create a new projects/ file that the reconciler should pick up.
-    writeFileSync(join(contextDir, "projects/alpha.md"), "# Alpha\n");
-    touch(join(contextDir, "projects/alpha.md"), "2026-04-21T00:00:00Z");
+    writeFileSync(join(contextDir, "plans/projects/alpha.md"), "# Alpha\n");
+    touch(join(contextDir, "plans/projects/alpha.md"), "2026-04-21T00:00:00Z");
 
     // Fire multiple events within the debounce window — only one reconcile
     // should result.
-    watcher.emit("projects/alpha.md");
+    watcher.emit("plans/projects/alpha.md");
     await vi.advanceTimersByTimeAsync(5_000);
-    watcher.emit("projects/alpha.md");
+    watcher.emit("plans/projects/alpha.md");
     await vi.advanceTimersByTimeAsync(5_000);
     // Still within the most-recent 10 s debounce — no run yet.
     await vi.advanceTimersByTimeAsync(4_000);
@@ -140,9 +145,9 @@ describe("ContextIndexReconcilerObserver", () => {
     expect(afterDebounce?.result).toBe("applied");
 
     const rows = parseContextIndexRows(
-      readFileSync(join(contextDir, "context-index.md"), "utf-8"),
+      readFileSync(join(contextDir, "_index.md"), "utf-8"),
     );
-    expect(rows.some((r) => r.path === "projects/alpha.md")).toBe(true);
+    expect(rows.some((r) => r.path === "plans/projects/alpha.md")).toBe(true);
 
     await observer.stop();
   });
@@ -160,8 +165,8 @@ describe("ContextIndexReconcilerObserver", () => {
     await vi.runOnlyPendingTimersAsync();
 
     // Ephemeral scratch file, _index.md, and non-md are all filtered.
-    watcher.emit("agent/scratch/2026-04-21-note.md");
-    watcher.emit("projects/_index.md");
+    watcher.emit("state/scratch/2026-04-21-note.md");
+    watcher.emit("plans/projects/_index.md");
     watcher.emit("README.txt");
     await vi.advanceTimersByTimeAsync(11_000);
 
@@ -385,7 +390,7 @@ enabled: true
     );
 
     // Fire an FS event for the policy file.
-    watcher.emit("rules/policies/morning-finance.md");
+    watcher.emit("policies/management-captures/morning-finance.md");
     await vi.advanceTimersByTimeAsync(11_000);
     await vi.runOnlyPendingTimersAsync();
 

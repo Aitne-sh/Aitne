@@ -76,7 +76,7 @@ Same template applies to "every 5 minutes", "every 30 minutes",
 ## Cadence string vs structured rule
 
 Always send both `cadence` (human-readable, rendered in
-`rules/management.md` §B) and `recurrenceRule` (structured, what the
+`policies/management.md` §B) and `recurrenceRule` (structured, what the
 scheduler executes). They must agree — if they drift, the rendered
 file misleads the user about what the scheduler will actually do.
 

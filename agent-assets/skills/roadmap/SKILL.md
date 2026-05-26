@@ -10,11 +10,11 @@ allowed-tools:
 
 Output language: roadmap.md is Policy B — see `<output_language_policy>`. Section headers stay English skeleton; items, narrative, and preparation-timeline prose are in `<settings primary_language>`. Preserve user-customized headers verbatim.
 
-`roadmap.md` is the single source of truth for **long-horizon user
-intent** — everything that does not belong in `today.md`. It aggregates
+`plans/roadmap.md` is the single source of truth for **long-horizon user
+intent** — everything that does not belong in `state/today.md`. It aggregates
 Calendar events, pending `agent_schedule` rows, DM-captured intent,
 mail-derived bookings, reading goals, and observations; Morning Routine
-consumes it to shape `today.md`.
+consumes it to shape `state/today.md`.
 
 ## Section schema
 
@@ -117,9 +117,9 @@ must carry a daemon-minted HTML comment ID:
 - The `YYYYMMDD` segment is the entry creation date / Source date, not
   the event date. Keep it stable when dates are refined.
 - Do not invent IDs in prose. Before adding a new roadmap entry, call
-  `POST /api/context/roadmap/id`:
+  `POST /api/context/plans/roadmap/id`:
   ```bash
-  curl -s -X POST http://localhost:8321/api/context/roadmap/id \
+  curl -s -X POST http://localhost:8321/api/context/plans/roadmap/id \
     -H 'Content-Type: application/json' \
     -d '{"creationDate": "YYYY-MM-DD"}'
   ```

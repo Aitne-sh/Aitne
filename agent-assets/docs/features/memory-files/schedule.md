@@ -52,7 +52,7 @@ read from this directory.
 
 > **Heads up — directory renamed.** The mechanical
 > `schedule/YYYY-MM-DD.md` copy was retired in B-007. The morning
-> routine now synthesizes `daily/YYYY-MM-DD.md` from `yesterday.md`
+> routine now synthesizes `daily/YYYY-MM-DD.md` from `state/yesterday.md`
 > plus the SQLite event log instead. Hand-pruning the old `schedule/`
 > directory is safe.
 
@@ -61,17 +61,17 @@ read from this directory.
 Each file under `~/.personal-agent/context/daily/` corresponds to one
 **agent day** (the file name uses the agent-day date, not the calendar
 date — see [Agent Day](../../concepts/agent-day.md)). The morning
-routine writes the file shortly after rolling `today.md` →
-`yesterday.md`. It contains:
+routine writes the file shortly after rolling `state/today.md` →
+`state/yesterday.md`. It contains:
 
 - Calendar events from connected calendars.
 - Mail-driven items the agent flagged for that day.
-- Preparation Timeline rows from `roadmap.md` whose offset fired that day.
+- Preparation Timeline rows from `plans/roadmap.md` whose offset fired that day.
 - Carryover items the agent did not finish.
 
 The synthesis is template-driven and reads from the in-process DB
-snapshot of the closing `today.md` plus the day's event records, so
-late edits made directly to `today.md` after rotation cannot retroactively
+snapshot of the closing `state/today.md` plus the day's event records, so
+late edits made directly to `state/today.md` after rotation cannot retroactively
 rewrite a previous `daily/` file.
 
 ## When It Runs / How It Is Triggered
@@ -107,6 +107,6 @@ files accumulate. A manual prune (`rm daily/2025-*.md`) is safe.
 
 ## Related
 
-- [Morning Routine](../routines/morning-routine.md) — the writer.
+- [Morning Routine](../policies/routines/morning-routine.md) — the writer.
 - [today.md](today.md) — the live, hand-editable surface for the
   current agent day.

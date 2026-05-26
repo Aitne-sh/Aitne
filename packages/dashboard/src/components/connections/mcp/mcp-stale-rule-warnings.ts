@@ -1,7 +1,7 @@
 /**
  * Stale-rule detection.
  *
- * Scan a `rules/mcp.md` body for references to server IDs and classify each
+ * Scan a `policies/mcp.md` body for references to server IDs and classify each
  * reference against the current `mcp_servers` table state the dashboard has
  * already loaded:
  *

@@ -47,8 +47,8 @@ the day's retro into the journal.
 
 ## What It Does
 
-- Reads the day's `today.md`, the journal entries, the activity feed.
-- Writes a short retrospective into `agent/journal.md`.
+- Reads the day's `state/today.md`, the journal entries, the activity feed.
+- Writes a short retrospective into `journal/agent.md`.
 - Surfaces uncompleted carry-over items the morning routine should
   re-pick-up tomorrow.
 
@@ -60,7 +60,7 @@ operator-configurable.
 
 ## What It Outputs
 
-- An `agent/journal.md` entry.
+- An `journal/agent.md` entry.
 - A "today wraps up here" notification (subject to quiet hours).
 
 ## Where in the Dashboard

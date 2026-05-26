@@ -7,12 +7,12 @@ import type { CustomRoutineParseError } from "../custom-routine-scheduler.js";
  * the morning / evening / weekly task-flow prompts and must declare the
  * canonical frontmatter shape so the loader can dispatch by slug + type.
  *
- * Custom routines (`routines/custom/*.md`) are user-authored and parsed
+ * Custom routines (`policies/routines/custom/*.md`) are user-authored and parsed
  * by `parseCustomRoutineSpec`; we only translate the structured error
  * into a human-readable message here so the API can surface a 400
  * response that the agent can self-correct from in-session.
  *
- * `.base` files (today: only `projects/_active.base`) carry the active
+ * `.base` files (today: only `plans/projects/_active.base`) carry the active
  * project list as inline YAML. Validation is deliberately syntactic
  * (no schema check) so the file can evolve without a daemon edit; the
  * loader does the per-row validation when it parses.
@@ -37,7 +37,7 @@ export function validateBuiltInRoutineRulebook(
     return "Routine rulebooks require YAML frontmatter.";
   }
 
-  const expectedSlug = path.slice("routines/".length);
+  const expectedSlug = path.slice("policies/routines/".length);
   const typeRaw = readRoutineFrontmatterScalar(frontmatter, "type");
   if (!typeRaw) {
     return "Routine rulebooks require `type: rule` in frontmatter.";

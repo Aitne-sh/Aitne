@@ -11,7 +11,7 @@
  *      envelope (50 turns / $1.00) — token counts dropped after the
  *      `travel` skill + Step 4 prose were removed.
  *   3. `resolveSkillManifest` correctly gates `notify` on the rulebook
- *      predicate (5 vs 6 skills depending on `routines/evening.md`
+ *      predicate (5 vs 6 skills depending on `policies/routines/evening.md`
  *      shape).
  *   4. Over the last 30 days, evening_review sessions on rulebook-less
  *      installs called `POST /api/notify` zero times — any non-zero
@@ -613,7 +613,7 @@ export function checkNotifyInvocations30d(
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Pre-read inspection of `routines/evening.md` that surfaces detail the
+ * Pre-read inspection of `policies/routines/evening.md` that surfaces detail the
  * boolean predicate doesn't expose (heading count, indeterminate state).
  *
  * The daemon's predicate (`eveningRulebookIsActive`) is canonical and

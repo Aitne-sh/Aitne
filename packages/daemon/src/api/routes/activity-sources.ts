@@ -13,7 +13,7 @@ import { enumerateActivitySources } from "../../core/context/activity-sources.js
  * The runner's `enumerateActivitySources` is the canonical source of
  * truth; this route is the dashboard's read-mirror. The response
  * includes `status` so the UI can flag a recently-stopped task whose
- * `_activity/<source>.md` is still on disk for the 90-day window.
+ * `state/activity/<source>.md` is still on disk for the 90-day window.
  *
  * Settings → Management still uses `GET /managed-tasks` (active only)
  * because that page edits live rows; the activity tab is read-only and

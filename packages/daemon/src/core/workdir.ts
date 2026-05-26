@@ -595,7 +595,18 @@ export function ensureSessionWorkdir(
 
     // User-authored skills — initial population via the manifest-backed sync
     // so subsequent mid-session calls (from dispatcher) share the same state.
-    const userSkillsDir = join(dataDir, "skills");
+    // CONTEXT_VAULT_REDESIGN_PLAN.md v4 V11 — user skills root moved to
+    // `<contextDir>/policies/skills`. We derive from `options.contextDir`
+    // when the caller provides it; otherwise fall back to the default
+    // `<dataDir>/context/policies/skills` (matches `getContextDir`'s plain
+    // vault-mode default). The legacy `<dataDir>/skills` path is dead post
+    // CONTEXT_VAULT_REDESIGN — falling back there would resurrect the
+    // Obsidian-mode divergence bug v4 V11 fixed.
+    const userSkillsDir = join(
+      options?.contextDir ?? join(dataDir, "context"),
+      "policies",
+      "skills",
+    );
     const userSync = syncAllUserSkills(sessionDir, userSkillsDir);
     // docs/design/appendices/skills-unification.md Phase 1 §R4 — fold user-authored slugs
     // into the `<skill-index>` block now that they're on disk. Idempotent
@@ -768,7 +779,7 @@ export function cleanupStaleWorkdirs(
  * pass `getContextDir(config, db)` — without it, a fallback re-materialize
  * for evening_review evaluates the gate as "rulebook inactive" and drops
  * `notify` from the fallback backend's manifest even when the operator's
- * `routines/evening.md` is active, breaking the contract that the
+ * `policies/routines/evening.md` is active, breaking the contract that the
  * fallback backend behaves identically to the main one
  * (`evening-review-slimdown.md` §3.5).
  */

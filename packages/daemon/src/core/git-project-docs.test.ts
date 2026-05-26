@@ -67,9 +67,9 @@ describe("git-project-docs", () => {
       category: "other",
       pollPriority: "normal",
     });
-    expect(repoDocContextPath(repos[0])).toBe("git/personal-agent/overview");
+    expect(repoDocContextPath(repos[0])).toBe("knowledge/repos/personal-agent/overview");
     expect(repoDocContextFilePath(repos[1])).toBe(
-      "git/personal-agent-clone/overview.md",
+      "knowledge/repos/personal-agent-clone/overview.md",
     );
   });
 
@@ -94,7 +94,7 @@ describe("git-project-docs", () => {
     applySchema(db);
     const dataDir = tempDir();
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
     seedGitProjectDocTemplates(dataDir, process.cwd());
     const [repo] = normalizeGitWatchedRepos({
       gitWatchedRepos: [
@@ -141,8 +141,8 @@ describe("git-project-docs", () => {
     expect(ctx.processKey).toBe("git.project.init");
     expect(ctx.slug).toBe("personal-agent");
     expect(ctx.localPath).toBe("/repo/personal-agent");
-    expect(ctx.overviewPath).toBe("git/personal-agent/overview.md");
-    expect(ctx.journalPath).toBe("git/personal-agent/journal/2026-04-30.md");
+    expect(ctx.overviewPath).toBe("knowledge/repos/personal-agent/overview.md");
+    expect(ctx.journalPath).toBe("journal/repos/personal-agent/2026-04-30.md");
     expect(ctx.contextPath).toBeUndefined();
     expect(ctx.templateContent).toBeUndefined();
     db.close();
@@ -442,8 +442,8 @@ describe("git-project-docs", () => {
     });
     expect(repo.classification).toBe("repo-only");
     expect(repoDocTemplateName(repo)).toBe("git-repo.md");
-    expect(repoDocContextFilePath(repo)).toBe("git/scratch-repo/overview.md");
-    expect(repoDocContextPath(repo)).toBe("git/scratch-repo/overview");
+    expect(repoDocContextFilePath(repo)).toBe("knowledge/repos/scratch-repo/overview.md");
+    expect(repoDocContextPath(repo)).toBe("knowledge/repos/scratch-repo/overview");
     expect(
       readGitProjectDocTemplate(dataDir, process.cwd(), "repo-only"),
     ).toContain("type: git-repo");
@@ -458,9 +458,11 @@ describe("git-project-docs", () => {
     applySchema(db);
     const dataDir = tempDir();
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "git", "personal-agent"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "repos", "personal-agent"), {
+      recursive: true,
+    });
     writeFileSync(
-      join(contextDir, "git", "personal-agent", "overview.md"),
+      join(contextDir, "knowledge", "repos", "personal-agent", "overview.md"),
       "user-authored",
       "utf-8",
     );
@@ -487,7 +489,10 @@ describe("git-project-docs", () => {
       }),
     ).toBe(0);
     expect(
-      readFileSync(join(contextDir, "git", "personal-agent", "overview.md"), "utf-8"),
+      readFileSync(
+        join(contextDir, "knowledge", "repos", "personal-agent", "overview.md"),
+        "utf-8",
+      ),
     ).toBe("user-authored");
   });
 
@@ -677,9 +682,9 @@ describe("git-project-docs", () => {
     applySchema(db);
     const dataDir = tempDir();
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
     writeFileSync(
-      join(contextDir, "projects", "scratch.md"),
+      join(contextDir, "plans", "projects", "scratch.md"),
       "leftover project file",
       "utf-8",
     );
@@ -710,7 +715,7 @@ describe("git-project-docs", () => {
       .prepare("SELECT task_context FROM agent_schedule WHERE task_type = 'git.project.init'")
       .get() as { task_context: string };
     const ctx = JSON.parse(row.task_context) as { overviewPath: string };
-    expect(ctx.overviewPath).toBe("git/scratch/overview.md");
+    expect(ctx.overviewPath).toBe("knowledge/repos/scratch/overview.md");
     db.close();
   });
 
@@ -960,7 +965,7 @@ describe("git-project-docs", () => {
       .prepare("SELECT task_context FROM agent_schedule WHERE task_type = 'git.project.init'")
       .get() as { task_context: string };
     const ctx = JSON.parse(row.task_context) as { overviewPath: string };
-    expect(ctx.overviewPath).toBe("git/scratch/overview.md");
+    expect(ctx.overviewPath).toBe("knowledge/repos/scratch/overview.md");
     // The prior-classification file is left in place; the daemon does not
     // touch user-authored content automatically.
     expect(

@@ -119,7 +119,7 @@ DM is who fired the event.
 
 | ProcessKey | When | Tier |
 |---|---|---|
-| `routine.morning_routine` | `dayBoundaryHour` daily (parent envelope; first-run branch detected inline from missing `yesterday.md`) | medium |
+| `routine.morning_routine` | `dayBoundaryHour` daily (parent envelope; first-run branch detected inline from missing `state/yesterday.md`) | medium |
 | `routine.morning_routine_today` | Stage A of every morning routine (today.md synthesis + roadmap maintenance + schedule fan-out) | medium |
 | `routine.morning_routine_journal` | Stage B of every morning routine (daily/<yesterday>.md authoring) | lite |
 | `routine.today_refresh` | Every 4h inside the active window | medium |

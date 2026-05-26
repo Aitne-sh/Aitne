@@ -7,7 +7,7 @@
       "anchor": "<!-- CURATION:knowledge_layout id=\"entry-types\" -->",
       "human_label": "Roadmap section schema",
       "description": "Required sections in roadmap.md and what each holds",
-      "scope_paths": ["roadmap.md"]
+      "scope_paths": ["plans/roadmap.md"]
     }
   ]
 }

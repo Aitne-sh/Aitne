@@ -56,7 +56,7 @@ the same safety layers as the built-ins.
 ## When It Runs / How It Is Triggered
 
 The cron expression in the routine's vault file
-`routines/custom/<slug>.md`. The custom-routine scheduler watches the
+`policies/routines/custom/<slug>.md`. The custom-routine scheduler watches the
 file and re-reads the frontmatter on every change.
 
 ## What It Outputs

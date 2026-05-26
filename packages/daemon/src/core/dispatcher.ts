@@ -614,7 +614,7 @@ export class EventDispatcher {
       // in_progress agent_actions row for Stage A so the agent's
       // `PATCH /api/agent-actions/self` can resolve mid-run, and feed
       // the write-tracker into ⑥ AgentJournalAppender so its atomic
-      // write to `agent/journal.md` does not get re-classified as a
+      // write to `journal/agent.md` does not get re-classified as a
       // user-actor change by the obsidian / git observers.
       audit: this.audit,
       ...(this.writeTracker ? { writeTracker: this.writeTracker } : {}),
@@ -1056,7 +1056,7 @@ export class EventDispatcher {
    * scheduled wake tasks, startup catchup, calendar-poller reactive events).
    *
    * Two layers:
-   *  - **Cold gate**: `rules/management.md` must exist. Before initial setup
+   *  - **Cold gate**: `policies/management.md` must exist. Before initial setup
    *    there is no policy document, no user/profile.md, no today.md — running
    *    routines would produce garbage AND, crucially, any loud prompt-context
    *    write from such a routine can trigger

@@ -5,9 +5,9 @@
       "id": "section-shape",
       "kind": "knowledge_layout",
       "anchor": "<!-- CURATION:knowledge_layout id=\"section-shape\" -->",
-      "human_label": "today.md section shape",
+      "human_label": "state/today.md section shape",
       "description": "Required sections in today.md and what each holds",
-      "scope_paths": ["today.md"]
+      "scope_paths": ["state/today.md"]
     },
     {
       "id": "agent-notes-flavors",
@@ -15,7 +15,7 @@
       "anchor": "<!-- CURATION:convention_notes id=\"agent-notes-flavors\" -->",
       "human_label": "Agent Notes flavors",
       "description": "Sub-shapes the agent uses inside ## Agent Notes (look-ahead, day-time observation, latent profile question)",
-      "scope_paths": ["today.md"]
+      "scope_paths": ["state/today.md"]
     }
   ]
 }

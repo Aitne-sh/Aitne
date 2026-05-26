@@ -19,4 +19,4 @@ Injected into prompts through the root-level context-index.md catalog.
 | `evening.md` | `routine.evening_review` |
 | `weekly.md` | `routine.weekly_review` |
 | `monthly.md` | `routine.monthly_review` |
-| `roadmap.md` | `routine.roadmap_refresh` |
+| `plans/roadmap.md` | `routine.roadmap_refresh` |

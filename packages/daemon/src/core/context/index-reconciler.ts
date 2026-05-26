@@ -48,12 +48,19 @@ export interface ReconcileResult {
 /**
  * Retention caps for rolling journals. Applied at snapshot-build time so
  * capped files neither appear in `add_set` nor churn through remove/add
- * cycles on the next run. Values from §4.7.
+ * cycles on the next run.
+ *
+ * Keys are the path prefixes used after the CONTEXT_VAULT_REDESIGN
+ * six-class restructure (`journal/daily/`, `journal/weekly/`,
+ * `journal/monthly/`).
  */
-export const ROLLING_RETENTION: Record<"daily" | "weekly" | "monthly", number> = {
-  daily: 7,
-  weekly: 4,
-  monthly: 6,
+export const ROLLING_RETENTION: Record<
+  "journal/daily" | "journal/weekly" | "journal/monthly",
+  number
+> = {
+  "journal/daily": 7,
+  "journal/weekly": 4,
+  "journal/monthly": 6,
 };
 
 /**
@@ -63,28 +70,27 @@ export const ROLLING_RETENTION: Record<"daily" | "weekly" | "monthly", number> =
  */
 export function shouldIndexPath(relativePath: string): boolean {
   if (!relativePath.endsWith(".md")) return false;
-  if (relativePath === CONTEXT_RELATIVE_PATHS.contextIndex) return false;
+  if (relativePath === CONTEXT_RELATIVE_PATHS.rootIndex) return false;
   const segments = relativePath.split("/");
   const basename = segments[segments.length - 1];
   if (basename === "_index.md") return false;
 
-  if (relativePath.startsWith("agent/scratch/")) return false;
-  if (relativePath.startsWith("inbox/")) return false;
-  if (relativePath.startsWith("routines/custom/")) return false;
+  if (relativePath.startsWith("state/scratch/")) return false;
+  if (relativePath.startsWith("state/inbox/")) return false;
+  if (relativePath.startsWith("policies/routines/custom/")) return false;
 
   if (relativePath === CONTEXT_RELATIVE_PATHS.today) return true;
   if (relativePath === CONTEXT_RELATIVE_PATHS.yesterday) return true;
   if (relativePath === CONTEXT_RELATIVE_PATHS.roadmap) return true;
   if (relativePath === CONTEXT_RELATIVE_PATHS.agent.journal) return true;
 
-  if (relativePath.startsWith("user/")) return true;
-  if (relativePath.startsWith("rules/")) return true;
-  if (relativePath.startsWith("routines/")) return true;
-  if (relativePath.startsWith("projects/")) return true;
-  if (relativePath.startsWith("dossiers/")) return true;
-  if (relativePath.startsWith("daily/")) return true;
-  if (relativePath.startsWith("weekly/")) return true;
-  if (relativePath.startsWith("monthly/")) return true;
+  if (relativePath.startsWith("identity/")) return true;
+  if (relativePath.startsWith("policies/")) return true;
+  if (relativePath.startsWith("plans/projects/")) return true;
+  if (relativePath.startsWith("knowledge/dossiers/")) return true;
+  if (relativePath.startsWith("journal/daily/")) return true;
+  if (relativePath.startsWith("journal/weekly/")) return true;
+  if (relativePath.startsWith("journal/monthly/")) return true;
 
   return false;
 }
@@ -103,12 +109,12 @@ export function applyRollingRetention(
   const passthrough: FilesystemSnapshotEntry[] = [];
 
   for (const entry of snapshot) {
-    const prefix = entry.path.startsWith("daily/")
-      ? "daily"
-      : entry.path.startsWith("weekly/")
-        ? "weekly"
-        : entry.path.startsWith("monthly/")
-          ? "monthly"
+    const prefix = entry.path.startsWith("journal/daily/")
+      ? "journal/daily"
+      : entry.path.startsWith("journal/weekly/")
+        ? "journal/weekly"
+        : entry.path.startsWith("journal/monthly/")
+          ? "journal/monthly"
           : null;
     if (prefix === null) {
       passthrough.push(entry);
@@ -205,29 +211,22 @@ export function reconcileContextIndex(
 }
 
 /**
- * Render a full `context-index.md` file from a row list. `updated` goes
- * into the frontmatter; rows are emitted in the order supplied.
+ * Render the reconciler-section block body (table + notes) without
+ * frontmatter or top-level heading. The host file (`_index.md`) owns
+ * those — V15 splices this body into the `<!-- reconciler-section -->`
+ * region while preserving user-curated content elsewhere.
+ *
+ * `updated` is recorded inline so the body itself is self-dating (the host
+ * frontmatter may have its own `updated:` field maintained by the user).
  */
-export function renderContextIndex(
+export function renderReconcilerBlockBody(
   rows: ContextIndexRow[],
   updated: string,
 ): string {
   const lines: string[] = [];
-  lines.push("---");
-  lines.push("type: index");
-  lines.push("owner: agent");
-  lines.push(`updated: ${updated}`);
-  lines.push("---");
-  lines.push("# Context Index");
-  lines.push("");
-  lines.push(
-    "Prompt-injection hub for dossier-backed flows (B-004). This file stays in",
-  );
-  lines.push(
-    "English so review / routine prompts read a stable, backend-neutral summary.",
-  );
-  lines.push("");
   lines.push("## Files");
+  lines.push("");
+  lines.push(`_Reconciled by daemon on ${updated}._`);
   lines.push("");
   lines.push("| Path | Purpose | Review flows | Last touched |");
   lines.push("|---|---|---|---|");
@@ -246,6 +245,62 @@ export function renderContextIndex(
     "- `Review flows` tokens: `all`, `hourly`, `morning`, `evening`, `weekly`,",
   );
   lines.push("  `monthly`, `roadmap`, or `-` when no flow should auto-load the file.");
+  return lines.join("\n");
+}
+
+/**
+ * Default `_index.md` scaffold used when the file is absent. The reconciler
+ * splices the rendered body into the `<!-- reconciler-section -->` block; on
+ * subsequent runs the user's edits to the prose around it are preserved.
+ */
+export function defaultRootIndexScaffold(updated: string): string {
+  return [
+    "---",
+    "type: index",
+    "owner: shared",
+    `updated: ${updated}`,
+    "---",
+    "# Aitne Vault",
+    "",
+    "Six top-level folders sit under this root, each with a single",
+    "authority/lifecycle contract:",
+    "",
+    "- `identity/` — who the user is (user-authored, slow-change)",
+    "- `state/` — operational state, today, scratch (agent-authored)",
+    "- `plans/` — roadmap and active projects (mixed authorship)",
+    "- `journal/` — append-only narrative + reviews + per-repo journals",
+    "- `knowledge/` — wiki, dossiers, repos, management-registry entities",
+    "- `policies/` — rules, routines, integrations, user skills",
+    "",
+    "The block below is maintained by the daemon reconciler — edits inside",
+    "the `reconciler-section` markers are overwritten. Anything outside the",
+    "block is yours.",
+    "",
+    "<!-- reconciler-section -->",
+    "<!-- /reconciler-section -->",
+    "",
+  ].join("\n");
+}
+
+/**
+ * @deprecated Retained for the migration's pre-V15 peer tests. Runtime
+ * callers must use `renderReconcilerBlockBody` + `mergeReconcilerBlock`
+ * so the user-curated portion of `_index.md` is preserved. Will be removed
+ * once all peer tests adopt the new shape.
+ */
+export function renderContextIndex(
+  rows: ContextIndexRow[],
+  updated: string,
+): string {
+  const lines: string[] = [];
+  lines.push("---");
+  lines.push("type: index");
+  lines.push("owner: agent");
+  lines.push(`updated: ${updated}`);
+  lines.push("---");
+  lines.push("# Context Index");
+  lines.push("");
+  lines.push(renderReconcilerBlockBody(rows, updated));
   lines.push("");
   return lines.join("\n");
 }
@@ -291,41 +346,45 @@ function defaultCells(
       reviewFlows: "all",
     });
   }
-  if (path.startsWith("user/")) {
-    const area = path.slice("user/".length).replace(/\.md$/, "");
+  if (path.startsWith("identity/")) {
+    const area = path.slice("identity/".length).replace(/\.md$/, "");
     return emit({
-      purpose: title ?? `User ${area}`,
+      purpose: title ?? `Identity ${area}`,
       reviewFlows: "morning, monthly",
     });
   }
 
-  if (path.startsWith("rules/")) {
-    const name = path.slice("rules/".length).replace(/\.md$/, "");
-    return emit({
-      purpose: title ?? `Rule: ${name}`,
-      reviewFlows: "all",
-    });
-  }
-
-  if (path.startsWith("routines/")) {
-    const cadence = path.slice("routines/".length).replace(/\.md$/, "");
+  // policies/routines/ — before the generic policies/ branch.
+  if (path.startsWith("policies/routines/")) {
+    const cadence = path
+      .slice("policies/routines/".length)
+      .replace(/\.md$/, "");
     const flow = REVIEW_FLOW_VOCAB.has(cadence) ? cadence : "-";
     return emit({
       purpose: title ?? `${capitalize(cadence)} routine rulebook`,
       reviewFlows: flow,
     });
   }
+  if (path.startsWith("policies/")) {
+    const name = path.slice("policies/".length).replace(/\.md$/, "");
+    return emit({
+      purpose: title ?? `Rule: ${name}`,
+      reviewFlows: "all",
+    });
+  }
 
-  if (path.startsWith("projects/")) {
-    const slug = path.slice("projects/".length).replace(/\.md$/, "");
+  if (path.startsWith("plans/projects/")) {
+    const slug = path.slice("plans/projects/".length).replace(/\.md$/, "");
     return emit({
       purpose: title ?? `Project ${slug}`,
       reviewFlows: "weekly, monthly, roadmap",
     });
   }
 
-  if (path.startsWith("dossiers/")) {
-    const flow = path.slice("dossiers/".length).replace(/\.md$/, "");
+  if (path.startsWith("knowledge/dossiers/")) {
+    const flow = path
+      .slice("knowledge/dossiers/".length)
+      .replace(/\.md$/, "");
     const normalizedFlow = REVIEW_FLOW_VOCAB.has(flow) ? flow : "-";
     return emit({
       purpose: title ?? `${capitalize(flow)} dossier`,
@@ -333,19 +392,19 @@ function defaultCells(
     });
   }
 
-  if (path.startsWith("daily/")) {
+  if (path.startsWith("journal/daily/")) {
     return emit({
       purpose: title ?? "Synthesized daily journal",
       reviewFlows: "-",
     });
   }
-  if (path.startsWith("weekly/")) {
+  if (path.startsWith("journal/weekly/")) {
     return emit({
       purpose: title ?? "Weekly review artifact",
       reviewFlows: "-",
     });
   }
-  if (path.startsWith("monthly/")) {
+  if (path.startsWith("journal/monthly/")) {
     return emit({
       purpose: title ?? "Monthly review artifact",
       reviewFlows: "-",

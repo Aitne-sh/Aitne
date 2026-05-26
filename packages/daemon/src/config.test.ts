@@ -400,17 +400,20 @@ describe("isRoadmapStale", () => {
   });
 
   it("returns true when roadmap.md contains placeholder text", () => {
-    writeFileSync(join(tmpDir, "roadmap.md"), "# Roadmap\n(Not yet configured)\n");
+    mkdirSync(join(tmpDir, "plans"), { recursive: true });
+    writeFileSync(join(tmpDir, "plans", "roadmap.md"), "# Roadmap\n(Not yet configured)\n");
     expect(isRoadmapStale(tmpDir)).toBe(true);
   });
 
   it("returns false for a fresh roadmap without placeholder", () => {
-    writeFileSync(join(tmpDir, "roadmap.md"), "# Roadmap\n- Build the thing\n");
+    mkdirSync(join(tmpDir, "plans"), { recursive: true });
+    writeFileSync(join(tmpDir, "plans", "roadmap.md"), "# Roadmap\n- Build the thing\n");
     expect(isRoadmapStale(tmpDir)).toBe(false);
   });
 
   it("returns true for a roadmap older than maxAgeDays", () => {
-    const roadmapPath = join(tmpDir, "roadmap.md");
+    const roadmapPath = join(tmpDir, "plans", "roadmap.md");
+    mkdirSync(join(tmpDir, "plans"), { recursive: true });
     writeFileSync(roadmapPath, "# Roadmap\n- Stuff\n");
     // Backdate mtime by 20 days
     const oldTime = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
@@ -419,7 +422,8 @@ describe("isRoadmapStale", () => {
   });
 
   it("returns false for a roadmap within custom maxAgeDays", () => {
-    writeFileSync(join(tmpDir, "roadmap.md"), "# Roadmap\n- Stuff\n");
+    mkdirSync(join(tmpDir, "plans"), { recursive: true });
+    writeFileSync(join(tmpDir, "plans", "roadmap.md"), "# Roadmap\n- Stuff\n");
     expect(isRoadmapStale(tmpDir, 30)).toBe(false);
   });
 });

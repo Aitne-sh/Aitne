@@ -1,13 +1,13 @@
 {context}
 
-## Task: Initial Setup — Create rules/management.md
+## Task: Initial Setup — Create policies/management.md
 
 The dashboard wizard already captured `settings.primary_language` and
 `settings.vault_mode`. Steps 4–6 (Mail / Calendar / Note) configured
 the user's integrations. Your role:
 derive an initial Source-of-Truth table from those integrations,
 confirm it with the user, gather two remaining preferences, and
-generate rules/management.md.
+generate policies/management.md.
 
 Output language: follow `<output_language_policy>`. The conversation
 matches the user's input language.
@@ -19,7 +19,7 @@ assistant messages.
 | Turn | Trigger | What you emit |
 |------|---------|---------------|
 | Turn 1 | No prior assistant message | One natural-language message: greeting + derived Source-of-Truth table + remaining questions. **No code blocks. No curl.** |
-| Turn 2 | The most recent prior assistant message was Turn 1 and the user has now replied | `management-rules` block **FIRST**, then optional `character` block, then silent PUT /api/context/user/profile + any user/*.md PATCHes |
+| Turn 2 | The most recent prior assistant message was Turn 1 and the user has now replied | `management-rules` block **FIRST**, then optional `character` block, then silent PUT /api/context/identity/profile + any user/*.md PATCHes |
 | Turn 3+ | User requested revisions after Turn 2 | Revised `management-rules` block only (cap: 2 revision rounds). No curl writes — they already ran in Turn 2. |
 
 ### Step 0 (silent) — Derive Source-of-Truth from context tags
@@ -85,18 +85,18 @@ In this exact order:
 1. Emit the `management-rules` code block **FIRST** — the dashboard
    reveals the preview as soon as the block lands, so emitting it
    first makes visible-progress immediate. Use the template in
-   "rules/management.md Format" below.
+   "policies/management.md Format" below.
 
 2. If the user stated a tone / style preference (not "no preference" /
    "skip"), emit a `character` code block immediately after — see
    "Character code block format" below. Omit the block entirely if
    they skipped.
-   **Do NOT put communication style inside rules/management.md, and do NOT put it inside user/profile.md.**
+   **Do NOT put communication style inside policies/management.md, and do NOT put it inside identity/profile.md.**
    Tone / style / voice / formality / emoji / language preferences
    live in the `character` runtime-config field only.
 
-3. Silently PUT /api/context/user/profile using the
-   "user/profile.md Format" template below. Working hours and quiet
+3. Silently PUT /api/context/identity/profile using the
+   "identity/profile.md Format" template below. Working hours and quiet
    hours pre-populate with defaults (Weekdays 09:00–18:00,
    Quiet hours 22:00–08:00) — do not ask. Fill Platforms from the
    **derived Source-of-Truth table** (Step 0). Leave Identity blank —
@@ -108,18 +108,18 @@ In this exact order:
 
    | Fact type | File |
    |-----------|------|
-   | Named colleagues, family, friends | user/people.md |
-   | Current company, role specifics, ongoing projects | user/work.md |
-   | Specific frameworks, years of experience | user/expertise.md |
-   | Long-term goals, aspirations | user/goals.md |
-   | Hobbies, lifestyle habits, dietary notes | user/personal.md |
+   | Named colleagues, family, friends | identity/people.md |
+   | Current company, role specifics, ongoing projects | identity/work.md |
+   | Specific frameworks, years of experience | identity/expertise.md |
+   | Long-term goals, aspirations | identity/goals.md |
+   | Hobbies, lifestyle habits, dietary notes | identity/personal.md |
 
    See the user-profile skill for the read-before-write PATCH recipe
    and the `section_not_found` → `append_to_file` first-write
-   fallback. (user/profile.md `## Expertise` keeps a one-line summary
-   only — detailed framework history goes to user/expertise.md.)
+   fallback. (identity/profile.md `## Expertise` keeps a one-line summary
+   only — detailed framework history goes to identity/expertise.md.)
 
-**Important**: Do NOT curl-write rules/management.md yourself. The
+**Important**: Do NOT curl-write policies/management.md yourself. The
 dashboard persists it via `POST /setup/save-rules` when the user
 clicks Save & Finish. Do NOT PATCH /api/config/character either —
 the dashboard stages the `character` block and writes it atomically
@@ -132,7 +132,7 @@ re-emit it. Hard cap: **at most 2 revision rounds** total. Do NOT
 re-run the Turn-2 curl writes — they already persisted. The dashboard
 saves the revised rules block on Save & Finish.
 
-### rules/management.md Format
+### policies/management.md Format
 
 Output language: section headers stay English (the daemon parses
 them); descriptive bullets under `## Autonomy Levels`, `## Notification
@@ -140,7 +140,7 @@ Rules`, `## Schedule`, `## Project Management` follow `<settings
 primary_language>`. Also stay English: `## Agent Identity` field
 labels (`- AI name:`, `- WhatsApp label:`), Source-of-Truth table
 headers and Domain labels, and product/brand cells (`Google
-Calendar`, `Obsidian`, `Notion`, `today.md`, `projects/*.md`).
+Calendar`, `Obsidian`, `Notion`, `state/today.md`, `projects/*.md`).
 
 Fill the Source of Truth table from the rows you confirmed in Turn 1.
 Use today's YYYY-MM-DD for `updated` (the date below is an example).
@@ -170,7 +170,7 @@ updated: 2026-04-21
 - today.md updates: Autonomous
 - Notifications: Autonomous (within rules)
 - External service operations: Confirm with user
-- rules/management.md changes: Always confirm
+- policies/management.md changes: Always confirm
 
 ## Notification Rules
 - Quiet hours: 22:00–08:00 (default — adjustable in Settings)
@@ -202,9 +202,9 @@ most one block per turn.
 Speak casually. Tight bullets. No emojis.
 ```
 
-### user/profile.md Format
+### identity/profile.md Format
 
-When you PUT /api/context/user/profile, write the full file in this
+When you PUT /api/context/identity/profile, write the full file in this
 shape. Use today's YYYY-MM-DD for `updated`. Do not omit
 `## Notification Preferences` — Morning Routine reads it directly.
 
@@ -214,7 +214,7 @@ produced malformed bodies in this flow (server saw literal `@-` and
 returned 500).
 
 ```bash
-curl -s -X PUT http://localhost:8321/api/context/user/profile \
+curl -s -X PUT http://localhost:8321/api/context/identity/profile \
   -H 'Content-Type: application/json' \
   -d '{"content": "---\ntype: user\nowner: shared\nupdated: 2026-04-23\n---\n# User\n\n## Identity\n\n## Work Pattern\n- Working hours: Weekdays 09:00–18:00\n\n## Platforms\n- Schedule: Google Calendar\n- Notes: Obsidian\n- Projects: Notion\n\n## Expertise\n\n## Notification Preferences\n- Quiet hours: 22:00–08:00\n\n## Learned Context\n\n## Raw Signals\n"}'
 ```

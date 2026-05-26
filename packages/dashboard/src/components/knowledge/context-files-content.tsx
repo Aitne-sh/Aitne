@@ -81,40 +81,48 @@ function HighlightedSnippet({ html }: { html: string }) {
 // Order matches the user-visible nav order on the Knowledge page.
 const TOP_FILES = [
   "_index",
-  "user/profile",
-  "user/_index",
+  "identity/profile",
+  "identity/_index",
   "today",
   "yesterday",
   "roadmap",
-  "rules/management",
-  "rules/mcp",
-  "rules/journal-format",
-  "rules/journal-export",
-  "rules/redaction",
-  "agent/journal",
+  "policies/management",
+  "policies/mcp",
+  "policies/journal-format",
+  "policies/journal-export",
+  "policies/redaction",
+  "journal/agent",
   "context-index",
 ];
+// CONTEXT_VAULT_REDESIGN_PLAN §3.1 — six authority classes. Each entry
+// here is a leaf directory accepted by `/api/context/list/:dir` (see
+// `read.ts:allowedDirs`). Wider classes (`identity/` for example) are
+// surfaced as single nodes since the API's flat-list output covers the
+// whole sub-tree; deeper trees (`journal/*`, `state/*`, `plans/*`,
+// `knowledge/*`, `policies/*`) are listed as their leaf sub-dirs so each
+// shows up as its own collapsible section in the sidebar.
 const DIRS = [
-  "user",
-  "rules",
-  "routines",
-  "projects",
-  "git",
-  "daily",
-  "weekly",
-  "monthly",
-  "dossiers",
-  "inbox",
+  "identity",
+  "state/inbox",
+  "plans/projects",
+  "journal/daily",
+  "journal/weekly",
+  "journal/monthly",
+  "knowledge/repos",
+  "knowledge/dossiers",
+  "policies",
+  "policies/routines",
+  "policies/management-captures",
 ];
 const REGENERABLE_FILES = new Set(["today", "roadmap"]);
 const SENSITIVE_FILES: Record<string, { filename: string; description: string }> = {
-  "rules/management": {
-    filename: "rules/management.md",
+  "policies/management": {
+    filename: "policies/management.md",
     description:
       "defines the agent's behavioral contract. Edits here can change how the agent acts.",
   },
-  "agent/journal": {
-    filename: "agent/journal.md",
+  "journal/agent": {
+    filename: "journal/agent.md",
     description:
       "is the agent's internal reflection journal — append-only from the Weekly Review routine. Manual edits can remove the agent's own improvement history and break the append-only contract. Prefer leaving it alone unless you are deliberately pruning noise.",
   },
@@ -202,14 +210,21 @@ function FileTreeDir({
   }
 
   const tree = useMemo(() => {
+    // CONTEXT_VAULT_REDESIGN_PLAN §5 — every class root carries an
+    // `_index.md` table-of-contents. Skip it from the per-class flat
+    // listing since it's already surfaced under TOP_FILES (or rendered
+    // as part of the navigation sidebar elsewhere).
+    const dirsWithOwnIndex = new Set([
+      "identity",
+      "policies",
+      "policies/routines",
+      "policies/management-captures",
+      "plans/projects",
+      "knowledge/dossiers",
+    ]);
     const files =
       data?.files.filter(
-        (f) =>
-          !(
-            ["user", "rules", "routines", "projects", "dossiers"].includes(
-              dir,
-            ) && f.name === "_index.md"
-          ),
+        (f) => !(dirsWithOwnIndex.has(dir) && f.name === "_index.md"),
       ) ?? [];
     return buildContextTree(files);
   }, [data?.files, dir]);
@@ -275,7 +290,7 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
   function ContextFilesContent(_props, ref) {
   // Honor `?path=<relative>` so deep-links (e.g. "Open overview.md" /
   // "Open today's journal" buttons on the git management section) land on
-  // a specific file instead of the default `user/profile`. The route
+  // a specific file instead of the default `identity/profile`. The route
   // accepts paths without the `.md` extension; strip it defensively in
   // case a link carries one anyway.
   const searchParams = useSearchParams();
@@ -284,7 +299,7 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
     return raw ? raw.replace(/\.(md|base)$/i, "") : null;
   })();
   const [selectedPath, setSelectedPath] = useState<string | null>(
-    urlPath ?? "user/profile",
+    urlPath ?? "identity/profile",
   );
   // Re-sync when the URL path changes after mount (Next.js keeps the page
   // mounted across client-side navigations). Using the "set state during
@@ -421,7 +436,7 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
           detail === "forbidden"
             ? "This file is read-only — it's not in the daemon's write whitelist."
             : detail === "morning_routine_lock_held"
-              ? "today.md is locked by the morning routine. Please try again shortly."
+              ? "state/today.md is locked by the morning routine. Please try again shortly."
               : detail === "validation_error"
                 ? "Content failed validation."
                 : `Save failed: ${err.message}`,
@@ -541,7 +556,7 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
         const detail = typeof body?.error === "string" ? body.error : null;
         setSaveError(
           detail === "morning_routine_lock_held"
-            ? "today.md is locked by the morning routine. Please try again shortly."
+            ? "state/today.md is locked by the morning routine. Please try again shortly."
             : detail === "forbidden"
               ? "This snapshot cannot be restored because the file is not writable."
               : detail === "validation_error"

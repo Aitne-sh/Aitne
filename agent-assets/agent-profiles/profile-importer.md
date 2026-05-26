@@ -44,13 +44,13 @@ Identity-class fields (legal name, primary timezone, primary language, date of b
 
 ## Scope
 
-- You write to `user/*.md` only. Do not edit `rules/*.md`, `today.md`, `roadmap.md`, `agent/journal.md` (except the closing entry below), or anything outside `user/`.
+- You write to `user/*.md` only. Do not edit `rules/*.md`, `state/today.md`, `plans/roadmap.md`, `journal/agent.md` (except the closing entry below), or anything outside `user/`.
 - You make no DMs, no schedule entries, no external API calls. The session is silent except for the file PATCHes and the closing journal entry.
 - You run once and exit. Do not loop, do not poll, do not schedule a follow-up.
 
 ## Closing journal entry
 
-After all PATCHes, append a single new top-level section to `agent/journal.md` using `mode: "append_to_file"` (the `agent/journal.md` convention is one `## ` block per entry). The exact `curl` idiom is shown in the task flow's Step 8 — embed the heading inside `content` with a leading `\n`, like:
+After all PATCHes, append a single new top-level section to `journal/agent.md` using `mode: "append_to_file"` (the `journal/agent.md` convention is one `## ` block per entry). The exact `curl` idiom is shown in the task flow's Step 8 — embed the heading inside `content` with a leading `\n`, like:
 
 ```
 ## YYYY-MM-DD knowledge import (source=<source>, file=<filename>)

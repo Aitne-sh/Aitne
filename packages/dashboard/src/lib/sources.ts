@@ -11,7 +11,7 @@ import { normalizeAppLabel, type ManagedTask } from "@aitne/shared";
  *   - `mergeActivitySources(active, activitySources)` — union with
  *     recently-stopped sources from `GET /api/activity-sources` (the
  *     daemon's `enumerateActivitySources` mirror). Used by the
- *     Memory → Activity tab so a stopped task's `_activity/<source>.md`
+ *     Memory → Activity tab so a stopped task's `state/activity/<source>.md`
  *     stays reachable for its 90-day post-stop window (followups doc
  *     Issue 3).
  *

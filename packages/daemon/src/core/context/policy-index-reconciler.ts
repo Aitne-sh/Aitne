@@ -5,10 +5,10 @@
  * (`policy-index-runner.ts`) drives it.
  *
  * Scope:
- *   - Render `rules/policies/_index.md` body (table of active / paused +
+ *   - Render `policies/management-captures/_index.md` body (table of active / paused +
  *     a Removed table) from a snapshot of policy frontmatters.
  *   - Render the `## Active Policies` section content for
- *     `rules/management.md` (a shorter table — slug, status, cadence, why).
+ *     `policies/management.md` (a shorter table — slug, status, cadence, why).
  *   - Provide a section-aware upsert that splices the section into existing
  *     management.md content, mirroring `upsertManagementRulesAgentIdentity`.
  *
@@ -23,11 +23,11 @@
 export type PolicyStatus = "active" | "paused" | "removed";
 
 export interface PolicySnapshotEntry {
-  /** Filename stem under `rules/policies/`. */
+  /** Filename stem under `policies/management-captures/`. */
   slug: string;
   status: PolicyStatus;
   /**
-   * Cron expression read from the linked `routines/custom/<slug>.md`'s
+   * Cron expression read from the linked `policies/routines/custom/<slug>.md`'s
    * frontmatter. Null when no routine is linked or the routine file is
    * missing. Frozen at snapshot time — manual cron edits to the routine
    * propagate on the next reconcile pass.
@@ -87,7 +87,7 @@ export function bucketPolicies(
 }
 
 /**
- * Render the body of `rules/policies/_index.md` (frontmatter + sections).
+ * Render the body of `policies/management-captures/_index.md` (frontmatter + sections).
  * `updated` populates the frontmatter `updated:` field.
  */
 export function renderPolicyIndex(
@@ -109,7 +109,7 @@ export function renderPolicyIndex(
     "are overwritten on the next reconcile pass — to add or modify a policy,",
   );
   lines.push(
-    "edit its `rules/policies/<slug>.md` file (or use the `management-policy`",
+    "edit its `policies/management-captures/<slug>.md` file (or use the `management-policy`",
   );
   lines.push("skill).");
   lines.push("");
@@ -135,7 +135,7 @@ export function renderPolicyIndex(
 }
 
 /**
- * Render the `## Active Policies` section of `rules/management.md`. The
+ * Render the `## Active Policies` section of `policies/management.md`. The
  * returned string starts with `## Active Policies\n` and does NOT include
  * a trailing newline (the upsert helper appends one).
  *
@@ -153,7 +153,7 @@ export function renderActivePoliciesSection(
     "Auto-maintained by the daemon (do not edit). Source files live under",
   );
   lines.push(
-    "`rules/policies/<slug>.md`; capture new policies via the",
+    "`policies/management-captures/<slug>.md`; capture new policies via the",
   );
   lines.push("`management-policy` skill. Full index: [[rules/policies/_index.md]]");
   lines.push("");

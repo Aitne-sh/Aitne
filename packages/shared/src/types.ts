@@ -192,7 +192,7 @@ export interface KnowledgeImportEvent extends Event {
    *  backend/model override on this exact value so a mis-emitted event
    *  cannot smuggle a backend pick from another adapter. */
   platform: string;
-  /** Context-relative path of the scratch copy (under `agent/scratch/`). */
+  /** Context-relative path of the scratch copy (under `state/scratch/`). */
   scratchPath: string;
   /** Original uploaded filename, for logs and the closing journal entry. */
   filename: string;

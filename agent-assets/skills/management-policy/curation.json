@@ -7,7 +7,7 @@
       "anchor": "<!-- CURATION:knowledge_layout id=\"policy-file-shape\" -->",
       "human_label": "Policy file section shape",
       "description": "Required sections inside rules/policies/<slug>.md and what each holds",
-      "scope_paths": ["rules/policies/*.md"]
+      "scope_paths": ["policies/management-captures/*.md"]
     }
   ]
 }

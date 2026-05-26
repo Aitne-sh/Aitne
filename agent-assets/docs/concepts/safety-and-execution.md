@@ -87,10 +87,10 @@ disallowed-tools floor.
 
 | Action | Risk tier |
 |---|---|
-| Read `today.md` | read |
-| Append to `agent/journal.md` | notify |
+| Read `state/today.md` | read |
+| Append to `journal/agent.md` | notify |
 | Send a DM | notify |
-| Update `roadmap.md` | approve |
+| Update `plans/roadmap.md` | approve |
 | Recursive delete | absolute-block (refused) |
 | `chmod` on a daemon-owned file | absolute-block |
 

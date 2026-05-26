@@ -52,3 +52,18 @@ export {
   type ContentWriteValidationOptions,
   type ContextContentValidationError,
 } from "./prepare-write.js";
+
+export {
+  parseVaultFrontmatter,
+  shouldParseVaultFrontmatter,
+  VAULT_FRONTMATTER_AUTHORITIES,
+  VAULT_FRONTMATTER_KINDS,
+  VAULT_FRONTMATTER_MUTABILITIES,
+  type VaultFrontmatter,
+  type VaultFrontmatterAdvisory,
+  type VaultFrontmatterAdvisoryCode,
+  type VaultFrontmatterAuthority,
+  type VaultFrontmatterKind,
+  type VaultFrontmatterMutability,
+  type VaultFrontmatterParseResult,
+} from "./frontmatter.js";

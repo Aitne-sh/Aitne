@@ -11,8 +11,8 @@ import type { RetemplateStatusRecord } from "@/lib/hooks/use-git-templates";
 
 const baseEntry = {
   contextPath: "projects/x",
-  contextFile: "projects/x.md",
-  backupRelPath: "projects/x.md",
+  contextFile: "plans/projects/x.md",
+  backupRelPath: "plans/projects/x.md",
   classification: "project" as const,
 };
 

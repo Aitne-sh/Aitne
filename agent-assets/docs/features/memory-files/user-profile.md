@@ -57,8 +57,8 @@ every session and appends only with explicit permission.
 - Pinned at the top of every session prompt so the agent has the
   same baseline understanding turn-to-turn.
 - The companion files in the `user/` directory split the dossier into
-  topic-shaped slices: `user/people.md`, `user/work.md`,
-  `user/expertise.md`, `user/personal.md`, `user/goals.md`. The agent
+  topic-shaped slices: `identity/people.md`, `identity/work.md`,
+  `identity/expertise.md`, `identity/personal.md`, `identity/goals.md`. The agent
   loads them on demand instead of inlining everything.
 
 ## When It Runs / How It Is Triggered

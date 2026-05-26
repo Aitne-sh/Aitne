@@ -2,7 +2,7 @@
  * Profile-interview queue — Layer 1 (skeleton-time deterministic
  * pre-tick).
  *
- * Walks every `[ ]` row in `agent/profile-questions.md ## Pending` and
+ * Walks every `[ ]` row in `state/profile-questions.md ## Pending` and
  * marks rows whose target slot is already filled (per
  * `isSlotFilled` — §3.5.6 of the design). Appends a matching
  * `(reconciled:skeleton)` entry to `## Answered` for each tick.
@@ -18,6 +18,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { CONTEXT_RELATIVE_PATHS } from "../context-paths.js";
 import { isSlotFilled } from "./slot-filled.js";
 
 export interface SeedResult {
@@ -45,10 +46,10 @@ export interface PendingRowMeta {
 const PENDING_ROW_RE =
   /^- \[([ xX])\] \((HIGH|MID|LOW)\) ([a-z][a-z0-9_]*)\s*::\s*(.+)$/;
 const HEADING_RE = /^(#{2,6})\s+(.+?)\s*$/;
-const QUEUE_PATH_REL = "agent/profile-questions.md";
+const QUEUE_PATH_REL = CONTEXT_RELATIVE_PATHS.agent.profileQuestions;
 
 /**
- * Run the deterministic Layer 1 pre-tick on `agent/profile-questions.md`
+ * Run the deterministic Layer 1 pre-tick on `state/profile-questions.md`
  * inside `contextDir`. Returns counts for telemetry / logging. Safe to
  * call when the queue file does not exist (returns zeros).
  */

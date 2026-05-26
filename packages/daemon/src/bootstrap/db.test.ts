@@ -16,7 +16,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySchema } from "../db/schema.js";
@@ -35,7 +42,15 @@ import {
   createWikiTokenResolver,
   initDatabase,
   loadPersistedSettings,
+  resolveVaultRestructureConsent,
+  VAULT_RESTRUCTURE_ACK_ENV_VAR,
 } from "./db.js";
+import { MIGRATION_ID as CONTEXT_VAULT_MIGRATION_ID } from "../db/migrations/context-vault-restructure.js";
+import {
+  getVaultRestructureAck,
+  getVaultRestructurePendingConsent,
+  setVaultRestructureAck,
+} from "../db/runtime-state.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -629,4 +644,476 @@ describe("bootstrap/db initDatabase", () => {
     expect(count.n).toBe(0);
     result.db.close();
   });
+});
+
+// ── resolveVaultRestructureConsent ───────────────────────────────────────────
+//
+// CONTEXT_VAULT_REDESIGN_PLAN.md V16. Tests pin the three branches:
+// plain-mode bypass, Obsidian + ack (env or stored), and Obsidian + no
+// ack (defer). All checks operate on the runtime_state row writes so
+// future call sites can pin behavior without booting the whole daemon.
+
+describe("bootstrap/db resolveVaultRestructureConsent", () => {
+  let db: Database.Database;
+  let obsidianVault: string;
+
+  beforeEach(() => {
+    db = openDb();
+    // Obsidian-mode vaults live OUTSIDE <dataDir>. Use a real tmp dir
+    // so the legacy-dirs / marker-file probes hit a writable filesystem.
+    obsidianVault = mkdtempSync(join(tmpdir(), "pa-obs-"));
+    // Seed a legacy-shape dir so the "would have work" probe returns
+    // true — the consent gate is only meaningful for vaults with
+    // actual legacy content to reorganize.
+    mkdirSync(join(obsidianVault, "user"), { recursive: true });
+  });
+  afterEach(() => {
+    db.close();
+    rmSync(obsidianVault, { recursive: true, force: true });
+  });
+
+  const dataDir = "/tmp/aitne-data";
+
+  it("plain-mode vault (under <dataDir>/context) → proceed", () => {
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: `${dataDir}/context`,
+      env: {},
+    });
+    expect(decision.deferred).toBe(false);
+    expect(decision.migrationsToRun).toBeUndefined();
+    expect(getVaultRestructurePendingConsent(db)).toBeNull();
+  });
+
+  it("Obsidian vault with existing stored ack → proceed", () => {
+    setVaultRestructureAck(db, { at: "2026-05-25T00:00:00Z", source: "dashboard" });
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: {},
+    });
+    expect(decision.deferred).toBe(false);
+    expect(decision.migrationsToRun).toBeUndefined();
+  });
+
+  it("Obsidian vault + env override → records env ack and proceeds", () => {
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: { [VAULT_RESTRUCTURE_ACK_ENV_VAR]: "1" },
+      nowIso: () => "2026-05-25T12:00:00Z",
+    });
+    expect(decision.deferred).toBe(false);
+    const ack = getVaultRestructureAck(db);
+    expect(ack).toEqual({ at: "2026-05-25T12:00:00Z", source: "env" });
+  });
+
+  it("Obsidian vault + no ack → defer, filter migration, record pending", () => {
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: {},
+      nowIso: () => "2026-05-25T12:00:00Z",
+    });
+    expect(decision.deferred).toBe(true);
+    expect(decision.migrationsToRun).toBeDefined();
+    expect(
+      decision.migrationsToRun!.some((m) => m.id === CONTEXT_VAULT_MIGRATION_ID),
+    ).toBe(false);
+    const pending = getVaultRestructurePendingConsent(db);
+    expect(pending).toEqual({
+      since: "2026-05-25T12:00:00Z",
+      reason: "obsidian_consent_required",
+      contextDir: obsidianVault,
+    });
+    expect(getVaultRestructureAck(db)).toBeNull();
+  });
+
+  it("Obsidian vault + env ack='0' → treated as not set, defers", () => {
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: { [VAULT_RESTRUCTURE_ACK_ENV_VAR]: "0" },
+    });
+    expect(decision.deferred).toBe(true);
+  });
+
+  it("Obsidian vault + env ack='  ' (whitespace) → treated as not set, defers", () => {
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: { [VAULT_RESTRUCTURE_ACK_ENV_VAR]: "  " },
+    });
+    expect(decision.deferred).toBe(true);
+  });
+
+  it("Obsidian vault already at v2 (marker present) → proceed, no pending state", () => {
+    // Simulate a successfully-migrated Obsidian vault: marker file
+    // exists at v2, legacy `user/` dir is gone (we created it in
+    // beforeEach — remove it so the post-migration shape is honest).
+    rmSync(join(obsidianVault, "user"), { recursive: true, force: true });
+    writeFileSync(join(obsidianVault, ".context-vault-version"), "2\n", "utf-8");
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: {},
+    });
+    expect(decision.deferred).toBe(false);
+    expect(decision.migrationsToRun).toBeUndefined();
+    expect(getVaultRestructurePendingConsent(db)).toBeNull();
+  });
+
+  it("Fresh-empty Obsidian vault (no legacy dirs, no marker) → proceed, no pending state", () => {
+    // Brand-new Obsidian install — vault is empty. Consent gate must
+    // not flash a spurious banner when there's nothing to consent to.
+    rmSync(join(obsidianVault, "user"), { recursive: true, force: true });
+    const decision = resolveVaultRestructureConsent({
+      db,
+      dataDir,
+      contextDir: obsidianVault,
+      env: {},
+    });
+    expect(decision.deferred).toBe(false);
+    expect(getVaultRestructurePendingConsent(db)).toBeNull();
+  });
+});
+
+// ── boot-order: initDatabase runs migrations against the DB-persisted
+//    vaultMode/primaryVaultPath, not env-only defaults (V21) ─────────────
+//
+// CONTEXT_VAULT_REDESIGN_PLAN.md §11.8 + V21. The vault-restructure
+// migration consumes the `contextDir` resolved by `getContextDir(config)`.
+// If `loadPersistedSettings` ran AFTER `runMigrations`, the migration
+// body would see the env-default `vaultMode="plain"` and walk
+// `<dataDir>/context/` even for users whose persisted configuration
+// points at an Obsidian vault. This describe block pins the fix.
+
+describe("bootstrap/db initDatabase — vault migration boot order", () => {
+  let dataDir: string;
+  let obsidianVault: string;
+  let priceFetcherSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "aitne-bo-data-"));
+    obsidianVault = mkdtempSync(join(tmpdir(), "aitne-bo-obs-"));
+    priceFetcherSpy = vi
+      .spyOn(PriceFetcher.prototype, "refresh")
+      .mockResolvedValue({
+        source: "hardcoded",
+        fetchedAt: null,
+        lastAttemptAt: null,
+        lastError: null,
+        stale: true,
+        sourceUrl: "https://example.invalid",
+      } as never);
+  });
+  afterEach(() => {
+    priceFetcherSpy.mockRestore();
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(obsidianVault, { recursive: true, force: true });
+  });
+
+  /**
+   * Seed `settings` rows on a fresh DB so the next `initDatabase` call
+   * sees the persisted shape. We open with the canonical DB path so the
+   * factory under test opens the same file on the second call.
+   */
+  function seedPersistedSettings(values: {
+    vaultMode: "plain" | "obsidian";
+    primaryVaultPath?: string | null;
+  }): void {
+    mkdirSync(join(dataDir, "data"), { recursive: true });
+    const db = new Database(join(dataDir, "data", "personal_agent.db"));
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+    const store = createSettingsStore(db);
+    store.set("vaultMode", values.vaultMode);
+    if (values.primaryVaultPath !== undefined) {
+      // `null` is meaningful — clears the primary path. The store handles
+      // both shapes uniformly via JSON.stringify.
+      store.set(
+        "primaryVaultPath",
+        values.primaryVaultPath as never,
+      );
+    }
+    db.close();
+  }
+
+  function configFor(): AgentConfig {
+    return makeConfig({ dataDir, workspaceDir: join(dataDir, "workspace") });
+  }
+
+  it(
+    "Obsidian + ACK env: migration runs against persisted primaryVaultPath, not <dataDir>/context — STRONG DIFFERENTIAL",
+    () => {
+      // Seed FS:
+      //   <obsidian>/user/profile.md            — REAL legacy content (must migrate)
+      //   <dataDir>/context/rules/management.md — DECOY (must NOT be touched)
+      mkdirSync(join(obsidianVault, "user"), { recursive: true });
+      writeFileSync(
+        join(obsidianVault, "user", "profile.md"),
+        "# Obsidian profile\n",
+        "utf-8",
+      );
+      mkdirSync(join(dataDir, "context", "rules"), { recursive: true });
+      writeFileSync(
+        join(dataDir, "context", "rules", "management.md"),
+        "# Decoy management\n",
+        "utf-8",
+      );
+
+      // Persist Obsidian settings in DB BEFORE initDatabase.
+      seedPersistedSettings({
+        vaultMode: "obsidian",
+        primaryVaultPath: obsidianVault,
+      });
+
+      // Provide ACK so the consent gate proceeds. The DB-restored-from-
+      // backup recovery path in initDatabase will invoke
+      // `runContextVaultRestructure` directly when schema_migrations
+      // already records the id; for a fresh seed DB the id is not yet
+      // recorded, so the normal `runMigrations` path runs the body.
+      const prevAck = process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+      process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR] = "1";
+      try {
+        const result = initDatabase({ config: configFor() });
+        try {
+          // ── Strong differential assertion ────────────────────────────
+          // Real legacy content under <obsidian>/ MUST be migrated.
+          expect(existsSync(join(obsidianVault, "identity", "profile.md")))
+            .toBe(true);
+          expect(existsSync(join(obsidianVault, "user", "profile.md")))
+            .toBe(false);
+          expect(
+            readFileSync(
+              join(obsidianVault, "identity", "profile.md"),
+              "utf-8",
+            ),
+          ).toBe("# Obsidian profile\n");
+          // Version marker lands on the Obsidian path.
+          expect(existsSync(join(obsidianVault, ".context-vault-version")))
+            .toBe(true);
+          // Decoy under <dataDir>/context/ MUST be untouched.
+          expect(
+            existsSync(join(dataDir, "context", "rules", "management.md")),
+          ).toBe(true);
+          expect(
+            existsSync(join(dataDir, "context", "policies", "management.md")),
+          ).toBe(false);
+          expect(
+            existsSync(join(dataDir, "context", ".context-vault-version")),
+          ).toBe(false);
+          // schema_migrations row recorded.
+          const row = result.db
+            .prepare<[string], { id: string }>(
+              "SELECT id FROM schema_migrations WHERE id = ?",
+            )
+            .get(CONTEXT_VAULT_MIGRATION_ID);
+          expect(row?.id).toBe(CONTEXT_VAULT_MIGRATION_ID);
+          // settingsStore reflects the persisted Obsidian config (proof
+          // the merge happened BEFORE migration).
+          expect(result.settingsStore.get("vaultMode")).toBe("obsidian");
+          expect(result.settingsStore.get("primaryVaultPath")).toBe(
+            obsidianVault,
+          );
+        } finally {
+          result.db.close();
+        }
+      } finally {
+        if (prevAck === undefined) {
+          delete process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+        } else {
+          process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR] = prevAck;
+        }
+      }
+    },
+  );
+
+  it(
+    "Obsidian + prior stored ack row: same path as ACK env — migrates Obsidian vault",
+    () => {
+      mkdirSync(join(obsidianVault, "user"), { recursive: true });
+      writeFileSync(
+        join(obsidianVault, "user", "profile.md"),
+        "# Obsidian profile\n",
+        "utf-8",
+      );
+      seedPersistedSettings({
+        vaultMode: "obsidian",
+        primaryVaultPath: obsidianVault,
+      });
+      // Record a pre-existing ack row directly in runtime_state.
+      {
+        const db = new Database(join(dataDir, "data", "personal_agent.db"));
+        try {
+          setVaultRestructureAck(db, {
+            at: "2026-05-25T00:00:00Z",
+            source: "dashboard",
+          });
+        } finally {
+          db.close();
+        }
+      }
+      const result = initDatabase({ config: configFor() });
+      try {
+        expect(existsSync(join(obsidianVault, "identity", "profile.md")))
+          .toBe(true);
+        expect(existsSync(join(obsidianVault, ".context-vault-version")))
+          .toBe(true);
+      } finally {
+        result.db.close();
+      }
+    },
+  );
+
+  it(
+    "Obsidian without ACK: migration deferred — neither path is touched",
+    () => {
+      mkdirSync(join(obsidianVault, "user"), { recursive: true });
+      writeFileSync(
+        join(obsidianVault, "user", "profile.md"),
+        "# Obsidian profile\n",
+        "utf-8",
+      );
+      seedPersistedSettings({
+        vaultMode: "obsidian",
+        primaryVaultPath: obsidianVault,
+      });
+      const prevAck = process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+      delete process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+      try {
+        const result = initDatabase({ config: configFor() });
+        try {
+          // Legacy content preserved as-is.
+          expect(existsSync(join(obsidianVault, "user", "profile.md")))
+            .toBe(true);
+          expect(existsSync(join(obsidianVault, "identity", "profile.md")))
+            .toBe(false);
+          expect(existsSync(join(obsidianVault, ".context-vault-version")))
+            .toBe(false);
+          // dataDir context untouched too — the migration runner saw
+          // contextDir=obsidian and was filtered out by consent.
+          expect(
+            existsSync(join(dataDir, "context", ".context-vault-version")),
+          ).toBe(false);
+          // schema_migrations row NOT recorded for 0004.
+          const row = result.db
+            .prepare<[string], { id: string }>(
+              "SELECT id FROM schema_migrations WHERE id = ?",
+            )
+            .get(CONTEXT_VAULT_MIGRATION_ID);
+          expect(row).toBeUndefined();
+          // Pending-consent state recorded.
+          const pending = getVaultRestructurePendingConsent(result.db);
+          expect(pending?.contextDir).toBe(obsidianVault);
+        } finally {
+          result.db.close();
+        }
+      } finally {
+        if (prevAck !== undefined) {
+          process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR] = prevAck;
+        }
+      }
+    },
+  );
+
+  it(
+    "Plain mode: migration runs against <dataDir>/context (baseline)",
+    () => {
+      // No DB-persisted Obsidian settings; vaultMode defaults to plain.
+      mkdirSync(join(dataDir, "context", "user"), { recursive: true });
+      writeFileSync(
+        join(dataDir, "context", "user", "profile.md"),
+        "# Plain profile\n",
+        "utf-8",
+      );
+      const result = initDatabase({ config: configFor() });
+      try {
+        // Real legacy content migrated.
+        expect(
+          existsSync(join(dataDir, "context", "identity", "profile.md")),
+        ).toBe(true);
+        expect(existsSync(join(dataDir, "context", "user", "profile.md")))
+          .toBe(false);
+        expect(
+          existsSync(join(dataDir, "context", ".context-vault-version")),
+        ).toBe(true);
+        // Obsidian path was never configured; it remains empty.
+        expect(existsSync(join(obsidianVault, ".context-vault-version")))
+          .toBe(false);
+      } finally {
+        result.db.close();
+      }
+    },
+  );
+
+  it(
+    "Obsidian + ACK + schema_migrations row already present: assessVaultVersion preflight recovery re-runs body against primaryVaultPath",
+    () => {
+      // Simulates the bug we hit in production: a prior boot wrongly
+      // recorded the migration as completed (in DB) but the actual
+      // Obsidian vault was never touched. After the V21 fix, the next
+      // boot must self-heal via the assessVaultVersion preflight.
+      mkdirSync(join(obsidianVault, "user"), { recursive: true });
+      writeFileSync(
+        join(obsidianVault, "user", "profile.md"),
+        "# Obsidian profile\n",
+        "utf-8",
+      );
+      seedPersistedSettings({
+        vaultMode: "obsidian",
+        primaryVaultPath: obsidianVault,
+      });
+      // Pre-seed the schema_migrations row as if a prior buggy boot ran.
+      // The table itself is created by `runMigrations` on first invocation;
+      // seed it manually here since we haven't called initDatabase yet.
+      {
+        const db = new Database(join(dataDir, "data", "personal_agent.db"));
+        try {
+          db.exec(
+            `CREATE TABLE IF NOT EXISTS schema_migrations (
+               id TEXT PRIMARY KEY,
+               applied_at TEXT NOT NULL
+             )`,
+          );
+          db.prepare(
+            `INSERT OR REPLACE INTO schema_migrations (id, applied_at)
+             VALUES (?, CURRENT_TIMESTAMP)`,
+          ).run(CONTEXT_VAULT_MIGRATION_ID);
+        } finally {
+          db.close();
+        }
+      }
+      const prevAck = process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+      process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR] = "1";
+      try {
+        const result = initDatabase({ config: configFor() });
+        try {
+          // Body re-ran against the correct path; user → identity.
+          expect(
+            existsSync(join(obsidianVault, "identity", "profile.md")),
+          ).toBe(true);
+          expect(existsSync(join(obsidianVault, ".context-vault-version")))
+            .toBe(true);
+          expect(existsSync(join(obsidianVault, "user", "profile.md")))
+            .toBe(false);
+        } finally {
+          result.db.close();
+        }
+      } finally {
+        if (prevAck === undefined) {
+          delete process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+        } else {
+          process.env[VAULT_RESTRUCTURE_ACK_ENV_VAR] = prevAck;
+        }
+      }
+    },
+  );
 });

@@ -8,8 +8,8 @@
       "human_label": "File responsibilities",
       "description": "Which file owns which area of the context tree (today, roadmap, projects, weekly, rules, user)",
       "scope_paths": [
-        "today.md",
-        "roadmap.md",
+        "state/today.md",
+        "plans/roadmap.md",
         "projects/*.md",
         "weekly/*.md",
         "monthly/*.md",

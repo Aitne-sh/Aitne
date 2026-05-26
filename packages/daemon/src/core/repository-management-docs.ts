@@ -608,7 +608,7 @@ function copyRepositoryReadme(
   const fileName = findReadmeFileName(localPath);
   if (!fileName) return null;
   const src = join(localPath, fileName);
-  const relPath = `git/${deps.repo.slug}/README.md`;
+  const relPath = `knowledge/repos/${deps.repo.slug}/README.md`;
   let body: string;
   try {
     body = readFileSync(src, "utf-8");

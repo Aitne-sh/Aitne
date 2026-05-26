@@ -15,7 +15,7 @@ day rotation and **not** a morning routine.
   Tasks`, or `## Agent Plan`.
 - **Read-before-write.** `PATCH section=user_schedule mode=replace`
   overwrites the entire body; always fetch current state first.
-- **Respect the Morning Routine lock.** The lock applies to `today.md`
+- **Respect the Morning Routine lock.** The lock applies to `state/today.md`
   as a whole — both section PATCHes are blocked when it is held. If a
   PATCH returns `409`, retry up to 3 times with a 30 s pause between
   tries. If still locked after the final retry, **return a one-line
@@ -97,7 +97,7 @@ branch is needed below.
 ### Step 2 — Replace the User Schedule section
 
 ```
-curl -s -X PATCH http://localhost:8321/api/context/today \
+curl -s -X PATCH http://localhost:8321/api/context/state/today \
   -H 'Content-Type: application/json' \
   -d '{"section": "user_schedule", "mode": "replace", "content": "<formatted lines>"}'
 ```
@@ -113,7 +113,7 @@ hit the error path or Step 2 gave up after 409 retries — see Ground
 rules):
 
 ```
-curl -s -X PATCH http://localhost:8321/api/context/today \
+curl -s -X PATCH http://localhost:8321/api/context/state/today \
   -H 'Content-Type: application/json' \
   -d '{"section": "agent_log", "mode": "append", "content": "- HH:MM Manual refresh: user_schedule updated (<N> events)."}'
 ```
@@ -124,6 +124,6 @@ Use the local `HH:MM` from `<current_time>` and the actual event count
 ### Output contract
 
 Your final text is an internal log — the daemon does NOT forward it.
-The dashboard watches `today.md` mtime to detect completion. Return a
+The dashboard watches `state/today.md` mtime to detect completion. Return a
 one-line status like `user_schedule refreshed — N events` (or the
 skip reason) and stop.

@@ -15,7 +15,7 @@ Base URL: `http://localhost:8321`. All calls via `curl -s` with `Content-Type: a
 Two adjacent files declare where the user's data lives — read both before
 routing any external-service call.
 
-1. **`rules/management.md` → `## Source of Truth`** carries durable
+1. **`policies/management.md` → `## Source of Truth`** carries durable
    user-authored answers ("Schedule = Google Calendar", "Tasks = Notion",
    etc.). This is the authoritative routing table.
 2. **`~/.personal-agent/integrations.md` → `## Note Sources`** is the
@@ -33,7 +33,7 @@ integrations DB. Treat it as a routing hint, not a knob.
 
 ### Calendar provider routing
 
-The user's calendar provider lives in `rules/management.md` → `## Source of Truth` → Schedule row. Read it before every calendar call.
+The user's calendar provider lives in `policies/management.md` → `## Source of Truth` → Schedule row. Read it before every calendar call.
 
 | Schedule value in management rules | Use this base path | Backed by |
 |---|---|---|
@@ -43,7 +43,7 @@ The user's calendar provider lives in `rules/management.md` → `## Source of Tr
 
 **Hard rule**: NEVER cross-call. Calling `/api/calendar/*` while Schedule = Apple Calendar does NOT return empty — it queries the user's separate Google account if one exists, returning the wrong day. Calling `/api/apple-calendar/*` while Schedule = Google Calendar returns 503. Both failure modes are silent at the agent level — only the user notices, in the form of wrong answers.
 
-If `rules/management.md` is missing, ambiguous, or names a provider not listed here, **stop and ask the user** rather than guessing. Do not default to Google.
+If `policies/management.md` is missing, ambiguous, or names a provider not listed here, **stop and ask the user** rather than guessing. Do not default to Google.
 
 The endpoint sets are intentionally near-identical in shape (same JSON for events, same query parameters for listing) so the rest of this skill body documents both at once. Provider-specific differences are flagged inline with **[Apple only]** or **[Google only]**.
 

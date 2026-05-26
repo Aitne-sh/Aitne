@@ -28,7 +28,8 @@ const FIXED_RENDER = { updatedDate: FIXED_DATE } as const;
 
 function tmpContextDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "mgmt-registry-"));
-  mkdirSync(join(dir, "rules"), { recursive: true });
+  // CONTEXT_VAULT_REDESIGN: management.md now lives under policies/.
+  mkdirSync(join(dir, "policies"), { recursive: true });
   return dir;
 }
 
@@ -611,7 +612,7 @@ describe("renderAndWriteManagementMd", () => {
       content: string;
       trigger: string;
     };
-    expect(snapshot.file_path).toBe("rules/management.md");
+    expect(snapshot.file_path).toBe("policies/management.md");
     expect(snapshot.trigger).toBe("test.write");
     expect(snapshot.content).toBe(onDisk);
   });

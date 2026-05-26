@@ -99,7 +99,7 @@ export default function ScheduleSettingsPage() {
 
       <ConfigSection
         title="Hourly Check"
-        helpDocId="features/routines/hourly-check"
+        helpDocId="features/routines/hourly-check" // drift-allow: doc slug, not vault path
       >
         <p className="pb-2 text-xs text-muted-foreground">
           The hourly check is the agent&rsquo;s passive review loop. At each
@@ -180,9 +180,9 @@ export default function ScheduleSettingsPage() {
           The monthly review is a once-per-month synthesis routine. At the
           last day of each month it reads the month&rsquo;s daily files,
           weekly retrospectives, and the agent journal, then writes a
-          user-facing snapshot to <code>monthly/YYYY-MM.md</code> and
+          user-facing snapshot to <code>journal/monthly/YYYY-MM.md</code> and
           appends a <code>## Monthly YYYY-MM</code> block to{" "}
-          <code>agent/journal.md</code>.
+          <code>journal/agent.md</code>.
         </p>
         <p className="pb-2 text-xs text-muted-foreground">
           It is <strong>disabled by default</strong> pre-release because

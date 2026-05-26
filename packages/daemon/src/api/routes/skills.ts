@@ -19,6 +19,7 @@ import {
 import type { AgentConfig } from "../../config.js";
 import { createLogger, toSafeErrorMessage } from "../../logging.js";
 import { SkillsCompiler } from "../../core/skills-compiler.js";
+import { resolveUserSkillsRoot } from "../../core/user-skills-root.js";
 import {
   listBuiltinSkillDirs,
   resolveBuiltinSkillDir,
@@ -269,11 +270,19 @@ function listSkillDetailsInRoot(
   return out;
 }
 
+// `resolveUserSkillsRoot` lives in `core/user-skills-root.ts` — re-export
+// from there so existing API consumers continue to import from this module.
+export { resolveUserSkillsRoot };
+
 export function createSkillsRoutes(deps: SkillsRouteDependencies): Hono {
   const app = new Hono();
   const { config } = deps;
 
-  const userSkillsRoot = resolve(config.dataDir, "skills");
+  // CONTEXT_VAULT_REDESIGN_PLAN.md §11.6 (v3.1 V5) — user skills root
+  // moved from `<dataDir>/skills/` to `<contextDir>/policies/skills/`.
+  // The vault-restructure migration moves any pre-existing slug
+  // directories on first boot post-upgrade.
+  const userSkillsRoot = resolveUserSkillsRoot(config);
   // Default workspaceDir to cwd if the config stub omits it (test fixtures).
   const workspaceDir = config.workspaceDir ?? process.cwd();
   const builtinSkillsRoot = resolve(workspaceDir, "agent-assets", "skills");

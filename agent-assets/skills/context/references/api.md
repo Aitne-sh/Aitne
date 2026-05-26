@@ -10,8 +10,8 @@ Body submission follows `_safety.md` "Daemon-API body submission":
 small section PATCHes use inline `-d '{...}'`; full-file PUT uses the
 stdin heredoc `-d @- <<'JSON'` shape because the body runs multi-KB.
 
-Add `X-Lock-Id: <today_write_lock_id>` (for `today.md`) or
-`X-Lock-Id: <roadmap_write_lock_id>` (for `roadmap.md`) on every
+Add `X-Lock-Id: <today_write_lock_id>` (for `state/today.md`) or
+`X-Lock-Id: <roadmap_write_lock_id>` (for `plans/roadmap.md`) on every
 PUT / PATCH when the matching lock-id tag is in your context — the
 daemon emits the tag only while the corresponding lock is held by
 this session.
@@ -21,7 +21,7 @@ this session.
 ### GET /api/context/:path
 
 ```bash
-curl -s http://localhost:8321/api/context/roadmap
+curl -s http://localhost:8321/api/context/plans/roadmap
 ```
 
 Response: `{ "content": "...", "lastModified": "ISO8601" }` or `404`.
@@ -39,9 +39,9 @@ Response: `{ "files": [{ "name", "lastModified" }, …] }`. Use this to
 enumerate `projects/`, `weekly/`, `monthly/`, `user/`, `rules/`,
 `routines/`, `inbox/` before deciding a write target.
 
-### GET /api/context/today/reconciliation
+### GET /api/context/state/today/reconciliation
 
-Returns the Morning Routine's reconciliation report for `today.md`
+Returns the Morning Routine's reconciliation report for `state/today.md`
 (which mail/calendar/Notion sources contributed what to User Tasks /
 Agent Plan). Read-only diagnostic surface; not the place to write
 changes.
@@ -62,29 +62,29 @@ Fields:
 | `content` | string (required) | Full file body, including frontmatter and H1 where the file's validator requires them. |
 | `expectedMtime` | string (optional) | ISO 8601. When present the daemon returns `409` if the current mtime differs — race protection for read-modify-write loops. |
 
-Add `X-Lock-Id: <lock-id>` when writing a locked file (`today.md`,
-`roadmap.md`). Snapshots the prior content for restore.
+Add `X-Lock-Id: <lock-id>` when writing a locked file (`state/today.md`,
+`plans/roadmap.md`). Snapshots the prior content for restore.
 
 Common rejections:
 
 - `400 {error:"validation_error", message, path}` — file-specific
-  validator failed (e.g. `today.md` line-1 date regex, `roadmap.md`
+  validator failed (e.g. `state/today.md` line-1 date regex, `plans/roadmap.md`
   transition guard, required frontmatter missing on `user/*.md` /
   `rules/*.md` / `projects/*.md` / `daily/*.md` / `weekly/*.md` /
   `monthly/*.md`).
 - `409 {error:"lock_held"}` — another session holds the file's write
   lock. Retry with backoff (30s × 3).
-- `422` — file-specific schema mismatch (e.g. `today.md` line-1
+- `422` — file-specific schema mismatch (e.g. `state/today.md` line-1
   agent-day mismatch — the error echoes both the supplied date and
   the daemon's current agent-day).
 
-`rules/management.md` is user-controlled policy: modify only when the
+`policies/management.md` is user-controlled policy: modify only when the
 user explicitly asks, and preserve every unrelated section.
 
 ### PATCH /api/context/:path — Section operation
 
 ```bash
-curl -s -X PATCH http://localhost:8321/api/context/today \
+curl -s -X PATCH http://localhost:8321/api/context/state/today \
   -H 'Content-Type: application/json' \
   -d '{"section": "agent_log", "mode": "append", "content": "- 09:35 Processed meeting summary"}'
 ```
@@ -103,7 +103,7 @@ Mode semantics:
 - `replace` — replace the entire section body with `content`. **Read-before-write is mandatory** — `replace` does not merge; sending just one bullet erases every sibling. The skill body's "Worked example" shows the GET-merge-PATCH pattern.
 - `clear` — drop the section body, keep the heading.
 - `clear_before` — rolling-log trim, drops bullets with timestamps ≤ `cutoff`. Non-bullet lines preserved. Race-safe consumption shape for `Raw Signals` and similar logs.
-- `append_to_file` — omit `section`, append `content` to the end of the file. The intended first-write path when a section header does not exist yet: include the header inside `content` (`"\n## Section\n- bullet\n"`). Also the only write shape for files with no canonical section schema (`agent/journal.md`).
+- `append_to_file` — omit `section`, append `content` to the end of the file. The intended first-write path when a section header does not exist yet: include the header inside `content` (`"\n## Section\n- bullet\n"`). Also the only write shape for files with no canonical section schema (`journal/agent.md`).
 
 Common rejections (informational responses worth knowing):
 
@@ -115,16 +115,16 @@ Common rejections (informational responses worth knowing):
 ### DELETE /api/context/:path
 
 Removes the file (snapshot first). The daemon only allows DELETE on a
-small set of paths — notably `routines/custom/<slug>` (after the user
+small set of paths — notably `policies/routines/custom/<slug>` (after the user
 asks to retire a custom routine). Most files are NOT delete-eligible
-(e.g. `today.md`, `roadmap.md`, `user/profile.md`); the daemon returns
+(e.g. `state/today.md`, `plans/roadmap.md`, `identity/profile.md`); the daemon returns
 `400 {error:"path_not_deletable"}` for those.
 
 ## Lifecycle
 
 ### POST /api/context/archive-today
 
-Rotates `today.md` → `yesterday.md` (synthesized `daily/YYYY-MM-DD.md`
+Rotates `state/today.md` → `state/yesterday.md` (synthesized `daily/YYYY-MM-DD.md`
 is now written by the Morning Routine, not this endpoint). Called by
 the Morning Routine during day rotation; other sessions should NOT
 invoke this directly.
@@ -144,7 +144,7 @@ when `GET /api/context/health` reports the file as stubbed.
 
 ## Locks
 
-`today.md` and `roadmap.md` are locked files: `PUT` / `PATCH` requires
+`state/today.md` and `plans/roadmap.md` are locked files: `PUT` / `PATCH` requires
 the lock to be held by the calling session, and the daemon emits an
 `X-Lock-Id` header value that must be echoed on each request via the
 `X-Lock-Id:` header.
@@ -176,8 +176,8 @@ another session — same 30 s × 3 retry pattern.
 **Path-name gotchas** (these return `404 {"error":"unknown_route", …}`
 with a hint pointing at the correct path):
 
-- `POST /api/context/roadmap/lock` — order reversed.
-- `POST /api/context/roadmap/write-lock` — order reversed and wrong noun.
+- `POST /api/context/plans/roadmap/lock` — order reversed.
+- `POST /api/context/plans/roadmap/write-lock` — order reversed and wrong noun.
 - `POST /api/context/lock/roadmap-write` — wrong noun.
 
 A `401 {"error":"unauthorized"}` from a path you believe is correct
@@ -186,13 +186,13 @@ so no bearer token is required).
 
 ## Roadmap-specific writes
 
-### POST /api/context/roadmap/id
+### POST /api/context/plans/roadmap/id
 
 Mints a new stable entry id (`rm-YYYYMMDD-<hash>`) for a roadmap row.
 Requires `X-Lock-Id: <roadmap_write_lock_id>`.
 
 ```bash
-curl -s -X POST http://localhost:8321/api/context/roadmap/id \
+curl -s -X POST http://localhost:8321/api/context/plans/roadmap/id \
   -H 'Content-Type: application/json' \
   -H 'X-Lock-Id: <roadmap_write_lock_id>' \
   -d '{"creationDate":"YYYY-MM-DD"}'
@@ -216,5 +216,5 @@ curl -s -X POST http://localhost:8321/api/action/log \
 ```
 
 Records an entry in `agent_actions` for the dashboard's audit feed.
-Not the same as `today.md ## Agent Log` (that's a markdown surface;
+Not the same as `state/today.md ## Agent Log` (that's a markdown surface;
 this is a SQLite row). Risk tier: Autonomous.

@@ -58,9 +58,10 @@ export function ManagementModeSection() {
     <section id="management-mode" className="scroll-mt-4">
       <ConfigSection title="Management Mode">
         <p className="pb-2 text-xs text-muted-foreground">
-          Where the agent stores its personal data (today.md, projects, rules,
-          routines, journals). Switching here moves every existing file to the
-          new location atomically — no reinstall needed.
+          Where the agent stores its personal data — the six-class vault
+          (identity, state, plans, journal, knowledge, policies). Switching
+          here moves every existing file to the new location atomically — no
+          reinstall needed.
         </p>
 
         <div className="space-y-3 pb-2">

@@ -68,7 +68,7 @@ export function classifyContextWriteStaleness(
   const path = normalizeContextWritePath(input.path);
   const section = normalizeContextSection(input.section);
 
-  if (path === "today" && input.method === "PATCH") {
+  if (path === "state/today" && input.method === "PATCH") {
     if (section === "agent_log") {
       return {
         tier: "quiet",
@@ -89,7 +89,7 @@ export function classifyContextWriteStaleness(
   }
 
   if (
-    path.startsWith("projects/")
+    path.startsWith("plans/projects/")
     && input.method === "PATCH"
     && QUIET_PROJECT_ACTIVITY_SECTIONS.has(section)
   ) {

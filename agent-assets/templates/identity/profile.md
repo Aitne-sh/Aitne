@@ -9,8 +9,8 @@ template_version: 2
 # User
 
 > Primary profile injected into every session. Keep this file concise.
-> Detailed profile lives under `user/`.
-> Fetch index: `curl -s http://localhost:8321/api/context/user/_index`
+> Detailed profile lives under `identity/`.
+> Fetch index: `curl -s http://localhost:8321/api/context/identity/_index`
 
 ## Identity
 (To be filled during setup)

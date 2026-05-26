@@ -42,11 +42,11 @@ function makeConfig(rootDir: string, overrides: Partial<AgentConfig> = {}): Agen
 
 describe("defaultWikiRoot", () => {
   it("resolves <dataDir>/wiki", () => {
-    expect(defaultWikiRoot("/var/lib/agent")).toBe("/var/lib/agent/wiki");
+    expect(defaultWikiRoot("/var/lib/agent")).toBe("/var/lib/agent/context/knowledge/wiki");
   });
 
   it("normalizes relative segments", () => {
-    expect(defaultWikiRoot("/a/b/../c")).toBe("/a/c/wiki");
+    expect(defaultWikiRoot("/a/b/../c")).toBe("/a/c/context/knowledge/wiki");
   });
 });
 

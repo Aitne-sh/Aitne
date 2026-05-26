@@ -87,7 +87,7 @@ export interface AppleCalendarRouteDependencies {
  * DELETE /apple-calendar/credentials         — disconnect
  * POST   /apple-calendar/default-calendar    — pick which calendar is primary
  *
- * The skill body routes the agent here when `rules/management.md` Source
+ * The skill body routes the agent here when `policies/management.md` Source
  * of Truth declares Apple Calendar as the schedule provider. The agent
  * MUST NOT cross-call `/api/calendar/*`; that would query Google and
  * silently return wrong data, which is worse than an error.

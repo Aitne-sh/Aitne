@@ -240,7 +240,7 @@ describe("POST /api/git/templates/:kind/apply", () => {
           pollPriority: "normal",
         },
       ],
-      seedFiles: [{ rel: "git/aitne/overview.md", body: "ORIG" }],
+      seedFiles: [{ rel: "knowledge/repos/aitne/overview.md", body: "ORIG" }],
     });
     const res = await h.app.request("/api/git/templates/project/apply", {
       method: "POST",
@@ -256,7 +256,7 @@ describe("POST /api/git/templates/:kind/apply", () => {
     };
     expect(body.kind).toBe("project");
     expect(body.targets[0].slug).toBe("aitne");
-    expect(existsSync(join(body.backupRoot, "git/aitne/overview.md"))).toBe(
+    expect(existsSync(join(body.backupRoot, "knowledge/repos/aitne/overview.md"))).toBe(
       true,
     );
 
@@ -278,7 +278,7 @@ describe("POST /api/git/templates/:kind/apply", () => {
           pollPriority: "normal",
         },
       ],
-      seedFiles: [{ rel: "git/aitne/overview.md", body: "ORIG" }],
+      seedFiles: [{ rel: "knowledge/repos/aitne/overview.md", body: "ORIG" }],
     });
     const first = (await (await h.app.request("/api/git/templates/project/apply", { method: "POST" })).json()) as { correlationId: string };
     const res = await h.app.request("/api/git/templates/project/apply", {
@@ -337,7 +337,7 @@ describe("retemplate status + per-file reporter", () => {
           pollPriority: "normal",
         },
       ],
-      seedFiles: [{ rel: "git/aitne/overview.md", body: "ORIG" }],
+      seedFiles: [{ rel: "knowledge/repos/aitne/overview.md", body: "ORIG" }],
     });
     const res = await h.app.request("/api/git/templates/project/apply", {
       method: "POST",
@@ -630,7 +630,7 @@ describe("retemplate status + per-file reporter", () => {
           pollPriority: "normal",
         },
       ],
-      seedFiles: [{ rel: "git/aitne/overview.md", body: "ORIG" }],
+      seedFiles: [{ rel: "knowledge/repos/aitne/overview.md", body: "ORIG" }],
     });
     h.db.prepare(
       `INSERT INTO agent_schedule

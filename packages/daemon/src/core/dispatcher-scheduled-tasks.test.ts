@@ -176,6 +176,7 @@ describe("ScheduledTaskRunner — diagnoseTodayMdState", () => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-st-"));
     contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
@@ -192,13 +193,13 @@ describe("ScheduledTaskRunner — diagnoseTodayMdState", () => {
   });
 
   it("returns 'no_h1_date' when today.md exists but has no H1 date", () => {
-    writeFileSync(join(contextDir, "today.md"), "# Today\nno date here");
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\nno date here");
     const { runner } = makeRunner({ db, dataDir });
     expect(runner.diagnoseTodayMdState()).toEqual({ kind: "no_h1_date" });
   });
 
   it("returns 'wrong_date' when today.md's H1 date does not match the current agent day", () => {
-    writeFileSync(join(contextDir, "today.md"), "# 1999-01-01 — old day\n");
+    writeFileSync(join(contextDir, "state", "today.md"), "# 1999-01-01 — old day\n");
     const { runner } = makeRunner({ db, dataDir });
     const state = runner.diagnoseTodayMdState();
     expect(state.kind).toBe("wrong_date");
@@ -211,7 +212,7 @@ describe("ScheduledTaskRunner — diagnoseTodayMdState", () => {
   it("returns 'fresh' when today.md's H1 date matches the current agent day", () => {
     // Use the real getAgentDayDateStr to compute today's expected value.
     const expected = getAgentDayDateStr("UTC", 4);
-    writeFileSync(join(contextDir, "today.md"), `# ${expected} — fresh\n`);
+    writeFileSync(join(contextDir, "state", "today.md"), `# ${expected} — fresh\n`);
     const { runner } = makeRunner({ db, dataDir });
     expect(runner.diagnoseTodayMdState()).toEqual({ kind: "fresh" });
   });
@@ -224,6 +225,7 @@ describe("ScheduledTaskRunner — hasCurrentAgentDayTodayMd", () => {
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-st-"));
     mkdirSync(join(dataDir, "context"), { recursive: true });
+    mkdirSync(join(dataDir, "context", "state"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
@@ -240,7 +242,7 @@ describe("ScheduledTaskRunner — hasCurrentAgentDayTodayMd", () => {
     expect(runner.hasCurrentAgentDayTodayMd()).toBe(false);
     const expected = getAgentDayDateStr("UTC", 4);
     writeFileSync(
-      join(dataDir, "context", "today.md"),
+      join(dataDir, "context", "state", "today.md"),
       `# ${expected} — fresh\n`,
     );
     expect(runner.hasCurrentAgentDayTodayMd()).toBe(true);
@@ -265,6 +267,7 @@ describe("ScheduledTaskRunner — handleMorningRoutineRetry gate", () => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-st-"));
     contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
@@ -277,7 +280,7 @@ describe("ScheduledTaskRunner — handleMorningRoutineRetry gate", () => {
 
   function writeFreshTodayMd(): void {
     const expected = getAgentDayDateStr("UTC", 4);
-    writeFileSync(join(contextDir, "today.md"), `# ${expected} — fresh\n`);
+    writeFileSync(join(contextDir, "state", "today.md"), `# ${expected} — fresh\n`);
   }
 
   function insertMorningRoutineSuccessRow(): void {
@@ -390,6 +393,7 @@ describe("ScheduledTaskRunner — rotateDayFiles", () => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-st-"));
     contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
@@ -406,28 +410,28 @@ describe("ScheduledTaskRunner — rotateDayFiles", () => {
   });
 
   it("is a no-op when today.md has no H1 date", () => {
-    writeFileSync(join(contextDir, "today.md"), "no h1 date here");
+    writeFileSync(join(contextDir, "state", "today.md"), "no h1 date here");
     const { runner } = makeRunner({ db, dataDir });
     runner.rotateDayFiles();
     // today.md should still exist (no rotation).
-    expect(existsSync(join(contextDir, "today.md"))).toBe(true);
-    expect(existsSync(join(contextDir, "yesterday.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(true);
+    expect(existsSync(join(contextDir, "state", "yesterday.md"))).toBe(false);
   });
 
   it("renames today.md → yesterday.md when the date is stale, and snapshots to DB", () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "# 1999-01-01 — old day\nbody",
     );
     const { runner } = makeRunner({ db, dataDir });
     runner.rotateDayFiles();
-    expect(existsSync(join(contextDir, "today.md"))).toBe(false);
-    expect(existsSync(join(contextDir, "yesterday.md"))).toBe(true);
-    expect(readFileSync(join(contextDir, "yesterday.md"), "utf-8")).toContain(
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "state", "yesterday.md"))).toBe(true);
+    expect(readFileSync(join(contextDir, "state", "yesterday.md"), "utf-8")).toContain(
       "1999-01-01",
     );
     const snapshots = db
-      .prepare("SELECT trigger, content FROM md_file_snapshots WHERE file_path = 'today'")
+      .prepare("SELECT trigger, content FROM md_file_snapshots WHERE file_path = 'state/today'")
       .all() as Array<{ trigger: string; content: string }>;
     expect(snapshots.length).toBe(1);
     expect(snapshots[0].trigger).toBe("day_rotation");
@@ -436,13 +440,13 @@ describe("ScheduledTaskRunner — rotateDayFiles", () => {
   it("does NOT rotate when today.md already carries the current agent day", () => {
     const expected = getAgentDayDateStr("UTC", 4);
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       `# ${expected} — fresh\n`,
     );
     const { runner } = makeRunner({ db, dataDir });
     runner.rotateDayFiles();
-    expect(existsSync(join(contextDir, "today.md"))).toBe(true);
-    expect(existsSync(join(contextDir, "yesterday.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "state", "today.md"))).toBe(true);
+    expect(existsSync(join(contextDir, "state", "yesterday.md"))).toBe(false);
   });
 });
 
@@ -1203,6 +1207,7 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
     dataDir = mkdtempSync(join(tmpdir(), "pa-st-wir-"));
     contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
@@ -1248,7 +1253,12 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
   function seedQualifyingClusters(count = 3): void {
     for (let i = 0; i < count; i++) {
       const slug = `theme-${i}`;
-      const lastActivity = Date.now() - 2 * 24 * 60 * 60 * 1000;
+      // 1h-ago keeps the visit inside the current ISO-Monday week window
+      // (`refreshInterestsReflection` snaps `weekStart` to the most recent
+      // Monday). Using a multi-day offset made this test flaky when the
+      // suite ran on Mon/Tue — "2 days ago" then landed in the prior
+      // week's window and `aggregateClusterWindow` returned zero visits.
+      const lastActivity = Date.now() - 60 * 60 * 1000;
       db.prepare(
         `INSERT INTO browser_research_clusters (
            slug, root_task_id, display_name, started_at, last_activity_at,
@@ -1295,9 +1305,9 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
   it("refreshes profile.md before the LLM session when browser_history is enabled", async () => {
     enableBrowserHistory();
     seedQualifyingClusters(3);
-    mkdirSync(join(contextDir, "user"), { recursive: true });
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
     writeFileSync(
-      join(contextDir, "user", "profile.md"),
+      join(contextDir, "identity", "profile.md"),
       [
         "---",
         "type: user",
@@ -1315,7 +1325,7 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
     await runner.executeDefault(makeWeeklyReviewEvent());
 
     const profile = readFileSync(
-      join(contextDir, "user", "profile.md"),
+      join(contextDir, "identity", "profile.md"),
       "utf-8",
     );
     expect(profile).toContain("<!-- BEGIN aitne:browser-interests v1");
@@ -1342,8 +1352,8 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
   it("short-circuits with skipped='no_browser_history' when browser_history is disabled", async () => {
     // Default integration mode is "disabled" — do NOT enable it.
     seedQualifyingClusters(3);
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    writeFileSync(join(contextDir, "user", "profile.md"), "# Profile\n");
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    writeFileSync(join(contextDir, "identity", "profile.md"), "# Profile\n");
     const { runner, router } = makeRunner({ db, dataDir });
     stubExecute(router);
 
@@ -1364,13 +1374,13 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
     const detail = JSON.parse(row.detail);
     expect(detail.skipped.reason).toBe("no_browser_history");
     // profile.md untouched.
-    expect(readFileSync(join(contextDir, "user", "profile.md"), "utf-8")).toBe(
+    expect(readFileSync(join(contextDir, "identity", "profile.md"), "utf-8")).toBe(
       "# Profile\n",
     );
     // Journal records the skip reason — the dispatcher logs the
     // human-readable form regardless of helper-emitted audit row.
     const journal = readFileSync(
-      join(contextDir, "agent", "journal.md"),
+      join(contextDir, "journal", "agent.md"),
       "utf-8",
     );
     expect(journal).toContain("## Weekly interests reflection");
@@ -1397,7 +1407,7 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
     expect(audit?.result).toBe("skipped");
 
     const journal = readFileSync(
-      join(contextDir, "agent", "journal.md"),
+      join(contextDir, "journal", "agent.md"),
       "utf-8",
     );
     expect(journal).toContain("interest reflection skipped: fewer_than_min_themes");
@@ -1420,7 +1430,7 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
     expect(router.execute).toHaveBeenCalledTimes(1);
 
     const journal = readFileSync(
-      join(contextDir, "agent", "journal.md"),
+      join(contextDir, "journal", "agent.md"),
       "utf-8",
     );
     expect(journal).toContain("interest reflection failed:");
@@ -1449,7 +1459,7 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
       )
       .get() as { n: number };
     expect(applied.n).toBe(0);
-    expect(existsSync(join(contextDir, "agent", "journal.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "journal", "agent.md"))).toBe(false);
   });
 });
 

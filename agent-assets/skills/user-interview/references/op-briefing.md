@@ -28,11 +28,11 @@ slip in a question without surfacing a cold standalone DM.
    closing side note. Same naturalness rules as Operation 2 — no
    preamble, no separate paragraph.
 4. After composing, issue two PATCH replaces (separate calls):
-   - `PATCH /api/context/agent/profile-questions` section=in_progress —
+   - `PATCH /api/context/state/profile-questions` section=in_progress —
      flip the entry to
      `state=asked :: since=<unchanged> :: asked_at=<current_time>`
      (preserve the original `since=` date).
-   - `PATCH /api/context/today` section=agent_notes — flip the
+   - `PATCH /api/context/state/today` section=agent_notes — flip the
      matching `Profile question (latent):` line by changing the
      parenthetical to `(asked HH:MM)`.
 ```

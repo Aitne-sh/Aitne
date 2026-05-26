@@ -11,17 +11,17 @@ allowed-tools:
 A **management policy** is a durable, ongoing rule the user wants the
 agent to keep applying. It is NOT a one-off task.
 
-Each policy lives at `rules/policies/<slug>.md` and may link to:
+Each policy lives at `policies/management-captures/<slug>.md` and may link to:
 
-- `routines/custom/<slug>.md` — the cron-driven execution rulebook
-- `dossiers/<topic>.md` — where the policy's accumulating data lands
+- `policies/routines/custom/<slug>.md` — the cron-driven execution rulebook
+- `knowledge/dossiers/<topic>.md` — where the policy's accumulating data lands
 
-A readable summary of every policy lives at `rules/policies/_index.md`,
+A readable summary of every policy lives at `policies/management-captures/_index.md`,
 which the daemon's policy-index reconciler **auto-maintains** from the
-policy files on disk. The directory listing under `rules/policies/` is
+policy files on disk. The directory listing under `policies/management-captures/` is
 the source of truth; `_index.md` is a derived snapshot — **do not
 PATCH or PUT it by hand**. The same reconciler also re-renders the
-`## Active Policies` section in `rules/management.md` so it stays in
+`## Active Policies` section in `policies/management.md` so it stays in
 sync. Both files refresh within ~10 s of any policy file write.
 
 ## When to use this skill
@@ -42,7 +42,7 @@ Use when the user expresses a **durable, ongoing management rule**:
 | "Reply more tersely from now on" / tone, voice, style | `user-profile` (routes to `character`) |
 | "I'm an NYC-based dev" / single user fact | `user-profile` |
 | "Add a project for the Q3 roadmap" | `context` (`projects/*.md`) |
-| Pure data write — "log this transaction" | direct context write to the relevant `dossiers/<topic>.md` |
+| Pure data write — "log this transaction" | direct context write to the relevant `knowledge/dossiers/<topic>.md` |
 
 If the user's request is **a recurring task with no need for a recorded
 reason** (e.g. "ping me every Monday at 9 to start standup prep"), use
@@ -60,12 +60,12 @@ the directory listing if you need authoritative state.
 ```bash
 # Auto-maintained by the daemon — fastest read for slug / status /
 # cadence / linked routine + dossier / one-line why.
-curl -s "http://localhost:8321/api/context/rules/policies/_index"
+curl -s "http://localhost:8321/api/context/policies/management-captures/_index"
 
 # Directory listing — authoritative source of truth. Use this if a
 # specific policy file looks newer than the index (the reconciler
 # debounces ~10 s; fresh writes may not be reflected yet).
-curl -s "http://localhost:8321/api/context/list/rules"
+curl -s "http://localhost:8321/api/context/list/policies"
 ```
 
 If the listing and `_index.md` rows disagree, **prefer the listing**
@@ -103,14 +103,14 @@ wait again.
 
 ### Step 4 — Build the policy file
 
-Emit the full `rules/policies/<slug>.md` content as a fenced markdown
+Emit the full `policies/management-captures/<slug>.md` content as a fenced markdown
 block in the DM **before** writing, so the user sees what's about to be
 saved. The slug must:
 
 - equal the filename stem
 - match `^[a-z0-9][a-z0-9-]*[a-z0-9]$` (or a single `[a-z0-9]`)
 - be ≤ 64 chars
-- equal the linked `routines/custom/<slug>.md` slug (if any) — keep
+- equal the linked `policies/routines/custom/<slug>.md` slug (if any) — keep
   them aligned in v1
 
 ### Step 5 — Wire the dependencies (strict order; on failure, roll back in reverse)
@@ -152,7 +152,7 @@ the active policies first and ask.
    `updated: <today>`, PUT back. (The frontmatter parser is
    line-scalar so a per-field PATCH section call would not target a
    frontmatter key — always GET-merge-PUT for frontmatter edits.)
-2. If `linked.routine` is set: GET `routines/custom/<slug>`, flip
+2. If `linked.routine` is set: GET `policies/routines/custom/<slug>`, flip
    frontmatter `enabled: false`, PUT back. The reload hook flips the
    cron job off automatically.
 
@@ -173,7 +173,7 @@ Same fan-out, with `status: active` and `enabled: true`.
 1. GET the policy file, flip frontmatter `status: removed` and
    `updated: <today>`, PUT back.
 2. If `linked.routine` is set: `DELETE
-   /api/context/routines/custom/<slug>` (whitelisted).
+   /api/context/policies/routines/custom/<slug>` (whitelisted).
 
 The reconciler moves the row from `## Active` to `## Removed`
 automatically — the `removedAt` cell is read from the policy file's
@@ -185,10 +185,10 @@ is intentionally not whitelisted (see MANAGEMENT-POLICY-CAPTURE-PLAN
 
 ## What this skill does NOT do
 
-- Does NOT touch `rules/management.md` body sections (Source of Truth
+- Does NOT touch `policies/management.md` body sections (Source of Truth
   table, Notification Rules, Schedule, etc.). Those are wizard-only.
 - Does NOT create rows in the `recurring_schedules` DB table — defer to
-  `routines/custom/` for cron, which gives the user a visible MD file
+  `policies/routines/custom/` for cron, which gives the user a visible MD file
   to edit.
 - Does NOT migrate existing custom routines into policy files
   retroactively. Migration is a separate one-time operation.
@@ -212,17 +212,17 @@ All writes go through `/api/context/*` — see the **context** skill's
 `references/api.md` for verb / mode / error envelope details. This
 skill targets these paths:
 
-- `GET /api/context/rules/policies/_index` (Step 1 summary)
-- `GET /api/context/list/rules` (Step 1 authoritative — entries prefixed `policies/`)
-- `GET /api/context/rules/policies/<slug>` (read before pause / resume / remove)
-- `PUT /api/context/dossiers/<topic>` (Step 5.1 — if new)
-- `PUT /api/context/routines/custom/<slug>` (Step 5.2 — if scheduling)
-- `PUT /api/context/rules/policies/<slug>` (Step 5.3)
-- `PATCH /api/context/rules/policies/<slug>` (pause / resume / remove; frontmatter via GET-merge-PUT only — line-scalar parser)
-- `DELETE /api/context/routines/custom/<slug>` (remove only)
+- `GET /api/context/policies/management-captures/_index` (Step 1 summary)
+- `GET /api/context/list/policies` (Step 1 authoritative — entries prefixed `management-captures/`)
+- `GET /api/context/policies/management-captures/<slug>` (read before pause / resume / remove)
+- `PUT /api/context/knowledge/dossiers/<topic>` (Step 5.1 — if new)
+- `PUT /api/context/policies/routines/custom/<slug>` (Step 5.2 — if scheduling)
+- `PUT /api/context/policies/management-captures/<slug>` (Step 5.3)
+- `PATCH /api/context/policies/management-captures/<slug>` (pause / resume / remove; frontmatter via GET-merge-PUT only — line-scalar parser)
+- `DELETE /api/context/policies/routines/custom/<slug>` (remove only)
 
-`rules/policies/_index.md` and the `## Active Policies` section in
-`rules/management.md` are written by the daemon's policy-index
+`policies/management-captures/_index.md` and the `## Active Policies` section in
+`policies/management.md` are written by the daemon's policy-index
 reconciler — they are NOT in the agent's write surface for this skill.
 
 Frontmatter validation enforces `kind: policy`, `owner: agent`, and

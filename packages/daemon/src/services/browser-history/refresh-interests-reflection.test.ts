@@ -347,7 +347,7 @@ describe("refreshInterestsReflection", () => {
     });
     expect(result.skipped?.reason).toBe("fewer_than_min_themes");
     expect(result.targetsWritten).toEqual([]);
-    expect(existsSync(join(dir, "user", "research-themes.md"))).toBe(false);
+    expect(existsSync(join(dir, "identity", "research-themes.md"))).toBe(false);
 
     const audit = db
       .prepare(
@@ -362,9 +362,9 @@ describe("refreshInterestsReflection", () => {
 
   it("writes all four targets on the happy path", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       [
         "---",
         "type: user",
@@ -381,7 +381,7 @@ describe("refreshInterestsReflection", () => {
       ].join("\n"),
     );
     writeFileSync(
-      join(dir, "user", "_index.md"),
+      join(dir, "identity", "_index.md"),
       [
         "---",
         "type: user",
@@ -393,9 +393,9 @@ describe("refreshInterestsReflection", () => {
         "- `expertise.md` — what the user knows",
       ].join("\n"),
     );
-    mkdirSync(join(dir, "projects"), { recursive: true });
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
     writeFileSync(
-      join(dir, "projects", "prompt-injection-defenses.md"),
+      join(dir, "plans", "projects", "prompt-injection-defenses.md"),
       [
         "---",
         "type: project",
@@ -415,16 +415,16 @@ describe("refreshInterestsReflection", () => {
     });
 
     expect(result.skipped).toBeUndefined();
-    expect(result.targetsWritten).toContain("user/profile.md");
-    expect(result.targetsWritten).toContain("user/research-themes.md");
-    expect(result.targetsWritten).toContain("user/_index.md");
+    expect(result.targetsWritten).toContain("identity/profile.md");
+    expect(result.targetsWritten).toContain("identity/research-themes.md");
+    expect(result.targetsWritten).toContain("identity/_index.md");
     expect(result.targetsWritten).toContain(
-      "projects/prompt-injection-defenses.md",
+      "plans/projects/prompt-injection-defenses.md",
     );
     expect(result.projectsAnnotated).toBe(1);
 
     // profile.md gained the auto-block.
-    const profileBytes = readFileSync(join(dir, "user", "profile.md"), "utf-8");
+    const profileBytes = readFileSync(join(dir, "identity", "profile.md"), "utf-8");
     expect(profileBytes).toContain("<!-- BEGIN aitne:browser-interests v1");
     expect(profileBytes).toContain("## Current research themes (auto)");
     // The user-authored sections must be untouched.
@@ -434,7 +434,7 @@ describe("refreshInterestsReflection", () => {
 
     // research-themes.md was created with the full snapshot.
     const themesBytes = readFileSync(
-      join(dir, "user", "research-themes.md"),
+      join(dir, "identity", "research-themes.md"),
       "utf-8",
     );
     expect(themesBytes).toContain("type: user");
@@ -442,13 +442,13 @@ describe("refreshInterestsReflection", () => {
     expect(themesBytes).toContain("clusters_active: 3");
 
     // _index.md got the disambiguated entry.
-    const indexBytes = readFileSync(join(dir, "user", "_index.md"), "utf-8");
+    const indexBytes = readFileSync(join(dir, "identity", "_index.md"), "utf-8");
     expect(indexBytes).toContain("target=research-themes");
     expect(indexBytes).toContain("- `expertise.md` — what the user knows");
 
     // Project file got annotated.
     const projectBytes = readFileSync(
-      join(dir, "projects", "prompt-injection-defenses.md"),
+      join(dir, "plans", "projects", "prompt-injection-defenses.md"),
       "utf-8",
     );
     expect(projectBytes).toContain(
@@ -461,12 +461,12 @@ describe("refreshInterestsReflection", () => {
     );
     expect(
       readRuntimeState<string[]>(db, RUNTIME_STATE_LAST_RUN_TARGETS_KEY),
-    ).toContain("user/research-themes.md");
+    ).toContain("identity/research-themes.md");
   });
 
   it("records profile_md_missing skip when profile.md is absent", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     // No profile.md, no _index.md
     const result = refreshInterestsReflection(db, dir, {
       boundary: TOKYO,
@@ -474,8 +474,8 @@ describe("refreshInterestsReflection", () => {
       nowMs,
       trigger: "test",
     });
-    expect(result.targetsWritten).toContain("user/research-themes.md");
-    expect(result.targetsWritten).not.toContain("user/profile.md");
+    expect(result.targetsWritten).toContain("identity/research-themes.md");
+    expect(result.targetsWritten).not.toContain("identity/profile.md");
     expect(result.targetsSkipped.some((s) => s.reason === "profile_md_missing")).toBe(
       true,
     );
@@ -486,7 +486,7 @@ describe("refreshInterestsReflection", () => {
 
   it("preserves testimonial sections of profile.md exactly", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     const original = [
       "---",
       "type: user",
@@ -510,7 +510,7 @@ describe("refreshInterestsReflection", () => {
       "## Learned Context",
       "- 2026-05-09 learned thing",
     ].join("\n");
-    writeFileSync(join(dir, "user", "profile.md"), original);
+    writeFileSync(join(dir, "identity", "profile.md"), original);
 
     refreshInterestsReflection(db, dir, {
       boundary: TOKYO,
@@ -519,7 +519,7 @@ describe("refreshInterestsReflection", () => {
       trigger: "test",
     });
 
-    const after = readFileSync(join(dir, "user", "profile.md"), "utf-8");
+    const after = readFileSync(join(dir, "identity", "profile.md"), "utf-8");
     // Every byte of the original sections must be intact.
     for (const heading of [
       "## Identity\nUser identity.",
@@ -535,9 +535,9 @@ describe("refreshInterestsReflection", () => {
 
   it("is idempotent on a second run within the same week", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       ["---", "type: user", "owner: user", "updated: 2026-05-01", "---", "# Profile"].join("\n"),
     );
     const r1 = refreshInterestsReflection(db, dir, {
@@ -546,9 +546,9 @@ describe("refreshInterestsReflection", () => {
       nowMs,
       trigger: "test",
     });
-    const profile1 = readFileSync(join(dir, "user", "profile.md"), "utf-8");
+    const profile1 = readFileSync(join(dir, "identity", "profile.md"), "utf-8");
     const themes1 = readFileSync(
-      join(dir, "user", "research-themes.md"),
+      join(dir, "identity", "research-themes.md"),
       "utf-8",
     );
 
@@ -558,9 +558,9 @@ describe("refreshInterestsReflection", () => {
       nowMs,
       trigger: "test",
     });
-    const profile2 = readFileSync(join(dir, "user", "profile.md"), "utf-8");
+    const profile2 = readFileSync(join(dir, "identity", "profile.md"), "utf-8");
     const themes2 = readFileSync(
-      join(dir, "user", "research-themes.md"),
+      join(dir, "identity", "research-themes.md"),
       "utf-8",
     );
 
@@ -571,9 +571,9 @@ describe("refreshInterestsReflection", () => {
 
   it("strips a prior project annotation when this week has no match", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "projects"), { recursive: true });
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
     // A project that does not match any of this week's clusters.
-    const projectPath = join(dir, "projects", "espresso-machine.md");
+    const projectPath = join(dir, "plans", "projects", "espresso-machine.md");
     const initial = [
       "---",
       "type: project",
@@ -617,7 +617,7 @@ describe("refreshInterestsReflection", () => {
       projectKeywordsOverride: [
         {
           projectSlug: "ghost",
-          projectPath: join(dir, "projects", "ghost.md"),
+          projectPath: join(dir, "plans", "projects", "ghost.md"),
           keywords: new Set(["ghost"]),
           source: "explicit",
         },
@@ -654,7 +654,7 @@ describe("refreshInterestsReflection", () => {
         trigger: "test",
       }),
     ).not.toThrow();
-    expect(existsSync(join(dir, "user", "research-themes.md"))).toBe(true);
+    expect(existsSync(join(dir, "identity", "research-themes.md"))).toBe(true);
   });
 
   it("emits audit row with scheduler trigger source_kind=cron", () => {
@@ -743,13 +743,13 @@ describe("refreshInterestsReflection", () => {
       trigger: "test",
     });
     expect(result.skipped).toBeUndefined();
-    expect(result.targetsWritten).toContain("user/research-themes.md");
+    expect(result.targetsWritten).toContain("identity/research-themes.md");
   });
 
   it("snaps the default weekStart back to the most recent Monday", () => {
     // Thursday in JST → weekStart should be the prior Monday.
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     const thursdayJst = Date.UTC(2026, 4, 21, 6); // 2026-05-21 15:00 JST
     const result = refreshInterestsReflection(db, dir, {
       boundary: TOKYO,
@@ -761,7 +761,7 @@ describe("refreshInterestsReflection", () => {
 
   it("keeps weekStart unchanged when the snap day is already Monday", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     const mondayJst = Date.UTC(2026, 4, 18, 6); // 2026-05-18 15:00 JST
     const result = refreshInterestsReflection(db, dir, {
       boundary: TOKYO,
@@ -773,7 +773,7 @@ describe("refreshInterestsReflection", () => {
 
   it("snaps from a Sunday back to the prior Monday", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     const sundayJst = Date.UTC(2026, 4, 24, 6); // 2026-05-24 15:00 JST (Sun)
     const result = refreshInterestsReflection(db, dir, {
       boundary: TOKYO,
@@ -785,8 +785,8 @@ describe("refreshInterestsReflection", () => {
 
   it("ignores existing irrelevant blocks in project files when picking what to strip", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "projects"), { recursive: true });
-    const projectPath = join(dir, "projects", "espresso.md");
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
+    const projectPath = join(dir, "plans", "projects", "espresso.md");
     writeFileSync(
       projectPath,
       [
@@ -815,8 +815,8 @@ describe("refreshInterestsReflection", () => {
     // but it pins the escape contract — render and strip must agree on
     // the BEGIN/END marker form ("evil-→name", not "evil-->name").
     seedThreeRichClusters();
-    mkdirSync(join(dir, "projects"), { recursive: true });
-    const projectPath = join(dir, "projects", "evil--name.md");
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
+    const projectPath = join(dir, "plans", "projects", "evil--name.md");
     const initial = [
       "---",
       "owner: user",
@@ -852,18 +852,18 @@ describe("refreshInterestsReflection", () => {
 
   it("marks every written target on the agent-write tracker (content-hash mode)", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       ["---", "type: user", "owner: user", "---", "# Profile"].join("\n"),
     );
     writeFileSync(
-      join(dir, "user", "_index.md"),
+      join(dir, "identity", "_index.md"),
       ["---", "owner: user", "---", "# Index"].join("\n"),
     );
-    mkdirSync(join(dir, "projects"), { recursive: true });
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
     writeFileSync(
-      join(dir, "projects", "rust-borrow-checker.md"),
+      join(dir, "plans", "projects", "rust-borrow-checker.md"),
       [
         "---",
         "owner: user",
@@ -886,10 +886,10 @@ describe("refreshInterestsReflection", () => {
     // attribution: the chokidar observer reads the file and supplies
     // the bytes it saw to `isMarked`.
     for (const rel of [
-      "user/profile.md",
-      "user/research-themes.md",
-      "user/_index.md",
-      "projects/rust-borrow-checker.md",
+      "identity/profile.md",
+      "identity/research-themes.md",
+      "identity/_index.md",
+      "plans/projects/rust-borrow-checker.md",
     ]) {
       const fullPath = join(dir, rel);
       const bytes = readFileSync(fullPath, "utf-8");
@@ -899,17 +899,17 @@ describe("refreshInterestsReflection", () => {
 
   it("rolls the agent-write mark back when an atomic write throws", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     // Replace the parent directory of user/research-themes.md with a
     // read-only file — the atomic rename will fail because the
     // destination's parent isn't writable. The helper must surface the
     // throw and unmark the path so a later observer of the original
     // disk state isn't told "the agent wrote this".
-    const themesPath = join(dir, "user", "research-themes.md");
+    const themesPath = join(dir, "identity", "research-themes.md");
     // Pre-existing profile.md so the prior target succeeds; we want
     // the throw to land on the research-themes write specifically.
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       ["---", "type: user", "owner: user", "---", "# Profile"].join("\n"),
     );
     const writeTracker = new AgentWriteTracker(60_000);
@@ -934,8 +934,8 @@ describe("refreshInterestsReflection", () => {
     expect(writeTracker.isMarked(themesPath, "")).toBe(false);
     expect(
       writeTracker.isMarked(
-        join(dir, "user", "profile.md"),
-        readFileSync(join(dir, "user", "profile.md"), "utf-8"),
+        join(dir, "identity", "profile.md"),
+        readFileSync(join(dir, "identity", "profile.md"), "utf-8"),
       ),
     ).toBe(true);
   });
@@ -945,9 +945,9 @@ describe("refreshInterestsReflection", () => {
     // and the dashboard preview pathway both pass undefined. Verifies
     // there's no implicit dependency that would NPE the helper.
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       ["---", "type: user", "owner: user", "---", "# Profile"].join("\n"),
     );
     const result = refreshInterestsReflection(db, dir, {
@@ -957,13 +957,13 @@ describe("refreshInterestsReflection", () => {
       trigger: "test",
     });
     expect(result.skipped).toBeUndefined();
-    expect(result.targetsWritten).toContain("user/profile.md");
+    expect(result.targetsWritten).toContain("identity/profile.md");
   });
 
   it("re-renders the project block when a refresh swaps the matching cluster set", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "projects"), { recursive: true });
-    const projectPath = join(dir, "projects", "rust-borrow-checker.md");
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
+    const projectPath = join(dir, "plans", "projects", "rust-borrow-checker.md");
     writeFileSync(
       projectPath,
       [
@@ -1014,7 +1014,7 @@ describe("refreshInterestsReflection", () => {
     expect(result.targetsWritten).toEqual([]);
     expect(result.themesSelected).toEqual([]);
     // research-themes.md is NOT created — no disk write happens at all.
-    expect(existsSync(join(dir, "user", "research-themes.md"))).toBe(false);
+    expect(existsSync(join(dir, "identity", "research-themes.md"))).toBe(false);
 
     // Audit row uniform with the fewer_than_min_themes case.
     const row = db
@@ -1057,14 +1057,14 @@ describe("refreshInterestsReflection", () => {
 
   it("emits result='partial' audit row when write throws mid-flight after profile.md was already written", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       ["---", "type: user", "owner: user", "---", "# Profile"].join("\n"),
     );
     // Force research-themes.md write to throw — directory at the
     // intended file path is the cheapest portable way to do this.
-    mkdirSync(join(dir, "user", "research-themes.md"), { recursive: true });
+    mkdirSync(join(dir, "identity", "research-themes.md"), { recursive: true });
 
     expect(() =>
       refreshInterestsReflection(db, dir, {
@@ -1094,7 +1094,7 @@ describe("refreshInterestsReflection", () => {
     expect(row.error).toMatch(/EISDIR|rename|directory/i);
     expect(row.metadata).toBe("{}");
     const detail = JSON.parse(row.detail);
-    expect(detail.targets_written).toContain("user/profile.md");
+    expect(detail.targets_written).toContain("identity/profile.md");
     expect(detail.error_message).toBe(row.error);
   });
 
@@ -1124,12 +1124,12 @@ describe("refreshInterestsReflection", () => {
 
   it("releases the lock in the finally block on a thrown write", () => {
     seedThreeRichClusters();
-    mkdirSync(join(dir, "user"), { recursive: true });
+    mkdirSync(join(dir, "identity"), { recursive: true });
     writeFileSync(
-      join(dir, "user", "profile.md"),
+      join(dir, "identity", "profile.md"),
       ["---", "type: user", "owner: user", "---", "# Profile"].join("\n"),
     );
-    mkdirSync(join(dir, "user", "research-themes.md"), { recursive: true });
+    mkdirSync(join(dir, "identity", "research-themes.md"), { recursive: true });
 
     expect(() =>
       refreshInterestsReflection(db, dir, {

@@ -14,7 +14,7 @@ Apply the canonical capture-user-info routing below to `<user_input>`.
 
 Two operations from the user-interview skill — run in order, before composing the reply.
 
-**A. Queue reconcile (Operation 4).** GET `agent/profile-questions.md ## In Progress`. For any `state=asked` entry where `(now − asked_at) < 24h`, treat the inbound DM as the answer: tick the matching `## Pending` row `[ ]` → `[x]`, remove from `## In Progress`, append to `## Answered`, and remove the matching `Profile question (...)` line from today's notes section. Leave `state=latent` / `state=scheduled` entries alone.
+**A. Queue reconcile (Operation 4).** GET `state/profile-questions.md ## In Progress`. For any `state=asked` entry where `(now − asked_at) < 24h`, treat the inbound DM as the answer: tick the matching `## Pending` row `[ ]` → `[x]`, remove from `## In Progress`, append to `## Answered`, and remove the matching `Profile question (...)` line from today's notes section. Leave `state=latent` / `state=scheduled` entries alone.
 
 **B. Latent opportunity (Operation 2).** If after reconcile a `state=latent` entry remains:
 
@@ -106,7 +106,7 @@ snapshot is fresh.
 
 Refetch the live log when the user asks about recent activity — for example "what have you been up to", "did anything come in", "anything new since X", "anything happen", "in the last N minutes".
 
-- Issue `GET /api/context/today` (the standard context-read endpoint).
+- Issue `GET /api/context/state/today` (the standard context-read endpoint).
 - Compare the live `## Agent Log` against what is in <today>.
 - Answer from the union. If the live log shows no new entries beyond
   <today>, the snapshot was sufficient — answer from <today> with no
@@ -157,7 +157,7 @@ Schedules go through this daemon — never through any cloud-hosted scheduled-ag
    - **Re-enable** → `PATCH /api/recurring-schedules/:id` `{"enabled": true}`.
 3. Confirm to the user in persona voice. Keep it short — never name internal mechanisms ("recurring schedule", "pin_to_quiet_hours_end", row IDs) in user-visible text.
 
-**Long-horizon intent** (commitment, trip, deliverable, learning target beyond today) → apply the decision tree below; the `roadmap` skill is the writer. Ambiguous or speculative items belong in `agent/journal.md` as a candidate line for the next morning routine to confirm — do **not** write directly to `roadmap.md` without a clear positive signal.
+**Long-horizon intent** (commitment, trip, deliverable, learning target beyond today) → apply the decision tree below; the `roadmap` skill is the writer. Ambiguous or speculative items belong in `journal/agent.md` as a candidate line for the next morning routine to confirm — do **not** write directly to `plans/roadmap.md` without a clear positive signal.
 
 {include:_partials/dm-intent.long-horizon.md}
 

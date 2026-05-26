@@ -17,7 +17,7 @@ const logger = createLogger("custom-routine-scheduler");
 
 /**
  * B-007 §5.8 Q3 — user-defined routines registered under
- * `context/routines/custom/<slug>.md`. Each file's YAML frontmatter
+ * `context/policies/routines/custom/<slug>.md`. Each file's YAML frontmatter
  * describes the cadence and the runtime budget; `CustomRoutineScheduler`
  * enumerates them at startup, wires a `node-cron` job per enabled
  * routine, and pushes a `routine.custom.<slug>` event into the EventBus
@@ -31,7 +31,7 @@ const logger = createLogger("custom-routine-scheduler");
  *   running → stop() → stopped (all cron jobs cleared)
  *
  * No fs.watch is used. The context API route (`src/api/routes/context.ts`)
- * calls `reload()` after every PUT/PATCH/DELETE under `routines/custom/`.
+ * calls `reload()` after every PUT/PATCH/DELETE under `policies/routines/custom/`.
  */
 
 export interface CustomRoutineSpec {
@@ -99,7 +99,7 @@ function hasChecksSection(content: string): boolean {
 }
 
 /**
- * Parse a `routines/custom/<slug>.md` file body into a validated spec.
+ * Parse a `policies/routines/custom/<slug>.md` file body into a validated spec.
  * Pure function — safe to unit-test exhaustively. Returns a discriminated
  * result so callers can log structured errors without throwing.
  */
@@ -204,7 +204,7 @@ export function parseCustomRoutineSpec(
 }
 
 /**
- * Enumerate every `routines/custom/*.md` file under `contextDir` and
+ * Enumerate every `policies/routines/custom/*.md` file under `contextDir` and
  * parse each into a spec. Errors are returned alongside the successful
  * specs so the scheduler can log them without aborting startup.
  *
@@ -438,7 +438,7 @@ export class CustomRoutineScheduler {
 }
 
 /**
- * Convenience: extract the slug from a `routines/custom/<slug>.md` path.
+ * Convenience: extract the slug from a `policies/routines/custom/<slug>.md` path.
  * Returns null if the path is outside the custom-routine directory.
  * Used by the context API route when deciding whether to call `reload()`.
  */

@@ -35,7 +35,8 @@ const logger = createLogger("activity-view-reconciler");
 export const ACTIVITY_VIEW_RECONCILER_LAST_RUN_KEY =
   "reconciler.activity_view.last_run";
 
-const ACTIVITY_DIR = "_activity";
+// CONTEXT_VAULT_REDESIGN: activity views live under state/activity/.
+const ACTIVITY_DIR = "state/activity";
 
 let runnerMutex: Promise<void> = Promise.resolve();
 

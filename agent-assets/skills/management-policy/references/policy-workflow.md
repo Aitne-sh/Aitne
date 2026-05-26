@@ -13,7 +13,7 @@ steps `N-1 … 1` in reverse before reporting the failure to the user.
 
 ```bash
 # Optional — only if the policy accumulates data into a new topic.
-curl -sS -X PUT http://localhost:8321/api/context/dossiers/<topic> \
+curl -sS -X PUT http://localhost:8321/api/context/knowledge/dossiers/<topic> \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
 {"content":"---\ntype: dossier\nowner: agent\nupdated: 2026-04-24\n---\n# <Topic>\n\n## Daily Log\n"}
@@ -27,7 +27,7 @@ when the rest of the flow rolls back.
 ## 5.2 Create the custom routine (only if scheduling is needed)
 
 ```bash
-curl -sS -X PUT http://localhost:8321/api/context/routines/custom/<slug> \
+curl -sS -X PUT http://localhost:8321/api/context/policies/routines/custom/<slug> \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
 {"content":"---\ntype: rule\nslug: <slug>\nprocess_key: routine.custom.<slug>\ncron: \"0 7 * * *\"\nbackend_tier: light\nmax_budget_usd: 0.20\nenabled: true\n---\n# <Title>\n\n## Checks\n\n### <step label>\n**Action**: …\n"}
@@ -52,7 +52,7 @@ line, write a short summary in `origin` and put the verbatim quote in
 a body section called `## Captured From`.
 
 ```bash
-curl -sS -X PUT http://localhost:8321/api/context/rules/policies/<slug> \
+curl -sS -X PUT http://localhost:8321/api/context/policies/management-captures/<slug> \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
 {"content":"---\ntype: rule\nkind: policy\nowner: agent\nupdated: 2026-04-24\nslug: <slug>\nstatus: active\ncreated_at: 2026-04-24\ncreated_via: dm\norigin: \"User DM 2026-04-24T14:30Z: <one-line summary or short quote>\"\nlinked:\n  routine: <slug>\n  dossier: <topic>\ntemplate_version: 1\n---\n# <Title>\n\n## Why\n<one short paragraph>\n\n## How\n1. …\n\n## Source of Truth\n- Authoritative: …\n- Local cache: dossiers/<topic>.md\n\n## Captured From\n> <verbatim DM quote, only when too long for the origin line>\n\n## Notes\n- …\n"}
@@ -62,7 +62,7 @@ JSON
 The global FS-watch reconciler picks this up within ~1 s and the
 policy appears in `context-index.md` automatically. The policy-index
 reconciler also fires on the same FS event (chained off the same
-debounce), so `rules/policies/_index.md` and `rules/management.md`'s
+debounce), so `policies/management-captures/_index.md` and `policies/management.md`'s
 `## Active Policies` section refresh within ~10 s — no manual PATCH
 needed.
 
@@ -76,14 +76,14 @@ reconciler can resolve them.
 
 ## 5.4 _(no manual step required)_
 
-`rules/policies/_index.md` is auto-maintained by the daemon's
+`policies/management-captures/_index.md` is auto-maintained by the daemon's
 policy-index reconciler — it re-renders within ~10 s of step 5.3's
 write. Same for the `## Active Policies` section in
-`rules/management.md`. **Do not PATCH or PUT either path manually**;
+`policies/management.md`. **Do not PATCH or PUT either path manually**;
 doing so just races the reconciler and creates snapshot churn.
 
 If you need to confirm the index is up to date before replying to the
-user, GET `rules/policies/_index` after a short wait. The
+user, GET `policies/management-captures/_index` after a short wait. The
 reconciler's last-run record lives at `runtime_state` key
 `reconciler.policy_index.last_run` for diagnostics.
 

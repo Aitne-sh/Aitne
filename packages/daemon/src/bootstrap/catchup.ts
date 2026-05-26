@@ -67,7 +67,7 @@ export async function runCatchup(
   const now = new Date();
   const tz = config.timezone || undefined;
   const contextDir = getContextDir(config);
-  const todayMdPath = join(contextDir, "today.md");
+  const todayMdPath = join(contextDir, "state", "today.md");
   const { start: agentDayStartUtc, end: agentDayEndUtc } = getAgentDayBoundsUtc(
     tz,
     config.dayBoundaryHour,

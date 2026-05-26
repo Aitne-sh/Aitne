@@ -50,7 +50,7 @@ function writeRoutineFile(
 }
 
 function writeManagement(contextDir: string, body: string): void {
-  const dir = join(contextDir, "rules");
+  const dir = join(contextDir, "policies");
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(contextDir, CONTEXT_RELATIVE_PATHS.rules.management),

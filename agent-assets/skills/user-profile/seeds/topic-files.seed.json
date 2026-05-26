@@ -2,7 +2,7 @@
   "kind": "knowledge_layout",
   "files": [
     {
-      "path": "user/profile.md",
+      "path": "identity/profile.md",
       "purpose": "identity, preferences, learned context",
       "sections": [
         { "heading": "## Identity", "contains": "name, role, time zone" },
@@ -15,7 +15,7 @@
       ]
     },
     {
-      "path": "user/people.md",
+      "path": "identity/people.md",
       "purpose": "people the user knows",
       "sections": [
         { "heading": "## Family", "contains": "household members" },
@@ -24,28 +24,28 @@
       ]
     },
     {
-      "path": "user/work.md",
+      "path": "identity/work.md",
       "purpose": "workplace, team, tech stack",
       "sections": [
         { "heading": "## Stack", "contains": "tools, languages, services used at work" }
       ]
     },
     {
-      "path": "user/expertise.md",
+      "path": "identity/expertise.md",
       "purpose": "domains, tools, skill levels",
       "sections": [
         { "heading": "## Tools", "contains": "tools the user uses habitually" }
       ]
     },
     {
-      "path": "user/personal.md",
+      "path": "identity/personal.md",
       "purpose": "hobbies, health, habits",
       "sections": [
         { "heading": "## Habits", "contains": "routines, lifestyle, health" }
       ]
     },
     {
-      "path": "user/goals.md",
+      "path": "identity/goals.md",
       "purpose": "developmental goals and learning targets",
       "sections": [
         { "heading": "## Learning", "contains": "skills the user wants to build" }

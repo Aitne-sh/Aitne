@@ -40,25 +40,25 @@ import type { AgentConfig } from "./config.js";
 describe("management-policy audit — classifyRisk Autonomous-tier coverage (post-Notify)", () => {
   it("PUT /api/context/rules/policies/<slug> classifies as Autonomous", () => {
     expect(
-      classifyRisk("PUT", "/api/context/rules/policies/morning-finance-check"),
+      classifyRisk("PUT", "/api/context/policies/management-captures/morning-finance-check"),
     ).toBe(RiskTier.Autonomous);
   });
 
   it("PATCH /api/context/rules/policies/<slug> classifies as Autonomous (pause/resume frontmatter)", () => {
     expect(
-      classifyRisk("PATCH", "/api/context/rules/policies/morning-finance-check"),
+      classifyRisk("PATCH", "/api/context/policies/management-captures/morning-finance-check"),
     ).toBe(RiskTier.Autonomous);
   });
 
   it("PATCH /api/context/rules/policies/_index classifies as Autonomous (skill step 5.4)", () => {
     expect(
-      classifyRisk("PATCH", "/api/context/rules/policies/_index"),
+      classifyRisk("PATCH", "/api/context/policies/management-captures/_index"),
     ).toBe(RiskTier.Autonomous);
   });
 
   it("PUT /api/context/routines/custom/<slug> classifies as Autonomous (skill step 5.2)", () => {
     expect(
-      classifyRisk("PUT", "/api/context/routines/custom/morning-finance-check"),
+      classifyRisk("PUT", "/api/context/policies/routines/custom/morning-finance-check"),
     ).toBe(RiskTier.Autonomous);
   });
 
@@ -66,7 +66,7 @@ describe("management-policy audit — classifyRisk Autonomous-tier coverage (pos
     expect(
       classifyRisk(
         "DELETE",
-        "/api/context/routines/custom/morning-finance-check",
+        "/api/context/policies/routines/custom/morning-finance-check",
       ),
     ).toBe(RiskTier.Autonomous);
   });
@@ -88,7 +88,7 @@ describe("management-policy audit — classifyRisk Autonomous-tier coverage (pos
     expect(
       classifyRisk(
         "DELETE",
-        "/api/context/rules/policies/morning-finance-check",
+        "/api/context/policies/management-captures/morning-finance-check",
       ),
     ).toBe(RiskTier.Approve);
   });
@@ -171,10 +171,12 @@ describe("management-policy audit — md_file_snapshots rows on write paths", ()
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-mp-audit-"));
     contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules", "policies"), { recursive: true });
-    mkdirSync(join(contextDir, "routines", "custom"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "management-captures"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), { recursive: true });
     writeFileSync(
-      join(contextDir, "rules", "policies", "_index.md"),
+      join(contextDir, "policies", "management-captures", "_index.md"),
       indexBody(),
       "utf-8",
     );
@@ -216,19 +218,19 @@ describe("management-policy audit — md_file_snapshots rows on write paths", ()
     // nothing to preserve — no row is written. This is by design (no
     // wasted bytes) and the skill's rollback-policy-only-on-update path
     // assumes it.
-    const res = await put("rules/policies/morning-finance-check", policyBody());
+    const res = await put("policies/management-captures/morning-finance-check", policyBody());
     expect(res.status).toBe(200);
-    expect(snapshotsFor("rules/policies/morning-finance-check")).toHaveLength(0);
+    expect(snapshotsFor("policies/management-captures/morning-finance-check")).toHaveLength(0);
   });
 
   it("second-PUT (pause flip) writes one api_put snapshot of the previous content", async () => {
     // Plan §5.5 — pause GET-merge-PUT preserves the prior content as
     // a snapshot row labeled `api_put`. The skill's rollback path can
     // recover the pre-pause file by reading the latest snapshot.
-    await put("rules/policies/morning-finance-check", policyBody("active"));
-    await put("rules/policies/morning-finance-check", policyBody("paused"));
+    await put("policies/management-captures/morning-finance-check", policyBody("active"));
+    await put("policies/management-captures/morning-finance-check", policyBody("paused"));
 
-    const rows = snapshotsFor("rules/policies/morning-finance-check");
+    const rows = snapshotsFor("policies/management-captures/morning-finance-check");
     expect(rows).toHaveLength(1);
     expect(rows[0].trigger).toBe("api_put");
     expect(rows[0].content).toContain("status: active");
@@ -237,7 +239,7 @@ describe("management-policy audit — md_file_snapshots rows on write paths", ()
   it("PATCH section=append on _index writes an api_patch snapshot", async () => {
     // Step 5.4 PATCH — the snapshot trigger column distinguishes
     // section-edit operations from full-file replaces.
-    await app.request("/api/context/rules/policies/_index", {
+    await app.request("/api/context/policies/management-captures/_index", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -247,7 +249,7 @@ describe("management-policy audit — md_file_snapshots rows on write paths", ()
       }),
     });
 
-    const rows = snapshotsFor("rules/policies/_index");
+    const rows = snapshotsFor("policies/management-captures/_index");
     expect(rows).toHaveLength(1);
     expect(rows[0].trigger).toBe("api_patch");
     // The snapshot captures the pre-patch content (no row in Active yet).
@@ -259,13 +261,13 @@ describe("management-policy audit — md_file_snapshots rows on write paths", ()
     // Plan §4.6 remove flow — the routine is deleted but its content
     // survives in `md_file_snapshots` so the agent can show the user
     // what they removed.
-    await put("routines/custom/morning-finance-check", routineBody("true"));
+    await put("policies/routines/custom/morning-finance-check", routineBody("true"));
     await app.request(
-      "/api/context/routines/custom/morning-finance-check",
+      "/api/context/policies/routines/custom/morning-finance-check",
       { method: "DELETE" },
     );
 
-    const rows = snapshotsFor("routines/custom/morning-finance-check");
+    const rows = snapshotsFor("policies/routines/custom/morning-finance-check");
     expect(rows).toHaveLength(1);
     expect(rows[0].trigger).toBe("api_delete");
     expect(rows[0].content).toContain("enabled: true");
@@ -276,21 +278,21 @@ describe("management-policy audit — md_file_snapshots rows on write paths", ()
     // A LIKE-prefix query reconstructs the full chronology of edits for
     // a given policy slug — this is the durable audit substrate the
     // plan §5.5 promises.
-    await put("rules/policies/morning-finance-check", policyBody("active"));
-    await put("rules/policies/morning-finance-check", policyBody("paused"));
-    await put("routines/custom/morning-finance-check", routineBody("true"));
-    await put("routines/custom/morning-finance-check", routineBody("false"));
+    await put("policies/management-captures/morning-finance-check", policyBody("active"));
+    await put("policies/management-captures/morning-finance-check", policyBody("paused"));
+    await put("policies/routines/custom/morning-finance-check", routineBody("true"));
+    await put("policies/routines/custom/morning-finance-check", routineBody("false"));
 
     const policyRows = db
       .prepare(
-        "SELECT trigger FROM md_file_snapshots WHERE file_path LIKE 'rules/policies/%' ORDER BY id ASC",
+        "SELECT trigger FROM md_file_snapshots WHERE file_path LIKE 'policies/management-captures/%' ORDER BY id ASC",
       )
       .all() as { trigger: string }[];
     expect(policyRows.map((r) => r.trigger)).toEqual(["api_put"]);
 
     const routineRows = db
       .prepare(
-        "SELECT trigger FROM md_file_snapshots WHERE file_path LIKE 'routines/custom/%' ORDER BY id ASC",
+        "SELECT trigger FROM md_file_snapshots WHERE file_path LIKE 'policies/routines/custom/%' ORDER BY id ASC",
       )
       .all() as { trigger: string }[];
     expect(routineRows.map((r) => r.trigger)).toEqual(["api_put"]);

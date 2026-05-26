@@ -40,7 +40,7 @@ export const POLICY_INDEX_RECONCILER_LAST_RUN_KEY =
  * MANAGEMENT-POLICY-CAPTURE-PLAN §9 P4 — drive one pass of the
  * policy-index reconciler:
  *
- *   1. Walk `rules/policies/<slug>.md` (excluding `_index.md`), parse each
+ *   1. Walk `policies/management-captures/<slug>.md` (excluding `_index.md`), parse each
  *      file's frontmatter + body, attach the linked routine's cron.
  *   2. Render the desired `_index.md` body and `## Active Policies`
  *      section content for `management.md`.
@@ -239,7 +239,7 @@ async function runOnce(
 }
 
 /**
- * Walk `rules/policies/`, parse each policy file, attach linked-routine
+ * Walk `policies/management-captures/`, parse each policy file, attach linked-routine
  * cadence. Files that fail validation (missing kind, malformed slug, etc.)
  * are skipped with a warn — the API chokepoint is the authoritative
  * validator and would have rejected them at write time, so a malformed

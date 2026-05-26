@@ -54,8 +54,8 @@ If the request expresses an **ongoing management practice** with a
 recorded reason — "every morning, run my finance app and log the
 balance to a finance dossier", "from now on whenever X happens, do
 Y" — switch to the `management-policy` skill instead. It creates a
-`rules/policies/<slug>.md` that captures the WHY alongside the cadence
-(via `routines/custom/<slug>.md`) so the rule survives a context
+`policies/management-captures/<slug>.md` that captures the WHY alongside the cadence
+(via `policies/routines/custom/<slug>.md`) so the rule survives a context
 reset. Plain recurring schedules via `/api/recurring-schedules` are
 still right when the cadence is all that matters and there is no need
 to record intent.
@@ -73,7 +73,7 @@ to record intent.
 
 ## Writing a Good Description (for agent tasks)
 
-> **The wake-up agent has NO memory of why it was scheduled.** It receives only: `today.md`, a fresh 1-day calendar, `user/profile.md` + `rules/management.md`, and the `description` + `taskContext` fields you provide. Nothing else.
+> **The wake-up agent has NO memory of why it was scheduled.** It receives only: `state/today.md`, a fresh 1-day calendar, `identity/profile.md` + `policies/management.md`, and the `description` + `taskContext` fields you provide. Nothing else.
 
 Include all four elements:
 
@@ -95,7 +95,7 @@ Structured metadata for IDs, URLs, and correlation. Put long identifiers here so
 ```
 
 **`importance` convention.** This controls whether `agent_schedule`
-rows become `roadmap.md` `Scheduled:` entries:
+rows become `plans/roadmap.md` `Scheduled:` entries:
 
 | Tier | Roadmap behavior | Use |
 |---|---|---|

@@ -16,7 +16,7 @@ This file governs how the agent uses attached Model Context Protocol
   the target with me via DM when the change is visible to others (a new
   issue, a posted message, an edited doc).
 - Failures are loggable events. On repeated MCP call failures, the agent
-  appends to `agent/journal.md` and surfaces the pattern at the next
+  appends to `journal/agent.md` and surfaces the pattern at the next
   hourly check.
 - Scope to the active task. MCP calls unrelated to the current flow's
   stated goal are skipped.

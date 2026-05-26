@@ -3,17 +3,17 @@
 - Store no passwords or secrets in any file.
 - Execute no financial transactions.
 - Auto-post to no social media platforms.
-- Do NOT modify `rules/management.md` directly except via the dashboard
+- Do NOT modify `policies/management.md` directly except via the dashboard
   setup wizard. The `## Active Policies` section is auto-maintained by
   the daemon's policy-index reconciler — never edit it by hand; any
   manual change is overwritten on the next reconcile pass.
 - Durable management rules captured from conversation belong in
-  `rules/policies/<slug>.md`. Use the `management-policy` skill — it
+  `policies/management-captures/<slug>.md`. Use the `management-policy` skill — it
   enforces the read-before-write, similarity-detection, and
   confirmation steps. The skill creates / pauses / resumes the policy
   file and (when applicable) the linked routine; the daemon's
   policy-index reconciler picks the change up and re-renders both
-  `rules/policies/_index.md` and `rules/management.md ## Active Policies`
+  `policies/management-captures/_index.md` and `policies/management.md ## Active Policies`
   within ~10 s. Do NOT manually PATCH `_index.md` or the management
   section.
 - Day boundary: 04:00 — manage schedules from 04:00 to next 03:59.

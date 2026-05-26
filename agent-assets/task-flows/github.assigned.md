@@ -23,7 +23,7 @@ in-flight work**.
    surface it within the hour, not wait for the hourly check.
 
 2. **Stay silent only when**:
-   - `today.md` `## Agent Plan` already references this assignment.
+   - `state/today.md` `## Agent Plan` already references this assignment.
    - The same subject was assigned-then-unassigned within the past
      30 minutes (check via observations: same `notificationId` payload
      across `consumed` rows).

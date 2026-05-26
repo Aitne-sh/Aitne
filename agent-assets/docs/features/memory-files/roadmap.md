@@ -62,5 +62,5 @@ on request).
 
 ## Related
 
-- [Morning Routine](../routines/morning-routine.md)
+- [Morning Routine](../policies/routines/morning-routine.md)
 - [Projects](projects.md)

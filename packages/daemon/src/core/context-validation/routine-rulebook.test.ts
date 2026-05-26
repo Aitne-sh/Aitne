@@ -104,45 +104,45 @@ describe("validateBuiltInRoutineRulebook", () => {
   ].join("\n");
 
   it("accepts a canonical rulebook", () => {
-    expect(validateBuiltInRoutineRulebook("routines/morning", validBody)).toBeNull();
+    expect(validateBuiltInRoutineRulebook("policies/routines/morning", validBody)).toBeNull();
   });
 
   it("rejects when frontmatter is missing", () => {
     expect(
-      validateBuiltInRoutineRulebook("routines/morning", "# Morning\n## Checks\n- x\n"),
+      validateBuiltInRoutineRulebook("policies/routines/morning", "# Morning\n## Checks\n- x\n"),
     ).toContain("YAML frontmatter");
   });
 
   it("rejects when type is missing", () => {
     const body = validBody.replace("type: rule\n", "");
-    expect(validateBuiltInRoutineRulebook("routines/morning", body)).toContain(
+    expect(validateBuiltInRoutineRulebook("policies/routines/morning", body)).toContain(
       "`type: rule`",
     );
   });
 
   it("rejects when type is not `rule`", () => {
     const body = validBody.replace("type: rule", "type: skill");
-    expect(validateBuiltInRoutineRulebook("routines/morning", body)).toContain(
+    expect(validateBuiltInRoutineRulebook("policies/routines/morning", body)).toContain(
       "must declare `type: rule`",
     );
   });
 
   it("rejects when slug is missing", () => {
     const body = validBody.replace("slug: morning\n", "");
-    expect(validateBuiltInRoutineRulebook("routines/morning", body)).toContain(
+    expect(validateBuiltInRoutineRulebook("policies/routines/morning", body)).toContain(
       "require a `slug`",
     );
   });
 
   it("rejects slug-filename mismatch", () => {
-    expect(validateBuiltInRoutineRulebook("routines/morning", validBody.replace("slug: morning", "slug: evening"))).toContain(
+    expect(validateBuiltInRoutineRulebook("policies/routines/morning", validBody.replace("slug: morning", "slug: evening"))).toContain(
       "match the filename",
     );
   });
 
   it("rejects when the ## Checks section is missing", () => {
     const body = validBody.replace("## Checks\n- something", "## Other\n- thing");
-    expect(validateBuiltInRoutineRulebook("routines/morning", body)).toContain(
+    expect(validateBuiltInRoutineRulebook("policies/routines/morning", body)).toContain(
       "`## Checks`",
     );
   });

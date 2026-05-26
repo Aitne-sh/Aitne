@@ -74,8 +74,9 @@ wrapper.
 | `curl -s "http://localhost:8321/api/docs"` | Tree listing. Use only when the operator asks "what docs are there?" |
 
 The slug in `by-slug/<slug>` is path-style (e.g.
-`features/routines/morning-routine`), exactly as it appears in the
-search response and inside `[doc:...]` citations.
+`features/routines/morning-routine`, a docs slug — not a vault path), <!-- drift-allow -->
+exactly as it appears in the search response and inside `[doc:...]`
+citations.
 
 ## Search-call budget — at most 3 per turn
 

@@ -32,9 +32,9 @@ and the `<integration-routing-table>` block in the session preamble.
 
 ## Source of Truth (READ FIRST)
 
-Same as the direct-mode body — `rules/management.md` →
+Same as the direct-mode body — `policies/management.md` →
 `## Source of Truth` and `~/.personal-agent/integrations.md` →
-`## Note Sources`. If `rules/management.md` Schedule != Google
+`## Note Sources`. If `policies/management.md` Schedule != Google
 Calendar, the native binding is irrelevant; route through the
 provider-specific direct route (`/api/apple-calendar/*` or
 `/api/calendar/outlook/*`).
@@ -120,7 +120,7 @@ this file.
 <!-- service:apple-calendar -->
 ## Apple Calendar (iCloud CalDAV) — direct, unchanged
 
-If `rules/management.md` Schedule = Apple Calendar, use the
+If `policies/management.md` Schedule = Apple Calendar, use the
 `/api/apple-calendar/*` routes documented in the base body. Apple
 Calendar has no MCP connector; native-mode gating does not apply.
 <!-- /service:apple-calendar -->
@@ -130,7 +130,7 @@ Calendar has no MCP connector; native-mode gating does not apply.
 <!-- service:outlook-calendar -->
 ## Outlook Calendar (Microsoft Graph) — direct, unchanged
 
-If `rules/management.md` Schedule = Outlook Calendar, use
+If `policies/management.md` Schedule = Outlook Calendar, use
 `/api/calendar/outlook/*` per the direct-mode body. No Outlook
 connector ships for Codex today; native-mode gating does not apply.
 <!-- /service:outlook-calendar -->
@@ -143,7 +143,7 @@ connector ships for Codex today; native-mode gating does not apply.
 Same surface as the direct-mode body. Full CRUD via
 `/api/obsidian/*`; requires the Obsidian app running. Omit `.md`
 extensions from paths. Never use this skill to read or write the
-agent's primary management vault (`today.md`, `roadmap.md`,
+agent's primary management vault (`state/today.md`, `plans/roadmap.md`,
 `projects/`, `rules/`, …) — that lives behind `/api/context/*`.
 
 ```bash

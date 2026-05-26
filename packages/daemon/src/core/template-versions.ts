@@ -27,7 +27,7 @@ import {
  * action.
  *
  * Scope:
- *  - Skip: `today.md`, `roadmap.md`, `projects/_active.base`, and any
+ *  - Skip: `today.md`, `roadmap.md`, `plans/projects/_active.base`, and any
  *    future file without YAML frontmatter (no place to carry the version
  *    marker).
  *  - Skip: files whose user-side copy is missing (user deleted it).

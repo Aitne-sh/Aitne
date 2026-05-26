@@ -72,7 +72,7 @@ DM you ahead of meetings that matter.
 - **Records observations** when events change (add / move / remove),
   consumed by the hourly check.
 - **Surfaces today's events** to the morning routine so they land in
-  `today.md` and the day's schedule file.
+  `state/today.md` and the day's schedule file.
 - **Reads** events on demand for reactive turns ("am I free at 3?").
 
 The agent can create events when the operator asks (a `notify`-tier
@@ -107,7 +107,7 @@ three situations:
 - An event was added, moved, or deleted between polls (recorded as a
   change observation; the hourly check picks it up).
 - An event was created far in advance (long-horizon events nudge the
-  roadmap-refresh routine so `roadmap.md` can build a preparation
+  roadmap-refresh routine so `plans/roadmap.md` can build a preparation
   timeline).
 
 Light tier is the default and almost always sufficient — these flows
@@ -155,7 +155,7 @@ rather than an env-style setting; the underlying state lives in the
 
 ## Related
 
-- [Morning Routine](../routines/morning-routine.md)
+- [Morning Routine](../policies/routines/morning-routine.md)
 - [daily/ files](../memory-files/schedule.md)
 - [Delegated Mode](../../concepts/delegated-mode.md)
 - [ProcessKeys](../../concepts/process-keys.md)

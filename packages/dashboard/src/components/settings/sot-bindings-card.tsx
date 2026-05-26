@@ -132,7 +132,7 @@ export function SotBindingsCard() {
           <CardTitle className="text-base">A. Source-of-Truth bindings</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground max-w-prose">
             Where the canonical data lives for each category. Renders Section A
-            of <code>rules/management.md</code>; injected into every agent
+            of <code>policies/management.md</code>; injected into every agent
             session so reactive flows know what to read or write.
           </p>
         </div>

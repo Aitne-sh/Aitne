@@ -1,6 +1,6 @@
 /**
  * `appendMorningRoutineJournalEntry` — assemble the one-block English
- * audit-trail entry for `agent/journal.md` from **structured sources
+ * audit-trail entry for `journal/agent.md` from **structured sources
  * only** (agent_actions rows + daily/<yesterday>.md frontmatter
  * deterministic fs read) and append it to the journal file.
  *
@@ -131,7 +131,7 @@ export interface AgentJournalAppenderArgs {
    * summary used to live in the user-facing `daily/<date>.md` `## Actions`
    * section, but was moved here as part of the user-diary refocus: the
    * user-side journal no longer carries agent telemetry, while the
-   * agent-side footprint (`agent/journal.md`) gains a single inline
+   * agent-side footprint (`journal/agent.md`) gains a single inline
    * summary line so the breakdown remains discoverable to operators
    * running `pnpm audit`. The orchestrator owns the timezone /
    * dayBoundaryHour math; passing the window in keeps this module pure
@@ -413,8 +413,8 @@ function formatActionsLine(summary: ActionsSummaryInput): string {
 }
 
 /**
- * Append the composed entry to `agent/journal.md`. Mirrors the write
- * chokepoint that `PATCH /api/context/agent/journal?mode=append_to_file`
+ * Append the composed entry to `journal/agent.md`. Mirrors the write
+ * chokepoint that `PATCH /api/context/journal/agent?mode=append_to_file`
  * exposes to the agent: snapshot the existing file into
  * `md_file_snapshots`, write the new content atomically, then notify
  * the write tracker + indexer so observers don't tag the write as a
@@ -439,7 +439,7 @@ export async function appendMorningRoutineJournalEntry(
   // (after `rotateDayFiles` has run and before the next day's rotation
   // touches the file) gives us the same predicate without threading
   // new state through the orchestrator → runner → appender chain.
-  const yesterdayMdPath = join(deps.contextDir, "yesterday.md");
+  const yesterdayMdPath = join(deps.contextDir, "state", "yesterday.md");
   const stageBAttempted = existsSync(yesterdayMdPath);
 
   // Reuse the skeleton builder's aggregation for the agent-action
@@ -468,7 +468,7 @@ export async function appendMorningRoutineJournalEntry(
   const journalAbs = join(deps.contextDir, journalRelative);
 
   // Read AND write inside the daemon-wide per-path serializer so a
-  // concurrent HTTP PATCH (`/api/context/agent/journal` append_to_file),
+  // concurrent HTTP PATCH (`/api/context/journal/agent` append_to_file),
   // a roadmap-maintenance journal-line append, or the weekly-interests
   // appender cannot race this read-modify-write. Without the fence,
   // two writers reading the same pre-state would each rename their

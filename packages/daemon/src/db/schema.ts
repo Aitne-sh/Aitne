@@ -1505,7 +1505,7 @@ CREATE INDEX IF NOT EXISTS idx_imminent_event_notifications_notified_at
 -- ── Management Registry & Entities (docs/design/21-management-registry-and-entities.md) ──
 --
 -- L1 — Section B authoritative storage for managed tasks (§9.2).
--- The file at <contextDir>/rules/management.md is a deterministic render
+-- The file at <contextDir>/policies/management.md is a deterministic render
 -- from this table; user hand-edits are parsed back via the registry
 -- watcher (§7.2 management-registry.ts), with parse failures triggering
 -- a re-render from this table (FR-13).

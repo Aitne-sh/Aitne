@@ -168,7 +168,7 @@ either accept path so a later cycle cannot re-offer the same cluster.
 - [Managed Chromium](../operations/managed-chromium.md) — separate
   experimental flow for *driving* a Chromium profile (B-4), not
   reading browser history.
-- [Weekly Review](../routines/weekly-review.md)
-- [Morning Routine](../routines/morning-routine.md)
+- [Weekly Review](../policies/routines/weekly-review.md)
+- [Morning Routine](../policies/routines/morning-routine.md)
 - [Bang Commands](../messaging/bang-commands.md)
 - [Glossary: Research Cluster](../../glossary.md#research-cluster)

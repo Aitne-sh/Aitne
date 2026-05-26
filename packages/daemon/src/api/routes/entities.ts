@@ -263,7 +263,7 @@ export function createEntitiesRoutes(deps: EntitiesRoutesDeps): Hono {
       ], {
         legacyFields: {
           message:
-            "provide `path` query parameter (e.g. work/meetings/foo.md)",
+            "provide `path` query parameter (e.g. knowledge/entities/work/meetings/foo.md)",
         },
       });
     }

@@ -38,7 +38,7 @@ related:
 
 ## What You See
 
-- An empty or stale `today.md`.
+- An empty or stale `state/today.md`.
 - No morning notification.
 - Activity has no `routine.morning_routine` row for today.
 

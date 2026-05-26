@@ -7,7 +7,7 @@ description: Outlook Calendar reference (Microsoft Graph) — read-only on-deman
 <!-- service:outlook-calendar -->
 ## Outlook Calendar (Microsoft Graph)
 
-Use this section **only when `rules/management.md` Schedule = Outlook Calendar**. The provider-routing table at the top of this skill is non-negotiable.
+Use this section **only when `policies/management.md` Schedule = Outlook Calendar**. The provider-routing table at the top of this skill is non-negotiable.
 
 v1 is **read-only and on-demand** — there is no Outlook calendar poller, so `schedule.approaching` events do not fire for Outlook calendars (the user's own Outlook clients fill that gap). Write surfaces (create / update / delete) are deferred. If the user asks the agent to schedule or change an Outlook event, tell them you can read the calendar but must defer the write to them.
 

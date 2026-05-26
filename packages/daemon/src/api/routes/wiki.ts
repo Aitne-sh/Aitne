@@ -17,6 +17,7 @@ import { writeFileAtomically } from "../../core/atomic-write.js";
 import {
   buildWikiWorkspaceStats,
   createExternalWikiWorkspace,
+  defaultWikiRoot,
   ensureDefaultWikiWorkspace,
   listWikiWorkspaces,
   readWikiWorkspaceByName,
@@ -94,7 +95,7 @@ export function createWikiRoutes(deps: ApiDependencies): Hono {
   app.get("/wiki/workspaces", (c) => {
     return c.json({
       defaultWorkspace: "default",
-      defaultInternalRoot: join(deps.config.dataDir, "wiki"),
+      defaultInternalRoot: defaultWikiRoot(deps.config),
       workspaces: listWikiWorkspaces(deps.db).map((row) =>
         serializeWorkspace(row, deps.db),
       ),

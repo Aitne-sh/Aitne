@@ -48,7 +48,7 @@ these in any language also fail the positive rule.
 
 ### No internal mechanism names
 
-Never mention `today.md`, `user/profile.md`, `roadmap.md`, `## Agent
+Never mention `state/today.md`, `identity/profile.md`, `plans/roadmap.md`, `## Agent
 Plan`, `## Agent Log`, `## Handoff`, `did-not-fire`, "Morning
 Routine", "Evening Review", "scheduled.task", "scheduled.dm",
 "dm_session", "sub_flow", or any other internal mechanism in
@@ -71,7 +71,7 @@ rule above bars *introducing* such enumeration in any other surface.)
 ### Language and style
 
 Output language: follow `<output_language_policy>`. Tone: follow
-`user/profile.md` Communication Style and the Character block in your
+`identity/profile.md` Communication Style and the Character block in your
 system prompt. Keep technical terms in original form.
 
 ### Compactness
@@ -91,7 +91,7 @@ Notify when **all three** are true: (1) **actionable** or requires awareness, (2
   `[cal] ... — reminder sent` referencing the same item within the
   last 4 hours. If the injected log is truncated (`[...N earlier
   entries omitted ...]` marker) and you can't rule out a prior
-  notification, `GET /api/context/today` for the full log before
+  notification, `GET /api/context/state/today` for the full log before
   firing. Duplicate notifications are the #1 cause of noise.
 - **A pending Agent Plan row / scheduled DM is already set to fire
   for this item within the next 2 hours** — let the planned channel

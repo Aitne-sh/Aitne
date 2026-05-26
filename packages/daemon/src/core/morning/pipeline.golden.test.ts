@@ -128,8 +128,8 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-mp-"));
     contextDir = join(dataDir, "context");
     mkdirSync(join(contextDir, "agent"), { recursive: true });
-    mkdirSync(join(contextDir, "daily"), { recursive: true });
-    writeFileSync(join(contextDir, `daily/${YESTERDAY_DATE}.md`), DAILY_MD);
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    writeFileSync(join(contextDir, `journal/daily/${YESTERDAY_DATE}.md`), DAILY_MD);
     seedPipelineRows(db);
   });
 
@@ -209,7 +209,7 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     // Exact bytes the current Step 9 template emits, anchored at the
     // H2 line. `pnpm audit` parses each `- <field>:` line; do not
     // reorder or rename without updating audit.

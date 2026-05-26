@@ -283,7 +283,7 @@ export interface ApiDependencies {
    */
   onIndexableContextChange?: (path: string) => void;
   /**
-   * B-007 §5.8 — called after any write/delete under `routines/custom/`
+   * B-007 §5.8 — called after any write/delete under `policies/routines/custom/`
    * so the CustomRoutineScheduler re-enumerates and re-registers jobs.
    */
   onCustomRoutinesChanged?: () => void;

@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import {
   MIGRATIONS,
@@ -11,6 +14,28 @@ import {
 
 function openDb(): Database.Database {
   return new Database(":memory:");
+}
+
+/**
+ * Build a temporary `MigrationContext` for tests that exercise the
+ * production `MIGRATIONS` list. The 0004 context-vault-restructure
+ * migration reads `dataDir` / `contextDir` and refuses to run without
+ * them. For tests that don't care about the filesystem effect, an
+ * empty temp dir keeps the body a no-op (no legacy paths to migrate).
+ */
+function tempMigrationCtx(): {
+  ctx: { dataDir: string; contextDir: string };
+  cleanup: () => void;
+} {
+  const baseDir = mkdtempSync(join(tmpdir(), "migrations-test-"));
+  const dataDir = join(baseDir, "data");
+  const contextDir = join(dataDir, "context");
+  mkdirSync(dataDir, { recursive: true });
+  mkdirSync(contextDir, { recursive: true });
+  return {
+    ctx: { dataDir, contextDir },
+    cleanup: () => rmSync(baseDir, { recursive: true, force: true }),
+  };
 }
 
 describe("runMigrations", () => {
@@ -95,8 +120,13 @@ describe("runMigrations", () => {
 
   it("uses the production MIGRATIONS list when no override is passed", () => {
     const db = openDb();
-    const result = runMigrations(db);
-    expect(result.applied).toEqual([...MIGRATIONS].map((m) => m.id));
+    const { ctx, cleanup } = tempMigrationCtx();
+    try {
+      const result = runMigrations(db, { ctx });
+      expect(result.applied).toEqual([...MIGRATIONS].map((m) => m.id));
+    } finally {
+      cleanup();
+    }
   });
 });
 

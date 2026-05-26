@@ -389,8 +389,11 @@ export function buildSnapshotRow(
 export function enumerateEntityFiles(contextDir: string): string[] {
   if (!existsSync(contextDir)) return [];
   const out: string[] = [];
+  // CONTEXT_VAULT_REDESIGN: entity files live under
+  // knowledge/entities/<domain>/<typePlural>/<slug>.md.
+  const entitiesRoot = join(contextDir, "knowledge", "entities");
   for (const domain of L2_DOMAINS) {
-    const domainAbs = join(contextDir, domain);
+    const domainAbs = join(entitiesRoot, domain);
     if (!existsSyncSafe(domainAbs)) continue;
     let entries: Dirent[];
     try {
@@ -425,7 +428,7 @@ export function enumerateEntityFiles(contextDir: string): string[] {
         if (!file.isFile()) continue;
         if (!file.name.endsWith(".md")) continue;
         if (file.name.startsWith("_")) continue; // _index.md and friends
-        out.push(`${domain}/${entry.name}/${file.name}`);
+        out.push(`knowledge/entities/${domain}/${entry.name}/${file.name}`);
       }
     }
   }
@@ -697,14 +700,16 @@ export function toRelativePath(
 
 /**
  * True when the given relative path matches the L2 layout
- * `<domain>/<type-plural>/<slug>.md`. Does NOT validate the slug — that
- * is the parser's job — only the directory shape.
+ * `knowledge/entities/<domain>/<type-plural>/<slug>.md` (CONTEXT_VAULT_REDESIGN
+ * v4 V14). Does NOT validate the slug — that is the parser's job — only the
+ * directory shape and `_*.md` skip.
  */
 export function isL2EntityRelativePath(relativePath: string): boolean {
   if (!relativePath.endsWith(".md")) return false;
   const segments = relativePath.split("/");
-  if (segments.length !== 3) return false;
-  const [domain, typePlural, fileName] = segments;
+  if (segments.length !== 5) return false;
+  const [knowledge, entities, domain, typePlural, fileName] = segments;
+  if (knowledge !== "knowledge" || entities !== "entities") return false;
   if (!isDomainEnum(domain)) return false;
   if (pluralToType(typePlural) === null) return false;
   if (fileName.startsWith("_")) return false;
@@ -726,10 +731,12 @@ export interface EntityMirrorWatcherOptions {
    * because `shouldIndexPath` filters L2 paths out of the context-
    * index's own watcher (followups item 7).
    *
-   * No fan-out risk: the reconciler outputs (`<domain>/_index.md`,
-   * `_activity/<source>.md`) live outside the entity-mirror watcher's
-   * `<contextDir>/<domain>/<plural>/*.md` patterns and `_*.md` is
-   * explicitly ignored, so the chain cannot loop back through this
+   * No fan-out risk: the reconciler outputs
+   * (`knowledge/entities/<domain>/_index.md`,
+   * `state/activity/<source>.md`) live outside the entity-mirror
+   * watcher's `<contextDir>/knowledge/entities/<domain>/<plural>/*.md`
+   * patterns (domain-index uses `_*.md` which is ignored; Activity
+   * lives under `state/`), so the chain cannot loop back through this
    * observer.
    */
   onEntityChanged?: () => void;
@@ -809,10 +816,17 @@ export function startEntityMirrorWatcher(
 
 function defaultEntityWatcherFactory(contextDir: string): EntityFileWatcher {
   // Watch every L2 directory pattern explicitly so unrelated files
-  // (rules/, routines/, etc.) never trigger a refresh.
+  // (policies/, journal/, etc.) never trigger a refresh.
+  //
+  // CONTEXT_VAULT_REDESIGN v4 V14 — entity files live at
+  // `<contextDir>/knowledge/entities/<domain>/<type-plural>/<slug>.md`.
+  // Pre-restructure the pattern was 4-segment
+  // (`<contextDir>/<domain>/<plural>/*.md`); after V14 the migration
+  // moves entities under `knowledge/entities/` and this watcher (plus
+  // `isL2EntityRelativePath`) must match the new 5-segment shape.
   const patterns = L2_DOMAINS.flatMap((domain) =>
     Array.from(L2_TYPE_PLURALS).map((plural) =>
-      join(contextDir, domain, plural, "*.md"),
+      join(contextDir, "knowledge", "entities", domain, plural, "*.md"),
     ),
   );
   const watcher = chokidar.watch(patterns, {

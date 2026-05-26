@@ -60,6 +60,7 @@ import {
 } from "@aitne/shared";
 
 import { getContextDir, type AgentConfig } from "../config.js";
+import { resolveUserSkillsRoot } from "./user-skills-root.js";
 import type { StreamCallbacks } from "./agent-core.js";
 import type { IAgentRouter } from "./backends/backend-router.js";
 import { getModelLabel } from "./backends/model-registry.js";
@@ -1076,7 +1077,7 @@ export class MessageHandler {
         // Sync user-authored skills into the workdir before resuming, so any
         // skill added/edited/deleted via /api/skills since the last turn is
         // visible to the SDK's `.claude/skills/` discovery. Cheap and idempotent.
-        syncAllUserSkills(sessionDir, join(this.config.dataDir, "skills"));
+        syncAllUserSkills(sessionDir, resolveUserSkillsRoot(this.config));
 
         // Phase 1 — stage inbound attachments + bind rows + append
         // bracketed prompt block. For resume we can't prepend to the
@@ -1241,7 +1242,7 @@ export class MessageHandler {
         // wouldn't discover it. The sync is a cheap diff operation backed by
         // a manifest file inside the workdir.
         if (sessionDir) {
-          syncAllUserSkills(sessionDir, join(this.config.dataDir, "skills"));
+          syncAllUserSkills(sessionDir, resolveUserSkillsRoot(this.config));
         }
 
         // Docs-QA sessions are stateless lookups (DOCS_QA_B7_DESIGN.md

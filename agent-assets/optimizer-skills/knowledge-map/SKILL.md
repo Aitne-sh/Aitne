@@ -21,7 +21,7 @@ submitting a proposal.
   "taken_at": 1717000000000,
   "files": [
     {
-      "path": "user/profile.md",
+      "path": "identity/profile.md",
       "headings": ["Identity", "Work Pattern", "Learned Context"],
       "frontmatter": { "type": "profile", "owner": "shared" },
       "last_modified_at": 1716900000000

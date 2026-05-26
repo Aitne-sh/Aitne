@@ -103,25 +103,25 @@ indexes, and configuration.
 
 ## Concrete Examples
 
-- `today.md` — rewritten by the morning routine.
-- `user/profile.md` — your profile, hand-edited or appended by the
+- `state/today.md` — rewritten by the morning routine.
+- `identity/profile.md` — your profile, hand-edited or appended by the
   agent on request. Topic-shaped slices live alongside it
-  (`user/people.md`, `user/work.md`, `user/expertise.md`,
-  `user/personal.md`, `user/goals.md`). See
+  (`identity/people.md`, `identity/work.md`, `identity/expertise.md`,
+  `identity/personal.md`, `identity/goals.md`). See
   [User Profile](../features/memory-files/user-profile.md).
-- `roadmap.md` — long-running goals + Preparation Timeline rows that
+- `plans/roadmap.md` — long-running goals + Preparation Timeline rows that
   fire daily during the morning routine.
-- `agent/journal.md` — the agent's own running log of decisions,
+- `journal/agent.md` — the agent's own running log of decisions,
   retros, and judgement calls.
-- `daily/2026-04-25.md` — per-date archive of that day's plan,
+- `journal/daily/2026-04-25.md` — per-date archive of that day's plan,
   synthesized by the morning routine.
 - `projects/<slug>.md` — one file per active project.
-- `rules/management.md` — the umbrella registry: Source-of-Truth
+- `policies/management.md` — the umbrella registry: Source-of-Truth
   bindings, Managed Tasks, an Active Policies summary. Always
   injected into every flow.
-- `rules/policies/<slug>.md` — one file per durable management rule
+- `policies/management-captures/<slug>.md` — one file per durable management rule
   ("from now on, do X"). The daemon auto-maintains a slug index at
-  `rules/policies/_index.md`.
+  `policies/management-captures/_index.md`.
 
 ## Where You See It in the Dashboard
 

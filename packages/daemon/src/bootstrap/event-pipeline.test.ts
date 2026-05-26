@@ -450,6 +450,8 @@ describe("createGoogleServicesReadyHandler", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "pa-event-pipeline-test-"));
     contextDir = join(tmpDir, "context");
     mkdirSync(contextDir, { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "plans"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
@@ -513,7 +515,7 @@ describe("createGoogleServicesReadyHandler", () => {
     const mm = String(adjusted.getUTCMonth() + 1).padStart(2, "0");
     const dd = String(adjusted.getUTCDate()).padStart(2, "0");
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       `# ${yyyy}-${mm}-${dd}\n\nfresh today.md\n`,
     );
   }
@@ -615,7 +617,7 @@ describe("createGoogleServicesReadyHandler", () => {
       // the `(Not yet configured)` skeleton placeholder; anything else is
       // considered configured.
       writeFileSync(
-        join(contextDir, "roadmap.md"),
+        join(contextDir, "plans", "roadmap.md"),
         "# Roadmap\n\n## Today\n\n- ship the thing\n",
       );
       const { deps, spies } = buildDeps();

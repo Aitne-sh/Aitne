@@ -32,7 +32,7 @@ describe("Profile-questions API route", () => {
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-profile-questions-"));
     contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "user"), { recursive: true });
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
     app = createProfileQuestionsRoutes(makeDeps(dataDir));
   });
 
@@ -80,7 +80,7 @@ describe("Profile-questions API route", () => {
 
     it("appends the .md extension automatically when omitted", async () => {
       writeFileSync(
-        join(contextDir, "user", "profile.md"),
+        join(contextDir, "identity", "profile.md"),
         "## Identity\n- Name: Alice\n",
         "utf-8",
       );
@@ -100,7 +100,7 @@ describe("Profile-questions API route", () => {
 
     it("forwards isSlotFilled output for a populated section/anchor", async () => {
       writeFileSync(
-        join(contextDir, "user", "profile.md"),
+        join(contextDir, "identity", "profile.md"),
         "## Identity\n- Name: Alice\n- Role: dev\n",
         "utf-8",
       );
@@ -124,7 +124,7 @@ describe("Profile-questions API route", () => {
 
     it("reports filled:false sectionPresent:true when the section exists with a placeholder", async () => {
       writeFileSync(
-        join(contextDir, "user", "profile.md"),
+        join(contextDir, "identity", "profile.md"),
         "## Identity\n- (none)\n",
         "utf-8",
       );
@@ -141,7 +141,7 @@ describe("Profile-questions API route", () => {
 
     it("treats an omitted section as a whole-file probe", async () => {
       writeFileSync(
-        join(contextDir, "user", "profile.md"),
+        join(contextDir, "identity", "profile.md"),
         "- Name: Alice\n",
         "utf-8",
       );
@@ -209,7 +209,7 @@ describe("Profile-questions API route", () => {
       // Even when the file exists, the route refuses to read .base at the
       // safePath layer — its job is prose probing, not config inspection.
       writeFileSync(
-        join(contextDir, "user", "view.base"),
+        join(contextDir, "identity", "view.base"),
         "filters:\n  and: []\n",
         "utf-8",
       );
@@ -226,7 +226,7 @@ describe("Profile-questions API route", () => {
       // exactly — a filename like `notes..md` is its own segment and
       // legal.
       writeFileSync(
-        join(contextDir, "user", "notes..md"),
+        join(contextDir, "identity", "notes..md"),
         "## Identity\n- Name: Alice\n",
         "utf-8",
       );
@@ -244,7 +244,7 @@ describe("Profile-questions API route", () => {
       // Direct the route at a directory entry that exists but cannot be
       // read as a regular file. We create `target/` as a directory inside
       // contextDir so existsSync passes but readFileSync throws EISDIR.
-      mkdirSync(join(contextDir, "user", "directory.md"));
+      mkdirSync(join(contextDir, "identity", "directory.md"));
 
       const res = await app.request(
         "/profile-questions/slot-filled?path=user/directory",
@@ -260,9 +260,9 @@ describe("Profile-questions API route", () => {
       const altRoot = mkdtempSync(join(tmpdir(), "pa-profile-vault-"));
       try {
         const altContextDir = join(altRoot);
-        mkdirSync(join(altContextDir, "user"), { recursive: true });
+        mkdirSync(join(altContextDir, "identity"), { recursive: true });
         writeFileSync(
-          join(altContextDir, "user", "profile.md"),
+          join(altContextDir, "identity", "profile.md"),
           "## Identity\n- Name: Bob\n",
           "utf-8",
         );

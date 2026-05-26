@@ -166,11 +166,11 @@ into the prompt by default:
 
 | Path | Injected as | Notes |
 |---|---|---|
-| `user/profile.md` | `<user>` | Identity anchor for every turn. |
-| `rules/management.md` | `<management_rules>` | Skipped only by Stage B of the morning routine (`routine.morning_routine_journal`). Size-capped: if it exceeds `POLICY_FILE_MAX_BYTES` it is dropped with a warning rather than truncated. |
-| `today.md` | `<today snapshot_at="...">` | `## Agent Log` is truncated to the last 10 entries for non-evening sessions. `routine.evening_review` gets the full log. |
+| `identity/profile.md` | `<user>` | Identity anchor for every turn. |
+| `policies/management.md` | `<management_rules>` | Skipped only by Stage B of the morning routine (`routine.morning_routine_journal`). Size-capped: if it exceeds `POLICY_FILE_MAX_BYTES` it is dropped with a warning rather than truncated. |
+| `state/today.md` | `<today snapshot_at="...">` | `## Agent Log` is truncated to the last 10 entries for non-evening sessions. `routine.evening_review` gets the full log. |
 
-Other files (`roadmap.md`, `agent/journal.md`, project pages, dossiers, etc.)
+Other files (`plans/roadmap.md`, `journal/agent.md`, project pages, dossiers, etc.)
 are loaded on demand by the specific routines or skills that need them —
 see `context-index.md` for the per-flow mapping.
 
@@ -187,7 +187,7 @@ Agent-facing file catalog. Used by the prompt loader to decide which
 non-always-injected files a given flow should pull in. Maintained from the
 filesystem; you generally do not need to edit it.
 
-### `today.md`
+### `state/today.md`
 The current agent-day's working view. Daemon-managed structure:
 
 ```
@@ -200,19 +200,19 @@ The current agent-day's working view. Daemon-managed structure:
 ## Handoff          — what carries into tomorrow
 ```
 
-Always injected. Writes go through `PUT /api/context/today` (locked) and
+Always injected. Writes go through `PUT /api/context/state/today` (locked) and
 are validated against the structure above. The agent-day boundary is 04:00
 local by default (`dayBoundaryHour`); before that, "today" still refers to
 the previous calendar date.
 
-### `yesterday.md`
-The previous agent-day's `today.md`, rotated at 04:00 by the morning
+### `state/yesterday.md`
+The previous agent-day's `state/today.md`, rotated at 04:00 by the morning
 routine. The new morning's first job is to read it, parse the `## Handoff`
 section, and seed today's plan. Replaced by the next rotation — there is no
 multi-day `yesterday-N.md` history; the synthesized `daily/YYYY-MM-DD.md`
 is the durable record.
 
-### `roadmap.md`
+### `plans/roadmap.md`
 Long-horizon commitments and recurring plans. Structure:
 
 ```
@@ -243,7 +243,7 @@ skills write here through the context API.
 | `work.md` | Employer, role, team, tech stack. |
 | `expertise.md` | Domains, tools, skills the user has. |
 | `personal.md` | Hobbies, sleep pattern, diet, background, health, location. |
-| `goals.md` | Developmental goals (distinct from `roadmap.md` project milestones). |
+| `goals.md` | Developmental goals (distinct from `plans/roadmap.md` project milestones). |
 
 **Growth pattern.** When a topic outgrows a single file (e.g. a multi-month
 sleep log), it can be promoted to a subdirectory: the API allows arbitrary
@@ -270,11 +270,11 @@ The structured registry of:
 - **B. Managed tasks** — active recurring agent jobs (e.g. "check Zoom
   daily at 10 AM"), rendered from the DB. Re-parsed if hand-edited.
 - **C. Active policies** — bullet list of policy slugs auto-rendered from
-  `rules/policies/`.
+  `policies/management-captures/`.
 
 **Always injected.** Capped in size on injection (oversize is skipped with
 a warning, not truncated). Writes go through
-`PUT /api/context/rules/management` (locked + snapshotted) or the
+`PUT /api/context/policies/management` (locked + snapshotted) or the
 `managed-tasks` / `sot-bindings` API surfaces.
 
 ### `mcp.md`
@@ -302,7 +302,7 @@ you can see what is being redacted from anything the agent writes.
 ### `policies/_index.md`
 Auto-maintained registry of active policies (Active table + Removed
 table). Direct edits are overwritten by the reconciler; to add or modify
-a policy, edit its `rules/policies/<slug>.md` file or use the
+a policy, edit its `policies/management-captures/<slug>.md` file or use the
 `management-policy` skill.
 
 ### `policies/<slug>.md`
@@ -358,7 +358,7 @@ are whitelisted to keep the layout disciplined.
 
 ---
 
-## `dossiers/` — per-flow carry-forward state
+## `knowledge/dossiers/` — per-flow carry-forward state
 
 Agent-owned. Each dossier captures enough context for one specific
 routine to run without re-scanning the full vault.
@@ -371,7 +371,7 @@ routine to run without re-scanning the full vault.
 | `evening.md` | `routine.evening_review` |
 | `weekly.md` | `routine.weekly_review` |
 | `monthly.md` | `routine.monthly_review` |
-| `roadmap.md` | `routine.roadmap_refresh` |
+| `plans/roadmap.md` | `routine.roadmap_refresh` |
 
 Each dossier carries a fixed shape: `## Standing checklist`, `## Focus
 this period`, `## Open items`, `## Last run`. Injected into prompts via
@@ -384,7 +384,7 @@ this period`, `## Open items`, `## Last run`. Injected into prompts via
 Written by Stage B of the 04:00 morning routine. It is **the user's
 diary** — first-person, from the user's perspective ("I shipped X", "I
 met with Y") — not an agent activity log. Agent-side bookkeeping lives
-in `agent/journal.md` instead.
+in `journal/agent.md` instead.
 
 Required frontmatter (daemon-owned, validated on write):
 `date`, `weekday`, `type: daily`, `owner: agent`, `agent_generated: true`,
@@ -410,7 +410,7 @@ Written by `routine.weekly_review` (Fridays by default). ISO year-week
 format, e.g. `2026-W19.md`.
 
 **Retention: 365 days** (`retention.ts:weeklyMd`). The long-arc rollup
-survives in `agent/journal.md`'s monthly sections.
+survives in `journal/agent.md`'s monthly sections.
 
 ---
 
@@ -426,7 +426,7 @@ Written by `routine.monthly_review` (month-end). YYYY-MM format.
 
 Dump anything here — text snippets, captured links, pasted email,
 brainstorming notes. The morning routine triages each file and moves
-the original to `agent/scratch/inbox-YYYY-MM-DD-<slug>.md`. The
+the original to `state/scratch/inbox-YYYY-MM-DD-<slug>.md`. The
 synthesized content lands wherever it belongs (a project file, today.md
 tasks, your journal). Supports `DELETE` for post-triage cleanup.
 
@@ -436,7 +436,7 @@ No fixed format — write whatever you want.
 
 ## `agent/` — agent's private notes
 
-### `agent/journal.md`
+### `journal/agent.md`
 Append-only self-reflection log. Created with one `PUT` at first
 boot; subsequent writes must be `PATCH` (append) — the API enforces
 this with `CREATE_ONLY_PUT`. Used internally for the agent's own
@@ -456,7 +456,7 @@ even when nothing qualifies for pruning.
 
 This file is never auto-pushed as a notification.
 
-### `agent/scratch/`
+### `state/scratch/`
 Ephemeral working files with a **48-hour TTL** (`B-007 §5.3`).
 
 | File pattern | Origin |
@@ -475,7 +475,7 @@ The agent cannot use the SDK's `Edit` / `Write` tools on any path inside
 `PATCH /api/context/<path>`, which:
 
 - Validates the path against the whitelist in `permissions.ts`
-- Holds a per-file lock (notably the `today.md` write lock)
+- Holds a per-file lock (notably the `state/today.md` write lock)
 - Validates frontmatter against the file's schema where one exists
 - Records a snapshot in the `md_file_snapshots` table (30-day retention)
 - Notifies the prompt context cache so active DM sessions can refresh
@@ -497,16 +497,16 @@ listed is read-only via the API.
 |---|---|
 | `today` · `yesterday` · `roadmap` · `_index` · `context-index` | `PUT`, `PATCH` |
 | `user/*` | `PUT`, `PATCH` |
-| `rules/_index` · `rules/*` | `PUT`, `PATCH` |
-| `routines/_index` · `routines/*` | `PUT`, `PATCH` |
-| `routines/custom/*` | `PUT`, `PATCH`, `DELETE` |
-| `projects/_index` · `projects/*` | `PUT`, `PATCH` |
-| `projects/_active` | `PUT` (the Obsidian Bases view) |
+| `policies/_index` · `rules/*` | `PUT`, `PATCH` |
+| `policies/routines/_index` · `routines/*` | `PUT`, `PATCH` |
+| `policies/routines/custom/*` | `PUT`, `PATCH`, `DELETE` |
+| `plans/projects/_index` · `projects/*` | `PUT`, `PATCH` |
+| `plans/projects/_active` | `PUT` (the Obsidian Bases view) |
 | `git/{slug}/overview` · `git/{slug}/journal/{date}` | `PUT`, `PATCH` |
 | `daily/*` · `weekly/*` · `monthly/*` | `PUT`, `PATCH` |
-| `dossiers/_index` · `dossiers/*` | `PUT`, `PATCH` |
-| `inbox/*` · `agent/scratch/*` | `PUT`, `PATCH`, `DELETE` |
-| `agent/journal` | `PUT` once (create-only), then `PATCH` (append) |
+| `knowledge/dossiers/_index` · `knowledge/dossiers/*` | `PUT`, `PATCH` |
+| `inbox/*` · `state/scratch/*` | `PUT`, `PATCH`, `DELETE` |
+| `journal/agent` | `PUT` once (create-only), then `PATCH` (append) |
 
 ---
 
@@ -516,16 +516,16 @@ From `packages/daemon/src/core/retention.ts`:
 
 | File / pattern | Retention | Mechanism |
 |---|---|---|
-| `today.md` | rotates every agent-day at 04:00 | morning routine writes the new file; previous becomes `yesterday.md` |
-| `yesterday.md` | one agent-day | overwritten by next rotation |
+| `state/today.md` | rotates every agent-day at 04:00 | morning routine writes the new file; previous becomes `state/yesterday.md` |
+| `state/yesterday.md` | one agent-day | overwritten by next rotation |
 | `daily/YYYY-MM-DD.md` | **persistent by design** | safety-net value `dailyMd: 36500` (~100 years); not enrolled in prune |
 | `weekly/YYYY-Www.md` | 365 days | `retention.ts:weeklyMd` |
 | `monthly/YYYY-MM.md` | **persistent** | no prune entry |
 | `git/<slug>/journal/<date>.md` | 365 days | `retention.ts:gitJournalMd` |
-| `agent/journal.md` weekly sections | last 12 | content-level rollup in `retention.ts` |
-| `agent/journal.md` monthly sections | last 24 | content-level rollup in `retention.ts` |
-| `agent/scratch/*` | 48 hours | TTL sweep |
-| `inbox/*` | until next morning routine | triage moves to `agent/scratch/` |
+| `journal/agent.md` weekly sections | last 12 | content-level rollup in `retention.ts` |
+| `journal/agent.md` monthly sections | last 24 | content-level rollup in `retention.ts` |
+| `state/scratch/*` | 48 hours | TTL sweep |
+| `inbox/*` | until next morning routine | triage moves to `state/scratch/` |
 | `md_file_snapshots` (DB) | 30 days | row-level prune |
 
 ---

@@ -25,7 +25,7 @@ just pushed and be watching the runs page.
    step's log output inline; the URL is sufficient.
 
 2. **Stay silent only when** one of the following clearly holds:
-   - `today.md` `## Agent Plan` already has an entry referring to this
+   - `state/today.md` `## Agent Plan` already has an entry referring to this
      workflow run by name (the user is already triaging it).
    - The same workflow has produced a `failed` observation within the
      past 30 minutes that already triggered a DM (check via
@@ -34,7 +34,7 @@ just pushed and be watching the runs page.
      channel clean during a flaky CI cascade.
    - The trigger event is `schedule` (cron-driven) AND the user has a
      known pattern of cron failures they don't want paged on. This is
-     opt-out territory — only stay silent if `roadmap.md` or
+     opt-out territory — only stay silent if `plans/roadmap.md` or
      `user.md` explicitly says so.
 
 3. **Send via `POST /api/notify`** at priority `high`. Suggested format:

@@ -5,7 +5,7 @@
  * fields + pre-aggregated facts pulled from SQLite + yesterday.md.
  *
  * Body sections are **scratch data** — Stage B authors the final body
- * per `rules/journal-format.md` (user-diary framing: Title / Summary /
+ * per `policies/journal-format.md` (user-diary framing: Title / Summary /
  * Schedule / Tasks / Conversations). Stage B treats `## Schedule` /
  * `## Tasks` / `## Conversations` here as input data, not output
  * structure. The skeleton deliberately does NOT emit a `## Summary`
@@ -16,7 +16,7 @@
  * The skeleton no longer emits a `## Actions` scratch section because
  * the agent-action breakdown is an agent-side footprint, not a
  * user-diary fact. `agent-journal-appender` renders it into
- * `agent/journal.md` instead. The `JournalSkeletonFacts`
+ * `journal/agent.md` instead. The `JournalSkeletonFacts`
  * `totalActions` + `actionsByType` fields remain in the contract so
  * downstream code (the appender) can consume the same aggregation
  * without re-querying.
@@ -100,7 +100,7 @@ export interface JournalSkeletonInputs {
 export interface JournalSkeletonFacts {
   /**
    * Total `agent_actions` rows in the window. Consumed by
-   * `agent-journal-appender` for the `agent/journal.md` footprint
+   * `agent-journal-appender` for the `journal/agent.md` footprint
    * line — NOT rendered into the user-facing `daily/<date>.md`
    * skeleton body (the user-diary refocus dropped `## Actions`).
    */
@@ -109,7 +109,7 @@ export interface JournalSkeletonFacts {
    * `agent_actions` rows grouped by `action_type`, ordered by count
    * descending then action_type ascending. Stable so test assertions
    * are deterministic. Consumed by `agent-journal-appender` for the
-   * `agent/journal.md` footprint line.
+   * `journal/agent.md` footprint line.
    */
   actionsByType: ReadonlyArray<{ actionType: string; count: number }>;
   /**
@@ -251,13 +251,13 @@ export function buildJournalSkeleton(
   lines.push("");
   // Scratch-body marker. Stage B reads the sections below as raw data
   // (calendar events, yesterday's tasks, DM rolling summaries) and
-  // authors the final user-diary body per `rules/journal-format.md` —
+  // authors the final user-diary body per `policies/journal-format.md` —
   // Title / Summary (user first-person) / Schedule / Tasks /
   // Conversations. The skeleton sections are NOT preserved verbatim;
   // Stage B replaces them wholesale. Only the frontmatter (above) is
   // byte-for-byte enforced by the daily-write chokepoint. Agent
   // action counts are NOT included as a scratch section — they are
-  // an agent-side footprint and land in `agent/journal.md` via
+  // an agent-side footprint and land in `journal/agent.md` via
   // `agent-journal-appender`, not in the user-facing daily journal.
   lines.push("<!-- Stage B: author the body per rules/journal-format.md.");
   lines.push("     The sections below are scratch data from the daemon —");
@@ -314,7 +314,7 @@ function appendConversationsSection(
   // today" rather than a mechanical DM log. Each scratch bullet still
   // carries the HH:MM + rolling-summary row + message count so Stage B
   // can synthesize topic-level bullets (per
-  // `rules/journal-format.md`); the bullet shape itself is unchanged
+  // `policies/journal-format.md`); the bullet shape itself is unchanged
   // so DM rolling-summary writers don't need a parallel rename.
   out.push("## Conversations");
   if (summaries.length === 0) {

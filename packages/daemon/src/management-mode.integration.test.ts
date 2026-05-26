@@ -103,7 +103,7 @@ function seedSetupComplete(dataDir: string): void {
   // is missing (bootstrapping bypass). Integration scenarios that want to
   // exercise the full degraded-mode behavior need to materialize this
   // sentinel file so the probe treats the daemon as "setup is done".
-  const rulesDir = resolve(dataDir, "context", "rules");
+  const rulesDir = resolve(dataDir, "context", "policies");
   mkdirSync(rulesDir, { recursive: true });
   writeFileSync(resolve(rulesDir, "management.md"), "# Management\n");
 }
@@ -177,8 +177,8 @@ describe("Management Mode — integration", () => {
       // still treat setup as complete or they would be stuck in the
       // bootstrap bypass forever with no way to hit degraded.
       const vaultPath = resolve(tmpRoot, "vault-primary");
-      mkdirSync(resolve(vaultPath, "rules"), { recursive: true });
-      writeFileSync(resolve(vaultPath, "rules", "management.md"), "# Mgmt\n");
+      mkdirSync(resolve(vaultPath, "policies"), { recursive: true });
+      writeFileSync(resolve(vaultPath, "policies", "management.md"), "# Mgmt\n");
 
       const config = baseConfig(dataDir, {
         vaultMode: "obsidian",
@@ -280,7 +280,12 @@ describe("Management Mode — integration", () => {
       // User restores the directory AND the expected context files (e.g.,
       // re-plugs the drive and the cloud provider has finished syncing).
       mkdirSync(vaultPath, { recursive: true });
-      writeFileSync(resolve(vaultPath, "today.md"), "# Today\n", "utf-8");
+      mkdirSync(resolve(vaultPath, "state"), { recursive: true });
+      writeFileSync(
+        resolve(vaultPath, "state", "today.md"),
+        "# Today\n",
+        "utf-8",
+      );
 
       // Next tick: reachable + content markers present → lifted.
       const second = runVaultHealthProbe(config, db);
@@ -327,7 +332,12 @@ describe("Management Mode — integration", () => {
       seedSetupComplete(dataDir);
       const vaultPath = resolve(tmpRoot, "vault-deleted");
       mkdirSync(vaultPath, { recursive: true });
-      writeFileSync(resolve(vaultPath, "today.md"), "# Today\n", "utf-8");
+      mkdirSync(resolve(vaultPath, "state"), { recursive: true });
+      writeFileSync(
+        resolve(vaultPath, "state", "today.md"),
+        "# Today\n",
+        "utf-8",
+      );
       const config = baseConfig(dataDir, {
         vaultMode: "obsidian",
         primaryVaultPath: vaultPath,
@@ -468,7 +478,7 @@ describe("Management Mode — integration", () => {
       expect(result.errors).toEqual({});
       expect(result.updated).toContain("externalObsidianVaultPath");
 
-      const integrationsPath = join(dataDir, "integrations.md");
+      const integrationsPath = join(dataDir, "context", "policies", "integrations.md");
       expect(existsSync(integrationsPath)).toBe(true);
       const body = readFileSync(integrationsPath, "utf-8");
       expect(body).toContain("## Note Sources");
@@ -495,7 +505,7 @@ describe("Management Mode — integration", () => {
         },
         { db },
       );
-      const integrationsPath = join(dataDir, "integrations.md");
+      const integrationsPath = join(dataDir, "context", "policies", "integrations.md");
       expect(existsSync(integrationsPath)).toBe(true);
       let body = readFileSync(integrationsPath, "utf-8");
       expect(body).toMatch(/Obsidian vault \(personal\):.*\(watching disabled\)/);
@@ -526,7 +536,7 @@ describe("Management Mode — integration", () => {
         { externalObsidianVaultPath: externalVault },
         { db },
       );
-      const integrationsPath = join(dataDir, "integrations.md");
+      const integrationsPath = join(dataDir, "context", "policies", "integrations.md");
       expect(existsSync(integrationsPath)).toBe(true);
       const seeded = readFileSync(integrationsPath, "utf-8");
 

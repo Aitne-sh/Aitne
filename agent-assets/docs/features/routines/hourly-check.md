@@ -66,7 +66,7 @@ config_keys:
 
 A medium-tier routine that drains the observations queue every hour
 during active hours and decides whether the accumulated change
-pattern warrants notifying you or appending to `today.md`. The
+pattern warrants notifying you or appending to `state/today.md`. The
 "decide" step is a four-layer gate designed to keep quiet days quiet
 without missing the moment when something piles up.
 
@@ -127,7 +127,7 @@ since last notification, quiet-hours window, heartbeat status,
 | Stage | What happens |
 |---|---|
 | `skip_low_signal` | No-op; the next tick re-evaluates. |
-| `silent_log` | Append a tiny line to `today.md` without DMing. |
+| `silent_log` | Append a tiny line to `state/today.md` without DMing. |
 | `triage` | When `hourlyCheckStage2Enabled = true`, run a lite-tier `routine.hourly_check.triage` call (~2K in / ~50 out) to decide `log_only` vs. `escalate` before paying for a Stage 3 session. |
 | `escalate` | Spawn the full medium-tier `routine.hourly_check` session. |
 
@@ -144,7 +144,7 @@ agent session.
 
 ## What It Outputs
 
-- Updates to `today.md` (always — even silent_log writes a thin line).
+- Updates to `state/today.md` (always — even silent_log writes a thin line).
 - Notifications when warranted (Stage 3 dispatch).
 - Audit rows: `agent_actions.action_type = 'hourly_check.gate'`
   carrying the harvest + signal + stage detail.

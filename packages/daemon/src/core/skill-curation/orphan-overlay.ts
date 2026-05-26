@@ -1,7 +1,7 @@
 // P22 §5.4 — orphan overlay detector.
 //
 // An overlay is "orphaned" when its on-disk overlay JSON
-// (`PA_DATA_DIR/skills/overlays/<slug>/<section_id>.json`) has no matching
+// (`PA_DATA_DIR/skill-curation-overlays/<slug>/<section_id>.json`) has no matching
 // declaration in the skill's `curation.json`. This happens when a framework
 // PR removes a section from `curation.json` while a previously-applied
 // overlay still exists on disk for that section.
@@ -32,7 +32,7 @@ import {
 } from "@aitne/shared";
 import { readFileSync } from "node:fs";
 import { loadAllCurationDeclarations } from "./declarations.js";
-import { OverlayStore } from "./overlay-store.js";
+import { OverlayStore, SKILL_CURATION_OVERLAYS_DIR } from "./overlay-store.js";
 import { createLogger } from "../../logging.js";
 
 const logger = createLogger("skill-curation-orphan");
@@ -52,14 +52,14 @@ export interface OrphanOverlaysReport {
   scanned_overlays: number;
 }
 
-/** Walks `PA_DATA_DIR/skills/overlays/<slug>/*.json` and cross-references each
- *  envelope against the current `curation.json` declaration for that slug.
+/** Walks `PA_DATA_DIR/skill-curation-overlays/<slug>/*.json` and cross-references
+ *  each envelope against the current `curation.json` declaration for that slug.
  *  Returns one record per orphan. Does not mutate disk. */
 export function detectOrphanOverlays(
   dataDir: string,
   skillsRoot: string,
 ): OrphanOverlaysReport {
-  const overlaysRoot = join(dataDir, "skills", "overlays");
+  const overlaysRoot = join(dataDir, SKILL_CURATION_OVERLAYS_DIR);
   if (!existsSync(overlaysRoot)) return { orphans: [], scanned_overlays: 0 };
 
   const declarations = new Map<string, CurationDeclarationValue | null>();

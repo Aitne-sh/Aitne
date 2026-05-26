@@ -26,7 +26,7 @@ message the user reads — plan the closing turn accordingly.
 - **Non-empty only when** the task's job is to deliver a short message
   AND you did not call `/api/notify`. Write the message itself, not a
   meta-report about it.
-- **Never name internal mechanisms** in the final text: no `today.md`,
+- **Never name internal mechanisms** in the final text: no `state/today.md`,
   `## Agent Plan`, `## Agent Log`, `did-not-fire`, "DM sent", "logged",
   "closed the row" — those go in Agent Log only. The same rule applies
   in whatever language you respond to the user; no status-word openers
@@ -89,7 +89,7 @@ confirmation.
       off 30 s and retry up to 3 times. If still held, **skip the
       roadmap flip entirely** — the next refresh reconciles — and
       proceed to Step 3 below so the task still executes.
-   2. `GET /api/context/roadmap` and locate the matching
+   2. `GET /api/context/plans/roadmap` and locate the matching
       `### Scheduled: ... (task #<id>)  <!-- id: rm-... -->` entry.
       Flip only its Status line to `running` via `PATCH`
       `section=agent_action_plan` `mode=replace` (include
@@ -137,5 +137,5 @@ confirmation.
 ### Step 5: Follow-up (optional)
 9. Register follow-up wake-ups if the action produced new work (schedule skill).
 10. For additional context if needed:
-    - GET /api/context/roadmap — long-term goals and milestones
-    - GET /api/context/projects/_active — active projects summary
+    - GET /api/context/plans/roadmap — long-term goals and milestones
+    - GET /api/context/plans/projects/_active — active projects summary

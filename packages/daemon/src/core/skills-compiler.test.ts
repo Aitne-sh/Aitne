@@ -1664,7 +1664,7 @@ describe("routine.evening_review session materialization (Phase 2 slimdown)", ()
 
   beforeEach(() => {
     contextDir = mkdtempSync(join(tmpdir(), "pa-evening-mat-ctx-"));
-    mkdirSync(join(contextDir, "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
     dirs = {
       claude: mkdtempSync(join(tmpdir(), "pa-evening-mat-claude-")),
       codex: mkdtempSync(join(tmpdir(), "pa-evening-mat-codex-")),
@@ -1753,7 +1753,7 @@ describe("routine.evening_review session materialization (Phase 2 slimdown)", ()
 
   it("never materializes the dropped `travel` skill on any backend (rulebook present)", () => {
     writeFileSync(
-      join(contextDir, "routines", "evening.md"),
+      join(contextDir, "policies", "routines", "evening.md"),
       "### Stripe metrics\n\nNotify me about churn outliers.\n",
       "utf-8",
     );
@@ -1772,14 +1772,14 @@ describe("routine.evening_review session materialization (Phase 2 slimdown)", ()
   });
 
   it("drops notify across every backend when routines/evening.md is empty", () => {
-    writeFileSync(join(contextDir, "routines", "evening.md"), "", "utf-8");
+    writeFileSync(join(contextDir, "policies", "routines", "evening.md"), "", "utf-8");
     materialiseAcrossBackends({ contextDir });
     expectNotifyAbsent();
   });
 
   it("drops notify across every backend when routines/evening.md has no `### ` heading", () => {
     writeFileSync(
-      join(contextDir, "routines", "evening.md"),
+      join(contextDir, "policies", "routines", "evening.md"),
       "# Header only\n\nDraft notes — no rules yet.\n",
       "utf-8",
     );
@@ -1789,7 +1789,7 @@ describe("routine.evening_review session materialization (Phase 2 slimdown)", ()
 
   it("loads notify across every backend when routines/evening.md has at least one `### ` rule", () => {
     writeFileSync(
-      join(contextDir, "routines", "evening.md"),
+      join(contextDir, "policies", "routines", "evening.md"),
       [
         "# Evening rules",
         "",

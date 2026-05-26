@@ -210,19 +210,24 @@ function capitalize(value: string): string {
  * runner uses this to resolve the absolute write target.
  */
 export function relativeDomainIndexPath(domain: Domain): string {
-  return `${domain}/_index.md`;
+  return `knowledge/entities/${domain}/_index.md`;
 }
 
 /**
  * Validate a relative path looks like a domain index. Used by the
  * runner's safety check before writing — defense-in-depth against a
  * caller-supplied domain that was tampered with.
+ *
+ * After CONTEXT_VAULT_REDESIGN domain indexes live at
+ * `knowledge/entities/<domain>/_index.md`.
  */
 export function isDomainIndexPath(relativePath: string): boolean {
   const segments = relativePath.split("/");
-  if (segments.length !== 2) return false;
-  if (segments[1] !== "_index.md") return false;
-  return (DOMAINS as readonly string[]).includes(segments[0]);
+  if (segments.length !== 4) return false;
+  if (segments[0] !== "knowledge") return false;
+  if (segments[1] !== "entities") return false;
+  if (segments[3] !== "_index.md") return false;
+  return (DOMAINS as readonly string[]).includes(segments[2]);
 }
 
 /**

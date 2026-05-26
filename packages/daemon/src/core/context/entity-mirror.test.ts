@@ -351,20 +351,20 @@ describe("filesystem walk + boot reconciler", () => {
   });
 
   it("enumerates only L2-shaped paths", () => {
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     writeEntity("work/meetings/_index.md", "skip me");
     writeEntity("work/notreal/bar.md", "skip me");
-    writeEntity("rules/management.md", "skip me");
-    mkdirSync(join(contextDir, "work", "trips"), { recursive: true });
+    writeEntity("policies/management.md", "skip me");
+    mkdirSync(join(contextDir, "knowledge", "entities", "work", "trips"), { recursive: true });
     const found = enumerateEntityFiles(contextDir);
-    expect(found).toEqual(["work/meetings/foo.md"]);
+    expect(found).toEqual(["knowledge/entities/work/meetings/foo.md"]);
   });
 
   it("ignores non-md files inside L2 directories", () => {
     writeEntity("work/meetings/note.txt", "should skip");
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     expect(enumerateEntityFiles(contextDir)).toEqual([
-      "work/meetings/foo.md",
+      "knowledge/entities/work/meetings/foo.md",
     ]);
   });
 
@@ -372,21 +372,21 @@ describe("filesystem walk + boot reconciler", () => {
     // Recreate scenarios where the walker might encounter these names
     // either as dir entries under a domain root or under a type-plural
     // subdir. The walker should silently skip without surfacing them.
-    mkdirSync(join(contextDir, "work/.git"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "entities", "work", ".git"), { recursive: true });
     writeEntity("work/.DS_Store", "metadata");
-    mkdirSync(join(contextDir, "work/meetings/.obsidian"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "entities", "work", "meetings", ".obsidian"), { recursive: true });
     writeEntity("work/meetings/.DS_Store", "metadata");
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     expect(enumerateEntityFiles(contextDir)).toEqual([
-      "work/meetings/foo.md",
+      "knowledge/entities/work/meetings/foo.md",
     ]);
   });
 
   it("ignores sub-directories nested under <domain>/<plural>/", () => {
-    mkdirSync(join(contextDir, "work/meetings/nested-dir"), { recursive: true });
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    mkdirSync(join(contextDir, "knowledge", "entities", "work", "meetings", "nested-dir"), { recursive: true });
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     expect(enumerateEntityFiles(contextDir)).toEqual([
-      "work/meetings/foo.md",
+      "knowledge/entities/work/meetings/foo.md",
     ]);
   });
 
@@ -394,9 +394,9 @@ describe("filesystem walk + boot reconciler", () => {
     // A regular file at `work/<plural>` (not a directory) should not
     // crash the walker — the `entry.isDirectory()` check filters it.
     writeFileSync(join(contextDir, "work-stray.md"), "stray", "utf-8");
-    mkdirSync(join(contextDir, "work"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "entities", "work"), { recursive: true });
     writeFileSync(
-      join(contextDir, "work/meetings"),
+      join(contextDir, "knowledge", "entities", "work", "meetings"),
       "stub-file-not-dir",
       "utf-8",
     );
@@ -404,7 +404,7 @@ describe("filesystem walk + boot reconciler", () => {
   });
 
   it("buildFullSnapshot reads + parses every found file", () => {
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     writeEntity(
       "work/meetings/bad.md",
       "no frontmatter\n",
@@ -415,13 +415,13 @@ describe("filesystem walk + boot reconciler", () => {
   });
 
   it("readSnapshotRow returns null on unreadable / unparseable", () => {
-    expect(readSnapshotRow(contextDir, "work/meetings/missing.md")).toBeNull();
-    writeEntity("work/meetings/foo.md", "no frontmatter");
-    expect(readSnapshotRow(contextDir, "work/meetings/foo.md")).toBeNull();
+    expect(readSnapshotRow(contextDir, "knowledge/entities/work/meetings/missing.md")).toBeNull();
+    writeEntity("knowledge/entities/work/meetings/foo.md", "no frontmatter");
+    expect(readSnapshotRow(contextDir, "knowledge/entities/work/meetings/foo.md")).toBeNull();
   });
 
   it("bootstrapEntityMirror upserts entities + sidecar atomically", () => {
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     const result = bootstrapEntityMirror({ db, contextDir });
     expect(result.scanned).toBe(1);
     expect(result.upserted).toBe(1);
@@ -433,7 +433,7 @@ describe("filesystem walk + boot reconciler", () => {
       .all();
     expect(row).toEqual([
       {
-        path: "work/meetings/foo.md",
+        path: "knowledge/entities/work/meetings/foo.md",
         domain: "work",
         type: "meeting",
         slug: "foo",
@@ -450,10 +450,10 @@ describe("filesystem walk + boot reconciler", () => {
   });
 
   it("bootstrapEntityMirror deletes rows that lost their files", () => {
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     bootstrapEntityMirror({ db, contextDir });
 
-    rmSync(join(contextDir, "work/meetings/foo.md"));
+    rmSync(join(contextDir, "knowledge/entities/work/meetings/foo.md"));
     const result = bootstrapEntityMirror({ db, contextDir });
     expect(result.scanned).toBe(0);
     expect(result.deleted).toBe(1);
@@ -464,7 +464,7 @@ describe("filesystem walk + boot reconciler", () => {
   });
 
   it("bootstrapEntityMirror is idempotent", () => {
-    writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
     bootstrapEntityMirror({ db, contextDir });
     const second = bootstrapEntityMirror({ db, contextDir });
     expect(second.upserted).toBe(0);
@@ -622,21 +622,43 @@ describe("readCurrentMirror + upsert/delete helpers", () => {
 
 describe("path classification helpers", () => {
   it("isL2EntityRelativePath accepts canonical L2 form", () => {
-    expect(isL2EntityRelativePath("work/meetings/foo.md")).toBe(true);
+    expect(
+      isL2EntityRelativePath("knowledge/entities/work/meetings/foo.md"),
+    ).toBe(true);
   });
 
   it("isL2EntityRelativePath rejects non-md, wrong depth, unknown enums", () => {
-    expect(isL2EntityRelativePath("work/meetings/foo.txt")).toBe(false);
-    expect(isL2EntityRelativePath("work/meetings/_index.md")).toBe(false);
-    expect(isL2EntityRelativePath("work/foo.md")).toBe(false);
-    expect(isL2EntityRelativePath("bogus/meetings/foo.md")).toBe(false);
-    expect(isL2EntityRelativePath("work/notreal/foo.md")).toBe(false);
+    // Wrong extension.
+    expect(
+      isL2EntityRelativePath("knowledge/entities/work/meetings/foo.txt"),
+    ).toBe(false);
+    // Underscore-prefixed (_index.md and friends) are filtered.
+    expect(
+      isL2EntityRelativePath("knowledge/entities/work/meetings/_index.md"),
+    ).toBe(false);
+    // 3-segment legacy shape — pre-V14 layout, must be rejected post-restructure.
+    expect(isL2EntityRelativePath("work/meetings/foo.md")).toBe(false);
+    // Right prefix, wrong depth.
+    expect(isL2EntityRelativePath("knowledge/entities/work/foo.md")).toBe(false);
+    // Unknown domain.
+    expect(
+      isL2EntityRelativePath("knowledge/entities/bogus/meetings/foo.md"),
+    ).toBe(false);
+    // Unknown type-plural.
+    expect(
+      isL2EntityRelativePath("knowledge/entities/work/notreal/foo.md"),
+    ).toBe(false);
+    // Right depth + enums but missing the `knowledge/entities/` prefix.
+    expect(isL2EntityRelativePath("a/b/work/meetings/foo.md")).toBe(false);
   });
 
   it("toRelativePath normalises slashes + rejects out-of-tree paths", () => {
-    expect(toRelativePath("/tmp/ctx", "/tmp/ctx/work/meetings/foo.md")).toBe(
-      "work/meetings/foo.md",
-    );
+    expect(
+      toRelativePath(
+        "/tmp/ctx",
+        "/tmp/ctx/knowledge/entities/work/meetings/foo.md",
+      ),
+    ).toBe("knowledge/entities/work/meetings/foo.md");
     expect(toRelativePath("/tmp/ctx", "/etc/passwd")).toBeNull();
     expect(toRelativePath("/tmp/ctx", "/tmp/ctx")).toBeNull();
   });
@@ -673,7 +695,7 @@ describe("refreshEntityMirrorForPath", () => {
   });
 
   it("ignores paths that fall outside the L2 layout", () => {
-    const abs = join(contextDir, "rules/management.md");
+    const abs = join(contextDir, "policies/management.md");
     mkdirSync(join(abs, ".."), { recursive: true });
     writeFileSync(abs, "# something", "utf-8");
     const result = refreshEntityMirrorForPath({
@@ -685,7 +707,10 @@ describe("refreshEntityMirrorForPath", () => {
   });
 
   it("upserts on add, returns noop on a second pass", () => {
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     const first = refreshEntityMirrorForPath({
       db,
       contextDir,
@@ -701,7 +726,10 @@ describe("refreshEntityMirrorForPath", () => {
   });
 
   it("returns deleted when the file no longer exists", () => {
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     refreshEntityMirrorForPath({ db, contextDir, absolutePath: abs });
     unlinkSync(abs);
     const result = refreshEntityMirrorForPath({
@@ -714,7 +742,10 @@ describe("refreshEntityMirrorForPath", () => {
   });
 
   it("flags self-write when the tracker matches the path", () => {
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     const tracker = new AgentWriteTracker();
     tracker.markWriting(abs); // path-only mark
     const result = refreshEntityMirrorForPath({
@@ -727,7 +758,10 @@ describe("refreshEntityMirrorForPath", () => {
   });
 
   it("returns ignored:unparseable for malformed files", () => {
-    const abs = writeEntity("work/meetings/foo.md", "no frontmatter\n");
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      "no frontmatter\n",
+    );
     const result = refreshEntityMirrorForPath({
       db,
       contextDir,
@@ -795,7 +829,10 @@ describe("startEntityMirrorWatcher onEntityChanged fan-out (followups item 7)", 
       onEntityChanged: () => calls.push(Date.now()),
       watcherFactory: () => fake.watcher,
     });
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     fake.emitChange(abs);
     expect(calls).toHaveLength(1);
     expect(
@@ -814,7 +851,10 @@ describe("startEntityMirrorWatcher onEntityChanged fan-out (followups item 7)", 
       onEntityChanged: () => calls.push(Date.now()),
       watcherFactory: () => fake.watcher,
     });
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     fake.emitChange(abs);
     expect(calls).toHaveLength(1);
     unlinkSync(abs);
@@ -832,7 +872,10 @@ describe("startEntityMirrorWatcher onEntityChanged fan-out (followups item 7)", 
       onEntityChanged: () => calls.push(Date.now()),
       watcherFactory: () => fake.watcher,
     });
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     fake.emitChange(abs);
     expect(calls).toHaveLength(1);
     // Same content again — refreshEntityMirrorForPath returns noop.
@@ -854,7 +897,10 @@ describe("startEntityMirrorWatcher onEntityChanged fan-out (followups item 7)", 
       },
       watcherFactory: () => fake.watcher,
     });
-    const abs = writeEntity("work/meetings/foo.md", SAMPLE_ENTITY);
+    const abs = writeEntity(
+      "knowledge/entities/work/meetings/foo.md",
+      SAMPLE_ENTITY,
+    );
     expect(() => fake.emitChange(abs)).not.toThrow();
     expect(
       db.prepare("SELECT count(*) AS n FROM entities").get(),

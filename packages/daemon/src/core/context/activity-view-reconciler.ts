@@ -2,7 +2,7 @@ import { normalizeAppLabel } from "@aitne/shared";
 
 /**
  * Activity-view reconciler — pure render + snapshot helpers for
- * `<contextDir>/_activity/<source>.md`
+ * `<contextDir>/state/activity/<source>.md`
  * (docs/design/21-management-registry-and-entities.md §7.2 / §9.6).
  *
  * Inputs:
@@ -12,7 +12,7 @@ import { normalizeAppLabel } from "@aitne/shared";
  *     "Recently changed" section.
  *
  * Output is a chronological per-source view; the LLM's query path
- * (§7.5) reads `_activity/<source>.md` for the date, then follows the
+ * (§7.5) reads `state/activity/<source>.md` for the date, then follows the
  * link into the entity file. The activity file is short on details
  * (entity title + per-entity source metadata + a managed-task tag) so
  * the prompt-injection budget stays modest even with hundreds of
@@ -125,11 +125,11 @@ export function activityFileSlugFor(source: string): string | null {
 
 /**
  * Relative path under `<contextDir>` for the activity file. Matches
- * the §9.6 layout `_activity/<source>.md`. The leading underscore is
+ * the §9.6 layout `state/activity/<source>.md`. The leading underscore is
  * the convention for auto-generated views (same as `_index.md`).
  */
 export function relativeActivityPath(slug: string): string {
-  return `_activity/${slug}.md`;
+  return `state/activity/${slug}.md`;
 }
 
 // ── Render ────────────────────────────────────────────────────────────────
@@ -243,11 +243,12 @@ function formatRecentlyChanged(row: RecentlyChangedInput): string {
 
 function formatEntity(entity: EntityActivityInput): string {
   const head = entity.timeRange ? `${entity.timeRange} ` : "";
-  // The activity file lives at `_activity/<slug>.md`; entity files
-  // live at `<domain>/<type-plural>/<slug>.md`. From the activity
-  // file's perspective an entity at `work/meetings/foo.md` is at
-  // `../work/meetings/foo.md`.
-  const link = `../${entity.entityRelativePath}`;
+  // After CONTEXT_VAULT_REDESIGN the activity file lives at
+  // `state/activity/<slug>.md` and entity files live at
+  // `knowledge/entities/<domain>/<type-plural>/<slug>.md`. From the
+  // activity file's perspective both trees are siblings under the vault
+  // root; the relative link climbs two levels first.
+  const link = `../../${entity.entityRelativePath}`;
   const title = `[${escapeMd(entity.title)}](${link})`;
   const tail = formatEntityTail(entity);
   return `${head}${title}${tail}`;

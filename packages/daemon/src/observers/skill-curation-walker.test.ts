@@ -56,18 +56,18 @@ describe("SkillCurationWalker.runOnce — knowledge_layout structure_diff", () =
           anchor: `<!-- CURATION:knowledge_layout id="topic-files" -->`,
           human_label: "Topic file layout",
           description: "y",
-          scope_paths: ["user/*.md"],
+          scope_paths: ["identity/*.md"],
         }],
       },
       {
         kind: "knowledge_layout",
-        files: [{ path: "user/profile.md", purpose: "identity facts", sections: [{ heading: "## Identity", contains: "name role tz" }] }],
+        files: [{ path: "identity/profile.md", purpose: "identity facts", sections: [{ heading: "## Identity", contains: "name role tz" }] }],
       },
       "topic-files",
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n");
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Hobbies\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n");
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Hobbies\n");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -76,7 +76,7 @@ describe("SkillCurationWalker.runOnce — knowledge_layout structure_diff", () =
     const sigs = unconsumedSignalsForSkill(db, "user-profile");
     const fileAdds = sigs.filter((s) => JSON.parse(s.payload_json).sub_kind === "file_add");
     expect(fileAdds.length).toBeGreaterThan(0);
-    expect(fileAdds.some((s) => JSON.parse(s.payload_json).target === "user/personal.md")).toBe(true);
+    expect(fileAdds.some((s) => JSON.parse(s.payload_json).target === "identity/personal.md")).toBe(true);
   });
 
   it("flags a heading the seed didn't know about as heading_add", async () => {
@@ -90,17 +90,17 @@ describe("SkillCurationWalker.runOnce — knowledge_layout structure_diff", () =
           anchor: `<!-- CURATION:knowledge_layout id="topic-files" -->`,
           human_label: "Topic file layout",
           description: "y",
-          scope_paths: ["user/*.md"],
+          scope_paths: ["identity/*.md"],
         }],
       },
       {
         kind: "knowledge_layout",
-        files: [{ path: "user/profile.md", purpose: "identity facts", sections: [{ heading: "## Identity", contains: "name role tz" }] }],
+        files: [{ path: "identity/profile.md", purpose: "identity facts", sections: [{ heading: "## Identity", contains: "name role tz" }] }],
       },
       "topic-files",
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n## NEW\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n## NEW\n");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     await walker.runOnce();
@@ -120,17 +120,17 @@ describe("SkillCurationWalker.runOnce — knowledge_layout structure_diff", () =
           anchor: `<!-- CURATION:knowledge_layout id="topic-files" -->`,
           human_label: "Topic file layout",
           description: "y",
-          scope_paths: ["user/*.md"],
+          scope_paths: ["identity/*.md"],
         }],
       },
       {
         kind: "knowledge_layout",
-        files: [{ path: "user/profile.md", purpose: "identity facts", sections: [{ heading: "## Identity", contains: "name role tz" }] }],
+        files: [{ path: "identity/profile.md", purpose: "identity facts", sections: [{ heading: "## Identity", contains: "name role tz" }] }],
       },
       "topic-files",
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## H\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## H\n");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const a = await walker.runOnce();
@@ -193,7 +193,7 @@ describe("SkillCurationWalker.runOnce — knowledge_layout heading_remove", () =
             anchor: `<!-- CURATION:knowledge_layout id="topic-files" -->`,
             human_label: "Topic file layout",
             description: "Files the agent uses for user profiling",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -201,7 +201,7 @@ describe("SkillCurationWalker.runOnce — knowledge_layout heading_remove", () =
         kind: "knowledge_layout",
         files: [
           {
-            path: "user/profile.md",
+            path: "identity/profile.md",
             purpose: "identity facts",
             sections: [
               { heading: "## Identity", contains: "name role tz" },
@@ -212,9 +212,9 @@ describe("SkillCurationWalker.runOnce — knowledge_layout heading_remove", () =
       },
       "topic-files",
     );
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
     // Write the file WITHOUT the Preferences heading that the seed declared.
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n", "utf-8");
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -225,7 +225,7 @@ describe("SkillCurationWalker.runOnce — knowledge_layout heading_remove", () =
       .map((s) => JSON.parse(s.payload_json))
       .filter((p) => p.sub_kind === "heading_remove");
     expect(removes.length).toBeGreaterThan(0);
-    expect(removes.some((p) => p.target === "user/profile.md#Preferences")).toBe(true);
+    expect(removes.some((p) => p.target === "identity/profile.md#Preferences")).toBe(true);
   });
 });
 
@@ -247,7 +247,7 @@ describe("SkillCurationWalker.runOnce — frontmatter_schema", () => {
             anchor: `<!-- CURATION:frontmatter_schema id="fm-section" -->`,
             human_label: "User frontmatter schema",
             description: "Declares required frontmatter keys for user files",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -255,16 +255,16 @@ describe("SkillCurationWalker.runOnce — frontmatter_schema", () => {
         kind: "frontmatter_schema",
         file_types: [
           {
-            glob: "user/*.md",
+            glob: "identity/*.md",
             required: [{ key: "tags", type: "array", example: "[work]" }],
             conventional: [],
           },
         ],
       },
     );
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
     // No frontmatter — tags key is missing.
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n", "utf-8");
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -276,7 +276,7 @@ describe("SkillCurationWalker.runOnce — frontmatter_schema", () => {
       .map((s) => JSON.parse(s.payload_json))
       .filter((p) => p.sub_kind === "frontmatter_change");
     expect(changes.length).toBeGreaterThan(0);
-    expect(changes.some((p) => p.target === "user/profile.md#tags")).toBe(true);
+    expect(changes.some((p) => p.target === "identity/profile.md#tags")).toBe(true);
     expect(changes[0].detail).toEqual({ missing: true });
   });
 
@@ -295,7 +295,7 @@ describe("SkillCurationWalker.runOnce — frontmatter_schema", () => {
             anchor: `<!-- CURATION:frontmatter_schema id="fm-section" -->`,
             human_label: "User frontmatter schema",
             description: "Declares required frontmatter keys for user files",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -303,17 +303,17 @@ describe("SkillCurationWalker.runOnce — frontmatter_schema", () => {
         kind: "frontmatter_schema",
         file_types: [
           {
-            glob: "user/*.md",
+            glob: "identity/*.md",
             required: [{ key: "tags", type: "array", example: "[work]" }],
             conventional: [],
           },
         ],
       },
     );
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
     // Frontmatter with the required key present.
     writeFileSync(
-      join(contextDir, "user", "profile.md"),
+      join(contextDir, "identity", "profile.md"),
       "---\ntags: work\n---\n## Identity\n",
       "utf-8",
     );
@@ -348,7 +348,7 @@ describe("SkillCurationWalker.runOnce — routing_table", () => {
             anchor: `<!-- CURATION:routing_table id="routes" -->`,
             human_label: "Routing table",
             description: "Where to write different kinds of information",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -357,7 +357,7 @@ describe("SkillCurationWalker.runOnce — routing_table", () => {
         rules: [
           {
             trigger_pattern: "When the user mentions a preference",
-            destination_path: "user/missing.md",
+            destination_path: "identity/missing.md",
             destination_section: "## Preferences",
             destination_mode: "append",
           },
@@ -365,7 +365,7 @@ describe("SkillCurationWalker.runOnce — routing_table", () => {
       },
     );
     // Create the context dir but NOT user/missing.md.
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -377,7 +377,7 @@ describe("SkillCurationWalker.runOnce — routing_table", () => {
       .map((s) => JSON.parse(s.payload_json))
       .filter((p) => p.sub_kind === "file_remove");
     expect(removes.length).toBeGreaterThan(0);
-    expect(removes.some((p) => p.target === "user/missing.md")).toBe(true);
+    expect(removes.some((p) => p.target === "identity/missing.md")).toBe(true);
   });
 
   it("skips destination_path entries that contain a wildcard", async () => {
@@ -395,7 +395,7 @@ describe("SkillCurationWalker.runOnce — routing_table", () => {
             anchor: `<!-- CURATION:routing_table id="routes" -->`,
             human_label: "Routing table",
             description: "Where to write different kinds of information",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -404,14 +404,14 @@ describe("SkillCurationWalker.runOnce — routing_table", () => {
         rules: [
           {
             trigger_pattern: "When the user mentions any project topic",
-            destination_path: "projects/*.md",
+            destination_path: "plans/projects/*.md",
             destination_section: "## Notes",
             destination_mode: "append",
           },
         ],
       },
     );
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -438,7 +438,7 @@ describe("SkillCurationWalker.runOnce — search_recipes", () => {
             anchor: `<!-- CURATION:search_recipes id="recipes" -->`,
             human_label: "Search recipes",
             description: "Lookup paths for common questions",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -447,14 +447,14 @@ describe("SkillCurationWalker.runOnce — search_recipes", () => {
         recipes: [
           {
             question_shape: "What are the user current projects",
-            lookup_path: "user/projects.md",
+            lookup_path: "identity/projects.md",
             lookup_section: "## Active",
           },
         ],
       },
     );
     // Create the context dir but NOT user/projects.md.
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -466,7 +466,7 @@ describe("SkillCurationWalker.runOnce — search_recipes", () => {
       .map((s) => JSON.parse(s.payload_json))
       .filter((p) => p.sub_kind === "file_remove");
     expect(removes.length).toBeGreaterThan(0);
-    expect(removes.some((p) => p.target === "user/projects.md")).toBe(true);
+    expect(removes.some((p) => p.target === "identity/projects.md")).toBe(true);
   });
 });
 
@@ -488,7 +488,7 @@ describe("SkillCurationWalker.runOnce — convention_notes no-op", () => {
             anchor: `<!-- CURATION:convention_notes id="conventions" -->`,
             human_label: "Writing conventions",
             description: "House style and naming conventions the agent should follow",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -503,8 +503,8 @@ describe("SkillCurationWalker.runOnce — convention_notes no-op", () => {
         ],
       },
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -530,7 +530,7 @@ describe("SkillCurationWalker.runOnce — cross_references no-op", () => {
             anchor: `<!-- CURATION:cross_references id="xrefs" -->`,
             human_label: "Cross-references",
             description: "Known links between context files",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -538,15 +538,15 @@ describe("SkillCurationWalker.runOnce — cross_references no-op", () => {
         kind: "cross_references",
         refs: [
           {
-            from_path: "user/profile.md",
+            from_path: "identity/profile.md",
             to_path: "user/details.md",
             relation: "profile links to extended details page",
           },
         ],
       },
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -595,17 +595,17 @@ describe("simpleGlobMatch behaviour via frontmatter_schema coverage", () => {
       "glob-skill-star",
       "frontmatter_schema",
       sectionId,
-      makeDecl("user/*.md", sectionId),
-      makeSeed("user/*.md"),
+      makeDecl("identity/*.md", sectionId),
+      makeSeed("identity/*.md"),
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Bio\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Bio\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
     expect(r.inserted).toBeGreaterThan(0);
     const sigs = unconsumedSignalsForSkill(db, "glob-skill-star");
-    expect(sigs.some((s) => JSON.parse(s.payload_json).target === "user/profile.md#tags")).toBe(true);
+    expect(sigs.some((s) => JSON.parse(s.payload_json).target === "identity/profile.md#tags")).toBe(true);
   });
 
   it("single-star glob does NOT match a file two levels deep (user/*.md does not match user/sub/profile.md)", async () => {
@@ -615,11 +615,11 @@ describe("simpleGlobMatch behaviour via frontmatter_schema coverage", () => {
       "glob-skill-star-no",
       "frontmatter_schema",
       sectionId,
-      makeDecl("user/*.md", sectionId),
-      makeSeed("user/*.md"),
+      makeDecl("identity/*.md", sectionId),
+      makeSeed("identity/*.md"),
     );
-    mkdirSync(join(contextDir, "user", "sub"), { recursive: true });
-    writeFileSync(join(contextDir, "user", "sub", "profile.md"), "## Bio\n", "utf-8");
+    mkdirSync(join(contextDir, "identity", "sub"), { recursive: true });
+    writeFileSync(join(contextDir, "identity", "sub", "profile.md"), "## Bio\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -641,15 +641,15 @@ describe("simpleGlobMatch behaviour via frontmatter_schema coverage", () => {
       makeDecl("**/*.md", sectionId),
       makeSeed("**/*.md"),
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Bio\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Bio\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
     expect(r.inserted).toBeGreaterThan(0);
     const sigs = unconsumedSignalsForSkill(db, "glob-skill-doublestar");
     expect(
-      sigs.some((s) => JSON.parse(s.payload_json).target === "user/profile.md#tags"),
+      sigs.some((s) => JSON.parse(s.payload_json).target === "identity/profile.md#tags"),
     ).toBe(true);
   });
 
@@ -660,13 +660,13 @@ describe("simpleGlobMatch behaviour via frontmatter_schema coverage", () => {
       "glob-skill-exact",
       "frontmatter_schema",
       sectionId,
-      makeDecl("user/profile.md", sectionId),
-      makeSeed("user/profile.md"),
+      makeDecl("identity/profile.md", sectionId),
+      makeSeed("identity/profile.md"),
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Bio\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Bio\n", "utf-8");
     // other.md should NOT match the exact pattern
-    writeFileSync(join(contextDir, "user", "other.md"), "## Other\n", "utf-8");
+    writeFileSync(join(contextDir, "identity", "other.md"), "## Other\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -676,7 +676,7 @@ describe("simpleGlobMatch behaviour via frontmatter_schema coverage", () => {
     const fmChanges = sigs
       .map((s) => JSON.parse(s.payload_json))
       .filter((p) => p.sub_kind === "frontmatter_change");
-    expect(fmChanges.every((p) => p.target.startsWith("user/profile.md"))).toBe(true);
+    expect(fmChanges.every((p) => p.target.startsWith("identity/profile.md"))).toBe(true);
     expect(r.inserted).toBeGreaterThan(0);
     void targets; // used above
   });
@@ -691,8 +691,8 @@ describe("simpleGlobMatch behaviour via frontmatter_schema coverage", () => {
       makeDecl("user/nonexistent.md", sectionId),
       makeSeed("user/nonexistent.md"),
     );
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Bio\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Bio\n", "utf-8");
 
     const walker = new SkillCurationWalker(db, contextDir, skillsRoot, dataDir);
     const r = await walker.runOnce();
@@ -716,7 +716,7 @@ describe("diffSkill — idempotency key deduplication", () => {
             anchor: `<!-- CURATION:knowledge_layout id="topic-files" -->`,
             human_label: "Topic file layout",
             description: "Files used for user profiling",
-            scope_paths: ["user/*.md"],
+            scope_paths: ["identity/*.md"],
           },
         ],
       },
@@ -724,7 +724,7 @@ describe("diffSkill — idempotency key deduplication", () => {
         kind: "knowledge_layout",
         files: [
           {
-            path: "user/profile.md",
+            path: "identity/profile.md",
             purpose: "identity facts",
             sections: [{ heading: "## Identity", contains: "name role tz" }],
           },
@@ -732,9 +732,9 @@ describe("diffSkill — idempotency key deduplication", () => {
       },
       "topic-files",
     );
-    mkdirSync(join(contextDir, "user"));
+    mkdirSync(join(contextDir, "identity"));
     // personal.md is new — not in the seed — so it will produce a file_add signal.
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Hobbies\n", "utf-8");
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Hobbies\n", "utf-8");
 
     const decls = loadAllCurationDeclarations(skillsRoot).filter((d) => d.declaration !== null);
     expect(decls).toHaveLength(1);
@@ -862,17 +862,17 @@ describe("diffSkill — edge cases", () => {
           anchor: `<!-- CURATION:knowledge_layout id="topic-files" -->`,
           human_label: "Files used for the user profile",
           description: "Layout of user context files",
-          scope_paths: ["user/*.md"],
+          scope_paths: ["identity/*.md"],
         }],
       },
       {
         kind: "knowledge_layout",
-        files: [{ path: "user/profile.md", purpose: "identity facts", sections: [] }],
+        files: [{ path: "identity/profile.md", purpose: "identity facts", sections: [] }],
       },
       "topic-files",
     );
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    writeFileSync(join(contextDir, "user", "extra.md"), "## Bio\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    writeFileSync(join(contextDir, "identity", "extra.md"), "## Bio\n", "utf-8");
 
     // Pre-seed the signals table with a row that has malformed JSON payload.
     // safeParse must return null for this row so diffSkill doesn't crash.

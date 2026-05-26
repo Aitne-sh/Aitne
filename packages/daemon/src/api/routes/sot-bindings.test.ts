@@ -356,7 +356,7 @@ describe("sot-bindings routes", () => {
       "context",
       CONTEXT_RELATIVE_PATHS.rules.management,
     );
-    mkdirSync(join(localEnv.dataDir, "context", "rules"), { recursive: true });
+    mkdirSync(join(localEnv.dataDir, "context", "policies"), { recursive: true });
     const PRESERVED = [
       "# Management",
       "",

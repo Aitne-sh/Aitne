@@ -254,9 +254,9 @@ describe("template-store pure helpers", () => {
 
   it("selectRetemplateTargets filters by classification and existence", () => {
     const ctx = tempDir("pa-template-targets-");
-    seedContextFile(ctx, "git/a/overview.md", "a");
+    seedContextFile(ctx, "knowledge/repos/a/overview.md", "a");
     // b's overview.md missing on disk — should be skipped.
-    seedContextFile(ctx, "git/c/overview.md", "c");
+    seedContextFile(ctx, "knowledge/repos/c/overview.md", "c");
 
     const repos = [
       makeRepo({ slug: "a", path: "/tmp/a", classification: "project" }),
@@ -267,16 +267,16 @@ describe("template-store pure helpers", () => {
 
     const projectTargets = selectRetemplateTargets(repos, "project", ctx);
     expect(projectTargets.map((t) => t.slug)).toEqual(["a"]);
-    expect(projectTargets[0].contextFile).toBe("git/a/overview.md");
+    expect(projectTargets[0].contextFile).toBe("knowledge/repos/a/overview.md");
 
     const repoTargets = selectRetemplateTargets(repos, "git-repo", ctx);
     expect(repoTargets.map((t) => t.slug)).toEqual(["c"]);
-    expect(repoTargets[0].backupRelPath).toBe("git/c/overview.md");
+    expect(repoTargets[0].backupRelPath).toBe("knowledge/repos/c/overview.md");
   });
 
   it("selectRetemplateTargets dedupes by slug across duplicate repos", () => {
     const ctx = tempDir();
-    seedContextFile(ctx, "git/dup/overview.md", "dup");
+    seedContextFile(ctx, "knowledge/repos/dup/overview.md", "dup");
     const repos = [
       makeRepo({ slug: "dup", path: "/tmp/x", classification: "project" }),
       makeRepo({ slug: "dup", path: "/tmp/y", classification: "project" }),
@@ -310,7 +310,7 @@ describe("template-store pure helpers", () => {
 
   it("safeFileSize returns size for existing file, undefined otherwise", () => {
     const ctx = tempDir();
-    const abs = seedContextFile(ctx, "projects/x.md", "hello");
+    const abs = seedContextFile(ctx, "plans/projects/x.md", "hello");
     expect(safeFileSize(abs)).toBe(5);
     expect(safeFileSize(join(ctx, "missing.md"))).toBeUndefined();
   });
@@ -486,7 +486,7 @@ describe("prepareRetemplateRun", () => {
     const ws = workspaceFixturesDir();
     const ctx = tempDir();
     seedTemplates(dataDir);
-    seedContextFile(ctx, "git/aitne/overview.md", "ORIG");
+    seedContextFile(ctx, "knowledge/repos/aitne/overview.md", "ORIG");
 
     const fixed = new Date("2026-04-30T05:06:07.890Z");
     const result = prepareRetemplateRun({
@@ -504,7 +504,7 @@ describe("prepareRetemplateRun", () => {
     // Backup file exists with original content
     const backupPath = join(
       result.backupRoot,
-      "git/aitne/overview.md",
+      "knowledge/repos/aitne/overview.md",
     );
     expect(existsSync(backupPath)).toBe(true);
     expect(readFileSync(backupPath, "utf-8")).toBe("ORIG");
@@ -544,7 +544,7 @@ describe("prepareRetemplateRun", () => {
     const ws = workspaceFixturesDir();
     const ctx = tempDir();
     seedTemplates(dataDir);
-    seedContextFile(ctx, "git/aitne/overview.md", "ORIG");
+    seedContextFile(ctx, "knowledge/repos/aitne/overview.md", "ORIG");
 
     const repos = [makeRepo({ slug: "aitne" })];
     const first = prepareRetemplateRun({
@@ -609,7 +609,7 @@ describe("prepareRetemplateRun", () => {
     // selectRetemplateTargets filters for classification === "repo-only" when
     // kind === "git-repo", so use a repo with that classification.
     const repo = makeRepo({ slug: "lib", classification: "repo-only" });
-    seedContextFile(ctx, "git/lib/overview.md", "# lib\n");
+    seedContextFile(ctx, "knowledge/repos/lib/overview.md", "# lib\n");
 
     const result = prepareRetemplateRun({
       db,
@@ -652,7 +652,7 @@ describe("finalizeRetemplate", () => {
     const ws = workspaceFixturesDir();
     const ctx = tempDir();
     seedTemplates(dataDir);
-    seedContextFile(ctx, "git/aitne/overview.md", "ORIGINAL_BODY");
+    seedContextFile(ctx, "knowledge/repos/aitne/overview.md", "ORIGINAL_BODY");
     const result = prepareRetemplateRun({
       db,
       dataDir,
@@ -672,7 +672,7 @@ describe("finalizeRetemplate", () => {
     if (opts.erroredHalfWritten) {
       // Simulate the agent half-writing the target before crashing
       writeFileSync(
-        join(ctx, "git/aitne/overview.md"),
+        join(ctx, "knowledge/repos/aitne/overview.md"),
         "HALF_WRITTEN",
         "utf-8",
       );
@@ -681,8 +681,8 @@ describe("finalizeRetemplate", () => {
       db,
       ctx,
       scheduleId: result.scheduleId,
-      targetPath: join(ctx, "git/aitne/overview.md"),
-      backupPath: join(result.backupRoot, "git/aitne/overview.md"),
+      targetPath: join(ctx, "knowledge/repos/aitne/overview.md"),
+      backupPath: join(result.backupRoot, "knowledge/repos/aitne/overview.md"),
     };
   }
 
@@ -711,7 +711,7 @@ describe("finalizeRetemplate", () => {
     const ws = workspaceFixturesDir();
     const ctx = tempDir();
     seedTemplates(dataDir);
-    seedContextFile(ctx, "git/aitne/overview.md", "ORIGINAL");
+    seedContextFile(ctx, "knowledge/repos/aitne/overview.md", "ORIGINAL");
     const result = prepareRetemplateRun({
       db,
       dataDir,
@@ -722,7 +722,7 @@ describe("finalizeRetemplate", () => {
     });
     if (!result.ok) throw new Error("setup_failed");
     // Simulate an out-of-band write before the agent even reported started
-    writeFileSync(join(ctx, "git/aitne/overview.md"), "DAMAGED", "utf-8");
+    writeFileSync(join(ctx, "knowledge/repos/aitne/overview.md"), "DAMAGED", "utf-8");
 
     const finalize = finalizeRetemplate({
       db,
@@ -732,7 +732,7 @@ describe("finalizeRetemplate", () => {
     });
     expect(finalize.applied).toBe(true);
     expect(finalize.rolledBackSlugs).toEqual(["aitne"]);
-    expect(readFileSync(join(ctx, "git/aitne/overview.md"), "utf-8")).toBe(
+    expect(readFileSync(join(ctx, "knowledge/repos/aitne/overview.md"), "utf-8")).toBe(
       "ORIGINAL",
     );
   });
@@ -743,7 +743,7 @@ describe("finalizeRetemplate", () => {
     const ws = workspaceFixturesDir();
     const ctx = tempDir();
     seedTemplates(dataDir);
-    seedContextFile(ctx, "git/aitne/overview.md", "ORIGINAL");
+    seedContextFile(ctx, "knowledge/repos/aitne/overview.md", "ORIGINAL");
     const prep = prepareRetemplateRun({
       db,
       dataDir,

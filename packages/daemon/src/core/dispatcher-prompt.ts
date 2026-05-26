@@ -113,7 +113,7 @@ export class PromptAssembler {
     if (!contextDir) {
       return base;
     }
-    // B-003 Phase 3 — the `rules/mcp.md` PolicyFileRef is registered with
+    // B-003 Phase 3 — the `policies/mcp.md` PolicyFileRef is registered with
     // `injectIf: ctx.flags?.mcpEnabled === true`. Compute the flag here so
     // every dispatch path (DM, routine, scheduled task, fallback reassembly)
     // injects the policy without each call site having to remember it.

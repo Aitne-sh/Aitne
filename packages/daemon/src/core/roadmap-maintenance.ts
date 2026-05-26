@@ -732,7 +732,7 @@ async function appendJournalLine(
       : "");
 
   // Per-path serializer fences this read-modify-write against the HTTP
-  // route's `PATCH /api/context/agent/journal` and the other in-process
+  // route's `PATCH /api/context/journal/agent` and the other in-process
   // journal appenders (morning routine, weekly-interests). Without the
   // fence, two writers reading the same pre-state would each rename
   // their own "next" over the file, silently dropping one of the
@@ -751,7 +751,7 @@ async function appendJournalLine(
 
     const next = appendToJournalSection(original, summary);
     if (original !== null) {
-      saveSnapshot(deps.db, "agent/journal", original, "roadmap_maintenance_journal");
+      saveSnapshot(deps.db, "journal/agent", original, "roadmap_maintenance_journal");
     }
     // Mark before the rename so FS-watch consumers attribute the
     // resulting event to the agent. Roll back on failure (C2).
@@ -768,7 +768,7 @@ async function appendJournalLine(
 
 /**
  * Append `summary` to the `## Roadmap maintenance` section of
- * `agent/journal.md`, creating the section when absent. Exported for
+ * `journal/agent.md`, creating the section when absent. Exported for
  * unit tests so the fresh-file vs. existing-section vs. existing-file
  * branches can be pinned without standing up a sqlite + fs harness.
  */

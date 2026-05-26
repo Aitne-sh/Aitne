@@ -8,6 +8,7 @@ import {
 } from "./config.js";
 import {
   getDegradedMode,
+  getVaultRestructurePendingConsent,
   isSetupCompleted,
   isDegraded as readDegradedMode,
 } from "./db/runtime-state.js";
@@ -37,6 +38,7 @@ import {
   recordInstructionAssetStatus,
   recordSkillAssetStatus,
 } from "./core/release-assets.js";
+import { resolveUserSkillsRoot } from "./core/user-skills-root.js";
 import {
   bootstrapManagementMd,
   startManagementMdWatcher,
@@ -165,23 +167,53 @@ async function startup(): Promise<void> {
   });
 
   // ── Integration Delegation Framework (Phase 1) ──
-  // Reconcile `<dataDir>/integrations.md` with the DB integrations map.
+  // Reconcile `<contextDir>/policies/integrations.md` with the DB integrations map.
   // Creates the file on first run, parses hand-edits if present, and
   // re-renders unconditionally so daemon-owned columns are canonical.
   // The watcher is started later (after the observer manager) so fs-watch
   // errors don't block boot.
   let managementMdWatcher: ManagementMdWatcherHandle | null = null;
   let managementRegistryWatcher: ManagementRegistryWatcherHandle | null = null;
-  try {
-    await bootstrapManagementMd(config.dataDir, db, config.workspaceDir, {
-      externalObsidianVaultPath: config.externalObsidianVaultPath,
-      externalObsidianWatch: config.externalObsidianWatch,
-    });
-  } catch (err) {
-    logger.error(
-      { err, dataDir: config.dataDir },
-      "integrations.md bootstrap failed; continuing with DB state",
+  // CONTEXT_VAULT_REDESIGN V16 — when the consent gate deferred the vault
+  // restructure (Obsidian-mode user has not acknowledged the sidebar move
+  // yet), DO NOT write `policies/integrations.md` into the legacy vault.
+  // Doing so would create a stray `policies/` directory next to the
+  // legacy `rules/` / `user/` / etc., producing a mixed layout the user
+  // sees in Obsidian before they ever consented. The write resumes on
+  // the next boot after ack, where the migration runs first and the
+  // vault has a coherent post-restructure shape.
+  const vaultConsentPending =
+    getVaultRestructurePendingConsent(db) !== null;
+  if (vaultConsentPending) {
+    logger.warn(
+      {
+        contextDir: getContextDir(config, db),
+        ackEnvVar: "PA_VAULT_RESTRUCTURE_ACK",
+      },
+      "Skipping integrations.md bootstrap: Obsidian-vault consent pending. Set PA_VAULT_RESTRUCTURE_ACK=1 (headless) or POST /api/setup/vault-restructure-ack (dashboard), then restart.",
     );
+  } else {
+    try {
+      // V18 — pass contextDir explicitly so `policies/integrations.md` lands
+      // at the right vault root in both plain and Obsidian-vault modes. The
+      // `initDirectories` step earlier created `<contextDir>/policies/`, which
+      // this bootstrap depends on existing.
+      await bootstrapManagementMd(
+        config.dataDir,
+        db,
+        config.workspaceDir,
+        {
+          externalObsidianVaultPath: config.externalObsidianVaultPath,
+          externalObsidianWatch: config.externalObsidianWatch,
+        },
+        getContextDir(config, db),
+      );
+    } catch (err) {
+      logger.error(
+        { err, dataDir: config.dataDir },
+        "integrations.md bootstrap failed; continuing with DB state",
+      );
+    }
   }
 
   // ── Docs corpus indexer (DOCS_QA_DESIGN.md P1) ──
@@ -202,7 +234,11 @@ async function startup(): Promise<void> {
 
   try {
     recordInstructionAssetStatus(db, config.workspaceDir);
-    const skillStatus = recordSkillAssetStatus(db, config.dataDir, config.workspaceDir);
+    const skillStatus = recordSkillAssetStatus(
+      db,
+      resolveUserSkillsRoot(config),
+      config.workspaceDir,
+    );
     if (skillStatus.builtinShadowedUserSkills.length > 0) {
       logger.warn(
         { slugs: skillStatus.builtinShadowedUserSkills },
@@ -247,7 +283,7 @@ async function startup(): Promise<void> {
 
     // ── Management Registry boot reconcile (design 21 §7.2 / P2) ──
     // Mirrors `bootstrapManagementMd` (which owns integrations.md). Reads
-    // `<contextDir>/rules/management.md` and reconciles its A-section with
+    // `<contextDir>/policies/management.md` and reconciles its A-section with
     // `settings.sot_bindings`; renders a fresh file when the on-disk
     // schema_version does not match the current daemon's. Run after
     // `ensureSkeletonFiles` so the seeded template is the parse target
@@ -257,7 +293,7 @@ async function startup(): Promise<void> {
     } catch (err) {
       logger.error(
         { err, contextDir },
-        "rules/management.md bootstrap failed; continuing with DB state",
+        "policies/management.md bootstrap failed; continuing with DB state",
       );
     }
 
@@ -1036,7 +1072,7 @@ async function startup(): Promise<void> {
   const scheduler = new AgentScheduler(eventBus, db, config);
 
   // ── 9.1 Custom routine scheduler (B-007 §5.8) ──
-  // Reads `routines/custom/*.md` from the context dir and registers a
+  // Reads `policies/routines/custom/*.md` from the context dir and registers a
   // cron job per enabled routine. Reloaded from the context API whenever
   // the agent or dashboard edits a file under that directory.
   const customRoutineScheduler = new CustomRoutineScheduler({
@@ -1345,7 +1381,7 @@ async function startup(): Promise<void> {
   // observation-threshold gate. checkAll() owns its own kill switch
   // (authProbeDisabled), morning-routine skip, and in-flight dedupe.
   scheduler.setAuthProbeCallback(() => authHealthMonitor.checkAll());
-  // Wire the autonomous-work gate: when rules/management.md is missing
+  // Wire the autonomous-work gate: when policies/management.md is missing
   // or a setup conversation is active, the scheduler pauses cron routines
   // and ScheduleWatcher claims. This prevents any autonomous turn from
   // racing with the dashboard setup flow and triggering the stale-session
@@ -1442,39 +1478,46 @@ async function startup(): Promise<void> {
   // a chokidar initialization error surfaces alongside the main observer
   // lifecycle instead of during boot critical path.
   try {
-    managementMdWatcher = startManagementMdWatcher(config.dataDir, db, {
-      workspaceDir: config.workspaceDir,
-      // SETUP-FLOW-REDESIGN-PLAN §6.2 — supply live external-vault state
-      // each reconcile so the Note Sources section tracks
-      // `PATCH /api/config` edits that don't touch integrations.md
-      // directly.
-      getNoteSources: () => ({
-        externalObsidianVaultPath: config.externalObsidianVaultPath,
-        externalObsidianWatch: config.externalObsidianWatch,
-      }),
-      sendNotification: async (params) => {
-        await notificationManager.send(
-          params.message,
-          {
-            type: params.notificationType ?? "integration.variant_missing",
-            source: "management-md-watcher",
-            priority: EventPriority.NORMAL,
-            timestamp: new Date(),
-            data: {},
-            correlationId: randomBytes(8).toString("hex"),
-          },
-          {
-            priority: params.priority ?? "normal",
-            destinationMode: "configured_only",
-          },
-        );
+    managementMdWatcher = startManagementMdWatcher(
+      config.dataDir,
+      db,
+      {
+        workspaceDir: config.workspaceDir,
+        // SETUP-FLOW-REDESIGN-PLAN §6.2 — supply live external-vault state
+        // each reconcile so the Note Sources section tracks
+        // `PATCH /api/config` edits that don't touch integrations.md
+        // directly.
+        getNoteSources: () => ({
+          externalObsidianVaultPath: config.externalObsidianVaultPath,
+          externalObsidianWatch: config.externalObsidianWatch,
+        }),
+        sendNotification: async (params) => {
+          await notificationManager.send(
+            params.message,
+            {
+              type: params.notificationType ?? "integration.variant_missing",
+              source: "management-md-watcher",
+              priority: EventPriority.NORMAL,
+              timestamp: new Date(),
+              data: {},
+              correlationId: randomBytes(8).toString("hex"),
+            },
+            {
+              priority: params.priority ?? "normal",
+              destinationMode: "configured_only",
+            },
+          );
+        },
       },
-    });
+      // V18 — chokidar must watch the post-restructure path under contextDir
+      // (Obsidian-mode users have a non-default vault root).
+      getContextDir(config, db),
+    );
   } catch (err) {
     logger.error({ err }, "integrations.md watcher failed to start");
   }
 
-  // Start the rules/management.md fs-watcher alongside its integrations.md
+  // Start the policies/management.md fs-watcher alongside its integrations.md
   // sibling so hand-edits to A-section bindings flow back into the DB. The
   // watcher is a no-op when the post-setup branch above did not run
   // (contextDir absent), since chokidar against a missing path is silent.
@@ -1487,7 +1530,7 @@ async function startup(): Promise<void> {
     } catch (err) {
       logger.error(
         { err },
-        "rules/management.md watcher failed to start",
+        "policies/management.md watcher failed to start",
       );
     }
   }
@@ -1579,7 +1622,7 @@ async function startup(): Promise<void> {
     }
     if (managementRegistryWatcher) {
       await managementRegistryWatcher.stop().catch((err) => {
-        logger.warn({ err }, "rules/management.md watcher stop failed");
+        logger.warn({ err }, "policies/management.md watcher stop failed");
       });
     }
     if (docsIndexer) {

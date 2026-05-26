@@ -13,4 +13,4 @@ template_version: 1
 | `work.md` | Workplace, team, tech stack |
 | `expertise.md` | Domains, tools, skills |
 | `personal.md` | Hobbies, health, habits |
-| `goals.md` | Developmental goals (distinct from `../roadmap.md` project milestones) |
+| `goals.md` | Developmental goals (distinct from `../plans/roadmap.md` project milestones) |

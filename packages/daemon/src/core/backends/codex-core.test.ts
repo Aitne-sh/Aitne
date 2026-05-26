@@ -1183,7 +1183,10 @@ describe("CodexCore", () => {
       expect(mockCreateSessionWorkdir).toHaveBeenCalledWith(
         ".",
         "routine.hourly_check",
-        "/tmp/test/skills",
+        // CONTEXT_VAULT_REDESIGN_PLAN.md v4 V11 — user skills root is
+        // `<contextDir>/policies/skills`. Test config sets dataDir=/tmp/test
+        // and uses plain vault mode → contextDir=/tmp/test/context.
+        "/tmp/test/context/policies/skills",
         expect.objectContaining({
           backendId: "codex",
         }),

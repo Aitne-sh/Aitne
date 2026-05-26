@@ -21,7 +21,7 @@ current day so the DM handler can route them into roadmap.
 **Not signals:**
 - Speculative language (*"maybe"*, *"someday"*, *"might"*, *"perhaps"*,
   *"thinking about"*) without a concrete anchor
-- Current-week commitments (those belong in `today.md`)
+- Current-week commitments (those belong in `state/today.md`)
 - Opinions, preferences, taste statements
   (those belong in `user/*.md` via the `user-profile` skill)
 

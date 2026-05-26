@@ -338,7 +338,7 @@ Auto-maintained by the daemon (do not edit). Source: rules/policies/*.
   it("preserves the Active Policies section across an update", async () => {
     // Seed: rules/management.md exists with the auto-section already
     // present (as the policy-index reconciler would have produced).
-    mkdirSync(join(dataDir, "context", "rules"), { recursive: true });
+    mkdirSync(join(dataDir, "context", "policies"), { recursive: true });
     const seeded = `${WIZARD_PAYLOAD.trim()}\n\n${PRESERVED_SECTION}\n`;
     writeFileSync(rulesPath(), seeded, "utf-8");
 
@@ -366,7 +366,7 @@ Auto-maintained by the daemon (do not edit). Source: rules/policies/*.
   });
 
   it("round-trips byte-for-byte when wizard re-saves identical content", async () => {
-    mkdirSync(join(dataDir, "context", "rules"), { recursive: true });
+    mkdirSync(join(dataDir, "context", "policies"), { recursive: true });
     const seeded = `${WIZARD_PAYLOAD.trim()}\n\n${PRESERVED_SECTION}\n`;
     writeFileSync(rulesPath(), seeded, "utf-8");
 
@@ -569,8 +569,8 @@ describe("GET /setup/status", () => {
     const config = makeStatusConfig(dataDir);
     // Create the rules file so the status check finds it
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "# Management", "utf-8");
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "# Management", "utf-8");
 
     const app = createSetupRoutes(makeDeps(db, config));
     const res = await app.request("/setup/status");
@@ -712,8 +712,8 @@ describe("POST /setup/start — additional branches", () => {
   it("returns 409 {error:'already_setup'} for initial mode when rules file exists", async () => {
     const config = makeStartConfig(dataDir);
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "# Management", "utf-8");
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "# Management", "utf-8");
 
     const app = createSetupRoutes(makeDepsWithAdapter(db, config));
     const res = await postStart(app, { channelId: "dash:1", mode: "initial" });
@@ -735,14 +735,14 @@ describe("POST /setup/start — additional branches", () => {
     const config = makeStartConfig(dataDir);
     // Create the rules file so update mode precondition passes
     const contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    writeFileSync(join(contextDir, "rules", "management.md"), "# Management", "utf-8");
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    writeFileSync(join(contextDir, "policies", "management.md"), "# Management", "utf-8");
 
     const app = createSetupRoutes(makeDepsWithAdapter(db, config));
     const res = await postStart(app, { channelId: "dash:1", mode: "update" });
     expect(res.status).toBe(200);
     expect(captured).toHaveLength(1);
-    expect(captured[0]!.message).toContain("rules/management.md");
+    expect(captured[0]!.message).toContain("policies/management.md");
   });
 
   it("normalizes and passes agentDisplayName in metadata", async () => {
@@ -984,8 +984,8 @@ template_version: 2
     const config = makeSaveConfig(dataDir);
     const app = createSetupRoutes(makeDeps(db, config));
 
-    // Create the context/rules dir and make it read-only so writes fail
-    const rulesDir = join(dataDir, "context", "rules");
+    // Create the context/policies dir and make it read-only so writes fail
+    const rulesDir = join(dataDir, "context", "policies");
     mkdirSync(rulesDir, { recursive: true });
     chmodSync(rulesDir, 0o555); // r-xr-xr-x — no write permission
 
@@ -1001,5 +1001,85 @@ template_version: 2
       // Restore write permissions so afterEach rmSync can clean up
       chmodSync(rulesDir, 0o755);
     }
+  });
+});
+
+// ── /setup/vault-restructure-* — CONTEXT_VAULT_REDESIGN_PLAN V16 ────────────
+
+describe("GET /setup/vault-restructure-status & POST /setup/vault-restructure-ack", () => {
+  let db: Database.Database;
+  let config: AgentConfig;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    applySchema(db);
+    config = makeConfig();
+  });
+  afterEach(() => db.close());
+
+  it("status returns null/null on a fresh DB", async () => {
+    const app = createSetupRoutes(makeDeps(db, config));
+    const res = await app.request("/setup/vault-restructure-status");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      pendingConsent: null,
+      acknowledgement: null,
+    });
+  });
+
+  it("status surfaces the pending-consent state when the bootstrap deferred", async () => {
+    db.prepare(
+      `INSERT INTO runtime_state (key, value_json, updated_at)
+       VALUES ('context_vault_restructure_pending_consent', ?, CURRENT_TIMESTAMP)`,
+    ).run(
+      JSON.stringify({
+        since: "2026-05-25T00:00:00Z",
+        reason: "obsidian_consent_required",
+        contextDir: "/Users/x/MyObsidianVault",
+      }),
+    );
+
+    const app = createSetupRoutes(makeDeps(db, config));
+    const res = await app.request("/setup/vault-restructure-status");
+    const body = (await res.json()) as { pendingConsent: { reason: string } };
+    expect(body.pendingConsent.reason).toBe("obsidian_consent_required");
+  });
+
+  it("ack endpoint records the dashboard ack on first POST", async () => {
+    const app = createSetupRoutes(makeDeps(db, config));
+    const res = await app.request("/setup/vault-restructure-ack", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      alreadyAcknowledged: boolean;
+      restartRequired: boolean;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.alreadyAcknowledged).toBe(false);
+    expect(body.restartRequired).toBe(true);
+
+    const ack = db
+      .prepare(
+        "SELECT value_json FROM runtime_state WHERE key = 'context_vault_restructure_acknowledged_at'",
+      )
+      .get() as { value_json: string } | undefined;
+    expect(ack).toBeDefined();
+    const parsed = JSON.parse(ack!.value_json);
+    expect(parsed.source).toBe("dashboard");
+    expect(typeof parsed.at).toBe("string");
+  });
+
+  it("ack endpoint is idempotent — second POST reports alreadyAcknowledged", async () => {
+    const app = createSetupRoutes(makeDeps(db, config));
+    await app.request("/setup/vault-restructure-ack", { method: "POST" });
+    const res = await app.request("/setup/vault-restructure-ack", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { alreadyAcknowledged: boolean; restartRequired: boolean };
+    expect(body.alreadyAcknowledged).toBe(true);
+    expect(body.restartRequired).toBe(false);
   });
 });

@@ -61,7 +61,7 @@ describe("getTaskFlow", () => {
   it("returns weekly review flow", () => {
     const flow = getTaskFlow("routine.weekly_review");
     expect(flow).toContain("Weekly Review");
-    expect(flow).toContain("weekly/YYYY-Www.md");
+    expect(flow).toContain("journal/weekly/YYYY-Www.md");
     // weekly-next-week-leverage.md — the free-form `## Next Week
     // Priorities` was replaced by import-targeted sections that the
     // every-morning `<previous_week>` digest extractor reads (Mon–Sun
@@ -73,7 +73,7 @@ describe("getTaskFlow", () => {
   it("returns monthly review flow", () => {
     const flow = getTaskFlow("routine.monthly_review");
     expect(flow).toContain("Monthly Review");
-    expect(flow).toContain("monthly/YYYY-MM.md");
+    expect(flow).toContain("journal/monthly/YYYY-MM.md");
     expect(flow).toContain("Next Month Priorities");
   });
 
@@ -131,12 +131,12 @@ describe("getTaskFlow", () => {
   // refetch endpoint, and English trigger phrases (equivalents in other
   // languages are governed by `<output_language_policy>`, not by a
   // hard-coded glossary in the task flow).
-  it("DM ongoing flow names <today snapshot_at>, <turn_context>, GET /api/context/today, and English trigger phrases for the recent-activity refetch", () => {
+  it("DM ongoing flow names <today snapshot_at>, <turn_context>, GET /api/context/state/today, and English trigger phrases for the recent-activity refetch", () => {
     const flow = getTaskFlow("message.received.dm");
     expect(flow).toContain("Recent activity — refetch on demand");
     expect(flow).toContain('<today snapshot_at="...">');
     expect(flow).toContain('<turn_context current_time="..." snapshot_age_minutes="N" />');
-    expect(flow).toContain("GET /api/context/today");
+    expect(flow).toContain("GET /api/context/state/today");
     // English trigger samples must be present so the agent recognizes
     // them verbatim. Non-English equivalents are handled by the
     // <output_language_policy> block injected per turn.
@@ -224,7 +224,7 @@ describe("getTaskFlow", () => {
     expect(flow).toContain("Agent Action Plan");
     expect(flow).toContain("calendar/events");
     expect(flow).toContain("PUT");
-    expect(flow).toContain("routines/monthly.md");
+    expect(flow).toContain("policies/routines/monthly.md");
   });
 
   it("roadmap refresh reads pending scheduled tasks and preserves Long-term Plans", () => {
@@ -254,7 +254,7 @@ describe("getTaskFlow", () => {
   it("roadmap refresh uses stable ids and transition-guard recovery", () => {
     const flow = getTaskFlow("routine.roadmap_refresh");
     expect(flow).toContain("merge-by-id");
-    expect(flow).toContain("POST /api/context/roadmap/id");
+    expect(flow).toContain("POST /api/context/plans/roadmap/id");
     expect(flow).toContain("payload.roadmap_entry_id");
     // Emoji-free Preparation Timeline row format (was previously
     // `✓ completed`; the on-disk legacy form is still accepted by
@@ -362,7 +362,7 @@ describe("getTaskFlow", () => {
     const morning = getTaskFlow("routine.morning_routine_today");
     expect(morning).toContain("did-not-fire");
     expect(morning).toContain("`<yesterday>` ## Agent Plan");
-    expect(morning).toContain("PATCH `/api/context/yesterday`");
+    expect(morning).toContain("PATCH `/api/context/state/yesterday`");
     expect(morning).toContain("section=agent_plan");
     expect(morning).toContain("section=agent_log");
     // `\s+` instead of a literal space — markdown line-wrap may split
@@ -511,7 +511,7 @@ describe("getTaskFlow", () => {
       const flow = getTaskFlow(key);
       expect(flow).toContain("roadmap");
       expect(flow).toMatch(/long-horizon|Long-horizon/);
-      expect(flow).toContain("agent/journal");
+      expect(flow).toContain("journal/agent");
       // Must not bypass the skill by embedding direct PATCH/PUT calls
       expect(flow).not.toMatch(/curl.*\/api\/context\/roadmap/);
     }
@@ -662,16 +662,16 @@ describe("getTaskFlow", () => {
     expect(flow).toMatch(/no user-facing output by default/i);
   });
 
-  it("setup.initial routes tone preferences to the character code block, not rules/management.md or profile.md", () => {
+  it("setup.initial routes tone preferences to the character code block, not policies/management.md or profile.md", () => {
     const flow = getTaskFlow("setup.initial");
-    const managementRulesSection = flow.split("### rules/management.md Format")[1] ?? "";
+    const managementRulesSection = flow.split("### policies/management.md Format")[1] ?? "";
     // Communication-style content must never land in the management-rules file.
-    expect(flow).toContain("Do NOT put communication style inside rules/management.md");
+    expect(flow).toContain("Do NOT put communication style inside policies/management.md");
     expect(managementRulesSection).not.toContain("## Communication Style");
     expect(flow).toContain("<agent_identity>");
     expect(flow).not.toContain("{event_data[agentDisplayName]}");
-    expect(flow).toContain("### user/profile.md Format");
-    expect(flow).toContain("PUT /api/context/user/profile");
+    expect(flow).toContain("### identity/profile.md Format");
+    expect(flow).toContain("PUT /api/context/identity/profile");
     expect(flow).toContain("## Notification Preferences");
     // Communication Style section is REMOVED from the profile skeleton —
     // tone preferences now flow through the ```character``` code block
@@ -723,15 +723,15 @@ describe("getTaskFlow", () => {
     expect(flow).toContain("600 token");
   });
 
-  it("setup.initial seeds user/ from Q&A with a do-not-invent guard", () => {
+  it("setup.initial seeds identity/ from Q&A with a do-not-invent guard", () => {
     const flow = getTaskFlow("setup.initial");
-    expect(flow).toContain("user/");
+    expect(flow).toContain("identity/");
     // All five detailed profile files should be mapped
-    expect(flow).toContain("user/people.md");
-    expect(flow).toContain("user/work.md");
-    expect(flow).toContain("user/expertise.md");
-    expect(flow).toContain("user/goals.md");
-    expect(flow).toContain("user/personal.md");
+    expect(flow).toContain("identity/people.md");
+    expect(flow).toContain("identity/work.md");
+    expect(flow).toContain("identity/expertise.md");
+    expect(flow).toContain("identity/goals.md");
+    expect(flow).toContain("identity/personal.md");
     // Must have the "do not invent" guard so the agent doesn't
     // hallucinate colleague names or project details
     expect(flow).toMatch(/do not invent or infer/i);
@@ -1748,7 +1748,7 @@ describe("roadmap skill contract", () => {
   it("documents stable ids and completed prep-row preservation", () => {
     expect(skillContent).toContain("## Stable entry identity");
     expect(skillContent).toContain("rm-YYYYMMDD-<6 lowercase hex>");
-    expect(skillContent).toContain("POST /api/context/roadmap/id");
+    expect(skillContent).toContain("POST /api/context/plans/roadmap/id");
     // Preparation Timeline row format in the post-emoji-sweep shape.
     // The validator still accepts the legacy `✓ completed ...` shape
     // for on-disk backward compat.

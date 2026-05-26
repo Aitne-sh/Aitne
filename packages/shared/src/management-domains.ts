@@ -7,10 +7,10 @@ import { recurrenceRuleSchema } from "./schemas.js";
  * This module is the single source of truth for the four-layer management
  * model defined in `docs/design/21-management-registry-and-entities.md`:
  *
- *   - L1 — `rules/management.md` SoT bindings (Section A) and Managed
+ *   - L1 — `policies/management.md` SoT bindings (Section A) and Managed
  *     Tasks (Section B).
- *   - L2 — Entity files at `context/<domain>/<type-plural>/<slug>.md`.
- *   - L3 — `context/_activity/<source>.md` (auto-generated).
+ *   - L2 — Entity files at `knowledge/entities/<domain>/<type-plural>/<slug>.md`.
+ *   - L3 — `state/activity/<source>.md` (auto-generated).
  *   - L4 — `agent_actions` / `md_file_snapshots` (existing audit tables).
  *
  * Pure-logic only — no I/O, no DB access, no fs. Imported by the daemon
@@ -289,10 +289,15 @@ export function isValidOutputPath(value: string): boolean {
 
 /**
  * Parse an entity-file path of the form
- * `<domain>/<type-plural>/<slug>.md` into its components. Returns
- * `null` when the path is malformed or any segment fails its enum
- * check. The leading `context/` MUST already be stripped — this is
- * the relative form used in `entities.path`.
+ * `knowledge/entities/<domain>/<type-plural>/<slug>.md` (the
+ * CONTEXT_VAULT_REDESIGN canonical layout) into its components.
+ * Returns `null` when the path is malformed or any segment fails its
+ * enum check. The leading `context/` MUST already be stripped — this
+ * is the relative form used in `entities.path`.
+ *
+ * Legacy paths of the form `<domain>/<type-plural>/<slug>.md` are
+ * still accepted so historical rows / pre-migration callers parse
+ * without translation; new code emits the canonical form.
  */
 export function parseEntityPath(path: string): EntityPathParts | null {
   if (typeof path !== "string" || path.length === 0) return null;
@@ -300,8 +305,20 @@ export function parseEntityPath(path: string): EntityPathParts | null {
   if (PATH_TRAVERSAL_RE.test(path)) return null;
   if (!path.endsWith(".md")) return null;
   const segments = path.split("/");
-  if (segments.length !== 3) return null;
-  const [domain, typePlural, fileName] = segments;
+  let domain: string | undefined;
+  let typePlural: string | undefined;
+  let fileName: string | undefined;
+  if (
+    segments.length === 5
+    && segments[0] === "knowledge"
+    && segments[1] === "entities"
+  ) {
+    [, , domain, typePlural, fileName] = segments;
+  } else if (segments.length === 3) {
+    [domain, typePlural, fileName] = segments;
+  } else {
+    return null;
+  }
   if (!domain || !typePlural || !fileName) return null;
   if (!isDomain(domain)) return null;
   const type = pluralToType(typePlural);

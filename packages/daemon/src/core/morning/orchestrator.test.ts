@@ -187,6 +187,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
     db = new Database(":memory:");
     applySchema(db);
     mkdirSync(join(tmp, "context"), { recursive: true });
+    mkdirSync(join(tmp, "context", "state"), { recursive: true });
     config = makeConfig({ dataDir: tmp });
     mocks = buildMocks({});
     // Default fixture = recurring-day. Phase 6 introduced a first-run
@@ -201,7 +202,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
     // builder tolerates a non-`## User Tasks` body, so no per-test
     // assertion depends on the literal content here.
     writeFileSync(
-      join(tmp, "context", "yesterday.md"),
+      join(tmp, "context", "state", "yesterday.md"),
       "# 2026-05-14 (Wednesday)\n",
     );
   });
@@ -252,7 +253,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
 
     it("injects <handoff_parsed> onto Stage A when yesterday.md has a parseable handoff", async () => {
       writeFileSync(
-        join(tmp, "context", "yesterday.md"),
+        join(tmp, "context", "state", "yesterday.md"),
         [
           "# 2026-05-14 (Wednesday)",
           "",
@@ -287,7 +288,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // explicitly. Deleting it here also exercises the orchestrator's
       // Phase 6 first-run skip for Stage B — verified in the dedicated
       // "skips Stage B on first-run" test below.
-      rmSync(join(tmp, "context", "yesterday.md"));
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
       const orch = makeOrchestrator();
       await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
       const stageACall = mocks.calls.find(
@@ -307,7 +308,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // user-facing artifact). The downstream agent-journal-appender
       // renders "Journal synthesis: skipped (no prior-day data)" on
       // missing daily, so the audit trail stays correct.
-      rmSync(join(tmp, "context", "yesterday.md"));
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
       const orch = makeOrchestrator();
       const out = await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
       // Stage A still fires — the first morning routine still has to
@@ -326,7 +327,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
 
     it("escapes XML metacharacters in handoff items", async () => {
       writeFileSync(
-        join(tmp, "context", "yesterday.md"),
+        join(tmp, "context", "state", "yesterday.md"),
         [
           "## Handoff",
           "### Tomorrow",
@@ -1078,7 +1079,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // returns null and the composer is never invoked. The appender
       // falls back to its file-presence-based "skipped (no prior-day
       // data)" render, which is correct.
-      rmSync(join(tmp, "context", "yesterday.md"));
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
       const dailyJournalComposer = { compose: vi.fn() };
       const orch = new MorningRoutinePipelineOrchestrator({
         db,
@@ -1135,10 +1136,10 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // Drop yesterday.md to flip to first-run; seed management rules
       // with an `## Annual Goals` section, an active project, and a
       // travel row so every skeleton section has populated content.
-      rmSync(join(tmp, "context", "yesterday.md"));
-      mkdirSync(join(tmp, "context", "rules"), { recursive: true });
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
+      mkdirSync(join(tmp, "context", "policies"), { recursive: true });
       writeFileSync(
-        join(tmp, "context", "rules", "management.md"),
+        join(tmp, "context", "policies", "management.md"),
         [
           "# Management rules",
           "",
@@ -1147,9 +1148,10 @@ describe("MorningRoutinePipelineOrchestrator", () => {
           "",
         ].join("\n"),
       );
-      mkdirSync(join(tmp, "context", "projects"), { recursive: true });
+      mkdirSync(join(tmp, "context", "plans", "projects"), { recursive: true });
       writeFileSync(
-        join(tmp, "context", "projects", "aitne.md"),
+
+        join(tmp, "context", "plans", "projects", "aitne.md"),
         "---\nstate: active\ndue: 2026-06-30\nnext_milestone: Ship release\n---\n\n# Aitne 1.0\n",
       );
       db.prepare(
@@ -1176,7 +1178,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
     });
 
     it("emits a skeleton with placeholders when no projects / management rules / travel exist on first-run", async () => {
-      rmSync(join(tmp, "context", "yesterday.md"));
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
       const orch = makeOrchestrator();
       await orch.run({ parentEvent: makeParentEvent(), isRetry: false });
       const stageACall = mocks.calls.find(
@@ -1210,7 +1212,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // asserts the skeleton picks them up under both providers, while
       // observations with `observed_at` slightly in the past still
       // match (proving the filter is no longer `observed_at`-bound).
-      rmSync(join(tmp, "context", "yesterday.md"));
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
       const eventStart = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
       const observedAt = new Date(Date.now() - 30 * 1000)
         .toISOString()
@@ -1282,7 +1284,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // will see — i.e. pending observations. A consumed row describes
       // an event a prior Stage A already folded into a roadmap edit;
       // surfacing it again would invite Stage A to double-fan it.
-      rmSync(join(tmp, "context", "yesterday.md"));
+      rmSync(join(tmp, "context", "state", "yesterday.md"));
       const eventStart = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
       db.prepare(
         `INSERT INTO observations

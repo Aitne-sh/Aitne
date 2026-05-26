@@ -106,7 +106,7 @@ mode lifecycle.
 
 - New threads land in the local `messages` table (FTS-indexed).
 - Classification labels are written via the provider API.
-- A short "mail" section in `today.md` when items qualified.
+- A short "mail" section in `state/today.md` when items qualified.
 
 ## Where in the Dashboard
 
@@ -130,4 +130,4 @@ the kind, not the transport.
 ## Related
 
 - [Connect a new mail account](../../guides/connect-a-new-mail-account.md)
-- [Morning Routine](../routines/morning-routine.md)
+- [Morning Routine](../policies/routines/morning-routine.md)

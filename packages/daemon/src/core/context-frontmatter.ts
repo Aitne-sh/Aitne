@@ -1,3 +1,4 @@
+import { extractContextFrontmatter } from "./context-frontmatter-extract.js";
 import {
   CONTEXT_FRONTMATTER_TYPES,
   CONTEXT_RELATIVE_PATHS,
@@ -23,30 +24,34 @@ export interface ContextFrontmatterValidationError {
   message: string;
 }
 
-interface ExtractedFrontmatter {
-  values: Record<string, string>;
-  body: string;
-}
-
 export interface ExpectedContextFrontmatter {
   type: string;
   owners: readonly string[];
 }
 
+/**
+ * Path-prefix predicate consumed by the write chokepoint to decide
+ * whether the strict frontmatter validator should fire. After the
+ * vault restructure (CONTEXT_VAULT_REDESIGN_PLAN.md §3) the prefixes
+ * are the new class-prefixed paths. Legacy prefixes are normalised by
+ * the API alias resolver upstream, so the matcher only ever sees
+ * canonical paths.
+ */
 export function shouldValidateContextFileFrontmatter(
   relativePath: string,
 ): boolean {
   if (!relativePath.endsWith(".md")) return false;
   return (
-    relativePath.startsWith("user/") ||
-    relativePath.startsWith("rules/") ||
-    relativePath.startsWith("projects/") ||
-    relativePath.startsWith("git-repos/") ||
-    relativePath.startsWith("daily/") ||
-    relativePath.startsWith("weekly/") ||
-    relativePath.startsWith("monthly/") ||
-    relativePath.startsWith("dossiers/") ||
-    relativePath === CONTEXT_RELATIVE_PATHS.contextIndex
+    relativePath.startsWith("identity/") ||
+    relativePath.startsWith("policies/") ||
+    relativePath.startsWith("plans/projects/") ||
+    relativePath.startsWith("knowledge/repos/legacy-registry/") ||
+    relativePath.startsWith("journal/daily/") ||
+    relativePath.startsWith("journal/weekly/") ||
+    relativePath.startsWith("journal/monthly/") ||
+    relativePath.startsWith("knowledge/dossiers/") ||
+    relativePath === CONTEXT_RELATIVE_PATHS.contextIndex ||
+    relativePath === CONTEXT_RELATIVE_PATHS.rootIndex
   );
 }
 
@@ -56,7 +61,7 @@ export function validateContextFileFrontmatter(
 ): ContextFrontmatterValidationError | null {
   if (!shouldValidateContextFileFrontmatter(relativePath)) return null;
 
-  const frontmatter = extractFrontmatter(content);
+  const frontmatter = extractContextFrontmatter(content);
   if (!frontmatter) {
     return {
       code: "missing_frontmatter",
@@ -130,7 +135,7 @@ export function validateContextFileFrontmatter(
 const POLICY_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const POLICY_STATUSES = new Set(["active", "paused", "removed"]);
 const POLICY_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const POLICY_INDEX_PATH = "rules/policies/_index.md";
+const POLICY_INDEX_PATH = "policies/management-captures/_index.md";
 // MANAGEMENT-POLICY-CAPTURE-PLAN §4.1.1 — `extractFrontmatter` is a flat
 // line-scalar parser; it does NOT expand YAML block scalars. A policy
 // file written as `origin: |\n  …` produces `values.origin === "|"` —
@@ -144,7 +149,7 @@ function validatePolicyFileFrontmatter(
   relativePath: string,
   values: Record<string, string>,
 ): ContextFrontmatterValidationError | null {
-  if (!relativePath.startsWith("rules/policies/")) return null;
+  if (!relativePath.startsWith("policies/management-captures/")) return null;
   if (relativePath === POLICY_INDEX_PATH) return null;
   /* c8 ignore start — caller filters to .md before reaching here; defensive
      guard for future callers that pass non-.md files. */
@@ -172,8 +177,10 @@ function validatePolicyFileFrontmatter(
       message: `${relativePath} frontmatter slug must be kebab-case (a-z, 0-9, hyphen), 1-64 chars, no leading/trailing hyphen.`,
     };
   }
-  const filenameStem = relativePath
-    .slice("rules/policies/".length, -".md".length);
+  const filenameStem = relativePath.slice(
+    "policies/management-captures/".length,
+    -".md".length,
+  );
   if (slug !== filenameStem) {
     return {
       code: "invalid_slug",
@@ -231,7 +238,7 @@ function validatePolicyFileFrontmatter(
 // frontmatter is owned by the daemon-prepared journal skeleton, NOT
 // by Stage B. Stage B reads the skeleton via `<journal_skeleton>` in
 // its prompt, copies the skeleton-owned frontmatter byte-for-byte,
-// authors the body per `rules/journal-format.md`, and PUTs the full
+// authors the body per `policies/journal-format.md`, and PUTs the full
 // file. The daemon's PUT chokepoint validates the seven skeleton-
 // owned fields are present and well-typed; drift surfaces as 422
 // with per-field structured errors so Stage B can self-correct in
@@ -270,10 +277,10 @@ export function validateDailySkeletonFrontmatter(
   content: string,
   relativePath: string,
 ): DailySkeletonFrontmatterDriftError[] {
-  if (!relativePath.startsWith("daily/")) return [];
+  if (!relativePath.startsWith("journal/daily/")) return [];
   if (!relativePath.endsWith(".md")) return [];
 
-  const frontmatter = extractFrontmatter(content);
+  const frontmatter = extractContextFrontmatter(content);
   // Missing frontmatter is already a 422 from validateContextFileFrontmatter
   // (`missing_frontmatter`); don't double-fire here. Return an empty list so
   // the generic validator owns the "no frontmatter at all" message.
@@ -282,11 +289,11 @@ export function validateDailySkeletonFrontmatter(
   const errors: DailySkeletonFrontmatterDriftError[] = [];
   const values = frontmatter.values;
 
-  // date — must equal the path's date stem (daily/YYYY-MM-DD.md).
+  // date — must equal the path's date stem (journal/daily/YYYY-MM-DD.md).
   // The daemon's PUT route also pins line 1 of the body via H1 date,
   // so this is the frontmatter-side of the same contract.
   const stem = relativePath.slice(
-    "daily/".length,
+    "journal/daily/".length,
     relativePath.length - ".md".length,
   );
   const dateValue = values.date;
@@ -378,62 +385,74 @@ export function validateDailySkeletonFrontmatter(
 export function expectedFrontmatterForPath(
   relativePath: string,
 ): ExpectedContextFrontmatter | null {
-  if (relativePath === "user/_index.md") {
+  if (relativePath === "identity/_index.md") {
     return { type: "index", owners: ["shared"] };
   }
-  if (relativePath.startsWith("user/")) {
+  if (relativePath.startsWith("identity/")) {
     return { type: "user", owners: ["shared"] };
   }
 
-  if (relativePath === "rules/_index.md") {
+  if (relativePath === "policies/_index.md") {
     return { type: "index", owners: ["shared"] };
   }
-  // MANAGEMENT-POLICY-CAPTURE-PLAN §4.1.1 / §4.3 — policy files use the
-  // existing `rule` type plus a `kind: policy` discriminator, and the
-  // policies sub-index is agent-owned (the `management-policy` skill is
-  // its sole writer). These rules MUST precede the generic `rules/`
-  // catch-all below; first match wins.
-  if (relativePath === "rules/policies/_index.md") {
+  // MANAGEMENT-POLICY-CAPTURE-PLAN §4.1.1 / §4.3 — policy capture files
+  // use the existing `rule` type plus a `kind: policy` discriminator,
+  // and the captures sub-index is agent-owned (the `management-policy`
+  // skill is its sole writer). These rules MUST precede the generic
+  // `policies/` catch-all below; first match wins.
+  if (relativePath === "policies/management-captures/_index.md") {
     return { type: "index", owners: ["agent"] };
   }
-  if (relativePath.startsWith("rules/policies/")) {
+  if (relativePath.startsWith("policies/management-captures/")) {
     return { type: "rule", owners: ["agent"] };
   }
-  if (relativePath.startsWith("rules/")) {
+  // Routine and skill sub-indices retain index frontmatter even though
+  // they live under the policies/ prefix.
+  if (relativePath === "policies/routines/_index.md") {
+    return { type: "index", owners: ["shared"] };
+  }
+  if (relativePath === "policies/skills/_index.md") {
+    return { type: "index", owners: ["shared"] };
+  }
+  if (relativePath.startsWith("policies/")) {
     return { type: "rule", owners: ["agent", "shared", "user"] };
   }
 
-  if (relativePath === "projects/_index.md") {
+  if (relativePath === "plans/projects/_index.md") {
     return { type: "index", owners: ["shared"] };
   }
-  if (relativePath.startsWith("projects/")) {
+  if (relativePath.startsWith("plans/projects/")) {
     return { type: "project", owners: ["shared"] };
   }
-  if (relativePath.startsWith("git-repos/")) {
+  if (relativePath.startsWith("knowledge/repos/legacy-registry/")) {
     return { type: "git-repo", owners: ["shared"] };
   }
 
-  if (relativePath.startsWith("daily/")) {
+  if (relativePath.startsWith("journal/daily/")) {
     return { type: "daily", owners: ["agent"] };
   }
-  if (relativePath.startsWith("weekly/")) {
+  if (relativePath.startsWith("journal/weekly/")) {
     return { type: "weekly", owners: ["agent"] };
   }
-  if (relativePath.startsWith("monthly/")) {
+  if (relativePath.startsWith("journal/monthly/")) {
     return { type: "monthly", owners: ["agent"] };
   }
 
-  // B-004 — agent-owned dossiers + system-prose context index. Validated
-  // on write via the same chokepoint so the Vault Health dashboard never
+  // Agent-owned dossiers + system-prose context index. Validated on
+  // write via the same chokepoint so the Vault Health dashboard never
   // flags a file that the API just permitted.
   if (relativePath === CONTEXT_RELATIVE_PATHS.dossiers.index) {
     return { type: "index", owners: ["agent"] };
   }
-  if (relativePath.startsWith("dossiers/")) {
+  if (relativePath.startsWith("knowledge/dossiers/")) {
     return { type: "dossier", owners: ["agent"] };
   }
-  if (relativePath === CONTEXT_RELATIVE_PATHS.contextIndex) {
-    return { type: "index", owners: ["agent"] };
+  // contextIndex and rootIndex collapse to the same `_index.md` after
+  // CONTEXT_VAULT_REDESIGN. The file is mixed-authorship (V15) — user
+  // prose around a `<!-- reconciler-section -->` block — so `shared` is
+  // the canonical owner; `agent` is grandfathered from the pre-V15 era.
+  if (relativePath === CONTEXT_RELATIVE_PATHS.rootIndex) {
+    return { type: "index", owners: ["shared", "agent"] };
   }
 
   return null;
@@ -451,83 +470,6 @@ function missingField(
     code: "missing_field",
     message: `${relativePath} frontmatter requires \`${field}\`.`,
   };
-}
-
-function extractFrontmatter(content: string): ExtractedFrontmatter | null {
-  const lines = content.split(/\r?\n/);
-  // `split` always returns at least one element; `lines[0]` is defined.
-  if (lines[0]!.trim() !== "---") return null;
-  const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-  if (end < 0) return null;
-
-  const values: Record<string, string> = {};
-  for (const rawLine of lines.slice(1, end)) {
-    const line = rawLine.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const match = /^([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/.exec(line);
-    /* c8 ignore start — non-matching lines slip through as documentation;
-       defensive guard for malformed YAML scalars. */
-    if (!match) continue;
-    /* c8 ignore stop */
-    values[match[1]] = parseYamlScalar(match[2]);
-  }
-
-  return {
-    values,
-    body: lines.slice(end + 1).join("\n"),
-  };
-}
-
-function parseYamlScalar(value: string): string {
-  return stripYamlQuotes(stripYamlInlineComment(value).trim());
-}
-
-function stripYamlInlineComment(value: string): string {
-  let quote: "'" | '"' | null = null;
-  let escaped = false;
-
-  for (let i = 0; i < value.length; i++) {
-    const char = value[i];
-    if (quote === '"') {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === '"') {
-        quote = null;
-      }
-      continue;
-    }
-
-    if (quote === "'") {
-      if (char === "'") quote = null;
-      continue;
-    }
-
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-
-    // `value[i-1]` is always defined when `i > 0` for a string we are
-    // iterating with a known length; no nullish fallback needed.
-    if (char === "#" && (i === 0 || /\s/.test(value[i - 1]!))) {
-      return value.slice(0, i).trimEnd();
-    }
-  }
-
-  return value;
-}
-
-function stripYamlQuotes(value: string): string {
-  const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
 }
 
 function isIsoDateString(value: string): boolean {

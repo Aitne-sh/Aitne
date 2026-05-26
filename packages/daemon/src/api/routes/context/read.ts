@@ -30,28 +30,49 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
   const { deps, getCurrentContextDir } = ctx;
   const { db, config } = deps;
 
-  // GET /context/list/:dir — List files in directory
+  // GET /context/list/:dir — List files in directory.
+  //
+  // Accepts both the new canonical names ("identity", "policies",
+  // "policies/routines", "plans/projects", "journal/daily", ...) and
+  // the legacy aliases ("user", "rules", "routines", "projects",
+  // "daily", ...) — the latter are translated to the new dir before
+  // listing. Legacy aliases are removed in the same minor-release
+  // window as the §14.4 agent-asset prose sweep (PR-6).
   app.get("/context/list/:dir", (c) => {
-    const dir = c.req.param("dir");
-    // B-007 §5.1 — canonical listable directories.
+    const rawDir = c.req.param("dir");
+    const legacyDirAlias: Record<string, string> = {
+      user: "identity",
+      rules: "policies",
+      routines: "policies/routines",
+      projects: "plans/projects",
+      daily: "journal/daily",
+      weekly: "journal/weekly",
+      monthly: "journal/monthly",
+      dossiers: "knowledge/dossiers",
+      inbox: "state/inbox",
+      git: "knowledge/repos",
+      "git-repos": "knowledge/repos/legacy-registry",
+    };
+    const dir = legacyDirAlias[rawDir] ?? rawDir;
     const allowedDirs = [
-      "projects",
-      "weekly",
-      "monthly",
-      "daily",
-      "user",
-      "rules",
-      "routines",
-      "dossiers",
-      "git",
-      "git-repos",
-      "inbox",
+      "identity",
+      "policies",
+      "policies/routines",
+      "policies/management-captures",
+      "plans/projects",
+      "journal/daily",
+      "journal/weekly",
+      "journal/monthly",
+      "knowledge/dossiers",
+      "knowledge/repos",
+      "knowledge/repos/legacy-registry",
+      "state/inbox",
     ];
     if (!allowedDirs.includes(dir)) {
       return respondWithAgentError(c, 400, [
         composeIssue("context.directory_invalid", {
           field: "dir",
-          received: { dir, allowed: allowedDirs },
+          received: { dir: rawDir, allowed: allowedDirs },
         }),
       ]);
     }
@@ -71,11 +92,11 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
         return { name: f, lastModified: stat.mtime.toISOString() };
       });
 
-    // B-007 §5.8 Q3 — surface custom routines so the dashboard routines
-    // editor sees them alongside the built-ins. `routines/custom/` is the
-    // only nested directory we need to flatten; other listable dirs are
-    // flat by design (§5.1).
-    if (dir === "routines") {
+    // Surface custom routines so the dashboard routines editor sees
+    // them alongside the built-ins. After the restructure the parent
+    // dir is `policies/routines` and the custom sub-dir is
+    // `policies/routines/custom/`.
+    if (dir === "policies/routines") {
       const customDir = join(dirPath, "custom");
       if (existsSync(customDir)) {
         for (const f of readdirSync(customDir)) {
@@ -88,13 +109,12 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
         }
       }
     }
-    // Unified repositories layout (`git/<slug>/overview.md` +
-    // `git/<slug>/journal/<YYYY-MM-DD>.md`) — surface every per-repo file
-    // under the `git` listing so the Knowledge page tree shows them.
-    // Without this the listing only contains files directly under `git/`,
-    // and the per-slug subdirectories silently drop off the dashboard.
-    // Mirrors the `routines/custom/` flatten above.
-    if (dir === "git") {
+    // Unified repositories layout — surface every per-repo file under
+    // the `knowledge/repos` listing so the Knowledge page tree shows
+    // them. Overview lives under `knowledge/repos/<slug>/overview.md`;
+    // per-day journals live under `journal/repos/<slug>/` and are
+    // surfaced as part of the journal/daily listing.
+    if (dir === "knowledge/repos") {
       for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
         const slug = entry.name;
@@ -107,32 +127,18 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
             lastModified: stat.mtime.toISOString(),
           });
         }
-        const journalDir = join(slugDir, "journal");
-        if (existsSync(journalDir)) {
-          for (const f of readdirSync(journalDir)) {
-            if (!CONTEXT_FILE_EXTENSIONS.some((ext) => f.endsWith(ext))) continue;
-            const stat = statSync(join(journalDir, f));
-            files.push({
-              name: `${slug}/journal/${f}`,
-              lastModified: stat.mtime.toISOString(),
-            });
-          }
-        }
       }
     }
-    // MANAGEMENT-POLICY-CAPTURE-PLAN §4.4.1 step 1 — surface policy files
-    // under `rules/policies/` flattened into the `rules` listing so the
-    // `management-policy` skill can use the directory listing as its
-    // source-of-truth (the agent-maintained `_index.md` is only the
-    // convenience snapshot). Mirrors the `routines/custom/` flatten above.
-    if (dir === "rules") {
-      const policiesDir = join(dirPath, "policies");
+    // Surface policy capture files under `policies/management-captures/`
+    // flattened into the `policies` listing for skill consumers.
+    if (dir === "policies") {
+      const policiesDir = join(dirPath, "management-captures");
       if (existsSync(policiesDir)) {
         for (const f of readdirSync(policiesDir)) {
           if (!CONTEXT_FILE_EXTENSIONS.some((ext) => f.endsWith(ext))) continue;
           const stat = statSync(join(policiesDir, f));
           files.push({
-            name: `policies/${f}`,
+            name: `management-captures/${f}`,
             lastModified: stat.mtime.toISOString(),
           });
         }
@@ -327,7 +333,7 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
     // Task 3 directive on a resumed turn. Bounded to `today` reads only
     // so the agent_actions volume stays small. Best-effort: any logging
     // failure must not break the read.
-    if (path === "today") {
+    if (path === "state/today") {
       try {
         deps.db
           .prepare(

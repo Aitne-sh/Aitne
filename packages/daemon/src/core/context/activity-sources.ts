@@ -5,12 +5,12 @@ import { normalizeAppLabel } from "@aitne/shared";
  * Activity-source enumeration (docs/design/21-management-registry-and-
  * entities.md §9.6). Lifted out of `activity-view-runner.ts` so the
  * dashboard can consume the same union the runner renders into
- * `_activity/<source>.md` (followups doc Issue 3).
+ * `state/activity/<source>.md` (followups doc Issue 3).
  *
  * The "active source set" is the union of three projections:
  *
  *   1. `managed_tasks.app_normalized` — the registered fetches (Section
- *      B of `rules/management.md`).
+ *      B of `policies/management.md`).
  *   2. `entity_source_keys.source_key` — every L2 entity file that
  *      mentions a source key, joined to the entity's date / sync window.
  *   3. `agent_actions.detail->>app_normalized` — recent management_task
@@ -21,7 +21,7 @@ import { normalizeAppLabel } from "@aitne/shared";
  *   - `active`  — there is a row in `managed_tasks` for this normalized
  *                 form (Settings → Management can edit it).
  *   - `stopped` — the source appears only in (2) or (3); typically a
- *                 recently stopped task whose `_activity/<source>.md`
+ *                 recently stopped task whose `state/activity/<source>.md`
  *                 file is still on disk for the 90-day window. The
  *                 dashboard's Activity tab keeps showing it; the
  *                 Settings → Management page does not (it only edits

@@ -31,7 +31,7 @@ curl -s -X POST http://localhost:8321/api/schedule/batch \
         "taskContext": {
           "background": "User flagged Q2 roadmap risks in yesterdays DM; standup needs the two open items front-loaded so the team aligns before 15:30.",
           "expected_output": "DM with two bullet items + one suggested mitigation each, sent 30min before standup.",
-          "references": ["projects/q2-roadmap.md#open-risks", "calendar:event:standup-2026-05-15"],
+          "references": ["plans/projects/q2-roadmap.md#open-risks", "calendar:event:standup-2026-05-15"],
           "tone": "concise"
         }
       }

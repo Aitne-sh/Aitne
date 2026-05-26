@@ -302,7 +302,7 @@ describe("enumerateCustomRoutines", () => {
   it("parses every .md file in the custom dir and surfaces errors", () => {
     const files = new Map<string, string>([
       [
-        "routines/custom/good.md",
+        "policies/routines/custom/good.md",
         fm({
           type: "rule",
           slug: "good",
@@ -314,7 +314,7 @@ describe("enumerateCustomRoutines", () => {
         }, "## Checks"),
       ],
       [
-        "routines/custom/bad.md",
+        "policies/routines/custom/bad.md",
         fm({
           type: "rule",
           slug: "bad",
@@ -323,12 +323,12 @@ describe("enumerateCustomRoutines", () => {
           max_budget_usd: "0.05",
         }, "## Checks"),
       ],
-      ["routines/custom/notes.txt", "ignored — not markdown"],
+      ["policies/routines/custom/notes.txt", "ignored — not markdown"],
     ]);
 
     const result = enumerateCustomRoutines("/context", {
       readDir: (dir) => {
-        expect(dir).toBe("/context/routines/custom");
+        expect(dir).toBe("/context/policies/routines/custom");
         return ["good.md", "bad.md", "notes.txt"];
       },
       readFile: (path) => files.get(path.replace("/context/", "")) ?? "",
@@ -424,13 +424,13 @@ describe("diffRegistrations", () => {
 
 describe("slugFromCustomRoutinePath", () => {
   it("extracts valid slug", () => {
-    expect(slugFromCustomRoutinePath("routines/custom/my-slug.md")).toBe("my-slug");
+    expect(slugFromCustomRoutinePath("policies/routines/custom/my-slug.md")).toBe("my-slug");
   });
 
   it("rejects non-markdown and nested paths", () => {
-    expect(slugFromCustomRoutinePath("routines/custom/x.txt")).toBe(null);
-    expect(slugFromCustomRoutinePath("routines/custom/sub/y.md")).toBe(null);
-    expect(slugFromCustomRoutinePath("routines/hourly.md")).toBe(null);
+    expect(slugFromCustomRoutinePath("policies/routines/custom/x.txt")).toBe(null);
+    expect(slugFromCustomRoutinePath("policies/routines/custom/sub/y.md")).toBe(null);
+    expect(slugFromCustomRoutinePath("policies/routines/hourly.md")).toBe(null);
   });
 });
 
@@ -653,7 +653,7 @@ describe("CustomRoutineScheduler orchestration", () => {
   it("reload logs warnings for files with parse errors", () => {
     const tmp = mkdtempSync(join(tmpdir(), "custom-routine-errs-"));
     try {
-      const customDir = join(tmp, "routines", "custom");
+      const customDir = join(tmp, "policies", "routines", "custom");
       mkdirSync(customDir, { recursive: true });
       // Write a file missing the required 'cron' field → parse error
       writeFileSync(
@@ -731,7 +731,7 @@ describe("CustomRoutineScheduler orchestration", () => {
   it("reload removes jobs whose routine file has been deleted", () => {
     const tmp = mkdtempSync(join(tmpdir(), "custom-routine-rm-"));
     try {
-      const customDir = join(tmp, "routines", "custom");
+      const customDir = join(tmp, "policies", "routines", "custom");
       mkdirSync(customDir, { recursive: true });
       const filePath = join(customDir, "goner.md");
       writeFileSync(
@@ -770,7 +770,7 @@ describe("CustomRoutineScheduler orchestration", () => {
     // Use a real tmpdir so reload()'s internal enumerate can read fs state.
     const tmp = mkdtempSync(join(tmpdir(), "custom-routine-reload-"));
     try {
-      const customDir = join(tmp, "routines", "custom");
+      const customDir = join(tmp, "policies", "routines", "custom");
       mkdirSync(customDir, { recursive: true });
       const filePath = join(customDir, "foo.md");
       writeFileSync(

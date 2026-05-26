@@ -17,9 +17,9 @@ Fires on the last calendar day of the month. Output target:
   `daily/*.md` items
 
 ### Roadmap delta
-- **Action**: compare current `roadmap.md` against the month's progress;
+- **Action**: compare current `plans/roadmap.md` against the month's progress;
   highlight completed + delayed items
 
 ### Habit + health snapshot
-- **Action**: if the user logged health/habit data in `user/personal.md`,
+- **Action**: if the user logged health/habit data in `identity/personal.md`,
   surface month-over-month changes (opt-in only)

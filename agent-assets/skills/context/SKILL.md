@@ -26,33 +26,33 @@ vault**, not this primary store.
 
 | File | Purpose | Owner | Lock? |
 |---|---|---|---|
-| `today.md` | Today's schedule, tasks, agent log, handoff | See `today` skill | Yes (Morning Routine) |
-| `roadmap.md` | Long-horizon agent action plan + Long-term Plans | See `roadmap` skill | Yes (Roadmap Refresh) |
+| `state/today.md` | Today's schedule, tasks, agent log, handoff | See `today` skill | Yes (Morning Routine) |
+| `plans/roadmap.md` | Long-horizon agent action plan + Long-term Plans | See `roadmap` skill | Yes (Roadmap Refresh) |
 | `projects/*.md` | Project state summaries | Any event on material state change | No |
 | `weekly/YYYY-Www.md` | Weekly review snapshots | Friday Weekly Review only (PUT) | No |
 | `monthly/YYYY-MM.md` | Monthly review snapshots | Month-end Monthly Review only (PUT) | No |
 | `rules/*.md` | User-controlled policy files | Explicit user request only | No |
-| `rules/policies/<slug>.md` | Durable management policies captured from DM | `management-policy` skill — **do not write from here** | No |
-| `rules/policies/_index.md` | Readable index of active policies | `management-policy` skill — **do not write from here** | No |
+| `policies/management-captures/<slug>.md` | Durable management policies captured from DM | `management-policy` skill — **do not write from here** | No |
+| `policies/management-captures/_index.md` | Readable index of active policies | `management-policy` skill — **do not write from here** | No |
 | `routines/*.md` | Per-cadence check rulebooks | Explicit user request only | No |
-| `user/profile.md` | User identity and preferences | `user-profile` skill — **do not write from here** | No |
+| `identity/profile.md` | User identity and preferences | `user-profile` skill — **do not write from here** | No |
 | `user/*.md` | Detailed user dictionary | `user-profile` skill — **do not write from here** | No |
 
 Morning Routine scans roadmap daily and processes matching Preparation
-Timeline rows into `today.md` — see the `roadmap` skill for the full
+Timeline rows into `state/today.md` — see the `roadmap` skill for the full
 entry taxonomy and the morning routine task-flow for the scanning rules.
 
 ## projects/*.md
 
 Update on status changes, milestones reached/delayed, or active set changes. Use `GET /api/context/list/projects` to discover files. The source of truth is always the individual `projects/<slug>.md` notes; `_active.base` is only the Obsidian Bases view config, not a narrative summary note.
 
-The canonical frontmatter schema is documented in `projects/_index.md`
-(seeded from `agent-assets/templates/projects/_index.md`). The API
+The canonical frontmatter schema is documented in `plans/projects/_index.md`
+(seeded from `agent-assets/templates/plans/projects/_index.md`). The API
 validates only `type: project`, `owner: shared`, `updated`, and an H1
 (`context-frontmatter.ts`). Conventional but unvalidated fields —
 `slug`, `state`, `start`, `due`, `stakeholders`, `next_milestone`,
 `tags` — should still be written for new files because the
-`projects/_active.base` Obsidian view filters on `state`.
+`plans/projects/_active.base` Obsidian view filters on `state`.
 
 ## Project DM-intent detection
 
@@ -76,8 +76,8 @@ the partial.
 
 Weekly and monthly review snapshots, the user-controlled `rules/*.md`
 policy files, the built-in `routines/<cadence>.md` rulebooks, custom
-routines under `routines/custom/`, and the agent-private
-`agent/journal.md` all have stable per-file conventions (writer event,
+routines under `policies/routines/custom/`, and the agent-private
+`journal/agent.md` all have stable per-file conventions (writer event,
 verb, frontmatter, retention) documented in the snapshot-files
 reference below.
 
@@ -101,7 +101,7 @@ envelope are in the required-frontmatter reference below.
 The full `/api/context/*` surface — read / write / list / lock /
 archive / restore / health / repair / action-log — is organised by
 operation in the reference below. Add `X-Lock-Id` on every PUT / PATCH
-to `today.md` (`<today_write_lock_id>`) or `roadmap.md`
+to `state/today.md` (`<today_write_lock_id>`) or `plans/roadmap.md`
 (`<roadmap_write_lock_id>`) when the matching lock-id tag is in your
 context.
 

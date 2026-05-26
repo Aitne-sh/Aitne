@@ -11,10 +11,10 @@ register a custom hourly task should POST to
 fire `scheduled.task` / `scheduled.dm` events instead.
 
 The "Vault policy files" block appended to this prompt includes
-`routines/hourly.md` — your canonical check list for this cadence.
+`policies/routines/hourly.md` — your canonical check list for this cadence.
 The "Vault review context" block includes `context-index.md` and
-`dossiers/hourly.md`; consult it before Step 1 and update the dossier's
-Open items / Last run before finishing. Writes to `dossiers/<flow>.md`
+`knowledge/dossiers/hourly.md`; consult it before Step 1 and update the dossier's
+Open items / Last run before finishing. Writes to `knowledge/dossiers/<flow>.md`
 MUST preserve the existing YAML frontmatter block (`---\ntype: dossier\nowner: agent\nupdated: <date>\n---`); prefer `PATCH` with a
 section target to mutate a single block, and when doing a `PUT` full
 rewrite keep the frontmatter and only refresh `updated:` — writes that
@@ -27,7 +27,7 @@ routing rules.
 
 Output language: follow `<output_language_policy>` (Policy B for any
 context-MD write-up; Policy C for the optional `POST /api/notify` DM).
-Agent log appends to `agent/journal.md` stay English (Policy A).
+Agent log appends to `journal/agent.md` stay English (Policy A).
 
 Use the observations skill to fetch pending items. The pre-pass
 fetcher session (`routine.fetch_window`) ran ahead of you and posted
@@ -135,7 +135,7 @@ This routine reads external state for context — it does not push back. While r
 - Create / update / delete calendar events.
 - Open / merge / comment on GitHub PRs or issues.
 
-External-source signals (`mail:*`, `notion:*`, `calendar:*`, `git:*`) reach you through `<observations>`. Consume them, route to `today.md` / `projects/*.md` / the `roadmap_candidate` queue per the Decision Framework below, but do **not** act back on the source system. Outbound writes against external services belong in the morning routine, evening review, or DM-reply paths — `routine.hourly_check` is a silent bookkeeping pass.
+External-source signals (`mail:*`, `notion:*`, `calendar:*`, `git:*`) reach you through `<observations>`. Consume them, route to `state/today.md` / `projects/*.md` / the `roadmap_candidate` queue per the Decision Framework below, but do **not** act back on the source system. Outbound writes against external services belong in the morning routine, evening review, or DM-reply paths — `routine.hourly_check` is a silent bookkeeping pass.
 
 This rule applies regardless of integration mode (direct, same-backend delegated, cross-backend delegated). It is owned by the routine, so a session whose `notion` / `mail` / `external-services` skill body was dropped under same-backend delegation (because the connector covers the surface) still inherits the constraint.
 
@@ -205,7 +205,7 @@ This rule applies regardless of integration mode (direct, same-backend delegated
      last 4 hours.
    - The truncation marker `[...N earlier entries omitted ...]` appears
      in `<today>` and you cannot rule out a same-day prior notification
-     from the truncated view. In that case `GET /api/context/today`
+     from the truncated view. In that case `GET /api/context/state/today`
      once for the full log before deciding.
    - A matching pending `POST /api/schedule/dm` or Agent Plan row is
      already going to fire for this item within the next 2 hours
@@ -215,7 +215,7 @@ This rule applies regardless of integration mode (direct, same-backend delegated
    (a) Hard deadline ≤ 2 hours away that the agent surfaced **this
        hour** from new input (mail, DM, observation) AND the user has
        not yet acted on it. **Self-set deadlines, course assignments,
-       class times, and items already in `today.md` ## User Tasks do
+       class times, and items already in `state/today.md` ## User Tasks do
        NOT qualify** — they fail the awareness gate (see notify skill
        § Universal user-facing message discipline § Awareness gate).
        A 6-hour deadline is NOT urgent regardless.

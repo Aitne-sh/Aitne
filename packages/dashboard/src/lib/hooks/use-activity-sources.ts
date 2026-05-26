@@ -11,7 +11,7 @@ import type { ActivitySourceRef } from "@/lib/sources";
  * Settings → Management still uses `useManagedTasks()` (active rows
  * only) because its UI edits live rows; this hook is for read-only
  * surfaces that should keep showing a stopped task's
- * `_activity/<source>.md` for its 90-day window.
+ * `state/activity/<source>.md` for its 90-day window.
  */
 
 export interface ActivitySourcesResponse {

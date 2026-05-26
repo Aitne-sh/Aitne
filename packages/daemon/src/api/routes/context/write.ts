@@ -1,3 +1,6 @@
+// drift-allow-file: route handlers document append-only enforcement for
+// legacy aliases (`agent/journal`, `routines/custom/*`); the comments
+// explain attack vectors against legacy paths and are load-bearing.
 import type { Hono } from "hono";
 import {
   existsSync,
@@ -194,7 +197,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       ]);
     }
     // Morning Routine lock: reject writes to today while lock is held
-    if (morningRoutineLock.getHolder() && path === "today") {
+    if (morningRoutineLock.getHolder() && path === "state/today") {
       const lockId = c.req.header("X-Lock-Id");
       if (!morningRoutineLock.isHeldBy(lockId)) {
         logger.info({ path }, "Context PUT rejected — morning routine lock held");
@@ -207,7 +210,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       }
     }
     // Roadmap write lock: reject writes to roadmap while another session holds it
-    if (roadmapWriteLock.getHolder() && path === "roadmap") {
+    if (roadmapWriteLock.getHolder() && path === "plans/roadmap") {
       const lockId = c.req.header("X-Lock-Id");
       if (!roadmapWriteLock.isHeldBy(lockId)) {
         logger.info({ path }, "Context PUT rejected — roadmap write lock held");
@@ -234,7 +237,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
     if (roadmapValidationOff) {
       logRoadmapValidationBypass(c, "PUT", path);
     }
-    const expectedAgentDay = path === "today"
+    const expectedAgentDay = path === "state/today"
       ? getAgentDayDateStr(config.timezone || undefined, config.dayBoundaryHour ?? 4)
       : undefined;
     const preflight = prepareContextContentForWrite(target, parsed.data.content, {
@@ -407,7 +410,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           { path, method: "PUT" },
         );
       }
-      if (path.startsWith("routines/custom/")) {
+      if (path.startsWith("policies/routines/custom/")) {
         deps.onCustomRoutinesChanged?.();
       }
       const writtenStat = statSync(fullPath);
@@ -454,7 +457,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       ]);
     }
     // Morning Routine lock: reject writes to today while lock is held
-    if (morningRoutineLock.getHolder() && path === "today") {
+    if (morningRoutineLock.getHolder() && path === "state/today") {
       const lockId = c.req.header("X-Lock-Id");
       if (!morningRoutineLock.isHeldBy(lockId)) {
         logger.info({ path }, "Context PATCH rejected — morning routine lock held");
@@ -467,7 +470,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       }
     }
     // Roadmap write lock: reject writes to roadmap while another session holds it
-    if (roadmapWriteLock.getHolder() && path === "roadmap") {
+    if (roadmapWriteLock.getHolder() && path === "plans/roadmap") {
       const lockId = c.req.header("X-Lock-Id");
       if (!roadmapWriteLock.isHeldBy(lockId)) {
         logger.info({ path }, "Context PATCH rejected — roadmap write lock held");
@@ -532,7 +535,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
     if (roadmapValidationOff) {
       logRoadmapValidationBypass(c, "PATCH", path);
     }
-    const expectedAgentDay = path === "today"
+    const expectedAgentDay = path === "state/today"
       ? getAgentDayDateStr(config.timezone || undefined, config.dayBoundaryHour ?? 4)
       : undefined;
 
@@ -568,7 +571,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           previousRoadmapContent: fileContent,
           today: localDateStr(new Date(), config.timezone || undefined),
           defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
-          allowLegacyToday: path === "today" && isLegacyTodayContent(fileContent),
+          allowLegacyToday: path === "state/today" && isLegacyTodayContent(fileContent),
           expectedAgentDay,
         });
         if (!prepared.ok) {
@@ -637,7 +640,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
             },
           );
         }
-        if (path.startsWith("routines/custom/")) {
+        if (path.startsWith("policies/routines/custom/")) {
           deps.onCustomRoutinesChanged?.();
         }
         logger.info({ path, method: "PATCH", mode }, "Content appended to file");
@@ -719,7 +722,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
         previousRoadmapContent: fileContent,
         today: localDateStr(new Date(), config.timezone || undefined),
         defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
-        allowLegacyToday: path === "today" && isLegacyTodayContent(fileContent),
+        allowLegacyToday: path === "state/today" && isLegacyTodayContent(fileContent),
         expectedAgentDay,
       });
       if (!prepared.ok) {
@@ -765,7 +768,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           },
         );
       }
-      if (path.startsWith("routines/custom/")) {
+      if (path.startsWith("policies/routines/custom/")) {
         deps.onCustomRoutinesChanged?.();
       }
       deps.onIndexableContextChange?.(`${path}${target.ext}`);
@@ -814,7 +817,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       const existing = readFileSync(fullPath, "utf-8");
       const snapshotId = saveSnapshot(path, existing, "api_delete", true);
       unlinkSync(fullPath);
-      if (path.startsWith("routines/custom/")) {
+      if (path.startsWith("policies/routines/custom/")) {
         deps.onCustomRoutinesChanged?.();
       }
       deps.onIndexableContextChange?.(path);

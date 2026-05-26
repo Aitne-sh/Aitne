@@ -37,7 +37,7 @@ function writeOverlay(
   sectionId: string,
   envelope: unknown,
 ): string {
-  const dir = join(dataDir, "skills", "overlays", slug);
+  const dir = join(dataDir, "skill-curation-overlays", slug);
   mkdirSync(dir, { recursive: true });
   const p = join(dir, `${sectionId}.json`);
   writeFileSync(p, JSON.stringify(envelope, null, 2), "utf-8");
@@ -137,7 +137,7 @@ describe("detectOrphanOverlays", () => {
         scope_paths: ["user/*.md"],
       },
     ]);
-    const dir = join(dataDir, "skills", "overlays", "user-profile");
+    const dir = join(dataDir, "skill-curation-overlays", "user-profile");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "topic-files.json"), "{ not json", "utf-8");
     // Corrupt overlays whose section IS declared still pass the
@@ -178,9 +178,9 @@ describe("detectOrphanOverlays", () => {
   });
 
   it("skips non-directory entries at the overlays root (covers 74)", () => {
-    // A stray loose file under PA_DATA_DIR/skills/overlays/ must be ignored.
-    mkdirSync(join(dataDir, "skills", "overlays"), { recursive: true });
-    writeFileSync(join(dataDir, "skills", "overlays", "loose.txt"), "ignored", "utf-8");
+    // A stray loose file under PA_DATA_DIR/skill-curation-overlays/ must be ignored.
+    mkdirSync(join(dataDir, "skill-curation-overlays"), { recursive: true });
+    writeFileSync(join(dataDir, "skill-curation-overlays", "loose.txt"), "ignored", "utf-8");
     // Write one real overlay to confirm we still walk valid slug dirs.
     writeOverlay("ghost", "section", VALID_KNOWLEDGE_LAYOUT);
     const r = detectOrphanOverlays(dataDir, skillsRoot);
@@ -189,7 +189,7 @@ describe("detectOrphanOverlays", () => {
   });
 
   it("skips non-file and non-.json entries within a slug directory (covers 79-80)", () => {
-    const slugDir = join(dataDir, "skills", "overlays", "ghost");
+    const slugDir = join(dataDir, "skill-curation-overlays", "ghost");
     mkdirSync(slugDir, { recursive: true });
     // history/ subdir → not a file, must be skipped
     mkdirSync(join(slugDir, "history"));
@@ -278,8 +278,8 @@ describe("discardOrphanOverlay — TOCTOU race branches (mocked fs)", () => {
 
   it("returns overlay_missing when existsSync(orphan_path) returns false (covers 196-197)", async () => {
     const realFs = await vi.importActual<typeof import("node:fs")>("node:fs");
-    const orphanPath = join(mockDataDir, "skills", "overlays", "ghost", "section.json");
-    realFs.mkdirSync(join(mockDataDir, "skills", "overlays", "ghost"), { recursive: true });
+    const orphanPath = join(mockDataDir, "skill-curation-overlays", "ghost", "section.json");
+    realFs.mkdirSync(join(mockDataDir, "skill-curation-overlays", "ghost"), { recursive: true });
     realFs.writeFileSync(orphanPath, JSON.stringify(VALID_KNOWLEDGE_LAYOUT), "utf-8");
 
     vi.resetModules();
@@ -299,8 +299,8 @@ describe("discardOrphanOverlay — TOCTOU race branches (mocked fs)", () => {
 
   it("returns stat_failed when statSync throws (covers 204-205)", async () => {
     const realFs = await vi.importActual<typeof import("node:fs")>("node:fs");
-    const orphanPath = join(mockDataDir, "skills", "overlays", "ghost2", "section.json");
-    realFs.mkdirSync(join(mockDataDir, "skills", "overlays", "ghost2"), { recursive: true });
+    const orphanPath = join(mockDataDir, "skill-curation-overlays", "ghost2", "section.json");
+    realFs.mkdirSync(join(mockDataDir, "skill-curation-overlays", "ghost2"), { recursive: true });
     realFs.writeFileSync(orphanPath, JSON.stringify(VALID_KNOWLEDGE_LAYOUT), "utf-8");
 
     vi.resetModules();
@@ -322,8 +322,8 @@ describe("discardOrphanOverlay — TOCTOU race branches (mocked fs)", () => {
 
   it("returns not_file when statSync reports a directory (adjacent branch in same block)", async () => {
     const realFs = await vi.importActual<typeof import("node:fs")>("node:fs");
-    const orphanPath = join(mockDataDir, "skills", "overlays", "ghost3", "section.json");
-    realFs.mkdirSync(join(mockDataDir, "skills", "overlays", "ghost3"), { recursive: true });
+    const orphanPath = join(mockDataDir, "skill-curation-overlays", "ghost3", "section.json");
+    realFs.mkdirSync(join(mockDataDir, "skill-curation-overlays", "ghost3"), { recursive: true });
     realFs.writeFileSync(orphanPath, JSON.stringify(VALID_KNOWLEDGE_LAYOUT), "utf-8");
 
     vi.resetModules();

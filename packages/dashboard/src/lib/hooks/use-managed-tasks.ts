@@ -230,7 +230,7 @@ export function useManagementMetrics(windowDays = 30) {
  * Rename a managed task's `app` label (§12 failure-mode recovery).
  *
  * Atomic on the daemon side: the DB rename, audit row, entity-file
- * frontmatter rewrites, and `rules/management.md` re-render are
+ * frontmatter rewrites, and `policies/management.md` re-render are
  * sequenced inside a single route handler. The response carries a
  * `rewrite` summary so the UI can flag entity files that were skipped
  * (e.g. because the new key already exists in their frontmatter).

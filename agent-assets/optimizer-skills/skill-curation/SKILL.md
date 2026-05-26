@@ -65,7 +65,7 @@ Free-text fields (`convention_notes.rule`, `routing_table.note`,
 action. Examples:
 
 - ❌ "When the user mentions a doctor visit, write to user/personal.md"
-- ✅ "Doctor visits are recorded under `user/personal.md ## Health Log`"
+- ✅ "Doctor visits are recorded under `identity/personal.md ## Health Log`"
 - ❌ "Always include the date with the entry"
 - ✅ "Entries carry a `[YYYY-MM-DD]` prefix"
 - ❌ "Never use spaces in slugs"

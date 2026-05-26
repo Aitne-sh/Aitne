@@ -96,7 +96,7 @@ export function clearDegradedMode(db: Database.Database): void {
  * Latched "setup completed" marker (Management Mode bootstrap bypass).
  *
  * Written the first time `runVaultHealthProbe` observes
- * `rules/management.md` in either the fallback or primary vault
+ * `policies/management.md` in either the fallback or primary vault
  * location. It stays latched during normal operation — a user whose
  * vault later becomes unreachable should enter degraded mode, NOT fall
  * back into bootstrapping where the 503 gate is disabled. Explicit reset
@@ -152,4 +152,71 @@ export function clearUserPaused(db: Database.Database): void {
 
 export function isUserPaused(db: Database.Database): boolean {
   return getUserPaused(db) !== null;
+}
+
+/**
+ * CONTEXT_VAULT_REDESIGN_PLAN.md §11.3.4 / V16 — explicit acknowledgement
+ * that an Obsidian-mode user has consented to the vault restructure
+ * reorganizing their Obsidian sidebar. Until present, the bootstrap layer
+ * defers migration `0004-context-vault-restructure` and records pending
+ * state so the dashboard can render a consent surface. Headless installs
+ * can set `PA_VAULT_RESTRUCTURE_ACK=1`; that path also writes this key
+ * (source="env") so subsequent boots short-circuit the env check.
+ */
+export const VAULT_RESTRUCTURE_ACK_KEY =
+  "context_vault_restructure_acknowledged_at";
+
+export interface VaultRestructureAck {
+  at: string;
+  source: "env" | "dashboard" | "cli";
+}
+
+export function getVaultRestructureAck(
+  db: Database.Database,
+): VaultRestructureAck | null {
+  return readRuntimeState<VaultRestructureAck>(db, VAULT_RESTRUCTURE_ACK_KEY);
+}
+
+export function setVaultRestructureAck(
+  db: Database.Database,
+  ack: VaultRestructureAck,
+): void {
+  writeRuntimeState(db, VAULT_RESTRUCTURE_ACK_KEY, ack);
+}
+
+/**
+ * Surfaced via `/api/health` so the dashboard can render a "vault
+ * restructure pending" banner. Written when the bootstrap defers the
+ * migration on Obsidian + no-ack; cleared once the migration applies or
+ * the vault has already reached the target layout.
+ */
+export const VAULT_RESTRUCTURE_PENDING_CONSENT_KEY =
+  "context_vault_restructure_pending_consent";
+
+export interface VaultRestructurePendingConsent {
+  since: string;
+  reason: "obsidian_consent_required";
+  contextDir: string;
+}
+
+export function getVaultRestructurePendingConsent(
+  db: Database.Database,
+): VaultRestructurePendingConsent | null {
+  return readRuntimeState<VaultRestructurePendingConsent>(
+    db,
+    VAULT_RESTRUCTURE_PENDING_CONSENT_KEY,
+  );
+}
+
+export function setVaultRestructurePendingConsent(
+  db: Database.Database,
+  state: VaultRestructurePendingConsent,
+): void {
+  writeRuntimeState(db, VAULT_RESTRUCTURE_PENDING_CONSENT_KEY, state);
+}
+
+export function clearVaultRestructurePendingConsent(
+  db: Database.Database,
+): void {
+  deleteRuntimeState(db, VAULT_RESTRUCTURE_PENDING_CONSENT_KEY);
 }

@@ -234,8 +234,8 @@ export default function SelfLearningSettingsPage() {
           <>
             Lets the agent periodically refresh a bounded set of &ldquo;knowledge
             map&rdquo; sections inside its own skills — for example, the list of
-            files under <code>user/</code>, the section names inside{" "}
-            <code>today.md</code>, or the routing table that decides where a
+            files under <code>identity/</code>, the section names inside{" "}
+            <code>state/today.md</code>, or the routing table that decides where a
             fact gets written. When ON, the agent runs on the cadence below and
             silently applies every passing proposal; an auto-revert loop rolls
             back any change that introduces more drift. There is no review queue:

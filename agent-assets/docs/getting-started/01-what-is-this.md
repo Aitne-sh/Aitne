@@ -69,7 +69,7 @@ By default:
 
 - Every morning, it reads your calendar, unread mail, open tasks, and
   recent notes, and writes today's plan into
-  [`today.md`](../features/memory-files/today.md).
+  [`state/today.md`](../features/memory-files/today.md).
 - Every evening, it reviews how the day went and updates
   [`journal.md`](../features/memory-files/agent-journal.md).
 - Once a week and once a month, it rolls those journals up.
@@ -133,16 +133,16 @@ Everything the agent learns about you is written as Markdown files
 you can read, edit, and version yourself. Nothing important lives in
 an opaque vector store.
 
-- [`user/profile.md`](../features/memory-files/user-profile.md) —
+- [`identity/profile.md`](../features/memory-files/user-profile.md) —
   what the agent knows about you.
 - [`projects/*.md`](../features/memory-files/projects.md) — one file
   per active project.
-- [`roadmap.md`](../features/memory-files/roadmap.md) — longer-term
+- [`plans/roadmap.md`](../features/memory-files/roadmap.md) — longer-term
   goals.
 - [`schedule/YYYY-MM-DD.md`](../features/memory-files/schedule.md) —
   per-day plans.
-- [`today.md`](../features/memory-files/today.md) — today's plan.
-- [`agent/journal.md`](../features/memory-files/agent-journal.md) —
+- [`state/today.md`](../features/memory-files/today.md) — today's plan.
+- [`journal/agent.md`](../features/memory-files/agent-journal.md) —
   what the agent did and noticed.
 
 → [Memory Model](../concepts/memory-model.md)

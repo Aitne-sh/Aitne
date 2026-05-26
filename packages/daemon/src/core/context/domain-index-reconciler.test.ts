@@ -226,15 +226,24 @@ describe("renderDomainIndex", () => {
 });
 
 describe("path helpers", () => {
-  it("relativeDomainIndexPath builds <domain>/_index.md", () => {
-    expect(relativeDomainIndexPath("work")).toBe("work/_index.md");
+  it("relativeDomainIndexPath builds knowledge/entities/<domain>/_index.md", () => {
+    expect(relativeDomainIndexPath("work")).toBe(
+      "knowledge/entities/work/_index.md",
+    );
   });
 
   it("isDomainIndexPath accepts canonical, rejects malformed", () => {
-    expect(isDomainIndexPath("work/_index.md")).toBe(true);
-    expect(isDomainIndexPath("rules/_index.md")).toBe(false); // rules ∉ DOMAINS
-    expect(isDomainIndexPath("work/meetings/_index.md")).toBe(false);
-    expect(isDomainIndexPath("work/main.md")).toBe(false);
+    expect(isDomainIndexPath("knowledge/entities/work/_index.md")).toBe(true);
+    // Wrong root.
+    expect(isDomainIndexPath("policies/_index.md")).toBe(false);
+    // Domain not in the enum.
+    expect(isDomainIndexPath("knowledge/entities/bogus/_index.md")).toBe(false);
+    // Wrong depth (typePlural subindex).
+    expect(
+      isDomainIndexPath("knowledge/entities/work/meetings/_index.md"),
+    ).toBe(false);
+    // Wrong basename.
+    expect(isDomainIndexPath("knowledge/entities/work/main.md")).toBe(false);
   });
 
   it("entityDirToDomain validates both segments", () => {

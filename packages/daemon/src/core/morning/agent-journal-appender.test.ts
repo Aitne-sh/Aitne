@@ -1158,8 +1158,9 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     applySchema(db);
     dataDir = mkdtempSync(join(tmpdir(), "pa-mra-"));
     contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "agent"), { recursive: true });
-    mkdirSync(join(contextDir, "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "journal"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
   });
 
   afterEach(() => {
@@ -1189,7 +1190,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result).toEqual({ ok: false, reason: "stage_a_row_missing" });
-    expect(existsSync(join(contextDir, "agent/journal.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "journal/agent.md"))).toBe(false);
   });
 
   it("creates agent/journal.md when absent, writes the H1 header + entry, and snapshots nothing", async () => {
@@ -1198,7 +1199,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       metadata: { dayType: "weekday", inboxStats: { triaged: 1, movedToScratch: 1, dmConfirmsSent: 0 } },
     });
     seedStageRow({ actionType: STAGE_B_ACTION_TYPE, metadata: {} });
-    writeFileSync(join(contextDir, "daily/2026-05-14.md"), DAILY_BODY);
+    writeFileSync(join(contextDir, "journal/daily/2026-05-14.md"), DAILY_BODY);
 
     const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
@@ -1211,14 +1212,14 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     );
     expect(result.ok).toBe(true);
 
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal.startsWith("# Agent journal\n\n## 2026-05-15 morning routine\n")).toBe(true);
     expect(journal).toContain("- Day-type: weekday\n");
     expect(journal).toContain("- Journal: daily/2026-05-14.md");
 
     const snapshots = db
       .prepare("SELECT COUNT(*) AS n FROM md_file_snapshots WHERE file_path = ?")
-      .get("agent/journal") as { n: number };
+      .get("journal/agent") as { n: number };
     expect(snapshots.n).toBe(0);
   });
 
@@ -1228,7 +1229,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       metadata: { dayType: "weekday", inboxStats: { triaged: 0, movedToScratch: 0, dmConfirmsSent: 0 } },
     });
     writeFileSync(
-      join(contextDir, "agent/journal.md"),
+      join(contextDir, "journal/agent.md"),
       "# Agent journal\n\n## 2026-05-14 morning routine\n- foo\n",
     );
 
@@ -1250,19 +1251,19 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     );
     expect(result.ok).toBe(true);
 
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain("## 2026-05-14 morning routine\n- foo");
     expect(journal).toContain("## 2026-05-15 morning routine\n");
 
     const snapshots = db
       .prepare("SELECT trigger, content FROM md_file_snapshots WHERE file_path = ?")
-      .all("agent/journal") as Array<{ trigger: string; content: string }>;
+      .all("journal/agent") as Array<{ trigger: string; content: string }>;
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0].trigger).toBe("morning_routine_appender");
     expect(snapshots[0].content).toContain("## 2026-05-14 morning routine\n- foo");
 
     expect(markWriting).toHaveBeenCalledTimes(1);
-    expect(onIndexable).toHaveBeenCalledWith("agent/journal.md");
+    expect(onIndexable).toHaveBeenCalledWith("journal/agent.md");
   });
 
   it("emits the `skipped (no prior-day data)` variant when daily/<yesterday>.md is absent AND yesterday.md is absent (legitimate first-run)", async () => {
@@ -1283,7 +1284,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain("- Journal synthesis: skipped (no prior-day data)\n");
   });
 
@@ -1300,7 +1301,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     // Simulate the post-rotation state: today.md was rotated to
     // yesterday.md at run start. Body is irrelevant — only existence
     // matters for the `stageBAttempted` derivation.
-    writeFileSync(join(contextDir, "yesterday.md"), "# 2026-05-14 (Wednesday)\n");
+    writeFileSync(join(contextDir, "state", "yesterday.md"), "# 2026-05-14 (Wednesday)\n");
 
     const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
@@ -1312,7 +1313,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain(
       "- Journal synthesis: failed (audit row missing — see daemon log)\n",
     );
@@ -1335,7 +1336,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain("- Day-type: unknown\n");
     expect(journal).toContain("- Inbox: 0 files triaged, 0 moved to scratch, 0 DM-confirmations sent\n");
   });
@@ -1378,7 +1379,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    expect(onIndexable).toHaveBeenCalledWith("agent/journal.md");
+    expect(onIndexable).toHaveBeenCalledWith("journal/agent.md");
   });
 
   it("aggregates the agent-action breakdown into the Actions line when `agentDayWindow` is supplied", async () => {
@@ -1415,7 +1416,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain("- Actions: 3 total (hourly_check: 2, evening_review: 1)\n");
   });
 
@@ -1438,7 +1439,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain("- Actions: (none)\n");
   });
 
@@ -1456,7 +1457,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     // appender invokes saveSnapshot first (no-op here because no
     // existing journal content), then markWriting, then the atomic
     // write — which sees the pre-existing symlink and refuses.
-    const journalAbs = join(contextDir, "agent/journal.md");
+    const journalAbs = join(contextDir, "journal/agent.md");
     mkdirSync(dirname(journalAbs), { recursive: true });
     const symlinkTarget = join(contextDir, "decoy.md");
     writeFileSync(symlinkTarget, "decoy");
@@ -1485,7 +1486,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       actionType: STAGE_A_ACTION_TYPE,
       metadata: { dayType: "weekday" },
     });
-    writeFileSync(join(contextDir, "agent/journal.md"), "# Agent journal\n\n## prev\n");
+    writeFileSync(join(contextDir, "journal/agent.md"), "# Agent journal\n\n## prev\n");
     db.exec("DROP TABLE md_file_snapshots");
     const result = await appendMorningRoutineJournalEntry(
       { db, contextDir },
@@ -1497,7 +1498,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       },
     );
     expect(result.ok).toBe(true);
-    const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+    const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
     expect(journal).toContain("## 2026-05-15 morning routine\n");
   });
 });

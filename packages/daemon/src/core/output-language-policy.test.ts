@@ -209,8 +209,8 @@ describe("ContextBuilder — output_language_policy block", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "pa-olp-"));
     contextDir = join(tmp, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    mkdirSync(join(contextDir, "user"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);

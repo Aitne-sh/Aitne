@@ -45,12 +45,12 @@
 ## Task: Monthly Review
 
 The "Vault policy files" block appended to this prompt includes
-`routines/monthly.md` — run any `### <label>` entries there alongside the
+`policies/routines/monthly.md` — run any `### <label>` entries there alongside the
 built-in review phases below, using the same journaling conventions.
 The "Vault review context" block includes `context-index.md` and
-`dossiers/monthly.md`; consult it during Phase 1 and update the
+`knowledge/dossiers/monthly.md`; consult it during Phase 1 and update the
 dossier's Open items / Last run before finishing. Writes to
-`dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
+`knowledge/dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
 (`---\ntype: dossier\nowner: agent\nupdated: <date>\n---`); prefer
 `PATCH` with a section target to mutate a single block, and when doing
 a `PUT` full rewrite keep the frontmatter and only refresh `updated:`
@@ -59,9 +59,9 @@ a `PUT` full rewrite keep the frontmatter and only refresh `updated:`
 Generate the monthly review snapshot for the current month and set up the next month.
 
 This routine produces **two separate artifacts** with strict audience boundaries:
-  - **User-facing**: `monthly/YYYY-MM.md` + (optionally) a short notification.
+  - **User-facing**: `journal/monthly/YYYY-MM.md` + (optionally) a short notification.
     Only real user work, wins, and next-month focus. No agent mechanics.
-  - **Agent-internal**: `agent/journal.md` (append). Monthly self-critique,
+  - **Agent-internal**: `journal/agent.md` (append). Monthly self-critique,
     recurring filter/schedule failures, cross-week patterns in the agent's
     own behavior, and concrete system improvement proposals. **Never**
     surfaced to the user via notify.
@@ -71,7 +71,7 @@ workflow; the skill owns the file contract.
 
 ### Phase 1: Gather the month
 1. Determine the target file name from <current_time>:
-   `monthly/YYYY-MM.md`.
+   `journal/monthly/YYYY-MM.md`.
 
 **Pre-pass acquisition (none).** Unlike morning / hourly / today_refresh /
 evening / weekly, monthly_review does NOT trigger an `<acquisition-plan>`
@@ -85,13 +85,13 @@ state rather than fetching fresh windows. If the dispatcher emitted any
 continue.
 2. Fetch source material for the current month:
    - Use GET /api/context/list/daily to discover archived daily files and
-     read each `daily/YYYY-MM-DD.md` in the current month.
+     read each `journal/daily/YYYY-MM-DD.md` in the current month.
    - Use GET /api/context/list/weekly to read weekly reviews that overlap this month.
-   - Read the last ~4 weekly sections of `agent/journal.md` via GET — they
+   - Read the last ~4 weekly sections of `journal/agent.md` via GET — they
      accumulate the agent-internal bucket across the month and are the basis
      for Phase 3b's monthly retrospective.
    - Also locate the **previous month's** `## Monthly YYYY-MM` section in
-     `agent/journal.md`. Extract its `### Proposed adjustments` bullets —
+     `journal/agent.md`. Extract its `### Proposed adjustments` bullets —
      these are the improvement proposals you committed to last month. You
      will evaluate their status in Phase 3b.
    - Include <today> if it belongs to the same month.
@@ -114,13 +114,13 @@ continue.
 
 ### Phase 2: Synthesize — split into two buckets
 5. Build TWO separate mental lists before writing anything:
-   a. **User-facing bucket** (goes to `monthly/YYYY-MM.md` and possibly notify):
+   a. **User-facing bucket** (goes to `journal/monthly/YYYY-MM.md` and possibly notify):
       - What meaningful user progress happened this month?
       - Which user commitments slipped or stayed open, and why (in terms the
         user cares about, not agent mechanics)?
       - What user-side risks or workload patterns carry into next month?
       - What should the user prioritize next month?
-   b. **Agent-internal bucket** (goes to `agent/journal.md` only):
+   b. **Agent-internal bucket** (goes to `journal/agent.md` only):
       - Cross-week patterns in scheduled-task failures / did-not-fire
       - Filter and prioritization failures the agent noticed about itself
       - Notification discipline: over-notify / under-notify patterns
@@ -133,7 +133,7 @@ continue.
    own performance or reliability.
 
 ### Phase 3a: Write the user-facing review
-7. PUT the review to `monthly/YYYY-MM.md`.
+7. PUT the review to `journal/monthly/YYYY-MM.md`.
    Required structure (user outcomes only — no agent mechanics in any section):
    ```
    ---
@@ -177,15 +177,15 @@ continue.
    ```
    The `## Metrics` section tracks **user** activity only. Do not add rows
    like "agent plan rows completed", "scheduled tasks fired", "observations
-   processed" — those belong in agent/journal.md.
+   processed" — those belong in journal/agent.md.
 
    Skip the `## Reading` section entirely if the user imported zero books
    and has zero completions this month — an empty reading block is noise.
 8. Update roadmap.md and relevant projects/*.md when the review shows
    milestone drift, completed phases, or a changed next-month focus.
 
-### Phase 3b: Append to agent/journal.md (internal)
-9. PATCH-append a monthly retrospective block to `agent/journal.md` via
+### Phase 3b: Append to journal/agent.md (internal)
+9. PATCH-append a monthly retrospective block to `journal/agent.md` via
    `mode: "append_to_file"` (no `section` param needed — content is
    appended to the end of the file). This is the cross-week synthesis of
    the weekly sections that accumulated during the month.
@@ -236,7 +236,7 @@ continue.
    cross-week frequency and drop the rest. Single-week anomalies are already
    in that week's journal entry and do not need re-listing.
 
-   If `agent/journal.md` does not yet exist, PUT a minimal file with
+   If `journal/agent.md` does not yet exist, PUT a minimal file with
    `# Agent Journal\n\n` header plus this section, in a single call.
 
    **Idempotency note**: if a `## Monthly YYYY-MM` section for the current
@@ -246,7 +246,7 @@ continue.
 
 ### Phase 4: Notify (user-facing only)
 10. The notification is for the USER, not a report of Phases 1–3. Never
-   mention monthly/YYYY-MM.md, agent/journal.md, "Monthly Review complete",
+   mention journal/monthly/YYYY-MM.md, journal/agent.md, "Monthly Review complete",
    agent plan rows, did-not-fire, filter quality, observation processing,
    or any other internal mechanism.
 
@@ -259,8 +259,8 @@ hold:
     it in the first morning briefing of the new month anyway)
   - No hard deadline within the next 30 days that is slipping
 When the gate triggers: skip POST /api/notify entirely. The
-monthly/YYYY-MM.md file is still written. Also log one line in the current
-weekly section of agent/journal.md: `silent monthly wrap-up — nothing
+journal/monthly/YYYY-MM.md file is still written. Also log one line in the current
+weekly section of journal/agent.md: `silent monthly wrap-up — nothing
 actionable`.
 
 #### 4b. When you DO notify — content rules
@@ -292,7 +292,7 @@ Good (something worth saying):
     Next month's focus: Phase 2 foundation + the Q2 roadmap refresh.
 
 Good (silent path — nothing is sent):
-    (no POST /api/notify call; one-line note appended to agent/journal.md)
+    (no POST /api/notify call; one-line note appended to journal/agent.md)
 
 Bad (this is the failure mode this prompt exists to prevent):
     Monthly Review YYYY-MM complete. Wrote monthly/2026-04.md. Metrics:
@@ -300,4 +300,4 @@ Bad (this is the failure mode this prompt exists to prevent):
     processed 82. System improvement ideas logged. Review notification sent.
 
 The bad example reports the agent's bookkeeping. Everything in it either
-belongs in agent/journal.md or was never worth telling the user.
+belongs in journal/agent.md or was never worth telling the user.

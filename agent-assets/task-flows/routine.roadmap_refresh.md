@@ -3,19 +3,19 @@
 ## Task: Roadmap Refresh
 
 The "Vault policy files" block appended to this prompt includes
-`routines/monthly.md` — run any `### <label>` entries there that affect
+`policies/routines/monthly.md` — run any `### <label>` entries there that affect
 long-horizon planning alongside the built-in roadmap-refresh steps below,
 using the same journaling conventions.
 The "Vault review context" block includes `context-index.md` and
-`dossiers/roadmap.md`; consult it during signal gathering and update the
+`knowledge/dossiers/roadmap.md`; consult it during signal gathering and update the
 dossier's Open items / Last run before finishing. Writes to
-`dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
+`knowledge/dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
 (`---\ntype: dossier\nowner: agent\nupdated: <date>\n---`); prefer
 `PATCH` with a section target to mutate a single block, and when doing
 a `PUT` full rewrite keep the frontmatter and only refresh `updated:`
 — writes that drop the frontmatter are rejected with 422.
 
-Update `roadmap.md` with a forward-looking agent action plan based on the
+Update `plans/roadmap.md` with a forward-looking agent action plan based on the
 next 90 days. The `roadmap` skill owns the section schema, the
 dated-vs-undated decision tree, the Preparation Timeline taxonomy
 (Travel / Deadlines / Conferences / Recurring), destination extraction,
@@ -65,7 +65,7 @@ coordinates the high-level gather → analyze → write loop.
 
    **Cover the full 90-day window with equal priority.** The live
    calendar poller only watches the next ~15 days, so any event the
-   user scheduled farther out reaches `roadmap.md` *exclusively*
+   user scheduled farther out reaches `plans/roadmap.md` *exclusively*
    through this routine — under-coverage of the day+15 → day+90
    horizon is the primary failure mode this refresh is designed to
    prevent. Read every day of the block (including empty days, which
@@ -149,7 +149,7 @@ coordinates the high-level gather → analyze → write loop.
       else an existing Long-term Plan candidate matched conservatively
       by destination/date (promotion case); else legacy title+date
       matching only during migration; else mint a fresh ID via
-      `POST /api/context/roadmap/id` using the Source/creation date.
+      `POST /api/context/plans/roadmap/id` using the Source/creation date.
    2. If an existing AAP entry has this ID, merge: keep every
       `completed ...` Preparation Timeline row byte-for-byte; re-emit
       non-completed taxonomy rows only for gaps by lead-time offset.
@@ -239,7 +239,7 @@ coordinates the high-level gather → analyze → write loop.
    `<roadmap_write_lock_id>` is in context, include it as the
    `X-Lock-Id` header so other concurrent writers see 409 and back off:
    ```
-   curl -s -X PUT http://localhost:8321/api/context/roadmap \
+   curl -s -X PUT http://localhost:8321/api/context/plans/roadmap \
      -H 'Content-Type: application/json' \
      -H 'X-Lock-Id: <roadmap_write_lock_id>' \
      -d '{"content": "..."}'
@@ -287,14 +287,14 @@ coordinates the high-level gather → analyze → write loop.
 
 11. If the PUT returns 400 from the roadmap transition guard (for
     example, a completed row was dropped), recover once:
-    1. Re-GET `/api/context/roadmap`.
+    1. Re-GET `/api/context/plans/roadmap`.
     2. Re-run the merge using the current body as authoritative,
        preserving every `completed ...` row byte-for-byte.
     3. retry the full PUT once with the same lock id.
     4. If the second write also returns 400, do not write the regenerated
        Agent Action Plan. Instead, PUT a minimal update that only bumps
        `> Last synced` on the current body, append a diagnostic section
-       to `agent/journal.md` with the validation error and affected IDs,
+       to `journal/agent.md` with the validation error and affected IDs,
        and end silently.
 
 ### Important

@@ -434,6 +434,7 @@ export function inspectDir(rootDir: string): Manifest {
  * user data that happens to share the name.
  */
 export const AGENT_FILE_TOP_LEVEL = new Set<string>([
+  // Loose top-level survivors (legacy + canonical _index.md).
   "today.md",
   "yesterday.md",
   "roadmap.md",
@@ -441,6 +442,9 @@ export const AGENT_FILE_TOP_LEVEL = new Set<string>([
   "context-index.md",
   "agent-journal.md",
   "user.md",
+  // Legacy top-level dirs (pre-CONTEXT_VAULT_REDESIGN) — kept so an
+  // upgrading install whose target carries them is not flagged
+  // foreign.
   "agent",
   "bases",
   "daily",
@@ -456,6 +460,13 @@ export const AGENT_FILE_TOP_LEVEL = new Set<string>([
   "user",
   "user-details",
   "weekly",
+  // CONTEXT_VAULT_REDESIGN six-class top-level dirs.
+  "identity",
+  "state",
+  "plans",
+  "journal",
+  "knowledge",
+  "policies",
 ]);
 
 /**

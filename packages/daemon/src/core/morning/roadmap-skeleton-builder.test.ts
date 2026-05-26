@@ -117,7 +117,7 @@ describe("gatherRoadmapSkeletonFacts", () => {
   });
 
   it("walks context/projects/ and excludes archived + leading-underscore files", () => {
-    const projectsDir = join(contextDir, "projects");
+    const projectsDir = join(contextDir, "plans", "projects");
     mkdirSync(projectsDir, { recursive: true });
     writeFileSync(
       join(projectsDir, "aitne.md"),
@@ -144,7 +144,7 @@ describe("gatherRoadmapSkeletonFacts", () => {
   });
 
   it("sorts active projects by due ascending then slug", () => {
-    const projectsDir = join(contextDir, "projects");
+    const projectsDir = join(contextDir, "plans", "projects");
     mkdirSync(projectsDir, { recursive: true });
     writeFileSync(
       join(projectsDir, "zebra.md"),
@@ -167,7 +167,7 @@ describe("gatherRoadmapSkeletonFacts", () => {
   });
 
   it("reads Annual Goals out of rules/management.md", () => {
-    const rulesDir = join(contextDir, "rules");
+    const rulesDir = join(contextDir, "policies");
     mkdirSync(rulesDir, { recursive: true });
     writeFileSync(
       join(rulesDir, "management.md"),

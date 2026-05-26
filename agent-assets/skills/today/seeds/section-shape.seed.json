@@ -2,7 +2,7 @@
   "kind": "knowledge_layout",
   "files": [
     {
-      "path": "today.md",
+      "path": "state/today.md",
       "purpose": "today's plan, schedule, agent log, and handoff to tomorrow",
       "sections": [
         { "heading": "## Plan", "contains": "the day's intent in plain prose" },

@@ -42,8 +42,8 @@ export function registerSnapshotsRoutes(
   // in the same flow.
   app.post("/context/archive-today", (c) => {
     const contextDir = getCurrentContextDir();
-    const todayPath = join(contextDir, "today.md");
-    const yesterdayPath = join(contextDir, "yesterday.md");
+    const todayPath = join(contextDir, "state", "today.md");
+    const yesterdayPath = join(contextDir, "state", "yesterday.md");
     // Acquire today.md FIRST, then yesterday.md inside. The fixed
     // lock order (alphabetical by absolute path is the convention)
     // prevents deadlock against any other caller that needs both.
@@ -77,11 +77,11 @@ export function registerSnapshotsRoutes(
         // legacy `copyFileSync` would silently follow such a symlink.
         writeFileAtomically(yesterdayPath, content);
 
-        saveSnapshot("today", content, "rotate-to-yesterday", true);
+        saveSnapshot("state/today", content, "rotate-to-yesterday", true);
 
         return c.json({
           status: "archived",
-          archivePath: "yesterday.md",
+          archivePath: "state/yesterday.md",
           rotatedFrom: dateStr,
         });
       }),
@@ -138,7 +138,7 @@ export function registerSnapshotsRoutes(
         }),
       ]);
     }
-    if (morningRoutineLock.getHolder() && path === "today") {
+    if (morningRoutineLock.getHolder() && path === "state/today") {
       const lockId = c.req.header("X-Lock-Id");
       if (!morningRoutineLock.isHeldBy(lockId)) {
         logger.info({ path }, "Snapshot restore rejected — morning routine lock held");
@@ -150,7 +150,7 @@ export function registerSnapshotsRoutes(
         ]);
       }
     }
-    if (roadmapWriteLock.getHolder() && path === "roadmap") {
+    if (roadmapWriteLock.getHolder() && path === "plans/roadmap") {
       const lockId = c.req.header("X-Lock-Id");
       if (!roadmapWriteLock.isHeldBy(lockId)) {
         logger.info({ path }, "Snapshot restore rejected — roadmap write lock held");
@@ -206,7 +206,7 @@ export function registerSnapshotsRoutes(
           { path, method: "RESTORE" },
         );
       }
-      if (path.startsWith("routines/custom/")) {
+      if (path.startsWith("policies/routines/custom/")) {
         deps.onCustomRoutinesChanged?.();
       }
 

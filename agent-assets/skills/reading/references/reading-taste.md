@@ -146,12 +146,12 @@ the sweep to write the refreshed metadata and YAML `updated` date.
 
 ### First-write registration (_index.md)
 
-The `user/_index.md` file indexes available topic files. When
+The `identity/_index.md` file indexes available topic files. When
 creating `reading-taste.md` for the first time (GET returned 404),
 append a one-line entry to the index so other flows can discover it:
 
 ```bash
-curl -s -X PATCH http://localhost:8321/api/context/user/_index \
+curl -s -X PATCH http://localhost:8321/api/context/identity/_index \
   -H 'Content-Type: application/json' \
   -d '{"section": "topics", "mode": "append", "content": "- reading-taste — derived taste profile + rolling book candidates (updated weekly)"}'
 ```

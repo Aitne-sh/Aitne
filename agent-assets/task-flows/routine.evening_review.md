@@ -3,12 +3,12 @@
 ## Task: Evening Review
 
 The "Vault policy files" block appended to this prompt includes
-`routines/evening.md` — run any `### <label>` entries there alongside the
+`policies/routines/evening.md` — run any `### <label>` entries there alongside the
 built-in review steps below, using the same journaling conventions.
 The "Vault review context" block includes `context-index.md` and
-`dossiers/evening.md`; consult it before Step 1 and update the
+`knowledge/dossiers/evening.md`; consult it before Step 1 and update the
 dossier's Open items / Last run before finishing. Writes to
-`dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
+`knowledge/dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
 (`---\ntype: dossier\nowner: agent\nupdated: <date>\n---`); prefer
 `PATCH` with a section target to mutate a single block, and when doing
 a `PUT` full rewrite keep the frontmatter and only refresh `updated:`
@@ -16,7 +16,7 @@ a `PUT` full rewrite keep the frontmatter and only refresh `updated:`
 
 Close out today and prepare tomorrow. Steps 1–3 are internal bookkeeping
 (Morning Routine depends on them) and emit no user-facing output by default.
-User-defined entries in `routines/evening.md` run alongside the built-in
+User-defined entries in `policies/routines/evening.md` run alongside the built-in
 steps and are authoritative: execute them as written, including any that
 call `POST /api/notify` — the built-in steps' silence does not override the
 user's explicit rulebook intent. For ad-hoc deadline or surprise nudges,
@@ -126,7 +126,7 @@ PATCH:
        `section=long_term_plans` `mode=replace`.
     3. Otherwise, bump `Review:` forward by the class review interval:
        previous Review +30 days by default, or +90 days for `undated`;
-       increment `ReviewCount:` and log one line to `agent/journal.md`.
+       increment `ReviewCount:` and log one line to `journal/agent.md`.
     4. For `undated` lines reaching `ReviewCount: 3` with no
        promotion, silently rewrite `Review:` to `[noreview]`. Do NOT
        DM.
@@ -140,7 +140,7 @@ PATCH:
     roadmap.md, rebuild from that current body, and retry once while
     preserving every existing `completed ...` row byte-for-byte. If
     the retry still fails, stop Step 2, append the validation error and
-    affected IDs to `agent/journal.md`, and stay silent.
+    affected IDs to `journal/agent.md`, and stay silent.
 
 ### Step 3 — Process user/profile.md and user/ per the user-profile skill
    Read <user> ## Raw Signals and classify each entry into one of four buckets.
@@ -179,7 +179,7 @@ PATCH:
       referenced, a lifestyle habit stated, a long-term goal declared, a
       specific framework with years of experience — → graduate into the
       matching user/*.md file via PATCH. The routing table lives in
-      the user-profile skill "user/profile.md vs user/" section; the curl
+      the user-profile skill "identity/profile.md vs user/" section; the curl
       recipe for read-before-write is under "How to navigate user/".
       Always read the target file first, check for duplicates, then PATCH
       (prefer `mode: "append"` for new bullets — it preserves siblings).
@@ -204,7 +204,7 @@ PATCH:
       mode to remove only those entries, preserving any signals that
       SignalDetector appended after your read:
       ```bash
-      curl -s -X PATCH http://localhost:8321/api/context/user/profile \
+      curl -s -X PATCH http://localhost:8321/api/context/identity/profile \
         -H 'Content-Type: application/json' \
         -d '{"section": "raw_signals", "mode": "clear_before", "cutoff": "<latest_processed_timestamp>"}'
       ```

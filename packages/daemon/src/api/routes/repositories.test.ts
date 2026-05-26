@@ -88,8 +88,8 @@ describe("repositories routes daily management", () => {
 
     expect(response.status).toBe(200);
     expect(body.status).toBe("completed");
-    expect(body.overviewPath).toBe("git/widgets/overview.md");
-    const overviewPath = join(root, "context", "git", "widgets", "overview.md");
+    expect(body.overviewPath).toBe("knowledge/repos/widgets/overview.md");
+    const overviewPath = join(root, "context", "knowledge", "repos", "widgets", "overview.md");
     expect(readFileSync(overviewPath, "utf-8")).toContain("Initial commit");
   });
 
@@ -116,7 +116,7 @@ describe("repositories routes daily management", () => {
 
     expect(response.status).toBe(200);
     expect(body.result).toBe("written");
-    expect(body.readmeCopiedTo).toBe("git/widgets/README.md");
+    expect(body.readmeCopiedTo).toBe("knowledge/repos/widgets/README.md");
     expect(body.architectureScheduleId).not.toBeNull();
     const row = db
       .prepare(
@@ -241,7 +241,7 @@ describe("repositories routes daily management", () => {
     // unbounded loop bounded only by the in-flight guard. The init
     // flow must instead leave hand-managed files alone and defer a
     // re-run to the explicit "Refresh architecture" endpoint.
-    const overviewPath = join(root, "context", "git", "widgets", "overview.md");
+    const overviewPath = join(root, "context", "knowledge", "repos", "widgets", "overview.md");
     writeFileSync(
       overviewPath,
       "# Widgets\n\n## Architecture\n\nManually authored.\n",
@@ -298,7 +298,7 @@ describe("repositories routes daily management", () => {
     // frontmatter. `readArchitectureStatus` should not infer a status
     // from a half-written document — if the file is broken the init
     // flow leaves recovery to the explicit refresh button.
-    const overviewPath = join(root, "context", "git", "widgets", "overview.md");
+    const overviewPath = join(root, "context", "knowledge", "repos", "widgets", "overview.md");
     writeFileSync(
       overviewPath,
       "---\narchitecture_status: pending\n# no closing fence\n",
@@ -339,7 +339,7 @@ describe("repositories routes daily management", () => {
     // Hand-tweaked the field to a value the parser does not recognize.
     // The init flow refuses to interpret unknown statuses to avoid
     // re-enqueueing forever on a state we don't control.
-    const overviewPath = join(root, "context", "git", "widgets", "overview.md");
+    const overviewPath = join(root, "context", "knowledge", "repos", "widgets", "overview.md");
     const original = readFileSync(overviewPath, "utf-8");
     writeFileSync(
       overviewPath,
@@ -465,10 +465,10 @@ describe("repositories routes daily management", () => {
       refreshedAt: string;
     };
     expect(body.status).toBe("written");
-    expect(body.overviewPath).toBe("git/widgets/overview.md");
+    expect(body.overviewPath).toBe("knowledge/repos/widgets/overview.md");
 
     const overview = readFileSync(
-      join(root, "context", "git", "widgets", "overview.md"),
+      join(root, "context", "knowledge", "repos", "widgets", "overview.md"),
       "utf-8",
     );
     expect(overview).toContain("### Modules");
@@ -593,7 +593,7 @@ describe("repositories routes daily management", () => {
     );
     expect(response.status).toBe(200);
     const mirrored = readFileSync(
-      join(root, "context", "git", "widgets", "README.md"),
+      join(root, "context", "knowledge", "repos", "widgets", "README.md"),
       "utf-8",
     );
     expect(mirrored).toBe("# Updated\n");

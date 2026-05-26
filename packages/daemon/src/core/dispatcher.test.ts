@@ -75,8 +75,8 @@ function makeResult(overrides: Partial<AgentResult> = {}): AgentResult {
  */
 function seedManagementRules(dataDir: string): void {
   const contextDir = join(dataDir, "context");
-  mkdirSync(join(contextDir, "rules"), { recursive: true });
-  const rulesPath = join(contextDir, "rules", "management.md");
+  mkdirSync(join(contextDir, "policies"), { recursive: true });
+  const rulesPath = join(contextDir, "policies", "management.md");
   if (!existsSync(rulesPath)) {
     writeFileSync(rulesPath, "# Management Rules\n");
   }
@@ -622,7 +622,10 @@ describe("EventDispatcher", () => {
         expect.any(Object),
       );
       expect(
-        readFileSync(join(root, "context", "git", "widgets", "overview.md"), "utf-8"),
+        readFileSync(
+          join(root, "context", "knowledge", "repos", "widgets", "overview.md"),
+          "utf-8",
+        ),
       ).toContain("Initial commit");
 
       await eventBus.put(
@@ -2711,7 +2714,8 @@ describe("EventDispatcher", () => {
       const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
       const tmpDir = `/tmp/pa-test-roadmap-${Date.now()}`;
       mkdirSync(`${tmpDir}/context`, { recursive: true });
-      writeFileSync(`${tmpDir}/context/roadmap.md`, "# Roadmap\n\n## Annual Goals\n- (Not yet configured)\n");
+      mkdirSync(`${tmpDir}/context/plans`, { recursive: true });
+      writeFileSync(`${tmpDir}/context/plans/roadmap.md`, "# Roadmap\n\n## Annual Goals\n- (Not yet configured)\n");
       try {
         const dispatcher = makeDispatcherWithDataDir(tmpDir);
         expect(dispatcher.isRoadmapStale()).toBe(true);
@@ -2724,7 +2728,8 @@ describe("EventDispatcher", () => {
       const { mkdirSync, writeFileSync, rmSync } = await import("node:fs");
       const tmpDir = `/tmp/pa-test-roadmap-${Date.now()}`;
       mkdirSync(`${tmpDir}/context`, { recursive: true });
-      writeFileSync(`${tmpDir}/context/roadmap.md`, "# Roadmap\n> Last synced: 2026-04-06\n\n## Annual Goals\n1. Ship project\n");
+      mkdirSync(`${tmpDir}/context/plans`, { recursive: true });
+      writeFileSync(`${tmpDir}/context/plans/roadmap.md`, "# Roadmap\n> Last synced: 2026-04-06\n\n## Annual Goals\n1. Ship project\n");
       try {
         const dispatcher = makeDispatcherWithDataDir(tmpDir);
         expect(dispatcher.isRoadmapStale()).toBe(false);
@@ -2737,7 +2742,8 @@ describe("EventDispatcher", () => {
       const { mkdirSync, writeFileSync, utimesSync, rmSync } = await import("node:fs");
       const tmpDir = `/tmp/pa-test-roadmap-${Date.now()}`;
       mkdirSync(`${tmpDir}/context`, { recursive: true });
-      const roadmapPath = `${tmpDir}/context/roadmap.md`;
+      mkdirSync(`${tmpDir}/context/plans`, { recursive: true });
+      const roadmapPath = `${tmpDir}/context/plans/roadmap.md`;
       writeFileSync(roadmapPath, "# Roadmap\n> Last synced: 2026-03-01\n\n## Annual Goals\n1. Ship project\n");
       // Set mtime to 20 days ago
       const pastDate = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
@@ -3430,8 +3436,9 @@ describe("EventDispatcher", () => {
       const dataDir = mkdtempSync(join(tmpdir(), "pa-stage0-silent-"));
       const contextDir = join(dataDir, "context");
       mkdirSync(contextDir, { recursive: true });
+      mkdirSync(join(contextDir, "state"), { recursive: true });
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         [
           "# 2026-05-06 (Wednesday)",
           "> Day type: Weekday | Work focus: on | Study focus: off | Personal focus: on",
@@ -3489,7 +3496,7 @@ describe("EventDispatcher", () => {
       expect(eventBus.size).toBe(0);
       expect(mockAgentCore.execute).not.toHaveBeenCalled();
 
-      const updated = readFileSync(join(contextDir, "today.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
       expect(updated).toMatch(/\[hourly_check\] Quiet \(no_signals\)/);
 
       rmSync(dataDir, { recursive: true, force: true });
@@ -4746,6 +4753,7 @@ describe("EventDispatcher", () => {
       tmpRoot = mkdtempSync(join(tmpdir(), "pa-dispatcher-retry-"));
       contextDir = join(tmpRoot, "context");
       mkdirSync(contextDir, { recursive: true });
+      mkdirSync(join(contextDir, "state"), { recursive: true });
     });
 
     afterEach(() => {
@@ -4885,7 +4893,7 @@ describe("EventDispatcher", () => {
       const config = makeConfig({ dataDir: tmpRoot });
       // Simulate a successful morning routine: today.md exists.
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         `# ${getAgentDayDateStr(config.timezone || undefined, config.dayBoundaryHour)}\n`,
       );
 
@@ -5183,7 +5191,7 @@ describe("EventDispatcher", () => {
       // successful PATCH to /api/context/today during its turn.
       mockAgentCore.execute = vi.fn().mockImplementation(async () => {
         writeFileSync(
-          join(contextDir, "today.md"),
+          join(contextDir, "state", "today.md"),
           `# ${getAgentDayDateStr(config.timezone || undefined, config.dayBoundaryHour)}\n`,
         );
         return makeResult({ contextUpdated: true });
@@ -5257,7 +5265,7 @@ describe("EventDispatcher", () => {
       const config = makeConfig({ dataDir: tmpRoot });
       // today.md already written (cron raced us to it)
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         `# ${getAgentDayDateStr(config.timezone || undefined, config.dayBoundaryHour)} — generated by cron\n`,
       );
 
@@ -5912,14 +5920,14 @@ describe("EventDispatcher", () => {
         }),
         type: "knowledge.import",
         platform: "dashboard",
-        scratchPath: "agent/scratch/import-2026-04-27-x.md",
+        scratchPath: "state/scratch/import-2026-04-27-x.md",
         filename: "profile.md",
         source: "self-written",
         uploadDate: "2026-04-27",
         requestedBackendId: "gemini",
         requestedModelId: "gemini-2.5-pro",
         data: {
-          scratchPath: "agent/scratch/import-2026-04-27-x.md",
+          scratchPath: "state/scratch/import-2026-04-27-x.md",
           filename: "profile.md",
           source: "self-written",
           uploadDate: "2026-04-27",
@@ -5956,14 +5964,14 @@ describe("EventDispatcher", () => {
         }),
         type: "knowledge.import",
         platform: "slack",
-        scratchPath: "agent/scratch/import-2026-04-27-y.md",
+        scratchPath: "state/scratch/import-2026-04-27-y.md",
         filename: "profile.md",
         source: "self-written",
         uploadDate: "2026-04-27",
         requestedBackendId: "gemini",
         requestedModelId: "gemini-2.5-pro",
         data: {
-          scratchPath: "agent/scratch/import-2026-04-27-y.md",
+          scratchPath: "state/scratch/import-2026-04-27-y.md",
           filename: "profile.md",
           source: "self-written",
           uploadDate: "2026-04-27",
@@ -6778,7 +6786,7 @@ describe("EventDispatcher", () => {
         }),
         type: "knowledge.import" as const,
         platform: "dashboard",
-        scratchPath: "agent/scratch/import-2026-04-27-x.md",
+        scratchPath: "state/scratch/import-2026-04-27-x.md",
         filename: "profile.md",
         source: "self-written" as const,
         uploadDate: "2026-04-27",

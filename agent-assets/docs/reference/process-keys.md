@@ -57,7 +57,7 @@ related:
 | `routine.morning_routine` | Daily at `dayBoundaryHour` (default 04:00). Parent envelope; LLM dispatch flows through the two stage keys below. | medium | yes |
 | `routine.morning_routine_today` | Stage A of the morning-routine pipeline — today.md synthesis, schedule fan-out, profile-question pick, user-editable checks. Stage A also populates roadmap.md from a daemon-prepared `<roadmap_skeleton>` block on the first-run branch (Phase 7 retired the heavy-tier `routine.morning_routine_initial`). | medium | yes |
 | `routine.morning_routine_journal` | Stage B of the morning-routine pipeline — authors `daily/<yesterday>.md` from the daemon-prepared journal skeleton. | lite | yes |
-| `routine.today_refresh` | Every 4h inside the active window — drift-refresh of `today.md` | medium | yes |
+| `routine.today_refresh` | Every 4h inside the active window — drift-refresh of `state/today.md` | medium | yes |
 | `routine.evening_review` | Daily at 18:00 local (fixed) | medium | yes |
 | `routine.weekly_review` | Friday 18:00 local (fixed) | medium | yes |
 | `routine.monthly_review` | Monthly cadence (gated OFF by default — kill switch `monthlyReviewEnabled` in runtime settings) | medium | no |

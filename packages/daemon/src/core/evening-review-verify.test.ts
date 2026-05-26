@@ -37,7 +37,7 @@ beforeEach(() => {
   applySchema(db);
   workspace = mkdtempSync(join(tmpdir(), "evening-review-verify-"));
   contextDir = join(workspace, "context");
-  mkdirSync(join(contextDir, "routines"), { recursive: true });
+  mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
 });
 
 afterEach(() => {
@@ -92,7 +92,7 @@ function insertNotification(createdAt: string): void {
 }
 
 function writeRulebook(body: string): string {
-  const p = join(contextDir, "routines/evening.md");
+  const p = join(contextDir, "policies/routines/evening.md");
   writeFileSync(p, body, "utf-8");
   return p;
 }

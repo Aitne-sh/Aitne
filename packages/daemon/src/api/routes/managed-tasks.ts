@@ -143,7 +143,7 @@ async function loadPreservedRenderOptions(
 }
 
 /**
- * Re-render `rules/management.md` from the current DB state, holding
+ * Re-render `policies/management.md` from the current DB state, holding
  * the management-md write lock for the render → atomic write →
  * snapshot trio (§11.1, §11.3). Returns:
  *   - `{ ok: true }` on success
@@ -690,7 +690,7 @@ export function createManagedTasksRoutes(deps: ManagedTasksRoutesDeps): Hono {
       // `$.app_normalized`, and `buildActivitySnapshot`'s "Recently
       // changed" query selects per-source via the same path. Without
       // them every lifecycle event but `created` is silently dropped
-      // from `_activity/<source>.md`.
+      // from `state/activity/<source>.md`.
       app: existing.app,
       app_normalized: normalizeAppLabel(existing.app),
       changed: Object.keys(data),
@@ -1075,9 +1075,9 @@ export function createManagedTasksRoutes(deps: ManagedTasksRoutesDeps): Hono {
       from: oldApp,
       to: newAppRaw,
       // `app` / `app_normalized` follow the post-rename label so the
-      // NEW `_activity/<new>.md` enumerates this event (parity with the
+      // NEW `state/activity/<new>.md` enumerates this event (parity with the
       // other `management_task.*` rows). `old_app` / `old_app_normalized`
-      // let the OLD `_activity/<old>.md` keep showing the rename for
+      // let the OLD `state/activity/<old>.md` keep showing the rename for
       // its 90-day retention window — the activity-view runner reads
       // both via the SQL OR clause in `enumerateActiveSources` /
       // `buildActivitySnapshot`.

@@ -110,12 +110,12 @@ describe("user/*.md template canonical-section drift", () => {
     // user/_index.md is excluded — it is the dictionary, not a content
     // file with H2 sections to track.
     const expectedSeedPaths = [
-      "user/profile.md",
-      "user/people.md",
-      "user/work.md",
-      "user/expertise.md",
-      "user/personal.md",
-      "user/goals.md",
+      "identity/profile.md",
+      "identity/people.md",
+      "identity/work.md",
+      "identity/expertise.md",
+      "identity/personal.md",
+      "identity/goals.md",
     ];
     const seedPaths = new Set(seed.files.map((f) => f.path));
     const missing = expectedSeedPaths.filter((p) => !seedPaths.has(p));

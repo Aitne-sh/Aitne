@@ -1,9 +1,12 @@
 // P22 §1.5, §5.4 — overlay store.
 //
-// Layout (under PA_DATA_DIR):
+// Layout (under PA_DATA_DIR — CONTEXT_VAULT_REDESIGN_PLAN.md v4 V11 moved
+// these out of `<dataDir>/skills/overlays/` because overlays are operational
+// metadata, not vault content; user skill MD files moved into the vault at
+// `<contextDir>/policies/skills/` but the JSON envelopes stay here):
 //
-//   ~/.personal-agent/skills/overlays/<slug>/<section_id>.json   ← active overlay
-//   ~/.personal-agent/skills/overlays/<slug>/history/<proposal_id>.json
+//   ~/.personal-agent/skill-curation-overlays/<slug>/<section_id>.json   ← active overlay
+//   ~/.personal-agent/skill-curation-overlays/<slug>/history/<proposal_id>.json
 //
 // Read precedence at session-materialization time:
 //
@@ -36,12 +39,16 @@ import {
   SKILL_CURATION_SCHEMA_VERSION,
 } from "@aitne/shared";
 
+/** Operational overlay root under PA_DATA_DIR. Shared with `orphan-overlay.ts`
+ *  and the migration runner — kept out of the vault per v4 V11. */
+export const SKILL_CURATION_OVERLAYS_DIR = "skill-curation-overlays";
+
 export interface OverlayStorePaths {
-  /** PA_DATA_DIR / skills / overlays / <slug> */
+  /** PA_DATA_DIR / skill-curation-overlays / <slug> */
   overlaysDir(slug: string): string;
-  /** PA_DATA_DIR / skills / overlays / <slug> / <section_id>.json */
+  /** PA_DATA_DIR / skill-curation-overlays / <slug> / <section_id>.json */
   overlayPath(slug: string, sectionId: string): string;
-  /** PA_DATA_DIR / skills / overlays / <slug> / history / <proposal_id>.json */
+  /** PA_DATA_DIR / skill-curation-overlays / <slug> / history / <proposal_id>.json */
   historyPath(slug: string, proposalId: number): string;
   /** agent-assets / skills / <slug> / curation.seed.json */
   seedPath(slug: string, sectionId: string): string;
@@ -58,11 +65,11 @@ export class OverlayStore {
   ) {}
 
   paths: OverlayStorePaths = {
-    overlaysDir: (slug) => join(this.dataDir, "skills", "overlays", slug),
+    overlaysDir: (slug) => join(this.dataDir, SKILL_CURATION_OVERLAYS_DIR, slug),
     overlayPath: (slug, sectionId) =>
-      join(this.dataDir, "skills", "overlays", slug, `${sectionId}.json`),
+      join(this.dataDir, SKILL_CURATION_OVERLAYS_DIR, slug, `${sectionId}.json`),
     historyPath: (slug, proposalId) =>
-      join(this.dataDir, "skills", "overlays", slug, "history", `${proposalId}.json`),
+      join(this.dataDir, SKILL_CURATION_OVERLAYS_DIR, slug, "history", `${proposalId}.json`),
     seedPath: (slug, sectionId) =>
       join(this.skillsRoot, slug, "seeds", `${sectionId}.seed.json`),
   };

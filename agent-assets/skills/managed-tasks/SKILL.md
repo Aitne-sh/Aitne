@@ -11,7 +11,7 @@ allowed-tools:
 A **managed task** is a user-delegated commitment: the agent runs a
 recurring fetch against a specific App at a user-specified Cadence and
 writes the resulting entities into a primary L2 directory (the
-`Output path`). Each row lives in `rules/management.md` §B. The
+`Output path`). Each row lives in `policies/management.md` §B. The
 authoritative store is the `managed_tasks` SQLite table; the file is
 re-rendered from the table after every mutation, so do **not** PUT the
 file yourself — every legal mutation goes through `/api/managed-tasks`
@@ -54,7 +54,7 @@ dedup contract. Do not register a duplicate.
 ### Step 1 — Read current state
 
 ```bash
-curl -s "http://localhost:8321/api/context/rules/management" | jq -r .content
+curl -s "http://localhost:8321/api/context/policies/management" | jq -r .content
 ```
 
 Extract §B (Managed tasks) and §A (Source-of-Truth bindings). §A
@@ -213,7 +213,7 @@ instead of registering twice.
 transaction rolls back and you get a 5xx — surface the body verbatim.
 
 **File render**: post-transaction the daemon re-renders
-`rules/management.md` from DB (locked, snapshotted into
+`policies/management.md` from DB (locked, snapshotted into
 `md_file_snapshots`). You do NOT touch the file.
 
 ### Step 7 — Confirm to user
@@ -307,7 +307,7 @@ for safety.
 
 Server-side transaction: UPDATE `recurring_schedules` (if
 `recurrenceRule` changed) → UPDATE `managed_tasks` → re-render
-`rules/management.md` → INSERT one `agent_actions` row
+`policies/management.md` → INSERT one `agent_actions` row
 (`action_type='management_task.modified', detail={changed, from, to}`).
 
 `mt_id`, `last_run_at`, `last_result`, and `consecutive_failures`
@@ -377,7 +377,7 @@ curl -sS -X DELETE http://localhost:8321/api/managed-tasks/mt_42
 Server-side transaction (atomic): snapshot the row's full state into
 `agent_actions.detail` → DELETE `managed_tasks` (cascades to
 `recurring_schedules` via FK) → cancel pending `agent_schedule`
-rows → re-render `rules/management.md` → INSERT one `agent_actions`
+rows → re-render `policies/management.md` → INSERT one `agent_actions`
 row (`action_type='management_task.deleted'`).
 
 The pre-delete row snapshot in `agent_actions`
@@ -392,7 +392,7 @@ One DM:
 > Stopped `mt_42` Zoom check. The row is gone from the registry; ask
 > me to register a new one any time.
 
-`_activity/<source>.md`'s "Recently changed (90d)" section
+`state/activity/<source>.md`'s "Recently changed (90d)" section
 auto-updates within ~10 s. You do NOT touch that file.
 
 ---
@@ -436,7 +436,7 @@ Idempotency-Key contract are in the errors reference below.
 
 - Does NOT hardcode connector tool names — all tool selection is
   LLM-judged.
-- Does NOT PUT `rules/management.md` directly — the daemon owns the
+- Does NOT PUT `policies/management.md` directly — the daemon owns the
   write. The only legal write is the `/api/managed-tasks` chokepoint.
 - Does NOT INSERT `recurring_schedules` directly. POST
   `/api/managed-tasks` keeps the FK pair consistent.
@@ -451,7 +451,7 @@ Idempotency-Key contract are in the errors reference below.
 - Does NOT register a task that has no probe-passing connector.
   Probe failure is a hard stop.
 - Does NOT delete entity files produced by past runs on stop.
-- Does NOT regenerate `_activity/<source>.md`. The reconciler does.
+- Does NOT regenerate `state/activity/<source>.md`. The reconciler does.
 - Does NOT bulk-stop without per-row confirmation. "Stop all gmail
   tasks" is a series of DM round-trips, one per row.
 
@@ -459,7 +459,7 @@ Idempotency-Key contract are in the errors reference below.
 
 | Verb + path | Used in |
 |---|---|
-| `GET /api/context/rules/management` | Register Step 1 (read §A + §B) |
+| `GET /api/context/policies/management` | Register Step 1 (read §A + §B) |
 | `GET /api/entities?source=<app>` | Register Step 4a (output-path bias) |
 | `GET /api/managed-tasks` / `/api/managed-tasks/:id` | Locate row (Modify / Stop Step 1; Register Step 1 alternate) |
 | `POST /api/managed-tasks` | Register Step 6 (Notify tier; daemon DMs confirmation) |

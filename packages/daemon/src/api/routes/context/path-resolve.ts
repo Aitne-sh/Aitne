@@ -1,3 +1,6 @@
+// drift-allow-file: this module documents the alias contract and
+// translates legacy `user/`, `rules/`, etc. paths to their six-class
+// destinations. Legacy refs in the docstring are load-bearing.
 import {
   lstatSync,
   readlinkSync,
@@ -8,6 +11,7 @@ import {
   CONTEXT_BASE_FILE_STEMS,
   CONTEXT_FILE_EXTENSIONS,
 } from "../../../core/context-paths.js";
+import { aliasVaultPath } from "../../../core/context-vault-aliases.js";
 import type { ResolvedContextTarget } from "../../../core/context-validation/index.js";
 import { createLogger } from "../../../logging.js";
 
@@ -30,16 +34,29 @@ const CONTEXT_BASE_FILE_STEM_SET = new Set<string>(CONTEXT_BASE_FILE_STEMS);
  */
 const DENIED_SUBPATH_ROOTS = [".git", ".DS_Store", ".obsidian"] as const;
 
+/**
+ * Resolve a user-supplied path into a canonical `(base, ext)` pair.
+ *
+ * **Legacy alias translation** (CONTEXT_VAULT_REDESIGN_PLAN.md §7.3,
+ * §14.3, v4 V8): every entry point first canonicalises the path
+ * through `aliasVaultPath` so legacy spellings (e.g. `today.md`,
+ * `user/profile.md`, `rules/management.md`) resolve to their six-class
+ * destinations (`state/today.md`, `identity/profile.md`,
+ * `policies/management.md`). The alias is an in-process resolver — no
+ * HTTP 3xx — so existing `curl -s -X PATCH` callers that omit `-L`
+ * continue to work. Idempotent on already-canonical paths.
+ */
 export function resolveContextTarget(userPath: string): ResolvedContextTarget {
+  const aliased = aliasVaultPath(userPath).canonicalPath;
   for (const ext of CONTEXT_FILE_EXTENSIONS) {
-    if (userPath.endsWith(ext)) {
-      return { base: userPath.slice(0, -ext.length), ext };
+    if (aliased.endsWith(ext)) {
+      return { base: aliased.slice(0, -ext.length), ext };
     }
   }
-  if (CONTEXT_BASE_FILE_STEM_SET.has(userPath)) {
-    return { base: userPath, ext: ".base" };
+  if (CONTEXT_BASE_FILE_STEM_SET.has(aliased)) {
+    return { base: aliased, ext: ".base" };
   }
-  return { base: userPath, ext: ".md" };
+  return { base: aliased, ext: ".md" };
 }
 
 export function normalizeContextPath(userPath: string): string {
@@ -97,7 +114,7 @@ export function safePath(
   userPath: string,
 ): string | null {
   const { base, ext } = resolveContextTarget(userPath);
-  if (base === "projects/_active" && ext !== ".base") {
+  if (base === "plans/projects/_active" && ext !== ".base") {
     logger.warn({ userPath, base, ext }, "Base file requested with wrong extension");
     return null;
   }

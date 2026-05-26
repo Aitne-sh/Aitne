@@ -112,8 +112,8 @@ describe("performContextFileWrite", () => {
       { saveSnapshot: () => 0 },
       {
         absolutePath: path,
-        relativePath: "agent/journal.md",
-        snapshotKey: "agent/journal",
+        relativePath: "journal/agent.md",
+        snapshotKey: "journal/agent",
         mode: "append_block",
         content: "## 2026-05-23 morning routine\n- new",
         trigger: "test",
@@ -134,8 +134,8 @@ describe("performContextFileWrite", () => {
       { saveSnapshot: () => 0 },
       {
         absolutePath: path,
-        relativePath: "daily/2026-05-22.md",
-        snapshotKey: "daily/2026-05-22",
+        relativePath: "journal/daily/2026-05-22.md",
+        snapshotKey: "journal/daily/2026-05-22",
         mode: "put",
         content: "---\n---\n# wrong\n",
         trigger: "test",

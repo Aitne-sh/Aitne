@@ -51,9 +51,9 @@ can copy the same pattern into their own skills.
      writing.
    - **Decline-marker pre-check (Goal 3 — never ask twice).** Before
      classifying a no-match as new, compute the candidate slug and
-     read `agent/journal.md ## Declined Intents`:
+     read `journal/agent.md ## Declined Intents`:
      ```bash
-     curl -s "http://localhost:8321/api/context/agent/journal" \
+     curl -s "http://localhost:8321/api/context/journal/agent" \
        | jq -r '.content // ""' \
        | awk '/^## Declined Intents/{f=1;next} f && /^## /{exit} f'
      ```
@@ -175,7 +175,7 @@ can copy the same pattern into their own skills.
        "confirm_defer_count": 0,
        "confirm_max_defers": 3,
        "confirm_decline_marker": {
-         "path": "agent/journal.md",
+         "path": "journal/agent.md",
          "section": "declined_intents",
          "match": "create_project:<slug>"
        },
@@ -270,14 +270,14 @@ can copy the same pattern into their own skills.
      decline, do NOT write the project file. Two mandatory writes:
 
      a. **Write the decline marker** to
-        `agent/journal.md ## Declined Intents`. Three cases — file
+        `journal/agent.md ## Declined Intents`. Three cases — file
         missing entirely, file present but section missing, file +
         section both present — are handled in one read-then-branch
         sequence:
 
         ```bash
         # 1. GET. HTTP 404 means the journal file does not yet exist.
-        body=$(curl -sS -w '\n%{http_code}' "http://localhost:8321/api/context/agent/journal")
+        body=$(curl -sS -w '\n%{http_code}' "http://localhost:8321/api/context/journal/agent")
         status=$(printf '%s\n' "$body" | tail -n1)
         content=$(printf '%s\n' "$body" | sed '$d' | jq -r '.content // ""' 2>/dev/null)
 
@@ -287,19 +287,19 @@ can copy the same pattern into their own skills.
           # Case A — file missing. CREATE_ONLY_PUT is enabled for
           # agent/journal, so PUT creates the file in a single call.
           # Include both the H1 and the Declined Intents section.
-          curl -s -X PUT "http://localhost:8321/api/context/agent/journal" \
+          curl -s -X PUT "http://localhost:8321/api/context/journal/agent" \
             -H 'Content-Type: application/json' \
             -d "$(jq -n --arg m "$marker_line" '{content: "# Agent Journal\n\n## Declined Intents\n\($m)\n"}')"
         elif printf '%s' "$content" | grep -q '^## Declined Intents'; then
           # Case B — file + section present. Append a bullet to the
           # existing section.
-          curl -s -X PATCH "http://localhost:8321/api/context/agent/journal" \
+          curl -s -X PATCH "http://localhost:8321/api/context/journal/agent" \
             -H 'Content-Type: application/json' \
             -d "$(jq -n --arg m "$marker_line" '{section:"declined_intents",mode:"append",content:$m}')"
         else
           # Case C — file present but section missing. append_to_file
           # adds the section header + bullet to the end of the file.
-          curl -s -X PATCH "http://localhost:8321/api/context/agent/journal" \
+          curl -s -X PATCH "http://localhost:8321/api/context/journal/agent" \
             -H 'Content-Type: application/json' \
             -d "$(jq -n --arg m "$marker_line" '{mode:"append_to_file",content:"\n## Declined Intents\n\($m)\n"}')"
         fi
@@ -326,7 +326,7 @@ can copy the same pattern into their own skills.
    inline in a fresh DM (the carve-out in Step 1) or as a reply to a
    confirm DM — run this recipe instead of skipping:
 
-   1. GET `agent/journal.md`, parse the `## Declined Intents`
+   1. GET `journal/agent.md`, parse the `## Declined Intents`
       section, drop the line whose bracketed dedup_key matches
       `create_project:<slug>`, and PATCH the section with
       `mode: "replace"` carrying the rebuilt body (the other lines

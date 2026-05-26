@@ -40,8 +40,8 @@ const SEED_QUEUE = [
 ].join("\n");
 
 function seedQueueFile(contextDir: string, content = SEED_QUEUE): void {
-  mkdirSync(join(contextDir, "agent"), { recursive: true });
-  writeFileSync(join(contextDir, "agent/profile-questions.md"), content, "utf-8");
+  mkdirSync(join(contextDir, "state"), { recursive: true });
+  writeFileSync(join(contextDir, "state/profile-questions.md"), content, "utf-8");
 }
 
 function seedUserFile(contextDir: string, relPath: string, content: string): void {
@@ -83,7 +83,7 @@ describe("preTickProfileQuestions", () => {
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(2); // name, timezone (NOT sleep)
     expect(result.examined).toBe(5);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toContain("- [x] (HIGH) name :: user/profile.md ## Identity :: match=Name");
     expect(after).toContain("- [x] (HIGH) timezone :: user/profile.md ## Identity :: match=Timezone");
     expect(after).toContain("- [ ] (MID) sleep_pattern :: user/personal.md :: match=Sleep");
@@ -102,7 +102,7 @@ describe("preTickProfileQuestions", () => {
 
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(1);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toContain("- [x] (HIGH) name :: ");
     expect(after).toContain("- [ ] (HIGH) timezone :: ");
   });
@@ -117,7 +117,7 @@ describe("preTickProfileQuestions", () => {
 
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(1);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toContain("- [x] (HIGH) location :: user/personal.md ## Location");
     expect(after).toContain("- [ ] (MID) hobbies :: user/personal.md ## Hobbies");
   });
@@ -137,10 +137,10 @@ describe("preTickProfileQuestions", () => {
     seedUserFile(contextDir, "user/profile.md", "## Identity\n(To be filled during setup)\n");
     seedUserFile(contextDir, "user/personal.md", "");
 
-    const before = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const before = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(0);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toBe(before);
   });
 
@@ -149,7 +149,7 @@ describe("preTickProfileQuestions", () => {
     seedUserFile(contextDir, "user/profile.md", "## Identity\n- Name: Alex\n");
 
     preTickProfileQuestions(contextDir);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     const idxAnsweredHeading = after.indexOf("## Answered");
     const idxDirective = after.indexOf("> Append-only log.", idxAnsweredHeading);
     const idxNew = after.indexOf("(reconciled:skeleton)");
@@ -169,7 +169,7 @@ describe("preTickProfileQuestions", () => {
     seedUserFile(contextDir, "user/profile.md", "## Identity\n- Name: Alex\n");
 
     preTickProfileQuestions(contextDir);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     // `## In Progress` retains its own `- (none)` — only Answered's
     // placeholder is consumed.
     const inProgressIdx = after.indexOf("## In Progress");
@@ -183,7 +183,7 @@ describe("preTickProfileQuestions", () => {
     seedUserFile(contextDir, "user/profile.md", "## Identity\n- Name: Alex\n");
 
     preTickProfileQuestions(contextDir);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toContain("### Identity");
     expect(after).toContain("### Personal");
     expect(after).toContain("## In Progress");
@@ -204,7 +204,7 @@ describe("preTickProfileQuestions", () => {
 
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(0);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     // No new Answered entry for `name`.
     expect(after).not.toContain("→ name (reconciled:skeleton)");
   });
@@ -292,7 +292,7 @@ describe("preTickProfileQuestions", () => {
 
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(1);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toContain("## Answered");
     expect(after).toContain("→ name (reconciled:skeleton)");
     // The new section is appended after the existing content.
@@ -316,7 +316,7 @@ describe("preTickProfileQuestions", () => {
 
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(1);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     expect(after).toContain("## Answered");
   });
 
@@ -335,7 +335,7 @@ describe("preTickProfileQuestions", () => {
 
     const result = preTickProfileQuestions(contextDir);
     expect(result.ticked).toBe(1);
-    const after = readFileSync(join(contextDir, "agent/profile-questions.md"), "utf-8");
+    const after = readFileSync(join(contextDir, "state/profile-questions.md"), "utf-8");
     // The last_attempted comment is preserved on the now-ticked row.
     expect(after).toContain("<!-- last_attempted=2026-04-20 -->");
     expect(after).toContain("- [x] (LOW) hobbies");

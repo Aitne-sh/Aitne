@@ -296,7 +296,7 @@ agent keeps trying, but doesn't disappear silently.
 `scheduled.task` flow's "Output contract — your final text becomes a
 DM" applies (`scheduled.task.md`). For managed-task runs the default
 is **empty final text**: bookkeeping is invisible by design. The user
-sees the change reflected in `_activity/<source>.md` (auto-built) and
+sees the change reflected in `state/activity/<source>.md` (auto-built) and
 `<domain>/_index.md`, not in a chat ping per fire.
 
 Exceptions:

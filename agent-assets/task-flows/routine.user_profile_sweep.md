@@ -3,12 +3,12 @@
 ## Task: User-profile sweep (`phase`: {event_data[phase]})
 
 Autonomous background run. There is no user-visible output — writes
-go silently to `user/profile.md` and `user/<topic>.md` per the
+go silently to `identity/profile.md` and `user/<topic>.md` per the
 **user-profile** skill. Do NOT call `/api/notify`.
 
 The sweep runs 10 min before each paired routine — 03:50 before
 Morning Routine at 04:00, 17:50 before Evening Review at 18:00 — so
-that the paired routine reads a freshly up-to-date `user/profile.md`
+that the paired routine reads a freshly up-to-date `identity/profile.md`
 (the only user file auto-injected into sessions via `<user>`) when it
 starts. This is the safety net for DM-time captures that the
 `message.received.dm` / `message.received.dm_first` task-flows missed.
@@ -23,7 +23,7 @@ The two windows overlap on the daytime portion; the idempotency check
 in Step 3 keeps this from producing duplicate writes.
 
 If neither tag is present, the ContextBuilder failed to inject the
-window — append one line to `agent/journal.md` (`- HH:MM user-profile
+window — append one line to `journal/agent.md` (`- HH:MM user-profile
 sweep (phase=<phase>) — aborted: missing agent-day window`) and exit.
 Do not guess at the bounds.
 
@@ -45,7 +45,7 @@ recorded (Step 3 handles deduplication).
 For each candidate, classify by the **user-profile** skill's decision
 rule (profile.md vs `user/<topic>.md` vs the expertise tie-breaker
 that writes a one-line summary to profile.md and full detail to
-`user/expertise.md`).
+`identity/expertise.md`).
 
 For each target file:
 
@@ -60,7 +60,7 @@ For each target file:
    `{"error": "section_not_found"}`): retry with PATCH `mode:
    "append_to_file"` and include the section header in the content:
    ```bash
-   curl -s -X PATCH http://localhost:8321/api/context/user/people \
+   curl -s -X PATCH http://localhost:8321/api/context/identity/people \
      -H 'Content-Type: application/json' \
      -d '{"mode": "append_to_file", "content": "\n## Family\n- Sister (Sarah): two kids as of 2026-04"}'
    ```
@@ -101,7 +101,7 @@ preservation rule applies there.
 
 ### Step 4 — Log once
 
-Append ONE line to `agent/journal.md`:
+Append ONE line to `journal/agent.md`:
 
 ```
 - HH:MM user-profile sweep (phase=<phase>) — N facts appended, M merged, K skipped-duplicate
@@ -121,7 +121,7 @@ it. Silence otherwise.
 ## Profile-interview queue maintenance (evening run only)
 
 The remaining steps cover the profile-interview queue
-(`agent/profile-questions.md`). They run **only on the evening
+(`state/profile-questions.md`). They run **only on the evening
 phase** (`phase=evening`) — the morning phase at 03:50 races with the
 04:00 morning routine that picks the next latent question, so the
 queue is not safe to mutate from the 03:50 run.
@@ -133,7 +133,7 @@ sub-steps below.
 
 ### Step 5 — Stale recovery (state=asked older than 24h)
 
-GET `agent/profile-questions.md ## In Progress`. For each entry with
+GET `state/profile-questions.md ## In Progress`. For each entry with
 `state=asked` AND `(now − asked_at) > 24h`:
 
 1. Remove the entry from `## In Progress` (PATCH replace; read-rebuild,
@@ -196,7 +196,7 @@ Step 5), remove the In Progress entry, AND remove the matching
 
 ### Step 6 — Daily LLM reconcile (Layer 4)
 
-GET `agent/profile-questions.md` and every distinct `<target_path>`
+GET `state/profile-questions.md` and every distinct `<target_path>`
 referenced by the union of `## Pending` AND `## Answered` rows. For
 each row, judge with model reasoning whether the target section
 **substantively answers the question's intent** — using the row's
@@ -229,7 +229,7 @@ extension owns that path.
 
 ### Step 7 — Profile-interview journal line
 
-Append a journal line to `agent/journal.md` (in addition to Step 4's
+Append a journal line to `journal/agent.md` (in addition to Step 4's
 sweep line):
 
 ```

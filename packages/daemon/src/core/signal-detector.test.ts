@@ -59,7 +59,7 @@ describe("SignalDetector", () => {
     const d = createDetector();
     d.onReaction({ platform: "discord", emoji: "❤️" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8321/api/context/user/profile",
+      "http://localhost:8321/api/context/identity/profile",
       expect.objectContaining({ method: "PATCH" }),
     );
   });

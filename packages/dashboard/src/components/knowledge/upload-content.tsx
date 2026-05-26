@@ -176,12 +176,12 @@ export function KnowledgeUploadContent() {
           <p className="font-medium text-foreground">Where facts land</p>
           <ul className="mt-1 space-y-0.5 text-muted-foreground">
             <li>Identity (name, timezone, language, DOB) → flagged for your confirmation, not auto-written.</li>
-            <li>Relationships (family, partners, close friends) → <code>user/people.md</code></li>
-            <li>Work, employer, role, colleagues → <code>user/work.md</code></li>
-            <li>Skills, expertise, languages spoken → <code>user/expertise.md</code></li>
-            <li>Lifestyle, hobbies, preferences, health → <code>user/personal.md</code></li>
-            <li>Goals, aspirations, current focus → <code>user/goals.md</code></li>
-            <li>Anything else → <code>user/profile.md</code> under a Misc section.</li>
+            <li>Relationships (family, partners, close friends) → <code>identity/people.md</code></li>
+            <li>Work, employer, role, colleagues → <code>identity/work.md</code></li>
+            <li>Skills, expertise, languages spoken → <code>identity/expertise.md</code></li>
+            <li>Lifestyle, hobbies, preferences, health → <code>identity/personal.md</code></li>
+            <li>Goals, aspirations, current focus → <code>identity/goals.md</code></li>
+            <li>Anything else → <code>identity/profile.md</code> under a Misc section.</li>
           </ul>
         </div>
 

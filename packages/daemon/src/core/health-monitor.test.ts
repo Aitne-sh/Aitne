@@ -80,15 +80,16 @@ describe("HealthMonitor", () => {
     const status = monitor.check();
 
     expect(status.contextFilesOk).toBe(false);
-    expect(status.missingContextFiles).toContain("user/profile.md");
-    expect(status.missingContextFiles).toContain("today.md");
+    expect(status.missingContextFiles).toContain("identity/profile.md");
+    expect(status.missingContextFiles).toContain("state/today.md");
   });
 
   it("reports context files as OK when they exist", () => {
     const contextDir = resolve(deps.config.dataDir, "context");
-    mkdirSync(resolve(contextDir, "user"), { recursive: true });
-    writeFileSync(resolve(contextDir, "user", "profile.md"), "# User");
-    writeFileSync(resolve(contextDir, "today.md"), "# Today");
+    mkdirSync(resolve(contextDir, "identity"), { recursive: true });
+    mkdirSync(resolve(contextDir, "state"), { recursive: true });
+    writeFileSync(resolve(contextDir, "identity", "profile.md"), "# User");
+    writeFileSync(resolve(contextDir, "state/today.md"), "# Today");
 
     const status = monitor.check();
     expect(status.contextFilesOk).toBe(true);
@@ -138,7 +139,7 @@ describe("HealthMonitor", () => {
   it("getStatus reflects current FS state on every call (no stale cache)", () => {
     // Files initially absent — first snapshot reports them missing.
     expect(monitor.getStatus().missingContextFiles).toEqual(
-      expect.arrayContaining(["user/profile.md", "today.md"]),
+      expect.arrayContaining(["identity/profile.md", "state/today.md"]),
     );
 
     // Create the files mid-flight, simulating the post-setup window
@@ -147,9 +148,10 @@ describe("HealthMonitor", () => {
     // without waiting for a 5-minute interval tick — that is the
     // contract this test exists to lock down.
     const contextDir = resolve(deps.config.dataDir, "context");
-    mkdirSync(resolve(contextDir, "user"), { recursive: true });
-    writeFileSync(resolve(contextDir, "user", "profile.md"), "# User");
-    writeFileSync(resolve(contextDir, "today.md"), "# Today");
+    mkdirSync(resolve(contextDir, "identity"), { recursive: true });
+    mkdirSync(resolve(contextDir, "state"), { recursive: true });
+    writeFileSync(resolve(contextDir, "identity", "profile.md"), "# User");
+    writeFileSync(resolve(contextDir, "state/today.md"), "# Today");
 
     const after = monitor.getStatus();
     expect(after.contextFilesOk).toBe(true);
@@ -158,8 +160,8 @@ describe("HealthMonitor", () => {
     // Removing one of the files must surface again on the next call,
     // proving the call really probes the FS rather than memoizing the
     // first OK result.
-    rmSync(resolve(contextDir, "today.md"));
-    expect(monitor.getStatus().missingContextFiles).toEqual(["today.md"]);
+    rmSync(resolve(contextDir, "state/today.md"));
+    expect(monitor.getStatus().missingContextFiles).toEqual(["state/today.md"]);
   });
 
   it("reports today's accumulated cost", () => {
@@ -372,7 +374,7 @@ describe("HealthMonitor", () => {
       const curr: HealthStatus = {
         ...prev,
         contextFilesOk: false,
-        missingContextFiles: ["user/profile.md", "today.md"],
+        missingContextFiles: ["identity/profile.md", "state/today.md"],
       };
 
       (monitor as unknown as {
@@ -382,7 +384,7 @@ describe("HealthMonitor", () => {
       expect(putSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            description: "Missing context files: user/profile.md, today.md",
+            description: "Missing context files: identity/profile.md, state/today.md",
             severity: "normal",
           }),
         }),
@@ -402,7 +404,7 @@ describe("HealthMonitor", () => {
         todaySessions: 0,
         todayCostUsd: 0,
         contextFilesOk: false,
-        missingContextFiles: ["today.md"],
+        missingContextFiles: ["state/today.md"],
         lastCheckAt: new Date().toISOString(),
       };
 
@@ -413,7 +415,7 @@ describe("HealthMonitor", () => {
       expect(putSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            description: "Missing context files: today.md",
+            description: "Missing context files: state/today.md",
             severity: "normal",
           }),
         }),
@@ -433,7 +435,7 @@ describe("HealthMonitor", () => {
         todaySessions: 0,
         todayCostUsd: 0,
         contextFilesOk: false,
-        missingContextFiles: ["today.md"],
+        missingContextFiles: ["state/today.md"],
         lastCheckAt: new Date().toISOString(),
       };
 

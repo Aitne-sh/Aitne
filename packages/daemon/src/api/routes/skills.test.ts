@@ -178,17 +178,17 @@ describe("Skills API routes", () => {
 
     it("skips subdirectory that has no SKILL.md file", () => {
       // Create a subdir without SKILL.md
-      const noSkillDir = join(dataDir, "skills", "no-skill-md");
+      const noSkillDir = join(dataDir, "context", "policies", "skills", "no-skill-md");
       mkdirSync(noSkillDir, { recursive: true });
       // Note: no SKILL.md is written, so listSkillsInRoot should skip it
 
-      const result = listSkillsInRoot(join(dataDir, "skills"), false);
+      const result = listSkillsInRoot(join(dataDir, "context", "policies", "skills"), false);
       expect(result.map((s) => s.name)).not.toContain("no-skill-md");
     });
 
     it("skips non-directory entries at the skills root", () => {
       // Create a regular file (not a directory) inside the skills root.
-      const skillsDir = join(dataDir, "skills");
+      const skillsDir = join(dataDir, "context", "policies", "skills");
       mkdirSync(skillsDir, { recursive: true });
       writeFileSync(join(skillsDir, "not-a-dir.txt"), "just a file", "utf-8");
 
@@ -202,7 +202,7 @@ describe("Skills API routes", () => {
   describe("GET /skills", () => {
     it("lists built-in and user skills with correct flags", async () => {
       // Plant a user skill manually
-      const userDir = join(dataDir, "skills", "my-skill");
+      const userDir = join(dataDir, "context", "policies", "skills", "my-skill");
       mkdirSync(userDir, { recursive: true });
       writeFileSync(
         join(userDir, "SKILL.md"),
@@ -336,7 +336,7 @@ describe("Skills API routes", () => {
       // Normally the API rejects POST with a built-in slug. But if a user
       // skill ever coexisted on disk with a built-in of the same name, reads
       // should return the user copy (the one the user last modified).
-      const userSkillDir = join(dataDir, "skills", "notify");
+      const userSkillDir = join(dataDir, "context", "policies", "skills", "notify");
       mkdirSync(userSkillDir, { recursive: true });
       writeFileSync(
         join(userSkillDir, "SKILL.md"),
@@ -367,7 +367,7 @@ describe("Skills API routes", () => {
       expect(data.status).toBe("created");
 
       // File should exist on disk
-      const path = join(dataDir, "skills", "greet", "SKILL.md");
+      const path = join(dataDir, "context", "policies", "skills", "greet", "SKILL.md");
       expect(existsSync(path)).toBe(true);
       const content = readFileSync(path, "utf-8");
       expect(content).toContain("name: greet");
@@ -631,7 +631,7 @@ describe("Skills API routes", () => {
       });
       const res = await app.request("/skills/temp", { method: "DELETE" });
       expect(res.status).toBe(200);
-      expect(existsSync(join(dataDir, "skills", "temp"))).toBe(false);
+      expect(existsSync(join(dataDir, "context", "policies", "skills", "temp"))).toBe(false);
     });
 
     it("refuses to delete built-in skill", async () => {
@@ -704,7 +704,7 @@ describe("Skills API routes", () => {
       const data = (await res.json()) as { status: string; name: string };
       expect(data.status).toBe("created");
       expect(data.name).toBe("uploaded");
-      expect(existsSync(join(dataDir, "skills", "uploaded", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(dataDir, "context", "policies", "skills", "uploaded", "SKILL.md"))).toBe(true);
     });
 
     it("refuses to overwrite a built-in", async () => {
@@ -843,7 +843,7 @@ describe("Skills API routes", () => {
       expect(res.status).toBe(200);
       const data = (await res.json()) as { status: string; name: string };
       expect(data.name).toBe("my-override-slug");
-      expect(existsSync(join(dataDir, "skills", "my-override-slug", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(dataDir, "context", "policies", "skills", "my-override-slug", "SKILL.md"))).toBe(true);
     });
 
     it("rejects upload with empty body content after stripping frontmatter", async () => {

@@ -62,11 +62,11 @@ related:
 | `observations` | Drain the pending-observations queue and inspect raw external-source change records. |
 | `project-doc` | Read / write per-project markdown files under `projects/<slug>.md`. |
 | `reading` | Query reading history and highlights; owns the reading-taste profile via the `books` and `reading_highlights` tables. |
-| `roadmap` | Read / write `roadmap.md` (cross-request write lock). |
+| `roadmap` | Read / write `plans/roadmap.md` (cross-request write lock). |
 | `schedule` | Schedule future agent wake-ups and DMs via the daemon (writes `agent_schedule` and `recurring_schedules` rows). |
 | `scheduled-managed-task` | Surface and act on Managed Tasks that are due now. |
-| `today` | Read or write `today.md` — morning routines, hourly checks, DMs that need a today snapshot. |
-| `user-interview` | Manage the profile-interview queue at `agent/profile-questions.md`; ask one question at a time. |
+| `today` | Read or write `state/today.md` — morning routines, hourly checks, DMs that need a today snapshot. |
+| `user-interview` | Manage the profile-interview queue at `state/profile-questions.md`; ask one question at a time. |
 | `user-profile` | Record user facts — identity, people, work, expertise, habits, goals — into the `user/*` slices. |
 | `wiki` | Build and maintain the personal wiki workspace — `!ingest` / `!compile` / `!ask` / `!lint` / `!trace` / `!connect`. |
 

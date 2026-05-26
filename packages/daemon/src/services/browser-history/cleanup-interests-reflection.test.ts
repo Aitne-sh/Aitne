@@ -63,7 +63,7 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("strips blocks from profile.md, _index.md, and projects/*.md", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "---",
       "type: user",
       "owner: user",
@@ -76,7 +76,7 @@ describe("cleanupInterestsReflection", () => {
       ...block("", "- **Theme A** — body"),
       "",
     ]);
-    seedFile(dir, "user/_index.md", [
+    seedFile(dir, "identity/_index.md", [
       "---",
       "owner: user",
       "---",
@@ -90,7 +90,7 @@ describe("cleanupInterestsReflection", () => {
       ),
       "",
     ]);
-    seedFile(dir, "projects/aitne.md", [
+    seedFile(dir, "plans/projects/aitne.md", [
       "---",
       "owner: user",
       "---",
@@ -99,7 +99,7 @@ describe("cleanupInterestsReflection", () => {
       ...block("project=aitne", "- **Theme A** — body"),
       "",
     ]);
-    seedFile(dir, "projects/no-block.md", [
+    seedFile(dir, "plans/projects/no-block.md", [
       "---",
       "owner: user",
       "---",
@@ -107,7 +107,7 @@ describe("cleanupInterestsReflection", () => {
       "",
       "No auto-block here.",
     ]);
-    seedFile(dir, "user/research-themes.md", [
+    seedFile(dir, "identity/research-themes.md", [
       "---",
       "type: user",
       "owner: aitne-browser-history",
@@ -117,8 +117,8 @@ describe("cleanupInterestsReflection", () => {
     // Seed runtime_state markers so cleanup clears them.
     writeRuntimeState(db, RUNTIME_STATE_LAST_RUN_AT_KEY, 1_700_000_000_000);
     writeRuntimeState(db, RUNTIME_STATE_LAST_RUN_TARGETS_KEY, [
-      "user/profile.md",
-      "user/research-themes.md",
+      "identity/profile.md",
+      "identity/research-themes.md",
     ]);
 
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
@@ -127,32 +127,32 @@ describe("cleanupInterestsReflection", () => {
     expect(result.researchThemesDeleted).toBe(true);
     expect(result.filesAffected.sort()).toEqual(
       [
-        "projects/aitne.md",
-        "user/_index.md",
-        "user/profile.md",
-        "user/research-themes.md",
+        "plans/projects/aitne.md",
+        "identity/_index.md",
+        "identity/profile.md",
+        "identity/research-themes.md",
       ].sort(),
     );
 
     // Block markers are gone, user-authored content survives.
-    const profile = readFileSync(join(dir, "user/profile.md"), "utf-8");
+    const profile = readFileSync(join(dir, "identity/profile.md"), "utf-8");
     expect(profile).not.toContain("aitne:browser-interests");
     expect(profile).toContain("## Identity");
     expect(profile).toContain("User identity.");
 
-    const idx = readFileSync(join(dir, "user/_index.md"), "utf-8");
+    const idx = readFileSync(join(dir, "identity/_index.md"), "utf-8");
     expect(idx).not.toContain("aitne:browser-interests");
     expect(idx).toContain("- `expertise.md` — what the user knows");
 
-    const project = readFileSync(join(dir, "projects/aitne.md"), "utf-8");
+    const project = readFileSync(join(dir, "plans/projects/aitne.md"), "utf-8");
     expect(project).not.toContain("aitne:browser-interests");
     expect(project).toContain("# Aitne");
 
     // research-themes.md was deleted.
-    expect(existsSync(join(dir, "user/research-themes.md"))).toBe(false);
+    expect(existsSync(join(dir, "identity/research-themes.md"))).toBe(false);
 
     // no-block.md was untouched.
-    const plain = readFileSync(join(dir, "projects/no-block.md"), "utf-8");
+    const plain = readFileSync(join(dir, "plans/projects/no-block.md"), "utf-8");
     expect(plain).toContain("No auto-block here.");
 
     // runtime_state markers were cleared.
@@ -177,16 +177,16 @@ describe("cleanupInterestsReflection", () => {
     const detail = JSON.parse(audit.detail);
     expect(detail.blocks_removed).toBe(3);
     expect(detail.research_themes_deleted).toBe(true);
-    expect(detail.files_affected).toContain("user/profile.md");
+    expect(detail.files_affected).toContain("identity/profile.md");
   });
 
   it("retains research-themes.md when alsoDeleteResearchThemesFile=false", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme A**"),
     ]);
-    seedFile(dir, "user/research-themes.md", "# Research themes\n");
+    seedFile(dir, "identity/research-themes.md", "# Research themes\n");
 
     const result = cleanupInterestsReflection(db, dir, {
       alsoDeleteResearchThemesFile: false,
@@ -195,12 +195,12 @@ describe("cleanupInterestsReflection", () => {
 
     expect(result.researchThemesDeleted).toBe(false);
     expect(result.blocksRemoved).toBe(1);
-    expect(existsSync(join(dir, "user/research-themes.md"))).toBe(true);
-    expect(result.filesAffected).not.toContain("user/research-themes.md");
+    expect(existsSync(join(dir, "identity/research-themes.md"))).toBe(true);
+    expect(result.filesAffected).not.toContain("identity/research-themes.md");
   });
 
   it("is idempotent — a second call returns blocksRemoved=0 with no errors", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme A**"),
@@ -223,9 +223,9 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("is a no-op when no auto-blocks and no themes file exist", () => {
-    seedFile(dir, "user/profile.md", "# Profile\n\nNo auto-block.\n");
-    seedFile(dir, "user/_index.md", "# Index\n");
-    seedFile(dir, "projects/aitne.md", "# Aitne\n");
+    seedFile(dir, "identity/profile.md", "# Profile\n\nNo auto-block.\n");
+    seedFile(dir, "identity/_index.md", "# Index\n");
+    seedFile(dir, "plans/projects/aitne.md", "# Aitne\n");
 
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
 
@@ -237,7 +237,7 @@ describe("cleanupInterestsReflection", () => {
   it("strips multiple blocks from a single project file", () => {
     // A project file that somehow accreted two blocks with different
     // disambiguators (or one stale + one fresh). Cleanup strips both.
-    seedFile(dir, "projects/aitne.md", [
+    seedFile(dir, "plans/projects/aitne.md", [
       "---",
       "owner: user",
       "---",
@@ -253,7 +253,7 @@ describe("cleanupInterestsReflection", () => {
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
     expect(result.blocksRemoved).toBe(2);
 
-    const after = readFileSync(join(dir, "projects/aitne.md"), "utf-8");
+    const after = readFileSync(join(dir, "plans/projects/aitne.md"), "utf-8");
     expect(after).not.toContain("stale A");
     expect(after).not.toContain("stale B");
     expect(after).not.toContain("aitne:browser-interests");
@@ -263,7 +263,7 @@ describe("cleanupInterestsReflection", () => {
 
   it("skips projects subdirectories that don't exist", () => {
     // No projects/ directory at all — must not throw.
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme A**"),
@@ -273,7 +273,7 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("does not recurse into projects/ subdirectories", () => {
-    seedFile(dir, "projects/aitne.md", [
+    seedFile(dir, "plans/projects/aitne.md", [
       "# Aitne",
       "",
       ...block("project=aitne", "- top-level block"),
@@ -281,7 +281,7 @@ describe("cleanupInterestsReflection", () => {
     // Block in a nested project file should NOT be touched — only the
     // matcher writes here, and it never recurses, so the cleanup
     // mirror must match.
-    seedFile(dir, "projects/nested/deep.md", [
+    seedFile(dir, "plans/projects/nested/deep.md", [
       "# Deep",
       "",
       ...block("project=deep", "- nested block"),
@@ -290,12 +290,12 @@ describe("cleanupInterestsReflection", () => {
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
     expect(result.blocksRemoved).toBe(1);
     expect(
-      readFileSync(join(dir, "projects/nested/deep.md"), "utf-8"),
+      readFileSync(join(dir, "plans/projects/nested/deep.md"), "utf-8"),
     ).toContain("nested block");
   });
 
   it("ignores non-.md files inside projects/", () => {
-    seedFile(dir, "projects/aitne.md", [
+    seedFile(dir, "plans/projects/aitne.md", [
       "# Aitne",
       "",
       ...block("project=aitne", "- the block"),
@@ -310,7 +310,7 @@ describe("cleanupInterestsReflection", () => {
 
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
     expect(result.blocksRemoved).toBe(1);
-    expect(result.filesAffected).toEqual(["projects/aitne.md"]);
+    expect(result.filesAffected).toEqual(["plans/projects/aitne.md"]);
     expect(readFileSync(join(dir, "projects/notes.txt"), "utf-8")).toContain(
       "bogus",
     );
@@ -319,7 +319,7 @@ describe("cleanupInterestsReflection", () => {
   it("preserves disjoint user-authored content in profile.md", () => {
     // A realistic profile.md with every section the testimonial
     // pipeline writes — none of these may be touched by cleanup.
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "---",
       "type: user",
       "owner: user",
@@ -346,7 +346,7 @@ describe("cleanupInterestsReflection", () => {
 
     cleanupInterestsReflection(db, dir, { trigger: "test" });
 
-    const after = readFileSync(join(dir, "user/profile.md"), "utf-8");
+    const after = readFileSync(join(dir, "identity/profile.md"), "utf-8");
     for (const heading of [
       "## Identity\nAuthor.",
       "## Work Pattern\nPatterns.",
@@ -360,7 +360,7 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("defaults trigger to 'dashboard' when omitted", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),
@@ -377,7 +377,7 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("marks each stripped file (content-hash) and the unlinked themes file (path-only) on the agent-write tracker", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "---",
       "owner: user",
       "---",
@@ -385,7 +385,7 @@ describe("cleanupInterestsReflection", () => {
       "",
       ...block("", "- **Theme**"),
     ]);
-    seedFile(dir, "projects/aitne.md", [
+    seedFile(dir, "plans/projects/aitne.md", [
       "---",
       "owner: user",
       "---",
@@ -393,15 +393,15 @@ describe("cleanupInterestsReflection", () => {
       "",
       ...block("project=aitne", "- **Theme**"),
     ]);
-    const themesPath = join(dir, "user/research-themes.md");
-    seedFile(dir, "user/research-themes.md", "# themes\n");
+    const themesPath = join(dir, "identity/research-themes.md");
+    seedFile(dir, "identity/research-themes.md", "# themes\n");
 
     const writeTracker = new AgentWriteTracker(60_000);
     cleanupInterestsReflection(db, dir, { trigger: "test", writeTracker });
 
     // Stripped files were marked in content-hash mode — the observer
     // would supply the post-strip bytes when reading off disk.
-    for (const rel of ["user/profile.md", "projects/aitne.md"]) {
+    for (const rel of ["identity/profile.md", "plans/projects/aitne.md"]) {
       const fullPath = join(dir, rel);
       const bytes = readFileSync(fullPath, "utf-8");
       expect(writeTracker.isMarked(fullPath, bytes)).toBe(true);
@@ -416,7 +416,7 @@ describe("cleanupInterestsReflection", () => {
   it("is a structural no-op when writeTracker is omitted", () => {
     // Optional dep contract — tests and direct admin invocations both
     // can pass `undefined`; the helper must not depend on it implicitly.
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),
@@ -427,14 +427,14 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("does not throw when the audit-row insert fails", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),
     ]);
     db.prepare("DROP TABLE agent_actions").run();
     expect(() => cleanupInterestsReflection(db, dir, { trigger: "test" })).not.toThrow();
-    expect(readFileSync(join(dir, "user/profile.md"), "utf-8")).not.toContain(
+    expect(readFileSync(join(dir, "identity/profile.md"), "utf-8")).not.toContain(
       "aitne:browser-interests",
     );
   });
@@ -450,12 +450,12 @@ describe("cleanupInterestsReflection", () => {
     // The cheapest way to produce that without mocking node:fs is to
     // create `projects` as a regular file. existsSync is true; readdir
     // raises ENOTDIR. The helper must log + continue.
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),
     ]);
-    seedFile(dir, "user/research-themes.md", "wholly daemon-owned\n");
+    seedFile(dir, "identity/research-themes.md", "wholly daemon-owned\n");
     seedFile(dir, "projects", "");
 
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
@@ -465,7 +465,7 @@ describe("cleanupInterestsReflection", () => {
     expect(result.blocksRemoved).toBe(1);
     expect(result.researchThemesDeleted).toBe(true);
     expect(result.filesAffected).toEqual(
-      expect.arrayContaining(["user/profile.md", "user/research-themes.md"]),
+      expect.arrayContaining(["identity/profile.md", "identity/research-themes.md"]),
     );
   });
 
@@ -475,16 +475,16 @@ describe("cleanupInterestsReflection", () => {
     // a directory raises EISDIR / EPERM depending on platform). The
     // helper must roll back the writeTracker mark, log, and return with
     // researchThemesDeleted = false.
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),
     ]);
-    mkdirSync(join(dir, "user", "research-themes.md"), { recursive: true });
-    writeFileSync(join(dir, "user", "research-themes.md", "stub.txt"), "x");
+    mkdirSync(join(dir, "identity", "research-themes.md"), { recursive: true });
+    writeFileSync(join(dir, "identity", "research-themes.md", "stub.txt"), "x");
 
     const tracker = new AgentWriteTracker(5_000);
-    const themesPath = join(dir, "user", "research-themes.md");
+    const themesPath = join(dir, "identity", "research-themes.md");
 
     const result = cleanupInterestsReflection(db, dir, {
       trigger: "test",
@@ -502,7 +502,7 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("absorbs a deleteRuntimeState failure and still completes the file purge", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),
@@ -514,7 +514,7 @@ describe("cleanupInterestsReflection", () => {
     const result = cleanupInterestsReflection(db, dir, { trigger: "test" });
 
     expect(result.blocksRemoved).toBe(1);
-    expect(readFileSync(join(dir, "user/profile.md"), "utf-8")).not.toContain(
+    expect(readFileSync(join(dir, "identity/profile.md"), "utf-8")).not.toContain(
       "aitne:browser-interests",
     );
   });
@@ -523,8 +523,8 @@ describe("cleanupInterestsReflection", () => {
     // existsSync(profilePath) → true, readFileSync(profilePath, 'utf-8')
     // → EISDIR. The helper must log + return 0 for that target without
     // bringing the purge down.
-    mkdirSync(join(dir, "user", "profile.md"), { recursive: true });
-    seedFile(dir, "user/_index.md", [
+    mkdirSync(join(dir, "identity", "profile.md"), { recursive: true });
+    seedFile(dir, "identity/_index.md", [
       "# Index",
       "",
       ...block("target=research-themes", "- `research-themes.md` — entry"),
@@ -534,7 +534,7 @@ describe("cleanupInterestsReflection", () => {
 
     // profile.md was unreadable → returned 0; _index.md still purged.
     expect(result.blocksRemoved).toBe(1);
-    expect(result.filesAffected).toEqual(["user/_index.md"]);
+    expect(result.filesAffected).toEqual(["identity/_index.md"]);
   });
 
   it("rolls back the writeTracker mark when writeFileAtomically throws on a target", async () => {
@@ -542,12 +542,12 @@ describe("cleanupInterestsReflection", () => {
     // read-only — the atomic-write helper's tempfile open in the same
     // dir then errors out (EACCES on a read-only dir). readFileSync of
     // the file itself still succeeds because the file is readable.
-    seedFile(dir, "projects/aitne.md", [
+    seedFile(dir, "plans/projects/aitne.md", [
       "# Aitne",
       "",
       ...block("project=aitne", "- block to strip"),
     ]);
-    const projectsDir = join(dir, "projects");
+    const projectsDir = join(dir, "plans", "projects");
     const { chmodSync } = await import("node:fs");
     chmodSync(projectsDir, 0o500); // r-x only, no writes for owner
 
@@ -597,7 +597,7 @@ describe("cleanupInterestsReflection", () => {
   });
 
   it("passes explicit metadata='{}' to the audit insert (rev 4 — documents the empty side-channel)", () => {
-    seedFile(dir, "user/profile.md", [
+    seedFile(dir, "identity/profile.md", [
       "# Profile",
       "",
       ...block("", "- **Theme**"),

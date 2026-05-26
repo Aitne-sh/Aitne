@@ -854,7 +854,7 @@ function ResearchDomainFilterCard({
  *     failed.
  *   - **Clean up auto-blocks** (Approve tier, bearer-authed) — strips
  *     every `<!-- BEGIN aitne:browser-interests v1 ... -->` block from
- *     `user/profile.md`, `user/_index.md`, and every `projects/*.md`,
+ *     `identity/profile.md`, `identity/_index.md`, and every `projects/*.md`,
  *     and optionally deletes the daemon-owned
  *     `user/research-themes.md` (default on; matches the helper's
  *     `alsoDeleteResearchThemesFile=true`). The next weekly_review
@@ -932,7 +932,7 @@ function InterestsReflectionCard({
         <SectionLabel
           icon={Sparkles}
           title="Research themes (auto-refreshed weekly)"
-          description="Each weekly review refreshes a short `## Current research themes (auto)` block on user/profile.md, the per-cluster snapshot at user/research-themes.md, and matching project files. The feature runs automatically while browser history is enabled; the buttons below are for testing and one-shot cleanup."
+          description="Each weekly review refreshes a short `## Current research themes (auto)` block on identity/profile.md, the per-cluster snapshot at identity/research-themes.md, and matching project files. The feature runs automatically while browser history is enabled; the buttons below are for testing and one-shot cleanup."
         />
       </CardHeader>
 
@@ -1002,9 +1002,10 @@ function InterestsReflectionCard({
               <div className="text-sm font-medium">Clean up auto-blocks</div>
               <p className="mt-1 text-xs text-muted-foreground">
                 Strips every <code>aitne:browser-interests v1</code> block
-                from <code>profile.md</code>, <code>_index.md</code>, and
-                each <code>projects/*.md</code>, and (by default) deletes
-                the wholly daemon-owned <code>user/research-themes.md</code>.
+                from <code>identity/profile.md</code>, <code>_index.md</code>,
+                and each <code>plans/projects/*.md</code>, and (by default)
+                deletes the wholly daemon-owned{" "}
+                <code>identity/research-themes.md</code>.
                 One-shot purge — the next weekly_review re-creates fresh
                 content.
               </p>
@@ -1020,7 +1021,7 @@ function InterestsReflectionCard({
               }
             />
             <span>
-              Also delete <code>user/research-themes.md</code>
+              Also delete <code>identity/research-themes.md</code>
             </span>
           </label>
           {!confirmCleanup ? (

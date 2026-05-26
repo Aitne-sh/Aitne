@@ -39,7 +39,7 @@ describe("activityFileSlugFor", () => {
 
 describe("relativeActivityPath", () => {
   it("returns _activity/<slug>.md", () => {
-    expect(relativeActivityPath("zoom")).toBe("_activity/zoom.md");
+    expect(relativeActivityPath("zoom")).toBe("state/activity/zoom.md");
   });
 });
 
@@ -58,7 +58,7 @@ describe("sortEntityActivityRows", () => {
     date: "2026-12-04",
     timeRange: "10:00–11:00",
     title: "Foo",
-    entityRelativePath: "work/meetings/foo.md",
+    entityRelativePath: "knowledge/entities/work/meetings/foo.md",
     details: [],
     mtId: null,
     fetchedAt: null,
@@ -66,20 +66,20 @@ describe("sortEntityActivityRows", () => {
   const b: EntityActivityInput = {
     ...a,
     title: "Bar",
-    entityRelativePath: "work/meetings/bar.md",
+    entityRelativePath: "knowledge/entities/work/meetings/bar.md",
     timeRange: "09:00–10:00",
   };
   const c: EntityActivityInput = {
     ...a,
     date: "2026-12-03",
     title: "Baz",
-    entityRelativePath: "work/meetings/baz.md",
+    entityRelativePath: "knowledge/entities/work/meetings/baz.md",
   };
   const d: EntityActivityInput = {
     ...a,
     title: "Bin",
     timeRange: null,
-    entityRelativePath: "work/meetings/bin.md",
+    entityRelativePath: "knowledge/entities/work/meetings/bin.md",
   };
 
   it("sorts by date desc, then time asc, then title asc", () => {
@@ -210,7 +210,7 @@ describe("renderActivityView", () => {
           date: "2026-12-04",
           timeRange: "14:00–15:00",
           title: "Foo 1on1",
-          entityRelativePath: "work/meetings/2026-12-04-foo-1on1.md",
+          entityRelativePath: "knowledge/entities/work/meetings/2026-12-04-foo-1on1.md",
           details: ["duration 60min", "recording zm_xyz789"],
           mtId: "mt_43",
           fetchedAt: "2026-12-05T10:00:00Z",
@@ -239,7 +239,7 @@ describe("renderActivityView", () => {
 
       ## 2026-12-04
 
-      - 14:00–15:00 [Foo 1on1](../work/meetings/2026-12-04-foo-1on1.md)
+      - 14:00–15:00 [Foo 1on1](../../knowledge/entities/work/meetings/2026-12-04-foo-1on1.md)
         duration 60min · recording zm_xyz789 · fetched by mt_43 @ 2026-12-05T10:00:00Z
 
       "
@@ -334,7 +334,7 @@ describe("renderActivityView", () => {
             date: "2026-12-04",
             timeRange: null,
             title: "Bare entity",
-            entityRelativePath: "work/meetings/bare.md",
+            entityRelativePath: "knowledge/entities/work/meetings/bare.md",
             details: [],
             mtId: null,
             fetchedAt: null,
@@ -343,7 +343,7 @@ describe("renderActivityView", () => {
       },
       "2026-12-05T00:00:00Z",
     );
-    expect(out).toContain("- [Bare entity](../work/meetings/bare.md)");
+    expect(out).toContain("- [Bare entity](../../knowledge/entities/work/meetings/bare.md)");
     expect(out).not.toContain("fetched by");
   });
 
@@ -356,7 +356,7 @@ describe("renderActivityView", () => {
             date: "2026-12-04",
             timeRange: null,
             title: "T",
-            entityRelativePath: "work/meetings/t.md",
+            entityRelativePath: "knowledge/entities/work/meetings/t.md",
             details: [],
             mtId: "mt_9",
             fetchedAt: null,
@@ -377,7 +377,7 @@ describe("renderActivityView", () => {
           date: "2026-12-04",
           timeRange: null,
           title: "A",
-          entityRelativePath: "work/meetings/a.md",
+          entityRelativePath: "knowledge/entities/work/meetings/a.md",
           details: [],
           mtId: null,
           fetchedAt: null,
@@ -386,7 +386,7 @@ describe("renderActivityView", () => {
           date: "2026-12-04",
           timeRange: null,
           title: "B",
-          entityRelativePath: "work/meetings/b.md",
+          entityRelativePath: "knowledge/entities/work/meetings/b.md",
           details: [],
           mtId: null,
           fetchedAt: null,
@@ -395,7 +395,7 @@ describe("renderActivityView", () => {
           date: "2026-12-03",
           timeRange: null,
           title: "C",
-          entityRelativePath: "work/meetings/c.md",
+          entityRelativePath: "knowledge/entities/work/meetings/c.md",
           details: [],
           mtId: null,
           fetchedAt: null,

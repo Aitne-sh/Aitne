@@ -16,7 +16,7 @@ Apply the canonical capture-user-info routing below to `<user_input>`.
 
 Two operations from the user-interview skill — run in order, before composing the reply.
 
-**A. Queue reconcile (Operation 4).** GET `agent/profile-questions.md ## In Progress`. For any `state=asked` entry where `(now − asked_at) < 24h`, treat the inbound DM as the answer: tick the matching `## Pending` row `[ ]` → `[x]`, remove from `## In Progress`, append to `## Answered`, and remove the matching `Profile question (...)` line from today's notes section. Leave `state=latent` / `state=scheduled` entries alone.
+**A. Queue reconcile (Operation 4).** GET `state/profile-questions.md ## In Progress`. For any `state=asked` entry where `(now − asked_at) < 24h`, treat the inbound DM as the answer: tick the matching `## Pending` row `[ ]` → `[x]`, remove from `## In Progress`, append to `## Answered`, and remove the matching `Profile question (...)` line from today's notes section. Leave `state=latent` / `state=scheduled` entries alone.
 
 **B. Latent opportunity (Operation 2).** If after reconcile a `state=latent` entry remains, FIRST run the slot-filled pre-check (GET `/api/profile-questions/slot-filled?path=<target>&section=<section?>&anchor=<anchor?>`); if `filled: true`, resolve the row (tick Pending, remove In Progress, append `(reconciled:opportunity)` to Answered, remove the matching note line) and **do not weave a question**.
 
@@ -136,7 +136,7 @@ affirmative.
 
 Schedules go through this daemon — never through any cloud-hosted scheduled-agent feature your CLI may expose. Cloud routines cannot reach `localhost:8321`, so they cannot deliver via the user's chat platforms or use any integration registered here.
 
-**Long-horizon intent** (commitment, trip, deliverable, learning target beyond today) → apply the decision tree below; the `roadmap` skill is the writer. Ambiguous or speculative items belong in `agent/journal.md` as a candidate line for the next morning routine to confirm — do **not** write directly to `roadmap.md` without a clear positive signal.
+**Long-horizon intent** (commitment, trip, deliverable, learning target beyond today) → apply the decision tree below; the `roadmap` skill is the writer. Ambiguous or speculative items belong in `journal/agent.md` as a candidate line for the next morning routine to confirm — do **not** write directly to `plans/roadmap.md` without a clear positive signal.
 
 {include:_partials/dm-intent.long-horizon.md}
 

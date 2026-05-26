@@ -28,7 +28,7 @@ import type { ApiDependencies } from "../server.js";
 const logger = createLogger("sot-bindings-api");
 
 /**
- * SoT bindings — Section A of `rules/management.md` (§9.5, §10.6).
+ * SoT bindings — Section A of `policies/management.md` (§9.5, §10.6).
  *
  * The list is small (typically ≤ DOMAINS.length) and PUT replace-
  * semantics (§10.6) is the only mutation surface. A single-binding

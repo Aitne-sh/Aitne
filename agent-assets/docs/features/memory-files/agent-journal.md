@@ -45,7 +45,7 @@ context_files:
 
 ## In One Sentence
 
-`agent/journal.md` is the agent's own running diary — what it noticed,
+`journal/agent.md` is the agent's own running diary — what it noticed,
 what it tried, what it would do differently — appended (never
 rewritten) so a long timeline accumulates.
 
@@ -92,14 +92,14 @@ can hand-edit, prune, or git-version it like any other context file.
 ## When Something Goes Wrong
 
 - A journal that **stops growing** points at the evening review not
-  running. See [Evening Review](../routines/evening-review.md).
+  running. See [Evening Review](../policies/routines/evening-review.md).
 - A journal that **looks duplicated** usually means a routine retried
   after a fallback. The agent's own anti-duplicate check is best-effort,
   not bulletproof — manual prune is fine.
 
 ## Related
 
-- [Evening Review](../routines/evening-review.md) — the daily writer.
-- [Weekly Review](../routines/weekly-review.md) — the consumer.
+- [Evening Review](../policies/routines/evening-review.md) — the daily writer.
+- [Weekly Review](../policies/routines/weekly-review.md) — the consumer.
 - [Activity](../operations/activity-and-conversations.md) — the
   action-shaped audit log, distinct from the journal.

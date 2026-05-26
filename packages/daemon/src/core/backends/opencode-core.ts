@@ -38,6 +38,7 @@ import {
   cleanupSessionWorkdir,
   createSessionWorkdir,
 } from "../workdir.js";
+import { resolveUserSkillsRoot } from "../user-skills-root.js";
 import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
 import {
   auditStreamObservation,
@@ -679,7 +680,7 @@ export class OpencodeCore implements IAgentCore {
     const sessionDir = params.sessionDir ?? createSessionWorkdir(
       this.config.workspaceDir,
       params.event.type,
-      `${this.config.dataDir}/skills`,
+      resolveUserSkillsRoot(this.config),
       {
         backendId: this.backendId,
         ...(params.processKey ? { processKey: params.processKey } : {}),

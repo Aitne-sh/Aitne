@@ -16,6 +16,7 @@ import {
 import type { AgentConfig } from "../../config.js";
 import { getContextDir } from "../../config.js";
 import { cleanupSessionWorkdir, createSessionWorkdir } from "../workdir.js";
+import { resolveUserSkillsRoot } from "../user-skills-root.js";
 import type {
   AgentExecuteParams,
   AgentResumeParams,
@@ -611,7 +612,7 @@ export class CodexCore implements IAgentCore {
     const sessionDir = params.sessionDir ?? createSessionWorkdir(
       this.config.workspaceDir,
       params.eventType,
-      `${this.config.dataDir}/skills`,
+      resolveUserSkillsRoot(this.config),
       {
         backendId: this.backendId,
         processKey: params.processKey,

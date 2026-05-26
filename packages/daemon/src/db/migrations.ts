@@ -1,7 +1,29 @@
 import type Database from "better-sqlite3";
 import { createLogger } from "../logging.js";
+import {
+  MIGRATION_ID as CONTEXT_VAULT_MIGRATION_ID,
+  runContextVaultRestructure,
+} from "./migrations/context-vault-restructure.js";
 
 const logger = createLogger("migrations");
+
+/**
+ * Runtime context handed to migrations whose body needs more than the
+ * `db` handle alone. CONTEXT_VAULT_REDESIGN_PLAN.md §11.8: the vault
+ * restructure needs `dataDir` (out-of-contextDir source paths) and
+ * `contextDir` (the new destination root) to drive the manifest walker.
+ *
+ * Existing migrations (0001-0003) don't read this; their `up()` simply
+ * ignores the second argument. New migrations that DO read it should
+ * defensively check for presence and throw a self-describing error if
+ * the caller forgot to thread the context in (the runner exposes a
+ * matching error message at the registration site).
+ */
+export interface MigrationContext {
+  readonly db: Database.Database;
+  readonly dataDir: string;
+  readonly contextDir: string;
+}
 
 /**
  * A schema migration. Each migration must be:
@@ -33,11 +55,49 @@ export interface Migration {
   readonly id: string;
   /** Human-readable summary for logs. */
   readonly description: string;
-  /** Idempotent upgrade body. Runs inside a single transaction together
-   *  with the bookkeeping row write. Throw to abort startup — the
-   *  transaction rolls back. */
-  up(db: Database.Database): void;
+  /**
+   * Idempotent upgrade body. Runs inside a single transaction together
+   * with the bookkeeping row write. Throw to abort startup — the
+   * transaction rolls back.
+   *
+   * The optional `ctx` argument carries `dataDir` and `contextDir` for
+   * migrations whose body needs to touch the filesystem. Existing
+   * migrations ignore it; new ones MUST defensively check for presence
+   * when their body reads from it.
+   */
+  up(db: Database.Database, ctx?: MigrationContext): void;
 }
+
+/**
+ * Pre-built migration entry for the context-vault restructure
+ * (CONTEXT_VAULT_REDESIGN_PLAN.md). Defined above MIGRATIONS so the
+ * forward reference works at module load (const declarations live in
+ * the TDZ until their line executes).
+ */
+export const CONTEXT_VAULT_MIGRATION_ENTRY: Migration = {
+  id: CONTEXT_VAULT_MIGRATION_ID,
+  description:
+    "CONTEXT_VAULT_REDESIGN_PLAN.md (v0.1.x→next) — reshape "
+    + "~/.personal-agent/context/ into six authority classes (identity, "
+    + "state, plans, journal, knowledge, policies); move wiki/ and "
+    + "integrations.md under the vault root; rewrite wiki_workspaces.root_path "
+    + "for kind='internal'; rebuild fts_wiki; rewrite md_file_snapshots / "
+    + "entities / entity_source_keys / managed_tasks path columns (V13); "
+    + "rewrite JSON-blob path references in agent_actions / observations / "
+    + "messages (V17); write .context-vault-version marker.",
+  up(db, ctx) {
+    if (!ctx) {
+      throw new Error(
+        `Migration ${CONTEXT_VAULT_MIGRATION_ID} requires MigrationContext (dataDir + contextDir); caller passed only db.`,
+      );
+    }
+    runContextVaultRestructure({
+      db,
+      dataDir: ctx.dataDir,
+      contextDir: ctx.contextDir,
+    });
+  },
+};
 
 /**
  * Registered migrations, applied in array order. Append new entries; never
@@ -242,11 +302,31 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  // CONTEXT_VAULT_REDESIGN_PLAN.md PR-3 — registered after the
+  // coordinated `CONTEXT_RELATIVE_PATHS` rewrite, structural-matcher
+  // sweep, and `agent-assets/templates/` restructure all landed. On
+  // first boot after upgrade the runner moves legacy files into the
+  // six-class layout, rewrites DB path keys, and stamps the
+  // `.context-vault-version` marker. The body is idempotent and the
+  // verification step rolls back if anything is off.
+  CONTEXT_VAULT_MIGRATION_ENTRY,
 ];
 
 export interface MigrationRunResult {
   /** Ids applied during this call, in execution order. Empty on steady state. */
   applied: string[];
+}
+
+export interface RunMigrationsOptions {
+  /** Vault filesystem context — required for any migration whose body
+   *  reads the filesystem. Migrations that only mutate SQLite ignore it.
+   *  Omitted by the legacy single-arg call shape that pre-dates the
+   *  CONTEXT_VAULT_REDESIGN_PLAN runner — those callers will only get a
+   *  hard error if a migration that needs the context is registered. */
+  readonly ctx?: Omit<MigrationContext, "db">;
+  /** Override the migration list. Tests pass an explicit list to keep
+   *  behaviour deterministic without mutating module state. */
+  readonly migrations?: readonly Migration[];
 }
 
 /**
@@ -257,14 +337,20 @@ export interface MigrationRunResult {
  * caller (`initDatabase` in `bootstrap/db.ts`) is expected to surface that
  * as a fatal startup error.
  *
- * `migrations` defaults to the production-registered list. Tests pass an
- * explicit list to keep behaviour deterministic without mutating module
- * state.
+ * The two-arg shape `runMigrations(db, migrations)` is preserved for
+ * legacy tests; production callers pass `runMigrations(db, { ctx, migrations })`.
  */
 export function runMigrations(
   db: Database.Database,
-  migrations: readonly Migration[] = MIGRATIONS,
+  optionsOrMigrations: RunMigrationsOptions | readonly Migration[] = MIGRATIONS,
 ): MigrationRunResult {
+  const options: RunMigrationsOptions = Array.isArray(optionsOrMigrations)
+    ? { migrations: optionsOrMigrations as readonly Migration[] }
+    : (optionsOrMigrations as RunMigrationsOptions);
+  const migrations = options.migrations ?? MIGRATIONS;
+  const ctx: MigrationContext | undefined = options.ctx
+    ? { db, dataDir: options.ctx.dataDir, contextDir: options.ctx.contextDir }
+    : undefined;
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id TEXT PRIMARY KEY,
@@ -283,7 +369,7 @@ export function runMigrations(
   for (const migration of migrations) {
     if (applied.has(migration.id)) continue;
     const txn = db.transaction(() => {
-      migration.up(db);
+      migration.up(db, ctx);
       insertApplied.run(migration.id, new Date().toISOString());
     });
     try {

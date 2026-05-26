@@ -350,7 +350,7 @@ export class MorningRoutineRunner {
     // gated on Stage A success + today.md health.
     if (pipelineRun !== null) {
       const todayMdHealth = mapDiagnoseToHealth(todayMdState);
-      // Land the `agent/journal.md` block BEFORE the parent-audit row
+      // Land the `journal/agent.md` block BEFORE the parent-audit row
       // emit so the gate-fire moment (which the dashboard / monitoring
       // tooling reads as "morning routine is done") follows the journal
       // write, not precedes it. The appender is self-gating on Stage A's

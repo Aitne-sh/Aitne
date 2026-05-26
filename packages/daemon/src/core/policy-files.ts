@@ -1,16 +1,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
+import { getInjectionPolicy } from "./injection-policy.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("policy-files");
 
 /**
  * Per-file byte cap. Files larger than this are skipped with a warning —
- * a user who accidentally pastes a 50MB transcript into rules/management.md
- * should not silently blow up prompt assembly. 32KB is comfortably above
- * the size of any realistic policy file (the largest templates under
- * `agent-assets/templates/` are under 4KB).
+ * a user who accidentally pastes a 50MB transcript into
+ * policies/management.md should not silently blow up prompt assembly. 32KB
+ * is comfortably above the size of any realistic policy file (the largest
+ * templates under `agent-assets/templates/` are under 4KB).
  */
 export const POLICY_FILE_MAX_BYTES = 32 * 1024;
 
@@ -43,12 +44,12 @@ export function createPromptInjectionBudget(
  * A "policy file" is a natural-language rulebook stored in the vault that
  * the agent should read when executing a particular ProcessKey. Examples:
  *
- *   - `rules/mcp.md` — MCP usage rules (B-003; inject when any MCP enabled)
- *   - `rules/journal-format.md` — daily journal format (morning routine)
- *   - `rules/redaction.md` — secret patterns (all flows)
- *   - `routines/hourly.md` — hourly check list
- *   - `routines/morning.md` — 04:00 checks (morning routine)
- *   - `routines/custom/<slug>.md` — per-custom-routine check list
+ *   - `policies/mcp.md` — MCP usage rules (B-003; inject when any MCP enabled)
+ *   - `policies/journal-format.md` — daily journal format (morning routine)
+ *   - `policies/redaction.md` — secret patterns (all flows)
+ *   - `policies/routines/hourly.md` — hourly check list
+ *   - `policies/routines/morning.md` — 04:00 checks (morning routine)
+ *   - `policies/routines/custom/<slug>.md` — per-custom-routine check list
  *
  * `appendPolicyBlocks` resolves the set of policy files relevant to a
  * ProcessKey, reads each from the runtime context dir, and returns a
@@ -58,7 +59,7 @@ export function createPromptInjectionBudget(
  * task-flow assembly time. Phase 3 layers morning-routine-specific blocks
  * on top (journal-format + journal-export).
  *
- * Note: `rules/management.md` is NOT in this registry — `ContextBuilder`
+ * Note: `policies/management.md` is NOT in this registry — `ContextBuilder`
  * injects it once at the top of every session prompt as the
  * `<management_rules>` block (see `context-builder.ts`). Task-flows
  * (`routine.morning_routine.md`, `setup.update.md`, …) reference that
@@ -76,7 +77,7 @@ export function createPromptInjectionBudget(
  */
 
 export interface PolicyFileRef {
-  /** Relative path under contextDir, e.g. `rules/management.md`. */
+  /** Relative path under contextDir, e.g. `policies/management.md`. */
   path: string;
   /** Short label used in the rendered block header. */
   label: string;
@@ -98,7 +99,7 @@ export interface PolicyContext {
  */
 export const POLICY_FILE_REGISTRY: Record<string, PolicyFileRef[]> = {
   "*": [
-    // `rules/management.md` is intentionally NOT in this registry.
+    // `policies/management.md` is intentionally NOT in this registry.
     // ContextBuilder's `<management_rules>` block is the authoritative
     // injection (task-flows reference the XML tag by name); re-adding
     // a heading-form copy here would duplicate the SoT text in every
@@ -154,13 +155,15 @@ export const POLICY_FILE_REGISTRY: Record<string, PolicyFileRef[]> = {
     },
   ],
   // morning-routine-optimization.md Phase 5 — Stage B opts OUT of every
-  // `*` default except `rules/redaction.md`. `resolvePolicyRefs` honours
-  // the `POLICY_KEY_GLOBAL_OPTOUT` set below by skipping the `*` merge
-  // entirely; Stage B re-declares the redaction ref here so it still
-  // flows through the same vault-write protections every other writer
-  // sees. `rules/mcp.md` is deliberately omitted — Stage B uses no MCP
-  // tools (skill bundle is `context` + `_safety` only), so injecting
-  // the rulebook would waste lite-tier prompt budget for no behaviour.
+  // `*` default except `policies/redaction.md`. The opt-out lives in
+  // `injection-policy.ts:getInjectionPolicy("routine.morning_routine_journal").policyFileGlobalMerge=false`
+  // (v4.2 V20 consolidation); `resolvePolicyRefs` reads that flag and
+  // skips the `*` merge entirely. Stage B re-declares the redaction
+  // ref here so it still flows through the same vault-write protections
+  // every other writer sees. `policies/mcp.md` is deliberately omitted —
+  // Stage B uses no MCP tools (skill bundle is `context` + `_safety`
+  // only), so injecting the rulebook would waste lite-tier prompt
+  // budget for no behaviour.
   "routine.morning_routine_journal": [
     {
       path: CONTEXT_RELATIVE_PATHS.rules.redaction,
@@ -205,43 +208,32 @@ export const POLICY_FILE_REGISTRY: Record<string, PolicyFileRef[]> = {
 };
 
 /**
- * Process keys that opt OUT of the global `*` registry merge. A key in
- * this set sees ONLY its own entries in `POLICY_FILE_REGISTRY[<key>]`
- * — the policies it actually needs must be re-declared inline (the
- * Stage B `routine.morning_routine_journal` entry above re-lists
- * `rules/redaction.md` for exactly this reason).
- *
- * Motivation (`morning-routine-optimization.md` Phase 5): Stage B runs
- * on the lite tier and ships with a `context` + `_safety` skill bundle
- * only. Inheriting `rules/mcp.md` (any time any MCP server is enabled
- * anywhere in the daemon) would pay prompt budget for behaviour Stage
- * B cannot exhibit, defeating the cold-start-floor sizing that makes
- * lite viable. Re-declaring `rules/redaction.md` inline keeps every
- * vault-write surface bound by the same patterns regardless of whether
- * the key opted out.
- */
-const POLICY_KEY_GLOBAL_OPTOUT = new Set<string>([
-  "routine.morning_routine_journal",
-]);
-
-/**
  * Pull the set of policy refs for a processKey. Process-specific entries
  * are appended to the global `*` set. Custom routines (keys starting with
- * `routine.custom.`) resolve to their slugged file automatically. Keys
- * in `POLICY_KEY_GLOBAL_OPTOUT` skip the `*` merge entirely and see only
- * their own entries.
+ * `routine.custom.`) resolve to their slugged file automatically.
+ *
+ * Whether the `*` merge applies is decided by
+ * `injection-policy.ts:getInjectionPolicy(processKey).policyFileGlobalMerge`
+ * (v4.2 V20 consolidation). The legacy `POLICY_KEY_GLOBAL_OPTOUT` set
+ * that used to live here was retired in favour of that single table —
+ * see `injection-policy.ts` for the architectural rationale.
+ *
+ * Stage B (`routine.morning_routine_journal`) is currently the only
+ * process key with `policyFileGlobalMerge=false`; its
+ * `POLICY_FILE_REGISTRY` row above re-declares `policies/redaction.md`
+ * inline so the lite-tier journal author still respects redaction even
+ * after opting out of the `*` merge.
  */
 export function resolvePolicyRefs(processKey: string): PolicyFileRef[] {
-  const global = POLICY_KEY_GLOBAL_OPTOUT.has(processKey)
-    ? []
-    : POLICY_FILE_REGISTRY["*"];
+  const policy = getInjectionPolicy(processKey);
+  const global = policy.policyFileGlobalMerge ? POLICY_FILE_REGISTRY["*"] : [];
   const specific = POLICY_FILE_REGISTRY[processKey] ?? [];
   if (processKey.startsWith("routine.custom.")) {
     const slug = processKey.slice("routine.custom.".length);
     return [
       ...global,
       {
-        path: `routines/custom/${slug}.md`,
+        path: `policies/routines/custom/${slug}.md`,
         label: `Custom routine: ${slug}`,
       },
     ];

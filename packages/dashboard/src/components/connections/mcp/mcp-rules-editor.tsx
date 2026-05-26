@@ -20,18 +20,18 @@ import {
 } from "./mcp-stale-rule-warnings";
 
 /**
- * Editor for `rules/mcp.md`.
+ * Editor for `policies/mcp.md`.
  *
  * The file is the narrative policy the agent consults when deciding *when*
  * to call a given MCP tool. Schema, path, and injector live elsewhere;
  * this module only owns the editor surface.
  *
- * Writes go through PUT /api/context/rules/mcp via the shared
+ * Writes go through PUT /api/context/policies/mcp via the shared
  * `useUpdateContextFile` hook (same optimistic-concurrency path the Journal
  * editor uses). When the agent writes to the file mid-edit, a 409 surfaces
  * the conflict so the user can reload or overwrite.
  */
-const PATH = "rules/mcp";
+const PATH = "policies/mcp";
 
 export function McpRulesEditor() {
   const query = useContextFile(PATH);
@@ -39,7 +39,7 @@ export function McpRulesEditor() {
   if (query.isLoading) {
     return (
       <Card className="p-4">
-        <p className="text-sm text-muted-foreground">Loading rules/mcp.md…</p>
+        <p className="text-sm text-muted-foreground">Loading policies/mcp.md…</p>
       </Card>
     );
   }
@@ -52,7 +52,7 @@ export function McpRulesEditor() {
     return (
       <Card className="p-4">
         <p className="text-sm text-destructive">
-          Failed to load rules/mcp.md:{" "}
+          Failed to load policies/mcp.md:{" "}
           {(query.error as Error | undefined)?.message ?? "unknown error"}
         </p>
       </Card>
@@ -74,7 +74,7 @@ function MissingRulesFile() {
         <FileText className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="space-y-1 text-sm">
           <p className="font-medium text-foreground">
-            <code>rules/mcp.md</code> has not been created yet.
+            <code>policies/mcp.md</code> has not been created yet.
           </p>
           <p className="text-muted-foreground">
             Add your first rule by editing this file. It will be created on
@@ -103,7 +103,7 @@ function CreateEmptyRulesFile() {
       setError(
         err instanceof ApiError || err instanceof Error
           ? err.message
-          : "Failed to create rules/mcp.md",
+          : "Failed to create policies/mcp.md",
       );
     }
   };
@@ -116,7 +116,7 @@ function CreateEmptyRulesFile() {
         disabled={update.isPending}
         className="h-7 text-xs"
       >
-        {update.isPending ? "Creating…" : "Create rules/mcp.md"}
+        {update.isPending ? "Creating…" : "Create policies/mcp.md"}
       </Button>
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
     </div>
@@ -227,7 +227,7 @@ function LoadedEditor({
       <CardHeader className="flex flex-row items-start justify-between gap-4 p-0 pb-0">
         <div className="flex-1">
           <CardTitle className="text-sm font-semibold">
-            MCP management rules (<code>rules/mcp.md</code>)
+            MCP management rules (<code>policies/mcp.md</code>)
           </CardTitle>
           <p className="pt-1 text-xs text-muted-foreground max-w-prose">
             Plain-prose rules the agent reads before every MCP-enabled task

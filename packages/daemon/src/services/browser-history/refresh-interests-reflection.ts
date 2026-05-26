@@ -330,7 +330,7 @@ export function refreshInterestsReflection(
     const writeTracker = options.writeTracker;
 
     // 1. profile.md (Mode A — only if it exists; user-authored)
-    const profilePath = join(contextDir, "user", "profile.md");
+    const profilePath = join(contextDir, "identity", "profile.md");
     if (existsSync(profilePath)) {
       const newBlock = renderProfileBlock({
         clusters: themedClusters,
@@ -347,14 +347,14 @@ export function refreshInterestsReflection(
     }
 
     // 2. user/research-themes.md (Mode B — daemon-owned, auto-create)
-    const themesPath = join(contextDir, "user", "research-themes.md");
+    const themesPath = join(contextDir, "identity", "research-themes.md");
     ensureDirExists(themesPath);
     const themesContent = renderResearchThemesFile(summary);
     markedAtomicWrite(themesPath, themesContent, writeTracker);
     result.targetsWritten.push(relativePath(contextDir, themesPath));
 
     // 3. user/_index.md (Mode A — only if it exists)
-    const indexPath = join(contextDir, "user", "_index.md");
+    const indexPath = join(contextDir, "identity", "_index.md");
     if (existsSync(indexPath)) {
       const indexEntry = renderIndexEntryBlock({
         generatedAt: summary.generatedAt,

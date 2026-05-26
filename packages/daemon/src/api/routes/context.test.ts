@@ -119,16 +119,27 @@ function agentPlanTaskContext(content = validTodayContent()): string {
 //  path-resolve helpers below stay here until PR 4 moves them.)
 
 describe("resolveContextTarget", () => {
-  it("defaults reserved base stems to .base", () => {
+  it("defaults reserved base stems to .base (after legacy alias)", () => {
+    // Legacy `projects/_active` is aliased to `plans/projects/_active`.
     expect(resolveContextTarget("projects/_active")).toEqual({
-      base: "projects/_active",
+      base: "plans/projects/_active",
+      ext: ".base",
+    });
+    // Canonical form is a no-op.
+    expect(resolveContextTarget("plans/projects/_active")).toEqual({
+      base: "plans/projects/_active",
       ext: ".base",
     });
   });
 
-  it("keeps explicit .md extensions for normal markdown files", () => {
+  it("keeps explicit .md extensions for normal markdown files (after legacy alias)", () => {
+    // Legacy `today.md` is aliased to `state/today.md`.
     expect(resolveContextTarget("today.md")).toEqual({
-      base: "today",
+      base: "state/today",
+      ext: ".md",
+    });
+    expect(resolveContextTarget("state/today.md")).toEqual({
+      base: "state/today",
       ext: ".md",
     });
   });
@@ -215,9 +226,26 @@ describe("Context API — optimistic concurrency", () => {
     dataDir = join(tmpdir(), `pa-context-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    mkdirSync(join(contextDir, "agent"), { recursive: true });
+    // Seed the six-class layout the daemon would normally create via
+    // `initDirectories`. Tests write fixtures into these dirs.
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "inbox"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "scratch"), { recursive: true });
+    mkdirSync(join(contextDir, "plans"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "policies", "management-captures"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "journal"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
 
     db = new Database(":memory:");
     applySchema(db);
@@ -285,8 +313,9 @@ describe("Context API — optimistic concurrency", () => {
       const updatedContent = validTodayContent(
         "- [ ] 10:00 Updated primary [work] \u2192DM",
       );
-      writeFileSync(join(primaryVault, "today.md"), primaryContent, "utf-8");
-      writeFileSync(join(contextDir, "today.md"), fallbackContent, "utf-8");
+      mkdirSync(join(primaryVault, "state"), { recursive: true });
+      writeFileSync(join(primaryVault, "state", "today.md"), primaryContent, "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), fallbackContent, "utf-8");
 
       config.vaultMode = "obsidian";
       config.primaryVaultPath = primaryVault;
@@ -302,16 +331,16 @@ describe("Context API — optimistic concurrency", () => {
         body: JSON.stringify({ content: updatedContent }),
       });
       expect(putRes.status).toBe(200);
-      expect(readFileSync(join(primaryVault, "today.md"), "utf-8")).toBe(
+      expect(readFileSync(join(primaryVault, "state", "today.md"), "utf-8")).toBe(
         updatedContent,
       );
-      expect(readFileSync(join(contextDir, "today.md"), "utf-8")).toBe(
+      expect(readFileSync(join(contextDir, "state", "today.md"), "utf-8")).toBe(
         fallbackContent,
       );
     });
 
     it("reports editable=true for whitelisted paths", async () => {
-      writeFileSync(join(contextDir, "today.md"), "# Today\n", "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\n", "utf-8");
       const res = await app.request("/api/context/today");
       expect(res.status).toBe(200);
       const data = (await res.json()) as { content: string; lastModified: string; editable: boolean };
@@ -330,7 +359,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("strips trailing .md from the path before whitelist matching", async () => {
-      writeFileSync(join(contextDir, "user", "profile.md"), "# User\n", "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), "# User\n", "utf-8");
       const res = await app.request("/api/context/user/profile.md");
       expect(res.status).toBe(200);
       const data = (await res.json()) as { editable: boolean };
@@ -341,7 +370,7 @@ describe("Context API — optimistic concurrency", () => {
   describe("GET /context/today/reconciliation", () => {
     it("reports Agent Plan rows without matching pending schedules", async () => {
       config.timezone = "UTC";
-      writeFileSync(join(contextDir, "today.md"), validTodayContent(), "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent(), "utf-8");
 
       const res = await app.request("/api/context/today/reconciliation");
 
@@ -360,7 +389,7 @@ describe("Context API — optimistic concurrency", () => {
 
     it("does not accept an unrelated same-time pending schedule", async () => {
       config.timezone = "UTC";
-      writeFileSync(join(contextDir, "today.md"), validTodayContent(), "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent(), "utf-8");
       db.prepare(
         `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status)
          VALUES ('2026-04-21 09:00:00', 'wake', 'Send prep note to the user', '{}', 'pending')`,
@@ -388,7 +417,7 @@ describe("Context API — optimistic concurrency", () => {
       // fingerprint won't match. Bypass agent-day validation by writing
       // directly to disk; the route under test is a GET, not a PUT.
       const content = validTodayContent(undefined, "2026-04-21");
-      writeFileSync(join(contextDir, "today.md"), content, "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), content, "utf-8");
       db.prepare(
         `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status)
          VALUES ('2026-04-21 09:00:00', 'wake', 'Send prep note to the user', ?, 'pending')`,
@@ -413,7 +442,7 @@ describe("Context API — optimistic concurrency", () => {
       config.timezone = "UTC";
       // Same fixture-date pinning as the previous test.
       const content = validTodayContent(undefined, "2026-04-21");
-      writeFileSync(join(contextDir, "today.md"), content, "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), content, "utf-8");
       const taskContext = agentPlanTaskContext(content);
       const stmt = db.prepare(
         `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status)
@@ -437,7 +466,7 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("PUT/PATCH /context/today — schema validation", () => {
     it("rejects legacy # Today content on full replace writes", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       writeFileSync(filePath, validTodayContent(), "utf-8");
 
       const res = await app.request("/api/context/today", {
@@ -454,7 +483,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("rejects malformed formal today.md before writing or snapshotting", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       writeFileSync(filePath, validTodayContent(), "utf-8");
       const malformed = validTodayContent().replace(
         "\n## User Tasks\n- (none)\n",
@@ -475,7 +504,7 @@ describe("Context API — optimistic concurrency", () => {
 
       const snapshotCount = db
         .prepare("SELECT COUNT(*) AS count FROM md_file_snapshots WHERE file_path = ?")
-        .get("today") as { count: number };
+        .get("state/today") as { count: number };
       expect(snapshotCount.count).toBe(0);
     });
 
@@ -488,7 +517,7 @@ describe("Context API — optimistic concurrency", () => {
       // buildSchemaIssues emits a per-field context.invalid_body_field
       // issue with the received value + the enum's
       // validValues so the next retry can fix the mode without guessing.
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       writeFileSync(filePath, validTodayContent(), "utf-8");
 
       const res = await app.request("/api/context/today", {
@@ -516,7 +545,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("PATCH /context/* with a non-object body returns body_not_object with the received type", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       writeFileSync(filePath, validTodayContent(), "utf-8");
 
       const res = await app.request("/api/context/today", {
@@ -539,7 +568,7 @@ describe("Context API — optimistic concurrency", () => {
       // succeeded silently and the dispatcher's post-run check then queued a
       // retry. The fix surfaces the mismatch synchronously so the agent can
       // correct in-session.
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       // Build a body whose H1 is a date that cannot be the current
       // agent-day regardless of when the test runs (1970-01-01 < every
       // post-epoch agent-day).
@@ -566,7 +595,7 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("PUT/PATCH /context/* — frontmatter validation", () => {
     it("rejects guarded context files without required frontmatter", async () => {
-      const filePath = join(contextDir, "user", "profile.md");
+      const filePath = join(contextDir, "identity", "profile.md");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PUT",
@@ -582,7 +611,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("accepts guarded context files with valid frontmatter and an H1", async () => {
-      const filePath = join(contextDir, "user", "profile.md");
+      const filePath = join(contextDir, "identity", "profile.md");
       const content = validUserProfileContent();
 
       const res = await app.request("/api/context/user/profile", {
@@ -596,7 +625,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("rejects PATCH writes that would leave guarded files structurally invalid", async () => {
-      const filePath = join(contextDir, "user", "profile.md");
+      const filePath = join(contextDir, "identity", "profile.md");
       writeFileSync(filePath, "# User\n\n## Identity\n", "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
@@ -749,7 +778,7 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("GET /context/health and POST /context/repair/stub", () => {
     it("reports missing stubs and frontmatter drift", async () => {
-      writeFileSync(join(contextDir, "user", "profile.md"), "# User\n", "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), "# User\n", "utf-8");
 
       const res = await app.request("/api/context/health");
 
@@ -762,14 +791,14 @@ describe("Context API — optimistic concurrency", () => {
       expect(data.status).toBe("error");
       expect(data.userAreaGaps).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ path: "user/people.md", repairable: true }),
-          expect.objectContaining({ path: "user/work.md", repairable: true }),
+          expect.objectContaining({ path: "identity/people.md", repairable: true }),
+          expect.objectContaining({ path: "identity/work.md", repairable: true }),
         ]),
       );
       expect(data.frontmatterErrors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            path: "user/profile.md",
+            path: "identity/profile.md",
             code: "missing_frontmatter",
           }),
         ]),
@@ -782,7 +811,7 @@ describe("Context API — optimistic concurrency", () => {
         dataDir,
         "agent-assets",
         "templates",
-        "user",
+        "identity",
         "people.md",
       );
       mkdirSync(join(templatePath, ".."), { recursive: true });
@@ -792,16 +821,16 @@ describe("Context API — optimistic concurrency", () => {
       const res = await app.request("/api/context/repair/stub", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "user/people" }),
+        body: JSON.stringify({ path: "identity/people" }),
       });
 
       expect(res.status).toBe(200);
       const data = (await res.json()) as { status: string; path: string };
       expect(data).toMatchObject({
         status: "created",
-        path: "user/people.md",
+        path: "identity/people.md",
       });
-      expect(readFileSync(join(contextDir, "user", "people.md"), "utf-8")).toBe(
+      expect(readFileSync(join(contextDir, "identity", "people.md"), "utf-8")).toBe(
         content,
       );
     });
@@ -810,7 +839,7 @@ describe("Context API — optimistic concurrency", () => {
       const res = await app.request("/api/context/repair/stub", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "rules/management.md" }),
+        body: JSON.stringify({ path: "policies/management.md" }),
       });
 
       expect(res.status).toBe(400);
@@ -821,10 +850,10 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("GET /context/list/routines — custom routine flattening", () => {
     it("surfaces files under routines/custom/ with a custom/ prefix", async () => {
-      mkdirSync(join(contextDir, "routines", "custom"), { recursive: true });
-      writeFileSync(join(contextDir, "routines", "hourly.md"), "# hourly\n", "utf-8");
+      mkdirSync(join(contextDir, "policies", "routines", "custom"), { recursive: true });
+      writeFileSync(join(contextDir, "policies", "routines", "hourly.md"), "# hourly\n", "utf-8");
       writeFileSync(
-        join(contextDir, "routines", "custom", "tuesday-notion.md"),
+        join(contextDir, "policies", "routines", "custom", "tuesday-notion.md"),
         "# tuesday\n",
         "utf-8",
       );
@@ -838,8 +867,8 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("returns an empty custom/ list when the subdir is absent", async () => {
-      mkdirSync(join(contextDir, "routines"), { recursive: true });
-      writeFileSync(join(contextDir, "routines", "hourly.md"), "# h\n", "utf-8");
+      mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+      writeFileSync(join(contextDir, "policies", "routines", "hourly.md"), "# h\n", "utf-8");
 
       const res = await app.request("/api/context/list/routines");
       expect(res.status).toBe(200);
@@ -885,6 +914,7 @@ describe("Context API — optimistic concurrency", () => {
 
       const filePath = join(
         contextDir,
+        "policies",
         "routines",
         "custom",
         "tuesday-notion.md",
@@ -924,6 +954,7 @@ describe("Context API — optimistic concurrency", () => {
 
       const filePath = join(
         contextDir,
+        "policies",
         "routines",
         "custom",
         "tuesday-notion.md",
@@ -934,7 +965,7 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("POST /context/restore-snapshot/:id", () => {
     it("restores the selected snapshot and snapshots the current file first", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       const current = validTodayContent("- [ ] 09:00 Current note [work] \u2192DM");
       const restored = validTodayContent("- [ ] 10:00 Restored note [work] \u2192DM");
       writeFileSync(filePath, current, "utf-8");
@@ -942,7 +973,7 @@ describe("Context API — optimistic concurrency", () => {
         .prepare(
           "INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)",
         )
-        .run("today", restored, "test_seed");
+        .run("state/today", restored, "test_seed");
       const snapshotId = Number(insert.lastInsertRowid);
 
       const res = await app.request(`/api/context/restore-snapshot/${snapshotId}`, {
@@ -956,7 +987,7 @@ describe("Context API — optimistic concurrency", () => {
         backupSnapshotId: number | null;
       };
       expect(data.status).toBe("restored");
-      expect(data.path).toBe("today");
+      expect(data.path).toBe("state/today");
       expect(data.restoredFromSnapshotId).toBe(snapshotId);
       expect(data.backupSnapshotId).toBeGreaterThan(0);
       expect(readFileSync(filePath, "utf-8")).toBe(restored);
@@ -965,7 +996,7 @@ describe("Context API — optimistic concurrency", () => {
         .prepare(
           "SELECT content, trigger FROM md_file_snapshots WHERE file_path = ? ORDER BY id DESC",
         )
-        .all("today") as Array<{ content: string; trigger: string }>;
+        .all("state/today") as Array<{ content: string; trigger: string }>;
       expect(rows[0]).toEqual({
         content: current,
         trigger: "api_restore_snapshot",
@@ -973,7 +1004,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("restores legacy guarded snapshots that predate frontmatter validation", async () => {
-      const filePath = join(contextDir, "user", "profile.md");
+      const filePath = join(contextDir, "identity", "profile.md");
       const current = validUserProfileContent();
       const restored = "# User\n\n## Identity\n- legacy snapshot\n";
       writeFileSync(filePath, current, "utf-8");
@@ -1004,7 +1035,7 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("PUT /context/* — expectedMtime", () => {
     it("succeeds when expectedMtime matches the current file", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       const v1 = validTodayContent("- [ ] 09:00 Version one [work] \u2192DM");
       const v2 = validTodayContent("- [ ] 10:00 Version two [work] \u2192DM");
       writeFileSync(filePath, v1, "utf-8");
@@ -1028,7 +1059,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("returns 409 with currentContent when expectedMtime is stale", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       const v1 = validTodayContent("- [ ] 09:00 Version one [work] \u2192DM");
       const userEdit = validTodayContent("- [ ] 10:00 User edit [work] \u2192DM");
       writeFileSync(filePath, v1, "utf-8");
@@ -1067,7 +1098,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("allows write without expectedMtime (backward compat for agent callers)", async () => {
-      const filePath = join(contextDir, "today.md");
+      const filePath = join(contextDir, "state", "today.md");
       const agentWrite = validTodayContent("- [ ] 10:00 Agent write [work] \u2192DM");
       writeFileSync(filePath, validTodayContent(), "utf-8");
 
@@ -1081,7 +1112,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("creates a new file when expectedMtime is omitted and file does not exist", async () => {
-      const filePath = join(contextDir, "projects", "new-project.md");
+      const filePath = join(contextDir, "plans", "projects", "new-project.md");
 
       const res = await app.request("/api/context/projects/new-project", {
         method: "PUT",
@@ -1128,7 +1159,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("PATCH returns 400 invalid_json_body with SyntaxError detail when body is not valid JSON", async () => {
-      writeFileSync(join(contextDir, "today.md"), "v1\n", "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), "v1\n", "utf-8");
       const res = await app.request("/api/context/today", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1159,7 +1190,7 @@ describe("Context API — optimistic concurrency", () => {
     ].join("\n"));
 
     it("appends content to a section", async () => {
-      writeFileSync(join(contextDir, "user", "profile.md"), userMd, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), userMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1174,14 +1205,14 @@ describe("Context API — optimistic concurrency", () => {
       const data = (await res.json()) as { status: string };
       expect(data.status).toBe("appended");
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).toContain("- Language: English");
       expect(updated).toContain("- Verbosity: concise");
       expect(updated).toContain("- Formality: casual");
     });
 
     it("classifies today Agent Log patches as quiet prompt-context changes", async () => {
-      writeFileSync(join(contextDir, "today.md"), validTodayContent(), "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent(), "utf-8");
 
       const res = await app.request("/api/context/today", {
         method: "PATCH",
@@ -1196,8 +1227,8 @@ describe("Context API — optimistic concurrency", () => {
       expect(res.status).toBe(200);
       expect(promptChanges).toEqual([
         {
-          path: "today",
-          reason: "context_patch:today",
+          path: "state/today",
+          reason: "context_patch:state/today",
           tier: "quiet",
           tierReason: "today_agent_log_section",
         },
@@ -1205,7 +1236,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("classifies today Agent Plan patches as loud prompt-context changes", async () => {
-      writeFileSync(join(contextDir, "today.md"), validTodayContent(), "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent(), "utf-8");
 
       const res = await app.request("/api/context/today", {
         method: "PATCH",
@@ -1220,8 +1251,8 @@ describe("Context API — optimistic concurrency", () => {
       expect(res.status).toBe(200);
       expect(promptChanges).toEqual([
         {
-          path: "today",
-          reason: "context_patch:today",
+          path: "state/today",
+          reason: "context_patch:state/today",
           tier: "loud",
           tierReason: "default_loud",
         },
@@ -1229,8 +1260,8 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("appends to an empty section (end of file)", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "user", "profile.md"), userMd, "utf-8");
+      mkdirSync(join(contextDir, "identity"), { recursive: true });
+      writeFileSync(join(contextDir, "identity", "profile.md"), userMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1243,7 +1274,7 @@ describe("Context API — optimistic concurrency", () => {
       });
       expect(res.status).toBe(200);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).toContain("## Raw Signals");
       expect(updated).toContain("- [2026-04-10 10:00:00] [reaction] thumbs up");
       // Other sections must be intact
@@ -1252,8 +1283,8 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("replaces section content without destroying other sections", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "user", "profile.md"), userMd, "utf-8");
+      mkdirSync(join(contextDir, "identity"), { recursive: true });
+      writeFileSync(join(contextDir, "identity", "profile.md"), userMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1266,7 +1297,7 @@ describe("Context API — optimistic concurrency", () => {
       });
       expect(res.status).toBe(200);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       // Replaced section
       expect(updated).toContain("- Language: Spanish");
       expect(updated).toContain("- Verbosity: detailed");
@@ -1277,8 +1308,8 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("clears a section", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "user", "profile.md"), userMd, "utf-8");
+      mkdirSync(join(contextDir, "identity"), { recursive: true });
+      writeFileSync(join(contextDir, "identity", "profile.md"), userMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1290,7 +1321,7 @@ describe("Context API — optimistic concurrency", () => {
       });
       expect(res.status).toBe(200);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).toContain("## Communication Style");
       expect(updated).not.toContain("- Language: English");
       // Other sections preserved
@@ -1298,8 +1329,8 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("returns 400 for non-existent section", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "user", "profile.md"), userMd, "utf-8");
+      mkdirSync(join(contextDir, "identity"), { recursive: true });
+      writeFileSync(join(contextDir, "identity", "profile.md"), userMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1317,8 +1348,8 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("consecutive appends produce correct separator", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "user", "profile.md"), userMd, "utf-8");
+      mkdirSync(join(contextDir, "identity"), { recursive: true });
+      writeFileSync(join(contextDir, "identity", "profile.md"), userMd, "utf-8");
 
       // First append
       await app.request("/api/context/user/profile", {
@@ -1342,7 +1373,7 @@ describe("Context API — optimistic concurrency", () => {
         }),
       });
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).toContain("- [2026-04-10 10:00:00] [reaction] signal 1");
       expect(updated).toContain("- [2026-04-10 10:01:00] [reaction] signal 2");
       // No double-newline gaps between entries
@@ -1368,7 +1399,7 @@ describe("Context API — optimistic concurrency", () => {
     ].join("\n"));
 
     it("removes entries with timestamp ≤ cutoff", async () => {
-      writeFileSync(join(contextDir, "user", "profile.md"), signalsMd, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), signalsMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1384,7 +1415,7 @@ describe("Context API — optimistic concurrency", () => {
       expect(data.status).toBe("cleared");
       expect(data.removedCount).toBe(2);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).not.toContain("old signal 1");
       expect(updated).not.toContain("old signal 2");
       expect(updated).toContain("new signal 3");
@@ -1394,7 +1425,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("preserves all entries when cutoff is before all timestamps", async () => {
-      writeFileSync(join(contextDir, "user", "profile.md"), signalsMd, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), signalsMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1411,7 +1442,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("returns 400 when cutoff is missing", async () => {
-      writeFileSync(join(contextDir, "user", "profile.md"), signalsMd, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), signalsMd, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1440,7 +1471,7 @@ describe("Context API — optimistic concurrency", () => {
         "- [2026-04-10 03:00:00] [ignore] entry 3",
         "",
       ].join("\n"));
-      writeFileSync(join(contextDir, "user", "profile.md"), md, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), md, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1457,7 +1488,7 @@ describe("Context API — optimistic concurrency", () => {
       expect(data.status).toBe("appended");
       expect(data.trimmedCount).toBe(1);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).not.toContain("entry 1"); // oldest trimmed
       expect(updated).toContain("entry 2");
       expect(updated).toContain("entry 3");
@@ -1472,7 +1503,7 @@ describe("Context API — optimistic concurrency", () => {
         "- [2026-04-10 01:00:00] [ignore] entry 1",
         "",
       ].join("\n"));
-      writeFileSync(join(contextDir, "user", "profile.md"), md, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), md, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1507,7 +1538,7 @@ describe("Context API — optimistic concurrency", () => {
         "- [2026-04-10 03:00:00] [reaction] new 3",
         "",
       ].join("\n"));
-      writeFileSync(join(contextDir, "user", "profile.md"), md, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), md, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1522,7 +1553,7 @@ describe("Context API — optimistic concurrency", () => {
       const data = (await res.json()) as { removedCount: number };
       expect(data.removedCount).toBe(2);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).not.toContain("old 1");
       expect(updated).not.toContain("old 2");
       expect(updated).toContain("new 3");
@@ -1545,7 +1576,7 @@ describe("Context API — optimistic concurrency", () => {
         "- [2026-04-10 03:00:00] [ignore] entry 3",
         "",
       ].join("\n"));
-      writeFileSync(join(contextDir, "user", "profile.md"), md, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), md, "utf-8");
 
       const res = await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1561,7 +1592,7 @@ describe("Context API — optimistic concurrency", () => {
       const data = (await res.json()) as { trimmedCount: number };
       expect(data.trimmedCount).toBe(1);
 
-      const updated = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
+      const updated = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
       expect(updated).not.toContain("entry 1");
       expect(updated).toContain("entry 2");
       expect(updated).toContain("entry 4");
@@ -1577,7 +1608,7 @@ describe("Context API — optimistic concurrency", () => {
     it("records X-Session-Id header in snapshot on PUT", async () => {
       const oldContent = withUserFrontmatter("# User\nold content\n");
       const newContent = withUserFrontmatter("# User\nnew content\n");
-      writeFileSync(join(contextDir, "user", "profile.md"), oldContent, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), oldContent, "utf-8");
 
       await app.request("/api/context/user/profile", {
         method: "PUT",
@@ -1590,13 +1621,13 @@ describe("Context API — optimistic concurrency", () => {
 
       const snapshot = db
         .prepare("SELECT session_id FROM md_file_snapshots WHERE file_path = ? ORDER BY id DESC LIMIT 1")
-        .get("user/profile") as { session_id: string | null } | undefined;
+        .get("identity/profile") as { session_id: string | null } | undefined;
       expect(snapshot?.session_id).toBe("session-abc-123");
     });
 
     it("records X-Session-Id header in snapshot on PATCH", async () => {
       const md = withUserFrontmatter("# User\n\n## Identity\n- Name: Test\n");
-      writeFileSync(join(contextDir, "user", "profile.md"), md, "utf-8");
+      writeFileSync(join(contextDir, "identity", "profile.md"), md, "utf-8");
 
       await app.request("/api/context/user/profile", {
         method: "PATCH",
@@ -1613,7 +1644,7 @@ describe("Context API — optimistic concurrency", () => {
 
       const snapshot = db
         .prepare("SELECT session_id FROM md_file_snapshots WHERE file_path = ? ORDER BY id DESC LIMIT 1")
-        .get("user/profile") as { session_id: string | null } | undefined;
+        .get("identity/profile") as { session_id: string | null } | undefined;
       expect(snapshot?.session_id).toBe("session-xyz-789");
     });
   });
@@ -1630,14 +1661,14 @@ describe("Context API — optimistic concurrency", () => {
       expect(res.status).toBe(200);
       const data = (await res.json()) as { status: string };
       expect(data.status).toBe("updated");
-      expect(readFileSync(join(contextDir, "agent", "journal.md"), "utf-8")).toBe(
+      expect(readFileSync(join(contextDir, "journal", "agent.md"), "utf-8")).toBe(
         "# Agent Journal\n",
       );
     });
 
     it("rejects PUT with 409 when agent/journal already exists", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W14\n- note\n",
         "utf-8",
       );
@@ -1652,14 +1683,14 @@ describe("Context API — optimistic concurrency", () => {
       expect(data.error).toBe("append_only");
 
       // Original content preserved
-      const content = readFileSync(join(contextDir, "agent", "journal.md"), "utf-8");
+      const content = readFileSync(join(contextDir, "journal", "agent.md"), "utf-8");
       expect(content).toContain("## Weekly 2026-W14");
       expect(content).not.toContain("overwritten!");
     });
 
     it("still allows PATCH append_to_file on existing agent/journal", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W13\n- existing note\n",
         "utf-8",
       );
@@ -1673,7 +1704,7 @@ describe("Context API — optimistic concurrency", () => {
         }),
       });
       expect(res.status).toBe(200);
-      const content = readFileSync(join(contextDir, "agent", "journal.md"), "utf-8");
+      const content = readFileSync(join(contextDir, "journal", "agent.md"), "utf-8");
       // Both sections present, new one appended at EOF
       expect(content).toContain("## Weekly 2026-W13");
       expect(content).toContain("## Weekly 2026-W14");
@@ -1700,7 +1731,7 @@ describe("Context API — optimistic concurrency", () => {
       expect(data.error).toBe("append_only");
 
       // First content survives, second never written
-      const content = readFileSync(join(contextDir, "agent", "journal.md"), "utf-8");
+      const content = readFileSync(join(contextDir, "journal", "agent.md"), "utf-8");
       expect(content).toContain("## Weekly 2026-W14");
       expect(content).not.toContain("## Weekly 2026-W15");
     });
@@ -1714,7 +1745,7 @@ describe("Context API — optimistic concurrency", () => {
     // PUT-side gate was meant to enforce.
     it("rejects PATCH mode=replace on agent/journal with 409 append_only_violation", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W14\n- protected note\n",
         "utf-8",
       );
@@ -1735,7 +1766,7 @@ describe("Context API — optimistic concurrency", () => {
 
       // Original content fully preserved — `replace` never landed.
       const content = readFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "utf-8",
       );
       expect(content).toContain("- protected note");
@@ -1744,7 +1775,7 @@ describe("Context API — optimistic concurrency", () => {
 
     it("rejects PATCH mode=clear on agent/journal with 409", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W14\n- protected note\n",
         "utf-8",
       );
@@ -1760,7 +1791,7 @@ describe("Context API — optimistic concurrency", () => {
 
       expect(res.status).toBe(409);
       const content = readFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "utf-8",
       );
       expect(content).toContain("- protected note");
@@ -1768,7 +1799,7 @@ describe("Context API — optimistic concurrency", () => {
 
     it("rejects PATCH mode=clear_before on agent/journal with 409", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W14\n- 2026-04-01 10:00:00 entry\n",
         "utf-8",
       );
@@ -1785,7 +1816,7 @@ describe("Context API — optimistic concurrency", () => {
 
       expect(res.status).toBe(409);
       const content = readFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "utf-8",
       );
       expect(content).toContain("entry");
@@ -1793,7 +1824,7 @@ describe("Context API — optimistic concurrency", () => {
 
     it("still allows PATCH mode=append on agent/journal (the legitimate path)", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W14\n- existing note\n",
         "utf-8",
       );
@@ -1810,7 +1841,7 @@ describe("Context API — optimistic concurrency", () => {
 
       expect(res.status).toBe(200);
       const content = readFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "utf-8",
       );
       expect(content).toContain("- existing note");
@@ -1821,7 +1852,7 @@ describe("Context API — optimistic concurrency", () => {
   describe("PATCH /context/* — append_to_file mode", () => {
     it("appends content to end of file without requiring section", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n\n## Weekly 2026-W13\n- note\n",
         "utf-8",
       );
@@ -1838,7 +1869,7 @@ describe("Context API — optimistic concurrency", () => {
       const data = (await res.json()) as { status: string };
       expect(data.status).toBe("appended");
 
-      const content = readFileSync(join(contextDir, "agent", "journal.md"), "utf-8");
+      const content = readFileSync(join(contextDir, "journal", "agent.md"), "utf-8");
       // Original content preserved
       expect(content).toContain("## Weekly 2026-W13");
       // New content appended as a separate top-level section
@@ -1861,7 +1892,7 @@ describe("Context API — optimistic concurrency", () => {
 
     it("creates a snapshot before appending", async () => {
       writeFileSync(
-        join(contextDir, "agent", "journal.md"),
+        join(contextDir, "journal", "agent.md"),
         "# Agent Journal\n",
         "utf-8",
       );
@@ -1877,7 +1908,7 @@ describe("Context API — optimistic concurrency", () => {
 
       const snapshot = db
         .prepare("SELECT content, trigger FROM md_file_snapshots WHERE file_path = ? ORDER BY id DESC LIMIT 1")
-        .get("agent/journal") as { content: string; trigger: string } | undefined;
+        .get("journal/agent") as { content: string; trigger: string } | undefined;
       expect(snapshot).toBeTruthy();
       expect(snapshot!.content).toBe("# Agent Journal\n");
       expect(snapshot!.trigger).toBe("api_patch");
@@ -1914,7 +1945,7 @@ describe("Context API — optimistic concurrency", () => {
     }
 
     it("rejects bad roadmap PUT bodies before writing or snapshotting", async () => {
-      const filePath = join(contextDir, "roadmap.md");
+      const filePath = join(contextDir, "plans", "roadmap.md");
       writeFileSync(filePath, validRoadmap(), "utf-8");
 
       const res = await app.request("/api/context/roadmap", {
@@ -1969,7 +2000,7 @@ describe("Context API — optimistic concurrency", () => {
       });
 
       expect(res.status).toBe(200);
-      const written = readFileSync(join(contextDir, "roadmap.md"), "utf-8");
+      const written = readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8");
       expect(written).toContain(
         "- [2026-05] LA trip candidate — Source: dashboard",
       );
@@ -1990,14 +2021,14 @@ describe("Context API — optimistic concurrency", () => {
       });
 
       expect(res.status).toBe(200);
-      const written = readFileSync(join(contextDir, "roadmap.md"), "utf-8");
+      const written = readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8");
       expect(written).toContain(
         "- [2026-05] LA trip candidate — Source: manual",
       );
     });
 
     it("rejects bad roadmap PATCH results before snapshotting", async () => {
-      const filePath = join(contextDir, "roadmap.md");
+      const filePath = join(contextDir, "plans", "roadmap.md");
       writeFileSync(filePath, validRoadmap(), "utf-8");
 
       const res = await app.request("/api/context/roadmap", {
@@ -2030,13 +2061,13 @@ describe("Context API — optimistic concurrency", () => {
       });
 
       expect(res.status).toBe(200);
-      expect(readFileSync(join(contextDir, "roadmap.md"), "utf-8")).toBe(
+      expect(readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8")).toBe(
         "# Roadmap\n\nbad body\n",
       );
     });
 
     it("rejects roadmap PUTs that drop completed prep rows", async () => {
-      const filePath = join(contextDir, "roadmap.md");
+      const filePath = join(contextDir, "plans", "roadmap.md");
       const original = validRoadmapWithIds();
       writeFileSync(filePath, original, "utf-8");
 
@@ -2063,7 +2094,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("lets the operator bypass skip the transition guard", async () => {
-      const filePath = join(contextDir, "roadmap.md");
+      const filePath = join(contextDir, "plans", "roadmap.md");
       const original = validRoadmapWithIds();
       writeFileSync(filePath, original, "utf-8");
       const next = original.replace(
@@ -2095,7 +2126,7 @@ describe("Context API — optimistic concurrency", () => {
         } as unknown as Parameters<typeof createContextRoutes>[0]),
       );
 
-      const res = await deterministicApp.request("/api/context/roadmap/id", {
+      const res = await deterministicApp.request("/api/context/plans/roadmap/id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ creationDate: "2026-04-19" }),
@@ -2107,7 +2138,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("retries roadmap id collisions against current roadmap content", async () => {
-      writeFileSync(join(contextDir, "roadmap.md"), validRoadmapWithIds(), "utf-8");
+      writeFileSync(join(contextDir, "plans", "roadmap.md"), validRoadmapWithIds(), "utf-8");
       const suffixes = [
         Buffer.from([0xa3, 0xf1, 0xc2]),
         Buffer.from([0xb8, 0xe7, 0xd4]),
@@ -2123,7 +2154,7 @@ describe("Context API — optimistic concurrency", () => {
         } as unknown as Parameters<typeof createContextRoutes>[0]),
       );
 
-      const res = await deterministicApp.request("/api/context/roadmap/id", {
+      const res = await deterministicApp.request("/api/context/plans/roadmap/id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceDate: "2026-04-19" }),
@@ -2135,7 +2166,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("returns 503 when roadmap id generation exhausts collision retries", async () => {
-      writeFileSync(join(contextDir, "roadmap.md"), validRoadmapWithIds(), "utf-8");
+      writeFileSync(join(contextDir, "plans", "roadmap.md"), validRoadmapWithIds(), "utf-8");
       const deterministicApp = new Hono();
       deterministicApp.route(
         "/api",
@@ -2146,7 +2177,7 @@ describe("Context API — optimistic concurrency", () => {
         } as unknown as Parameters<typeof createContextRoutes>[0]),
       );
 
-      const res = await deterministicApp.request("/api/context/roadmap/id", {
+      const res = await deterministicApp.request("/api/context/plans/roadmap/id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ creationDate: "2026-04-19" }),
@@ -2160,7 +2191,7 @@ describe("Context API — optimistic concurrency", () => {
 
   describe("Management Mode degraded-mode gate", () => {
     it("returns 503 on GET when degraded mode is active", async () => {
-      writeFileSync(join(contextDir, "today.md"), "# Today\n", "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\n", "utf-8");
       setDegradedMode(db, {
         reason: "primary_vault_unreachable",
         path: "/missing/vault",
@@ -2195,7 +2226,7 @@ describe("Context API — optimistic concurrency", () => {
     });
 
     it("serves reads normally after degraded mode is cleared", async () => {
-      writeFileSync(join(contextDir, "today.md"), "# Today\n", "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\n", "utf-8");
       setDegradedMode(db, {
         reason: "primary_vault_unreachable",
         path: "/x",
@@ -2240,13 +2271,30 @@ describe("Context API — additional coverage", () => {
     dataDir = join(tmpdir(), `pa-ctx-extra-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     contextDir = join(dataDir, "context");
     mkdirSync(contextDir, { recursive: true });
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    mkdirSync(join(contextDir, "agent"), { recursive: true });
-    mkdirSync(join(contextDir, "routines"), { recursive: true });
-    mkdirSync(join(contextDir, "routines", "custom"), { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
-    mkdirSync(join(contextDir, "daily"), { recursive: true });
+    // Seed the six-class layout the daemon would normally create via
+    // `initDirectories`. Tests write fixtures into these dirs.
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "inbox"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "scratch"), { recursive: true });
+    mkdirSync(join(contextDir, "plans"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "policies", "management-captures"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "journal"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
     mkdirSync(join(contextDir, "git"), { recursive: true });
     db = new Database(":memory:");
     applySchema(db);
@@ -2355,7 +2403,7 @@ describe("Context API — additional coverage", () => {
     it("archives today.md to yesterday.md when it exists", async () => {
       const todayStr = getAgentDayDateStr(undefined, 4);
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         `# ${todayStr} (Day)\nsome content\n`,
         "utf-8",
       );
@@ -2364,8 +2412,8 @@ describe("Context API — additional coverage", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { status: string; archivePath: string };
       expect(body.status).toBe("archived");
-      expect(body.archivePath).toBe("yesterday.md");
-      expect(existsSync(join(contextDir, "yesterday.md"))).toBe(true);
+      expect(body.archivePath).toBe("state/yesterday.md");
+      expect(existsSync(join(contextDir, "state", "yesterday.md"))).toBe(true);
     });
 
     it("returns 404 when today.md does not exist", async () => {
@@ -2388,7 +2436,7 @@ describe("Context API — additional coverage", () => {
 
     it("returns empty files array when dir does not exist", async () => {
       // projects dir exists from beforeEach setup but has no files
-      rmSync(join(contextDir, "projects"), { recursive: true, force: true });
+      rmSync(join(contextDir, "plans", "projects"), { recursive: true, force: true });
       const res = await app.request("/api/context/list/projects");
       expect(res.status).toBe(200);
       const body = (await res.json()) as { files: unknown[] };
@@ -2396,7 +2444,7 @@ describe("Context API — additional coverage", () => {
     });
 
     it("flattens git slug subdirs with overview.md", async () => {
-      const slugDir = join(contextDir, "git", "my-repo");
+      const slugDir = join(contextDir, "knowledge", "repos", "my-repo");
       mkdirSync(slugDir, { recursive: true });
       writeFileSync(join(slugDir, "overview.md"), "# overview\n", "utf-8");
 
@@ -2407,16 +2455,16 @@ describe("Context API — additional coverage", () => {
       expect(names).toContain("my-repo/overview.md");
     });
 
-    it("flattens rules/policies subdir into rules listing", async () => {
-      const policiesDir = join(contextDir, "rules", "policies");
-      mkdirSync(policiesDir, { recursive: true });
-      writeFileSync(join(policiesDir, "no-delete.md"), "# policy\n", "utf-8");
+    it("flattens management-captures subdir into policies listing", async () => {
+      const capturesDir = join(contextDir, "policies", "management-captures");
+      mkdirSync(capturesDir, { recursive: true });
+      writeFileSync(join(capturesDir, "no-delete.md"), "# policy\n", "utf-8");
 
       const res = await app.request("/api/context/list/rules");
       expect(res.status).toBe(200);
       const body = (await res.json()) as { files: { name: string }[] };
       const names = body.files.map((f) => f.name);
-      expect(names).toContain("policies/no-delete.md");
+      expect(names).toContain("management-captures/no-delete.md");
     });
   });
 
@@ -2454,7 +2502,7 @@ describe("Context API — additional coverage", () => {
         } as unknown as Parameters<typeof createContextRoutes>[0]["contextWriteGate"],
       });
 
-      writeFileSync(join(contextDir, "today.md"), validTodayContent(), "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent(), "utf-8");
       const res = await gateApp.request("/api/context/today", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -2498,7 +2546,7 @@ describe("Context API — additional coverage", () => {
       // Seed a today snapshot
       const insert = db
         .prepare("INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)")
-        .run("today", validTodayContent(), "test_seed");
+        .run("state/today", validTodayContent(), "test_seed");
       const snapshotId = Number(insert.lastInsertRowid);
 
       // Acquire the morning routine lock
@@ -2570,12 +2618,12 @@ describe("Context API — additional coverage", () => {
     it("returns 404 when template file is missing despite templatesRoot being set", async () => {
       config.workspaceDir = dataDir;
       // Create the templates root but NOT the specific file
-      mkdirSync(join(dataDir, "agent-assets", "templates", "user"), { recursive: true });
+      mkdirSync(join(dataDir, "agent-assets", "templates", "identity"), { recursive: true });
 
       const res = await app.request("/api/context/repair/stub", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "user/people" }),
+        body: JSON.stringify({ path: "identity/people" }),
       });
       expect(res.status).toBe(404);
       const body = (await res.json()) as { error: string };
@@ -2584,17 +2632,17 @@ describe("Context API — additional coverage", () => {
 
     it("returns 200 with status=exists when stub file already exists", async () => {
       config.workspaceDir = dataDir;
-      const templatePath = join(dataDir, "agent-assets", "templates", "user", "people.md");
+      const templatePath = join(dataDir, "agent-assets", "templates", "identity", "people.md");
       mkdirSync(join(templatePath, ".."), { recursive: true });
       writeFileSync(templatePath, "---\ntype: user\nowner: shared\nupdated: 2026-04-21\n---\n# People\n", "utf-8");
 
       // Pre-create the target file
-      writeFileSync(join(contextDir, "user", "people.md"), "# People already here\n", "utf-8");
+      writeFileSync(join(contextDir, "identity", "people.md"), "# People already here\n", "utf-8");
 
       const res = await app.request("/api/context/repair/stub", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "user/people" }),
+        body: JSON.stringify({ path: "identity/people" }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { status: string };
@@ -2624,7 +2672,7 @@ describe("Context API — additional coverage", () => {
         "- **Action**: sample",
         "",
       ].join("\n");
-      writeFileSync(join(contextDir, "routines", "custom", "my-routine.md"), routineContent, "utf-8");
+      writeFileSync(join(contextDir, "policies", "routines", "custom", "my-routine.md"), routineContent, "utf-8");
 
       const res = await app.request("/api/context/routines/custom/my-routine", {
         method: "DELETE",
@@ -2632,7 +2680,7 @@ describe("Context API — additional coverage", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as { status: string };
       expect(body.status).toBe("deleted");
-      expect(existsSync(join(contextDir, "routines", "custom", "my-routine.md"))).toBe(false);
+      expect(existsSync(join(contextDir, "policies", "routines", "custom", "my-routine.md"))).toBe(false);
     });
 
     it("returns 404 when the file does not exist", async () => {
@@ -2645,7 +2693,7 @@ describe("Context API — additional coverage", () => {
     });
 
     it("returns 403 when deleting a forbidden path (today)", async () => {
-      writeFileSync(join(contextDir, "today.md"), validTodayContent(), "utf-8");
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent(), "utf-8");
       const res = await app.request("/api/context/today", { method: "DELETE" });
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error: string };
@@ -2681,7 +2729,7 @@ describe("Context API — additional coverage", () => {
   describe("PATCH /context/roadmap — roadmap lock rejection", () => {
     it("returns 409 when roadmap lock held and no lockId provided", async () => {
       writeFileSync(
-        join(contextDir, "roadmap.md"),
+        join(contextDir, "plans", "roadmap.md"),
         "# Roadmap\n\n## Section\n- item\n",
         "utf-8",
       );
@@ -2702,7 +2750,7 @@ describe("Context API — additional coverage", () => {
 
   describe("PATCH /context/projects/_active — unsupported for .base files", () => {
     it("returns 400 unsupported_operation", async () => {
-      writeFileSync(join(contextDir, "projects", "_active.base"), "filters:\n  and: []\n", "utf-8");
+      writeFileSync(join(contextDir, "plans", "projects", "_active.base"), "filters:\n  and: []\n", "utf-8");
 
       const res = await app.request("/api/context/projects/_active", {
         method: "PATCH",
@@ -2719,7 +2767,7 @@ describe("Context API — additional coverage", () => {
 
   describe("GET /context/projects/_active.md — rejects non-.base extension", () => {
     it("returns 400 invalid_path for projects/_active.md", async () => {
-      writeFileSync(join(contextDir, "projects", "_active.md"), "# active\n", "utf-8");
+      writeFileSync(join(contextDir, "plans", "projects", "_active.md"), "# active\n", "utf-8");
       const res = await app.request("/api/context/projects/_active.md");
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
@@ -2733,7 +2781,7 @@ describe("Context API — additional coverage", () => {
     it("returns 409 when roadmap lock held and no lockId header provided", async () => {
       await app.request("/api/context/lock/roadmap", { method: "POST" });
 
-      const res = await app.request("/api/context/roadmap/id", {
+      const res = await app.request("/api/context/plans/roadmap/id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ creationDate: "2026-05-10" }),
@@ -2748,7 +2796,7 @@ describe("Context API — additional coverage", () => {
 
   describe("POST /context/roadmap/id — invalid creationDate", () => {
     it("returns 400 validation_error when creationDate is not YYYY-MM-DD", async () => {
-      const res = await app.request("/api/context/roadmap/id", {
+      const res = await app.request("/api/context/plans/roadmap/id", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ creationDate: "not-a-date" }),
@@ -2764,8 +2812,8 @@ describe("Context API — additional coverage", () => {
   describe("safePath — circular symlink returns null → 400 invalid_path", () => {
     it("returns 400 when a circular symlink is encountered", async () => {
       // Create A → B → A circular symlink pair
-      const linkA = join(contextDir, "user", "loop-a.md");
-      const linkB = join(contextDir, "user", "loop-b.md");
+      const linkA = join(contextDir, "identity", "loop-a.md");
+      const linkB = join(contextDir, "identity", "loop-b.md");
       symlinkSync(linkB, linkA);
       symlinkSync(linkA, linkB);
 

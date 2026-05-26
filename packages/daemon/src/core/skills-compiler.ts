@@ -199,7 +199,7 @@ export class SkillsCompiler {
   /**
    * P22 — skill-curation overlay context. When set, the materializer runs an
    * extra pass that resolves `<!-- CURATION:<kind> id="<id>" -->` anchors in
-   * each skill's SKILL.md against `<dataDir>/skills/overlays/<slug>/<id>.json`
+   * each skill's SKILL.md against `<dataDir>/skill-curation-overlays/<slug>/<id>.json`
    * (overlay) or `agent-assets/skills/<slug>/seeds/<id>.seed.json` (seed).
    *
    * Optional and default-OFF — daemon code is expected to call

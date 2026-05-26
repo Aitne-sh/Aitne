@@ -117,7 +117,7 @@ export function useUpdateContextFile() {
 
 /**
  * Delete a context file. Currently the daemon only exposes DELETE for
- * `routines/custom/*` — other paths return 403.
+ * `policies/routines/custom/*` — other paths return 403.
  */
 export function useDeleteContextFile() {
   const qc = useQueryClient();
@@ -132,7 +132,7 @@ export function useDeleteContextFile() {
       // view on the routines page stays fresh.
       const dir = path.includes("/") ? path.split("/")[0] : null;
       if (dir) qc.invalidateQueries({ queryKey: ["context-list", dir] });
-      if (path.startsWith("routines/custom/")) {
+      if (path.startsWith("policies/routines/custom/")) {
         qc.invalidateQueries({ queryKey: ["context-list", "routines"] });
       }
     },

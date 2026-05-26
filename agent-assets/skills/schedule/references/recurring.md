@@ -14,7 +14,7 @@ Use a recurring schedule when the cadence is all that matters and
 there is no need to record *why* the rule exists. If the user wants
 the WHY captured alongside the cadence (so the rule survives a
 context reset), use the `management-policy` skill — it produces a
-`rules/policies/<slug>.md` linked to a `routines/custom/<slug>.md`
+`policies/management-captures/<slug>.md` linked to a `policies/routines/custom/<slug>.md`
 custom routine.
 
 ## POST /api/recurring-schedules — Create
@@ -125,7 +125,7 @@ When `daysOfMonth` contains 29/30/31 and `onMissingDay` is omitted,
 the daemon returns a `warnings[]` entry nudging you to be explicit.
 Persistence still happens — the warning is advisory.
 
-Response: `{ "status":"created", "item":{ "id","recurrenceRule","recurrenceLabel","nextRunAt",...}, "warnings":[] }`. `nextRunAt` is the UTC timestamp the engine has materialized as the first one-shot row's `scheduled_for`. `recurrenceLabel` is the human-readable form rendered into `rules/management.md` §B (e.g. `"Every 2 hours at :30 (UTC)"`, `"Monthly on the 31st at 21:00 (Asia/Tokyo); falls back to last day of month"`).
+Response: `{ "status":"created", "item":{ "id","recurrenceRule","recurrenceLabel","nextRunAt",...}, "warnings":[] }`. `nextRunAt` is the UTC timestamp the engine has materialized as the first one-shot row's `scheduled_for`. `recurrenceLabel` is the human-readable form rendered into `policies/management.md` §B (e.g. `"Every 2 hours at :30 (UTC)"`, `"Monthly on the 31st at 21:00 (Asia/Tokyo); falls back to last day of month"`).
 
 ## GET /api/recurring-schedules — List
 

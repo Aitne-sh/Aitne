@@ -54,7 +54,7 @@ Make the agent fire a particular kind of work on a schedule you pick.
 3. Fill the form:
    - **Slug** — kebab-case (e.g. `tuesday-notion-sweep`); becomes the
      ProcessKey `routine.custom.<slug>` and the file name
-     `routines/custom/<slug>.md`.
+     `policies/routines/custom/<slug>.md`.
    - **Cron expression** — standard 5-field cron (e.g. `0 11 * * 2`).
      The form previews the next three fires.
    - **Backend tier** — `light` or `heavy`. Custom routines have no

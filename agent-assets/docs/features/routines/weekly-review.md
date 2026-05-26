@@ -51,7 +51,7 @@ of the following ISO week.
   retrospective, roadmap, and active projects.
 - Synthesizes three axes — Outcomes, Forward items, Behavioral
   Lessons — and writes the user-facing snapshot.
-- Appends an agent-internal block to `agent/journal.md` for self-
+- Appends an agent-internal block to `journal/agent.md` for self-
   critique, filter quality, and improvement ideas.
 - Sends a brief Friday-evening notification by default (silence gate
   triggers only on an essentially blank week).

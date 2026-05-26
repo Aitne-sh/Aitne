@@ -231,13 +231,28 @@ describe("Daemon API", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "pa-api-test-"));
     contextDir = join(tmpDir, "context");
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
-    mkdirSync(join(contextDir, "daily"), { recursive: true });
-    mkdirSync(join(contextDir, "weekly"), { recursive: true });
-    mkdirSync(join(contextDir, "monthly"), { recursive: true });
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    mkdirSync(join(contextDir, "agent"), { recursive: true });
+    // Seed the six-class layout the daemon would normally create via
+    // `initDirectories`. Tests write fixtures into these dirs.
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "inbox"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "scratch"), { recursive: true });
+    mkdirSync(join(contextDir, "plans"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "journal"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "weekly"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "monthly"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "policies", "management-captures"), {
+      recursive: true,
+    });
+    mkdirSync(join(contextDir, "knowledge"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
 
     const made = makeTestDeps(tmpDir);
     deps = made.deps;
@@ -354,7 +369,7 @@ describe("Daemon API", () => {
 
   describe("Context File API", () => {
     it("GET returns file content", async () => {
-      writeFileSync(join(contextDir, "today.md"), "# Today\nContent here");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\nContent here");
 
       const res = await app.request("/api/context/today");
       expect(res.status).toBe(200);
@@ -365,7 +380,7 @@ describe("Daemon API", () => {
     });
 
     it("GET accepts an optional .md suffix", async () => {
-      writeFileSync(join(contextDir, "today.md"), "# Today\nContent here");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\nContent here");
 
       const res = await app.request("/api/context/today.md");
       expect(res.status).toBe(200);
@@ -380,7 +395,7 @@ describe("Daemon API", () => {
     });
 
     it("PUT replaces file content", async () => {
-      writeFileSync(join(contextDir, "today.md"), validTodayContent());
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent());
 
       const res = await app.request("/api/context/today", {
         method: "PUT",
@@ -397,7 +412,7 @@ describe("Daemon API", () => {
 
     it("PUT replaces rules/management content when explicitly requested", async () => {
       writeFileSync(
-        join(contextDir, "rules", "management.md"),
+        join(contextDir, "policies", "management.md"),
         validRuleContent("# Management Rules\n\n## Source of Truth\nold\n"),
       );
 
@@ -413,7 +428,7 @@ describe("Daemon API", () => {
 
     it("PATCH updates a section in rules/management", async () => {
       writeFileSync(
-        join(contextDir, "rules", "management.md"),
+        join(contextDir, "policies", "management.md"),
         validRuleContent(
           "# Management Rules\n\n## Source of Truth\n- old\n\n## Notification Rules\n- old quiet hours\n",
         ),
@@ -438,7 +453,7 @@ describe("Daemon API", () => {
 
     it("normalizes .md suffix before permission checks", async () => {
       writeFileSync(
-        join(contextDir, "rules", "management.md"),
+        join(contextDir, "policies", "management.md"),
         validRuleContent("# Management Rules\n"),
       );
 
@@ -454,7 +469,7 @@ describe("Daemon API", () => {
 
     it("PATCH appends to section", async () => {
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         "# Today\n\n## Schedule\n- 9:00 Meeting\n\n## Tasks\n- Task 1\n\n## Agent Notes\n\n## Agent Log\n",
       );
 
@@ -480,7 +495,7 @@ describe("Daemon API", () => {
 
     it("PATCH returns 400 for missing section", async () => {
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         "# Today\n\n## Schedule\n- 9:00\n",
       );
 
@@ -502,7 +517,7 @@ describe("Daemon API", () => {
 
     it("PATCH and PUT user are both allowed", async () => {
       writeFileSync(
-        join(contextDir, "user", "profile.md"),
+        join(contextDir, "identity", "profile.md"),
         validUserContent(
           "# User\n\n## Raw Signals\n\n## Learned Context\n\n## Communication Style\n",
         ),
@@ -533,7 +548,7 @@ describe("Daemon API", () => {
 
     it("PUT saves snapshot to md_file_snapshots", async () => {
       const original = validTodayContent("- [ ] 09:00 Original note [work] \u2192DM");
-      writeFileSync(join(contextDir, "today.md"), original);
+      writeFileSync(join(contextDir, "state", "today.md"), original);
 
       await app.request("/api/context/today", {
         method: "PUT",
@@ -545,7 +560,7 @@ describe("Daemon API", () => {
 
       const snapshot = db
         .prepare(
-          "SELECT * FROM md_file_snapshots WHERE file_path = 'today'",
+          "SELECT * FROM md_file_snapshots WHERE file_path = 'state/today'",
         )
         .get() as { content: string; trigger: string } | undefined;
 
@@ -556,7 +571,7 @@ describe("Daemon API", () => {
 
     it("POST /context/archive-today rotates today.md → yesterday.md (B-007 §5.9)", async () => {
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         "# Today 2026-04-02\n\nContent",
       );
 
@@ -567,19 +582,19 @@ describe("Daemon API", () => {
 
       const data = (await res.json()) as Record<string, any>;
       expect(data.status).toBe("archived");
-      expect(data.archivePath).toBe("yesterday.md");
+      expect(data.archivePath).toBe("state/yesterday.md");
       expect(data.rotatedFrom).toBe("2026-04-02");
 
-      expect(existsSync(join(contextDir, "yesterday.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "state", "yesterday.md"))).toBe(true);
     });
 
     it("GET /context/list/:dir lists files", async () => {
       writeFileSync(
-        join(contextDir, "projects", "test-project.md"),
+        join(contextDir, "plans", "projects", "test-project.md"),
         "# Test",
       );
       writeFileSync(
-        join(contextDir, "projects", "_active.base"),
+        join(contextDir, "plans", "projects", "_active.base"),
         "filters:\n  and:\n    - state != \"archived\"\n",
       );
 
@@ -594,7 +609,7 @@ describe("Daemon API", () => {
 
     it("GET /context/list/:dir lists user files", async () => {
       writeFileSync(
-        join(contextDir, "user", "people.md"),
+        join(contextDir, "identity", "people.md"),
         "# People\n",
       );
 
@@ -609,7 +624,7 @@ describe("Daemon API", () => {
 
     it("GET /context/list/:dir lists monthly files", async () => {
       writeFileSync(
-        join(contextDir, "monthly", "2026-04.md"),
+        join(contextDir, "journal", "monthly", "2026-04.md"),
         "# Monthly Review 2026-04\n",
       );
 
@@ -673,7 +688,7 @@ describe("Daemon API", () => {
 
     it("GET /api/context/user/_index returns the detailed profile index", async () => {
       writeFileSync(
-        join(contextDir, "user", "_index.md"),
+        join(contextDir, "identity", "_index.md"),
         "# User Details Index\n\n- [people.md](people.md): People",
       );
 
@@ -867,9 +882,9 @@ describe("Daemon API", () => {
     });
 
     it("lists files under B-007 new directories", async () => {
-      mkdirSync(join(contextDir, "daily"), { recursive: true });
+      mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
       writeFileSync(
-        join(contextDir, "daily", "2026-04-17.md"),
+        join(contextDir, "journal", "daily", "2026-04-17.md"),
         "# 2026-04-17\n",
       );
       const res = await app.request("/api/context/list/daily");
@@ -1000,7 +1015,7 @@ describe("Daemon API", () => {
 
     it("POST /setup/start update mode triggers the rules/management update conversation", async () => {
       writeFileSync(
-        join(contextDir, "rules", "management.md"),
+        join(contextDir, "policies", "management.md"),
         validRuleContent("# Management Rules\n"),
       );
       const handleIncomingMessage = vi.fn();
@@ -1029,7 +1044,7 @@ describe("Daemon API", () => {
 
       expect(handleIncomingMessage).toHaveBeenCalledWith(
         "dashboard-ch",
-        "I'd like to update rules/management.md.",
+        "I'd like to update policies/management.md.",
         { metadata: { setupMode: "update" } },
       );
     });
@@ -1433,25 +1448,26 @@ describe("Daemon API", () => {
       // B-008 P2 — profile.md, user/_index.md, and user-area stubs are
       // written from templates so fresh Obsidian installs have no dangling
       // user/*.md wikilinks.
-      expect(existsSync(join(contextDir, "user", "profile.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "user", "_index.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "user", "people.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "user", "work.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "user", "expertise.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "user", "personal.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "user", "goals.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "context-index.md"))).toBe(true);
-      expect(existsSync(join(contextDir, "projects", "_active.base"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "profile.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "_index.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "people.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "work.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "expertise.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "personal.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "identity", "goals.md"))).toBe(true);
+      // CONTEXT_VAULT_REDESIGN: context-index.md merged into root _index.md.
+      expect(existsSync(join(contextDir, "_index.md"))).toBe(true);
+      expect(existsSync(join(contextDir, "plans", "projects", "_active.base"))).toBe(true);
       expect(existsSync(join(contextDir, "bases", "_active.base"))).toBe(false);
 
-      const userMd = readFileSync(join(contextDir, "user", "profile.md"), "utf-8");
-      const rulesMd = readFileSync(join(contextDir, "rules", "management.md"), "utf-8");
+      const userMd = readFileSync(join(contextDir, "identity", "profile.md"), "utf-8");
+      const rulesMd = readFileSync(join(contextDir, "policies", "management.md"), "utf-8");
       const contextIndexMd = readFileSync(
-        join(contextDir, "context-index.md"),
+        join(contextDir, "_index.md"),
         "utf-8",
       );
-      expect(userMd).toContain("Detailed profile lives under `user/`.");
-      expect(userMd).toContain("Fetch index: `curl -s http://localhost:8321/api/context/user/_index`");
+      expect(userMd).toContain("Detailed profile lives under `identity/`.");
+      expect(userMd).toContain("Fetch index: `curl -s http://localhost:8321/api/context/identity/_index`");
       // Communication Style is NOT a profile section anymore — tone/style
       // preferences live in the `character` runtime-config field per
       // docs/design/15-character.md. The template carries an HTML-comment
@@ -1462,7 +1478,9 @@ describe("Daemon API", () => {
       expect(rulesMd).toContain("## Agent Identity");
       expect(rulesMd).toContain("- AI name: desk bot");
       expect(rulesMd).toContain("- WhatsApp label: [desk bot]");
-      expect(contextIndexMd).toContain("# Context Index");
+      // _index.md (root) — content from the seed template; carries the
+      // reconciler-managed block.
+      expect(contextIndexMd).toContain("# ");
       expect(deps.config.agentDisplayName).toBe("desk bot");
       const storedAgentName = db.prepare(
         "SELECT value_json FROM settings WHERE key = 'agentDisplayName'",
@@ -1502,11 +1520,11 @@ describe("Daemon API", () => {
       const body = (await res.json()) as { error: string };
       expect(body.error).toContain("requires YAML frontmatter");
       expect(deps.config.agentDisplayName).toBe("ai bot");
-      expect(existsSync(join(contextDir, "rules", "management.md"))).toBe(false);
+      expect(existsSync(join(contextDir, "policies", "management.md"))).toBe(false);
     });
 
     it("POST /setup/save-rules does not snapshot rejected setup updates", async () => {
-      const rulesPath = join(contextDir, "rules", "management.md");
+      const rulesPath = join(contextDir, "policies", "management.md");
       const existing = validRuleContent("# Management Rules\n\n## Source of Truth\n- old\n");
       writeFileSync(rulesPath, existing, "utf-8");
 
@@ -1597,7 +1615,7 @@ describe("Daemon API", () => {
 
       expect(res.status).toBe(400);
       expect(deps.config.agentDisplayName).toBe("ai bot");
-      expect(existsSync(join(contextDir, "rules", "management.md"))).toBe(false);
+      expect(existsSync(join(contextDir, "policies", "management.md"))).toBe(false);
     });
 
     it("POST /setup/save-rules preserves the ## Active Policies stanza byte-for-byte (MANAGEMENT-POLICY-CAPTURE-PLAN §5.7)", async () => {
@@ -1626,7 +1644,7 @@ describe("Daemon API", () => {
       expect(res.status).toBe(200);
 
       const saved = readFileSync(
-        join(contextDir, "rules", "management.md"),
+        join(contextDir, "policies", "management.md"),
         "utf-8",
       );
       // Stanza preserved verbatim alongside the daemon-managed
@@ -1659,7 +1677,7 @@ describe("Daemon API", () => {
         const body = (await res.json()) as { error: string; message: string };
         expect(body.error).toBe("primary_vault_path_required");
         expect(body.message).toMatch(/primary vault path/i);
-        expect(existsSync(join(contextDir, "rules", "management.md"))).toBe(false);
+        expect(existsSync(join(contextDir, "policies", "management.md"))).toBe(false);
       } finally {
         deps.config.vaultMode = prev.vaultMode;
         deps.config.primaryVaultPath = prev.primaryVaultPath;
@@ -2535,7 +2553,7 @@ describe("Daemon API", () => {
     });
 
     it("blocks today.md writes during lock without correct lockId", async () => {
-      writeFileSync(join(contextDir, "today.md"), validTodayContent());
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent());
 
       const acqRes = await app.request("/api/context/lock/morning-routine", {
         method: "POST",
@@ -2636,7 +2654,7 @@ describe("Daemon API", () => {
 
     it("blocks roadmap.md writes without X-Lock-Id and accepts with matching id", async () => {
       writeFileSync(
-        join(contextDir, "roadmap.md"),
+        join(contextDir, "plans", "roadmap.md"),
         "# Roadmap\n> Last synced: 2026-04-01\n\n## Annual Goals\n\n## Quarterly Focus\n\n## Long-term Plans\n\n## Recurring\n",
       );
 
@@ -2693,7 +2711,7 @@ describe("Daemon API", () => {
     });
 
     it("does not affect today.md writes when the roadmap lock is held", async () => {
-      writeFileSync(join(contextDir, "today.md"), validTodayContent());
+      writeFileSync(join(contextDir, "state", "today.md"), validTodayContent());
 
       const acqRes = await app.request("/api/context/lock/roadmap", {
         method: "POST",
@@ -2728,8 +2746,9 @@ describe("ReadSensitive auth middleware", () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "pa-rs-test-"));
     const contextDir = join(tmpDir, "context");
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    writeFileSync(join(contextDir, "today.md"), "# Today\n## agent_log\n", "utf-8");
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\n## agent_log\n", "utf-8");
   });
 
   afterEach(() => {
@@ -2872,7 +2891,7 @@ describe("ReadSensitive auth middleware", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as Record<string, any>;
     expect(body.error).toBe("forbidden_origin");
-    expect(existsSync(join(tmpDir, "context", "yesterday.md"))).toBe(false);
+    expect(existsSync(join(tmpDir, "context", "state/yesterday.md"))).toBe(false);
   });
 
   it("allows valid Bearer-authenticated unsafe requests despite browser metadata", async () => {
@@ -2886,7 +2905,7 @@ describe("ReadSensitive auth middleware", () => {
       },
     });
     expect(res.status).toBe(200);
-    expect(existsSync(join(tmpDir, "context", "yesterday.md"))).toBe(true);
+    expect(existsSync(join(tmpDir, "context", "state/yesterday.md"))).toBe(true);
   });
 
   it("allows CLI-style unsafe POSTs without browser metadata", async () => {
@@ -2895,7 +2914,7 @@ describe("ReadSensitive auth middleware", () => {
       method: "POST",
     });
     expect(res.status).toBe(200);
-    expect(existsSync(join(tmpDir, "context", "yesterday.md"))).toBe(true);
+    expect(existsSync(join(tmpDir, "context", "state/yesterday.md"))).toBe(true);
   });
 
   it("rejects browser-originated unsafe POSTs to Notify routes", async () => {

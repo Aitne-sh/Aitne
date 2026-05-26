@@ -97,7 +97,7 @@ user's **external Obsidian vault**.
 > **external** Obsidian vault (user's personal knowledge base reached
 > via `/api/obsidian/*`), **not** the primary management store
 > reached via `/api/context/*`. The agent's own state files
-> (`today.md`, `roadmap.md`, `projects/*`, `user/*`, `rules/*`,
+> (`state/today.md`, `plans/roadmap.md`, `projects/*`, `user/*`, `rules/*`,
 > `routines/*`, `agent/*`) live in the primary store and must
 > **never** receive receipt attachments. See the
 > `external-services` skill's obsidian reference for the external

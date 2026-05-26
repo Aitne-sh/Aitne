@@ -941,7 +941,7 @@ function DangerZone() {
     runAction("factory-reset", {
       title: "Factory reset — really?",
       description:
-        "Wipes everything on this device: conversation history, action logs, runtime settings, context files (including rules/management.md), keychain secrets, encrypted blobs, uploaded attachments, session and skill-optimizer workdirs, all backups, caches, user skills, integrations.md, the managed Codex Azure config, the Whisper model cache, and every user-data table (backends, mail accounts, recurring schedules, receipts, books, travel bookings, runtime state, auth telemetry). The SQLite DB is compacted afterward; restart the daemon to re-bootstrap observers and adapters.",
+        "Wipes everything on this device: conversation history, action logs, runtime settings, context files (including policies/management.md), keychain secrets, encrypted blobs, uploaded attachments, session and skill-optimizer workdirs, all backups, caches, user skills, the managed Codex Azure config, the Whisper model cache, and every user-data table (backends, mail accounts, recurring schedules, receipts, books, travel bookings, runtime state, auth telemetry). The SQLite DB is compacted afterward; restart the daemon to re-bootstrap observers and adapters.",
       confirmLabel: "Continue",
       doubleConfirm: {
         title: "Final confirmation",
@@ -1024,7 +1024,7 @@ function DangerZone() {
 
             <DangerRow
               title="Reinstall context"
-              description="Writes a tarball backup first, then wipes context/ (including rules/management.md) and md_file_snapshots. Conversation history, settings, and credentials are preserved. Restart the daemon to re-seed the vault from templates."
+              description="Writes a tarball backup first, then wipes context/ (including policies/management.md) and md_file_snapshots. Conversation history, settings, and credentials are preserved. Restart the daemon to re-seed the vault from templates."
               icon={<RotateCcw className="h-3.5 w-3.5 mr-1" />}
               label="Reinstall context"
               busy={busy === "reinstall-context"}

@@ -17,7 +17,7 @@
  */
 
 import Database from "better-sqlite3";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -432,7 +432,7 @@ describe("DailyJournalComposer.compose", () => {
     const result = await composer.compose(makeArgs());
 
     expect(result).toMatchObject({ ok: "complete", wroteMode: "put" });
-    const expectedPath = join(tmpDir, "daily", "2026-05-22.md");
+    const expectedPath = join(tmpDir, "journal", "daily", "2026-05-22.md");
     expect(existsSync(expectedPath)).toBe(true);
     const written = readFileSync(expectedPath, "utf-8");
     expect(written).toContain("date: 2026-05-22");
@@ -441,7 +441,7 @@ describe("DailyJournalComposer.compose", () => {
     // First-write path doesn't snapshot a pre-state (file didn't exist).
     expect(snapshotInserts.length).toBe(0);
     expect(writeTrackerEvents.map((e) => e.kind)).toEqual(["markWriting"]);
-    expect(indexedChanges).toEqual(["daily/2026-05-22.md"]);
+    expect(indexedChanges).toEqual(["journal/daily/2026-05-22.md"]);
   });
 
   it("stage_b_null when stageBResult is null", async () => {
@@ -493,7 +493,7 @@ describe("DailyJournalComposer.compose", () => {
       partialReason: "frontmatter_tag_missing",
       wroteMode: "put",
     });
-    const written = readFileSync(join(tmpDir, "daily", "2026-05-22.md"), "utf-8");
+    const written = readFileSync(join(tmpDir, "journal", "daily", "2026-05-22.md"), "utf-8");
     // Body landed even though frontmatter parsing failed.
     expect(written).toContain("# 2026-05-22 (Friday)");
     // Empty arrays for the missing frontmatter fields.
@@ -564,7 +564,7 @@ describe("DailyJournalComposer.compose", () => {
     );
 
     expect(result).toMatchObject({ ok: "complete", wroteMode: "append_revision" });
-    const written = readFileSync(join(tmpDir, "daily", "2026-05-22.md"), "utf-8");
+    const written = readFileSync(join(tmpDir, "journal", "daily", "2026-05-22.md"), "utf-8");
     expect(written).toContain("## Agent revision — 2026-05-23T19:01:12.345Z");
     expect(written).toContain("Second-attempt body");
     // Pre-state was snapshotted before the read-modify-write.
@@ -575,8 +575,10 @@ describe("DailyJournalComposer.compose", () => {
     const { deps } = makeDeps();
     // Sabotage the contextDir so writeFileAtomically hits ENOTDIR on
     // mkdirSync(parent). We do this by writing a regular file at
-    // `<tmpDir>/daily` — the path the composer mkdirs recursively into.
-    writeFileSync(join(tmpDir, "daily"), "x", "utf-8");
+    // `<tmpDir>/journal/daily` — the path the composer mkdirs recursively
+    // into post-restructure.
+    mkdirSync(join(tmpDir, "journal"), { recursive: true });
+    writeFileSync(join(tmpDir, "journal", "daily"), "x", "utf-8");
 
     const composer = new DailyJournalComposer(deps);
     const result = await composer.compose(makeArgs());
@@ -667,7 +669,7 @@ describe("DailyJournalComposer.compose", () => {
     );
 
     expect(result).toMatchObject({ ok: "complete", wroteMode: "append_revision" });
-    const written = readFileSync(join(tmpDir, "daily", "2026-05-22.md"), "utf-8");
+    const written = readFileSync(join(tmpDir, "journal", "daily", "2026-05-22.md"), "utf-8");
     // The original body is preserved, and the revision block lives
     // below it.
     expect(written).toContain("Body line");

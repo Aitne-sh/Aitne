@@ -17,8 +17,8 @@ Output language: write-ups inherit the destination file's policy via the `today`
 2. Group related observations before acting.
 3. For each group, apply the **fetch decision** (below) — `summary_text` + `novelty_score` are pre-computed by the daemon's per-observation summarizer; only `novelty_score >= 2` warrants full content fetch.
 4. Decide actionability:
-   - Update `today.md` for TODOs, blockers, decisions, or deadlines
-   - Update `roadmap.md` or `projects/*.md` only for material project-state changes
+   - Update `state/today.md` for TODOs, blockers, decisions, or deadlines
+   - Update `plans/roadmap.md` or `projects/*.md` only for material project-state changes
    - Schedule a wake-up if the observation implies a future reminder
 5. Apply the smallest meaningful set of context updates.
 6. Mark processed observations consumed via the bulk endpoint

@@ -3,49 +3,49 @@
   "rules": [
     {
       "trigger_pattern": "user states identity or role (I'm a, I work at, my title is)",
-      "destination_path": "user/profile.md",
+      "destination_path": "identity/profile.md",
       "destination_section": "## Identity",
       "destination_mode": "replace"
     },
     {
       "trigger_pattern": "user mentions a person they know with a name plus relationship",
-      "destination_path": "user/people.md",
+      "destination_path": "identity/people.md",
       "destination_section": "## Family",
       "destination_mode": "append_to_file"
     },
     {
       "trigger_pattern": "user mentions a workplace specific (company, team, tech stack)",
-      "destination_path": "user/work.md",
+      "destination_path": "identity/work.md",
       "destination_section": "## Stack",
       "destination_mode": "append_to_file"
     },
     {
       "trigger_pattern": "user describes hobbies, habits, health, or lifestyle facts",
-      "destination_path": "user/personal.md",
+      "destination_path": "identity/personal.md",
       "destination_section": "## Habits",
       "destination_mode": "append_to_file"
     },
     {
       "trigger_pattern": "user states a goal or learning target",
-      "destination_path": "user/goals.md",
+      "destination_path": "identity/goals.md",
       "destination_section": "## Learning",
       "destination_mode": "append_to_file"
     },
     {
       "trigger_pattern": "user states expertise level or tools they use habitually",
-      "destination_path": "user/expertise.md",
+      "destination_path": "identity/expertise.md",
       "destination_section": "## Tools",
       "destination_mode": "append_to_file"
     },
     {
       "trigger_pattern": "user states a notification or day-type preference",
-      "destination_path": "user/profile.md",
+      "destination_path": "identity/profile.md",
       "destination_section": "## Notification Preferences",
       "destination_mode": "replace"
     },
     {
       "trigger_pattern": "user reports a behavioral pattern the agent should adapt to",
-      "destination_path": "user/profile.md",
+      "destination_path": "identity/profile.md",
       "destination_section": "## Learned Context",
       "destination_mode": "append"
     }

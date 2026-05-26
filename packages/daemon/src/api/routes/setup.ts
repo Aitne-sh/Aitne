@@ -31,6 +31,11 @@ import type { RuntimeSettings, RuntimeSettingKey } from "../../settings/runtime-
 import { cleanupSessionWorkdir, getSessionWorkdirPath } from "../../core/workdir.js";
 import type Database from "better-sqlite3";
 import { readJsonBody } from "../json-body.js";
+import {
+  getVaultRestructureAck,
+  getVaultRestructurePendingConsent,
+  setVaultRestructureAck,
+} from "../../db/runtime-state.js";
 
 const logger = createLogger("api:setup");
 
@@ -706,6 +711,60 @@ export function createSetupRoutes(deps: ApiDependencies): Hono {
         200,
       );
     }
+  });
+
+  // CONTEXT_VAULT_REDESIGN_PLAN.md §11.3.4 / V16 — dashboard consent
+  // surface for the Obsidian-mode vault restructure. On Obsidian
+  // installs the boot layer defers the migration until the user opts
+  // in; this endpoint records that opt-in. The migration runs on the
+  // NEXT daemon boot — the response carries that instruction so the
+  // dashboard can ask the user to restart (or trigger a supervisor
+  // restart if one is wired).
+  //
+  // GET returns the current pending-consent state so the dashboard
+  // can decide whether to show the banner.
+  app.get("/setup/vault-restructure-status", (c) => {
+    const pending = getVaultRestructurePendingConsent(db);
+    const ack = getVaultRestructureAck(db);
+    return c.json({
+      pendingConsent: pending,
+      acknowledgement: ack,
+    });
+  });
+
+  app.post("/setup/vault-restructure-ack", async (c) => {
+    const ack = getVaultRestructureAck(db);
+    if (ack) {
+      return c.json(
+        {
+          ok: true,
+          alreadyAcknowledged: true,
+          acknowledgement: ack,
+          restartRequired: false,
+          message:
+            "Vault restructure consent was already recorded; nothing to do.",
+        },
+        200,
+      );
+    }
+    setVaultRestructureAck(db, {
+      at: new Date().toISOString(),
+      source: "dashboard",
+    });
+    logger.info(
+      { source: "dashboard" },
+      "Vault restructure consent recorded — migration will run on next daemon boot.",
+    );
+    return c.json(
+      {
+        ok: true,
+        alreadyAcknowledged: false,
+        restartRequired: true,
+        message:
+          "Consent recorded. Restart the daemon (e.g. `aitne restart`) to run the vault restructure.",
+      },
+      200,
+    );
   });
 
   return app;

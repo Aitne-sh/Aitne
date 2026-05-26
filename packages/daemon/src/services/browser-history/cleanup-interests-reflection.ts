@@ -28,7 +28,7 @@ import {
  *
  *   1. Strip every `<!-- BEGIN aitne:browser-interests v1 … --> …
  *      <!-- END aitne:browser-interests v1 … -->` block from
- *      `user/profile.md`, `user/_index.md`, and every `projects/*.md`.
+ *      `identity/profile.md`, `identity/_index.md`, and every `projects/*.md`.
  *   2. If `alsoDeleteResearchThemesFile` is true (default), delete
  *      `user/research-themes.md` — the wholly-daemon-owned file from
  *      Mode B writes.
@@ -128,7 +128,7 @@ function runCleanup(
   // 1. user/profile.md
   blocksRemoved += stripBlocksFromFile(
     contextDir,
-    join(contextDir, "user", "profile.md"),
+    join(contextDir, "identity", "profile.md"),
     filesAffected,
     writeTracker,
   );
@@ -136,7 +136,7 @@ function runCleanup(
   // 2. user/_index.md
   blocksRemoved += stripBlocksFromFile(
     contextDir,
-    join(contextDir, "user", "_index.md"),
+    join(contextDir, "identity", "_index.md"),
     filesAffected,
     writeTracker,
   );
@@ -145,7 +145,7 @@ function runCleanup(
   //    no recursion into subdirectories; the matcher only writes to
   //    top-level project files, so a recursive scan would expand the
   //    blast radius without matching the writer).
-  const projectsDir = join(contextDir, "projects");
+  const projectsDir = join(contextDir, "plans", "projects");
   if (existsSync(projectsDir)) {
     let entries: string[] = [];
     try {
@@ -170,7 +170,7 @@ function runCleanup(
   }
 
   // 4. Optional: delete user/research-themes.md
-  const themesPath = join(contextDir, "user", "research-themes.md");
+  const themesPath = join(contextDir, "identity", "research-themes.md");
   let researchThemesDeleted = false;
   if (alsoDeleteThemes && existsSync(themesPath)) {
     // Mark path-only (no content to hash post-unlink). The tracker's

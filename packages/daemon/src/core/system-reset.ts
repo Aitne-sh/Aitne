@@ -298,7 +298,7 @@ export function resetRuntimeConfig(params: {
 
 /**
  * Remove everything inside the context directory, including
- * `rules/management.md` — so `/setup/status` flips back to
+ * `policies/management.md` — so `/setup/status` flips back to
  * `needsSetup: true` on the next read.
  *
  * The context directory itself is kept so downstream code that

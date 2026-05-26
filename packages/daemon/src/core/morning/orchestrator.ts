@@ -174,7 +174,7 @@ export interface MorningPipelineOrchestratorDeps {
    * not get tagged as a user-actor change by the obsidian / git
    * observers (which would re-trigger the hourly check on the agent's
    * own output). The context-index reconciler is intentionally NOT
-   * threaded here: `agent/journal.md` is not in the indexable set, so
+   * threaded here: `journal/agent.md` is not in the indexable set, so
    * the chokidar fallback path covers it without an explicit hint.
    */
   writeTracker?: AgentWriteTracker;
@@ -763,7 +763,7 @@ export class MorningRoutinePipelineOrchestrator {
   /**
    * morning-routine-optimization.md Phase 6 — ⑥ AgentJournalAppender.
    * Assembles the one-paragraph English audit-trail entry for
-   * `agent/journal.md` from `agent_actions` rows (stage results +
+   * `journal/agent.md` from `agent_actions` rows (stage results +
    * the metadata column Stage A wrote via `PATCH /api/agent-actions/self`)
    * plus `daily/<yesterday>.md` frontmatter. No LLM final-text parsing.
    *
@@ -796,7 +796,7 @@ export class MorningRoutinePipelineOrchestrator {
     );
     // Yesterday's agent-day UTC window — same shape `buildStageBInputs`
     // derives for the skeleton facts. The appender uses it to aggregate
-    // the agent-action breakdown into the `agent/journal.md` footprint
+    // the agent-action breakdown into the `journal/agent.md` footprint
     // line. Recomputed here (rather than threaded from `buildStageBInputs`)
     // because Stage B is dispatched async and the orchestrator does not
     // retain its inputs between phases.
@@ -839,7 +839,7 @@ export class MorningRoutinePipelineOrchestrator {
 
   private buildHandoffParsedBlock(): string | null {
     const contextDir = getContextDir(this.deps.config, this.deps.db);
-    const yesterdayPath = join(contextDir, "yesterday.md");
+    const yesterdayPath = join(contextDir, "state", "yesterday.md");
     if (!existsSync(yesterdayPath)) return null;
     let body: string;
     try {
@@ -873,7 +873,7 @@ export class MorningRoutinePipelineOrchestrator {
     // renders the daemon-emitted `Journal synthesis: skipped (no
     // prior-day data)` line whenever `daily/<yesterday>.md` is absent on
     // disk, so the audit-trail entry stays correct without Stage B.
-    const yesterdayPath = join(contextDir, "yesterday.md");
+    const yesterdayPath = join(contextDir, "state", "yesterday.md");
     if (!existsSync(yesterdayPath)) return null;
 
     // Yesterday's agent-day window = today's window shifted by -24h.
@@ -1039,7 +1039,7 @@ export class MorningRoutinePipelineOrchestrator {
    */
   private buildRoadmapSkeletonBlock(): string | null {
     const contextDir = getContextDir(this.deps.config, this.deps.db);
-    const yesterdayPath = join(contextDir, "yesterday.md");
+    const yesterdayPath = join(contextDir, "state", "yesterday.md");
     if (existsSync(yesterdayPath)) return null; // recurring branch
     try {
       const now = new Date();

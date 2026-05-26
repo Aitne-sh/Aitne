@@ -39,7 +39,7 @@
  * Two-layer design mirrors `journal-skeleton-builder.ts`:
  *   - `gatherRoadmapSkeletonFacts(db, contextDir, ...)` — runs SQLite
  *     aggregations against `travel_bookings`, walks `context/projects/`
- *     for active project frontmatter, parses `rules/management.md`
+ *     for active project frontmatter, parses `policies/management.md`
  *     for the operator-declared goals block, and pulls 7-day calendar
  *     events for the `## Quarterly Focus` synthesis hints. Pure
  *     read-only, idempotent.
@@ -114,7 +114,7 @@ export interface RoadmapSkeletonFacts {
   activeProjects: ReadonlyArray<RoadmapSkeletonProject>;
   /**
    * Annual goals — operator-supplied free-text lines extracted from
-   * `rules/management.md` under a `## Annual Goals` heading. Empty
+   * `policies/management.md` under a `## Annual Goals` heading. Empty
    * when the heading is absent or the section is empty (the skeleton
    * then renders an explicit `_(Not yet configured)_` placeholder
    * Stage A is expected to replace with the operator's intent — same
@@ -136,8 +136,8 @@ export interface RoadmapSkeletonFacts {
  * harnesses can substitute the directory without re-implementing the
  * fs walk.
  */
-const PROJECTS_REL = "projects";
-const MANAGEMENT_RULES_REL = "rules/management.md";
+const PROJECTS_REL = "plans/projects";
+const MANAGEMENT_RULES_REL = "policies/management.md";
 
 /**
  * Run the SQLite + fs aggregations that feed the skeleton. Pure

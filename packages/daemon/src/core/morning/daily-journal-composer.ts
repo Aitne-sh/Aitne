@@ -223,7 +223,7 @@ export function extractLastTaggedBlock(
   // Strip a code-fence wrapper if Haiku decorated the block with one.
   // The strip is conservative: only fence lines directly adjacent to
   // the tag survive removal so quoted code fences inside the body
-  // (which `rules/journal-format.md` allows) are left untouched.
+  // (which `policies/journal-format.md` allows) are left untouched.
   return stripCodeFence(inner);
 }
 
@@ -253,7 +253,7 @@ function escapeRegex(value: string): string {
  * function of the inputs.
  *
  * YAML serialisation policy per design §4.6: list form (not flow form)
- * for `projects/people/tags`, fixed key order regardless of input
+ * for `plans/projects/people/tags`, fixed key order regardless of input
  * property order, empty arrays render as `field: []`.
  *
  * Daemon-owned + immutable: date, weekday, type, owner, agent_generated,

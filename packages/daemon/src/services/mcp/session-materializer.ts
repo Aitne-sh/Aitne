@@ -89,7 +89,7 @@ export interface MaterializeMcpParams {
   /**
    * Resolved vault context dir (result of `getContextDir(config)`). Used
    * only to decide whether the agent-facing MCP section should mention
-   * `rules/mcp.md`. Optional so tests and internal callers without a
+   * `policies/mcp.md`. Optional so tests and internal callers without a
    * config handle can still materialize; when omitted the reference is
    * silently dropped instead of pointing at a non-existent file.
    */
@@ -176,7 +176,7 @@ export async function materializeMcpForSession(
   writeAtomic(absConfigPath, generated.contents);
 
   const rulesFileExists = params.contextDir
-    ? existsSync(join(params.contextDir, "rules/mcp.md"))
+    ? existsSync(join(params.contextDir, "policies/mcp.md"))
     : false;
 
   appendMcpSection(params.sessionDir, params.backendId, forBackend, {
@@ -289,7 +289,7 @@ export interface RenderMcpSectionOptions {
    */
   autonomous?: boolean;
   /**
-   * Whether `<contextDir>/rules/mcp.md` exists. When false, the agent-facing
+   * Whether `<contextDir>/policies/mcp.md` exists. When false, the agent-facing
    * section no longer tells the model to consult a file that doesn't exist —
    * prevents spurious `curl` hunts in DMs and routines.
    */
@@ -342,7 +342,7 @@ export function renderMcpSection(
       : "The following MCP servers are enabled.",
   );
   if (rulesFileExists) {
-    push("Consult `rules/mcp.md` for per-server usage rules.");
+    push("Consult `policies/mcp.md` for per-server usage rules.");
   }
   push("");
 

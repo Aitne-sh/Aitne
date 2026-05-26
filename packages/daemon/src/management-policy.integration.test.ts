@@ -145,11 +145,11 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "pa-mp-integration-"));
     contextDir = join(dataDir, "context");
-    mkdirSync(join(contextDir, "rules", "policies"), { recursive: true });
-    mkdirSync(join(contextDir, "routines", "custom"), { recursive: true });
-    mkdirSync(join(contextDir, "dossiers"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "management-captures"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
     writeFileSync(
-      join(contextDir, "rules", "policies", "_index.md"),
+      join(contextDir, "policies", "management-captures", "_index.md"),
       seededIndexContent(),
       "utf-8",
     );
@@ -233,7 +233,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       expect(policyRes.status).toBe(200);
 
       // 5.4 _index update via PATCH section append
-      const indexRes = await patchSection("rules/policies/_index", {
+      const indexRes = await patchSection("policies/management-captures/_index", {
         section: "Active",
         mode: "append",
         content: `| ${POLICY_SLUG} | active | 0 7 * * * | ${POLICY_SLUG} | ${POLICY_TOPIC} | Daily finance snapshot |`,
@@ -245,7 +245,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       expect(policyRead.status).toBe(200);
       expect(policyRead.content).toContain(`slug: ${POLICY_SLUG}`);
 
-      const indexRead = await getContext("rules/policies/_index");
+      const indexRead = await getContext("policies/management-captures/_index");
       expect(indexRead.status).toBe(200);
       expect(indexRead.content).toContain(`| ${POLICY_SLUG} | active | 0 7 * * * |`);
     });
@@ -258,17 +258,17 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       await putContext(`dossiers/${POLICY_TOPIC}`, dossierContent());
       await putContext(`routines/custom/${POLICY_SLUG}`, routineContent());
       await putContext(`rules/policies/${POLICY_SLUG}`, policyContent());
-      await patchSection("rules/policies/_index", {
+      await patchSection("policies/management-captures/_index", {
         section: "Active",
         mode: "append",
         content: "| s | active | 0 0 * * * | s | t | w |",
       });
 
       const indexable = onIndexableContextChangeCalls;
-      expect(indexable.some((p) => p === `dossiers/${POLICY_TOPIC}.md`)).toBe(true);
-      expect(indexable.some((p) => p === `routines/custom/${POLICY_SLUG}.md`)).toBe(true);
-      expect(indexable.some((p) => p === `rules/policies/${POLICY_SLUG}.md`)).toBe(true);
-      expect(indexable.some((p) => p === "rules/policies/_index.md")).toBe(true);
+      expect(indexable.some((p) => p === `knowledge/dossiers/${POLICY_TOPIC}.md`)).toBe(true);
+      expect(indexable.some((p) => p === `policies/routines/custom/${POLICY_SLUG}.md`)).toBe(true);
+      expect(indexable.some((p) => p === `policies/management-captures/${POLICY_SLUG}.md`)).toBe(true);
+      expect(indexable.some((p) => p === "policies/management-captures/_index.md")).toBe(true);
     });
   });
 
@@ -290,7 +290,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       // rollback only has to undo dossier+routine.
       expect(
         existsSync(
-          join(contextDir, "rules", "policies", `${POLICY_SLUG}.md`),
+          join(contextDir, "policies", "management-captures", `${POLICY_SLUG}.md`),
         ),
       ).toBe(false);
     });
@@ -317,7 +317,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       expect(res.status).toBe(400);
       expect(
         existsSync(
-          join(contextDir, "routines", "custom", `${POLICY_SLUG}.md`),
+          join(contextDir, "policies", "routines", "custom", `${POLICY_SLUG}.md`),
         ),
       ).toBe(false);
       // No reload fired for an invalid file.
@@ -336,7 +336,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       expect(errBody.error).toBe("forbidden");
       expect(
         existsSync(
-          join(contextDir, "rules", "policies", `${POLICY_SLUG}.md`),
+          join(contextDir, "policies", "management-captures", `${POLICY_SLUG}.md`),
         ),
       ).toBe(true);
     });
@@ -357,7 +357,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
         policyContent(),
       );
       await putContext(
-        "rules/policies/another-policy",
+        "policies/management-captures/another-policy",
         policyContent({ updated: "2026-04-25" })
           .replace(`slug: ${POLICY_SLUG}`, "slug: another-policy"),
       );
@@ -367,11 +367,11 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
         files: { name: string; lastModified: string }[];
       };
       const names = data.files.map((f) => f.name);
-      expect(names).toContain(`policies/${POLICY_SLUG}.md`);
-      expect(names).toContain("policies/another-policy.md");
+      expect(names).toContain(`management-captures/${POLICY_SLUG}.md`);
+      expect(names).toContain("management-captures/another-policy.md");
       // The seeded `_index.md` MUST also appear so the skill can
       // cross-check listing vs index in a single pass.
-      expect(names).toContain("policies/_index.md");
+      expect(names).toContain("management-captures/_index.md");
     });
 
     it("GET /api/context/list/rules/policies (broken multi-segment form) does NOT 200", async () => {
@@ -397,13 +397,13 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
     // captures the prior content, and `onIndexableContextChange` fires.
     it("GET → edit row → PUT survives validation and snapshots the prior content", async () => {
       await putContext(`rules/policies/${POLICY_SLUG}`, policyContent());
-      await patchSection("rules/policies/_index", {
+      await patchSection("policies/management-captures/_index", {
         section: "Active",
         mode: "append",
         content: `| ${POLICY_SLUG} | active | 0 7 * * * | ${POLICY_SLUG} | ${POLICY_TOPIC} | Why |`,
       });
 
-      const beforeRead = await getContext("rules/policies/_index");
+      const beforeRead = await getContext("policies/management-captures/_index");
       expect(beforeRead.status).toBe(200);
       const before = beforeRead.content!;
       expect(before).toContain(`| ${POLICY_SLUG} | active |`);
@@ -421,13 +421,13 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       );
 
       onIndexableContextChangeCalls = [];
-      const putRes = await putContext("rules/policies/_index", flippedWithDate);
+      const putRes = await putContext("policies/management-captures/_index", flippedWithDate);
       expect(putRes.status).toBe(200);
       expect(onIndexableContextChangeCalls).toContain(
-        "rules/policies/_index.md",
+        "policies/management-captures/_index.md",
       );
 
-      const after = await getContext("rules/policies/_index");
+      const after = await getContext("policies/management-captures/_index");
       expect(after.content).toContain(`| ${POLICY_SLUG} | paused |`);
       expect(after.content).not.toContain(`| ${POLICY_SLUG} | active |`);
     });
@@ -439,7 +439,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       await putContext(`dossiers/${POLICY_TOPIC}`, dossierContent());
       await putContext(`routines/custom/${POLICY_SLUG}`, routineContent());
       await putContext(`rules/policies/${POLICY_SLUG}`, policyContent());
-      await patchSection("rules/policies/_index", {
+      await patchSection("policies/management-captures/_index", {
         section: "Active",
         mode: "append",
         content: `| ${POLICY_SLUG} | active | 0 7 * * * | ${POLICY_SLUG} | ${POLICY_TOPIC} | Why |`,
@@ -531,13 +531,13 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       // Policy file still exists for audit.
       expect(
         existsSync(
-          join(contextDir, "rules", "policies", `${POLICY_SLUG}.md`),
+          join(contextDir, "policies", "management-captures", `${POLICY_SLUG}.md`),
         ),
       ).toBe(true);
       // Routine file is gone.
       expect(
         existsSync(
-          join(contextDir, "routines", "custom", `${POLICY_SLUG}.md`),
+          join(contextDir, "policies", "routines", "custom", `${POLICY_SLUG}.md`),
         ),
       ).toBe(false);
     });
@@ -556,19 +556,19 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
   describe("_index maintenance", () => {
     it("PATCH section=Active mode=append adds a row without disturbing Removed", async () => {
       const before = readFileSync(
-        join(contextDir, "rules", "policies", "_index.md"),
+        join(contextDir, "policies", "management-captures", "_index.md"),
         "utf-8",
       );
       expect(before).toContain("## Removed");
 
-      await patchSection("rules/policies/_index", {
+      await patchSection("policies/management-captures/_index", {
         section: "Active",
         mode: "append",
         content: "| a | active | 0 7 * * * | a | t | w |",
       });
 
       const after = readFileSync(
-        join(contextDir, "rules", "policies", "_index.md"),
+        join(contextDir, "policies", "management-captures", "_index.md"),
         "utf-8",
       );
       expect(after).toContain("| a | active | 0 7 * * * | a | t | w |");
@@ -584,7 +584,7 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       // trigger for the skill's GET-merge-PUT fallback. (Earlier
       // skill text claimed 404; this test pins the real 400 contract
       // so the skill doesn't drift.)
-      const res = await patchSection("rules/policies/_index", {
+      const res = await patchSection("policies/management-captures/_index", {
         section: "NonExistent",
         mode: "append",
         content: "| x |",

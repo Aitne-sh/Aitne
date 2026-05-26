@@ -252,13 +252,13 @@ describe("release asset reconciliation", () => {
   });
 
   it("findBuiltinShadowedUserSkills returns empty array when both skill directories are absent", () => {
-    // Neither dataDir/skills/ nor workspaceDir/agent-assets/skills/ exists —
-    // listSkillSlugs fires the !existsSync(root) early-return branch (line 573).
-    const dataDir = join(tmp, "data-no-skills");
+    // Neither userSkillsRoot nor workspaceDir/agent-assets/skills/ exists —
+    // listSkillSlugs fires the !existsSync(root) early-return branch.
+    const userSkillsRoot = join(tmp, "data-no-skills", "skills");
     const workspaceDir = join(tmp, "ws-no-skills");
-    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(dirname(userSkillsRoot), { recursive: true });
     mkdirSync(workspaceDir, { recursive: true });
-    expect(findBuiltinShadowedUserSkills(dataDir, workspaceDir)).toEqual([]);
+    expect(findBuiltinShadowedUserSkills(userSkillsRoot, workspaceDir)).toEqual([]);
   });
 
   it("detects user skills shadowed by newly shipped built-ins", () => {
@@ -268,7 +268,7 @@ describe("release asset reconciliation", () => {
     write(workspaceDir, "agent-assets/skills/travel/SKILL.md", "---\nname: travel\n---\n# Built-in\n");
     write(workspaceDir, "agent-assets/skills/mail/SKILL.md", "---\nname: mail\n---\n# Mail\n");
 
-    expect(findBuiltinShadowedUserSkills(dataDir, workspaceDir)).toEqual(["travel"]);
+    expect(findBuiltinShadowedUserSkills(join(dataDir, "skills"), workspaceDir)).toEqual(["travel"]);
   });
 
   /* ── readInstructionStampManifest ──────────────────────────────────── */
@@ -432,7 +432,7 @@ describe("release asset reconciliation", () => {
     write(workspaceDir, "agent-assets/skills/mail/SKILL.md", "---\nname: mail\n---\n");
     write(workspaceDir, "agent-assets/skills/calendar/SKILL.md", "---\nname: calendar\n---\n");
 
-    const status = recordSkillAssetStatus(db, dataDir, workspaceDir, () => NOW);
+    const status = recordSkillAssetStatus(db, join(dataDir, "skills"), workspaceDir, () => NOW);
     expect(status.builtinShadowedUserSkills).toEqual(["mail"]);
 
     const record = readReleaseAssetStatus(db);

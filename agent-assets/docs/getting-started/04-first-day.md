@@ -84,7 +84,7 @@ and 2.
 ## 1. Teach the agent about you
 
 The agent reads
-[`user/profile.md`](../features/memory-files/user-profile.md) and
+[`identity/profile.md`](../features/memory-files/user-profile.md) and
 the rest of the `user/*.md` Context Files at the start of every
 session. The faster those files have real content, the faster every
 reply gets useful.
@@ -102,8 +102,8 @@ Send 3–5 DMs that read like introductions to a new assistant:
   said back to me."*
 
 The agent appends each fact to the right `user/*.md` file (work
-facts → `user/work.md`, people → `user/people.md`, preferences →
-`user/personal.md`, and so on). Identity-class facts (legal name,
+facts → `identity/work.md`, people → `identity/people.md`, preferences →
+`identity/personal.md`, and so on). Identity-class facts (legal name,
 primary timezone) are deferred for your explicit confirmation
 rather than auto-written.
 
@@ -128,7 +128,7 @@ second upload are skipped automatically.
 Open **Knowledge → Context Files** and skim each `user/*.md` file.
 If a bullet is wrong, edit it directly — the agent reads your edit
 on its next turn. The journal entry the import session writes
-(`agent/journal.md`) lists everything that was deferred or flagged
+(`journal/agent.md`) lists everything that was deferred or flagged
 as a conflict.
 
 → [user/profile.md](../features/memory-files/user-profile.md) ·
@@ -285,7 +285,7 @@ By end of day one you should have:
   still mostly empty. DM more, or run a Knowledge upload.
 - A connected integration shows no observations after an hour →
   [Observation Not Detected](../troubleshooting/observation-not-detected.md).
-- A blank `today.md` after the morning routine →
+- A blank `state/today.md` after the morning routine →
   [Morning Routine Didn't Run](../troubleshooting/morning-routine-didnt-run.md).
 - A Knowledge upload returns `409 setup_incomplete` → finish the
   setup wizard at `/setup` first.

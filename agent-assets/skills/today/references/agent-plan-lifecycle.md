@@ -49,10 +49,10 @@ the action it represents, before the session exits.
    + action text), and flip `[ ]` → `[x]`:
 
    ```bash
-   curl -s http://localhost:8321/api/context/today
+   curl -s http://localhost:8321/api/context/state/today
    # Find the agent_plan section. Edit the matching row's checkbox.
    # Then PATCH the full updated section body:
-   curl -s -X PATCH http://localhost:8321/api/context/today \
+   curl -s -X PATCH http://localhost:8321/api/context/state/today \
      -H 'Content-Type: application/json' \
      -H 'X-Lock-Id: <today_write_lock_id>' \
      -d '{"section": "agent_plan", "mode": "replace", "content": "<full merged section>"}'
@@ -86,7 +86,7 @@ triggers self-recovery and inflates the agent-actions audit.
 
 ## Lock retry rules
 
-The Morning Routine holds the `today.md` write lock. Other sessions
+The Morning Routine holds the `state/today.md` write lock. Other sessions
 get `409 today_write_lock_held` on PUT / PATCH while the lock is held.
 
 - Detect by the response body `{"error":"lock_held"}` or by the

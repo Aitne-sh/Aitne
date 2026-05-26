@@ -839,8 +839,8 @@ describe("eveningRulebookIsActive predicate", () => {
 
   beforeEach(() => {
     ctxRoot = mkdtempSync(join(tmpdir(), "pa-evening-rulebook-"));
-    mkdirSync(join(ctxRoot, "routines"), { recursive: true });
-    rulebookPath = join(ctxRoot, "routines", "evening.md");
+    mkdirSync(join(ctxRoot, "policies", "routines"), { recursive: true });
+    rulebookPath = join(ctxRoot, "policies", "routines", "evening.md");
   });
 
   afterEach(() => {
@@ -976,8 +976,8 @@ describe("resolveSkillManifest wrapper", () => {
 
   beforeEach(() => {
     ctxRoot = mkdtempSync(join(tmpdir(), "pa-resolve-manifest-"));
-    mkdirSync(join(ctxRoot, "routines"), { recursive: true });
-    rulebookPath = join(ctxRoot, "routines", "evening.md");
+    mkdirSync(join(ctxRoot, "policies", "routines"), { recursive: true });
+    rulebookPath = join(ctxRoot, "policies", "routines", "evening.md");
   });
 
   afterEach(() => {

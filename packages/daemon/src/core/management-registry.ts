@@ -35,7 +35,7 @@ import { createLogger } from "../logging.js";
 const logger = createLogger("management-registry");
 
 /**
- * `rules/management.md` registry — render / parse / boot / watch
+ * `policies/management.md` registry — render / parse / boot / watch
  * (docs/design/21-management-registry-and-entities.md §7.2, §11, P2).
  *
  * Architectural mirror of `core/management-md.ts` (which owns the
@@ -94,7 +94,7 @@ const DEFAULT_C_STUB = [
   SECTION_C_HEADER,
   "",
   "Auto-maintained by the daemon (do not edit). Source files live under",
-  "`rules/policies/<slug>.md`; capture new policies via the",
+  "`policies/management-captures/<slug>.md`; capture new policies via the",
   "`management-policy` skill. Full index: [[rules/policies/_index.md]]",
   "",
   "_No active policies yet._",
@@ -105,7 +105,7 @@ const DEFAULT_NOTES_BLOCK = [
   "## Notes",
   "",
   "- The agent cannot use `Edit` / `Write` tools on this file — writes go",
-  "  through `/api/context/rules/management` (locked + snapshotted) or the",
+  "  through `/api/context/policies/management` (locked + snapshotted) or the",
   "  managed-tasks / sot-bindings API surfaces.",
   "- This file is injected into every flow via `policy-files.ts`. Keep it",
   "  concise so prompt assembly stays cheap.",
@@ -1118,7 +1118,7 @@ export async function reconcileManagementMdFromFile(
 }
 
 /**
- * Watch `rules/management.md` for hand-edits and reconcile them against
+ * Watch `policies/management.md` for hand-edits and reconcile them against
  * the DB (§7.2 watch path). Self-writes are ignored. Fatal parse errors
  * trigger a re-render from the DB; row-level failures are recorded in
  * `management_parse_failures` and the dashboard surfaces a banner.
@@ -1172,7 +1172,7 @@ export function startManagementRegistryWatcher(
 // ── policy-files.ts compatibility check (P2 acceptance gate) ───────────────
 
 /**
- * §0.2 — `rules/management.md` is the first wildcard ref in
+ * §0.2 — `policies/management.md` is the first wildcard ref in
  * `policy-files.ts`'s registry. The P2 plan calls out a verification
  * gate: "Verify `policy-files.ts` wildcard ref still loads the v3 file
  * unchanged." This helper is exposed so the boot path (and tests)

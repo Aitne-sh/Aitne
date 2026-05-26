@@ -225,20 +225,21 @@ describe("system-reset", () => {
   describe("wipeContextFiles", () => {
     it("removes every entry in the context dir but keeps the dir itself", () => {
       const contextDir = join(dataDir, "context");
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      mkdirSync(join(contextDir, "rules"), { recursive: true });
-      mkdirSync(join(contextDir, "projects"), { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "today");
-      writeFileSync(join(contextDir, "rules", "management.md"), "rules");
-      writeFileSync(join(contextDir, "user", "work.md"), "work");
+      mkdirSync(join(contextDir, "identity"), { recursive: true });
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      mkdirSync(join(contextDir, "policies"), { recursive: true });
+      mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "today");
+      writeFileSync(join(contextDir, "policies", "management.md"), "rules");
+      writeFileSync(join(contextDir, "identity", "work.md"), "work");
 
       const result = wipeContextFiles({ dataDir });
 
       expect(result.removed).toBeGreaterThanOrEqual(3);
       expect(existsSync(contextDir)).toBe(true);
-      expect(existsSync(join(contextDir, "today.md"))).toBe(false);
-      expect(existsSync(join(contextDir, "rules", "management.md"))).toBe(false);
-      expect(existsSync(join(contextDir, "user"))).toBe(false);
+      expect(existsSync(join(contextDir, "state", "today.md"))).toBe(false);
+      expect(existsSync(join(contextDir, "policies", "management.md"))).toBe(false);
+      expect(existsSync(join(contextDir, "identity"))).toBe(false);
     });
 
     it("is a no-op when the context dir does not exist", () => {
@@ -250,10 +251,10 @@ describe("system-reset", () => {
     it("removes every provided context dir so Obsidian primary vaults are cleaned too", () => {
       const fallbackContextDir = join(dataDir, "context");
       const primaryContextDir = join(dataDir, "primary-vault");
-      mkdirSync(join(fallbackContextDir, "rules"), { recursive: true });
-      mkdirSync(join(primaryContextDir, "rules"), { recursive: true });
-      writeFileSync(join(fallbackContextDir, "rules", "management.md"), "fallback");
-      writeFileSync(join(primaryContextDir, "rules", "management.md"), "primary");
+      mkdirSync(join(fallbackContextDir, "policies"), { recursive: true });
+      mkdirSync(join(primaryContextDir, "policies"), { recursive: true });
+      writeFileSync(join(fallbackContextDir, "policies", "management.md"), "fallback");
+      writeFileSync(join(primaryContextDir, "policies", "management.md"), "primary");
 
       const result = wipeContextFiles({
         dataDir,
@@ -266,16 +267,16 @@ describe("system-reset", () => {
         { path: primaryContextDir, removed: 1 },
         { path: fallbackContextDir, removed: 1 },
       ]);
-      expect(existsSync(join(primaryContextDir, "rules", "management.md"))).toBe(false);
-      expect(existsSync(join(fallbackContextDir, "rules", "management.md"))).toBe(false);
+      expect(existsSync(join(primaryContextDir, "policies", "management.md"))).toBe(false);
+      expect(existsSync(join(fallbackContextDir, "policies", "management.md"))).toBe(false);
     });
 
     it("records path errors and still wipes other provided context dirs", () => {
       const badContextPath = join(dataDir, "not-a-dir");
       const fallbackContextDir = join(dataDir, "context");
       writeFileSync(badContextPath, "not a directory");
-      mkdirSync(join(fallbackContextDir, "rules"), { recursive: true });
-      writeFileSync(join(fallbackContextDir, "rules", "management.md"), "fallback");
+      mkdirSync(join(fallbackContextDir, "policies"), { recursive: true });
+      writeFileSync(join(fallbackContextDir, "policies", "management.md"), "fallback");
 
       const result = wipeContextFiles({
         dataDir,
@@ -288,7 +289,7 @@ describe("system-reset", () => {
       expect(result.paths[0]).toMatchObject({ path: badContextPath, removed: 0 });
       expect(result.paths[0]?.error).toBeTruthy();
       expect(result.paths[1]).toEqual({ path: fallbackContextDir, removed: 1 });
-      expect(existsSync(join(fallbackContextDir, "rules", "management.md"))).toBe(false);
+      expect(existsSync(join(fallbackContextDir, "policies", "management.md"))).toBe(false);
     });
 
     it("rejects unsafe context dirs before deleting anything", () => {
@@ -383,7 +384,8 @@ describe("system-reset", () => {
       ).run();
       const contextDir = join(dataDir, "context");
       mkdirSync(contextDir, { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
       const blobDir = join(dataDir, "secrets", "blobs");
       mkdirSync(blobDir, { recursive: true });
       writeFileSync(join(blobDir, "a.blob"), "x");
@@ -467,7 +469,7 @@ describe("system-reset", () => {
       expect(owners.n).toBe(0);
 
       expect(existsSync(contextDir)).toBe(true);
-      expect(existsSync(join(contextDir, "today.md"))).toBe(false);
+      expect(existsSync(join(contextDir, "state", "today.md"))).toBe(false);
       for (const dir of [
         "attachments",
         "agent-sessions",
@@ -532,10 +534,10 @@ describe("system-reset", () => {
     it("wipes captured context dirs even after settings reset mutates runtime config", async () => {
       const fallbackContextDir = join(dataDir, "context");
       const primaryContextDir = join(dataDir, "primary-vault");
-      mkdirSync(join(fallbackContextDir, "rules"), { recursive: true });
-      mkdirSync(join(primaryContextDir, "rules"), { recursive: true });
-      writeFileSync(join(fallbackContextDir, "rules", "management.md"), "fallback");
-      writeFileSync(join(primaryContextDir, "rules", "management.md"), "primary");
+      mkdirSync(join(fallbackContextDir, "policies"), { recursive: true });
+      mkdirSync(join(primaryContextDir, "policies"), { recursive: true });
+      writeFileSync(join(fallbackContextDir, "policies", "management.md"), "fallback");
+      writeFileSync(join(primaryContextDir, "policies", "management.md"), "primary");
 
       const broker = { delete: vi.fn(async () => {}) } as unknown as SecretBroker;
       const applyDefaults = vi.fn();
@@ -554,8 +556,8 @@ describe("system-reset", () => {
         { path: fallbackContextDir, removed: 1 },
       ]);
       expect(applyDefaults).toHaveBeenCalledOnce();
-      expect(existsSync(join(primaryContextDir, "rules", "management.md"))).toBe(false);
-      expect(existsSync(join(fallbackContextDir, "rules", "management.md"))).toBe(false);
+      expect(existsSync(join(primaryContextDir, "policies", "management.md"))).toBe(false);
+      expect(existsSync(join(fallbackContextDir, "policies", "management.md"))).toBe(false);
     });
 
     it("survives when an optional extra table does not exist", async () => {
@@ -868,7 +870,8 @@ describe("system-reset", () => {
     it("factoryReset removes the reset audit log instead of preserving it", async () => {
       const contextDir = join(dataDir, "context");
       mkdirSync(contextDir, { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
       appendResetAuditLine({
         dataDir,
         event: "before_factory_reset",

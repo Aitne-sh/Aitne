@@ -23,23 +23,28 @@ function validContent(overrides: string[] = []): string {
 
 describe("shouldValidateContextFileFrontmatter", () => {
   it("targets user/rules/projects/git-repos/daily/weekly/monthly/dossiers markdown files and context-index.md", () => {
-    expect(shouldValidateContextFileFrontmatter("user/profile.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("rules/management.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("projects/example.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("git-repos/example.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("daily/2026-04-21.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("weekly/2026-W17.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("monthly/2026-04.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("dossiers/hourly.md")).toBe(true);
-    expect(shouldValidateContextFileFrontmatter("context-index.md")).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("identity/profile.md")).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("policies/management.md")).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("plans/projects/example.md")).toBe(true);
+    expect(
+      shouldValidateContextFileFrontmatter(
+        "knowledge/repos/legacy-registry/example.md",
+      ),
+    ).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("journal/daily/2026-04-21.md")).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("journal/weekly/2026-W17.md")).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("journal/monthly/2026-04.md")).toBe(true);
+    expect(shouldValidateContextFileFrontmatter("knowledge/dossiers/hourly.md")).toBe(true);
+    // contextIndex was folded into rootIndex (_index.md) — both validate.
+    expect(shouldValidateContextFileFrontmatter("_index.md")).toBe(true);
     expect(shouldValidateContextFileFrontmatter("roadmap.md")).toBe(false);
-    expect(shouldValidateContextFileFrontmatter("projects/_active.base")).toBe(false);
+    expect(shouldValidateContextFileFrontmatter("plans/projects/_active.base")).toBe(false);
   });
 });
 
 describe("validateContextFileFrontmatter", () => {
   it("accepts required fields, YAML comments, quoted scalars, and an H1", () => {
-    expect(validateContextFileFrontmatter(validContent(), "user/profile.md")).toBeNull();
+    expect(validateContextFileFrontmatter(validContent(), "identity/profile.md")).toBeNull();
   });
 
   it("accepts inline comments on required scalar fields", () => {
@@ -52,7 +57,7 @@ describe("validateContextFileFrontmatter", () => {
       "# User",
     ].join("\n");
 
-    expect(validateContextFileFrontmatter(content, "user/profile.md")).toBeNull();
+    expect(validateContextFileFrontmatter(content, "identity/profile.md")).toBeNull();
   });
 
   it("accepts the rule-owner variants used by rule templates", () => {
@@ -66,7 +71,7 @@ describe("validateContextFileFrontmatter", () => {
         "# Rule",
       ].join("\n");
 
-      expect(validateContextFileFrontmatter(content, "rules/example.md")).toBeNull();
+      expect(validateContextFileFrontmatter(content, "policies/example.md")).toBeNull();
     }
   });
 
@@ -80,7 +85,7 @@ describe("validateContextFileFrontmatter", () => {
       "# Weekly Review 2026-W17",
     ].join("\n");
 
-    expect(validateContextFileFrontmatter(content, "weekly/2026-W17.md")).toBeNull();
+    expect(validateContextFileFrontmatter(content, "journal/weekly/2026-W17.md")).toBeNull();
   });
 
   it("skips paths outside the guarded prefixes", () => {
@@ -88,7 +93,7 @@ describe("validateContextFileFrontmatter", () => {
   });
 
   it("rejects files without opening frontmatter", () => {
-    const result = validateContextFileFrontmatter("# User\n", "user/profile.md");
+    const result = validateContextFileFrontmatter("# User\n", "identity/profile.md");
 
     expect(result?.code).toBe("missing_frontmatter");
     expect(result?.message).toContain("requires YAML frontmatter");
@@ -97,7 +102,7 @@ describe("validateContextFileFrontmatter", () => {
   it("rejects files without closing frontmatter", () => {
     const result = validateContextFileFrontmatter(
       "---\ntype: user\nowner: shared\nupdated: 2026-04-21\n# User\n",
-      "user/profile.md",
+      "identity/profile.md",
     );
 
     expect(result?.code).toBe("missing_frontmatter");
@@ -107,19 +112,19 @@ describe("validateContextFileFrontmatter", () => {
     expect(
       validateContextFileFrontmatter(
         "---\nowner: shared\nupdated: 2026-04-21\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.message,
     ).toContain("`type`");
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nupdated: 2026-04-21\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.message,
     ).toContain("`owner`");
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nowner: shared\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.message,
     ).toContain("`updated`");
   });
@@ -128,31 +133,31 @@ describe("validateContextFileFrontmatter", () => {
     expect(
       validateContextFileFrontmatter(
         "---\ntype: unknown\nowner: shared\nupdated: 2026-04-21\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.code,
     ).toBe("invalid_type");
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nowner: nobody\nupdated: 2026-04-21\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.code,
     ).toBe("invalid_owner");
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nowner: shared\nupdated: 2026-02-30\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.code,
     ).toBe("invalid_updated");
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nowner: shared\nupdated: 2026-04-21Tbad\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.code,
     ).toBe("invalid_updated");
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nowner: shared\nupdated: tomorrow\n---\n# User\n",
-        "user/profile.md",
+        "identity/profile.md",
       )?.code,
     ).toBe("invalid_updated");
   });
@@ -161,28 +166,28 @@ describe("validateContextFileFrontmatter", () => {
     expect(
       validateContextFileFrontmatter(
         "---\ntype: user\nowner: shared\nupdated: 2026-04-21\n---\n# Project\n",
-        "projects/example.md",
+        "plans/projects/example.md",
       )?.message,
     ).toContain("type must be `project`");
 
     expect(
       validateContextFileFrontmatter(
         "---\ntype: project\nowner: shared\nupdated: 2026-04-21\n---\n# Repo\n",
-        "git-repos/example.md",
+        "knowledge/repos/legacy-registry/example.md",
       )?.message,
     ).toContain("type must be `git-repo`");
 
     expect(
       validateContextFileFrontmatter(
         "---\ntype: daily\nowner: user\nupdated: 2026-04-21\n---\n# 2026-04-21\n",
-        "daily/2026-04-21.md",
+        "journal/daily/2026-04-21.md",
       )?.message,
     ).toContain("owner must be `agent`");
 
     expect(
       validateContextFileFrontmatter(
-        "---\ntype: rule\nowner: shared\nupdated: 2026-04-21\n---\n# User index\n",
-        "user/_index.md",
+        "---\ntype: rule\nowner: shared\nupdated: 2026-04-21\n---\n# Identity index\n",
+        "identity/_index.md",
       )?.message,
     ).toContain("type must be `index`");
   });
@@ -190,13 +195,13 @@ describe("validateContextFileFrontmatter", () => {
   it("rejects files without an H1 after frontmatter", () => {
     const result = validateContextFileFrontmatter(
       "---\ntype: user\nowner: shared\nupdated: 2026-04-21\n---\n## User\n",
-      "user/profile.md",
+      "identity/profile.md",
     );
 
     expect(result?.code).toBe("missing_h1");
   });
 
-  describe("rules/policies/* — MANAGEMENT-POLICY-CAPTURE-PLAN §4.1.1", () => {
+  describe("policies/management-captures/* — MANAGEMENT-POLICY-CAPTURE-PLAN §4.1.1", () => {
     function policyContent(overrides: Record<string, string | null> = {}): string {
       const defaults: Record<string, string | null> = {
         type: "rule",
@@ -218,7 +223,7 @@ describe("validateContextFileFrontmatter", () => {
       return lines.join("\n");
     }
 
-    const POLICY_PATH = "rules/policies/morning-finance-check.md";
+    const POLICY_PATH = "policies/management-captures/morning-finance-check.md";
 
     it("accepts a fully populated policy file", () => {
       expect(
@@ -381,7 +386,7 @@ describe("validateContextFileFrontmatter", () => {
         "# Active Policies",
       ].join("\n");
       expect(
-        validateContextFileFrontmatter(validIndex, "rules/policies/_index.md"),
+        validateContextFileFrontmatter(validIndex, "policies/management-captures/_index.md"),
       ).toBeNull();
 
       const sharedOwner = [
@@ -393,7 +398,7 @@ describe("validateContextFileFrontmatter", () => {
         "# Active Policies",
       ].join("\n");
       expect(
-        validateContextFileFrontmatter(sharedOwner, "rules/policies/_index.md")
+        validateContextFileFrontmatter(sharedOwner, "policies/management-captures/_index.md")
           ?.message,
       ).toContain("owner must be `agent`");
 
@@ -407,7 +412,7 @@ describe("validateContextFileFrontmatter", () => {
         "# Active Policies",
       ].join("\n");
       expect(
-        validateContextFileFrontmatter(indexNoKind, "rules/policies/_index.md"),
+        validateContextFileFrontmatter(indexNoKind, "policies/management-captures/_index.md"),
       ).toBeNull();
     });
   });
@@ -422,7 +427,7 @@ describe("validateContextFileFrontmatter", () => {
       "# Hourly Dossier",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(validDossier, "dossiers/hourly.md"),
+      validateContextFileFrontmatter(validDossier, "knowledge/dossiers/hourly.md"),
     ).toBeNull();
 
     const validIndex = [
@@ -437,7 +442,7 @@ describe("validateContextFileFrontmatter", () => {
       validateContextFileFrontmatter(validIndex, "context-index.md"),
     ).toBeNull();
     expect(
-      validateContextFileFrontmatter(validIndex, "dossiers/_index.md"),
+      validateContextFileFrontmatter(validIndex, "knowledge/dossiers/_index.md"),
     ).toBeNull();
 
     const wrongOwner = [
@@ -449,7 +454,7 @@ describe("validateContextFileFrontmatter", () => {
       "# Dossier",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(wrongOwner, "dossiers/morning.md")?.message,
+      validateContextFileFrontmatter(wrongOwner, "knowledge/dossiers/morning.md")?.message,
     ).toContain("owner must be `agent`");
 
     const wrongType = [
@@ -461,7 +466,7 @@ describe("validateContextFileFrontmatter", () => {
       "# Mismatch",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(wrongType, "context-index.md")?.message,
+      validateContextFileFrontmatter(wrongType, "_index.md")?.message,
     ).toContain("type must be `index`");
   });
 
@@ -478,10 +483,10 @@ describe("validateContextFileFrontmatter", () => {
       "# Index",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(validIndex, "rules/_index.md"),
+      validateContextFileFrontmatter(validIndex, "policies/_index.md"),
     ).toBeNull();
     expect(
-      validateContextFileFrontmatter(validIndex, "projects/_index.md"),
+      validateContextFileFrontmatter(validIndex, "plans/projects/_index.md"),
     ).toBeNull();
 
     const validMonthly = [
@@ -493,7 +498,7 @@ describe("validateContextFileFrontmatter", () => {
       "# 2026-04",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(validMonthly, "monthly/2026-04.md"),
+      validateContextFileFrontmatter(validMonthly, "journal/monthly/2026-04.md"),
     ).toBeNull();
   });
 
@@ -533,7 +538,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("returns no drift errors for a well-formed daily file", () => {
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton(),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(errors).toEqual([]);
   });
@@ -544,7 +549,7 @@ describe("validateDailySkeletonFrontmatter", () => {
     // before frontmatter extraction.
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton(),
-      "daily/sticky.txt",
+      "journal/daily/sticky.txt",
     );
     expect(errors).toEqual([]);
   });
@@ -558,7 +563,7 @@ describe("validateDailySkeletonFrontmatter", () => {
         calendar_events: "<omit>",
         messages_handled: "<omit>",
       }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     // All five fields surface as separate errors in one response so
     // Stage B can fix them in a single retry.
@@ -576,7 +581,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("rejects a `date` field that does not match the path stem", () => {
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton({ date: "2026-04-30" }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]?.field).toBe("frontmatter.date");
@@ -586,7 +591,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("rejects a `weekday` outside the seven long-form English values", () => {
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton({ weekday: "Fri" }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]?.field).toBe("frontmatter.weekday");
@@ -596,7 +601,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("rejects `agent_generated: false` — the skeleton always emits `true`", () => {
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton({ agent_generated: "false" }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]?.field).toBe("frontmatter.agent_generated");
@@ -606,14 +611,14 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("rejects negative or non-integer `calendar_events`", () => {
     const negative = validateDailySkeletonFrontmatter(
       dailySkeleton({ calendar_events: "-1" }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(negative.map((e) => e.field)).toEqual([
       "frontmatter.calendar_events",
     ]);
     const noisy = validateDailySkeletonFrontmatter(
       dailySkeleton({ calendar_events: "three" }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(noisy.map((e) => e.field)).toEqual([
       "frontmatter.calendar_events",
@@ -623,7 +628,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("rejects negative or non-integer `messages_handled`", () => {
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton({ messages_handled: "five" }),
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]?.field).toBe("frontmatter.messages_handled");
@@ -632,7 +637,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("returns no errors for non-daily paths (gracefully scoped)", () => {
     const errors = validateDailySkeletonFrontmatter(
       dailySkeleton(),
-      "weekly/2026-W20.md",
+      "journal/weekly/2026-W20.md",
     );
     expect(errors).toEqual([]);
   });
@@ -640,7 +645,7 @@ describe("validateDailySkeletonFrontmatter", () => {
   it("returns no errors when there is no frontmatter at all — the generic validator owns that message", () => {
     const errors = validateDailySkeletonFrontmatter(
       "# Header\nBody only.",
-      "daily/2026-05-15.md",
+      "journal/daily/2026-05-15.md",
     );
     expect(errors).toEqual([]);
   });
@@ -669,7 +674,7 @@ describe("YAML scalar parser — quoted-string and inline-comment edge cases", (
       "# User",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(content, "user/profile.md"),
+      validateContextFileFrontmatter(content, "identity/profile.md"),
     ).toBeNull();
   });
 
@@ -687,7 +692,7 @@ describe("YAML scalar parser — quoted-string and inline-comment edge cases", (
       "# User",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(content, "user/profile.md"),
+      validateContextFileFrontmatter(content, "identity/profile.md"),
     ).toBeNull();
   });
 
@@ -704,7 +709,7 @@ describe("YAML scalar parser — quoted-string and inline-comment edge cases", (
       "# User",
     ].join("\n");
     expect(
-      validateContextFileFrontmatter(content, "user/profile.md"),
+      validateContextFileFrontmatter(content, "identity/profile.md"),
     ).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { CONTEXT_RELATIVE_PATHS, dossierPath } from "./context-paths.js";
+import { aliasVaultPath } from "./context-vault-aliases.js";
 import {
   POLICY_FILE_MAX_BYTES,
   createPromptInjectionBudget,
@@ -118,8 +119,23 @@ export function resolveReviewFlow(
   return REVIEW_FLOW_BY_PROCESS_KEY[processKey] ?? null;
 }
 
+/**
+ * Parse the rows table from the root `_index.md`. CONTEXT_VAULT_REDESIGN
+ * v4 V15 split the file into user-curated prose + a daemon-owned
+ * `<!-- reconciler-section -->` block. When the block is present its body
+ * is the authoritative slice; consumers must NOT mix in stale outer
+ * tables the user may have left from a pre-V15 hand-curated index.
+ * When no block exists (fresh install before first reconcile, or a user
+ * who has deleted it), fall back to the first table found anywhere in
+ * the file.
+ */
 export function parseContextIndexRows(content: string): ContextIndexRow[] {
-  const lines = content.split(/\r?\n/);
+  const blockMatch =
+    /<!--\s*reconciler-section\s*-->([\s\S]*?)<!--\s*\/reconciler-section\s*-->/.exec(
+      content,
+    );
+  const scope = blockMatch ? blockMatch[1] : content;
+  const lines = scope.split(/\r?\n/);
   const rows: ContextIndexRow[] = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -197,16 +213,21 @@ export function loadReviewContextBlocks(
         const indexRows = parseContextIndexRows(contextIndex);
         for (const row of indexRows) {
           if (!reviewFlowsMatch(row.reviewFlows, flowConfig.flow)) continue;
+          // Translate legacy spellings (e.g. `plans/projects/foo.md`) to their
+          // canonical six-class form (`plans/projects/foo.md`) so older
+          // context-index rows still resolve and dossier dedup matches
+          // the new layout. Idempotent on already-canonical paths.
+          const aliasedRowPath = aliasVaultPath(row.path).canonicalPath;
           if (
-            row.path === CONTEXT_RELATIVE_PATHS.contextIndex ||
-            row.path === flowConfig.dossierPath
+            aliasedRowPath === CONTEXT_RELATIVE_PATHS.contextIndex ||
+            aliasedRowPath === flowConfig.dossierPath
           ) {
             continue;
           }
           /* c8 ignore start — cleanIndexPath already routes through
              sanitizeContextIndexPath upstream, so this re-sanitize never
              rejects a path that survived parsing. */
-          const safePath = sanitizeContextIndexPath(row.path);
+          const safePath = sanitizeContextIndexPath(aliasedRowPath);
           if (!safePath) continue;
           /* c8 ignore stop */
           const content = readReviewFile(opts, safePath);

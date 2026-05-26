@@ -84,6 +84,7 @@ import type Database from "better-sqlite3";
 
 import type { AgentConfig } from "../config.js";
 import { getContextDir, isRoadmapStale } from "../config.js";
+import { resolveUserSkillsRoot } from "../core/user-skills-root.js";
 import { isUserPaused } from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { selectGithubRepoSlugs } from "../db/repositories-store.js";
@@ -484,7 +485,7 @@ export async function createEventPipeline(
         db,
         messageText ?? null,
       );
-      syncAllUserSkills(sessionDir, join(config.dataDir, "skills"));
+      syncAllUserSkills(sessionDir, resolveUserSkillsRoot(config));
     },
   );
 
@@ -1212,7 +1213,7 @@ export function createGoogleServicesReadyHandler(
     // (same logic as runCatchup, ensures schedule generation after first
     // auth).
     const contextDir = getContextDir(config);
-    const todayMdPath = join(contextDir, "today.md");
+    const todayMdPath = join(contextDir, "state", "today.md");
     const needsMorning = !hasFreshAgentDayTodayMd(
       todayMdPath,
       config.timezone || undefined,

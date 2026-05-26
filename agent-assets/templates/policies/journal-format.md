@@ -22,7 +22,7 @@ because the human user doesn't journal by hand — but the perspective,
 voice, and content all belong to the user.
 
 Agent-side bookkeeping (action counts, internal anomalies, audit
-trail) lives in `agent/journal.md` — not here. If you find yourself
+trail) lives in `journal/agent.md` — not here. If you find yourself
 about to log "the agent ran N tools today" or "the hourly check
 fired M times", that belongs in the agent-side log instead. Filter
 it out.
@@ -108,7 +108,7 @@ day, etc.
 **Sections deliberately NOT in the daily journal:**
 
 - ❌ Agent action counts (`agent_actions` breakdown by type). Lives
-  in `agent/journal.md` instead — the audit-trail footprint.
+  in `journal/agent.md` instead — the audit-trail footprint.
 - ❌ Internal stage status, retry counts, anomalies. Same as above.
 - ❌ "The agent did X for the user" framing. The user's diary uses
   user voice; agent meta-narration belongs in the agent-side log.
@@ -129,7 +129,7 @@ day, etc.
 
 - When `settings.vault_mode` is `obsidian`, Stage B renders project /
   people references throughout the body as `[[wikilinks]]` targeting
-  `projects/<slug>.md` or `user/people.md#<person>` (basename resolves
+  `projects/<slug>.md` or `identity/people.md#<person>` (basename resolves
   automatically). The `## Summary` paragraph is the primary surface,
   but data sections may also receive wikilinks where a project / person
   name appears (e.g. a meeting title containing a person's name).
@@ -140,10 +140,10 @@ day, etc.
 
 ## Redaction
 
-- Apply `rules/redaction.md` patterns to the entire body Stage B
+- Apply `policies/redaction.md` patterns to the entire body Stage B
   authors (Summary + data sections both — Stage B owns the body, so
   redaction applies wherever sensitive content might surface).
-- Apply `rules/journal-export.md` user rules to the entire body.
+- Apply `policies/journal-export.md` user rules to the entire body.
 - If yesterday.md frontmatter had `no_journal_export: true`, write
   `[Skipped by user request]` as the body of `## Summary` and omit
   the data sections (they would echo information the export rule is

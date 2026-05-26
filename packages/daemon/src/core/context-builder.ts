@@ -23,6 +23,7 @@ import { getContextDir } from "../config.js";
 import { getDegradedMode } from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
+import { getInjectionPolicy } from "./injection-policy.js";
 import { POLICY_FILE_MAX_BYTES } from "./policy-files.js";
 import { renderOutputLanguagePolicyBlock } from "./output-language-policy.js";
 import {
@@ -57,24 +58,20 @@ import {
 const logger = createLogger("context-builder");
 
 /**
- * Per-event opt-out for the two large "always-injected" blocks
- * (`<user>` → `user/profile.md`, `<management_rules>` → `rules/management.md`).
+ * Per-event injection policy for the two heavy "always-injected" blocks
+ * (`<user>` → `identity/profile.md`, `<management_rules>` → `policies/management.md`).
  *
- * Default for any event NOT listed below: both blocks are injected
- * (wide-path behaviour). Opting out is explicit — every entry here is
- * a deliberate decision that the task-flow does not consume the block,
- * the agent profile does not depend on it, and the skill set is narrow
- * enough that the bytes are pure dead weight.
+ * Default for any event NOT listed in the underlying table: both blocks
+ * are injected (wide-path behaviour). Opting out is explicit — every
+ * entry is a deliberate decision that the task-flow does not consume the
+ * block, the agent profile does not depend on it, and the skill set is
+ * narrow enough that the bytes are pure dead weight.
  *
  * The opt-out is the same input-discipline pattern as the
- * `routine.fetch_window` slim path (`buildFetchWindowContext` below) and
- * the existing Stage B (`routine.morning_routine_journal`) carve-out for
- * `<management_rules>` — fetch_window is the existence proof that
- * cutting the always-injected set per session-shape is safe and lands
- * the same saving on every backend.
+ * `routine.fetch_window` slim path (`buildFetchWindowContext` below).
  *
- * Adding a new opt-out — the three checks (in this order) that
- * justify a row here:
+ * Adding a new opt-out — the three checks (in this order) that justify
+ * adding a row to `getInjectionPolicy` in `injection-policy.ts`:
  *
  *  1. **Task-flow body does not reference the block name.** Grep
  *     `agent-assets/task-flows/<eventType>.md` (and any
@@ -82,122 +79,38 @@ const logger = createLogger("context-builder");
  *     A prose pointer like "see <user> for …" must be removed FIRST,
  *     or the agent will look for a tag that no longer exists.
  *  2. **Agent profile does not depend on the block.** Profiles in
- *     `agent-assets/agent-profiles/` resolve via
- *     `getProfileForEvent`. Persona prose that says "use the operator's
- *     profile to set tone" is a `<user>` dependency.
+ *     `agent-assets/agent-profiles/` resolve via `getProfileForEvent`.
+ *     Persona prose that says "use the operator's profile to set tone"
+ *     is a `<user>` dependency.
  *  3. **Skill manifest is narrow.** A skill bundle that includes
  *     `user-profile` (the only skill that reads `<user>` today) blocks
  *     the `<user>` opt-out. Confirm by reading
  *     `EVENT_SKILL_SETS[<eventType>]` in `skills-manifest.ts`.
  *
- * Past precedents kept here for the next author's benchmark:
+ * Past precedents and routine-by-routine rationale live in
+ * `injection-policy.ts`. After CONTEXT_VAULT_REDESIGN_PLAN v4.2 V20 the
+ * underlying registry also covers `policy-files.ts:resolvePolicyRefs`'s
+ * `*` merge gate — adding a row in one module covers both surfaces.
  *
- *  - **Stage B** (`routine.morning_routine_journal`) — Phase 5 of
- *    `morning-routine-optimization.md`. Drops `<management_rules>`
- *    because the journal author reads `<journal_skeleton>` +
- *    `rules/journal-format.md` and never SoT bindings. Keeps `<user>`
- *    because the journal author uses the people roster for wikilinks
- *    and the redaction rules. The parallel opt-out in
- *    `policy-files.ts:POLICY_KEY_GLOBAL_OPTOUT` strips Stage B from
- *    the `*` policy-file registry; when adding a new event here,
- *    consider whether the policy-file side needs the same treatment
- *    so the two injection paths stay in lock-step.
- *  - **Hourly check** (`routine.hourly_check`) — task-flow §"Execution
- *    budget" explicitly tells the agent "Do NOT read roadmap.md,
- *    projects/*.md, or user/*.md unless an observation warrants it".
- *    The decision framework consumes `<observations>` + `<today>` +
- *    `<gate_decision>` + `<fetch_report>` only; SoT bindings are not
- *    used by the hourly decision tree.
- *  - **Today refresh** (`routine.today_refresh`) — dashboard-triggered
- *    manual rewrite of `today.md ## User Schedule` from a calendar
- *    pre-pass. Skill bundle is `[context, today, external-services]`
- *    by design (the narrow narrowing in `skills-manifest.ts`); the
- *    flow patches one section and emits no identity-aware text.
- *  - **Observer events** (`github.*`, `git.*`, `schedule.approaching`)
- *    — `observer.md` profile is "evaluate external change events; act,
- *    skip, or defer." The classification is structural (diff / commit
- *    / event payload vs. category routing); operator identity does not
- *    enter the loop. Bundles are narrow (`context, today, notify,
- *    observations, [external-services|project-doc]`) and none of those
- *    skills carries a `<user>` reference.
- *  - **`scheduled.task`** — `task.md` profile is "execute exactly what
- *    the description says; close the Agent Plan loop." The task-flow
- *    body consumes `<today>` (Agent Plan grep + day-type filter from
- *    line 2), `<calendar_today>`, `<task_origin>`, and `<task_context>`;
- *    `<user>` / `<management_rules>` appear in zero steps. The
- *    `taskContext.background` field is the per-row contract for "what
- *    the future session needs to know upfront that it could not derive
- *    from today.md alone" (see `routine.morning_routine_today.md`
- *    Step 7's batch contract). Skill bundle is narrow (`context, today,
- *    notify, schedule, external-services, mail, notion, roadmap,
- *    scheduled-managed-task`); none reads `<user>`. The
- *    `dashboard_regenerate` source still adds `<roadmap>` +
- *    `<active_projects>` further down in `build()` — that branch is
- *    independent of this opt-out. DM-tone scheduled work runs under
- *    `scheduled.dm`, which is NOT covered here because the
- *    `morning_briefing` sub-flow legitimately needs `<user>` for
- *    `## Notification Preferences` and name resolution; per-sub_flow
- *    narrowing of `scheduled.dm` belongs in a follow-up.
- *
- * Out of scope for this resolver: `<today>` (small + always cited by
- * the close-the-loop / Agent Log contract), `<agent_identity>` /
- * `<current_time>` / `<settings>` / `<output_language_policy>` /
+ * Out of scope for this resolver: `<today>` (small + always cited by the
+ * close-the-loop / Agent Log contract), `<agent_identity>`,
+ * `<current_time>`, `<settings>`, `<output_language_policy>`,
  * `<integration_modes>` (small structured metadata that every prompt
- * consumes). When a routine has no need for `<today>` either, the
- * right pattern is a dedicated slim builder (see
- * `buildFetchWindowContext`), not a third boolean on this struct.
+ * consumes). When a routine has no need for `<today>` either, the right
+ * pattern is a dedicated slim builder (see `buildFetchWindowContext`),
+ * not a third boolean on this struct.
  */
 interface AlwaysInjectionPolicy {
   injectUserProfile: boolean;
   injectManagementRules: boolean;
 }
 
-const ALWAYS_INJECTION_POLICY_DEFAULT: AlwaysInjectionPolicy = {
-  injectUserProfile: true,
-  injectManagementRules: true,
-};
-
 function resolveAlwaysInjectionPolicy(event: Event): AlwaysInjectionPolicy {
-  const eventType = event.type;
-
-  // Stage B (daily journal author) — see precedent comment above.
-  if (eventType === "routine.morning_routine_journal") {
-    return { injectUserProfile: true, injectManagementRules: false };
-  }
-
-  // Hourly check + today_refresh — narrow routines that explicitly do
-  // not consume operator identity or SoT bindings.
-  if (
-    eventType === "routine.hourly_check" ||
-    eventType === "routine.today_refresh"
-  ) {
-    return { injectUserProfile: false, injectManagementRules: false };
-  }
-
-  // Observer bucket — every github.* / git.* event AND the proximity
-  // wake (schedule.approaching) routes through `observer.md`. Prefix
-  // matching mirrors `PROFILE_RULES` in `skills-manifest.ts` so the
-  // injection contract follows the persona contract.
-  if (
-    eventType.startsWith("github.") ||
-    eventType.startsWith("git.") ||
-    eventType === "schedule.approaching"
-  ) {
-    return { injectUserProfile: false, injectManagementRules: false };
-  }
-
-  // scheduled.task — non-DM-tone scheduled work whose task body and
-  // close-the-loop discipline are self-contained via `<today>` +
-  // `<task_context>`. NOT generalised to scheduled.dm: the
-  // morning_briefing sub-flow legitimately reads `<user>` (day-type
-  // filter + name resolution). Per-sub_flow narrowing of scheduled.dm
-  // is a follow-up; the default here keeps scheduled.dm on the wide
-  // path.
-  if (eventType === "scheduled.task") {
-    return { injectUserProfile: false, injectManagementRules: false };
-  }
-
-  return ALWAYS_INJECTION_POLICY_DEFAULT;
+  const policy = getInjectionPolicy(event.type);
+  return {
+    injectUserProfile: policy.alwaysBlocks.has("user"),
+    injectManagementRules: policy.alwaysBlocks.has("management_rules"),
+  };
 }
 
 export class ContextBuilder implements IContextBuilder {
@@ -297,7 +210,7 @@ export class ContextBuilder implements IContextBuilder {
     const todayReadAt = todayMd ? new Date().toISOString() : null;
 
     if (userMd) sections.push(`<user>\n${userMd}\n</user>`);
-    // Authoritative injection of `rules/management.md`. Task-flows
+    // Authoritative injection of `policies/management.md`. Task-flows
     // (`routine.morning_routine.md`, `setup.update.md`, …) reference
     // `<management_rules>` directly, so the XML form is the contract
     // surface. The policy-files registry (`policy-files.ts`)
@@ -320,7 +233,7 @@ export class ContextBuilder implements IContextBuilder {
             size: rulesBytes,
             cap: POLICY_FILE_MAX_BYTES,
           },
-          "rules/management.md exceeds per-file cap — skipped from <management_rules>",
+          "policies/management.md exceeds per-file cap — skipped from <management_rules>",
         );
       } else {
         sections.push(`<management_rules>\n${rulesMd}\n</management_rules>`);
@@ -526,8 +439,8 @@ export class ContextBuilder implements IContextBuilder {
         // yesterday.md is created by Dispatcher.rotateDayFiles() before this runs.
         // It contains the previous day's today.md (with ## Handoff section).
         const [yesterdayMd, roadmapMd, activeProjects, yesterdaySqlite] = await Promise.all([
-          this.readFile("yesterday.md"),
-          this.readFile("roadmap.md"),
+          this.readFile(CONTEXT_RELATIVE_PATHS.yesterday),
+          this.readFile(CONTEXT_RELATIVE_PATHS.roadmap),
           renderActiveProjectsSection(this.readableContextDir),
           buildYesterdayContext({ db: this.db, config: this.config }),
         ]);
@@ -631,7 +544,7 @@ export class ContextBuilder implements IContextBuilder {
         }
       } else if (event.routine === "roadmap_refresh") {
         const [roadmapMd, activeProjects] = await Promise.all([
-          this.readFile("roadmap.md"),
+          this.readFile(CONTEXT_RELATIVE_PATHS.roadmap),
           renderActiveProjectsSection(this.readableContextDir),
         ]);
         // Roadmap refresh must see the full file — the session
@@ -675,7 +588,7 @@ export class ContextBuilder implements IContextBuilder {
         );
       } else if (event.routine === "evening_review") {
         const [roadmapMd, activeProjects] = await Promise.all([
-          this.readFile("roadmap.md"),
+          this.readFile(CONTEXT_RELATIVE_PATHS.roadmap),
           renderActiveProjectsSection(this.readableContextDir),
         ]);
         if (roadmapMd)
@@ -747,7 +660,7 @@ export class ContextBuilder implements IContextBuilder {
         event.routine === "monthly_review"
       ) {
         const [roadmapMd, activeProjects] = await Promise.all([
-          this.readFile("roadmap.md"),
+          this.readFile(CONTEXT_RELATIVE_PATHS.roadmap),
           renderActiveProjectsSection(this.readableContextDir),
         ]);
         if (roadmapMd)
@@ -798,7 +711,7 @@ export class ContextBuilder implements IContextBuilder {
       // (Calendar data is already embedded in the task description by the API endpoint)
       if (event.source === "dashboard_regenerate") {
         const [roadmapMd, activeProjects] = await Promise.all([
-          this.readFile("roadmap.md"),
+          this.readFile(CONTEXT_RELATIVE_PATHS.roadmap),
           renderActiveProjectsSection(this.readableContextDir),
         ]);
         if (roadmapMd) sections.push(`<roadmap>\n${roadmapMd}\n</roadmap>`);

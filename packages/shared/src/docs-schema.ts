@@ -34,7 +34,7 @@ export type DocStatus = (typeof DOC_STATUS)[number];
  * `slug.split('/')[0] === category` lives in the indexer because it
  * needs the runtime category value.
  *
- * Example: `features/routines/morning-routine`
+ * Example: `features/routines/morning-routine` (doc slug, not a vault path) // drift-allow
  */
 const slugSchema = z
   .string()

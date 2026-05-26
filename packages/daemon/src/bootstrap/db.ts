@@ -8,18 +8,24 @@
  *
  * Responsibilities (in run order):
  *  1. Open the SQLite file and apply the idempotent schema.
- *  2. Register the wiki workspace token resolver so skill compilation can
+ *  2. Load persisted `settings` rows and merge them on top of env
+ *     defaults. **Must run before step 3** so `getContextDir(config)`
+ *     sees DB-persisted `vaultMode` / `primaryVaultPath` before the
+ *     context-vault-restructure migration (0004) walks the vault.
+ *     CONTEXT_VAULT_REDESIGN_PLAN.md §11.8 + V21.
+ *  3. Resolve `contextDir`, evaluate the Obsidian-mode consent gate, and
+ *     run the forward-only schema migrations.
+ *  4. Register the wiki workspace token resolver so skill compilation can
  *     resolve `<wiki_workspace>` tokens via the DB.
- *  3. Backfill the content-less `fts_wiki` virtual table once per workspace.
- *  4. Bump `managed_task_seq.next_id` past any restored backup rows.
- *  5. Close orphaned `dashboard_chat` sessions left active by a crash so
+ *  5. Backfill the content-less `fts_wiki` virtual table once per workspace.
+ *  6. Bump `managed_task_seq.next_id` past any restored backup rows.
+ *  7. Close orphaned `dashboard_chat` sessions left active by a crash so
  *     the setup wizard's resume gate flips correctly on next dashboard load.
- *  6. Construct the chat `AttachmentStore` (top-level so adapter reloaders
+ *  8. Construct the chat `AttachmentStore` (top-level so adapter reloaders
  *     can capture it in closure) and reap orphan rows.
- *  7. Fire-and-forget price refresh (best-effort, network call).
- *  8. Load persisted `settings` rows and merge them on top of env defaults.
- *  9. Best-effort seed of git-project document templates (filesystem write).
- *  10. Heal the `delegatedTaskModeEnabled` Phase-1 canary default for users
+ *  9. Fire-and-forget price refresh (best-effort, network call).
+ *  10. Best-effort seed of git-project document templates (filesystem write).
+ *  11. Heal the `delegatedTaskModeEnabled` Phase-1 canary default for users
  *      who have delegated integrations but never explicitly set the flag.
  *
  * Each step that has its own peer-test surface is exported by name so the
@@ -35,12 +41,25 @@
  *    reloader reads the config.
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { AgentConfig } from "../config.js";
-import { mergeRuntimeSettingsFromDb } from "../config.js";
+import { getContextDir, mergeRuntimeSettingsFromDb } from "../config.js";
 import { createDatabase } from "../db/client.js";
 import { applySchema } from "../db/schema.js";
-import { runMigrations } from "../db/migrations.js";
+import { MIGRATIONS, runMigrations, type Migration } from "../db/migrations.js";
+import {
+  assessVaultVersion,
+  runContextVaultRestructure,
+  MIGRATION_ID as CONTEXT_VAULT_MIGRATION_ID,
+} from "../db/migrations/context-vault-restructure.js";
+import {
+  clearVaultRestructurePendingConsent,
+  getVaultRestructureAck,
+  setVaultRestructureAck,
+  setVaultRestructurePendingConsent,
+} from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { bootstrapManagedTaskSeq } from "../db/managed-tasks-store.js";
 import { setWikiWorkspaceTokenResolver } from "../core/skills-compiler-tree.js";
@@ -74,6 +93,170 @@ export interface BootstrapDbResult {
 }
 
 /**
+ * CONTEXT_VAULT_REDESIGN_PLAN.md V16 — env-var override for the Obsidian
+ * consent gate. Set to `"1"` (or any non-empty string) to declare that
+ * the user has accepted the sidebar reorganization without going
+ * through the dashboard surface. Recorded into
+ * `runtime_state.context_vault_restructure_acknowledged_at` with
+ * `source="env"` so subsequent boots short-circuit the env check.
+ */
+export const VAULT_RESTRUCTURE_ACK_ENV_VAR = "PA_VAULT_RESTRUCTURE_ACK";
+
+export interface VaultRestructureConsentDecision {
+  /** True when the migration is deferred awaiting user consent. */
+  deferred: boolean;
+  /** Migrations to pass into `runMigrations`. `undefined` means "use the
+   *  default MIGRATIONS list" (steady-state proceed). A concrete array
+   *  is the filtered list when the migration is deferred. */
+  migrationsToRun: readonly Migration[] | undefined;
+}
+
+export interface ResolveVaultRestructureConsentDeps {
+  readonly db: Database.Database;
+  readonly dataDir: string;
+  readonly contextDir: string;
+  /** Test seam — production reads `process.env`. */
+  readonly env?: NodeJS.ProcessEnv;
+  /** Test seam — defaults to `() => new Date().toISOString()`. */
+  readonly nowIso?: () => string;
+}
+
+/**
+ * Decide whether to run, defer, or short-circuit the context-vault
+ * restructure migration (CONTEXT_VAULT_REDESIGN_PLAN.md §11.3.4 / V16).
+ *
+ * Branches:
+ *  - Vault is in plain mode (under `<dataDir>/context/`): always proceed.
+ *  - Vault is Obsidian-rooted and an explicit ack exists: proceed.
+ *  - Vault is Obsidian-rooted and `PA_VAULT_RESTRUCTURE_ACK` is set:
+ *    record the ack with `source="env"` and proceed.
+ *  - Vault is Obsidian-rooted with no ack: defer. The migration is
+ *    filtered out of the run list (so `schema_migrations` doesn't get
+ *    its row), pending-consent state is recorded, the daemon boots
+ *    normally on the legacy layout, and the alias resolver continues to
+ *    translate legacy paths until the user acks. The Obsidian-mode
+ *    vault-health probe (`config.ts:runVaultHealthProbe`) sees the
+ *    missing `policies/management.md` marker on a legacy vault and
+ *    enters degraded mode for reason `primary_vault_missing_content`
+ *    on its own — that's what 503s context writes during the consent
+ *    window. `bootstrapManagementMd` in `index.ts` reads
+ *    `getVaultRestructurePendingConsent(db)` and skips its write so the
+ *    legacy vault doesn't grow a stray `policies/` directory before the
+ *    user has acknowledged the move.
+ *
+ * **Subsequent-migration ordering caveat**: only the 0004 entry is
+ * filtered out. Any future migration appended AFTER 0004 will still
+ * run while the vault is at the legacy layout. Authors of post-0004
+ * migrations whose body reads from `<contextDir>/policies/...`,
+ * `identity/...`, etc. must either (a) be idempotent against both
+ * layouts, or (b) detect the pending-consent state via
+ * `getVaultRestructurePendingConsent(db)` and skip their body
+ * gracefully. Both are simpler than reintroducing a dependency-graph
+ * framework just for this one transitional window. The window closes
+ * the first time a deferred-consent user runs the daemon with the
+ * env / dashboard ack set — at that point the migration runner picks
+ * up 0004 (and only 0004; later entries already ran on the legacy
+ * layout boot).
+ *
+ * Exported for peer testing.
+ */
+export function resolveVaultRestructureConsent(
+  deps: ResolveVaultRestructureConsentDeps,
+): VaultRestructureConsentDecision {
+  const env = deps.env ?? process.env;
+  const isObsidianVault = !deps.contextDir.startsWith(deps.dataDir);
+  if (!isObsidianVault) {
+    return { deferred: false, migrationsToRun: undefined };
+  }
+
+  // Already-migrated or fresh-empty Obsidian vault — nothing to consent
+  // to. The marker check covers post-migration installs (the migration
+  // body writes `.context-vault-version=2` as its last step). The
+  // legacy-dirs check covers fresh Obsidian installs that have never
+  // held vault content yet; without it, a brand-new Obsidian user
+  // would see a "consent to restructure" banner with nothing to
+  // restructure. Both checks are pure fs reads — no DB writes — so a
+  // misclassification can't strand the user in a pending-state row.
+  if (!vaultRestructureWouldHaveWork(deps.contextDir)) {
+    return { deferred: false, migrationsToRun: undefined };
+  }
+
+  const existingAck = getVaultRestructureAck(deps.db);
+  if (existingAck) {
+    return { deferred: false, migrationsToRun: undefined };
+  }
+
+  const envAckRaw = env[VAULT_RESTRUCTURE_ACK_ENV_VAR];
+  const envAckSet =
+    typeof envAckRaw === "string" && envAckRaw.trim() !== "" && envAckRaw !== "0";
+  if (envAckSet) {
+    const nowIso = deps.nowIso ?? (() => new Date().toISOString());
+    setVaultRestructureAck(deps.db, { at: nowIso(), source: "env" });
+    return { deferred: false, migrationsToRun: undefined };
+  }
+
+  // Defer: filter the context-vault migration out of the run list so
+  // `schema_migrations` doesn't acquire its row this boot. Record
+  // pending-consent state for the health endpoint + dashboard surface.
+  const nowIso = deps.nowIso ?? (() => new Date().toISOString());
+  setVaultRestructurePendingConsent(deps.db, {
+    since: nowIso(),
+    reason: "obsidian_consent_required",
+    contextDir: deps.contextDir,
+  });
+
+  return {
+    deferred: true,
+    migrationsToRun: MIGRATIONS.filter(
+      (m) => m.id !== CONTEXT_VAULT_MIGRATION_ID,
+    ),
+  };
+}
+
+/**
+ * True when the vault-restructure migration would actually have moves
+ * to make against this `contextDir`. Cheap fs-only probe — used by
+ * `resolveVaultRestructureConsent` to short-circuit the consent gate
+ * for already-migrated and fresh-install Obsidian vaults.
+ *
+ * Returns false when:
+ *  - The version marker `<contextDir>/.context-vault-version` reads
+ *    `"2"` — migration completed on a prior boot.
+ *  - None of the legacy top-level dirs exists — fresh install (or
+ *    one that's already lost its legacy entries some other way).
+ *
+ * Returns true otherwise (legacy vault with `user/` / `rules/` / etc.).
+ */
+function vaultRestructureWouldHaveWork(contextDir: string): boolean {
+  const markerPath = join(contextDir, ".context-vault-version");
+  try {
+    if (existsSync(markerPath)) {
+      const marker = readFileSync(markerPath, "utf-8").trim();
+      if (marker === "2") return false;
+    }
+  } catch {
+    // best-effort — treat marker errors as "do the work to be safe."
+  }
+  const LEGACY_DIRS = [
+    "user",
+    "rules",
+    "routines",
+    "projects",
+    "daily",
+    "weekly",
+    "monthly",
+    "dossiers",
+    "inbox",
+    "agent",
+    "_activity",
+  ];
+  for (const dir of LEGACY_DIRS) {
+    if (existsSync(join(contextDir, dir))) return true;
+  }
+  return false;
+}
+
+/**
  * Open the SQLite file, apply schema, run boot-time backfills, hydrate
  * persisted settings, and apply the delegated-task-mode default
  * correction. Mutates `deps.config` in place via
@@ -85,13 +268,106 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
 
   const db = createDatabase(config);
   applySchema(db);
+
+  // Merge DB-persisted runtime settings into `config` BEFORE resolving
+  // `contextDir`. Settings like `vaultMode` and `primaryVaultPath` live
+  // in the `settings` table; without this merge `getContextDir(config)`
+  // sees only env defaults — typically `vaultMode="plain"` — and would
+  // resolve to `<dataDir>/context/` even for users whose persisted
+  // configuration points at an Obsidian vault.
+  //
+  // The context-vault-restructure migration (0004) consumes that
+  // `contextDir` to walk the user's actual vault, so this ordering is
+  // load-bearing: if settings merged AFTER `runMigrations`, the
+  // migration body would walk the wrong directory on every Obsidian
+  // install. CONTEXT_VAULT_REDESIGN_PLAN.md §11.8 + V21 (boot-order
+  // fix). The `settings` table is created by `applySchema` above, so
+  // reading from it pre-migration is safe; no existing migration ALTERs
+  // the `settings` columns.
+  const { settingsStore, persistedSettings } = loadPersistedSettings({
+    db,
+    config,
+  });
+
   // Run any forward-only ALTER / backfill migrations the consolidated
   // CREATE IF NOT EXISTS script in `applySchema` can't express. Empty on
   // steady-state boots and on fresh installs (the schema is already at
   // head); records ids in `schema_migrations` so this stays a no-op once
   // applied. A failing migration throws — startup aborts intentionally
   // so we never run with a half-migrated DB.
-  runMigrations(db);
+  const contextDir = getContextDir(config);
+
+  // CONTEXT_VAULT_REDESIGN_PLAN.md §11.3.4 / V16 — Obsidian consent gate.
+  // When the vault root lives inside the user's Obsidian vault, the
+  // restructure reorganizes folders the user sees in their Obsidian
+  // sidebar. We defer the migration until the user explicitly consents
+  // (via env, dashboard, or CLI). Plain-mode vaults bypass this gate.
+  const consent = resolveVaultRestructureConsent({
+    db,
+    dataDir: config.dataDir,
+    contextDir,
+  });
+
+  runMigrations(db, {
+    ctx: {
+      dataDir: config.dataDir,
+      contextDir,
+    },
+    migrations: consent.migrationsToRun,
+  });
+
+  if (consent.deferred) {
+    logger.warn(
+      {
+        contextDir,
+        ackEnvVar: "PA_VAULT_RESTRUCTURE_ACK",
+      },
+      "Context vault restructure deferred: Obsidian-mode vault requires explicit consent before reorganizing the sidebar. Set PA_VAULT_RESTRUCTURE_ACK=1 and restart, or confirm via the dashboard (POST /api/setup/vault-restructure-ack).",
+    );
+  } else {
+    // Either migration applied (or was a no-op) — pending-consent state
+    // is no longer relevant.
+    clearVaultRestructurePendingConsent(db);
+  }
+
+  // CONTEXT_VAULT_REDESIGN_PLAN.md §11.8 + §11.10 — post-migration
+  // preflight. The `schema_migrations` row covers same-DB re-runs; the
+  // filesystem marker covers DB-restored-from-backup scenarios where
+  // the row is present but the filesystem is from an older snapshot.
+  //
+  // Three outcomes must be handled distinctly:
+  //   - "noop": marker == VAULT_LAYOUT_VERSION → vault is canonical.
+  //   - "run-migration": marker missing or stale BUT schema_migrations
+  //       already records the id → `runMigrations` above is a no-op so
+  //       the file body never ran. This is the DB-restored-from-backup
+  //       case the plan calls out. Re-invoke the runner directly; it
+  //       is idempotent (skip-if-target-exists per manifest entry,
+  //       per-pair JSON rewrites already at rowsRewritten=0) so a
+  //       fully-canonical FS is a fast no-op that just writes the
+  //       marker. A partially-restored FS converges to canonical.
+  //   - "throw-unknown-version": marker holds a value the runner
+  //       does not recognise. Hard fail — refuse to boot.
+  //
+  // V16: when the migration is deferred for Obsidian consent we skip
+  // the recovery reinvoke too — otherwise the deferral would be
+  // immediately undone by the "marker missing → reinvoke runner" path.
+  const assessment = assessVaultVersion({ contextDir });
+  if (assessment.action === "throw-unknown-version") {
+    throw new Error(
+      `Context vault version marker is unrecognised: ${JSON.stringify(assessment.observedVersion)}. Refusing to boot.`,
+    );
+  }
+  if (assessment.action === "run-migration" && !consent.deferred) {
+    logger.warn(
+      { contextDir, observedVersion: assessment.observedVersion },
+      "Context vault marker missing or stale but schema_migrations row present — running idempotent reconciliation",
+    );
+    runContextVaultRestructure({
+      db,
+      dataDir: config.dataDir,
+      contextDir,
+    });
+  }
 
   initWikiTokenResolver(db);
 
@@ -119,10 +395,12 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
 
   void new PriceFetcher(config.dataDir, db).refresh();
 
-  const { settingsStore, persistedSettings } = loadPersistedSettings({
-    db,
-    config,
-  });
+  // NOTE: `loadPersistedSettings` ran earlier (immediately after
+  // `applySchema`) so `runMigrations` could see DB-persisted vaultMode /
+  // primaryVaultPath when resolving `contextDir`. The legacy position
+  // here is intentionally not restored — re-running the merge would be
+  // a wasted DB read, and any consumer between then and now relies on
+  // the already-merged config.
 
   try {
     seedGitProjectDocTemplates(config.dataDir, config.workspaceDir);

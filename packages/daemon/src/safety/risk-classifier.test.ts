@@ -153,7 +153,7 @@ describe("classifyRisk — B-008 P7 vault health surface", () => {
     // force Sonnet onto fabricated placeholder IDs that then fail PUT
     // validation with `Malformed roadmap id marker`. Lock this down so
     // the regression doesn't recur.
-    expect(classifyRisk("POST", "/api/context/roadmap/id")).toBe(
+    expect(classifyRisk("POST", "/api/context/plans/roadmap/id")).toBe(
       RiskTier.Autonomous,
     );
   });
@@ -249,8 +249,8 @@ describe("auditRiskClassifications — boot-time enforcement", () => {
   it("returns empty when every /api route has an explicit classification", () => {
     const routes = [
       { method: "GET", path: "/api/health" },
-      { method: "PUT", path: "/api/context/today" },
-      { method: "POST", path: "/api/context/roadmap/id" },
+      { method: "PUT", path: "/api/context/state/today" },
+      { method: "POST", path: "/api/context/plans/roadmap/id" },
     ];
     expect(auditRiskClassifications(routes)).toEqual([]);
   });

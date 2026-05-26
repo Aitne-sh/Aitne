@@ -37,14 +37,14 @@ in the session preamble.
 The same two files documented in the direct-mode body are still
 authoritative for non-Calendar routing:
 
-1. **`rules/management.md` → `## Source of Truth`** — durable
+1. **`policies/management.md` → `## Source of Truth`** — durable
    user-authored answers ("Schedule = Google Calendar", "Tasks =
    Notion", etc.).
 2. **`~/.personal-agent/integrations.md` → `## Note Sources`** — the
    daemon-rendered snapshot for the user's external Obsidian vault path
    plus Notion's mode.
 
-If `rules/management.md` Schedule = Apple Calendar or Outlook Calendar,
+If `policies/management.md` Schedule = Apple Calendar or Outlook Calendar,
 the user's chosen provider is **not** Google Calendar and the
 native-Claude binding is irrelevant — route to `/api/apple-calendar/*`
 or `/api/calendar/outlook/*` exactly as the direct-mode body documents.
@@ -149,7 +149,7 @@ the window and intersect.
 <!-- service:apple-calendar -->
 ## Apple Calendar (iCloud CalDAV) — direct, unchanged
 
-If `rules/management.md` Schedule = Apple Calendar, use the
+If `policies/management.md` Schedule = Apple Calendar, use the
 `/api/apple-calendar/*` routes documented in the base body. Apple
 Calendar has no MCP connector; native-mode gating does not apply.
 
@@ -165,7 +165,7 @@ native binding above is Google-only.
 <!-- service:outlook-calendar -->
 ## Outlook Calendar (Microsoft Graph) — direct, unchanged
 
-If `rules/management.md` Schedule = Outlook Calendar, use
+If `policies/management.md` Schedule = Outlook Calendar, use
 `/api/calendar/outlook/*` per the direct-mode body. Microsoft does not
 ship a hosted Outlook Calendar connector for Claude / Codex / Gemini
 today; native-mode gating does not apply.
@@ -178,7 +178,7 @@ today; native-mode gating does not apply.
 
 **Scope**: this skill targets the **separate** Obsidian vault the user
 maintains alongside this app — never the agent's primary management
-store (`today.md`, `roadmap.md`, `projects/`, `rules/`, `routines/`,
+store (`state/today.md`, `plans/roadmap.md`, `projects/`, `rules/`, `routines/`,
 `user/`, `agent/`). Those are reached via `/api/context/*` (see the
 `context` skill).
 

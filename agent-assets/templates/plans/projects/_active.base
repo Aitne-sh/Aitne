@@ -1,6 +1,6 @@
 filters:
   and:
-    - file.inFolder("projects")
+    - file.inFolder("plans/projects")
     - state != "archived"
 views:
   - type: table

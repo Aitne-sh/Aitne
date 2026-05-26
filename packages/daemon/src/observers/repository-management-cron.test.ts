@@ -283,8 +283,8 @@ describe("RepositoryManagementCron", () => {
     const management = getManagement(db, repo.id);
     expect(management?.lastScanStatus).toBe("ok");
 
-    const overviewPath = join(contextDir, "git", repo.slug, "overview.md");
-    const journalPath = join(contextDir, "git", repo.slug, "journal", "2026-05-05.md");
+    const overviewPath = join(contextDir, "knowledge", "repos", repo.slug, "overview.md");
+    const journalPath = join(contextDir, "journal", "repos", repo.slug, "2026-05-05.md");
     expect(existsSync(overviewPath)).toBe(true);
     expect(readFileSync(journalPath, "utf-8")).toContain("Initial docs");
     expect(await drainQueue()).toHaveLength(0);

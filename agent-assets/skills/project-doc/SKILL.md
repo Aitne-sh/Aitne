@@ -28,7 +28,7 @@ carries (project keeps `## Lifecycle Phases`, repo-only stays light).
 ## Hard rules
 
 - Write only through `/api/context/*`. Never edit files directly on disk.
-- Do not modify `today.md`, `roadmap.md`, `user/*`, `rules/*`, or
+- Do not modify `state/today.md`, `plans/roadmap.md`, `user/*`, `rules/*`, or
   unrelated context files.
 - Preserve valid frontmatter. The overview file uses `type: git-project`,
   the journal file uses `type: git-journal`. Both carry an ISO `updated`

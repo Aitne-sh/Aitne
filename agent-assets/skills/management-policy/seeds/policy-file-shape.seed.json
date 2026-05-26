@@ -2,7 +2,7 @@
   "kind": "knowledge_layout",
   "files": [
     {
-      "path": "rules/policies/*.md",
+      "path": "policies/management-captures/*.md",
       "purpose": "Durable management policy capturing why a recurring rule exists, how it runs, and where data lands",
       "sections": [
         { "heading": "## Why", "contains": "one short paragraph stating the motivation behind the policy" },

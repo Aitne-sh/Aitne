@@ -185,8 +185,8 @@ describe("management-policy SKILL.md — pause / resume / remove (plan §4.6)", 
     const text = body(readSkill());
     const removeSection = text.split(/^### Remove/m)[1] ?? "";
     expect(removeSection).toMatch(/status:\s*removed/);
-    // The routine file IS deleted (DELETE is whitelisted on routines/custom/*).
-    expect(removeSection).toMatch(/DELETE\s+\/api\/context\/routines\/custom/);
+    // The routine file IS deleted (DELETE is whitelisted on policies/routines/custom/*).
+    expect(removeSection).toMatch(/DELETE\s+\/api\/context\/policies\/routines\/custom/);
   });
 
   it("documents best-effort fan-out semantics, not transactional", () => {
@@ -204,10 +204,10 @@ describe("management-policy SKILL.md — API surface (plan §11)", () => {
     // live calls; this assertion catches obvious typos at static-analysis
     // time.
     const text = body(readSkill());
-    expect(text).toMatch(/\/api\/context\/rules\/policies\//);
-    expect(text).toMatch(/\/api\/context\/routines\/custom\//);
-    expect(text).toMatch(/\/api\/context\/dossiers\//);
-    expect(text).toMatch(/\/api\/context\/rules\/policies\/_index/);
+    expect(text).toMatch(/\/api\/context\/policies\/management-captures\//);
+    expect(text).toMatch(/\/api\/context\/policies\/routines\/custom\//);
+    expect(text).toMatch(/\/api\/context\/knowledge\/dossiers\//);
+    expect(text).toMatch(/\/api\/context\/policies\/management-captures\/_index/);
   });
 
   it("uses the single-segment list endpoint, NOT the broken multi-segment form", () => {
@@ -221,11 +221,11 @@ describe("management-policy SKILL.md — API surface (plan §11)", () => {
     expect(
       text,
       "skill must NOT call the broken multi-segment list URL",
-    ).not.toMatch(/\/api\/context\/list\/rules\/policies/);
+    ).not.toMatch(/\/api\/context\/list\/policies\/management-captures/);
     expect(
       text,
-      "skill MUST call /api/context/list/rules and filter for policies/ entries",
-    ).toMatch(/\/api\/context\/list\/rules(?!\/)/);
+      "skill MUST call /api/context/list/policies and filter for management-captures/ entries",
+    ).toMatch(/\/api\/context\/list\/policies(?!\/)/);
   });
 
   it("forbids direct insertion into agent_actions and describes the real audit substrate", () => {

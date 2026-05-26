@@ -53,7 +53,7 @@ the doc that goes deep.
 ## Plan your day, on its own
 
 The agent runs **routines** on a schedule. The morning routine builds
-`today.md` from your calendar, mail, tasks, and notes; the evening
+`state/today.md` from your calendar, mail, tasks, and notes; the evening
 review writes a journal entry; the weekly review rolls up the week.
 
 - [Routines](../concepts/routines.md) — what runs and when.

@@ -460,7 +460,7 @@ export function createBrowserHistoryRoutes(deps: ApiDependencies): Hono {
       ...summary,
       projectMatches: summary.projectMatches.map((match) => ({
         ...match,
-        projectPath: `projects/${match.projectSlug}.md`,
+        projectPath: `plans/projects/${match.projectSlug}.md`,
       })),
     };
     return c.json(weeklyInterestsSummaryResponseSchema.parse(projected));

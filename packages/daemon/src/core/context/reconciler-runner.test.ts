@@ -35,7 +35,7 @@ function makeDb(): Database.Database {
 
 function seedTemplate(contextDir: string): void {
   writeFileSync(
-    join(contextDir, "context-index.md"),
+    join(contextDir, "_index.md"),
     [
       "---",
       "type: index",
@@ -48,9 +48,9 @@ function seedTemplate(contextDir: string): void {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| `today.md` | Today's state | hourly, morning, evening | 2026-04-17 |",
-      "| `user/profile.md` | User profile | all | 2026-04-17 |",
-      "| `projects/legacy.md` | Old project | weekly | 2026-04-10 |",
+      "| `state/today.md` | Today's state | hourly, morning, evening | 2026-04-17 |",
+      "| `identity/profile.md` | User profile | all | 2026-04-17 |",
+      "| `plans/projects/legacy.md` | Old project | weekly | 2026-04-10 |",
       "",
     ].join("\n"),
   );
@@ -70,8 +70,12 @@ describe("runReconciler", () => {
     tmp = mkdtempSync(join(tmpdir(), "reconciler-runner-"));
     contextDir = join(tmp, "context");
     mkdirSync(contextDir, { recursive: true });
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
     db = makeDb();
   });
 
@@ -82,18 +86,18 @@ describe("runReconciler", () => {
 
   it("writes a fresh index, removes stale rows, and refreshes mtime", async () => {
     seedTemplate(contextDir);
-    writeFileSync(join(contextDir, "today.md"), "# Today\n\nstub");
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\n\nstub");
     writeFileSync(
-      join(contextDir, "user/profile.md"),
+      join(contextDir, "identity/profile.md"),
       "---\ntype: user\nowner: shared\nupdated: 2026-04-20\n---\n# Profile\n",
     );
     writeFileSync(
-      join(contextDir, "projects/alpha.md"),
+      join(contextDir, "plans/projects/alpha.md"),
       "---\ntype: project\nowner: shared\nupdated: 2026-04-21\n---\n# Project Alpha — Q2\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-17T00:00:00Z");
-    touch(join(contextDir, "user/profile.md"), "2026-04-20T00:00:00Z");
-    touch(join(contextDir, "projects/alpha.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "state", "today.md"), "2026-04-17T00:00:00Z");
+    touch(join(contextDir, "identity/profile.md"), "2026-04-20T00:00:00Z");
+    touch(join(contextDir, "plans/projects/alpha.md"), "2026-04-21T00:00:00Z");
 
     const writeTracker = new AgentWriteTracker();
     const contextChangeCalls: Array<{
@@ -124,18 +128,23 @@ describe("runReconciler", () => {
     expect(result.removed).toBeGreaterThan(0);
     expect(result.refreshedMtime).toBeGreaterThan(0);
 
-    const rewritten = readFileSync(join(contextDir, "context-index.md"), "utf-8");
-    expect(rewritten).toContain("updated: 2026-04-21");
+    const rewritten = readFileSync(join(contextDir, "_index.md"), "utf-8");
+    // V15: the outer frontmatter `updated:` is user-curated and survives
+    // verbatim — the seed wrote `updated: 2026-04-17`, the reconciler does
+    // not touch it. The bump date lives inside the reconciler block body
+    // (`_Reconciled by daemon on YYYY-MM-DD._`).
+    expect(rewritten).toContain("updated: 2026-04-17");
+    expect(rewritten).toContain("_Reconciled by daemon on 2026-04-21._");
     const rows = parseContextIndexRows(rewritten);
     const rowPaths = rows.map((r) => r.path);
-    expect(rowPaths).toContain("projects/alpha.md");
-    expect(rowPaths).not.toContain("projects/legacy.md");
+    expect(rowPaths).toContain("plans/projects/alpha.md");
+    expect(rowPaths).not.toContain("plans/projects/legacy.md");
 
-    const alphaRow = rows.find((r) => r.path === "projects/alpha.md")!;
+    const alphaRow = rows.find((r) => r.path === "plans/projects/alpha.md")!;
     expect(alphaRow.purpose).toBe("Project Alpha — Q2");
     expect(alphaRow.lastTouched).toBe("2026-04-21");
 
-    const profileRow = rows.find((r) => r.path === "user/profile.md")!;
+    const profileRow = rows.find((r) => r.path === "identity/profile.md")!;
     // User-edited Purpose/reviewFlows survive verbatim.
     expect(profileRow.purpose).toBe("User profile");
     expect(profileRow.reviewFlows).toBe("all");
@@ -143,7 +152,7 @@ describe("runReconciler", () => {
 
     expect(contextChangeCalls).toEqual([
       {
-        path: "context-index.md",
+        path: "_index.md",
         reason: "reconciler",
         tier: "quiet",
         tierReason: "derived_context_index",
@@ -154,7 +163,7 @@ describe("runReconciler", () => {
       .prepare(
         "SELECT trigger FROM md_file_snapshots WHERE file_path = ? ORDER BY id DESC LIMIT 1",
       )
-      .get("context-index.md") as { trigger: string } | undefined;
+      .get("_index.md") as { trigger: string } | undefined;
     expect(snapshotRow?.trigger).toBe("reconciler_write");
 
     const persisted = readRuntimeState<ReconcilerRunRecord>(
@@ -168,11 +177,11 @@ describe("runReconciler", () => {
 
   it("creates the index when the file is missing (recovery path)", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
-    expect(existsSync(join(contextDir, "context-index.md"))).toBe(false);
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
+    expect(existsSync(join(contextDir, "_index.md"))).toBe(false);
 
     const result = await runReconciler({
       db,
@@ -183,19 +192,19 @@ describe("runReconciler", () => {
     });
 
     expect(result.result).toBe("applied");
-    expect(existsSync(join(contextDir, "context-index.md"))).toBe(true);
+    expect(existsSync(join(contextDir, "_index.md"))).toBe(true);
     const rows = parseContextIndexRows(
-      readFileSync(join(contextDir, "context-index.md"), "utf-8"),
+      readFileSync(join(contextDir, "_index.md"), "utf-8"),
     );
-    expect(rows.some((row) => row.path === "today.md")).toBe(true);
+    expect(rows.some((row) => row.path === "state/today.md")).toBe(true);
   });
 
   it("returns noop when the snapshot already matches the index", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
 
     // First run to establish the canonical index.
     await runReconciler({
@@ -205,7 +214,7 @@ describe("runReconciler", () => {
       timezone: "UTC",
       now,
     });
-    const first = readFileSync(join(contextDir, "context-index.md"), "utf-8");
+    const first = readFileSync(join(contextDir, "_index.md"), "utf-8");
 
     // Second run with no filesystem changes.
     const second = await runReconciler({
@@ -216,19 +225,19 @@ describe("runReconciler", () => {
       now,
     });
     expect(second.result).toBe("noop");
-    expect(readFileSync(join(contextDir, "context-index.md"), "utf-8")).toBe(first);
+    expect(readFileSync(join(contextDir, "_index.md"), "utf-8")).toBe(first);
   });
 
   it("records an error when the write fails but still persists the run record", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
     // Replace `context-index.md` with a directory — writeFileSync then
     // fails with EISDIR, which is the real failure shape we expect when
     // the user has mis-placed a directory at the reconciler's target.
-    mkdirSync(join(contextDir, "context-index.md"));
+    mkdirSync(join(contextDir, "_index.md"));
 
     const result = await runReconciler({
       db,
@@ -250,10 +259,10 @@ describe("runReconciler", () => {
 
   it("exits early when degraded mode is active", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
     setDegradedMode(db, {
       reason: "primary_unreachable",
       path: contextDir,
@@ -270,14 +279,14 @@ describe("runReconciler", () => {
     expect(result.result).toBe("noop");
     expect(result.error).toBe("degraded_mode:primary_unreachable");
     // No index written.
-    expect(existsSync(join(contextDir, "context-index.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "_index.md"))).toBe(false);
   });
 
   it("treats an unparseable context-index.md as empty and rebuilds it", async () => {
-    writeFileSync(join(contextDir, "today.md"), "# Today\nstub");
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\nstub");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
     writeFileSync(
-      join(contextDir, "context-index.md"),
+      join(contextDir, "_index.md"),
       "not a table at all",
     );
 
@@ -290,9 +299,9 @@ describe("runReconciler", () => {
     });
     expect(result.result).toBe("applied");
     const rows = parseContextIndexRows(
-      readFileSync(join(contextDir, "context-index.md"), "utf-8"),
+      readFileSync(join(contextDir, "_index.md"), "utf-8"),
     );
-    expect(rows.some((r) => r.path === "today.md")).toBe(true);
+    expect(rows.some((r) => r.path === "state/today.md")).toBe(true);
   });
 
   it("returns noop when contextDir does not exist", async () => {
@@ -309,10 +318,10 @@ describe("runReconciler", () => {
 
   it("serializes concurrent calls", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
 
     const [ra, rb] = await Promise.all([
       runReconciler({
@@ -336,7 +345,7 @@ describe("runReconciler", () => {
 
   it("extracts H1 titles while skipping frontmatter blocks", async () => {
     writeFileSync(
-      join(contextDir, "projects/alpha.md"),
+      join(contextDir, "plans/projects/alpha.md"),
       [
         "---",
         "type: project",
@@ -350,7 +359,7 @@ describe("runReconciler", () => {
         "body",
       ].join("\n"),
     );
-    touch(join(contextDir, "projects/alpha.md"), "2026-04-21T00:00:00Z");
+    touch(join(contextDir, "plans/projects/alpha.md"), "2026-04-21T00:00:00Z");
 
     const result = await runReconciler({
       db,
@@ -361,19 +370,19 @@ describe("runReconciler", () => {
     });
     expect(result.result).toBe("applied");
     const rows = parseContextIndexRows(
-      readFileSync(join(contextDir, "context-index.md"), "utf-8"),
+      readFileSync(join(contextDir, "_index.md"), "utf-8"),
     );
-    const alpha = rows.find((r) => r.path === "projects/alpha.md");
+    const alpha = rows.find((r) => r.path === "plans/projects/alpha.md");
     expect(alpha?.purpose).toBe("Project Alpha — Q2");
   });
 
   it("silently skips the snapshot write when md_file_snapshots is unavailable", async () => {
     writeFileSync(
-      join(contextDir, "today.md"),
+      join(contextDir, "state", "today.md"),
       "---\ntype: daily\nowner: agent\nupdated: 2026-04-21\n---\n# Today\n",
     );
-    touch(join(contextDir, "today.md"), "2026-04-21T00:00:00Z");
-    writeFileSync(join(contextDir, "context-index.md"), "placeholder");
+    touch(join(contextDir, "state", "today.md"), "2026-04-21T00:00:00Z");
+    writeFileSync(join(contextDir, "_index.md"), "placeholder");
     db.prepare("DROP TABLE md_file_snapshots").run();
 
     const result = await runReconciler({
@@ -386,7 +395,7 @@ describe("runReconciler", () => {
     // Snapshot insert failed; the reconciler continues and the index is
     // still rewritten because the snapshot is a best-effort side-effect.
     expect(result.result).toBe("applied");
-    expect(readFileSync(join(contextDir, "context-index.md"), "utf-8")).toContain(
+    expect(readFileSync(join(contextDir, "_index.md"), "utf-8")).toContain(
       "updated: 2026-04-21",
     );
   });
@@ -397,7 +406,8 @@ describe("runReconciler — run-record persistence", () => {
     const tmp = mkdtempSync(join(tmpdir(), "reconciler-runner-err-"));
     const contextDir = join(tmp, "context");
     mkdirSync(contextDir, { recursive: true });
-    writeFileSync(join(contextDir, "today.md"), "# Today\n");
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\n");
     try {
       const db = makeDb();
       db.prepare("DROP TABLE runtime_state").run();

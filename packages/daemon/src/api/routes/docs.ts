@@ -51,7 +51,7 @@ const logger = createLogger("docs-api");
  * search-call rate-limit).
  *
  * The slug-fetch route lives under `/by-slug/:slug{.+}` rather than
- * `/:slug{.+}` so the path-style slug (`features/routines/morning-routine`)
+ * `/:slug{.+}` so the path-style slug (`features/routines/morning-routine`) // drift-allow
  * cannot shadow the static `/search`, `/health`, `/qa/binding` siblings —
  * Hono's wildcard matcher is eager and would otherwise capture them.
  */

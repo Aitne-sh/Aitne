@@ -12,12 +12,12 @@ import { preTickProfileQuestions } from "./profile-questions/seed.js";
 import { createLogger } from "../logging.js";
 
 /**
- * Relative path of the profile-interview queue file, mirrored from the
- * shipped template. Hardcoded here (rather than imported from
- * `context-paths.ts`) because the seed runs before any caller would
- * read it from runtime config.
+ * Relative path of the profile-interview queue file. Sourced from the
+ * central registry — CONTEXT_VAULT_REDESIGN_PLAN.md v4 V10 moved this
+ * from `state/profile-questions.md` to `state/profile-questions.md`,
+ * and a hardcoded duplicate here would silently regress fresh installs.
  */
-const PROFILE_QUESTIONS_REL = "agent/profile-questions.md";
+const PROFILE_QUESTIONS_REL = CONTEXT_RELATIVE_PATHS.agent.profileQuestions;
 
 const logger = createLogger("skeleton");
 
@@ -165,7 +165,7 @@ export function resolveTemplatesRoot(workspaceDir: string): string | null {
  *    plain-mode fallback, leaving the agent with no policy files /
  *    routine rulebooks / user profile for prompt injection.
  *  - `api/routes/setup.ts` `/setup/save-rules` — kept as a safety net
- *    for any code path that commits `rules/management.md` without going
+ *    for any code path that commits `policies/management.md` without going
  *    through migrate-context (e.g. the plain-mode first-run flow).
  *
  * When `agent-assets/templates/` is missing (running from a prebuilt

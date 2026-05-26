@@ -106,7 +106,7 @@ describe("POST /knowledge/import", () => {
     const body = (await res.json()) as { status: string; traceId: string; scratchPath: string };
     expect(body.status).toBe("accepted");
     expect(body.traceId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(body.scratchPath).toMatch(/^agent\/scratch\/import-\d{4}-\d{2}-\d{2}-profile-[0-9a-f]+\.md$/);
+    expect(body.scratchPath).toMatch(/^state\/scratch\/import-\d{4}-\d{2}-\d{2}-profile-[0-9a-f]+\.md$/);
 
     // Scratch file landed under context/agent/scratch/.
     const absPath = join(contextDir, body.scratchPath);
@@ -323,9 +323,9 @@ describe("POST /knowledge/import", () => {
   });
 
   it("returns 500 scratch_write_failed when the scratch directory cannot be created", async () => {
-    // Place a regular FILE at contextDir/agent — mkdirSync cannot create
+    // Place a regular FILE at contextDir/state — mkdirSync cannot create
     // a directory where a file already exists, so the write will throw.
-    writeFileSync(join(contextDir, "agent"), "I am a file, not a dir");
+    writeFileSync(join(contextDir, "state"), "I am a file, not a dir");
     const fd = fileForm(
       { name: "crash.md", content: "- This will fail.\n" },
       { source: "self-written" },

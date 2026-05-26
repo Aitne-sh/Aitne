@@ -4,7 +4,7 @@ name: migration
 description: Section auto-ensure recipe for legacy roadmaps missing ## Long-term Plans. PATCH-driven; full-file PUT writers (refresh routine) do not need this.
 ---
 
-# Section auto-ensure — legacy `roadmap.md` files
+# Section auto-ensure — legacy `plans/roadmap.md` files
 
 Roadmaps created before the `## Long-term Plans` section was
 introduced may be missing that header. A direct
@@ -24,19 +24,19 @@ they never trigger `section_not_found` and never need this recipe.
 
 ```bash
 # 1. Read the file
-curl -s http://localhost:8321/api/context/roadmap
+curl -s http://localhost:8321/api/context/plans/roadmap
 
 # 2. Inspect the body for "## Long-term Plans". If present, skip the
 #    insert and go straight to the normal PATCH below.
 
 # 3. Absent → insert it after "## Quarterly Focus":
-curl -s -X PATCH http://localhost:8321/api/context/roadmap \
+curl -s -X PATCH http://localhost:8321/api/context/plans/roadmap \
   -H 'Content-Type: application/json' \
   -H 'X-Lock-Id: <roadmap_write_lock_id>' \
   -d '{"section": "quarterly_focus", "mode": "append", "content": "\n## Long-term Plans\n"}'
 
 # 4. Then PATCH long_term_plans normally
-curl -s -X PATCH http://localhost:8321/api/context/roadmap \
+curl -s -X PATCH http://localhost:8321/api/context/plans/roadmap \
   -H 'Content-Type: application/json' \
   -H 'X-Lock-Id: <roadmap_write_lock_id>' \
   -d '{"section": "long_term_plans", "mode": "append", "content": "- [undated] …"}'

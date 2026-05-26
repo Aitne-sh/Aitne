@@ -785,9 +785,18 @@ describe("ensureSessionWorkdir", () => {
     expect(dir1).not.toBe(dir2);
   });
 
-  it("copies user-authored skills from {dataDir}/skills/", () => {
-    // Plant a user skill in the data dir
-    const userSkillDir = join(fakeDataDir, "skills", "my-digest");
+  it("copies user-authored skills from <contextDir>/policies/skills/", () => {
+    // CONTEXT_VAULT_REDESIGN_PLAN.md v4 V11 — user skills root is now
+    // `<contextDir>/policies/skills`. The workdir fallback (when
+    // `options.contextDir` is omitted) derives from `<dataDir>/context`
+    // — the default plain-mode vault location.
+    const userSkillDir = join(
+      fakeDataDir,
+      "context",
+      "policies",
+      "skills",
+      "my-digest",
+    );
     mkdirSync(userSkillDir, { recursive: true });
     writeFileSync(
       join(userSkillDir, "SKILL.md"),
@@ -802,7 +811,7 @@ describe("ensureSessionWorkdir", () => {
     expect(existsSync(join(dir, ".claude", "skills", "user-profile", "SKILL.md"))).toBe(true);
   });
 
-  it("is resilient when {dataDir}/skills/ doesn't exist", () => {
+  it("is resilient when <contextDir>/policies/skills/ doesn't exist", () => {
     // No user skills dir at all — should not throw
     const dir = ensureSessionWorkdir(fakeProjectRoot, fakeDataDir, 101, "message.received");
     expect(existsSync(dir)).toBe(true);
@@ -816,8 +825,9 @@ describe("ensureSessionWorkdir", () => {
     // 3. Main fails → ensureBackendMaterialized for Codex (creates .codex/skills/)
     // 4. syncAllUserSkills again (the fix: re-sync picks up newly created .codex/skills/)
 
-    // Plant a user skill
-    const userSkillDir = join(fakeDataDir, "skills", "my-digest");
+    // Plant a user skill at the canonical CONTEXT_VAULT_REDESIGN location.
+    const userSkillsRoot = join(fakeDataDir, "context", "policies", "skills");
+    const userSkillDir = join(userSkillsRoot, "my-digest");
     mkdirSync(userSkillDir, { recursive: true });
     writeFileSync(
       join(userSkillDir, "SKILL.md"),
@@ -832,7 +842,7 @@ describe("ensureSessionWorkdir", () => {
     expect(existsSync(join(dir, ".codex", "skills"))).toBe(false);
 
     // Step 2: syncAllUserSkills (dispatcher calls this before router.execute)
-    syncAllUserSkills(dir, join(fakeDataDir, "skills"));
+    syncAllUserSkills(dir, userSkillsRoot);
     // .codex/skills/ still doesn't exist, so user skills not synced there
     expect(existsSync(join(dir, ".codex", "skills"))).toBe(false);
 
@@ -846,7 +856,7 @@ describe("ensureSessionWorkdir", () => {
     expect(existsSync(join(dir, ".codex", "skills", "my-digest", "SKILL.md"))).toBe(false);
 
     // Step 4: syncAllUserSkills again (the fix in index.ts callback)
-    syncAllUserSkills(dir, join(fakeDataDir, "skills"));
+    syncAllUserSkills(dir, userSkillsRoot);
     // Now user skills should be in .codex/skills/ too
     expect(existsSync(join(dir, ".codex", "skills", "my-digest", "SKILL.md"))).toBe(true);
     const content = readFileSync(join(dir, ".codex", "skills", "my-digest", "SKILL.md"), "utf-8");
@@ -979,9 +989,9 @@ describe("ensureSessionWorkdir", () => {
 
     // Operator has authored a `### `-headed rule — rulebook ACTIVE.
     const contextDir = join(fakeDataDir, "context");
-    mkdirSync(join(contextDir, "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
     writeFileSync(
-      join(contextDir, "routines", "evening.md"),
+      join(contextDir, "policies", "routines", "evening.md"),
       "### Stripe metrics\n\nDM me about churn outliers.\n",
       "utf-8",
     );
@@ -1032,9 +1042,9 @@ describe("ensureSessionWorkdir", () => {
     // predicate can't see it — the conservative default wins. This is
     // the documented `eveningRulebookIsActive(undefined) === false` rule.
     const contextDir = join(fakeDataDir, "context");
-    mkdirSync(join(contextDir, "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
     writeFileSync(
-      join(contextDir, "routines", "evening.md"),
+      join(contextDir, "policies", "routines", "evening.md"),
       "### Stripe metrics\n\nDM me about churn outliers.\n",
       "utf-8",
     );

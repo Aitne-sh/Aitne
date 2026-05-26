@@ -90,7 +90,7 @@ export function registerLockRoutes(app: Hono, ctx: ContextRouteContext): void {
   });
 
   // POST /context/roadmap/id — Mint a stable daemon-owned roadmap entry id.
-  app.post("/context/roadmap/id", async (c) => {
+  app.post("/context/plans/roadmap/id", async (c) => {
     if (roadmapWriteLock.getHolder()) {
       const lockId = c.req.header("X-Lock-Id");
       if (!roadmapWriteLock.isHeldBy(lockId)) {

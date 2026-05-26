@@ -395,47 +395,47 @@ const API_RISK: Record<string, RiskTier> = {
   // ── Context File API ──
   // GET reads contain personal notes, schedule, user profile — ReadSensitive.
   // Writes remain Autonomous (agent's own memory operations).
+  //
+  // CONTEXT_VAULT_REDESIGN_PLAN.md §7.1 — after the six-class restructure
+  // the per-path entries collapse to one row per class prefix. Legacy
+  // URLs (e.g. `PUT /api/context/today.md`) are normalised by the
+  // in-process alias resolver before reaching the classifier, so only
+  // canonical paths need to be enumerated here.
   "GET /api/context": RiskTier.ReadSensitive,
   "PUT /api/context/": RiskTier.Autonomous,
   "PATCH /api/context/": RiskTier.Autonomous,
-  "PUT /api/context/today": RiskTier.Autonomous,
-  "PATCH /api/context/today": RiskTier.Autonomous,
-  "PUT /api/context/tomorrow": RiskTier.Autonomous,
-  "PATCH /api/context/tomorrow": RiskTier.Autonomous,
-  // B-007 §5.1 — user profile lives at user/profile.md, area files under user/*.md.
-  "PUT /api/context/user/": RiskTier.Autonomous,
-  "PATCH /api/context/user/": RiskTier.Autonomous,
-  // B-007 §5.1 — management rules moved from context/management-rules.md to
-  // context/rules/management.md; mcp / journal-format / journal-export /
-  // redaction rules are Autonomous (post-Notify-abolition) — agent edits its
-  // own session-shaping rules, on-demand retrospective covers awareness.
-  "PUT /api/context/rules/": RiskTier.Autonomous,
-  "PATCH /api/context/rules/": RiskTier.Autonomous,
-  "PATCH /api/context/roadmap": RiskTier.Autonomous,
-  // Pure-utility ID minter — reads existing IDs, generates a fresh one.
-  // No write side-effect; the route's own write-lock guard handles
-  // concurrent-mint protection. Without this entry the call defaulted
-  // to Approve (fail-closed) and roadmap_refresh's task-flow Step 4.1
-  // collapsed onto fabricated placeholder IDs that then failed PUT
-  // validation with `Malformed roadmap id marker`.
-  "POST /api/context/roadmap/id": RiskTier.Autonomous,
-  "PUT /api/context/projects": RiskTier.Autonomous,
-  "PATCH /api/context/projects": RiskTier.Autonomous,
-  "PUT /api/context/weekly": RiskTier.Autonomous,
-  // B-007 §5.9 — day rotation endpoint (today.md → yesterday.md; synthesized
-  // daily/YYYY-MM-DD.md is written by the morning routine, not this path).
+  // identity/ ← user profile + area files
+  "PUT /api/context/identity/": RiskTier.Autonomous,
+  "PATCH /api/context/identity/": RiskTier.Autonomous,
+  // state/ — today, yesterday, scratch, inbox, activity, profile questions
+  "PUT /api/context/state/": RiskTier.Autonomous,
+  "PATCH /api/context/state/": RiskTier.Autonomous,
+  "DELETE /api/context/state/": RiskTier.Autonomous,
+  // plans/ — roadmap + projects
+  "PUT /api/context/plans/": RiskTier.Autonomous,
+  "PATCH /api/context/plans/": RiskTier.Autonomous,
+  // Pure-utility ID minter for the new plans/roadmap path. Reads
+  // existing IDs, generates a fresh one. No write side-effect.
+  "POST /api/context/plans/roadmap/id": RiskTier.Autonomous,
+  // policies/ — management, mcp, redaction, journal-format/-export,
+  // integrations.md, management-captures, routines, skills
+  "PUT /api/context/policies/": RiskTier.Autonomous,
+  "PATCH /api/context/policies/": RiskTier.Autonomous,
+  // DELETE on policies/ is intentionally scoped to routines/custom/*
+  // only — policy captures preserve `status: removed` rather than
+  // physically deleting, so blanket policies/ DELETE would defeat the
+  // §4.6 / §5.1 audit invariant. Custom routines have their own
+  // explicit route entry below.
+  "DELETE /api/context/policies/routines/custom/": RiskTier.Autonomous,
+  // journal/ — append-only narrative.
+  "PUT /api/context/journal/": RiskTier.Autonomous,
+  "PATCH /api/context/journal/": RiskTier.Autonomous,
+  // knowledge/ — dossiers, entities, wiki, repos.
+  "PUT /api/context/knowledge/": RiskTier.Autonomous,
+  "PATCH /api/context/knowledge/": RiskTier.Autonomous,
+  // Day rotation endpoint (today.md → yesterday.md; synthesized
+  // journal/daily/YYYY-MM-DD.md is written by the morning routine).
   "POST /api/context/archive-today": RiskTier.Autonomous,
-  // B-007 §5.8 — routines/<cadence>.md and routines/custom/<slug>.md
-  // shape scheduled behavior; Autonomous (matches rules tier).
-  "PUT /api/context/routines/": RiskTier.Autonomous,
-  "PATCH /api/context/routines/": RiskTier.Autonomous,
-  "DELETE /api/context/routines/": RiskTier.Autonomous,
-  // B-007 §5.9 — synthesized daily journal path is Autonomous (agent-owned output).
-  "PUT /api/context/daily/": RiskTier.Autonomous,
-  "PATCH /api/context/daily/": RiskTier.Autonomous,
-  // B-007 §5.1 — agent/journal.md (self-reflection) is agent-only.
-  "PUT /api/context/agent/": RiskTier.Autonomous,
-  "PATCH /api/context/agent/": RiskTier.Autonomous,
   "GET /api/context/list": RiskTier.ReadSensitive,
   // B-008 P7 — Vault Health surface. `health` returns a structural drift
   // report (no user prose), so Autonomous. `repair/stub` copies a template
@@ -772,7 +772,7 @@ const API_RISK: Record<string, RiskTier> = {
 
   // Activity tab read-mirror (Memory → Activity). Dashboard-only — surfaces
   // the wider activity-source union used by the runner so the UI can flag
-  // recently-stopped tasks whose `_activity/<source>.md` is still on disk
+  // recently-stopped tasks whose `state/activity/<source>.md` is still on disk
   // for the 90-day window. Not agent-callable; same Approve tier as the
   // rest of the dashboard read surfaces.
   "GET /api/activity-sources": RiskTier.Approve,

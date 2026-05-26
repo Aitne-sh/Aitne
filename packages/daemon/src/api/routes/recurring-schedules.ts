@@ -147,7 +147,7 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
   /**
    * SCHEDULED-DM-IMPLEMENTATION-PLAN §2.5 — every recurring-schedules
    * mutation triggers the `## Default Schedules` reconciler so the
-   * read-only mirror in `rules/management.md` stays in lock-step with
+   * read-only mirror in `policies/management.md` stays in lock-step with
    * the table. Best-effort: failures are logged but never block the
    * caller's response — the reconciler runs on its own mutex and
    * persists a runtime_state row so the dashboard can surface drift.

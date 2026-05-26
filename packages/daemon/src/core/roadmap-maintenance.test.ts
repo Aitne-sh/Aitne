@@ -70,7 +70,8 @@ describe("roadmap-maintenance", () => {
     applySchema(db);
     root = mkdtempSync(join(tmpdir(), "pa-roadmap-maintenance-"));
     contextDir = join(root, "context");
-    mkdirSync(join(contextDir, "agent"), { recursive: true });
+    mkdirSync(join(contextDir, "journal"), { recursive: true });
+    mkdirSync(join(contextDir, "plans"), { recursive: true });
   });
 
   afterEach(() => {
@@ -437,7 +438,7 @@ describe("roadmap-maintenance", () => {
     }
 
     function seedRoadmap(body: string): string {
-      const path = join(contextDir, "roadmap.md");
+      const path = join(contextDir, "plans", "roadmap.md");
       writeFileSync(path, body, "utf-8");
       return path;
     }
@@ -526,7 +527,7 @@ describe("roadmap-maintenance", () => {
       expect(result.swept).toBe(1);
       expect(result.staleMarked).toBe(1);
 
-      const after = readFileSync(join(contextDir, "roadmap.md"), "utf-8");
+      const after = readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8");
       expect(after).toContain("Status: completed");
       expect(after).not.toContain("rm-20260601-cccccc");
       expect(after).toContain("[stale since 2026-05-15]");
@@ -550,16 +551,16 @@ describe("roadmap-maintenance", () => {
       expect(detail).toMatchObject({ statusSynced: 1, swept: 1, staleMarked: 1 });
 
       // writeTracker marked both the roadmap and the journal write
-      const roadmapPath = join(contextDir, "roadmap.md");
-      const journalPath = join(contextDir, "agent/journal.md");
+      const roadmapPath = join(contextDir, "plans", "roadmap.md");
+      const journalPath = join(contextDir, "journal/agent.md");
       expect(writeTracker.isMarked(roadmapPath, after)).toBe(true);
       expect(existsSync(journalPath)).toBe(true);
       const journal = readFileSync(journalPath, "utf-8");
       expect(writeTracker.isMarked(journalPath, journal)).toBe(true);
 
       // index hints fired for both paths
-      expect(indexHints).toContain("roadmap.md");
-      expect(indexHints).toContain("agent/journal.md");
+      expect(indexHints).toContain("plans/roadmap.md");
+      expect(indexHints).toContain("journal/agent.md");
     });
 
     it("writes a journal entry even when no roadmap mutation occurred", async () => {
@@ -576,7 +577,7 @@ describe("roadmap-maintenance", () => {
       expect(result.swept).toBe(0);
       expect(result.staleMarked).toBe(0);
 
-      const journal = readFileSync(join(contextDir, "agent/journal.md"), "utf-8");
+      const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
       expect(journal).toContain("## Roadmap maintenance");
       expect(journal).toContain("status_synced=0, swept=0, stale_marked=0");
 
@@ -598,7 +599,7 @@ describe("roadmap-maintenance", () => {
           "- [2026-Q3] aging — Source: dm 2026-02-01 — Review: 2026-08-01 — ReviewCount: 0  <!-- id: rm-1 -->",
         ],
       }).replace("# Roadmap", "# Wrong Heading");
-      const path = join(contextDir, "roadmap.md");
+      const path = join(contextDir, "plans", "roadmap.md");
       writeFileSync(path, malformed, "utf-8");
 
       const result = await runRoadmapMechanicalMaintenance({
@@ -683,7 +684,7 @@ describe("roadmap-maintenance", () => {
       });
       expect(result.status).toBe("success");
       expect(result.swept).toBe(0);
-      const after = readFileSync(join(contextDir, "roadmap.md"), "utf-8");
+      const after = readFileSync(join(contextDir, "plans", "roadmap.md"), "utf-8");
       expect(after).toContain("Scheduled: orphan");
       expect(after).toContain("Status: pending");
     });

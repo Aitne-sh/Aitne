@@ -36,11 +36,16 @@ describe("ContextBuilder", () => {
   beforeEach(() => {
     tmpDir = join(tmpdir(), `pa-test-${Date.now()}`);
     contextDir = join(tmpDir, "context");
-    mkdirSync(join(contextDir, "daily"), { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
-    mkdirSync(join(contextDir, "user"), { recursive: true });
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    mkdirSync(join(contextDir, "agent"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "daily"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "identity"), { recursive: true });
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "journal"), { recursive: true });
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "inbox"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
 
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
@@ -60,12 +65,12 @@ describe("ContextBuilder", () => {
   });
 
   it("builds context with existing files", async () => {
-    writeFileSync(join(contextDir, "user", "profile.md"), "# User\nTest user");
+    writeFileSync(join(contextDir, "identity", "profile.md"), "# User\nTest user");
     writeFileSync(
-      join(contextDir, "rules", "management.md"),
+      join(contextDir, "policies", "management.md"),
       "# Rules\nBe helpful",
     );
-    writeFileSync(join(contextDir, "today.md"), "# Today\nBusy day");
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\nBusy day");
 
     const event = createEvent({
       type: "test.event",
@@ -143,8 +148,8 @@ describe("ContextBuilder", () => {
   // blowing up the prompt budget.
   it("skips <management_rules> when rules/management.md exceeds the 32KB cap", async () => {
     const oversize = "x".repeat(33 * 1024); // 33KB > POLICY_FILE_MAX_BYTES (32KB)
-    writeFileSync(join(contextDir, "rules", "management.md"), oversize);
-    writeFileSync(join(contextDir, "user", "profile.md"), "# User\nTest user");
+    writeFileSync(join(contextDir, "policies", "management.md"), oversize);
+    writeFileSync(join(contextDir, "identity", "profile.md"), "# User\nTest user");
 
     const event = createEvent({
       type: "test.event",
@@ -165,7 +170,7 @@ describe("ContextBuilder", () => {
 
   it("emits <management_rules> when rules/management.md is just under the cap", async () => {
     const justUnder = "y".repeat(32 * 1024 - 16); // 32KB - 16 bytes < POLICY_FILE_MAX_BYTES
-    writeFileSync(join(contextDir, "rules", "management.md"), justUnder);
+    writeFileSync(join(contextDir, "policies", "management.md"), justUnder);
 
     const event = createEvent({
       type: "test.event",
@@ -187,12 +192,15 @@ describe("ContextBuilder", () => {
   // bindings; injecting management rules into a lite-tier session
   // both pushes it over the cold-start floor and contradicts the
   // design table. The ContextBuilder gate must agree with the
-  // policy-files registry opt-out (`POLICY_KEY_GLOBAL_OPTOUT`) so
-  // both injection paths converge on the same Stage B prompt shape.
+  // policy-files registry opt-out — both the ContextBuilder
+  // injectManagementRules check and the policy-files `*` merge gate
+  // read from the same `getInjectionPolicy(eventOrProcessKey)` table
+  // (v4.2 V20), so both injection paths converge on the same Stage B
+  // prompt shape.
   it("skips <management_rules> for Stage B (routine.morning_routine_journal)", async () => {
-    writeFileSync(join(contextDir, "user", "profile.md"), "# User\nTest user");
+    writeFileSync(join(contextDir, "identity", "profile.md"), "# User\nTest user");
     writeFileSync(
-      join(contextDir, "rules", "management.md"),
+      join(contextDir, "policies", "management.md"),
       "# Rules\nSoT bindings the journal author should never see",
     );
 
@@ -216,9 +224,9 @@ describe("ContextBuilder", () => {
   });
 
   it("still emits <management_rules> for Stage A (routine.morning_routine_today)", async () => {
-    writeFileSync(join(contextDir, "user", "profile.md"), "# User\nTest user");
+    writeFileSync(join(contextDir, "identity", "profile.md"), "# User\nTest user");
     writeFileSync(
-      join(contextDir, "rules", "management.md"),
+      join(contextDir, "policies", "management.md"),
       "# Rules\nStage A reads SoT bindings",
     );
 
@@ -252,9 +260,9 @@ describe("ContextBuilder", () => {
     const RULES_BODY = "# Rules\nSoT bindings that must NOT leak into observer / hourly / today_refresh prompts";
 
     beforeEach(() => {
-      writeFileSync(join(contextDir, "user", "profile.md"), PROFILE_BODY);
-      writeFileSync(join(contextDir, "rules", "management.md"), RULES_BODY);
-      writeFileSync(join(contextDir, "today.md"), "# Today\nseed");
+      writeFileSync(join(contextDir, "identity", "profile.md"), PROFILE_BODY);
+      writeFileSync(join(contextDir, "policies", "management.md"), RULES_BODY);
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\nseed");
     });
 
     it("omits <user> and <management_rules> for routine.hourly_check", async () => {
@@ -364,7 +372,7 @@ describe("ContextBuilder", () => {
       // <active_projects> independently of the <user> opt-out. Verify
       // those blocks still land so dashboard-driven regeneration keeps
       // its richer input set.
-      writeFileSync(join(contextDir, "roadmap.md"), "# Roadmap\nMilestone A");
+      writeFileSync(join(contextDir, "plans", "roadmap.md"), "# Roadmap\nMilestone A");
       const event = {
         ...createEvent({
           type: "scheduled.task",
@@ -423,12 +431,12 @@ describe("ContextBuilder", () => {
   });
 
   it("does not read fallback vault files while degraded", async () => {
-    writeFileSync(join(contextDir, "user", "profile.md"), "# User\nFallback user");
+    writeFileSync(join(contextDir, "identity", "profile.md"), "# User\nFallback user");
     writeFileSync(
-      join(contextDir, "rules", "management.md"),
+      join(contextDir, "policies", "management.md"),
       "# Rules\nFallback rules",
     );
-    writeFileSync(join(contextDir, "today.md"), "# Today\nFallback today");
+    writeFileSync(join(contextDir, "state", "today.md"), "# Today\nFallback today");
     setDegradedMode(db, {
       reason: "primary_vault_unreachable",
       path: "/missing/primary-vault",
@@ -501,7 +509,7 @@ describe("ContextBuilder", () => {
 
     for (const routine of consumerRoutines) {
       it(`truncates roadmap for ${routine}`, async () => {
-        writeFileSync(join(contextDir, "roadmap.md"), bloatedRoadmap);
+        writeFileSync(join(contextDir, "plans", "roadmap.md"), bloatedRoadmap);
         const event = {
           ...createEvent({
             type: `routine.${routine}`,
@@ -531,7 +539,7 @@ describe("ContextBuilder", () => {
     // builder now injects a 7-day dm_conversation_log window for
     // roadmap_refresh specifically.
     it("injects 7-day DM conversation log for roadmap_refresh", async () => {
-      writeFileSync(join(contextDir, "roadmap.md"), bloatedRoadmap);
+      writeFileSync(join(contextDir, "plans", "roadmap.md"), bloatedRoadmap);
       // Seed a DM summary within the 7-day window.
       const recentMs = Date.now() - 2 * 24 * 60 * 60 * 1000;
       const recentTs = new Date(recentMs)
@@ -569,7 +577,7 @@ describe("ContextBuilder", () => {
     });
 
     it("renders a (none) stub when no recent DM summaries exist", async () => {
-      writeFileSync(join(contextDir, "roadmap.md"), bloatedRoadmap);
+      writeFileSync(join(contextDir, "plans", "roadmap.md"), bloatedRoadmap);
       const event = {
         ...createEvent({
           type: "routine.roadmap_refresh",
@@ -586,7 +594,7 @@ describe("ContextBuilder", () => {
     });
 
     it("does NOT truncate roadmap for roadmap_refresh (full file needed)", async () => {
-      writeFileSync(join(contextDir, "roadmap.md"), bloatedRoadmap);
+      writeFileSync(join(contextDir, "plans", "roadmap.md"), bloatedRoadmap);
       const event = {
         ...createEvent({
           type: "routine.roadmap_refresh",
@@ -604,9 +612,9 @@ describe("ContextBuilder", () => {
   });
 
   it("adds morning routine extra context", async () => {
-    writeFileSync(join(contextDir, "roadmap.md"), "# Roadmap\nQ2 goals");
+    writeFileSync(join(contextDir, "plans", "roadmap.md"), "# Roadmap\nQ2 goals");
     writeFileSync(
-      join(contextDir, "projects", "project-a.md"),
+      join(contextDir, "plans", "projects", "project-a.md"),
       [
         "---",
         "type: project",
@@ -621,7 +629,7 @@ describe("ContextBuilder", () => {
       ].join("\n"),
     );
     writeFileSync(
-      join(contextDir, "projects", "project-b.md"),
+      join(contextDir, "plans", "projects", "project-b.md"),
       [
         "---",
         "type: project",
@@ -650,7 +658,7 @@ describe("ContextBuilder", () => {
   });
 
   it("injects previous-agent-day SQLite projections for morning routine synthesis", async () => {
-    writeFileSync(join(contextDir, "yesterday.md"), "# 2026-04-16\n");
+    writeFileSync(join(contextDir, "state", "yesterday.md"), "# 2026-04-16\n");
     const previousAgentDayBounds = getAgentDayBoundsUtc(
       undefined,
       4,
@@ -716,9 +724,9 @@ describe("ContextBuilder", () => {
       // the production code uses to avoid duplicating ISO math here.
       const { getPreviousWeekIsoKey } = await import("./previous-week-digest.js");
       const previousKey = getPreviousWeekIsoKey(undefined);
-      mkdirSync(join(contextDir, "weekly"), { recursive: true });
+      mkdirSync(join(contextDir, "journal", "weekly"), { recursive: true });
       writeFileSync(
-        join(contextDir, "weekly", `${previousKey}.md`),
+        join(contextDir, "journal", "weekly", `${previousKey}.md`),
         [
           "---",
           "type: weekly",
@@ -786,9 +794,9 @@ describe("ContextBuilder", () => {
       // only invoked from the morning_routine branch.
       const { getPreviousWeekIsoKey } = await import("./previous-week-digest.js");
       const previousKey = getPreviousWeekIsoKey(undefined);
-      mkdirSync(join(contextDir, "weekly"), { recursive: true });
+      mkdirSync(join(contextDir, "journal", "weekly"), { recursive: true });
       writeFileSync(
-        join(contextDir, "weekly", `${previousKey}.md`),
+        join(contextDir, "journal", "weekly", `${previousKey}.md`),
         ["# x", "", "## Next Week Focus", "- A"].join("\n"),
       );
 
@@ -2055,7 +2063,7 @@ describe("ContextBuilder", () => {
       it(`excludes agent/journal.md content from ${label} context`, async () => {
         // Plant recognizable sentinel content in the journal
         writeFileSync(
-          join(contextDir, "agent", "journal.md"),
+          join(contextDir, "journal", "agent.md"),
           "# Agent Journal\n\n## Weekly 2026-W14\nSENTINEL_JOURNAL_CONTENT_SHOULD_NOT_LEAK\n",
           "utf-8",
         );
@@ -2064,7 +2072,7 @@ describe("ContextBuilder", () => {
 
         // The file content (sentinel) and the auto-injection block tag
         // together prove the journal was NOT auto-injected. The bare path
-        // string "agent/journal" is legitimately referenced by routine
+        // string "journal/agent" is legitimately referenced by routine
         // task-flow instruction templates (telling the agent it MAY write
         // there on demand), so we don't gate on the path token alone.
         expect(context).not.toContain("SENTINEL_JOURNAL_CONTENT_SHOULD_NOT_LEAK");
@@ -2687,7 +2695,7 @@ describe("ContextBuilder", () => {
   describe("<today snapshot_at> anchor", () => {
     it("emits snapshot_at on the <today> open tag for DM events", async () => {
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         "# Today\n\n## Agent Log\n- 09:00 woke up\n",
       );
 
@@ -2717,7 +2725,7 @@ describe("ContextBuilder", () => {
     it("preserves the omission marker AND snapshot_at when Agent Log is truncated (>10 entries)", async () => {
       const bullets = Array.from({ length: 15 }, (_, i) => `- 09:${String(i).padStart(2, "0")} entry-${i}`).join("\n");
       writeFileSync(
-        join(contextDir, "today.md"),
+        join(contextDir, "state", "today.md"),
         `# Today\n\n## Agent Log\n${bullets}\n`,
       );
 
@@ -2844,12 +2852,12 @@ describe("ContextBuilder", () => {
       // Pre-seed `<user>` / `<today>` / `<management_rules>` files so the
       // wide path WOULD have injected them. The slim path should suppress
       // them anyway — this is the regression guard the test exists for.
-      writeFileSync(join(contextDir, "user", "profile.md"), "# User\nshould be skipped");
+      writeFileSync(join(contextDir, "identity", "profile.md"), "# User\nshould be skipped");
       writeFileSync(
-        join(contextDir, "rules", "management.md"),
+        join(contextDir, "policies", "management.md"),
         "# Rules\nshould be skipped",
       );
-      writeFileSync(join(contextDir, "today.md"), "# Today\nshould be skipped");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\nshould be skipped");
 
       const event = makeFetchWindowEvent({ acquisitionPlanBlock });
       const context = await builder.build(event);
@@ -2953,7 +2961,7 @@ describe("ContextBuilder", () => {
       // covers that contract, this case only guards that the slim
       // fetch_window branch did not accidentally swallow sibling
       // routines.
-      writeFileSync(join(contextDir, "today.md"), "# Today\nseed");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\nseed");
       const event = {
         ...createEvent({
           type: "routine.hourly_check",
@@ -2992,7 +3000,7 @@ describe("ContextBuilder", () => {
     });
 
     it("omits <roadmap_skeleton> on morning_routine when the orchestrator did not inject it", async () => {
-      writeFileSync(join(contextDir, "today.md"), "# Today\nseed");
+      writeFileSync(join(contextDir, "state", "today.md"), "# Today\nseed");
       const event = {
         ...createEvent({
           type: "routine.morning_routine",

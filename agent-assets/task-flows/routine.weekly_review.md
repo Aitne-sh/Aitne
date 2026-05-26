@@ -3,12 +3,12 @@
 ## Task: Weekly Review
 
 The "Vault policy files" block appended to this prompt includes
-`routines/weekly.md` — run any `### <label>` entries there alongside the
+`policies/routines/weekly.md` — run any `### <label>` entries there alongside the
 built-in review phases below, using the same journaling conventions.
 The "Vault review context" block includes `context-index.md` and
-`dossiers/weekly.md`; consult it during Phase 1 and update the
+`knowledge/dossiers/weekly.md`; consult it during Phase 1 and update the
 dossier's Open items / Last run before finishing. Writes to
-`dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
+`knowledge/dossiers/<flow>.md` MUST preserve the existing YAML frontmatter block
 (`---\ntype: dossier\nowner: agent\nupdated: <date>\n---`); prefer
 `PATCH` with a section target to mutate a single block, and when doing
 a `PUT` full rewrite keep the frontmatter and only refresh `updated:`
@@ -24,11 +24,11 @@ input to next week's daily planning, not as an artifact the user reads
 once. Full design: `docs/design/appendices/weekly-next-week-leverage.md`.
 
 This routine produces **two separate artifacts** with strict audience boundaries:
-  - **User-facing**: `weekly/YYYY-Www.md` + a short Friday-evening
+  - **User-facing**: `journal/weekly/YYYY-Www.md` + a short Friday-evening
     notification (default send; narrow silence gate in Phase 4a).
     Only real user outcomes — no agent mechanics, no fabricated
     positivity. Tone: brief, warm, weekend-close.
-  - **Agent-internal**: `agent/journal.md` (append). Self-reflection, filter
+  - **Agent-internal**: `journal/agent.md` (append). Self-reflection, filter
     quality, system improvement ideas, failed scheduled actions, pipeline
     observations. **Never** surfaced to the user via notify.
 
@@ -48,14 +48,14 @@ workflow; the skill owns the file contract.
 
 ### Phase 1: Gather the week
 1. Determine the target file name from <current_time>:
-   `weekly/YYYY-Www.md` (ISO week in the daemon timezone).
+   `journal/weekly/YYYY-Www.md` (ISO week in the daemon timezone).
 2. Read the current-ISO-week calendar retrospective. The pre-pass
    fetcher session (`routine.fetch_window`) ran ahead of you and posted
    observations for the `cal_iso_week_to_now` window for every active
    calendar integration (Google + Outlook). That window spans from
    **Monday 00:00 local** of the current ISO week through **now**, so
    the retrospective covers exactly the days the archived
-   `daily/YYYY-MM-DD.md` files are keyed on — no rolling drift into
+   `journal/daily/YYYY-MM-DD.md` files are keyed on — no rolling drift into
    last week's tail, and no missing today's events. The
    `<fetch_report>` block in your prompt tells you the pre-pass
    status — `success` / `partial` means the table is fresh;
@@ -84,7 +84,7 @@ workflow; the skill owns the file contract.
    week's run.
 3. Fetch the source days for the current ISO week:
    - Use GET /api/context/list/daily to discover archived daily files.
-   - Read each `daily/YYYY-MM-DD.md` whose date falls in the current ISO week.
+   - Read each `journal/daily/YYYY-MM-DD.md` whose date falls in the current ISO week.
    - Include <today> as the in-progress final day. On the Friday-evening
      cron run, the daily archive carries Mon–Thu and `<today>` carries
      Friday-in-progress; Saturday and Sunday have not happened yet, and
@@ -118,7 +118,7 @@ workflow; the skill owns the file contract.
 
 ### Phase 2: Synthesize — split into two buckets
 5. Build TWO separate mental lists before writing anything:
-   a. **User-facing bucket** (goes to `weekly/YYYY-Www.md` and possibly notify).
+   a. **User-facing bucket** (goes to `journal/weekly/YYYY-Www.md` and possibly notify).
       Synthesize along **three axes**:
       i.   **Outcomes** — what meaningful user work moved forward this week,
            and which user tasks / commitments slipped or stalled (with the
@@ -144,7 +144,7 @@ workflow; the skill owns the file contract.
                here.
            Hard cap: 3 lessons. Two is fine; zero is fine. Padding to three
            dilutes the signal that downstream morning_routines act on.
-   b. **Agent-internal bucket** (goes to `agent/journal.md` only):
+   b. **Agent-internal bucket** (goes to `journal/agent.md` only):
       - Scheduled tasks / reminders that did-not-fire or failed, and any
         pattern behind the failures
       - Quality of the day-type / focus-dimension filter (false positives,
@@ -161,7 +161,7 @@ workflow; the skill owns the file contract.
    agent-internal if the latter.
 
 ### Phase 3a: Write the user-facing review
-7. PUT the review to `weekly/YYYY-Www.md`.
+7. PUT the review to `journal/weekly/YYYY-Www.md`.
    Required structure (user outcomes only — no agent mechanics in any section):
    ```
    ---
@@ -206,7 +206,7 @@ workflow; the skill owns the file contract.
    ```
    The `## Metrics` section tracks **user** activity only. Do not add rows
    like "agent plan rows completed", "scheduled tasks fired", "observations
-   processed" — those are agent mechanics and belong in agent/journal.md.
+   processed" — those are agent mechanics and belong in journal/agent.md.
 
    **`## Carry Over to Next Week`, `## Next Week Focus`, and `## Lessons
    for Next Week` are import-targeted sections** — every morning of the
@@ -227,7 +227,7 @@ workflow; the skill owns the file contract.
        two sections).
      - **Next Week Focus** — max **3** bullets, ordered. The "if you only
        did three things next week" list. Each item should be specific
-       enough that next week's `today.md` priority selection can use it
+       enough that next week's `state/today.md` priority selection can use it
        verbatim as a candidate. If next week's focus is unclear from this
        week's data, write fewer items rather than padding to three.
      - **Lessons for Next Week** — max **3** bullets, format
@@ -240,7 +240,7 @@ workflow; the skill owns the file contract.
          - `Focus more next week` — no observation, no testable action.
          - `Be more disciplined about email` — no concrete adjustment.
          - `Agent over-notified on Tuesday` — agent mechanics; belongs in
-           agent/journal.md, never here.
+           journal/agent.md, never here.
        Zero lessons is acceptable. Padding is worse than silence — the
        morning_routine's only job with a fabricated lesson is to ignore it,
        which trains the loop to ignore real ones too.
@@ -286,8 +286,8 @@ workflow; the skill owns the file contract.
 8. If the review reveals roadmap drift or stale project status, update
    roadmap.md and the relevant projects/*.md in the same session.
 
-### Phase 3b: Append to agent/journal.md (internal)
-9. PATCH-append a new section to `agent/journal.md` with the agent-internal
+### Phase 3b: Append to journal/agent.md (internal)
+9. PATCH-append a new section to `journal/agent.md` with the agent-internal
    bucket from Phase 2. Use `mode: "append_to_file"` (no `section` param
    needed — content is appended to the end of the file).
    Required shape for the appended block — **these bullet caps are hard
@@ -320,7 +320,7 @@ workflow; the skill owns the file contract.
    everything — the monthly review synthesizes across weeks and surfaces
    recurring items anyway.
 
-   If `agent/journal.md` does not yet exist (GET returns 404), PUT a minimal
+   If `journal/agent.md` does not yet exist (GET returns 404), PUT a minimal
    file with just `# Agent Journal\n\n` as header and your new section below
    it, in a single call. Do not abort the review.
 
@@ -333,8 +333,8 @@ workflow; the skill owns the file contract.
 
 ### Phase 4: Notify (user-facing only)
 10. The notification is a brief, warm end-of-week touchpoint for the USER
-    — not a report of Phases 1–3. Never mention weekly/YYYY-Www.md,
-    agent/journal.md, "Weekly Review complete", agent plan rows,
+    — not a report of Phases 1–3. Never mention journal/weekly/YYYY-Www.md,
+    journal/agent.md, "Weekly Review complete", agent plan rows,
     did-not-fire, filter quality, observation processing, or any other
     internal mechanism.
 
@@ -351,7 +351,7 @@ In a normal week — even a low-activity one — notify.
 
 When the gate triggers: skip POST /api/notify entirely. The weekly file
 is still written (user can open it on demand). Append one bullet under
-agent/journal.md "What worked": `silent weekly wrap-up — quiet week`.
+journal/agent.md "What worked": `silent weekly wrap-up — quiet week`.
 
 **Silence-path × leverage loop.** A silent-path week still PUTs the
 full Phase 3a structure. Carry Over / Next Week Focus / Lessons may be
@@ -479,7 +479,7 @@ omitted):
     Enjoy the trip to Portland.
 
 Good (silent path — quiet week, nothing sent):
-    (no POST /api/notify call; one-line note appended to agent/journal.md)
+    (no POST /api/notify call; one-line note appended to journal/agent.md)
 
 Bad (fabricated positivity — the failure mode the strict rule prevents):
     Big win: design doc shipped Thursday.
@@ -500,7 +500,7 @@ Bad (subtle padding — proverb-shaped insight that fails the line-2 bar):
 The first bad example invented "30% harder" — there is no such measurement
 in Phase 1. If you did not derive it from real data, do not write it.
 The second bad example reports the agent's bookkeeping; everything in it
-either belongs in agent/journal.md or was never worth telling the user.
+either belongs in journal/agent.md or was never worth telling the user.
 The third bad example is the most common failure mode the 4b bars
 prevent: a generic line 1 (no artifact, would read in any week) paired
 with a proverb-shaped line 2 (no named research area). Correct output
@@ -528,7 +528,7 @@ Book Candidates list.
       frontmatter line. If that line is missing (older file schema),
       treat `N = 0` to force a one-time re-baseline.
     - If `M - N < 10`, **skip Phase 5** and append one bullet under
-      agent/journal.md "What worked":
+      journal/agent.md "What worked":
       `reading sweep skipped — only (M-N) new highlights since last refresh`.
     - Do NOT use the `Sampled: X` line for this check — `X` is the
       sample size, not a DB count.
@@ -550,5 +550,5 @@ Book Candidates list.
 **When to abort Phase 5 loudly**: if you detect the `reading-taste.md`
 file is corrupted, contains non-English sections, or its "Last updated"
 timestamp is in the future, leave it alone and append one bullet under
-agent/journal.md "What slipped on my side" with a one-line description.
+journal/agent.md "What slipped on my side" with a one-line description.
 Never self-heal corrupted profile files without user awareness.

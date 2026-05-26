@@ -88,7 +88,7 @@ describe("runSmokeTest — paths_resolve / sections_resolve", () => {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions a doctor visit",
-          destination_path: "user/missing.md",
+          destination_path: "identity/missing.md",
           destination_section: "## Health",
           destination_mode: "append",
         }],
@@ -101,14 +101,14 @@ describe("runSmokeTest — paths_resolve / sections_resolve", () => {
   });
 
   it("rejects routing_table whose destination_section is missing in file", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## OtherSection\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## OtherSection\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions a doctor visit",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Missing",
           destination_mode: "append",
         }],
@@ -121,14 +121,14 @@ describe("runSmokeTest — paths_resolve / sections_resolve", () => {
   });
 
   it("allows append_to_file mode regardless of section presence", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## OtherSection\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## OtherSection\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions a doctor visit",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## NewSection",
           destination_mode: "append_to_file",
         }],
@@ -208,12 +208,12 @@ describe("runSmokeTest — signal_citations_valid", () => {
 
 describe("runSmokeTest — cross_section_consistency", () => {
   it("flags routing rule whose section is absent from this skill's knowledge_layout", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Health\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Health\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "topic-files": {
         kind: "knowledge_layout",
-        files: [{ path: "user/personal.md", purpose: "habits and health", sections: [{ heading: "## Hobbies", contains: "art games" }] }],
+        files: [{ path: "identity/personal.md", purpose: "habits and health", sections: [{ heading: "## Hobbies", contains: "art games" }] }],
       },
     };
     const r = runSmokeTest(basicInput({
@@ -221,7 +221,7 @@ describe("runSmokeTest — cross_section_consistency", () => {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions a doctor visit",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Health",
           destination_mode: "append",
         }],
@@ -240,13 +240,13 @@ describe("runSmokeTest — inverse cross_section_consistency with no siblings (l
     // siblingPayloads is not set → input.siblingPayloads is undefined
     // → collectRoutingTableReferences(input.siblingPayloads ?? {}) fires the right side of ??
     // → referencedByRouting is empty → no inverse check failure.
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Health\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Health\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "knowledge_layout",
         files: [{
-          path: "user/personal.md",
+          path: "identity/personal.md",
           purpose: "health data",
           sections: [{ heading: "## Health", contains: "doctor visits" }],
         }],
@@ -264,8 +264,8 @@ describe("runSmokeTest — inverse cross_section_consistency (knowledge_layout)"
   it("flags knowledge_layout that drops a section still referenced by sibling routing rules (covers 374-379)", () => {
     // The proposal removes "## Health" from user/personal.md but a sibling
     // routing_table still routes content there → must be rejected.
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Hobbies\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Hobbies\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "routing-rules": {
         kind: "routing_table",
@@ -273,14 +273,14 @@ describe("runSmokeTest — inverse cross_section_consistency (knowledge_layout)"
           {
             // Non-append_to_file → its destination_section is collected.
             trigger_pattern: "user mentions a doctor visit",
-            destination_path: "user/personal.md",
+            destination_path: "identity/personal.md",
             destination_section: "## Health",
             destination_mode: "append",
           },
           {
             // append_to_file mode → must be SKIPPED by collectRoutingTableReferences.
             trigger_pattern: "user mentions a journal entry",
-            destination_path: "user/personal.md",
+            destination_path: "identity/personal.md",
             destination_section: "## Journal",
             destination_mode: "append_to_file",
           },
@@ -291,7 +291,7 @@ describe("runSmokeTest — inverse cross_section_consistency (knowledge_layout)"
       payload: {
         kind: "knowledge_layout",
         files: [{
-          path: "user/personal.md",
+          path: "identity/personal.md",
           purpose: "habits and hobbies, no health",
           // Health was removed; only Hobbies remains.
           sections: [{ heading: "## Hobbies", contains: "art games" }],
@@ -310,14 +310,14 @@ describe("runSmokeTest — inverse cross_section_consistency (knowledge_layout)"
   });
 
   it("does not flag when sibling routing references are still satisfied", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Health\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Health\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "routing-rules": {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions a doctor visit",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Health",
           destination_mode: "append",
         }],
@@ -327,7 +327,7 @@ describe("runSmokeTest — inverse cross_section_consistency (knowledge_layout)"
       payload: {
         kind: "knowledge_layout",
         files: [{
-          path: "user/personal.md",
+          path: "identity/personal.md",
           purpose: "habits and health",
           sections: [{ heading: "## Health", contains: "doctor visits" }],
         }],
@@ -445,7 +445,7 @@ describe("runSmokeTest — search_recipes sections_resolve continue on missing p
         kind: "search_recipes",
         recipes: [{
           question_shape: "where do I record meeting notes",
-          lookup_path: "user/nonexistent.md",
+          lookup_path: "identity/nonexistent.md",
           lookup_section: "## Notes",
         }],
       },
@@ -460,14 +460,14 @@ describe("runSmokeTest — search_recipes sections_resolve continue on missing p
 
 describe("runSmokeTest — search_recipes paths_resolve / sections_resolve", () => {
   it("flags search_recipes whose lookup_section is missing (covers 138-145)", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Other\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Other\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "search_recipes",
         recipes: [{
           question_shape: "where do I record meeting notes",
-          lookup_path: "user/profile.md",
+          lookup_path: "identity/profile.md",
           lookup_section: "## Notes",
         }],
       },
@@ -479,14 +479,14 @@ describe("runSmokeTest — search_recipes paths_resolve / sections_resolve", () 
   });
 
   it("ignores search recipes without a lookup_section (early continue)", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Other\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Other\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "search_recipes",
         recipes: [{
           question_shape: "where do I record meeting notes",
-          lookup_path: "user/profile.md",
+          lookup_path: "identity/profile.md",
         }],
       },
       rendered_md: "- ok",
@@ -548,14 +548,14 @@ describe("runSmokeTest — payload free-text + path coverage for non-convention 
   });
 
   it("walks search_recipes free-text + lookup_path + note (covers 300-304, 326-327)", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "search_recipes",
         recipes: [{
           question_shape: "where do entries live",
-          lookup_path: "user/profile.md",
+          lookup_path: "identity/profile.md",
           note: "free-form author note here",
         }],
       },
@@ -567,14 +567,14 @@ describe("runSmokeTest — payload free-text + path coverage for non-convention 
   });
 
   it("walks routing_table notes for free-text scan (covers 292-293)", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Health\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Health\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions doctor visit",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Health",
           destination_mode: "append",
           note: "free-form clarification text",
@@ -588,13 +588,14 @@ describe("runSmokeTest — payload free-text + path coverage for non-convention 
   });
 
   it("walks cross_references relation strings + paths (covers 309-310, 331-335)", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n");
-    writeFileSync(join(contextDir, "today.md"), "## Plan\n");
+    mkdirSync(join(contextDir, "identity"));
+    mkdirSync(join(contextDir, "state"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n");
+    writeFileSync(join(contextDir, "state", "today.md"), "## Plan\n");
     const r = runSmokeTest(basicInput({
       payload: {
         kind: "cross_references",
-        refs: [{ from_path: "user/profile.md", to_path: "today.md", relation: "see also for daily context" }],
+        refs: [{ from_path: "identity/profile.md", to_path: "state/today.md", relation: "see also for daily context" }],
       },
       rendered_md: "- ok",
       section_kind: "cross_references",
@@ -607,8 +608,8 @@ describe("runSmokeTest — payload free-text + path coverage for non-convention 
 
 describe("runSmokeTest — happy path", () => {
   it("returns ok=true for a clean proposal", () => {
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "profile.md"), "## Identity\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "profile.md"), "## Identity\n");
     const r = runSmokeTest(basicInput({
       payload: { kind: "convention_notes", notes: [{ topic: "Dates", rule: "Entries are written as [YYYY-MM-DD]." }] },
       rendered_md: "- **Dates.** Entries are written as [YYYY-MM-DD].",
@@ -692,13 +693,13 @@ describe("runSmokeTest — cross_section_consistency skillManagesPath=false (lin
     // The sibling knowledge_layout only describes "user/other.md", not "user/personal.md".
     // So skillManagesPath = Array.from(ownedSections).some(k => k.startsWith("user/personal.md#")) = false
     // → the inconsistency failure is NOT added.
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Health\n");
-    writeFileSync(join(contextDir, "user", "other.md"), "## Misc\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Health\n");
+    writeFileSync(join(contextDir, "identity", "other.md"), "## Misc\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "layout-sibling": {
         kind: "knowledge_layout",
-        files: [{ path: "user/other.md", purpose: "misc stuff", sections: [{ heading: "## Misc", contains: "misc" }] }],
+        files: [{ path: "identity/other.md", purpose: "misc stuff", sections: [{ heading: "## Misc", contains: "misc" }] }],
       },
     };
     const r = runSmokeTest(basicInput({
@@ -706,7 +707,7 @@ describe("runSmokeTest — cross_section_consistency skillManagesPath=false (lin
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions doctor",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Health",
           destination_mode: "append",
         }],
@@ -725,21 +726,21 @@ describe("runSmokeTest — cross_section_consistency non-knowledge_layout siblin
     // siblingPayloads has both a routing_table (skipped at line 355) and a
     // knowledge_layout (collected). The routing rule's section is NOT in the
     // knowledge_layout → failure added.
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Hobbies\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Hobbies\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "ignored-routing": {
         kind: "routing_table",   // NOT knowledge_layout → line 355 continue fires
         rules: [{
           trigger_pattern: "ignored",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Hobbies",
           destination_mode: "append",
         }],
       },
       "real-layout": {
         kind: "knowledge_layout",
-        files: [{ path: "user/personal.md", purpose: "hobbies", sections: [{ heading: "## Hobbies", contains: "art" }] }],
+        files: [{ path: "identity/personal.md", purpose: "hobbies", sections: [{ heading: "## Hobbies", contains: "art" }] }],
       },
     };
     const r = runSmokeTest(basicInput({
@@ -747,7 +748,7 @@ describe("runSmokeTest — cross_section_consistency non-knowledge_layout siblin
         kind: "routing_table",
         rules: [{
           trigger_pattern: "doctor visit",
-          destination_path: "user/personal.md",
+          destination_path: "identity/personal.md",
           destination_section: "## Health",   // NOT in the knowledge_layout → failure
           destination_mode: "append",
         }],
@@ -766,12 +767,12 @@ describe("runSmokeTest — inverse cross_section_consistency non-routing_table s
     // siblingPayloads contains only non-routing_table entries (knowledge_layout,
     // convention_notes). collectRoutingTableReferences fires the line-373 continue for
     // each, returning an empty set → no inverse check failure.
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Hobbies\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Hobbies\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "layout-only": {
         kind: "knowledge_layout",   // NOT routing_table → line 373 continue
-        files: [{ path: "user/other.md", purpose: "other", sections: [] }],
+        files: [{ path: "identity/other.md", purpose: "other", sections: [] }],
       },
       "notes-only": {
         kind: "convention_notes",   // NOT routing_table → line 373 continue
@@ -782,7 +783,7 @@ describe("runSmokeTest — inverse cross_section_consistency non-routing_table s
       payload: {
         kind: "knowledge_layout",
         files: [{
-          path: "user/personal.md",
+          path: "identity/personal.md",
           purpose: "hobbies",
           sections: [{ heading: "## Hobbies", contains: "art" }],
         }],
@@ -801,15 +802,15 @@ describe("runSmokeTest — inverse cross_section_consistency proposalCoversPath=
     // The sibling routing_table references "user/other.md" (non-append_to_file).
     // The knowledge_layout proposal only describes "user/personal.md".
     // proposalCoversPath for "user/other.md" = false → condition false → no failure.
-    mkdirSync(join(contextDir, "user"));
-    writeFileSync(join(contextDir, "user", "personal.md"), "## Health\n");
-    writeFileSync(join(contextDir, "user", "other.md"), "## Notes\n");
+    mkdirSync(join(contextDir, "identity"));
+    writeFileSync(join(contextDir, "identity", "personal.md"), "## Health\n");
+    writeFileSync(join(contextDir, "identity", "other.md"), "## Notes\n");
     const sibling: Record<string, CurationPayloadValue> = {
       "routing-rules": {
         kind: "routing_table",
         rules: [{
           trigger_pattern: "user mentions notes",
-          destination_path: "user/other.md",      // NOT in proposal
+          destination_path: "identity/other.md",      // NOT in proposal
           destination_section: "## Notes",
           destination_mode: "append",
         }],
@@ -819,7 +820,7 @@ describe("runSmokeTest — inverse cross_section_consistency proposalCoversPath=
       payload: {
         kind: "knowledge_layout",
         files: [{
-          path: "user/personal.md",   // proposal only covers personal.md
+          path: "identity/personal.md",   // proposal only covers personal.md
           purpose: "health",
           sections: [{ heading: "## Health", contains: "doctor visits" }],
         }],

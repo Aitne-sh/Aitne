@@ -22,7 +22,7 @@ redaction is performed in code by `packages/shared/src/secret-redaction.ts`.
 ## Context-specific (journal export)
 
 When exporting `daily/*.md` to an external vault (B-005), additional
-user-defined rules in `rules/journal-export.md` are applied on top.
+user-defined rules in `policies/journal-export.md` are applied on top.
 
 ## Appearance in logs
 

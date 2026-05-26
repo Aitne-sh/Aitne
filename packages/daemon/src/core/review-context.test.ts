@@ -29,8 +29,8 @@ describe("review-context", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "review-context-"));
     contextDir = join(tmp, "context");
-    mkdirSync(join(contextDir, "dossiers"), { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
   });
 
   afterEach(() => {
@@ -51,7 +51,7 @@ describe("review-context", () => {
     );
     expect(resolveReviewFlow("routine.morning_routine_journal")).toBeNull();
     expect(resolveReviewFlow("routine.roadmap_refresh")?.dossierPath).toBe(
-      "dossiers/roadmap.md",
+      "knowledge/dossiers/roadmap.md",
     );
     expect(resolveReviewFlow("message.received.dm")).toBeNull();
   });
@@ -62,19 +62,19 @@ describe("review-context", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| `projects/foo.md` | Foo state | hourly, weekly | 2026-04-21 |",
-      "| `dossiers/hourly.md` | Hourly state | hourly | 2026-04-21 |",
+      "| `plans/projects/foo.md` | Foo state | hourly, weekly | 2026-04-21 |",
+      "| `knowledge/dossiers/hourly.md` | Hourly state | hourly | 2026-04-21 |",
     ].join("\n"));
 
     expect(rows).toEqual([
       {
-        path: "projects/foo.md",
+        path: "plans/projects/foo.md",
         purpose: "Foo state",
         reviewFlows: "hourly, weekly",
         lastTouched: "2026-04-21",
       },
       {
-        path: "dossiers/hourly.md",
+        path: "knowledge/dossiers/hourly.md",
         purpose: "Hourly state",
         reviewFlows: "hourly",
         lastTouched: "2026-04-21",
@@ -84,21 +84,21 @@ describe("review-context", () => {
 
   it("loads context-index, matching indexed files, and the per-flow dossier", () => {
     writeFileSync(
-      join(contextDir, "context-index.md"),
+      join(contextDir, "_index.md"),
       [
         "# Context Index",
         "",
         "| Path | Purpose | Review flows | Last touched |",
         "|---|---|---|---|",
-        "| `projects/foo.md` | Foo project | hourly, weekly | 2026-04-21 |",
-        "| `projects/monthly.md` | Monthly only | monthly | 2026-04-21 |",
-        "| `dossiers/hourly.md` | Hourly state | hourly | 2026-04-21 |",
+        "| `plans/projects/foo.md` | Foo project | hourly, weekly | 2026-04-21 |",
+        "| `plans/projects/monthly.md` | Monthly only | monthly | 2026-04-21 |",
+        "| `knowledge/dossiers/hourly.md` | Hourly state | hourly | 2026-04-21 |",
       ].join("\n"),
     );
-    writeFileSync(join(contextDir, "projects", "foo.md"), "# Foo\n");
-    writeFileSync(join(contextDir, "projects", "monthly.md"), "# Monthly\n");
+    writeFileSync(join(contextDir, "plans", "projects","foo.md"), "# Foo\n");
+    writeFileSync(join(contextDir, "plans", "projects","monthly.md"), "# Monthly\n");
     writeFileSync(
-      join(contextDir, "dossiers", "hourly.md"),
+      join(contextDir, "knowledge", "dossiers","hourly.md"),
       "# Hourly Dossier\n",
     );
 
@@ -109,16 +109,16 @@ describe("review-context", () => {
     });
 
     expect(blocks.map((block) => block.path)).toEqual([
-      "context-index.md",
-      "projects/foo.md",
-      "dossiers/hourly.md",
+      "_index.md",
+      "plans/projects/foo.md",
+      "knowledge/dossiers/hourly.md",
     ]);
   });
 
   it("renders the dossier in a dedicated XML-style block", () => {
-    writeFileSync(join(contextDir, "context-index.md"), "# Context Index\n");
+    writeFileSync(join(contextDir, "_index.md"), "# Context Index\n");
     writeFileSync(
-      join(contextDir, "dossiers", "weekly.md"),
+      join(contextDir, "knowledge", "dossiers","weekly.md"),
       "# Weekly Dossier\n\n## Open items\n- carry this\n",
     );
 
@@ -129,14 +129,14 @@ describe("review-context", () => {
     });
 
     expect(rendered).toContain("## Vault review context");
-    expect(rendered).toContain('<dossier flow="weekly" path="dossiers/weekly.md">');
+    expect(rendered).toContain('<dossier flow="weekly" path="knowledge/dossiers/weekly.md">');
     expect(rendered).toContain("carry this");
     expect(rendered).toContain("</dossier>");
   });
 
   it("skips the dossier when useReviewDossiers=false", () => {
     writeFileSync(
-      join(contextDir, "dossiers", "weekly.md"),
+      join(contextDir, "knowledge", "dossiers","weekly.md"),
       "# Weekly Dossier\n",
     );
 
@@ -151,18 +151,18 @@ describe("review-context", () => {
 
   it("skips context-index loading when useContextIndex=false (Phase 2 gate)", () => {
     writeFileSync(
-      join(contextDir, "context-index.md"),
+      join(contextDir, "_index.md"),
       [
         "# Context Index",
         "",
         "| Path | Purpose | Review flows | Last touched |",
         "|---|---|---|---|",
-        "| `projects/foo.md` | Foo project | hourly | 2026-04-21 |",
+        "| `plans/projects/foo.md` | Foo project | hourly | 2026-04-21 |",
       ].join("\n"),
     );
-    writeFileSync(join(contextDir, "projects", "foo.md"), "# Foo\n");
+    writeFileSync(join(contextDir, "plans", "projects","foo.md"), "# Foo\n");
     writeFileSync(
-      join(contextDir, "dossiers", "hourly.md"),
+      join(contextDir, "knowledge", "dossiers","hourly.md"),
       "# Hourly Dossier\n",
     );
 
@@ -173,23 +173,23 @@ describe("review-context", () => {
     });
 
     expect(blocks.map((b) => b.kind)).toEqual(["dossier"]);
-    expect(blocks[0].path).toBe("dossiers/hourly.md");
+    expect(blocks[0].path).toBe("knowledge/dossiers/hourly.md");
   });
 
   it("honors the shared prompt-injection budget threaded from the caller", () => {
     writeFileSync(
-      join(contextDir, "context-index.md"),
+      join(contextDir, "_index.md"),
       [
         "# Context Index",
         "",
         "| Path | Purpose | Review flows | Last touched |",
         "|---|---|---|---|",
-        "| `projects/foo.md` | Foo | hourly | 2026-04-21 |",
+        "| `plans/projects/foo.md` | Foo | hourly | 2026-04-21 |",
       ].join("\n"),
     );
-    writeFileSync(join(contextDir, "projects", "foo.md"), "# Foo\n");
+    writeFileSync(join(contextDir, "plans", "projects","foo.md"), "# Foo\n");
     writeFileSync(
-      join(contextDir, "dossiers", "hourly.md"),
+      join(contextDir, "knowledge", "dossiers","hourly.md"),
       "# Hourly\n",
     );
 
@@ -212,7 +212,7 @@ describe("review-context", () => {
 
   it("accounts review-context usage against the shared budget", () => {
     writeFileSync(
-      join(contextDir, "dossiers", "hourly.md"),
+      join(contextDir, "knowledge", "dossiers","hourly.md"),
       "# Hourly\n",
     );
 
@@ -235,7 +235,7 @@ describe("parseContextIndexRows — header / separator edge cases", () => {
     const rows = parseContextIndexRows([
       "| Path | Purpose |",
       "|---|---|",
-      "| projects/foo.md | Foo |",
+      "| plans/projects/foo.md | Foo |",
     ].join("\n"));
     expect(rows).toEqual([]);
   });
@@ -244,7 +244,7 @@ describe("parseContextIndexRows — header / separator edge cases", () => {
     const rows = parseContextIndexRows([
       "| Path | Purpose | Review flows | Last touched |",
       "| not-a-separator | x | y | z |",
-      "| projects/foo.md | Foo | hourly | 2026-04-21 |",
+      "| plans/projects/foo.md | Foo | hourly | 2026-04-21 |",
     ].join("\n"));
     expect(rows).toEqual([]);
   });
@@ -254,20 +254,20 @@ describe("parseContextIndexRows — header / separator edge cases", () => {
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
       "|  | empty path | hourly | 2026-04-21 |",
-      "| projects/ok.md | ok | hourly | 2026-04-21 |",
+      "| plans/projects/ok.md | ok | hourly | 2026-04-21 |",
     ].join("\n"));
-    expect(rows.map((r) => r.path)).toEqual(["projects/ok.md"]);
+    expect(rows.map((r) => r.path)).toEqual(["plans/projects/ok.md"]);
   });
 
   it("breaks at the first non-table line", () => {
     const rows = parseContextIndexRows([
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/a.md | A | hourly | 2026-04-21 |",
+      "| plans/projects/a.md | A | hourly | 2026-04-21 |",
       "",
-      "| projects/b.md | B | hourly | 2026-04-21 |",
+      "| plans/projects/b.md | B | hourly | 2026-04-21 |",
     ].join("\n"));
-    expect(rows.map((r) => r.path)).toEqual(["projects/a.md"]);
+    expect(rows.map((r) => r.path)).toEqual(["plans/projects/a.md"]);
   });
 
   it("treats a header line with no separator below it as no table (lines[i+1] ?? \"\" branch)", () => {
@@ -287,11 +287,11 @@ describe("parseContextIndexRows — header / separator edge cases", () => {
     const rows = parseContextIndexRows([
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/short.md | shortRow |",
+      "| plans/projects/short.md | shortRow |",
     ].join("\n"));
     expect(rows).toEqual([
       {
-        path: "projects/short.md",
+        path: "plans/projects/short.md",
         purpose: "shortRow",
         reviewFlows: "",
         lastTouched: "",
@@ -305,16 +305,82 @@ describe("parseContextIndexRows — header / separator edge cases", () => {
     const rows = parseContextIndexRows([
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/single.md |",
+      "| plans/projects/single.md |",
     ].join("\n"));
     expect(rows).toEqual([
       {
-        path: "projects/single.md",
+        path: "plans/projects/single.md",
         purpose: "",
         reviewFlows: "",
         lastTouched: "",
       },
     ]);
+  });
+});
+
+describe("parseContextIndexRows — V15 reconciler-section preference", () => {
+  // CONTEXT_VAULT_REDESIGN_PLAN.md V15: the root `_index.md` carries
+  // both user-curated prose AND a daemon-owned reconciler block. When
+  // both contain a Files table, the block is authoritative — anything
+  // in the outer (user-curated) table is treated as stale prose that
+  // the user may have left from a pre-V15 hand-curated index. This
+  // protects the review-context loader and the reconciler's diff input
+  // from picking up zombie rows.
+  it("returns only the reconciler-block rows when both outer and inner tables exist", () => {
+    const content = [
+      "---",
+      "type: index",
+      "owner: shared",
+      "updated: 2026-04-17",
+      "---",
+      "# Aitne Vault",
+      "",
+      "## Files",
+      "",
+      "| Path | Purpose | Review flows | Last touched |",
+      "|---|---|---|---|",
+      "| plans/projects/legacy-outer.md | stale | weekly | 2026-04-10 |",
+      "",
+      "<!-- reconciler-section -->",
+      "## Files",
+      "",
+      "_Reconciled by daemon on 2026-04-21._",
+      "",
+      "| Path | Purpose | Review flows | Last touched |",
+      "|---|---|---|---|",
+      "| plans/projects/alpha.md | Project Alpha | weekly | 2026-04-21 |",
+      "<!-- /reconciler-section -->",
+    ].join("\n");
+    const rows = parseContextIndexRows(content);
+    const paths = rows.map((r) => r.path);
+    expect(paths).toEqual(["plans/projects/alpha.md"]);
+    expect(paths).not.toContain("plans/projects/legacy-outer.md");
+  });
+
+  it("falls back to the whole content when no reconciler-section block exists", () => {
+    // Pre-V15 file shape (no markers) — parse the first table as before.
+    const content = [
+      "# Context Index",
+      "",
+      "| Path | Purpose | Review flows | Last touched |",
+      "|---|---|---|---|",
+      "| state/today.md | Today | hourly | 2026-04-21 |",
+    ].join("\n");
+    const rows = parseContextIndexRows(content);
+    expect(rows.map((r) => r.path)).toEqual(["state/today.md"]);
+  });
+
+  it("returns [] for a reconciler-section block whose body has no table", () => {
+    // Empty block body — no rows parseable from the inner slice.
+    const content = [
+      "# Aitne Vault",
+      "",
+      "<!-- reconciler-section -->",
+      "(reconciler has not run yet)",
+      "<!-- /reconciler-section -->",
+    ].join("\n");
+    const rows = parseContextIndexRows(content);
+    expect(rows).toEqual([]);
   });
 });
 
@@ -326,7 +392,7 @@ describe("renderReviewContextBlocks", () => {
         {
           kind: "context-index",
           label: "Context index",
-          path: "context-index.md",
+          path: "_index.md",
           content: "anything",
         },
       ]),
@@ -349,7 +415,7 @@ describe("appendReviewContextBlocks", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "review-append-"));
     contextDir = join(tmp, "context");
-    mkdirSync(join(contextDir, "dossiers"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
   });
 
   afterEach(() => {
@@ -370,7 +436,7 @@ describe("appendReviewContextBlocks", () => {
 
   it("appends the rendered block when context exists", () => {
     writeFileSync(
-      join(contextDir, "dossiers", "hourly.md"),
+      join(contextDir, "knowledge", "dossiers","hourly.md"),
       "# Hourly dossier\n",
     );
     const result = appendReviewContextBlocks("base prompt", {
@@ -391,8 +457,8 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "review-context-guard-"));
     contextDir = join(tmp, "context");
-    mkdirSync(join(contextDir, "dossiers"), { recursive: true });
-    mkdirSync(join(contextDir, "projects"), { recursive: true });
+    mkdirSync(join(contextDir, "knowledge", "dossiers"), { recursive: true });
+    mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
   });
 
   afterEach(() => {
@@ -405,10 +471,10 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/exists.md | yes | hourly | 2026-04-21 |",
-      "| projects/missing.md | no | hourly | 2026-04-21 |",
+      "| plans/projects/exists.md | yes | hourly | 2026-04-21 |",
+      "| plans/projects/missing.md | no | hourly | 2026-04-21 |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const seen: string[] = [];
     const blocks = loadReviewContextBlocks({
@@ -420,11 +486,11 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
         return p.endsWith("missing.md") ? null : { size: 12 };
       },
       readFile: (p) =>
-        p.endsWith("context-index.md") ? indexContent : "stub-content",
+        p.endsWith("_index.md") ? indexContent : "stub-content",
     });
 
-    expect(blocks.find((b) => b.path === "projects/exists.md")).toBeDefined();
-    expect(blocks.find((b) => b.path === "projects/missing.md")).toBeUndefined();
+    expect(blocks.find((b) => b.path === "plans/projects/exists.md")).toBeDefined();
+    expect(blocks.find((b) => b.path === "plans/projects/missing.md")).toBeUndefined();
     expect(seen.some((p) => p.endsWith("exists.md"))).toBe(true);
   });
 
@@ -434,9 +500,9 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/huge.md | huge | hourly | 2026-04-21 |",
+      "| plans/projects/huge.md | huge | hourly | 2026-04-21 |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -447,10 +513,10 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
           ? { size: 10 * 1024 * 1024 }
           : { size: indexContent.length },
       readFile: (p) =>
-        p.endsWith("context-index.md") ? indexContent : "stub-content",
+        p.endsWith("_index.md") ? indexContent : "stub-content",
     });
 
-    expect(blocks.find((b) => b.path === "projects/huge.md")).toBeUndefined();
+    expect(blocks.find((b) => b.path === "plans/projects/huge.md")).toBeUndefined();
   });
 
   it("skips a file whose read content exceeds the per-block cap", () => {
@@ -459,9 +525,9 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/big.md | big | hourly | 2026-04-21 |",
+      "| plans/projects/big.md | big | hourly | 2026-04-21 |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -471,14 +537,14 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       // readFile returns a huge string so the in-memory check fires.
       statFile: () => ({ size: 100 }),
       readFile: (p) =>
-        p.endsWith("context-index.md")
+        p.endsWith("_index.md")
           ? indexContent
           : p.endsWith("big.md")
             ? "x".repeat(10 * 1024 * 1024)
             : "small",
     });
 
-    expect(blocks.find((b) => b.path === "projects/big.md")).toBeUndefined();
+    expect(blocks.find((b) => b.path === "plans/projects/big.md")).toBeUndefined();
   });
 
   it("returns null from readReviewFile when statFile throws", () => {
@@ -487,9 +553,9 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/throws.md | throws | hourly | 2026-04-21 |",
+      "| plans/projects/throws.md | throws | hourly | 2026-04-21 |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -500,10 +566,10 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
         return { size: indexContent.length };
       },
       readFile: (p) =>
-        p.endsWith("context-index.md") ? indexContent : "ok",
+        p.endsWith("_index.md") ? indexContent : "ok",
     });
 
-    expect(blocks.find((b) => b.path === "projects/throws.md")).toBeUndefined();
+    expect(blocks.find((b) => b.path === "plans/projects/throws.md")).toBeUndefined();
   });
 
   it("uses real fs (existsSync + readFileSync) when no statFile/readFile is injected", () => {
@@ -515,11 +581,11 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/real.md | real | hourly | 2026-04-21 |",
-      "| projects/missing-on-disk.md | missing | hourly | 2026-04-21 |",
+      "| plans/projects/real.md | real | hourly | 2026-04-21 |",
+      "| plans/projects/missing-on-disk.md | missing | hourly | 2026-04-21 |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
-    writeFileSync(join(contextDir, "projects", "real.md"), "real-body");
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
+    writeFileSync(join(contextDir, "plans", "projects","real.md"), "real-body");
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -527,10 +593,10 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       flags: BOTH_FLAGS_ON,
     });
 
-    const realBlock = blocks.find((b) => b.path === "projects/real.md");
+    const realBlock = blocks.find((b) => b.path === "plans/projects/real.md");
     expect(realBlock?.content).toBe("real-body");
     expect(
-      blocks.find((b) => b.path === "projects/missing-on-disk.md"),
+      blocks.find((b) => b.path === "plans/projects/missing-on-disk.md"),
     ).toBeUndefined();
   });
 
@@ -545,10 +611,10 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/.git/config.md | hidden segment | hourly | x |",
-      "| projects/notes.txt | wrong extension | hourly | x |",
+      "| plans/projects/.git/config.md | hidden segment | hourly | x |",
+      "| plans/projects/notes.txt | wrong extension | hourly | x |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -556,7 +622,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       flags: BOTH_FLAGS_ON,
       statFile: () => ({ size: indexContent.length }),
       readFile: (p) =>
-        p.endsWith("context-index.md") ? indexContent : "stub",
+        p.endsWith("_index.md") ? indexContent : "stub",
     });
 
     const indexedPaths = blocks
@@ -567,7 +633,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
   it("rejects unsafe context-index paths (parent traversal, hidden files, non-md, absolute)", () => {
     writeFileSync(
-      join(contextDir, "context-index.md"),
+      join(contextDir, "_index.md"),
       [
         "# Context Index",
         "",
@@ -605,7 +671,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "| [Foo](projects/foo.md) | link form | hourly | x |",
       "| `policies/baseline.base` | base form | hourly | x |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -613,7 +679,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       flags: BOTH_FLAGS_ON,
       statFile: () => ({ size: 50 }),
       readFile: (p) =>
-        p.endsWith("context-index.md") ? indexContent : "stub",
+        p.endsWith("_index.md") ? indexContent : "stub",
     });
 
     const paths = blocks
@@ -621,7 +687,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       .map((b) => b.path)
       .sort();
     expect(paths).toEqual(
-      ["policies/baseline.base", "projects/foo.md"].sort(),
+      ["plans/projects/foo.md", "policies/baseline.base"].sort(),
     );
   });
 
@@ -631,9 +697,9 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/everywhere.md | everywhere | all | x |",
+      "| plans/projects/everywhere.md | everywhere | all | x |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -641,10 +707,10 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       flags: BOTH_FLAGS_ON,
       statFile: () => ({ size: 50 }),
       readFile: (p) =>
-        p.endsWith("context-index.md") ? indexContent : "stub",
+        p.endsWith("_index.md") ? indexContent : "stub",
     });
     expect(
-      blocks.find((b) => b.path === "projects/everywhere.md"),
+      blocks.find((b) => b.path === "plans/projects/everywhere.md"),
     ).toBeDefined();
   });
 
@@ -668,33 +734,33 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
       "",
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
-      "| projects/noPurpose.md |  | hourly | 2026-04-21 |",
+      "| plans/projects/noPurpose.md |  | hourly | 2026-04-21 |",
     ].join("\n");
-    writeFileSync(join(contextDir, "context-index.md"), indexContent);
-    writeFileSync(join(contextDir, "projects", "noPurpose.md"), "body");
+    writeFileSync(join(contextDir, "_index.md"), indexContent);
+    writeFileSync(join(contextDir, "plans", "projects","noPurpose.md"), "body");
 
     const blocks = loadReviewContextBlocks({
       contextDir,
       processKey: "routine.hourly_check",
       flags: BOTH_FLAGS_ON,
     });
-    const row = blocks.find((b) => b.path === "projects/noPurpose.md");
-    expect(row?.label).toBe("Indexed context: projects/noPurpose.md");
+    const row = blocks.find((b) => b.path === "plans/projects/noPurpose.md");
+    expect(row?.label).toBe("Indexed context: plans/projects/noPurpose.md");
   });
 
   it("skips the dossier row referenced by the index (avoids duplicate emission)", () => {
     writeFileSync(
-      join(contextDir, "context-index.md"),
+      join(contextDir, "_index.md"),
       [
         "# Context Index",
         "",
         "| Path | Purpose | Review flows | Last touched |",
         "|---|---|---|---|",
-        "| `dossiers/hourly.md` | hourly state | hourly | x |",
-        "| `context-index.md` | self-ref | hourly | x |",
+        "| `knowledge/dossiers/hourly.md` | hourly state | hourly | x |",
+        "| `_index.md` | self-ref | hourly | x |",
       ].join("\n"),
     );
-    writeFileSync(join(contextDir, "dossiers", "hourly.md"), "# H\n");
+    writeFileSync(join(contextDir, "knowledge", "dossiers","hourly.md"), "# H\n");
 
     const blocks = loadReviewContextBlocks({
       contextDir,
@@ -704,7 +770,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
     // The dossier appears once via the dossier branch — not duplicated
     // by the index loop.
     const dossierAppearances = blocks.filter(
-      (b) => b.path === "dossiers/hourly.md",
+      (b) => b.path === "knowledge/dossiers/hourly.md",
     );
     expect(dossierAppearances).toHaveLength(1);
     expect(dossierAppearances[0].kind).toBe("dossier");

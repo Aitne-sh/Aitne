@@ -13,7 +13,7 @@ import { ManagementHistoryCard } from "@/components/settings/management-history-
  * entities.md §14.1).
  *
  * The page surfaces the three concerns rendered into
- * `rules/management.md`: A (SoT bindings), B (managed tasks), and the
+ * `policies/management.md`: A (SoT bindings), B (managed tasks), and the
  * audit history that backs both.
  *
  * History lives behind its own tab so the default surface stays focused
@@ -51,7 +51,7 @@ function ManagementPageInner() {
           <>
             Source-of-Truth bindings (Section A) and Managed Tasks (Section B) —
             the structured rows the daemon renders into{" "}
-            <code>rules/management.md</code> and injects into every agent
+            <code>policies/management.md</code> and injects into every agent
             session. Edits here re-render the file atomically; the agent picks
             up the new state on its next session.
           </>

@@ -50,7 +50,7 @@ on `PUT` (full replace).
 
 ## Files outside the table
 
-`today.md`, `roadmap.md`, `agent/journal.md`, and `rules/policies/*.md`
+`state/today.md`, `plans/roadmap.md`, `journal/agent.md`, and `policies/management-captures/*.md`
 have their own validators (date-line regex, transition guard, append-
 only mode, policy schema). The frontmatter rules in this reference do
 not apply to them — see each owning skill for the specifics.
@@ -60,8 +60,8 @@ not apply to them — see each owning skill for the specifics.
 ```json
 {
   "error": "validation_error",
-  "message": "user/people.md is missing required frontmatter field: updated",
-  "path": "user/people.md"
+  "message": "identity/people.md is missing required frontmatter field: updated",
+  "path": "identity/people.md"
 }
 ```
 

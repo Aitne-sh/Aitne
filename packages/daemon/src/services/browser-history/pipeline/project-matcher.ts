@@ -26,7 +26,8 @@ import type {
  * `aliases`, `tags`) we read.
  */
 
-const PROJECTS_DIR = "projects";
+// CONTEXT_VAULT_REDESIGN: project files live under plans/projects/.
+const PROJECTS_DIR = "plans/projects";
 const KEY_PROJECT_KEYWORDS = "aitne_project_keywords";
 const KEY_EXCLUDE = "aitne.exclude_from_interests";
 const KEY_ALIASES = "aliases";

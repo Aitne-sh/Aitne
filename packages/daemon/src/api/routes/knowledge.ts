@@ -206,7 +206,7 @@ export function createKnowledgeRoutes(deps: ApiDependencies): Hono {
       requestedModelId = modelRaw;
     }
 
-    // Persist the raw blob under context/agent/scratch/. This directory
+    // Persist the raw blob under context/state/scratch/. This directory
     // is exempt from frontmatter validation, so we write the file
     // directly with Node fs rather than the Context File API. The
     // scratch_path the agent reads is the same relative path that the

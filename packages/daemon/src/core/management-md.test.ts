@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySchema } from "../db/schema.js";
@@ -436,6 +436,9 @@ describe("management-md file I/O", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "pa-mgmt-"));
+    // CONTEXT_VAULT_REDESIGN: integrations.md lives at
+    // <dataDir>/context/policies/integrations.md.
+    mkdirSync(join(dir, "context", "policies"), { recursive: true });
     db = new Database(":memory:");
     applySchema(db);
   });
@@ -686,6 +689,7 @@ describe("startManagementMdWatcher", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "pa-mgmt-watch-"));
+    mkdirSync(join(dir, "context", "policies"), { recursive: true });
     db = new Database(":memory:");
     applySchema(db);
   });

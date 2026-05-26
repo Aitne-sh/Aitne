@@ -16,7 +16,7 @@ describe("previous-week-digest", () => {
 
   beforeEach(() => {
     contextDir = join(tmpdir(), `pa-prev-week-${Date.now()}-${Math.random()}`);
-    mkdirSync(join(contextDir, "weekly"), { recursive: true });
+    mkdirSync(join(contextDir, "journal", "weekly"), { recursive: true });
   });
 
   afterEach(() => {
@@ -119,7 +119,7 @@ describe("previous-week-digest", () => {
     });
 
     it("returns null when the file is empty", async () => {
-      writeFileSync(join(contextDir, "weekly", "2026-W20.md"), "");
+      writeFileSync(join(contextDir, "journal", "weekly", "2026-W20.md"), "");
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest).toBeNull();
     });
@@ -139,7 +139,7 @@ describe("previous-week-digest", () => {
         "## Completed",
         "- swapped the schema",
       ].join("\n");
-      writeFileSync(join(contextDir, "weekly", "2026-W20.md"), body);
+      writeFileSync(join(contextDir, "journal", "weekly", "2026-W20.md"), body);
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest).toBeNull();
     });
@@ -172,7 +172,7 @@ describe("previous-week-digest", () => {
         "- Email replies after 14:00 slid to next day → process first wave by 11:00",
         "",
       ].join("\n");
-      writeFileSync(join(contextDir, "weekly", "2026-W20.md"), body);
+      writeFileSync(join(contextDir, "journal", "weekly", "2026-W20.md"), body);
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest).not.toBeNull();
       expect(digest!.period).toBe("2026-W20");
@@ -197,7 +197,7 @@ describe("previous-week-digest", () => {
         "- (none — quiet week)",
         "",
       ].join("\n");
-      writeFileSync(join(contextDir, "weekly", "2026-W20.md"), body);
+      writeFileSync(join(contextDir, "journal", "weekly", "2026-W20.md"), body);
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest).not.toBeNull();
       expect(digest!.carryOver).toBe("");
@@ -222,7 +222,7 @@ describe("previous-week-digest", () => {
         "## Some Trailing Section",
         "- Don't bleed me in",
       ].join("\n");
-      writeFileSync(join(contextDir, "weekly", "2026-W20.md"), body);
+      writeFileSync(join(contextDir, "journal", "weekly", "2026-W20.md"), body);
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest).not.toBeNull();
       expect(digest!.focus).toBe("- Top 1\n- Top 2");
@@ -232,7 +232,7 @@ describe("previous-week-digest", () => {
     });
 
     it("uses the source file mtime for generated_at", async () => {
-      const filePath = join(contextDir, "weekly", "2026-W20.md");
+      const filePath = join(contextDir, "journal", "weekly", "2026-W20.md");
       writeFileSync(
         filePath,
         ["# Weekly Review 2026-W20", "", "## Next Week Focus", "- A"].join("\n"),
@@ -248,7 +248,7 @@ describe("previous-week-digest", () => {
       // existsSync passes (the path resolves), but readFile/stat raise
       // because the entry is a directory — both errors collapse to the
       // single try/catch and return null.
-      mkdirSync(join(contextDir, "weekly", "2026-W20.md"));
+      mkdirSync(join(contextDir, "journal", "weekly", "2026-W20.md"));
       const digest = await loadPreviousWeekDigest(contextDir, "2026-W20");
       expect(digest).toBeNull();
     });

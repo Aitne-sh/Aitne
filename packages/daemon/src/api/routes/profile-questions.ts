@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { ApiDependencies } from "../server.js";
 import { getContextDir } from "../../config.js";
+import { aliasVaultPath } from "../../core/context-vault-aliases.js";
 import { isSlotFilled } from "../../core/profile-questions/slot-filled.js";
 import { createLogger } from "../../logging.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
@@ -32,7 +33,7 @@ export function createProfileQuestionsRoutes(deps: ApiDependencies): Hono {
    *
    * Query:
    *   path     (required) Relative path under contextDir,
-   *                       e.g. `user/profile.md`. The trailing `.md`
+   *                       e.g. `identity/profile.md`. The trailing `.md`
    *                       can be omitted; `.base` files are not accepted
    *                       (this endpoint is for prose-bearing markdown).
    *   section  (optional) Heading text without leading `## ` —
@@ -124,6 +125,11 @@ function safePath(contextDir: string, userPath: string): string | null {
   // endpoint.
   let candidate = userPath;
   if (candidate.endsWith(".base")) return null;
+  // CONTEXT_VAULT_REDESIGN: translate legacy paths (e.g. `identity/profile`)
+  // to their canonical six-class destinations (`identity/profile`) so
+  // skill code calling the route with either spelling resolves to the
+  // same file.
+  candidate = aliasVaultPath(candidate).canonicalPath;
   if (!candidate.endsWith(".md")) candidate = `${candidate}.md`;
   const resolved = resolve(contextDir, candidate);
   const rel = relative(contextDir, resolved);

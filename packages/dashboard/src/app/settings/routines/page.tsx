@@ -60,7 +60,7 @@ function builtInPath(stem: string): string {
 }
 
 function customPath(slug: string): string {
-  return `routines/custom/${slug}`;
+  return `policies/routines/custom/${slug}`;
 }
 
 function selectionPath(sel: Selection): string {
@@ -526,8 +526,8 @@ function LoadedRoutineEditor({
             </p>
           ) : (
             <p className="pt-1 text-xs text-muted-foreground">
-              All files under <code>routines/</code>, including <code>_index.md</code>,
-              are editable here.
+              All files under <code>policies/routines/</code>, including{" "}
+              <code>_index.md</code>, are editable here.
             </p>
           )}
         </div>

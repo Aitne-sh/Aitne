@@ -374,7 +374,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.path_invalid": {
     expected: "context-relative path within the allowed write whitelist",
     hint:
-      "The path failed safePath(): it escaped getContextDir() or pointed outside the allowed file set. Use a path like 'today', 'roadmap', 'projects/<slug>', 'user/profile' — no '..', no absolute paths. Read GET /api/context/list/projects to discover live slugs.",
+      "The path failed safePath(): it escaped getContextDir() or pointed outside the allowed file set. Use a path like 'state/today', 'plans/roadmap', 'plans/projects/<slug>', 'identity/profile' — no '..', no absolute paths. Read GET /api/context/list/plans/projects to discover live slugs.",
     skillAnchor: "context#allowed-paths",
     legacyErrorCode: "invalid_path",
     constraint: { type: "string" },
@@ -382,7 +382,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.path_required": {
     expected: "non-empty 'path' query / route parameter",
     hint:
-      "The endpoint needs a context path (e.g. 'today', 'projects/launch-prep'). For wildcard read/write routes the path is the URL tail after /api/context/; for snapshot restore the path is captured from the snapshot row.",
+      "The endpoint needs a context path (e.g. 'state/today', 'plans/projects/launch-prep'). For wildcard read/write routes the path is the URL tail after /api/context/; for snapshot restore the path is captured from the snapshot row.",
     skillAnchor: "context#allowed-paths",
     legacyErrorCode: "path_required",
     constraint: { type: "string", required: true },
@@ -390,7 +390,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.path_not_found": {
     expected: "an existing context MD file at the resolved path",
     hint:
-      "GET / PATCH / DELETE on a path that does not exist on disk. Use GET /api/context/list/projects (or .../list/rules) to discover available paths, or PUT first to create the file.",
+      "GET / PATCH / DELETE on a path that does not exist on disk. Use GET /api/context/list/plans/projects (or .../list/policies) to discover available paths, or PUT first to create the file.",
     skillAnchor: "context#allowed-paths",
     legacyErrorCode: "not_found",
     retryable: false,
@@ -398,7 +398,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.write_forbidden": {
     expected: "path inside the daemon's write whitelist",
     hint:
-      "This file is read-only from the agent side. The whitelist covers user.md, today.md, roadmap.md, projects/*, rules/policies/*, user/*, agent/journal, agent/profile-questions, weekly/*, monthly/*, schedule/*, dossiers/*, work/meetings/*, and custom routines. Files outside this set are owned by the daemon or operator. If you need to record something, GET /api/context/list/projects and find a writable parent, or NOTIFY the user.",
+      "This file is read-only from the agent side. The whitelist covers state/today, plans/roadmap, plans/projects/*, policies/management-captures/*, identity/*, journal/agent, state/profile-questions, journal/weekly/*, journal/monthly/*, knowledge/dossiers/*, knowledge/entities/<domain>/<type-plural>/* (e.g. knowledge/entities/work/meetings/<slug>), state/inbox/*, state/scratch/*, and policies/routines/custom/*. Legacy paths (today.md, roadmap.md, user/*, rules/*, agent/journal) are server-side aliased for one minor release but the canonical names above are the future contract. Files outside this set are owned by the daemon or operator — GET /api/context/list/plans/projects to find a writable parent, or NOTIFY the user.",
     skillAnchor: "context#write-whitelist",
     legacyErrorCode: "forbidden",
     retryable: false,
@@ -446,7 +446,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.invalid_body_field": {
     expected: "field value matching the route schema",
     hint:
-      "One or more body fields failed schema validation. Inspect the per-issue `field` (Zod path) and `received` (the value you sent) plus `validValues` for enum fields. For PATCH /api/context/<path> the shape is {section, mode: 'append'|'replace'|'clear'|'clear_before'|'append_to_file', content?, cutoff?, maxEntries?}; for PUT it is {content}. For append-only files like agent/journal.md prefer mode='append_to_file' (section optional).",
+      "One or more body fields failed schema validation. Inspect the per-issue `field` (Zod path) and `received` (the value you sent) plus `validValues` for enum fields. For PATCH /api/context/<path> the shape is {section, mode: 'append'|'replace'|'clear'|'clear_before'|'append_to_file', content?, cutoff?, maxEntries?}; for PUT it is {content}. For append-only files like journal/agent.md prefer mode='append_to_file' (section optional).",
     skillAnchor: "context#request-shape",
     legacyErrorCode: "validation_error",
   },
@@ -492,7 +492,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.directory_invalid": {
     expected: "directory listed in the allowed-directory set",
     hint:
-      "Directory listings are restricted to the curated allow-list returned in the 400 response's `allowed` field (e.g. 'projects', 'rules/policies', 'user-details', 'dossiers'). Pick from that list — wildcards and absolute paths are rejected.",
+      "Directory listings are restricted to the curated allow-list returned in the 400 response's `allowed` field (e.g. 'plans/projects', 'policies/management-captures', 'identity', 'knowledge/dossiers'). Pick from that list — wildcards and absolute paths are rejected.",
     skillAnchor: "context#allowed-paths",
     legacyErrorCode: "invalid_directory",
   },
@@ -541,7 +541,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.stub_target_unsupported": {
     expected: "one of the REPAIRABLE_STUB_TARGETS paths",
     hint:
-      "POST /api/context/repair-stub only accepts a curated allow-list of paths (e.g. 'rules/policies/_index', 'user/_index'). The response's expected list (if surfaced) or the REPAIRABLE_STUB_TARGETS constant in context-health.ts is authoritative. For any other file, PUT the content directly via /api/context/<path>.",
+      "POST /api/context/repair-stub only accepts a curated allow-list of paths (e.g. 'policies/management-captures/_index', 'identity/_index'). The response's expected list (if surfaced) or the REPAIRABLE_STUB_TARGETS constant in context-health.ts is authoritative. For any other file, PUT the content directly via /api/context/<path>.",
     skillAnchor: "context#stub-repair",
     legacyErrorCode: "unsupported_stub_target",
     retryable: false,
@@ -2169,7 +2169,7 @@ export const AGENT_ERROR_REGISTRY = {
   "profile_questions.path_required": {
     expected: "non-empty 'path' query parameter (context-relative)",
     hint:
-      "GET /api/profile-questions/slot-filled needs `?path=<relative>` — e.g. `?path=user/profile`. Trailing `.md` is optional; `.base` files are rejected (use a prose markdown file). Add `&section=<heading>` to scope to one heading and `&anchor=<bullet-key>` to scope to one bullet.",
+      "GET /api/profile-questions/slot-filled needs `?path=<relative>` — e.g. `?path=identity/profile`. Trailing `.md` is optional; `.base` files are rejected (use a prose markdown file). Add `&section=<heading>` to scope to one heading and `&anchor=<bullet-key>` to scope to one bullet.",
     skillAnchor: "profile-questions#slot-filled",
     legacyErrorCode: "missing_path",
     constraint: { type: "string", required: true },
@@ -2177,7 +2177,7 @@ export const AGENT_ERROR_REGISTRY = {
   "profile_questions.path_invalid": {
     expected: "context-relative path inside the vault (no '..', no absolute)",
     hint:
-      "The path failed traversal validation. Use forward-slash, vault-relative paths only — e.g. `user/profile`, `user/people/colleague-jane`. Reject `..` segments, absolute paths, and `.base` files (those are Obsidian view configs, not prose).",
+      "The path failed traversal validation. Use forward-slash, vault-relative paths only — e.g. `identity/profile`, `identity/people/colleague-jane`. Reject `..` segments, absolute paths, and `.base` files (those are Obsidian view configs, not prose).",
     skillAnchor: "profile-questions#slot-filled",
     legacyErrorCode: "invalid_path",
     constraint: { type: "string" },

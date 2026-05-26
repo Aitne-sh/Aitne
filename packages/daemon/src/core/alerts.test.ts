@@ -446,8 +446,8 @@ describe("aggregateAlerts", () => {
     const alerts = aggregateAlerts(
       baseInputs({
         templatesPending: [
-          { path: "rules/journal-format.md", from: 1, to: 2 },
-          { path: "rules/journal-export.md", from: 1, to: 3 },
+          { path: "policies/journal-format.md", from: 1, to: 2 },
+          { path: "policies/journal-export.md", from: 1, to: 3 },
         ],
       }),
     );

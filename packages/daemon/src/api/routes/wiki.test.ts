@@ -49,7 +49,7 @@ describe("Wiki API routes", () => {
       defaultInternalRoot: string;
     };
     expect(initial.workspaces).toEqual([]);
-    expect(initial.defaultInternalRoot).toBe(join(dataDir, "wiki"));
+    expect(initial.defaultInternalRoot).toBe(join(dataDir, "context", "knowledge", "wiki"));
 
     const enable = await app.request("/wiki/workspaces", { method: "POST" });
     expect(enable.status).toBe(201);
@@ -198,7 +198,7 @@ describe("Wiki API routes", () => {
     const body = (await dmRead.json()) as { content: string };
     expect(body.content).toContain("# Readable");
 
-    const log = readFileSync(join(dataDir, "wiki", "log.md"), "utf-8");
+    const log = readFileSync(join(dataDir, "context", "knowledge", "wiki", "log.md"), "utf-8");
     expect(log).toContain("wiki.compile post 20_wiki/readable.md");
   });
 
@@ -851,7 +851,7 @@ describe("Wiki API routes", () => {
       };
       expect(body.result.outcome).toBe("written");
       expect(body.result.path).toMatch(/^10_raw\/bridge-.*\.md$/);
-      expect(existsSync(join(dataDir, "wiki", body.result.path!))).toBe(true);
+      expect(existsSync(join(dataDir, "context", "knowledge", "wiki", body.result.path!))).toBe(true);
     });
 
     it("dedups a repeat proposal back to the same content_hash", async () => {

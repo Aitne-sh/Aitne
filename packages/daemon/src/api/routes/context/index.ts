@@ -180,7 +180,7 @@ export function createContextRoutes(deps: ApiDependencies): Hono {
   }
 
   function isRoadmapValidationDisabled(path: string, headerValue?: string): boolean {
-    return path === "roadmap" && headerValue?.toLowerCase() === "off";
+    return path === "plans/roadmap" && headerValue?.toLowerCase() === "off";
   }
 
   function logRoadmapValidationBypass(

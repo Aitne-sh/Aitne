@@ -26,14 +26,14 @@ of being missed**.
 2. **DM at `high` priority** if any of the following hold:
    - The PR title contains a release-blocker keyword (`hotfix`,
      `revert`, `urgent`, `security`).
-   - `today.md` has a `## Agent Plan` entry that mentions this
+   - `state/today.md` has a `## Agent Plan` entry that mentions this
      repository or PR number — the user is already context-loaded on it.
    - The roadmap has an active milestone tied to this repository.
 
    For the third trigger, fetch context once:
 
    ```bash
-   curl -s http://localhost:8321/api/context/roadmap | grep -i "{event_data[repository]}"
+   curl -s http://localhost:8321/api/context/plans/roadmap | grep -i "{event_data[repository]}"
    ```
 
    If non-empty, the milestone tie is real.

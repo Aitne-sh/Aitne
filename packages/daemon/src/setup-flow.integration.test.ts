@@ -189,7 +189,7 @@ describe("Setup wizard happy-path (SETUP-FLOW-REDESIGN-PLAN §11.3 — integrati
     }
 
     // §11.3 acceptance assertions — integrations.md body.
-    const integrationsPath = join(dataDir, "integrations.md");
+    const integrationsPath = join(dataDir, "context", "policies", "integrations.md");
     expect(existsSync(integrationsPath)).toBe(true);
     const body = readFileSync(integrationsPath, "utf-8");
     expect(body).toContain("## Note Sources");

@@ -19,10 +19,10 @@ import { formatAbsoluteTime } from "@/lib/utils";
  * Co-edit the two natural-language rule files that drive the 04:00 daily
  * journal synthesis:
  *
- *  - `rules/journal-format.md` defines the format template (sections, voice,
+ *  - `policies/journal-format.md` defines the format template (sections, voice,
  *    frontmatter). The morning routine reads it when writing
  *    `daily/YYYY-MM-DD.md`.
- *  - `rules/journal-export.md` defines inclusion / exclusion / redaction for
+ *  - `policies/journal-export.md` defines inclusion / exclusion / redaction for
  *    the external export (if opted-in).
  *
  * Both files are user-editable prose. Saves go through `PUT /api/context/`
@@ -42,14 +42,14 @@ const FILES: JournalFile[] = [
   {
     key: "format",
     label: "Journal Format",
-    path: "rules/journal-format",
+    path: "policies/journal-format",
     description:
       "Controls how the agent writes daily/YYYY-MM-DD.md during the morning routine. Edit the sections, voice, or required frontmatter here — changes take effect on the next synthesis run.",
   },
   {
     key: "export",
     label: "Journal Export",
-    path: "rules/journal-export",
+    path: "policies/journal-export",
     description:
       "Injected into the morning-routine prompt alongside Journal Format. Use this to pin redaction rules, excluded sections, or required inclusions the agent should honor on every synthesis run, regardless of whether an external export pipeline is configured.",
   },

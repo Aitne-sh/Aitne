@@ -9,7 +9,7 @@ describe("classifyContextWriteStaleness", () => {
   it("treats today.md Agent Log section patches as quiet", () => {
     expect(
       classifyContextWriteStaleness({
-        path: "today",
+        path: "state/today",
         method: "PATCH",
         mode: "append",
         section: "agent_log",
@@ -24,7 +24,7 @@ describe("classifyContextWriteStaleness", () => {
   it("keeps today.md Agent Plan patches loud", () => {
     expect(
       classifyContextWriteStaleness({
-        path: "today",
+        path: "state/today",
         method: "PATCH",
         mode: "replace",
         section: "agent_plan",
@@ -36,7 +36,7 @@ describe("classifyContextWriteStaleness", () => {
   it("treats project activity-log patches as quiet", () => {
     expect(
       classifyContextWriteStaleness({
-        path: "projects/acme.md",
+        path: "plans/projects/acme.md",
         method: "PATCH",
         mode: "append",
         section: "Daily Activity Log",
@@ -48,7 +48,7 @@ describe("classifyContextWriteStaleness", () => {
   it("recognizes safe append_to_file writes only when they land in Agent Log", () => {
     expect(
       classifyContextWriteStaleness({
-        path: "today.md",
+        path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
         content: "- 12:00 Quiet hourly check",
@@ -58,7 +58,7 @@ describe("classifyContextWriteStaleness", () => {
 
     expect(
       classifyContextWriteStaleness({
-        path: "today.md",
+        path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
         content: "- 12:00 Quiet hourly check",
@@ -72,7 +72,7 @@ describe("classifyContextWriteStaleness", () => {
     // returns false via the `headings.length === 0` guard.
     expect(
       classifyContextWriteStaleness({
-        path: "today.md",
+        path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
         content: "- 12:00 brand-new entry",
@@ -86,7 +86,7 @@ describe("classifyContextWriteStaleness", () => {
     // via the `!content` guard.
     expect(
       classifyContextWriteStaleness({
-        path: "today.md",
+        path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
         content: "- 12:00 brand-new entry",
@@ -99,7 +99,7 @@ describe("classifyContextWriteStaleness", () => {
     // `if (!firstLine) return false;` branch fires.
     expect(
       classifyContextWriteStaleness({
-        path: "today.md",
+        path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
         content: "   \n  \n",
@@ -166,7 +166,7 @@ describe("applyPromptContextStaleness", () => {
   it("calls the persistent timestamp before marking active DMs stale", () => {
     const calls: string[] = [];
     applyPromptContextStaleness(
-      { path: "today", reason: "context_patch:today", tier: "loud" },
+      { path: "state/today", reason: "context_patch:today", tier: "loud" },
       {
         dmStalenessStrict: false,
         setupInProgress: false,
@@ -182,7 +182,7 @@ describe("applyPromptContextStaleness", () => {
     const markContextChanged = vi.fn();
     const markActiveDmSessionsStale = vi.fn();
     applyPromptContextStaleness(
-      { path: "today", reason: "context_patch:today", tier: "quiet" },
+      { path: "state/today", reason: "context_patch:today", tier: "quiet" },
       {
         dmStalenessStrict: false,
         setupInProgress: false,

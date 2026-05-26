@@ -58,7 +58,7 @@ explicit confirmation.
 
 ## Prerequisites
 
-- Initial setup is complete (`rules/management.md` saved). Pre-setup
+- Initial setup is complete (`policies/management.md` saved). Pre-setup
   imports are rejected with `409 setup_incomplete` because the
   `user/*.md` skeleton has not been seeded yet.
 - At least one backend (Claude, Codex, or Gemini CLI) is authenticated
@@ -73,12 +73,12 @@ explicit confirmation.
 | Class of fact | Target Context File |
 |---|---|
 | Identity (legal name, primary timezone, primary language, DOB, primary email/phone) | **Deferred for confirmation** — surfaced in the closing journal entry; never auto-written. |
-| Relationships (family, partners, close friends) | `user/people.md` |
-| Work, employer, role, colleagues | `user/work.md` |
-| Skills, expertise, languages spoken | `user/expertise.md` |
-| Lifestyle, hobbies, preferences, health | `user/personal.md` |
-| Goals, aspirations, current focus | `user/goals.md` |
-| Anything else | `user/profile.md` under `## Misc` |
+| Relationships (family, partners, close friends) | `identity/people.md` |
+| Work, employer, role, colleagues | `identity/work.md` |
+| Skills, expertise, languages spoken | `identity/expertise.md` |
+| Lifestyle, hobbies, preferences, health | `identity/personal.md` |
+| Goals, aspirations, current focus | `identity/goals.md` |
+| Anything else | `identity/profile.md` under `## Misc` |
 
 Conflicts (a source bullet that contradicts an existing bullet) land in
 a `## Pending Conflicts` section on the affected file with the upload
@@ -111,7 +111,7 @@ date inline, so you can resolve them later without losing data.
   session completes (typically 30 s to 2 min depending on file size
   and backend).
 - The agent appends a single `## YYYY-MM-DD knowledge import` block to
-  `agent/journal.md` summarising the run — counts of facts written /
+  `journal/agent.md` summarising the run — counts of facts written /
   skipped, pending conflicts, and identity-class facts awaiting
   confirmation.
 - Open each affected `user/*.md` file under Context Files. New bullets
@@ -269,7 +269,7 @@ way, and Google Takeout produces a comprehensive archive.
   deferral). Trim aggressively.
 - **Identity is special.** Even if your file says
   `- Name: <Your Name>`, the agent will *not* write it to
-  `user/profile.md`. It surfaces in the journal entry instead, where
+  `identity/profile.md`. It surfaces in the journal entry instead, where
   you can confirm and accept it via the dashboard.
 - **Conflicts are flagged, not merged.** If your file contradicts an
   existing bullet, the agent appends the new bullet to a

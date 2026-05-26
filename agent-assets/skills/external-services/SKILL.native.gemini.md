@@ -33,7 +33,7 @@ and the `<integration-routing-table>` block in the session preamble.
 
 ## Source of Truth (READ FIRST)
 
-Same files as the direct-mode body — `rules/management.md` →
+Same files as the direct-mode body — `policies/management.md` →
 `## Source of Truth` and `~/.personal-agent/integrations.md` →
 `## Note Sources`. If Schedule != Google Calendar, route through the
 provider-specific direct route (`/api/apple-calendar/*` or
@@ -124,7 +124,7 @@ materialised event to `/api/observations` per the section below.
 ## Apple Calendar (iCloud CalDAV) — direct, unchanged
 
 Use `/api/apple-calendar/*` per the direct-mode body if
-`rules/management.md` Schedule = Apple Calendar.
+`policies/management.md` Schedule = Apple Calendar.
 <!-- /service:apple-calendar -->
 
 ---

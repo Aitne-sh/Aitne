@@ -58,8 +58,12 @@ export class HealthMonitor {
   // stale-cache bug, so it is updated only on interval ticks.
   private anomalyBaseline: HealthStatus | null = null;
 
-  /** Required context files (relative to context dir). B-007 §5.1. */
-  private static readonly REQUIRED_FILES = ["user/profile.md", "today.md"];
+  /** Required context files (relative to context dir). Updated for the
+   *  six-class vault layout (CONTEXT_VAULT_REDESIGN_PLAN). */
+  private static readonly REQUIRED_FILES = [
+    "identity/profile.md",
+    "state/today.md",
+  ];
 
   constructor(deps: HealthMonitorDependencies) {
     this.db = deps.db;

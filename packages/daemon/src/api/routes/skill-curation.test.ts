@@ -1250,8 +1250,12 @@ describe("POST /skill-curation/orphans/discard", () => {
   });
 
   it("returns 200 success when discarding a real orphan overlay", async () => {
-    // Create a real orphan: overlay for a skill that has no curation.json
-    const orphanDir = join(dataDir, "skills", "overlays", "orphan-skill");
+    // Create a real orphan: overlay for a skill that has no curation.json.
+    // CONTEXT_VAULT_REDESIGN_PLAN.md V11 moved the overlay root from
+    // `<dataDir>/skills/overlays/` to `<dataDir>/skill-curation-overlays/`
+    // — `detectOrphanOverlays` reads from the new location, so the
+    // fixture must seed there too.
+    const orphanDir = join(dataDir, "skill-curation-overlays", "orphan-skill");
     mkdirSync(orphanDir, { recursive: true });
     // Write a valid OverlayEnvelope JSON
     const envelope = {

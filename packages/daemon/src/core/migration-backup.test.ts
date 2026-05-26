@@ -188,7 +188,7 @@ describe("createBackup + restoreFromBackup", () => {
     makeTree(source, {
       "today.md": "T",
       "projects/a.md": "A content",
-      "rules/management.md": "R",
+      "policies/management.md": "R",
     });
     const backup = createBackup(source, join(tmp, "bk"));
     expect(backup.manifest.files.length).toBeGreaterThan(0);

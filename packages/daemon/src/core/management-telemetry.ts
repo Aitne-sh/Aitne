@@ -54,7 +54,7 @@ export function recordManagementMdRenderDuration(durationMs: number): void {
 /**
  * Record one per-source activity-view rebuild wall-clock sample. The
  * `source` is the user-typed app label (matches the `source:`
- * frontmatter in `_activity/<source>.md`).
+ * frontmatter in `state/activity/<source>.md`).
  */
 export function recordActivityViewRebuildDuration(
   source: string,

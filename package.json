@@ -54,6 +54,7 @@
     "test": "node scripts/check-redaction-coverage.mjs && vitest run --coverage",
     "test:watch": "vitest",
     "check:redaction": "node scripts/check-redaction-coverage.mjs",
+    "check:vault-paths": "node scripts/check-vault-path-drift.mjs",
     "lint": "turbo run lint",
     "typecheck:tests": "turbo run typecheck:tests",
     "clean": "turbo run clean && node scripts/rm-paths.mjs node_modules .buildstamp",

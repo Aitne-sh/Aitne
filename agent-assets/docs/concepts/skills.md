@@ -90,7 +90,7 @@ visible to the model.
 
 ## Concrete Examples
 
-- `today` — read and rewrite `today.md`.
+- `today` — read and rewrite `state/today.md`.
 - `schedule` — produce per-date schedule files from the calendar.
 - `mail` — search and label messages via the daemon's mail proxy.
 - `docs-search` — read-only fetch over the docs corpus, used only by

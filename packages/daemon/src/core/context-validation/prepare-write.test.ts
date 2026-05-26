@@ -5,18 +5,18 @@ import {
   type ResolvedContextTarget,
 } from "./prepare-write.js";
 
-const TODAY_TARGET: ResolvedContextTarget = { base: "today", ext: ".md" };
-const ROADMAP_TARGET: ResolvedContextTarget = { base: "roadmap", ext: ".md" };
+const TODAY_TARGET: ResolvedContextTarget = { base: "state/today", ext: ".md" };
+const ROADMAP_TARGET: ResolvedContextTarget = { base: "plans/roadmap", ext: ".md" };
 const CUSTOM_ROUTINE_TARGET: ResolvedContextTarget = {
-  base: "routines/custom/my-routine",
+  base: "policies/routines/custom/my-routine",
   ext: ".md",
 };
 const BUILTIN_ROUTINE_TARGET: ResolvedContextTarget = {
-  base: "routines/morning",
+  base: "policies/routines/morning",
   ext: ".md",
 };
 const ROUTINES_INDEX_TARGET: ResolvedContextTarget = {
-  base: "routines/_index",
+  base: "policies/routines/_index",
   ext: ".md",
 };
 const PROJECT_BASE_TARGET: ResolvedContextTarget = {
@@ -24,7 +24,7 @@ const PROJECT_BASE_TARGET: ResolvedContextTarget = {
   ext: ".base",
 };
 const USER_PROFILE_TARGET: ResolvedContextTarget = {
-  base: "user/profile",
+  base: "identity/profile",
   ext: ".md",
 };
 

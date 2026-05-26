@@ -50,7 +50,7 @@ config_keys:
 
 Aitne treats the "day" as starting at **04:00 local time**, not
 00:00. Anything you log between midnight and 4am is filed under the day
-that just ended, so a late commit at 02:30 lands in the same `today.md`
+that just ended, so a late commit at 02:30 lands in the same `state/today.md`
 that opened the previous morning.
 
 ## Why This Concept Exists
@@ -58,7 +58,7 @@ that opened the previous morning.
 Owner-as-user installations almost always have late-night work sessions
 that, mentally, belong to "today" even though the wall-clock has already
 ticked over. A day boundary at midnight would split a single coherent
-working session across two `today.md` files, and the morning routine
+working session across two `state/today.md` files, and the morning routine
 would open against an empty schedule because no agent activity had been
 logged for the new calendar day yet.
 
@@ -70,7 +70,7 @@ clean boundary before they start.
 
 - **Agent day**: the 24-hour window starting at the configured day-boundary hour and ending at the same hour the next calendar day.
 - **Day boundary**: the hour-of-day that starts the agent day. Configured via the `dayBoundaryHour` setting (default `4`).
-- **Day-stamped file**: any file whose name includes `YYYY-MM-DD` (e.g. `daily/2026-04-25.md`, `weekly/2026-04-20.md`). The date stamp uses the agent-day boundary, not the calendar day.
+- **Day-stamped file**: any file whose name includes `YYYY-MM-DD` (e.g. `journal/daily/2026-04-25.md`, `journal/weekly/2026-04-20.md`). The date stamp uses the agent-day boundary, not the calendar day.
 
 ## Concrete Examples
 

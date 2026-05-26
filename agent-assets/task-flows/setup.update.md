@@ -12,7 +12,7 @@ Output language: follow `<output_language_policy>` (this is a DM-style turn — 
 2. Ask the user which part they'd like to change, presenting these options:
    - **Source of Truth** — Change tools
    - **Notification Rules** — Notification timing and methods
-   - **Character (tone / style / voice)** — Update the `character` runtime-config field, emitted as a ```character``` code block (NOT `rules/management.md`, NOT `user/profile.md`)
+   - **Character (tone / style / voice)** — Update the `character` runtime-config field, emitted as a ```character``` code block (NOT `policies/management.md`, NOT `identity/profile.md`)
    - **Autonomy Levels** — Agent decision scope
    - **Schedule** — Working hours
    - **Project Management** — Preferences for how the agent should handle your projects
@@ -45,7 +45,7 @@ not part of the wizard's editable surface, and stripping them silently
 breaks downstream features:
 
 - **`## Agent Identity`** — populated by the daemon from `agentDisplayName`. Re-emit it as-is or omit it (the server upserts it on save).
-- **`## Active Policies`** — a static wikilink to `rules/policies/_index.md` placed by skeleton seeding. Owned by the management-policy capture flow (the wizard is read-only here). If it is missing from the current rules (legacy installs), do NOT invent it; the next skeleton run will add it.
+- **`## Active Policies`** — a static wikilink to `policies/management-captures/_index.md` placed by skeleton seeding. Owned by the management-policy capture flow (the wizard is read-only here). If it is missing from the current rules (legacy installs), do NOT invent it; the next skeleton run will add it.
 
 The same applies to any other section the wizard does not explicitly
 ask the user about — when in doubt, copy it through unchanged.

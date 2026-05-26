@@ -84,10 +84,11 @@ export const DOSSIER_FLOW_PATHS = [
 ] as const;
 
 const REQUIRED_CONTEXT_FILES: readonly string[] = [
+  // CONTEXT_VAULT_REDESIGN folded contextIndex into rootIndex
+  // (`_index.md`); list once.
   CONTEXT_RELATIVE_PATHS.rootIndex,
   CONTEXT_RELATIVE_PATHS.today,
   CONTEXT_RELATIVE_PATHS.roadmap,
-  CONTEXT_RELATIVE_PATHS.contextIndex,
   CONTEXT_RELATIVE_PATHS.user.index,
   ...USER_AREA_FILE_PATHS,
   CONTEXT_RELATIVE_PATHS.rules.index,
@@ -121,9 +122,8 @@ export const REPAIRABLE_STUB_TARGETS = new Set<string>([
 ]);
 
 const INJECTION_CAPPED_PREFIXES = [
-  "rules/",
-  "routines/",
-  "dossiers/",
+  "policies/",
+  "knowledge/dossiers/",
 ] as const;
 
 export function buildContextHealthReport(

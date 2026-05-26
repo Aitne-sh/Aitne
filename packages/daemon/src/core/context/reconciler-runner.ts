@@ -32,11 +32,13 @@ import { createLogger } from "../../logging.js";
 import type { PromptContextChangedCallback } from "../context-staleness.js";
 import {
   applyRollingRetention,
+  defaultRootIndexScaffold,
   reconcileContextIndex,
-  renderContextIndex,
+  renderReconcilerBlockBody,
   shouldIndexPath,
   type FilesystemSnapshotEntry,
 } from "./index-reconciler.js";
+import { mergeReconcilerBlock } from "./reconciler-section.js";
 
 const logger = createLogger("context-index-reconciler");
 
@@ -154,11 +156,32 @@ async function runOnce(
       return record;
     }
 
-    const output = renderContextIndex(diff.rows, today);
-    const validationError = validateContextFileFrontmatter(
+    // V15: render only the inner block body, then splice it into the host
+    // `_index.md` so user-curated content around the block is preserved.
+    const blockBody = renderReconcilerBlockBody(diff.rows, today);
+    const existing = readExistingIndexFile(opts.contextDir);
+    let baseTarget = existing ?? defaultRootIndexScaffold(today);
+    let output = mergeReconcilerBlock(baseTarget, blockBody);
+    let validationError = validateContextFileFrontmatter(
       output,
       CONTEXT_RELATIVE_PATHS.contextIndex,
     );
+    if (validationError && existing) {
+      // Recovery path (§4.5): the host `_index.md` is corrupt — frontmatter
+      // missing, type/owner invalid, etc. Rebuild from the scaffold rather
+      // than refusing to reconcile. The user's broken content is replaced;
+      // the previous bytes survive in `md_file_snapshots` for restore.
+      logger.warn(
+        { validation: validationError },
+        "Reconciler rebuilding _index.md from scaffold — host content failed validation",
+      );
+      baseTarget = defaultRootIndexScaffold(today);
+      output = mergeReconcilerBlock(baseTarget, blockBody);
+      validationError = validateContextFileFrontmatter(
+        output,
+        CONTEXT_RELATIVE_PATHS.contextIndex,
+      );
+    }
     if (validationError) {
       const record: ReconcilerRunRecord = {
         ...recordBase,
@@ -326,9 +349,25 @@ function readCurrentRows(contextDir: string): ContextIndexRow[] {
   } catch (err) {
     logger.warn(
       { err },
-      "Reconciler could not read existing context-index.md — treating as empty",
+      "Reconciler could not read existing _index.md — treating as empty",
     );
     return [];
+  }
+}
+
+/**
+ * Return the host `_index.md` content verbatim so the reconciler can splice
+ * its block in without clobbering the user-curated prose. Returns `null`
+ * when the file does not exist (first-run case — the caller falls back to
+ * `defaultRootIndexScaffold`).
+ */
+function readExistingIndexFile(contextDir: string): string | null {
+  const absolute = join(contextDir, CONTEXT_RELATIVE_PATHS.contextIndex);
+  if (!existsSync(absolute)) return null;
+  try {
+    return readFileSync(absolute, "utf-8");
+  } catch {
+    return null;
   }
 }
 

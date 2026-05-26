@@ -90,4 +90,4 @@ by design.
 ## Related
 
 - [GitHub](github.md) — separate integration for remote-side data.
-- [Hourly Check](../routines/hourly-check.md) — the consumer.
+- [Hourly Check](../policies/routines/hourly-check.md) — the consumer.

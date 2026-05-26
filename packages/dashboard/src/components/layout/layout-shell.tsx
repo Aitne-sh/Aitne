@@ -4,6 +4,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { AppSidebar } from "./app-sidebar";
 import { DegradedBanner } from "./degraded-banner";
+import { VaultRestructureModal } from "./vault-restructure-modal";
 import { CmdkPalette } from "@/components/settings/cmdk-palette";
 import { DocsHelpButton } from "@/components/docs/docs-help-button";
 import { DocsHelpKeybinding } from "@/components/docs/docs-help-keybinding";
@@ -55,6 +56,10 @@ function LayoutShellInner({ children }: { children: React.ReactNode }) {
       <DocsHelpSlideover />
       <DocsHelpKeybinding />
       {!isInitialSetup && <CmdkPalette />}
+      {/* CONTEXT_VAULT_REDESIGN_PLAN.md §11.3.4 / V16 — Obsidian-mode
+          consent modal. Suppressed during the initial-setup wizard
+          since a brand-new install has no legacy vault to migrate. */}
+      <VaultRestructureModal enabled={!isInitialSetup} />
     </div>
   );
 }

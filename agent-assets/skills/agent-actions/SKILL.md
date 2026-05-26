@@ -10,7 +10,7 @@ allowed-tools:
 
 The running session can patch structured metadata into the `agent_actions`
 row that records its own run. The daemon's morning-routine pipeline
-consumes that metadata to assemble `agent/journal.md` without parsing
+consumes that metadata to assemble `journal/agent.md` without parsing
 your final-text output — see `docs/design/appendices/morning-routine-
 optimization.md` §"Data-flow principle: prose vs structured".
 
@@ -55,7 +55,7 @@ The morning-routine Stage A is the primary caller. Its expected shape:
 | `anomalies` | `string[]` | Free-form anomalies you encountered (e.g. "AgentPlan cardinality mismatch: today.md has 6 rows, batch had 5"). ⑥ surfaces these in agent/journal.md and `pnpm audit` filters on them. |
 | `filesTouched` | `string[]` | Paths your turn wrote to (e.g. `context/today.md`, `context/roadmap.md`). |
 | `inboxStats` | `{triaged, movedToScratch, dmConfirmsSent, secretsSkipped}` | Inbox triage counts from Step 4. All keys integers >= 0. `secretsSkipped` is collected but NOT rendered by ⑥; surface secret-skip events through `anomalies` as well so they reach the audit trail. |
-| `morningChecks` | `string[]` | Short labels for every Step 8 `routines/morning.md` extension check executed (e.g. `"water bottle filled"`). ⑥ joins these with `, ` into the `Checks from routines/morning.md:` bullet. Empty array → renders as `(none)`. |
+| `morningChecks` | `string[]` | Short labels for every Step 8 `policies/routines/morning.md` extension check executed (e.g. `"water bottle filled"`). ⑥ joins these with `, ` into the `Checks from routines/morning.md:` bullet. Empty array → renders as `(none)`. |
 | `scheduleBatchSize` | `number` | Cardinality you observed when posting to `/api/schedule/batch`. Mirrors what was POSTed so ⑥ can detect cardinality mismatches against today.md. |
 
 The endpoint accepts any well-formed JSON object — these are the keys

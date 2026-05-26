@@ -1,7 +1,7 @@
 /**
  * Pure helpers for locating `## Section` blocks in context-file markdown.
  *
- * Used by `/api/context` PATCH handlers and by `agent/journal` trim/clear
+ * Used by `/api/context` PATCH handlers and by `journal/agent` trim/clear
  * logic. No I/O, no Hono — keep these importable from any layer.
  *
  * Section names are normalized case- and whitespace-insensitively so that

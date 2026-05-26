@@ -81,7 +81,7 @@ export interface ContextContentValidationError {
  *
  *   - `today` → `validateTodayContent` (400)
  *   - `roadmap` → `validateRoadmap` (400 with path hint)
- *   - `routines/custom/*` → `parseCustomRoutineSpec` (400)
+ *   - `policies/routines/custom/*` → `parseCustomRoutineSpec` (400)
  *   - `routines/*` (excluding `_index`) → `validateBuiltInRoutineRulebook` (400)
  *   - everything else → frontmatter validation (422) + `.base` YAML check (400)
  *
@@ -96,14 +96,14 @@ export function validateContextContent(
     "allowLegacyToday" | "skipFrontmatterValidation" | "expectedAgentDay"
   >,
 ): ContextContentValidationError | null {
-  if (target.base === "today") {
+  if (target.base === "state/today") {
     const message = validateTodayContent(content, {
       allowLegacyToday: options?.allowLegacyToday ?? false,
       expectedAgentDay: options?.expectedAgentDay,
     });
     return message ? { message, status: 400 } : null;
   }
-  if (target.base === "roadmap") {
+  if (target.base === "plans/roadmap") {
     const result = validateRoadmap(content);
     if (!result.ok && result.error) {
       return {
@@ -114,8 +114,8 @@ export function validateContextContent(
     }
     return null;
   }
-  if (target.base.startsWith("routines/custom/")) {
-    const slug = target.base.slice("routines/custom/".length);
+  if (target.base.startsWith("policies/routines/custom/")) {
+    const slug = target.base.slice("policies/routines/custom/".length);
     const result = parseCustomRoutineSpec(slug, content);
     if (!result.ok) {
       return {
@@ -125,7 +125,7 @@ export function validateContextContent(
     }
     return null;
   }
-  if (target.base.startsWith("routines/") && target.base !== "routines/_index") {
+  if (target.base.startsWith("policies/routines/") && target.base !== "policies/routines/_index") {
     const message = validateBuiltInRoutineRulebook(target.base, content);
     return message ? { message, status: 400 } : null;
   }
@@ -163,7 +163,7 @@ export function prepareContextContentForWrite(
 ):
   | { ok: true; content: string }
   | { ok: false; message: string; status: 400 | 422; path?: string } {
-  if (target.base !== "roadmap") {
+  if (target.base !== "plans/roadmap") {
     const contentError = validateContextContent(target, content, {
       allowLegacyToday: options?.allowLegacyToday,
       expectedAgentDay: options?.expectedAgentDay,

@@ -3,10 +3,10 @@
  *
  * `SNAPSHOT_DEBOUNCE_MS` is the floor the route handler enforces between
  * snapshot rows persisted to `md_file_snapshots`. Without it a busy section
- * (e.g. `agent/journal` Raw Signals) would write a new row per append.
+ * (e.g. `journal/agent` Raw Signals) would write a new row per append.
  *
  * The trim/clear helpers run during PATCH against bullet-list sections
- * that grow unbounded — `agent/journal` Raw Signals (timestamp-clear) and
+ * that grow unbounded — `journal/agent` Raw Signals (timestamp-clear) and
  * any section with a `maxEntries` cap (FIFO trim). They preserve
  * continuation lines (indented) and inter-entry blank lines, leaving
  * non-bullet decoration (headings, prose) untouched.
@@ -14,7 +14,7 @@
 
 /**
  * Minimum elapsed milliseconds between two snapshot rows for the same
- * file. 5 minutes — picked so a chatty section (`agent/journal`) does
+ * file. 5 minutes — picked so a chatty section (`journal/agent`) does
  * not write a snapshot per append, while still capturing the dominant
  * state of the file every ~5 min for forensics.
  *

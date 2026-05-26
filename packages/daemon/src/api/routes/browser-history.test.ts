@@ -690,13 +690,13 @@ describe("browser history API routes", () => {
       // targets to write into. `_index.md` is intentionally created so
       // the test exercises the index-entry block path; tests that want
       // `_index_missing` semantics omit it.
-      mkdirSync(join(tmpRoot, "context", "user"), { recursive: true });
+      mkdirSync(join(tmpRoot, "context", "identity"), { recursive: true });
       writeFileSync(
-        join(tmpRoot, "context", "user", "profile.md"),
+        join(tmpRoot, "context", "identity", "profile.md"),
         "# Profile\n\n## Identity\n- placeholder\n",
       );
       writeFileSync(
-        join(tmpRoot, "context", "user", "_index.md"),
+        join(tmpRoot, "context", "identity", "_index.md"),
         "# User topics\n\n- `profile.md`\n",
       );
       visitCounter = 0;
@@ -804,9 +804,9 @@ describe("browser history API routes", () => {
           ts: weekStartMs + 1 * 86_400_000,
           domain: "doc.rust-lang.org",
         });
-        mkdirSync(join(tmpRoot, "context", "projects"), { recursive: true });
+        mkdirSync(join(tmpRoot, "context", "plans", "projects"), { recursive: true });
         writeFileSync(
-          join(tmpRoot, "context", "projects", "rust-borrow-checker.md"),
+          join(tmpRoot, "context", "plans", "projects", "rust-borrow-checker.md"),
           [
             "---",
             "type: project",
@@ -830,7 +830,7 @@ describe("browser history API routes", () => {
         expect(body.projectMatches).toHaveLength(1);
         expect(body.projectMatches[0]).toMatchObject({
           projectSlug: "rust-borrow-checker",
-          projectPath: "projects/rust-borrow-checker.md",
+          projectPath: "plans/projects/rust-borrow-checker.md",
         });
         // No absolute path / data-dir layout leaks into the response.
         expect(body.projectMatches[0]!.projectPath.startsWith("/")).toBe(false);
@@ -884,21 +884,21 @@ describe("browser history API routes", () => {
           // to be written; project files are absent so no project block.
           expect(body.targetsWritten).toEqual(
             expect.arrayContaining([
-              "user/profile.md",
-              "user/research-themes.md",
-              "user/_index.md",
+              "identity/profile.md",
+              "identity/research-themes.md",
+              "identity/_index.md",
             ]),
           );
           // The wholly-daemon-owned snapshot file landed on disk.
           const themesPath = join(
             tmpRoot,
             "context",
-            "user",
+            "identity",
             "research-themes.md",
           );
           expect(existsSync(themesPath)).toBe(true);
           const profileBody = readFileSync(
-            join(tmpRoot, "context", "user", "profile.md"),
+            join(tmpRoot, "context", "identity", "profile.md"),
             "utf-8",
           );
           expect(profileBody).toContain(
@@ -936,11 +936,11 @@ describe("browser history API routes", () => {
     describe("POST /browser-history/cleanup-interests-reflection", () => {
       function seedThemesFileAndAutoBlock(): void {
         writeFileSync(
-          join(tmpRoot, "context", "user", "research-themes.md"),
+          join(tmpRoot, "context", "identity", "research-themes.md"),
           "---\ntype: user\nowner: aitne-browser-history\n---\n# stub\n",
         );
         writeFileSync(
-          join(tmpRoot, "context", "user", "profile.md"),
+          join(tmpRoot, "context", "identity", "profile.md"),
           [
             "# Profile",
             "",
@@ -972,11 +972,11 @@ describe("browser history API routes", () => {
         expect(body.researchThemesDeleted).toBe(true);
         expect(
           existsSync(
-            join(tmpRoot, "context", "user", "research-themes.md"),
+            join(tmpRoot, "context", "identity", "research-themes.md"),
           ),
         ).toBe(false);
         const profileBody = readFileSync(
-          join(tmpRoot, "context", "user", "profile.md"),
+          join(tmpRoot, "context", "identity", "profile.md"),
           "utf-8",
         );
         expect(profileBody).not.toContain("aitne:browser-interests");
@@ -1001,7 +1001,7 @@ describe("browser history API routes", () => {
         expect(body.researchThemesDeleted).toBe(false);
         expect(
           existsSync(
-            join(tmpRoot, "context", "user", "research-themes.md"),
+            join(tmpRoot, "context", "identity", "research-themes.md"),
           ),
         ).toBe(true);
       });

@@ -240,28 +240,28 @@ describe("findPendingTemplateUpgrades", () => {
   it("reports files whose user-side version trails the manifest", () => {
     writeTemplate(
       tmp,
-      "rules/management.md",
+      "policies/management.md",
       "---\ntype: rule\ntemplate_version: 1\nowner: shared\n---\n# M\n",
     );
     const manifest = {
       manifestVersion: 1,
-      templates: { "rules/management.md": { version: 3 } },
+      templates: { "policies/management.md": { version: 3 } },
     };
     const pending = findPendingTemplateUpgrades(manifest, tmp);
     expect(pending).toEqual([
-      { path: "rules/management.md", from: 1, to: 3 },
+      { path: "policies/management.md", from: 1, to: 3 },
     ]);
   });
 
   it("skips files whose user-side version matches the manifest", () => {
     writeTemplate(
       tmp,
-      "rules/management.md",
+      "policies/management.md",
       "---\ntype: rule\ntemplate_version: 2\nowner: shared\n---\n# M\n",
     );
     const manifest = {
       manifestVersion: 1,
-      templates: { "rules/management.md": { version: 2 } },
+      templates: { "policies/management.md": { version: 2 } },
     };
     expect(findPendingTemplateUpgrades(manifest, tmp)).toEqual([]);
   });
@@ -271,12 +271,12 @@ describe("findPendingTemplateUpgrades", () => {
     // touch' — we stay out of their way.
     writeTemplate(
       tmp,
-      "rules/management.md",
+      "policies/management.md",
       "---\ntype: rule\ntemplate_version: 99\nowner: shared\n---\n# M\n",
     );
     const manifest = {
       manifestVersion: 1,
-      templates: { "rules/management.md": { version: 2 } },
+      templates: { "policies/management.md": { version: 2 } },
     };
     expect(findPendingTemplateUpgrades(manifest, tmp)).toEqual([]);
   });
@@ -292,12 +292,12 @@ describe("findPendingTemplateUpgrades", () => {
   it("skips files with no template_version marker (treated as user-rewritten)", () => {
     writeTemplate(
       tmp,
-      "rules/management.md",
+      "policies/management.md",
       "---\ntype: rule\nowner: shared\n---\n# user rewrote\n",
     );
     const manifest = {
       manifestVersion: 1,
-      templates: { "rules/management.md": { version: 3 } },
+      templates: { "policies/management.md": { version: 3 } },
     };
     expect(findPendingTemplateUpgrades(manifest, tmp)).toEqual([]);
   });

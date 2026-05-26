@@ -17,4 +17,4 @@ I've added later via DM). All checks are treated equally.
 | `evening.md` | evening | `routine.evening_review` |
 | `weekly.md` | Friday | `routine.weekly_review` |
 | `monthly.md` | month-end | `routine.monthly_review` |
-| custom/<slug>.md | user-defined cron in `routines/custom/` | `routine.custom.<slug>` |
+| custom/<slug>.md | user-defined cron in `policies/routines/custom/` | `routine.custom.<slug>` |

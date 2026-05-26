@@ -56,14 +56,14 @@ context_files:
 ## In One Sentence
 
 Once per agent day, at `dayBoundaryHour` local time, Aitne
-rebuilds `today.md` and the day's schedule from your calendar, mail,
+rebuilds `state/today.md` and the day's schedule from your calendar, mail,
 roadmap, and recent observations.
 
 ## What It Does
 
 The morning routine is the single highest-value process in Aitne.
 It runs as a **two-stage pipeline** — Stage A (`routine.morning_routine_today`)
-on the medium tier rebuilds `today.md`, walks the roadmap, fans out
+on the medium tier rebuilds `state/today.md`, walks the roadmap, fans out
 the day's schedule, and self-reports structured metadata; Stage B
 (`routine.morning_routine_journal`) on the lite tier authors
 `daily/<yesterday>.md` in parallel from a daemon-prepared skeleton.
@@ -73,12 +73,12 @@ hence the medium-tier ceiling on Stage A even after the split.
 
 In sequence, the routine:
 
-1. Reads the previous day's `today.md` and rolls forward unfinished items.
+1. Reads the previous day's `state/today.md` and rolls forward unfinished items.
 2. Pulls today's calendar events from any connected calendar integration.
 3. Scans recent unread mail and surfaces the few that need owner attention.
 4. Walks the roadmap looking for items whose **Preparation Timeline** rows fire today.
 5. Consumes any pending observations the hourly check has already dropped into the queue.
-6. Writes the rebuilt `today.md` and the per-date snapshot at `daily/YYYY-MM-DD.md`.
+6. Writes the rebuilt `state/today.md` and the per-date snapshot at `daily/YYYY-MM-DD.md`.
 7. Logs a single status line to the dashboard activity feed.
 
 ## When It Runs / How It Is Triggered
@@ -90,7 +90,7 @@ There is no separate `morningRoutineHour` — the morning routine and the
 agent-day rollover are the same instant.
 
 There is no separate "initial" process key. The first morning after
-setup is detected inline by Stage A from the absence of `yesterday.md`;
+setup is detected inline by Stage A from the absence of `state/yesterday.md`;
 the daemon injects a `<roadmap_skeleton>` block carrying the pre-aggregated
 Annual Goals / Quarterly Focus / Preparation Timeline facts so Stage A
 can populate the wizard's placeholder roadmap on medium tier instead of
@@ -99,7 +99,7 @@ under `routine.morning_routine_initial` on the heavy tier.)
 
 ## What It Outputs
 
-- A rebuilt `today.md` with sections for User Schedule, Tasks, Agent Plan, Agent Log, and Handoff.
+- A rebuilt `state/today.md` with sections for User Schedule, Tasks, Agent Plan, Agent Log, and Handoff.
 - A per-date `daily/YYYY-MM-DD.md` capturing the day's calendar snapshot.
 - A short notification ("Good morning, here's today...") when notifications are enabled and quiet hours have ended.
 - An entry in the Activity feed.
@@ -115,7 +115,7 @@ under `routine.morning_routine_initial` on the heavy tier.)
 | Setting | Default | Notes |
 |---|---|---|
 | `dayBoundaryHour` | `4` | Both the agent-day boundary and the morning-routine fire time. See [Agent Day](../../concepts/agent-day.md). |
-| Stage A tier (`routine.morning_routine_today`) | medium (Sonnet 4.6) | Synthesises `today.md` + the day's roadmap fan-out. Adjustable per-row in Settings → Models. |
+| Stage A tier (`routine.morning_routine_today`) | medium (Sonnet 4.6) | Synthesises `state/today.md` + the day's roadmap fan-out. Adjustable per-row in Settings → Models. |
 | Stage B tier (`routine.morning_routine_journal`) | lite (Haiku 4.5) | Appends yesterday's entry to `agent-journal.md`. |
 | Max turns | 50 | Stage A default. Adjustable per-process in Settings → Models. |
 | Max budget USD | 2.00 (Stage A: 0.50, Stage B: 0.10) | Per-execute envelope cap. The router enforces this before token costs accumulate. |

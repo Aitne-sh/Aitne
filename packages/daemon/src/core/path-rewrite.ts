@@ -23,7 +23,7 @@ const logger = createLogger("path-rewrite");
  *     watcher writes external-vault paths (not rewritten here), but other
  *     producers may write primary-context paths.
  *   - `md_file_snapshots.file_path` — logical keys like `today`,
- *     `rules/management`. Already relative; NOT rewritten (left as-is).
+ *     `rules/management`. Already relative; NOT rewritten (left as-is). // drift-allow
  *   - `messages.metadata` — currently unused at runtime but open-ended;
  *     generic walk for defense in depth.
  *   - `receipts.obsidian_path` — external vault relative path. NOT

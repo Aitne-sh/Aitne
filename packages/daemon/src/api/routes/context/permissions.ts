@@ -1,71 +1,80 @@
+// drift-allow-file: write-permission whitelist documents legacy alias
+// targets (`agent/journal`, etc.) so future maintainers understand why
+// the rule maps to a six-class destination.
 import type { ApiDependencies } from "../../server.js";
 import { classifyContextWriteStaleness } from "../../../core/context-staleness.js";
 import { createLogger } from "../../../logging.js";
 
 const logger = createLogger("context-api");
 
-// B-007 §5.1 — write-permission whitelist for the new layout.
+/**
+ * Write-permission whitelist (CONTEXT_VAULT_REDESIGN_PLAN.md §7.1).
+ *
+ * After the six-class restructure the table collapses from 26 explicit
+ * patterns to one per class prefix plus a small number of exceptions
+ * (`CREATE_ONLY_PUT`, `git/{slug}` placeholders, lifecycle DELETEs).
+ * Legacy URLs (`PUT /api/context/today.md` etc.) are normalised by the
+ * API alias resolver before this table is consulted, so canonical paths
+ * are the only inputs we have to enumerate.
+ */
 export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
   // Top-level survivors.
-  today: ["PUT", "PATCH"],
-  yesterday: ["PUT", "PATCH"],
-  roadmap: ["PUT", "PATCH"],
   _index: ["PUT", "PATCH"],
-  "context-index": ["PUT", "PATCH"],
 
-  // user/* covers fixed area files AND the §5.5 growth pattern
-  // (e.g. `user/health/sleep-log.md` after an area promotion).
-  "user/*": ["PUT", "PATCH"],
+  // state/
+  "state/today": ["PUT", "PATCH"],
+  "state/yesterday": ["PUT", "PATCH"],
+  "state/profile-questions": ["PUT", "PATCH"],
+  "state/inbox/*": ["PUT", "PATCH", "DELETE"],
+  "state/scratch/*": ["PUT", "PATCH", "DELETE"],
+  "state/activity/*": ["PUT", "PATCH"],
 
-  // Natural-language rulebooks — §5.8.
-  "rules/_index": ["PUT", "PATCH"],
-  // DELETE intentionally omitted. Policy files under `rules/policies/`
-  // use `status: removed` in lieu of physical deletion so the captured
-  // history (origin DM, why, linked routine) survives. See
-  // MANAGEMENT-POLICY-CAPTURE-PLAN.md §4.6 / §5.1.
-  "rules/*": ["PUT", "PATCH"],
-  "routines/_index": ["PUT", "PATCH"],
-  "routines/*": ["PUT", "PATCH"],
-  // B-007 §5.8 Q3 — custom routines support DELETE so the agent can
-  // retire a routine when the user asks via DM. The scheduler re-reads
-  // the directory via `onCustomRoutinesChanged` and unregisters the
-  // cron job on the next reload pass.
-  "routines/custom/*": ["PUT", "PATCH", "DELETE"],
+  // identity/
+  "identity/_index": ["PUT", "PATCH"],
+  "identity/*": ["PUT", "PATCH"],
 
-  // Projects (`.base` permitted via CONTEXT_FILE_EXTENSIONS).
-  "projects/_index": ["PUT", "PATCH"],
-  "projects/_active": ["PUT"],
-  "projects/*": ["PUT", "PATCH"],
+  // plans/
+  "plans/roadmap": ["PUT", "PATCH"],
+  "plans/projects/_index": ["PUT", "PATCH"],
+  "plans/projects/_active": ["PUT"],
+  "plans/projects/*": ["PUT", "PATCH"],
 
-  // Lightweight registry for watched git repos that are not promoted to a
-  // full project page.
-  // @deprecated Pre-cutover layout (see docs/design/appendices/unified-repositories.md);
-  // retained for transitional reads of legacy files. New writes route to
-  // `git/<slug>/{overview,journal/<YYYY-MM-DD>}`.
-  "git-repos/*": ["PUT", "PATCH"],
+  // policies/ — DELETE intentionally omitted for management-captures:
+  // policy files use `status: removed` in lieu of physical deletion so
+  // the captured history (origin DM, why, linked routine) survives.
+  "policies/_index": ["PUT", "PATCH"],
+  "policies/management": ["PUT", "PATCH"],
+  "policies/mcp": ["PUT", "PATCH"],
+  "policies/redaction": ["PUT", "PATCH"],
+  "policies/journal-format": ["PUT", "PATCH"],
+  "policies/journal-export": ["PUT", "PATCH"],
+  "policies/integrations": ["PUT", "PATCH"],
+  "policies/management-captures/_index": ["PUT", "PATCH"],
+  "policies/management-captures/*": ["PUT", "PATCH"],
+  "policies/routines/_index": ["PUT", "PATCH"],
+  "policies/routines/*": ["PUT", "PATCH"],
+  // Custom routines support DELETE so the agent can retire a routine
+  // when the user asks via DM.
+  "policies/routines/custom/*": ["PUT", "PATCH", "DELETE"],
 
-  // Unified repositories — per-repo project overview + per-day journal.
-  // The two specific patterns below carry write permission; arbitrary
-  // paths under `git/` are NOT writable to keep the layout disciplined.
-  // See docs/design/appendices/unified-repositories.md §4.5.
-  "git/{slug}/overview": ["PUT", "PATCH"],
-  "git/{slug}/journal/{date}": ["PUT", "PATCH"],
+  // journal/ — append-only narrative. `journal/agent.md` is
+  // `CREATE_ONLY_PUT` and only accepts append-style PATCH.
+  "journal/daily/*": ["PUT", "PATCH"],
+  "journal/weekly/*": ["PUT", "PATCH"],
+  "journal/monthly/*": ["PUT", "PATCH"],
+  "journal/agent": ["PUT", "PATCH"],
+  "journal/repos/{slug}/{date}": ["PUT", "PATCH"],
 
-  // Journal & reviews.
-  "daily/*": ["PUT", "PATCH"],
-  "weekly/*": ["PUT", "PATCH"],
-  "monthly/*": ["PUT", "PATCH"],
-
-  // Dossiers + inbox + agent self-areas.
-  "dossiers/_index": ["PUT", "PATCH"],
-  "dossiers/*": ["PUT", "PATCH"],
-  // B-007 §5.9 Step 4 / §5.3 — morning routine triages each inbox file and
-  // moves the original to `agent/scratch/inbox-YYYY-MM-DD-*.md`. Both sides
-  // of the move need DELETE: inbox for the post-triage cleanup, scratch for
-  // the eventual 48h TTL retention sweep (§6.5).
-  "inbox/*": ["PUT", "PATCH", "DELETE"],
-  "agent/journal": ["PUT", "PATCH"],
-  "agent/scratch/*": ["PUT", "PATCH", "DELETE"],
+  // knowledge/ — dossiers + per-repo overviews + entity files.
+  "knowledge/dossiers/_index": ["PUT", "PATCH"],
+  "knowledge/dossiers/*": ["PUT", "PATCH"],
+  "knowledge/repos/{slug}/overview": ["PUT", "PATCH"],
+  // Legacy git-repos registry preserved read-only under
+  // knowledge/repos/legacy-registry/ — left writable so the user can
+  // clean up dangling entries; no new writes target this path.
+  "knowledge/repos/legacy-registry/*": ["PUT", "PATCH"],
+  "knowledge/entities/{domain}/_index": ["PUT", "PATCH"],
+  "knowledge/entities/{domain}/{typePlural}/{slug}": ["PUT", "PATCH"],
 };
 
 /**
@@ -79,7 +88,7 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
  * so `mode:"replace"` / `"clear"` / `"clear_before"` cannot erase existing
  * sections behind the agent's back.
  */
-export const CREATE_ONLY_PUT = new Set(["agent/journal"]);
+export const CREATE_ONLY_PUT = new Set(["journal/agent"]);
 
 /**
  * PATCH modes that count as "append-style" for paths in {@link CREATE_ONLY_PUT}.
@@ -171,24 +180,27 @@ export function isWriteAllowed(path: string, method: string): boolean {
  * setup conversation — the `onPromptContextChanged` handler in index.ts
  * skips `markActiveDmSessionsStale` while `currentSetupMode` is active.
  */
-export function shouldRefreshPromptContext(path: string, method: string): boolean {
+export function shouldRefreshPromptContext(
+  path: string,
+  method: string,
+): boolean {
   if (
-    path === "today" ||
-    path === "roadmap" ||
-    path === "context-index"
+    path === "state/today" ||
+    path === "plans/roadmap" ||
+    path === "_index"
   ) {
     return true;
   }
-  // B-007 — any rules/*.md file feeds the policy-files injection hub, so
-  // edits to any of them should invalidate the owner-session prompt cache.
-  // Routine rulebooks (`routines/*.md`) similarly drive task-flow prompts.
-  if (path.startsWith("rules/") || path.startsWith("routines/")) {
+  // Any policies/*.md edit feeds the policy-files injection hub, so
+  // changes should invalidate the owner-session prompt cache.
+  // policies/routines/* drives task-flow prompts.
+  if (path.startsWith("policies/")) {
     return true;
   }
-  if (path.startsWith("dossiers/")) {
+  if (path.startsWith("knowledge/dossiers/")) {
     return true;
   }
-  if (path === "user/profile" && method === "PUT") {
+  if (path === "identity/profile" && method === "PUT") {
     return true;
   }
   return false;

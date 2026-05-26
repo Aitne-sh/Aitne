@@ -21,7 +21,7 @@ skipping any whose preconditions are not met.
 
 ### Upcoming schedule
 - **Precondition**: always
-- **Action**: scan `today.md` `## Agent Plan` for items in the next 60
+- **Action**: scan `state/today.md` `## Agent Plan` for items in the next 60
   min; ensure each has a `scheduled.task` row.
 
 ## Skip conditions (applied before any check)

@@ -80,7 +80,7 @@ describe("runDomainIndexReconciler", () => {
 
   it("writes _index.md for each non-empty domain", async () => {
     seedEntity(db, {
-      path: "work/meetings/foo.md",
+      path: "knowledge/entities/work/meetings/foo.md",
       domain: "work",
       type: "meeting",
       slug: "foo",
@@ -96,14 +96,14 @@ describe("runDomainIndexReconciler", () => {
     });
     expect(result.result).toBe("applied");
     expect(result.added).toBe(1);
-    const body = readFileSync(join(contextDir, "work/_index.md"), "utf-8");
+    const body = readFileSync(join(contextDir, "knowledge/entities/work/_index.md"), "utf-8");
     expect(body).toContain("# Work — Index");
     expect(body).toContain("| Foo | meeting | zoom | — | 2026-12-04 |");
   });
 
   it("is idempotent — second pass is a noop", async () => {
     seedEntity(db, {
-      path: "work/meetings/foo.md",
+      path: "knowledge/entities/work/meetings/foo.md",
       domain: "work",
       type: "meeting",
       slug: "foo",
@@ -133,7 +133,7 @@ describe("runDomainIndexReconciler", () => {
     // line and unconditionally rewrite. Production cron / fs_event
     // chains always advance the clock, so this is the realistic case.
     seedEntity(db, {
-      path: "work/meetings/foo.md",
+      path: "knowledge/entities/work/meetings/foo.md",
       domain: "work",
       type: "meeting",
       slug: "foo",
@@ -165,14 +165,14 @@ describe("runDomainIndexReconciler", () => {
       now: () => new Date("2026-12-05T00:00:00Z"),
     });
     expect(result.result).toBe("noop");
-    expect(existsSync(join(contextDir, "work/_index.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "knowledge/entities/work/_index.md"))).toBe(false);
   });
 
   it("snapshots prior contents into md_file_snapshots", async () => {
-    mkdirSync(join(contextDir, "work"), { recursive: true });
-    writeFileSync(join(contextDir, "work/_index.md"), "old", "utf-8");
+    mkdirSync(join(contextDir, "knowledge", "entities", "work"), { recursive: true });
+    writeFileSync(join(contextDir, "knowledge/entities/work/_index.md"), "old", "utf-8");
     seedEntity(db, {
-      path: "work/meetings/foo.md",
+      path: "knowledge/entities/work/meetings/foo.md",
       domain: "work",
       type: "meeting",
       slug: "foo",
@@ -189,10 +189,10 @@ describe("runDomainIndexReconciler", () => {
       .prepare(
         "SELECT file_path, content, trigger FROM md_file_snapshots WHERE file_path = ?",
       )
-      .all("work/_index.md");
+      .all("knowledge/entities/work/_index.md");
     expect(snapshots).toEqual([
       {
-        file_path: "work/_index.md",
+        file_path: "knowledge/entities/work/_index.md",
         content: "old",
         trigger: "domain_index_reconciled",
       },
@@ -218,7 +218,7 @@ describe("runDomainIndexReconciler", () => {
 
   it("marks the AgentWriteTracker so the watcher does not re-loop", async () => {
     seedEntity(db, {
-      path: "work/meetings/foo.md",
+      path: "knowledge/entities/work/meetings/foo.md",
       domain: "work",
       type: "meeting",
       slug: "foo",
@@ -233,7 +233,7 @@ describe("runDomainIndexReconciler", () => {
       trigger: "startup",
       now: () => new Date("2026-12-05T00:00:00Z"),
     });
-    const indexPath = join(contextDir, "work/_index.md");
+    const indexPath = join(contextDir, "knowledge/entities/work/_index.md");
     const written = readFileSync(indexPath, "utf-8");
     expect(tracker.isMarked(indexPath, written)).toBe(true);
   });
@@ -292,7 +292,7 @@ describe("runActivityViewReconciler", () => {
       lastResult: "ok (3 new)",
     });
     seedEntity(db, {
-      path: "work/meetings/foo.md",
+      path: "knowledge/entities/work/meetings/foo.md",
       domain: "work",
       type: "meeting",
       slug: "foo",
@@ -311,19 +311,21 @@ describe("runActivityViewReconciler", () => {
     expect(result.result).toBe("applied");
     expect(result.added).toBe(1);
     const body = readFileSync(
-      join(contextDir, "_activity/zoom.md"),
+      join(contextDir, "state/activity/zoom.md"),
       "utf-8",
     );
     expect(body).toContain("source: zoom");
     expect(body).toContain("- mt_1 daily 10:00 — last 2026-12-04T10:00Z ok (3 new)");
-    expect(body).toContain("[Foo](../work/meetings/foo.md)");
+    expect(body).toContain(
+      "[Foo](../../knowledge/entities/work/meetings/foo.md)",
+    );
     expect(body).toContain("duration 60min");
   });
 
   it("prunes activity files for sources that no longer exist", async () => {
-    mkdirSync(join(contextDir, "_activity"), { recursive: true });
+    mkdirSync(join(contextDir, "state", "activity"), { recursive: true });
     writeFileSync(
-      join(contextDir, "_activity/stale.md"),
+      join(contextDir, "state/activity/stale.md"),
       "old content",
       "utf-8",
     );
@@ -334,12 +336,12 @@ describe("runActivityViewReconciler", () => {
       now: () => new Date("2026-12-05T00:00:00Z"),
     });
     expect(result.removed).toBe(1);
-    expect(existsSync(join(contextDir, "_activity/stale.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "state/activity/stale.md"))).toBe(false);
     const snapshots = db
       .prepare(
         "SELECT file_path, trigger FROM md_file_snapshots WHERE file_path = ?",
       )
-      .all("_activity/stale.md");
+      .all("state/activity/stale.md");
     expect(snapshots).toHaveLength(1);
   });
 
@@ -355,7 +357,7 @@ describe("runActivityViewReconciler", () => {
       cadence: "daily 10:00",
     });
     seedEntity(db, {
-      path: "work/meetings/twokeys.md",
+      path: "knowledge/entities/work/meetings/twokeys.md",
       domain: "work",
       type: "meeting",
       slug: "twokeys",
@@ -377,7 +379,7 @@ describe("runActivityViewReconciler", () => {
     expect(result.added).toBe(1);
 
     const body = readFileSync(
-      join(contextDir, "_activity/zoom.md"),
+      join(contextDir, "state/activity/zoom.md"),
       "utf-8",
     );
     const occurrences = body.split("Two-key meeting").length - 1;
@@ -395,7 +397,7 @@ describe("runActivityViewReconciler", () => {
       cadence: "daily 10:00",
     });
     seedEntity(db, {
-      path: "work/meetings/foo-cap.md",
+      path: "knowledge/entities/work/meetings/foo-cap.md",
       domain: "work",
       type: "meeting",
       slug: "foo-cap",
@@ -404,7 +406,7 @@ describe("runActivityViewReconciler", () => {
       sources: { ZOOM: { external_id: "zm_a" } },
     });
     seedEntity(db, {
-      path: "work/meetings/foo-pretty.md",
+      path: "knowledge/entities/work/meetings/foo-pretty.md",
       domain: "work",
       type: "meeting",
       slug: "foo-pretty",
@@ -413,7 +415,7 @@ describe("runActivityViewReconciler", () => {
       sources: { Zoom: { external_id: "zm_b" } },
     });
     seedEntity(db, {
-      path: "work/meetings/foo-flat.md",
+      path: "knowledge/entities/work/meetings/foo-flat.md",
       domain: "work",
       type: "meeting",
       slug: "foo-flat",
@@ -432,7 +434,7 @@ describe("runActivityViewReconciler", () => {
     expect(result.added).toBe(1);
 
     const body = readFileSync(
-      join(contextDir, "_activity/zoom.md"),
+      join(contextDir, "state/activity/zoom.md"),
       "utf-8",
     );
     expect(body).toContain("Foo (CAP)");
@@ -463,7 +465,7 @@ describe("runActivityViewReconciler", () => {
     });
     expect(result.added).toBe(1);
     const body = readFileSync(
-      join(contextDir, "_activity/zoom.md"),
+      join(contextDir, "state/activity/zoom.md"),
       "utf-8",
     );
     expect(body).toContain("- 2026-11-15 mt_27 stopped by user");
@@ -501,7 +503,7 @@ describe("runActivityViewReconciler", () => {
     });
     expect(result.added).toBe(1);
     const body = readFileSync(
-      join(contextDir, "_activity/zoom.md"),
+      join(contextDir, "state/activity/zoom.md"),
       "utf-8",
     );
     expect(body).toContain("- 2026-11-10 mt_42 modified (weekly → daily)");
@@ -545,14 +547,14 @@ describe("runActivityViewReconciler", () => {
     // `_activity/google-meet.md` (from `app_normalized`).
     expect(result.added).toBe(2);
     const oldBody = readFileSync(
-      join(contextDir, "_activity/zoom.md"),
+      join(contextDir, "state/activity/zoom.md"),
       "utf-8",
     );
     expect(oldBody).toContain(
       "- 2026-11-15 mt_42 app renamed (Zoom → Google Meet)",
     );
     const newBody = readFileSync(
-      join(contextDir, "_activity/google-meet.md"),
+      join(contextDir, "state/activity/google-meet.md"),
       "utf-8",
     );
     expect(newBody).toContain(
@@ -634,14 +636,16 @@ describe("end-to-end: bootstrap + reconcile", () => {
   it("converges entity-mirror + domain-index in one boot pass (NFR-9 budget)", async () => {
     // Seed a few L2 files so the boot pass walks a realistic shape.
     const files = [
-      ["work/meetings/2026-12-04-foo.md", "Foo 1on1", "2026-12-04"],
-      ["work/projects/acme.md", "Acme renewal", null],
-      ["personal/notes/idea.md", "Idea seed", "2026-12-03"],
+      ["knowledge/entities/work/meetings/2026-12-04-foo.md", "Foo 1on1", "2026-12-04"],
+      ["knowledge/entities/work/projects/acme.md", "Acme renewal", null],
+      ["knowledge/entities/personal/notes/idea.md", "Idea seed", "2026-12-03"],
     ];
     for (const [path, title, date] of files) {
       const abs = join(contextDir, path as string);
       mkdirSync(join(abs, ".."), { recursive: true });
-      const [domain, plural] = (path as string).split("/");
+      const segments = (path as string).split("/");
+      // knowledge/entities/<domain>/<plural>/...
+      const [, , domain, plural] = segments;
       const type = plural === "meetings" ? "meeting"
         : plural === "projects" ? "project"
         : "note";
@@ -688,7 +692,7 @@ sources:
     });
     expect(activityResult.added).toBe(1); // single source: zoom
     expect(
-      existsSync(join(contextDir, "_activity/zoom.md")),
+      existsSync(join(contextDir, "state/activity/zoom.md")),
     ).toBe(true);
   });
 });

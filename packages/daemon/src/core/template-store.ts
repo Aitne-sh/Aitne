@@ -83,9 +83,9 @@ export type RetemplateRunStatus =
 
 export interface RetemplateTarget {
   slug: string;
-  /** Relative context path without the trailing `.md` (e.g. `projects/aitne`). */
+  /** Relative context path without the trailing `.md` (e.g. `plans/projects/aitne`). */
   contextPath: string;
-  /** Relative context file with `.md` (e.g. `projects/aitne.md`). */
+  /** Relative context file with `.md` (e.g. `plans/projects/aitne.md`). */
   contextFile: string;
   /** Path inside `backupRoot` mirroring the contextDir layout. */
   backupRelPath: string;

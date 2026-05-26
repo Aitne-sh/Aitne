@@ -17,9 +17,12 @@ describe("policy-files", () => {
   beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), "policy-files-test-"));
     contextDir = join(tmp, "context");
-    mkdirSync(join(contextDir, "rules"), { recursive: true });
-    mkdirSync(join(contextDir, "routines"), { recursive: true });
-    mkdirSync(join(contextDir, "routines", "custom"), { recursive: true });
+    // Vault restructure: rules/ + routines/ both live under policies/.
+    mkdirSync(join(contextDir, "policies"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
+    mkdirSync(join(contextDir, "policies", "routines", "custom"), {
+      recursive: true,
+    });
   });
 
   afterEach(() => {
@@ -29,17 +32,17 @@ describe("policy-files", () => {
   describe("registry", () => {
     it("exposes global * refs for redaction + mcp (management.md is owned by ContextBuilder)", () => {
       const global = POLICY_FILE_REGISTRY["*"];
-      // rules/management.md is injected as `<management_rules>` by
+      // policies/management.md is injected as `<management_rules>` by
       // ContextBuilder; the policy registry intentionally does NOT
       // re-emit it (see policy-files.ts module JSDoc).
-      expect(global.some((r) => r.path === "rules/management.md")).toBe(false);
-      expect(global.some((r) => r.path === "rules/redaction.md")).toBe(true);
-      expect(global.some((r) => r.path === "rules/mcp.md")).toBe(true);
+      expect(global.some((r) => r.path === "policies/management.md")).toBe(false);
+      expect(global.some((r) => r.path === "policies/redaction.md")).toBe(true);
+      expect(global.some((r) => r.path === "policies/mcp.md")).toBe(true);
     });
 
     it("mcp ref is gated on flags.mcpEnabled", () => {
       const mcp = POLICY_FILE_REGISTRY["*"].find(
-        (r) => r.path === "rules/mcp.md",
+        (r) => r.path === "policies/mcp.md",
       );
       expect(mcp?.injectIf).toBeDefined();
       expect(mcp?.injectIf?.({ processKey: "x" })).toBe(false);
@@ -61,7 +64,7 @@ describe("policy-files", () => {
       expect(POLICY_FILE_REGISTRY["routine.roadmap_refresh"]).toBeDefined();
       // `routine.morning_routine_initial` retired by Phase 7 (2026-05-16)
       // — no longer in the registry. The first-run branch routes through
-      // `routine.morning_routine_today` with the same `routines/morning.md`
+      // `routine.morning_routine_today` with the same `policies/routines/morning.md`
       // policy file injected via that key's entry.
       expect(POLICY_FILE_REGISTRY["routine.morning_routine_initial"]).toBeUndefined();
     });
@@ -74,9 +77,9 @@ describe("policy-files", () => {
       const stageA = POLICY_FILE_REGISTRY["routine.morning_routine_today"];
       expect(stageA).toBeDefined();
       const stageAPaths = stageA!.map((r) => r.path);
-      expect(stageAPaths).toContain("routines/morning.md");
-      expect(stageAPaths).not.toContain("rules/journal-format.md");
-      expect(stageAPaths).not.toContain("rules/journal-export.md");
+      expect(stageAPaths).toContain("policies/routines/morning.md");
+      expect(stageAPaths).not.toContain("policies/journal-format.md");
+      expect(stageAPaths).not.toContain("policies/journal-export.md");
 
       // Stage B — opts out of the `*` defaults entirely (no `mcp.md`,
       // no parent management bindings) and re-declares only the
@@ -87,9 +90,9 @@ describe("policy-files", () => {
       const stageBPaths = stageB!.map((r) => r.path);
       expect(stageBPaths).toEqual(
         expect.arrayContaining([
-          "rules/redaction.md",
-          "rules/journal-format.md",
-          "rules/journal-export.md",
+          "policies/redaction.md",
+          "policies/journal-format.md",
+          "policies/journal-export.md",
         ]),
       );
     });
@@ -100,31 +103,31 @@ describe("policy-files", () => {
       const refs = resolvePolicyRefs("routine.hourly_check");
       const paths = refs.map((r) => r.path);
       // management.md is injected by ContextBuilder, not here.
-      expect(paths).not.toContain("rules/management.md");
-      expect(paths).toContain("rules/redaction.md");
-      expect(paths).toContain("routines/hourly.md");
+      expect(paths).not.toContain("policies/management.md");
+      expect(paths).toContain("policies/redaction.md");
+      expect(paths).toContain("policies/routines/hourly.md");
     });
 
     it("maps roadmap refresh to the monthly planning rulebook", () => {
       const refs = resolvePolicyRefs("routine.roadmap_refresh");
       const paths = refs.map((r) => r.path);
-      expect(paths).toContain("routines/monthly.md");
-      expect(paths).not.toContain("rules/management.md");
+      expect(paths).toContain("policies/routines/monthly.md");
+      expect(paths).not.toContain("policies/management.md");
     });
 
     it("adds the dynamic slug file for custom routines", () => {
       const refs = resolvePolicyRefs("routine.custom.tuesday-notion");
       const paths = refs.map((r) => r.path);
-      expect(paths).toContain("routines/custom/tuesday-notion.md");
-      expect(paths).not.toContain("rules/management.md");
+      expect(paths).toContain("policies/routines/custom/tuesday-notion.md");
+      expect(paths).not.toContain("policies/management.md");
     });
 
     it("returns only global refs for unknown keys", () => {
       const refs = resolvePolicyRefs("message.received.dm");
       const paths = refs.map((r) => r.path);
       expect(paths).toEqual([
-        "rules/redaction.md",
-        "rules/mcp.md",
+        "policies/redaction.md",
+        "policies/mcp.md",
       ]);
     });
 
@@ -132,13 +135,13 @@ describe("policy-files", () => {
       const refs = resolvePolicyRefs("routine.morning_routine_today");
       const paths = refs.map((r) => r.path);
       // From `*`:
-      expect(paths).toContain("rules/redaction.md");
-      expect(paths).toContain("rules/mcp.md");
+      expect(paths).toContain("policies/redaction.md");
+      expect(paths).toContain("policies/mcp.md");
       // From its own registry entry:
-      expect(paths).toContain("routines/morning.md");
+      expect(paths).toContain("policies/routines/morning.md");
       // Stage B's policies do NOT bleed in.
-      expect(paths).not.toContain("rules/journal-format.md");
-      expect(paths).not.toContain("rules/journal-export.md");
+      expect(paths).not.toContain("policies/journal-format.md");
+      expect(paths).not.toContain("policies/journal-export.md");
     });
 
     it("Stage B opts OUT of the * defaults — only its declared policies are returned", () => {
@@ -150,14 +153,14 @@ describe("policy-files", () => {
       const refs = resolvePolicyRefs("routine.morning_routine_journal");
       const paths = refs.map((r) => r.path);
       expect(paths).toEqual([
-        "rules/redaction.md",
-        "rules/journal-format.md",
-        "rules/journal-export.md",
+        "policies/redaction.md",
+        "policies/journal-format.md",
+        "policies/journal-export.md",
       ]);
-      // Explicitly verify the opt-out: rules/mcp.md is NOT injected
+      // Explicitly verify the opt-out: policies/mcp.md is NOT injected
       // even though it lives in the `*` set with `injectIf:
       // ctx.flags?.mcpEnabled === true`.
-      expect(paths).not.toContain("rules/mcp.md");
+      expect(paths).not.toContain("policies/mcp.md");
     });
   });
 
@@ -172,11 +175,11 @@ describe("policy-files", () => {
 
     it("reads files that exist", () => {
       writeFileSync(
-        join(contextDir, "rules", "redaction.md"),
+        join(contextDir, "policies", "redaction.md"),
         "# Redaction\n\nPatterns",
       );
       writeFileSync(
-        join(contextDir, "routines", "hourly.md"),
+        join(contextDir, "policies", "routines", "hourly.md"),
         "# Hourly\n\nChecks",
       );
       const blocks = loadPolicyBlocks({
@@ -190,15 +193,15 @@ describe("policy-files", () => {
 
     it("always loads journal-export rules for morning routine when the file exists", () => {
       writeFileSync(
-        join(contextDir, "rules", "journal-format.md"),
+        join(contextDir, "policies", "journal-format.md"),
         "format spec",
       );
       writeFileSync(
-        join(contextDir, "rules", "journal-export.md"),
+        join(contextDir, "policies", "journal-export.md"),
         "export rules",
       );
       writeFileSync(
-        join(contextDir, "routines", "morning.md"),
+        join(contextDir, "policies", "routines", "morning.md"),
         "morning checks",
       );
 
@@ -206,8 +209,8 @@ describe("policy-files", () => {
         contextDir,
         processKey: "routine.morning_routine",
       });
-      expect(off.some((b) => b.path === "rules/journal-export.md")).toBe(true);
-      expect(off.some((b) => b.path === "rules/journal-format.md")).toBe(true);
+      expect(off.some((b) => b.path === "policies/journal-export.md")).toBe(true);
+      expect(off.some((b) => b.path === "policies/journal-format.md")).toBe(true);
     });
 
     it("supports a custom reader override", () => {
@@ -295,7 +298,7 @@ describe("policy-files", () => {
 
     it("appends rendered blocks to the prompt", () => {
       writeFileSync(
-        join(contextDir, "rules", "redaction.md"),
+        join(contextDir, "policies", "redaction.md"),
         "redaction body",
       );
       const result = appendPolicyBlocks("base prompt", {

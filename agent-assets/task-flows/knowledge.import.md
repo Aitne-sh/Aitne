@@ -5,7 +5,7 @@
 The user has uploaded a single Markdown or text file from the dashboard Knowledge page. Your job is to read it and route its facts into the appropriate `user/*.md` files **without changing what the user wrote**. The CLAUDE.md / AGENTS.md / GEMINI.md materialized for this session contains your full Profile Importer persona — re-read it before writing if you're unsure.
 
 The event payload (substituted into this prompt) carries:
-- `{event_data[scratchPath]}` — context-relative path of the scratch copy of the upload (e.g. `agent/scratch/import-2026-04-27-<id>.md`)
+- `{event_data[scratchPath]}` — context-relative path of the scratch copy of the upload (e.g. `state/scratch/import-2026-04-27-<id>.md`)
 - `{event_data[filename]}` — the original filename
 - `{event_data[importSource]}` — origin label the user picked (`obsidian-export`, `notion-export`, `self-written`, `other`). Note: `event_data[source]` is the daemon-side event source (e.g. `"dashboard_knowledge_upload"`), not what the user selected — use `importSource`.
 - `{event_data[uploadDate]}` — ISO date string for the closing journal entry
@@ -33,10 +33,10 @@ curl -s -X POST http://localhost:8321/api/notify \
   -d '{"message": "Knowledge import refused — the upload contained content shaped like a private key, API token, or credential. No files were modified. Please remove the sensitive content and re-upload.", "priority": "normal"}'
 ```
 
-Then append this entry to `agent/journal.md` using `mode: "append_to_file"` (each journal entry is its own top-level `## ` section):
+Then append this entry to `journal/agent.md` using `mode: "append_to_file"` (each journal entry is its own top-level `## ` section):
 
 ```
-curl -s -X PATCH http://localhost:8321/api/context/agent/journal \
+curl -s -X PATCH http://localhost:8321/api/context/journal/agent \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg c '
 ## {event_data[uploadDate]} knowledge import REFUSED (source={event_data[importSource]}, file={event_data[filename]})
@@ -76,16 +76,16 @@ Standard routing (see also `user-profile` skill):
 
 | Class | Target |
 |---|---|
-| Identity (legal name, primary timezone, primary language, DOB) | **DO NOT WRITE.** Collect verbatim for the Step 8 journal entry under "Identity-class facts awaiting confirmation". The dashboard surfaces these for explicit accept/reject — they never auto-land in `user/profile.md`. |
-| Relationships (family, partners, close friends) | `user/people.md` |
-| Work / employer / role / colleagues | `user/work.md` |
-| Skills, expertise, languages spoken | `user/expertise.md` |
-| Lifestyle, hobbies, preferences, health | `user/personal.md` |
-| Goals, aspirations, current focus | `user/goals.md` |
+| Identity (legal name, primary timezone, primary language, DOB) | **DO NOT WRITE.** Collect verbatim for the Step 8 journal entry under "Identity-class facts awaiting confirmation". The dashboard surfaces these for explicit accept/reject — they never auto-land in `identity/profile.md`. |
+| Relationships (family, partners, close friends) | `identity/people.md` |
+| Work / employer / role / colleagues | `identity/work.md` |
+| Skills, expertise, languages spoken | `identity/expertise.md` |
+| Lifestyle, hobbies, preferences, health | `identity/personal.md` |
+| Goals, aspirations, current focus | `identity/goals.md` |
 
 Routing rules:
-- If the natural target file is **missing from the Step 3 Set**, route the fact to `user/profile.md` instead and prefix its bullet with `[from <missing-file>]` (e.g. `- [from work.md] Works at Acme.`) so the user can later move it. Skip the route only if `user/profile.md` itself is also missing — in that case Step 3's empty-listing abort already fired.
-- If a fact does not fit any class, append it to `user/profile.md` in a section named `## Misc` (verbatim — no parens, no date in the heading, because `normalizeSection` does not preserve them). Date the bullet inline: `- [imported {event_data[uploadDate]}] <verbatim line>`.
+- If the natural target file is **missing from the Step 3 Set**, route the fact to `identity/profile.md` instead and prefix its bullet with `[from <missing-file>]` (e.g. `- [from work.md] Works at Acme.`) so the user can later move it. Skip the route only if `identity/profile.md` itself is also missing — in that case Step 3's empty-listing abort already fired.
+- If a fact does not fit any class, append it to `identity/profile.md` in a section named `## Misc` (verbatim — no parens, no date in the heading, because `normalizeSection` does not preserve them). Date the bullet inline: `- [imported {event_data[uploadDate]}] <verbatim line>`.
 
 ### Step 6 — Apply writes (verbatim, append-only) via section PATCH
 
@@ -134,14 +134,14 @@ The next PATCH to `section: "family"` on the same file then succeeds normally.
 
 ### Step 7 — Identity-class deferral
 
-This is a no-write step. From the source, collect every Identity-class fact (legal name, primary timezone, primary language, date of birth, primary email, primary phone) into a list, **verbatim**. Do NOT PATCH them anywhere. The Step 8 journal entry surfaces them under "Identity-class facts awaiting confirmation"; the dashboard reads that section to offer the user an explicit accept/reject decision later. Identity-class fields are too high-stakes to land in `user/profile.md` from an import.
+This is a no-write step. From the source, collect every Identity-class fact (legal name, primary timezone, primary language, date of birth, primary email, primary phone) into a list, **verbatim**. Do NOT PATCH them anywhere. The Step 8 journal entry surfaces them under "Identity-class facts awaiting confirmation"; the dashboard reads that section to offer the user an explicit accept/reject decision later. Identity-class fields are too high-stakes to land in `identity/profile.md` from an import.
 
 ### Step 8 — Closing journal entry
 
-After all PATCHes succeed, append exactly one entry to `agent/journal.md`. Each journal entry is its own top-level `## ` section, so use `mode: "append_to_file"` and embed the heading in the content (leading `\n` so it lands on its own line):
+After all PATCHes succeed, append exactly one entry to `journal/agent.md`. Each journal entry is its own top-level `## ` section, so use `mode: "append_to_file"` and embed the heading in the content (leading `\n` so it lands on its own line):
 
 ```
-curl -s -X PATCH http://localhost:8321/api/context/agent/journal \
+curl -s -X PATCH http://localhost:8321/api/context/journal/agent \
   -H 'Content-Type: application/json' \
   -d "$(jq -nc --arg c '
 ## {event_data[uploadDate]} knowledge import (source={event_data[importSource]}, file={event_data[filename]})

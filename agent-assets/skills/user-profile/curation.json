@@ -7,7 +7,7 @@
       "anchor": "<!-- CURATION:knowledge_layout id=\"topic-files\" -->",
       "human_label": "Topic file layout",
       "description": "Which user/* file owns which kind of fact",
-      "scope_paths": ["user/profile.md", "user/*.md"]
+      "scope_paths": ["identity/profile.md", "user/*.md"]
     },
     {
       "id": "routing-table",
@@ -23,7 +23,7 @@
       "anchor": "<!-- CURATION:convention_notes id=\"learned-context-format\" -->",
       "human_label": "Learned Context bullet conventions",
       "description": "Date-prefix rule, prune cadence, refresh-on-merge",
-      "scope_paths": ["user/profile.md"]
+      "scope_paths": ["identity/profile.md"]
     }
   ]
 }

@@ -2,7 +2,7 @@
   "kind": "knowledge_layout",
   "files": [
     {
-      "path": "roadmap.md",
+      "path": "plans/roadmap.md",
       "purpose": "Long-horizon user intent: goals, focus, plans, scheduled tasks, and recurring entries",
       "sections": [
         { "heading": "## Annual Goals", "contains": "user-authored yearly goals preserved verbatim" },

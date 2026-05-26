@@ -212,7 +212,7 @@ carries the connector's own language.
 **Scope**: this skill targets a **separate** Obsidian vault the user
 maintains alongside this app — e.g. a personal knowledge base. It is
 **not** the agent's own primary management store. The agent's primary
-files (`today.md`, `roadmap.md`, `projects/`, `rules/`, `routines/`,
+files (`state/today.md`, `plans/roadmap.md`, `projects/`, `rules/`, `routines/`,
 `user/`, `agent/`, …) live in the primary vault and are reached via
 `/api/context/*` (see the `context` skill). **Never** use this skill to
 read or write the primary vault.

@@ -272,7 +272,7 @@ voice carries the whole message.
 - Tasks list: cap 10, append `...and N more` if over.
 - Overnight: cap 5 per category (mail / dm / calendar).
 - No internal names ("Morning Routine", "Agent Plan",
-  "scheduled.dm", "today.md") in user-facing text.
+  "scheduled.dm", "state/today.md") in user-facing text.
 - Forbidden openers across all variants: "Morning briefing —",
   "Morning briefing delivered", "Here's your day".
 
@@ -305,7 +305,7 @@ occurring outgoing-DM opportunities to slip a question in without it
 feeling cold. Use the **user-interview** skill's "Operation 3 — Latent
 piggyback" recipe:
 
-1. GET `agent/profile-questions.md` ## In Progress. If no entry has
+1. GET `state/profile-questions.md` ## In Progress. If no entry has
    `state=latent`, skip this section entirely.
 1.5 **Slot-filled pre-check.** GET
    `/api/profile-questions/slot-filled?path=<target>&section=<section?>&anchor=<anchor?>`.
@@ -352,7 +352,7 @@ recipe:
 
 ### Step 1 — Fire-time abort (Layer 3)
 
-GET `agent/profile-questions.md` and the row's `<target_path>`. Call:
+GET `state/profile-questions.md` and the row's `<target_path>`. Call:
 
 ```bash
 curl -s "http://localhost:8321/api/profile-questions/slot-filled?path=<target>&section=<section?>&anchor=<anchor?>"
@@ -623,12 +623,12 @@ handled in one read-then-branch sequence:
    ```
 
    `<confirm_decline_marker.path>` is the value from `taskContext`
-   (e.g. `agent/journal.md`). The endpoint accepts the path with or
+   (e.g. `journal/agent.md`). The endpoint accepts the path with or
    without the `.md` suffix.
 
 2. Branch on status + section presence:
    - **status=404 (file missing).** Some marker paths
-     (`agent/journal`) support `PUT` for first-write creation via the
+     (`journal/agent`) support `PUT` for first-write creation via the
      daemon's CREATE_ONLY_PUT allowlist. PUT a minimal file
      containing an H1, the section header, and the new marker line:
      ```bash

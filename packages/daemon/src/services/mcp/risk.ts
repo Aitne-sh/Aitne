@@ -116,7 +116,7 @@ export interface BuildMcpDisallowedToolsInput {
  * allowlisted tools. The known trade-off: a tool added to the server after
  * the last probe is NOT in this list, so the autonomous strip is weaker
  * than a wildcard would be. Operationally the user re-probes after
- * changing tools; the `rules/mcp.md` policy layer is the soft backstop.
+ * changing tools; the `policies/mcp.md` policy layer is the soft backstop.
  */
 export function buildMcpDisallowedTools(
   input: BuildMcpDisallowedToolsInput,

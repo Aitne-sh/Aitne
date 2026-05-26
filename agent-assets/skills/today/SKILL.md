@@ -23,7 +23,7 @@ Output language: today.md is Policy B — see `<output_language_policy>`. The sk
    `## Agent Plan`, `## Agent Notes`, `## Agent Log`, `## Handoff` —
    in this order.
 
-A `PUT /api/context/today` whose line 1 or line 2 fails the exact regex
+A `PUT /api/context/state/today` whose line 1 or line 2 fails the exact regex
 is rejected with 400 and the daemon does NOT write the file. Translating
 any keyword on line 2 (the field labels, the `Weekday`/`Weekend` value,
 or `on`/`off`) into the user's primary language is the most common
@@ -63,7 +63,7 @@ line 1 is exactly `# 2026-04-28 (Tuesday)`. Do **not** advance the date
 because the routine is "preparing tomorrow"; the morning routine always
 prepares the agent-day in progress, not the next one.
 
-`PUT /api/context/today` returns 422 if line 1 disagrees with the
+`PUT /api/context/state/today` returns 422 if line 1 disagrees with the
 daemon's current agent-day; the error message echoes both values so a
 mistake is recoverable in the same session.
 
@@ -80,7 +80,7 @@ Line 2 encodes today's filter policy (field order is fixed — downstream parser
 
 Derivation (Morning Routine at 04:00):
 1. Day-of-week from `<current_time>`. Weekday = Mon–Fri, Weekend = Sat–Sun (unless user/profile.md overrides).
-2. Read `user/profile.md` → ## Notification Preferences. Apply matching policy.
+2. Read `identity/profile.md` → ## Notification Preferences. Apply matching policy.
 3. No explicit policy → default: weekday = all on, weekend = work off, study on, personal on.
 
 Category → focus-dimension mapping:
@@ -143,7 +143,7 @@ Violations: row without schedule → silently never fires. Schedule without row 
 `scheduled.task` and `scheduled.dm` (and any other event that flips an
 Agent Plan row) follow the close-the-loop lifecycle in the reference
 below: execute, append Agent Log entry, read-then-flip the row to
-`[x]` with annotation, retry on `today.md` lock, surface missing-row
+`[x]` with annotation, retry on `state/today.md` lock, surface missing-row
 state.
 
 DM handlers and hourly checks do not flip Agent Plan rows — read the
@@ -195,7 +195,7 @@ The generic GET / PUT / PATCH / DELETE surface — modes, fields, error
 envelopes, body-submission shape — is documented in the **context**
 skill `references/api.md`. today.md-specific rules layered on top:
 
-- **Lock.** `today.md` is locked by the Morning Routine. Include
+- **Lock.** `state/today.md` is locked by the Morning Routine. Include
   `X-Lock-Id: <today_write_lock_id>` on every PUT / PATCH when the
   tag is in your context; other sessions get `409
   today_write_lock_held` while the lock is held.

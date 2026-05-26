@@ -98,8 +98,12 @@ describe("initDirectories", () => {
     initDirectories(makeConfig({ dataDir }));
 
     expect(existsSync(resolve(dataDir, "context"))).toBe(true);
-    expect(existsSync(resolve(dataDir, "context", "rules"))).toBe(true);
-    expect(existsSync(resolve(dataDir, "context", "user"))).toBe(true);
+    expect(existsSync(resolve(dataDir, "context", "policies"))).toBe(true);
+    expect(existsSync(resolve(dataDir, "context", "identity"))).toBe(true);
+    expect(existsSync(resolve(dataDir, "context", "state"))).toBe(true);
+    expect(existsSync(resolve(dataDir, "context", "plans"))).toBe(true);
+    expect(existsSync(resolve(dataDir, "context", "journal"))).toBe(true);
+    expect(existsSync(resolve(dataDir, "context", "knowledge"))).toBe(true);
     expect(existsSync(resolve(dataDir, "data"))).toBe(true);
     expect(existsSync(resolve(dataDir, "logs"))).toBe(true);
     expect(existsSync(resolve(dataDir, "tmp"))).toBe(true);

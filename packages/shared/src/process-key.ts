@@ -447,8 +447,8 @@ export function isConfigurableProcessKey(value: string): value is ConfigurablePr
 /**
  * B-007 §5.8 — custom routine keys use the branded form
  * `routine.custom.<slug>` with a kebab-case slug that matches the vault
- * file `routines/custom/<slug>.md`. The slug regex mirrors the context
- * API path validator so the two stay in lock-step.
+ * file `policies/routines/custom/<slug>.md`. The slug regex mirrors the
+ * context API path validator so the two stay in lock-step.
  */
 const CUSTOM_ROUTINE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 const CUSTOM_ROUTINE_KEY_PREFIX = "routine.custom.";

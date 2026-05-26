@@ -105,7 +105,7 @@ export default function McpConnectionsPage() {
             <GeminiDelegationSetupCard />
           </div>
 
-          {/* rules/mcp.md editor — injected into every task-flow prompt
+          {/* policies/mcp.md editor — injected into every task-flow prompt
               while at least one MCP server is enabled. */}
           <div className="pt-4">
             <McpRulesEditor />

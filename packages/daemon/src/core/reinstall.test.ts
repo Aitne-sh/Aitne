@@ -56,9 +56,9 @@ describe("reinstall", () => {
     });
 
     it("enumerates files recursively with byte totals", () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "hello");
-      writeFileSync(join(contextDir, "user", "profile.md"), "profile!");
+      mkdirSync(join(contextDir, "identity"), { recursive: true }); mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "hello");
+      writeFileSync(join(contextDir, "identity", "profile.md"), "profile!");
       const result = enumerateContextFiles(contextDir);
       expect(result.filesToDelete).toHaveLength(2);
       expect(result.totalBytes).toBe(5 + 8);
@@ -147,9 +147,10 @@ describe("reinstall", () => {
     });
 
     it("reports files and snapshot rows accurately", () => {
-      mkdirSync(join(contextDir, "projects"), { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "x");
-      writeFileSync(join(contextDir, "projects", "p.md"), "yy");
+      mkdirSync(join(contextDir, "plans", "projects"), { recursive: true });
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "x");
+      writeFileSync(join(contextDir, "plans", "projects", "p.md"), "yy");
       const db = createDb();
       db.prepare(
         "INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)",
@@ -180,9 +181,9 @@ describe("reinstall", () => {
 
   describe("executeReinstall", () => {
     it("wipes context/ and deletes snapshot rows, writes a backup", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
-      writeFileSync(join(contextDir, "user", "profile.md"), "p");
+      mkdirSync(join(contextDir, "identity"), { recursive: true }); mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
+      writeFileSync(join(contextDir, "identity", "profile.md"), "p");
       const db = createDb();
       db.prepare(
         "INSERT INTO md_file_snapshots (file_path, content, trigger) VALUES (?, ?, ?)",
@@ -217,8 +218,8 @@ describe("reinstall", () => {
     });
 
     it("wipes prompts/ and agent-sessions/ alongside context/ (spec §7.1)", async () => {
-      mkdirSync(join(contextDir, "user"), { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
+      mkdirSync(join(contextDir, "identity"), { recursive: true }); mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
       const promptsDir = join(tmp, "prompts");
       const sessionsDir = join(tmp, "agent-sessions");
       mkdirSync(promptsDir, { recursive: true });
@@ -248,7 +249,8 @@ describe("reinstall", () => {
 
     it("honours custom ancillaryDirs + skips those that do not exist", async () => {
       mkdirSync(contextDir, { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
       const present = join(tmp, "scratch-cache");
       const absent = join(tmp, "never-existed");
       mkdirSync(present, { recursive: true });
@@ -310,7 +312,8 @@ describe("reinstall", () => {
 
     it("uses the real tar binary when no override is supplied", async () => {
       mkdirSync(contextDir, { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "real");
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "real");
       const db = createDb();
       const backupDir = join(tmp, "bak");
       const result = await executeReinstall({
@@ -329,7 +332,8 @@ describe("reinstall", () => {
 
     it("throws when the tar process exits non-zero", async () => {
       mkdirSync(contextDir, { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
       const db = createDb();
       await expect(
         executeReinstall({
@@ -346,7 +350,8 @@ describe("reinstall", () => {
 
     it("propagates backup failures and preserves context", async () => {
       mkdirSync(contextDir, { recursive: true });
-      writeFileSync(join(contextDir, "today.md"), "t");
+      mkdirSync(join(contextDir, "state"), { recursive: true });
+      writeFileSync(join(contextDir, "state", "today.md"), "t");
       const db = createDb();
       await expect(
         executeReinstall({

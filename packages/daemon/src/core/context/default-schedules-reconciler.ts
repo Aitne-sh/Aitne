@@ -1,6 +1,6 @@
 /**
  * SCHEDULED-DM-IMPLEMENTATION-PLAN §6.5 — pure logic for the
- * `## Default Schedules` section of `rules/management.md`. Mirrors
+ * `## Default Schedules` section of `policies/management.md`. Mirrors
  * `policy-index-reconciler.ts` exactly — snapshot → rendered output,
  * with no DB or fs I/O. The runner (`default-schedules-runner.ts`)
  * drives it.

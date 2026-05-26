@@ -817,7 +817,7 @@ function hasPrimaryVaultSchemaMarkers(primaryVaultPath: string): boolean {
  * vault must also contain at least one canonical context marker so the
  * daemon does not resume writes into an empty or wrong directory.
  *
- * Bootstrapping bypass: if `rules/management.md` doesn't exist yet, setup
+ * Bootstrapping bypass: if `policies/management.md` doesn't exist yet, setup
  * hasn't run; honoring a null primaryVaultPath would break the initial-DM
  * setup flow (which writes via `/api/context/*`, gated by the 503
  * middleware). Skip degraded-mode entirely until setup completes. This
@@ -847,7 +847,7 @@ export function runVaultHealthProbe(
   // disable degraded mode when the user most needs the banner.
   //
   // Second priority: if setup has never been marked complete, probe the
-  // filesystem. Setup is considered complete once `rules/management.md`
+  // filesystem. Setup is considered complete once `policies/management.md`
   // lands anywhere the user could plausibly have pointed their vault at:
   //   - the fallback (`<dataDir>/context`): fresh-install setup with
   //     null primaryVaultPath writes here
@@ -857,9 +857,15 @@ export function runVaultHealthProbe(
   // forcing degraded on them would 503 the DM-driven setup flow before
   // they can configure anything.
   if (!isSetupCompleted(db)) {
-    const fallbackRulesPath = resolve(config.dataDir, "context", "rules", "management.md");
+    // CONTEXT_VAULT_REDESIGN: management.md lives under policies/.
+    const fallbackRulesPath = resolve(
+      config.dataDir,
+      "context",
+      "policies",
+      "management.md",
+    );
     const primaryRulesPath = config.primaryVaultPath
-      ? resolve(config.primaryVaultPath, "rules", "management.md")
+      ? resolve(config.primaryVaultPath, "policies", "management.md")
       : null;
     const setupIncomplete =
       !existsSync(fallbackRulesPath) &&
@@ -871,9 +877,9 @@ export function runVaultHealthProbe(
       }
       return { action: "noop" };
     }
-    // rules/management.md exists now — latch the marker so subsequent
-    // probes skip the filesystem check and treat any unreachability as
-    // genuine degradation.
+    // policies/management.md exists now — latch the marker so
+    // subsequent probes skip the filesystem check and treat any
+    // unreachability as genuine degradation.
     markSetupCompleted(db);
   }
 
@@ -933,7 +939,7 @@ export function runVaultHealthProbe(
 }
 
 export function isRoadmapStale(contextDir: string, maxAgeDays = 15): boolean {
-  const roadmapPath = resolve(contextDir, "roadmap.md");
+  const roadmapPath = resolve(contextDir, "plans", "roadmap.md");
   if (!existsSync(roadmapPath)) return true;
   const content = readFileSync(roadmapPath, "utf-8");
   if (content.includes("(Not yet configured)")) return true;

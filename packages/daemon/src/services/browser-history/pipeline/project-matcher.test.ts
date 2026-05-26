@@ -275,51 +275,51 @@ describe("loadProjectKeywords", () => {
   });
 
   it("returns an empty array when projects path is a regular file", () => {
-    writeFileSync(join(dir, "projects"), "not a directory");
+    mkdirSync(join(dir, "plans"), { recursive: true }); writeFileSync(join(dir, "plans", "projects"), "not a directory");
     expect(loadProjectKeywords(dir)).toEqual([]);
   });
 
   it("reads .md files only and sorts by slug", () => {
-    mkdirSync(join(dir, "projects"));
-    writeFileSync(join(dir, "projects", "zebra.md"), "# zebra");
-    writeFileSync(join(dir, "projects", "aardvark.md"), "# aardvark");
-    writeFileSync(join(dir, "projects", "README.txt"), "ignored");
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
+    writeFileSync(join(dir, "plans", "projects", "zebra.md"), "# zebra");
+    writeFileSync(join(dir, "plans", "projects", "aardvark.md"), "# aardvark");
+    writeFileSync(join(dir, "plans", "projects", "README.txt"), "ignored");
     const out = loadProjectKeywords(dir);
     expect(out.map((o) => o.projectSlug)).toEqual(["aardvark", "zebra"]);
   });
 
   it("ignores subdirectories under projects/", () => {
-    mkdirSync(join(dir, "projects"));
-    mkdirSync(join(dir, "projects", "nested"));
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
+    mkdirSync(join(dir, "plans", "projects", "nested"));
     // Also exercise a `.md`-suffixed directory — passes the extension
     // filter but `statSync.isFile()` is false. Real-world: a user
     // dropped a folder named like a Markdown file.
-    mkdirSync(join(dir, "projects", "looks-like-a-file.md"));
-    writeFileSync(join(dir, "projects", "real.md"), "# real");
+    mkdirSync(join(dir, "plans", "projects", "looks-like-a-file.md"));
+    writeFileSync(join(dir, "plans", "projects", "real.md"), "# real");
     const out = loadProjectKeywords(dir);
     expect(out.map((o) => o.projectSlug)).toEqual(["real"]);
   });
 
   it("omits files where the project opts out", () => {
-    mkdirSync(join(dir, "projects"));
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
     writeFileSync(
-      join(dir, "projects", "private.md"),
+      join(dir, "plans", "projects", "private.md"),
       ["---", "aitne.exclude_from_interests: true", "---"].join("\n"),
     );
-    writeFileSync(join(dir, "projects", "public.md"), "# public");
+    writeFileSync(join(dir, "plans", "projects", "public.md"), "# public");
     const out = loadProjectKeywords(dir);
     expect(out.map((o) => o.projectSlug)).toEqual(["public"]);
   });
 
   it("survives unreadable entries gracefully", () => {
-    mkdirSync(join(dir, "projects"));
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
     // Broken symlink — statSync should throw inside the loop and the
     // file is skipped.
     symlinkSync(
       join(dir, "does-not-exist.md"),
-      join(dir, "projects", "broken.md"),
+      join(dir, "plans", "projects", "broken.md"),
     );
-    writeFileSync(join(dir, "projects", "real.md"), "# real");
+    writeFileSync(join(dir, "plans", "projects", "real.md"), "# real");
     const out = loadProjectKeywords(dir);
     expect(out.map((o) => o.projectSlug)).toEqual(["real"]);
   });
@@ -328,11 +328,11 @@ describe("loadProjectKeywords", () => {
     // Process running as root sees every file regardless of mode; skip
     // the chmod-based denial in that case — CI sometimes runs root.
     if (process.getuid && process.getuid() === 0) return;
-    mkdirSync(join(dir, "projects"));
-    const denied = join(dir, "projects", "denied.md");
+    mkdirSync(join(dir, "plans", "projects"), { recursive: true });
+    const denied = join(dir, "plans", "projects", "denied.md");
     writeFileSync(denied, "# denied");
     chmodSync(denied, 0o000);
-    writeFileSync(join(dir, "projects", "ok.md"), "# ok");
+    writeFileSync(join(dir, "plans", "projects", "ok.md"), "# ok");
     try {
       const out = loadProjectKeywords(dir);
       expect(out.map((o) => o.projectSlug)).toEqual(["ok"]);

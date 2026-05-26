@@ -783,7 +783,7 @@ describe("health routes — templatesPendingRecord non-null", () => {
     writeRuntimeState(db, PENDING_UPGRADES_KEY, {
       checkedAt: "2026-05-01T00:00:00.000Z",
       pending: [
-        { path: "rules/management.md", from: 1, to: 2 },
+        { path: "policies/management.md", from: 1, to: 2 },
       ],
     });
 
@@ -795,7 +795,7 @@ describe("health routes — templatesPendingRecord non-null", () => {
     };
     expect(body.templatesPending).not.toBeNull();
     expect(body.templatesPending?.pending).toHaveLength(1);
-    expect(body.templatesPending?.pending[0]?.path).toBe("rules/management.md");
+    expect(body.templatesPending?.pending[0]?.path).toBe("policies/management.md");
     expect(body.templatesPending?.pending[0]?.from).toBe(1);
     expect(body.templatesPending?.pending[0]?.to).toBe(2);
   });

@@ -102,8 +102,8 @@ describe("repository-management-docs", () => {
     });
 
     expect(result.status).toBe("written");
-    expect(result.readmeCopiedTo).toBe("git/widgets/README.md");
-    const content = readFileSync(join(contextDir, "git/widgets/overview.md"), "utf-8");
+    expect(result.readmeCopiedTo).toBe("knowledge/repos/widgets/README.md");
+    const content = readFileSync(join(contextDir, "knowledge/repos/widgets/overview.md"), "utf-8");
     expect(content).toContain("type: git-project");
     expect(content).toContain("repository_id: \"github:acme/widgets\"");
     expect(content).toContain("architecture_status: pending");
@@ -116,7 +116,7 @@ describe("repository-management-docs", () => {
     expect(content).not.toContain("README excerpt:");
 
     // Mechanical README copy lands at the slug directory.
-    const readmeMirror = readFileSync(join(contextDir, "git/widgets/README.md"), "utf-8");
+    const readmeMirror = readFileSync(join(contextDir, "knowledge/repos/widgets/README.md"), "utf-8");
     expect(readmeMirror).toBe("# Widgets\n\nUseful repo.\n");
 
     const second = runRepositoryManagementInit({
@@ -128,7 +128,7 @@ describe("repository-management-docs", () => {
     expect(second.status).toBe("exists");
     // README copy is re-run on subsequent inits so the mirror tracks
     // the source even when the overview already exists.
-    expect(second.readmeCopiedTo).toBe("git/widgets/README.md");
+    expect(second.readmeCopiedTo).toBe("knowledge/repos/widgets/README.md");
   });
 
   it("init handles an empty git history", () => {
@@ -143,7 +143,7 @@ describe("repository-management-docs", () => {
     });
 
     expect(result.status).toBe("written");
-    const content = readFileSync(join(contextDir, "git/widgets/overview.md"), "utf-8");
+    const content = readFileSync(join(contextDir, "knowledge/repos/widgets/overview.md"), "utf-8");
     expect(content).toContain("First commit: unknown");
     expect(content).toContain("No commits found in the sampled history.");
   });
@@ -169,13 +169,13 @@ describe("repository-management-docs", () => {
     expect(result.status).toBe("written");
     expect(result.commitCount).toBe(2);
     const journal = readFileSync(
-      join(contextDir, "git/widgets/journal/2026-05-07.md"),
+      join(contextDir, "journal/repos/widgets/2026-05-07.md"),
       "utf-8",
     );
     expect(journal).toContain("type: git-journal");
     expect(journal).toContain("Add feature");
     expect(journal).toContain("feature.txt");
-    const overview = readFileSync(join(contextDir, "git/widgets/overview.md"), "utf-8");
+    const overview = readFileSync(join(contextDir, "knowledge/repos/widgets/overview.md"), "utf-8");
     expect(overview).toContain("2026-05-07: 2 commits");
     const snapshots = db
       .prepare("SELECT COUNT(*) AS count FROM md_file_snapshots")
@@ -211,7 +211,7 @@ describe("repository-management-docs", () => {
     expect(result.commitCount).toBe(0);
     expect(result.prEvents).toBe(1);
     const journal = readFileSync(
-      join(contextDir, "git/widgets/journal/2026-05-07.md"),
+      join(contextDir, "journal/repos/widgets/2026-05-07.md"),
       "utf-8",
     );
     expect(journal).toContain("No commits in the lookback window.");
@@ -230,7 +230,7 @@ describe("repository-management-docs", () => {
     });
 
     expect(result.status).toBe("skipped_no_activity");
-    expect(existsSync(join(contextDir, "git/widgets/journal/2026-05-07.md"))).toBe(false);
+    expect(existsSync(join(contextDir, "journal/repos/widgets/2026-05-07.md"))).toBe(false);
   });
 
   describe("architecture section replace", () => {
@@ -261,7 +261,7 @@ describe("repository-management-docs", () => {
       );
 
       expect(result.status).toBe("written");
-      const content = readFileSync(join(contextDir, "git/widgets/overview.md"), "utf-8");
+      const content = readFileSync(join(contextDir, "knowledge/repos/widgets/overview.md"), "utf-8");
       // Architecture content replaced.
       expect(content).toContain("### Modules");
       expect(content).toContain("packages/widget");
@@ -301,7 +301,7 @@ describe("repository-management-docs", () => {
         contextDir,
         now: new Date("2026-05-07T18:00:00Z"),
       });
-      const overviewPath = join(contextDir, "git/widgets/overview.md");
+      const overviewPath = join(contextDir, "knowledge/repos/widgets/overview.md");
       const original = readFileSync(overviewPath, "utf-8");
       const stripped = original
         .replace(ARCHITECTURE_MARKERS.begin, "")
@@ -740,7 +740,7 @@ describe("repository-management-docs", () => {
       expect(archResult.status).toBe("written");
       expect(scanResult.status).toBe("written");
 
-      const overview = readFileSync(join(contextDir, "git/widgets/overview.md"), "utf-8");
+      const overview = readFileSync(join(contextDir, "knowledge/repos/widgets/overview.md"), "utf-8");
       // Architecture body landed.
       expect(overview).toContain("locked path keeps both writes coherent");
       expect(overview).not.toContain(ARCHITECTURE_MARKERS.placeholder);
