@@ -4,8 +4,10 @@
  *
  * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17 / §13 step 50.
  *
- * Mirrors the structural pattern of `approval-tokens.ts` (B-3) but
- * with three category-defining differences:
+ * The shape parallels `lite-final-confirm-tokens.ts` (the browser-task
+ * surface's parallel primitive) but has three category-defining
+ * differences vs. that path (and vs. the retired B-3
+ * `approval-tokens.ts` whose 128-bit nonce shape this superseded):
  *
  *   1. The token is a server-side opaque NONCE keyed to a DB row that
  *      carries every scope field (workflow_invocation_id, site_key,
@@ -59,7 +61,13 @@ import {
 export const PURCHASE_CONFIRMATION_TEMPLATE_MARKERS = Object.freeze([
   "Aitne purchase confirmation",
   "[purchase-verify:",
-  "Approved on ",
+  // Daemon-only token-identifier suffix carried by BOTH purchase
+  // follow-ups (`Confirmed… jti=<jti>` and `Approved on … jti=<jti>` —
+  // purchase-system-message-sender.ts). Replaces the former bare
+  // "Approved on " marker, whose substring collided with ordinary agent
+  // prose ("Your PR was approved on main") and falsely refused
+  // legitimate DMs. `jti=` is effectively never written by the agent.
+  "jti=",
 ] as const);
 
 /** Header line that opens every daemon-emitted purchase-confirmation

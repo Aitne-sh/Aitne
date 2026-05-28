@@ -302,6 +302,50 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0004-drop-browser-automation-approvals",
+    description:
+      "BROWSER_TASK_REDESIGN_PLAN.md §6.8 / Phase 6 (v0.1.x→next) — drop "
+      + "`browser_automation_approvals`. The B-3 single-use approval-token "
+      + "gate is retired alongside the workflow runner + frozen registry; "
+      + "the replacement chokepoint for in-turn user confirmations is "
+      + "`browser_task_clarifications` (mid-task ask_user) + "
+      + "`browser_task_final_confirm_tokens` (final-confirm DM token). "
+      + "The B-4 purchase-confirmation path is unaffected — it continues "
+      + "through `browser_automation_purchase_tokens` + `purchase-handler.ts`. "
+      + "The audit table `browser_automation_workflows` is INTENTIONALLY "
+      + "retained so users with prior B-2 / B-2.5 / B-3 audit rows can still "
+      + "query their history; new audit lives in `browser_task_action_log`.",
+    up(db) {
+      // Idempotent: on a fresh install the table never existed (we
+      // dropped its CREATE from `schema.ts` in this same plan revision),
+      // so the existence check short-circuits and the migration body is
+      // a no-op. The `schema_migrations` row is still inserted by the
+      // runner, so subsequent boots won't re-evaluate.
+      if (!tableExists(db, "browser_automation_approvals")) return;
+      db.exec("DROP TABLE browser_automation_approvals");
+    },
+  },
+  {
+    id: "0005-drop-browser-automation-allowlist",
+    description:
+      "BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6.5 follow-up (v0.1.x→next) — "
+      + "drop `browser_automation_allowlist`. The per-domain user opt-in "
+      + "fronted the workflow-runner's deny-on-unknown gate; both the "
+      + "runner and the four `/api/browser-automation/allowlist*` routes "
+      + "were deleted in Phase 6, leaving the table with zero callers. "
+      + "The browser-task surface uses the site-registry's "
+      + "`allowedHostPattern` plus per-request `extraAllowedHosts` (§14.1 "
+      + "composition rules) as its allowlist; the registry's structural "
+      + "fence supersedes the runtime DB allowlist entirely. The store "
+      + "helpers `listAllowlistEntries` / `upsertAllowlistEntry` / "
+      + "`removeAllowlistEntry` / `isDomainAllowed` were removed in the "
+      + "same Phase 6.5 pass.",
+    up(db) {
+      if (!tableExists(db, "browser_automation_allowlist")) return;
+      db.exec("DROP TABLE browser_automation_allowlist");
+    },
+  },
   // CONTEXT_VAULT_REDESIGN_PLAN.md PR-3 — registered after the
   // coordinated `CONTEXT_RELATIVE_PATHS` rewrite, structural-matcher
   // sweep, and `agent-assets/templates/` restructure all landed. On
@@ -310,6 +354,56 @@ export const MIGRATIONS: readonly Migration[] = [
   // `.context-vault-version` marker. The body is idempotent and the
   // verification step rolls back if anything is off.
   CONTEXT_VAULT_MIGRATION_ENTRY,
+  {
+    id: "0006-message-dm-budget-bump",
+    description:
+      "(v0.1.x→next) — raise the message.dm per-turn budget ceiling to the "
+      + "new $5.00 base default for upgrading installs still on the seeded "
+      + "default. DM turns re-process the full conversation history every "
+      + "turn and routinely run $0.70-0.80 on Sonnet; legitimate multi-step "
+      + "turns (e.g. dispatching a browser task) tipped over $1.00 mid-turn "
+      + "and surfaced a per-turn-budget quota error to the user even when "
+      + "the work succeeded. Backend-aware: applyDefaultPresets stores the "
+      + "post-hoc-scaled budget (codex/gemini medium x1.5), so the OLD "
+      + "default is $1.00 on claude/opencode and $1.50 on codex/gemini, and "
+      + "the NEW default is the $5.00 base scaled the same way -> $5.00 / "
+      + "$7.50. Fresh installs already get the new value from the schema "
+      + "seed + the per-process envelope-overrides map; this migration only "
+      + "touches pre-existing installs. Gated so it ONLY moves preset rows "
+      + "still at the OLD per-backend default — operator-pinned rows "
+      + "(updated_by='user') and rows already at a custom value are left "
+      + "untouched. Idempotent: after the bump no row sits in the old band, "
+      + "and the recorded id short-circuits a re-run anyway.",
+    up(db) {
+      // Empty-DB safety (e.g. the runner's own unit tests run on a bare
+      // :memory: db): if applySchema never ran, the table is absent — the
+      // runner still records the id so a later boot does not re-evaluate.
+      if (!tableExists(db, "process_backend_config")) return;
+      // The NEW per-backend value mirrors what `resolveDefaultBindingFor`
+      // now produces for message.dm: the $5.00 base x the medium post-hoc
+      // factor (1.5 for codex/gemini, 1.0 for claude/opencode). The 7.50
+      // literal is that product at migration time — a migration is a
+      // point-in-time snapshot, so the literal is correct even if the
+      // factor later changes. The old-default bands ([0.99,1.01] /
+      // [1.49,1.51]) keep us from clobbering a row already moved to a
+      // custom value while still tolerating float dust.
+      db.prepare(
+        `UPDATE process_backend_config
+            SET max_budget_usd = CASE
+              WHEN main_backend IN ('codex', 'gemini') THEN 7.5
+              ELSE 5.0
+            END
+          WHERE process_key = 'message.dm'
+            AND updated_by = 'preset'
+            AND (
+              (main_backend IN ('codex', 'gemini')
+                 AND max_budget_usd >= 1.49 AND max_budget_usd <= 1.51)
+              OR (main_backend NOT IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.99 AND max_budget_usd <= 1.01)
+            )`,
+      ).run();
+    },
+  },
 ];
 
 export interface MigrationRunResult {

@@ -1,7 +1,7 @@
 ---
 schema_version: 1
 slug: features/memory-files/agent-journal
-title: agent/journal.md
+title: journal/agent.md
 id: agent-journal
 aliases:
   - journal
@@ -38,10 +38,10 @@ ui_anchors:
   - /connections/journal
   - /settings/journal
 context_files:
-  - agent/journal.md
+  - journal/agent.md
 ---
 
-# agent/journal.md
+# journal/agent.md
 
 ## In One Sentence
 
@@ -74,7 +74,7 @@ look for patterns.
 ## What It Outputs
 
 - An ever-growing append-only file at
-  `~/.personal-agent/context/agent/journal.md`.
+  `~/.personal-agent/context/journal/agent.md`.
 - A linked-from-roadmap section when an entry tied a project to a new
   decision.
 

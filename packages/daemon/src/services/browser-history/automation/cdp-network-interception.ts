@@ -36,9 +36,12 @@ import {
 
 const logger = createLogger("browser-automation-cdp-interception");
 
-/** Per-workflow blocked-request counter. The runner reads this at
- *  cleanup time and persists the list into
- *  `browser_automation_workflows.blocked_requests`. */
+/** Per-task blocked-request counter. The browser-task runner reads
+ *  this at cleanup time and persists the count onto the parent
+ *  `browser_task` row (BROWSER_TASK_REDESIGN_PLAN.md §14.2). The
+ *  pre-Phase-6 workflow-runner wrote the same list into
+ *  `browser_automation_workflows.blocked_requests`; that audit table
+ *  is retained as a read-only historical store. */
 export interface BlockedRequestRecorder {
   record(url: string, reason: "denylist" | "not_allowlisted"): void;
   list(): readonly string[];
@@ -63,13 +66,28 @@ export function makeBlockedRequestRecorder(): BlockedRequestRecorder {
 
 export interface CdpInterceptionOptions {
   workflowId: string;
-  /** Per-workflow positive selector. */
-  allowlistRegex: RegExp;
+  /**
+   * Per-workflow positive selector. When `null`, no positive
+   * allowlist is enforced — only the denylist gate (hostname +
+   * IP CIDR + DNS-rebind resolve) decides. The browser-task surface
+   * passes `null` here as of the 2026-05-27 open-navigation revision;
+   * the legacy Instance A workflow path may still pass a real regex.
+   */
+  allowlistRegex: RegExp | null;
   /** Where to record blocked URLs for the audit row. */
   recorder: BlockedRequestRecorder;
   /** DNS resolver — injected so tests can stub. Production wires
    *  `dns.promises.lookup`. */
   resolveIps?: (hostname: string) => Promise<readonly string[]>;
+  /**
+   * User-managed hostname denylist (compiled regexes). Sourced from
+   * `runtime-settings.browserTaskHostnameDenylist` by the runner /
+   * driver. When omitted, the (empty) module default is used and
+   * the only domain-level gate is whatever the user explicitly added.
+   * The IP CIDR layer (RFC1918 / loopback / cloud-metadata) remains
+   * hardcoded inside `shouldDenyEgress` and is not configurable here.
+   */
+  hostnameDenylist?: ReadonlyArray<RegExp>;
 }
 
 /**
@@ -111,22 +129,30 @@ export async function applyCDPInterception(
       return;
     }
 
-    // Fast-path hostname denylist BEFORE the async DNS leg — most
-    // attacks we care about (payment processors, banking) hit by name.
-    if (matchesHostnameDenylist(parsed.hostname)) {
+    // Fast-path hostname denylist BEFORE the async DNS leg — when the
+    // user has curated entries this short-circuits common matches; with
+    // an empty list (default), this is a one-pass no-op.
+    if (matchesHostnameDenylist(parsed.hostname, opts.hostnameDenylist)) {
       opts.recorder.record(url, "denylist");
       await route.abort("blockedbyclient");
       return;
     }
 
-    const decision = await shouldDenyEgress(url, { resolveIps });
+    const decision = await shouldDenyEgress(url, {
+      resolveIps,
+      hostnameDenylist: opts.hostnameDenylist,
+    });
     if (decision.denied) {
       opts.recorder.record(url, "denylist");
       await route.abort("blockedbyclient");
       return;
     }
 
-    if (opts.allowlistRegex.test(url)) {
+    // 2026-05-27 open-navigation revision: when `allowlistRegex` is null
+    // (the new browser-task default), no positive selector applies and
+    // the request continues if it survived the denylist gate above. The
+    // legacy Instance A workflow path may still pin a real regex.
+    if (opts.allowlistRegex === null || opts.allowlistRegex.test(url)) {
       await route.continue();
       return;
     }

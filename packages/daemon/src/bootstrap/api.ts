@@ -182,6 +182,20 @@ export interface BootstrapApiDeps {
   readonly delegatedBackendInvoker: DelegatedBackendInvoker;
   readonly gitAccountRegistry: GitAccountRegistry;
 
+  // ── Browser-task surface (BROWSER_TASK_REDESIGN_PLAN §5 / §5.1) ─────
+  /** Shared in-memory slot state — the runner + route layer mutate one
+   *  instance so cancel-while-pending and runner-side promote see each
+   *  other. Constructed in `event-pipeline.ts`. */
+  readonly browserTaskSlotStateRef: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).SlotStateRef;
+  /** Per-install browser-task runner. Phase 1 runs without `driver`
+   *  wired so the runner returns `failed (not_implemented)`; Phase 2
+   *  passes the Playwright + Claude SDK driver into the same factory. */
+  readonly browserTaskRunner: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).BrowserTaskRunner;
+
   // ── Safety / chat surfaces ────────────────────────────────────────────
   readonly writeTracker: AgentWriteTracker;
   readonly auditLogger: AuditLogger;
@@ -639,6 +653,24 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     get purchaseHandler() {
       return dispatcher.getPurchaseHandler() ?? undefined;
     },
+    // BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 — lite-final-confirm
+    // handler. Constructed in `event-pipeline.ts` (parallel to the B-4
+    // block) once the message hub is up; surfaced here via the
+    // dispatcher getter so the route layer + the inbound message
+    // classifier always see the same live instance.
+    get finalConfirmHandler() {
+      return dispatcher.getFinalConfirmHandler() ?? undefined;
+    },
+    // BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — browser-task runner +
+    // shared slot state. Both originate from `event-pipeline.ts` so
+    // every consumer (route handler, runner, deadline tick) operates
+    // on a single in-memory state. The route layer's
+    // `deps.browserTaskRunner` and `deps.browserTaskSlotStateRef`
+    // resolve through this object — never re-instantiated in
+    // `createApp` so cancel-while-pending and runner-side promote
+    // race on the same value.
+    browserTaskRunner: deps.browserTaskRunner,
+    browserTaskSlotStateRef: deps.browserTaskSlotStateRef,
     onIntegrationModeChange,
     onMainBackendChange,
     onSetupStart: (mode) => {

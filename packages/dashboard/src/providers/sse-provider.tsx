@@ -13,7 +13,56 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { ContextMigrationProgressEvent } from "@/lib/api-types";
 
 type EventHandler = (data: unknown) => void;
-type SseEventName = "event" | "context_migration_progress";
+type SseEventName =
+  | "event"
+  | "context_migration_progress"
+  // BROWSER_TASK_REDESIGN_PLAN.md §9a.5 Shape B — daemon emits one
+  // `browser_task` named event per state transition (pending → running
+  // → awaiting_user → final_confirm → completed / failed / cancelled /
+  // timeout / abandoned). The dashboard invalidates exactly three keys
+  // on receipt: the list, the per-id detail, and the awaiting-count.
+  | "browser_task";
+
+/** Shape of the `browser_task` SSE payload — mirrors the daemon's
+ *  `BrowserTaskTransitionPayload`. Kept narrow for forward compat. */
+export interface BrowserTaskSsePayload {
+  taskId: string;
+  state: string;
+  transitionedAt: number;
+  brief: string;
+  outcomeDetail: string | null;
+  originatingChannel: string | null;
+}
+
+/**
+ * Minimal slice of TanStack's QueryClient — narrow enough that the
+ * pure-logic test in `sse-provider.browser-tasks.test.ts` can hand in
+ * a recorder without booting a full client.
+ */
+interface InvalidateSink {
+  invalidateQueries(filter: { queryKey: readonly unknown[] }): unknown;
+}
+
+/**
+ * BROWSER_TASK_REDESIGN_PLAN.md §13 — pure invalidation contract for
+ * the `browser_task` SSE event. Extracted out of the provider so the
+ * acceptance test can assert "exactly these three keys, no extras"
+ * without standing up a React render harness.
+ *
+ * Contract: on every `browser_task` event the dashboard invalidates
+ * the list key, the awaiting-count key, and (when a taskId is present)
+ * the per-id detail key. Nothing else.
+ */
+export function invalidateBrowserTaskCaches(
+  sink: InvalidateSink,
+  payload: Partial<BrowserTaskSsePayload> | null | undefined,
+): void {
+  sink.invalidateQueries({ queryKey: ["browser-tasks"] });
+  sink.invalidateQueries({ queryKey: ["browser-tasks", "awaiting-count"] });
+  if (payload?.taskId) {
+    sink.invalidateQueries({ queryKey: ["browser-tasks", payload.taskId] });
+  }
+}
 
 interface SSEContextValue {
   connected: boolean;
@@ -30,6 +79,7 @@ const SSEContext = createContext<SSEContextValue | null>(null);
 const KNOWN_EVENT_NAMES: readonly SseEventName[] = [
   "event",
   "context_migration_progress",
+  "browser_task",
 ] as const;
 
 export function SSEProvider({ children }: { children: ReactNode }) {
@@ -81,6 +131,19 @@ export function SSEProvider({ children }: { children: ReactNode }) {
               queryClient.invalidateQueries({ queryKey: ["config"] });
               queryClient.invalidateQueries({ queryKey: ["health"] });
             }
+          }
+          if (eventName === "browser_task") {
+            // §9a.5 Shape B — invalidate exactly three keys per the
+            // design. List + detail repopulate from the daemon; the
+            // awaiting-count query is the anchor for the cross-cutting
+            // "needs your attention" surfaces (banner / nav badge / list
+            // strip). No global cache thrash. Logic lives in
+            // `invalidateBrowserTaskCaches` so the §13 acceptance test
+            // can assert the contract without a render harness.
+            invalidateBrowserTaskCaches(
+              queryClient,
+              data as Partial<BrowserTaskSsePayload>,
+            );
           }
         } catch {
           // ignore parse errors

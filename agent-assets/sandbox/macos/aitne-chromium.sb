@@ -23,9 +23,18 @@
 (deny file-write* (with no-log))
 
 ;; Allow forking + IPC needed for Chromium's multi-process model.
+;; `%binary_bundle%` is the resolved .app bundle root (e.g.
+;; /Applications/Chromium.app, or for a Playwright-managed install
+;; ~/Library/Caches/ms-playwright/chromium-NNNN/chrome-mac-{arm64,x64}/
+;; Google Chrome for Testing.app). The subpath covers helpers
+;; (`Chromium Helper.app`, `Google Chrome for Testing Helper.app`),
+;; crashpad_handler, and the embedded `.framework/*` bundles Chromium
+;; spawns from inside the .app at runtime. Substituted by
+;; sandbox-install.ts alongside %binary_path%.
 (allow process-fork)
 (allow process-exec
   (literal "%binary_path%")
+  (subpath "%binary_bundle%")
   (subpath "/Applications/Chromium.app")
   (subpath "/Applications/Google Chrome.app")
   (subpath "/System/Library")
@@ -34,6 +43,16 @@
 (allow signal (target same-sandbox))
 (allow mach-priv-host-port)
 (allow mach-lookup)
+;; `mach-register` is required for Chromium's `MachPortRendezvousServer`
+;; to call `bootstrap_check_in` and register its per-PID rendezvous
+;; service (`com.google.chrome.for.testing.MachPortRendezvousServer.<pid>`).
+;; Without it the browser process aborts with
+;; `FATAL:mach_port_rendezvous_mac.cc: bootstrap_check_in ...
+;; Permission denied (1100)`. The registered name embeds the PID so a
+;; compromised Chromium cannot squat a well-known name; the daemon
+;; itself reaches Chromium over CDP, not Mach, so allowing `mach-register`
+;; on the outer ring does not widen the daemon ↔ Chromium boundary.
+(allow mach-register)
 (allow ipc-posix-shm*)
 (allow process-info-pidinfo)
 (allow process-info-pidfdinfo)
@@ -45,7 +64,22 @@
 ;; Reads — system frameworks, fonts, locale data, the binary's own
 ;; bundle. Read access to the user's general Library tree is denied;
 ;; only the explicit chromium-sync/ profile dir is writable.
+;; `%binary_bundle%` covers the same .app root referenced under
+;; `process-exec` above so Chromium can load its .dylib / .pak /
+;; .icns / locale resources from inside its own bundle.
+;;
+;; The bare `(literal "/")` is mandatory on macOS 26 (Tahoe): dyld
+;; performs `file-read-data /` very early during process boot
+;; (boot_boot → CacheFinder → ignition_halt path, abort_with_reason
+;; namespace 0x23 / code 2). Without it every sandboxed arm64e child
+;; — Chromium, /usr/bin/true, anything — aborts before main() runs.
+;; `/dev/dtracehelper` is opened by libdispatch on first
+;; dispatch_queue use; benign denial, allow it to keep the kernel log
+;; clean.
 (allow file-read*
+  (literal "/")
+  (literal "/dev/dtracehelper")
+  (subpath "%binary_bundle%")
   (subpath "/Applications/Chromium.app")
   (subpath "/Applications/Google Chrome.app")
   (subpath "/Library/Frameworks")
@@ -68,6 +102,24 @@
   (literal "/var")
   (literal "/tmp")
   (literal "/private/tmp"))
+
+;; Path-traversal metadata grant. macOS 26 no longer implicitly
+;; allows `file-read-metadata` on the parent directories of a
+;; `(subpath ...)` rule, so a `stat("/Users")` on the way down to
+;; %binary_bundle% / %user_data_dir% fails and Chromium then raises
+;; `NSInvalidArgumentException: *** -[NSBundle initWithURL:]:
+;; non-file URL argument` during framework bootstrap.
+;;
+;; Only metadata (stat / lstat) is granted — no `file-read-data`,
+;; so directory contents under the ancestors are not enumerable from
+;; this rule. The list is the union of the ancestors of
+;; %binary_bundle% and %user_data_dir%, deduped + sorted, and is
+;; expanded by sandbox-install.ts at install time. If both paths
+;; collapse to no ancestors (e.g. both at `/`) the placeholder
+;; renders to a single no-op `(literal "/")` line so the form stays
+;; syntactically valid.
+(allow file-read-metadata
+%ancestor_metadata_literals%)
 
 ;; The per-instance user data dir is the only persistent path the
 ;; browser can write to. sandbox-install.ts rewrites %user_data_dir%
@@ -101,5 +153,4 @@
 ;; Required for the Chromium UI to function when running with a window
 ;; (initial sign-in bootstrap; headless instances never hit this path).
 (allow user-preference-read)
-(allow user-preference-write
-  (preference-domain "%user_data_dir%"))
+(allow user-preference-write)

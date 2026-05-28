@@ -212,7 +212,9 @@ describe("getSkillsForEvent", () => {
     // adds `browser-history` (BROWSER_HISTORY_INTEGRATION_PLAN) → 26.
     // P3c (seventh-pass) adds `browser-history-respond` (narrow accept
     // surface loaded only for message.received.dm) → 27.
-    expect(skills).toHaveLength(27);
+    // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 adds `browser-task`
+    // (DM-driven entry to the open-ended browser sub-agent) → 28.
+    expect(skills).toHaveLength(28);
     expect(skills).toContain("context");
     expect(skills).toContain("today");
     expect(skills).toContain("user-profile");
@@ -2145,7 +2147,7 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
   // ── DM-class events (conservative-include shape) ──
   {
     // No db / messageText is threaded → resolver returns the static
-    // manifest verbatim (conservative include). 14 slugs including
+    // manifest verbatim (conservative include). 15 slugs including
     // both `gmail-lifestyle` and `managed-tasks`. The Phase 4 suite
     // covers the runtime-gated branches.
     processKey: "message.dm",
@@ -2168,6 +2170,9 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — narrow
       // accept-surface for the natural-language reply path.
       "browser-history-respond",
+      // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — DM-driven entry
+      // point to the open-ended browser-task surface.
+      "browser-task",
     ],
     expectedProfileHeading: "# Conversational Agent",
   },

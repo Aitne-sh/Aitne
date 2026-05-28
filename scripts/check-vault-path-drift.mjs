@@ -105,17 +105,28 @@ const SCAN_EXTENSIONS = new Set([
 /**
  * Negative lookbehind that suppresses matches whose delimiter `/`
  * happens to live inside a NEW-class prefix (`policies/routines/...`
- * legitimately contains `routines/`, etc.). Without this, every
- * canonical post-migration path would register as drift because the
- * delimiter group `(["'`/])` matches the inner slash.
+ * legitimately contains `routines/`, etc.) OR inside a docs-internal
+ * cross-link prefix (`features/routines/morning-routine.md` references
+ * another doc slug, not a vault path).
+ *
+ * Without this, every canonical post-migration path would register as
+ * drift because the delimiter group `(["'`/])` matches the inner slash;
+ * and every docs cross-link to a sibling doc would register because the
+ * trailing `routines/<cadence>` substring still matches the regex body.
  *
  * Listed in longest-name-first order so JS regex backtracking finds
  * the longest match — `policies` ahead of `plans` keeps a
  * `plans/projects/x` path from being misread as ending with `plans`
  * when the suppress check would actually be looking for `policies`.
+ *
+ * `features` / `concepts` / `getting-started` / `troubleshooting`
+ * / `guides` / `reference` are the top-level slug prefixes used by
+ * `docs/user/**` and `agent-assets/docs/**` for inter-doc Markdown
+ * links and frontmatter `related:` lists. Adding them to the
+ * lookbehind keeps the scanner focused on real vault paths.
  */
 const NEW_CLASS_LOOKBEHIND =
-  "(?<!(?:knowledge|policies|identity|journal|state|plans))";
+  "(?<!(?:troubleshooting|getting-started|knowledge|reference|features|policies|identity|concepts|journal|guides|state|plans))";
 
 function legacyPattern(rest) {
   return new RegExp(NEW_CLASS_LOOKBEHIND + rest, "g");

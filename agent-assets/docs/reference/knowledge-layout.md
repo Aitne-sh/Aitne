@@ -57,11 +57,11 @@ related:
 ui_anchors:
   - /knowledge
 context_files:
-  - today.md
-  - roadmap.md
-  - user/profile.md
-  - rules/management.md
-  - agent/journal.md
+  - state/today.md
+  - plans/roadmap.md
+  - identity/profile.md
+  - policies/management.md
+  - journal/agent.md
 ---
 
 # Knowledge layout — what Aitne remembers, and where
@@ -70,6 +70,16 @@ This is the authoritative map of everything Aitne writes to disk as its
 knowledge of you. Every file lives under `PA_DATA_DIR/context/`
 (default `~/.personal-agent/context/`) as plain Markdown that you can read,
 edit, version, and back up with ordinary tools.
+
+The vault is partitioned into **six authority classes** — `identity/`, `state/`,
+`plans/`, `journal/`, `knowledge/`, and `policies/`. Each top-level directory
+carries a distinct authority + lifecycle contract; the daemon enforces those
+contracts via the file's YAML frontmatter (advisory in this release; strict in
+the next phase). This shape landed in the context-vault v2 restructure
+(migration `0004-context-vault-restructure`); legacy pre-v2 paths such as <!-- drift-allow -->
+`today.md`, `user/profile`, `rules/management`, `agent/journal`, etc. continue to work <!-- drift-allow -->
+because the daemon normalizes them in-process — never via HTTP 3xx — for one
+minor release while shipped skills and task-flows are updated.
 
 The layout below is the canonical source-of-truth. It mirrors
 `packages/daemon/src/core/context-paths.ts` (`CONTEXT_RELATIVE_PATHS`) and
@@ -81,80 +91,99 @@ the write-permission whitelist in `packages/daemon/src/api/routes/context/permis
 
 ```
 ~/.personal-agent/context/
-├── _index.md                    Human-readable navigation hub
-├── context-index.md             Agent-facing file catalog (prompt-injection hub)
-├── today.md                     Today's working view (always injected)
-├── yesterday.md                 Yesterday's today.md snapshot (rotated each morning)
-├── roadmap.md                   Long-horizon goals and recurring plans
+├── _index.md                       Root nav + machine-rebuilt reconciler block
 │
-├── user/                        Who you are — slow-changing facts
+├── identity/                       USER-authored — who you are
 │   ├── _index.md
-│   ├── profile.md               Identity, preferences, comms style (always injected)
-│   ├── people.md                People dictionary
-│   ├── work.md                  Workplace, team, stack
-│   ├── expertise.md             Domains, tools, skills
-│   ├── personal.md              Hobbies, health, habits, location
-│   └── goals.md                 Developmental goals
+│   ├── profile.md                  Identity, preferences (always injected)
+│   ├── people.md                   People dictionary
+│   ├── work.md                     Workplace, team, stack
+│   ├── expertise.md                Domains, tools, skills
+│   ├── personal.md                 Hobbies, health, habits, location
+│   └── goals.md                    Developmental goals
 │
-├── rules/                       How the agent should behave
+├── state/                          AGENT-authored — volatile working state
+│   ├── today.md                    Today's working view (always injected)
+│   ├── yesterday.md                today.md snapshot rotated each morning
+│   ├── profile-questions.md        Onboarding interview queue
+│   ├── activity/
+│   │   └── <source>.md             Per-source 90-day Activity view (reconciler)
+│   ├── inbox/
+│   │   └── YYYY-MM-DD-<slug>.md    Paste bucket (triaged at morning)
+│   └── scratch/
+│       └── YYYY-MM-DD-<slug>.md    Ephemeral 48-hour TTL working area
+│
+├── plans/                          MIXED — user direction + agent progress
 │   ├── _index.md
-│   ├── management.md            Source-of-Truth bindings + managed tasks (always injected)
-│   ├── mcp.md                   MCP usage rules (per-server policies)
-│   ├── journal-format.md        Format spec for the synthesized daily journal
-│   ├── journal-export.md        Inclusion / exclusion rules when exporting daily/
-│   ├── redaction.md             Mirror of built-in secret-redaction patterns
-│   └── policies/
-│       ├── _index.md            Auto-maintained policy registry
-│       └── <slug>.md            One captured policy per file
+│   ├── roadmap.md                  Long-horizon goals and recurring plans
+│   └── projects/
+│       ├── _index.md
+│       ├── _active.base            Obsidian Bases live view of active projects
+│       └── <slug>.md               Project page with structured frontmatter
 │
-├── routines/                    Per-cadence checklist rulebooks
+├── journal/                        APPEND-ONLY narrative
 │   ├── _index.md
-│   ├── hourly.md                Extension checks for routine.hourly_check
-│   ├── morning.md               Extension checks for routine.morning_routine
-│   ├── evening.md               Extension checks for routine.evening_review
-│   ├── weekly.md                Extension checks for routine.weekly_review
-│   ├── monthly.md               Extension checks for routine.monthly_review
-│   └── custom/
-│       └── <slug>.md            User-defined cron routines
+│   ├── daily/
+│   │   └── YYYY-MM-DD.md           Stage B morning synthesis (user's diary)
+│   ├── weekly/
+│   │   └── YYYY-Www.md             ISO year-week, e.g. 2026-W19.md
+│   ├── monthly/
+│   │   └── YYYY-MM.md
+│   ├── repos/
+│   │   └── <slug>/
+│   │       └── YYYY-MM-DD.md       Per-repo daily activity journal
+│   └── agent.md                    Agent decision log (CREATE_ONLY_PUT,
+│                                   append-only PATCH only)
 │
-├── projects/                    One file per active project
+├── knowledge/                      Persistent reference material
 │   ├── _index.md
-│   ├── _active.base             Obsidian Bases live view of non-archived projects
-│   └── <slug>.md                Project page with structured frontmatter
+│   ├── wiki/                       Internal wiki workspaces (FTS5-indexed)
+│   │   └── <workspace>/
+│   │       ├── 00_inbox/
+│   │       ├── 10_raw/
+│   │       ├── 20_wiki/
+│   │       ├── 30_outputs/
+│   │       ├── 90_meta/
+│   │       └── log/
+│   ├── repos/
+│   │   └── <slug>/
+│   │       └── overview.md         Long-arc per-repository overview
+│   ├── entities/                   Management-registry entities
+│   │   └── <domain>/               work/travel/finance/personal/health/learning
+│   │       ├── _index.md           Per-domain index (reconciler-written)
+│   │       └── <type-plural>/      meetings, trips, receipts, projects, books, notes
+│   │           └── <slug>.md
+│   └── dossiers/                   Per-flow carry-forward state (agent-owned)
+│       ├── _index.md
+│       └── <flow>.md               One per routine (hourly/morning/evening/…)
 │
-├── git/                         Unified per-repository pages
-│   └── <slug>/
-│       ├── overview.md          Long-arc project overview
-│       └── journal/
-│           └── YYYY-MM-DD.md    Per-day activity log
-│
-├── dossiers/                    Per-flow carry-forward state (agent-owned)
-│   ├── _index.md
-│   ├── hourly.md
-│   ├── morning.md
-│   ├── evening.md
-│   ├── weekly.md
-│   ├── monthly.md
-│   └── roadmap.md
-│
-├── daily/                       Synthesized daily journal (the user's diary)
-│   └── YYYY-MM-DD.md
-│
-├── weekly/                      Weekly review files
-│   └── YYYY-Www.md              ISO year-week, e.g. 2026-W19.md
-│
-├── monthly/                     Monthly review files
-│   └── YYYY-MM.md
-│
-├── inbox/                       Paste bucket (triaged on next morning routine)
-│   └── <anything>.md
-│
-└── agent/                       Agent's private notes
-    ├── journal.md               Append-only self-reflection log
-    └── scratch/
-        ├── <YYYY-MM-DD>-<slug>.md          Ephemeral, 48-hour TTL
-        └── inbox-YYYY-MM-DD-<slug>.md      Inbox triage residue (48h TTL)
+└── policies/                       USER-authored config + rules
+    ├── _index.md
+    ├── management.md               SoT bindings + managed tasks (always injected)
+    ├── mcp.md                      Per-server MCP usage rules
+    ├── redaction.md                Mirror of built-in secret-redaction patterns
+    ├── journal-format.md           Format spec for the synthesized daily journal
+    ├── journal-export.md           Inclusion / exclusion rules for exporting journal/daily/
+    ├── integrations.md             Integration-mode snapshot (daemon-rendered,
+    │                               chokidar-watched at this new path)
+    ├── management-captures/        One captured policy per file
+    │   ├── _index.md
+    │   └── <slug>.md
+    ├── routines/                   Per-cadence checklist rulebooks
+    │   ├── _index.md
+    │   ├── hourly.md               Extension checks for routine.hourly_check
+    │   ├── morning.md               …for routine.morning_routine
+    │   ├── evening.md               …for routine.evening_review
+    │   ├── weekly.md                …for routine.weekly_review
+    │   ├── monthly.md               …for routine.monthly_review
+    │   └── custom/
+    │       └── <slug>.md           User-defined cron routines
+    └── skills/                     User-registered skills (lazy directory)
+        └── <slug>/
+            └── SKILL.md            Built-in skills stay in agent-assets/skills/ (read-only)
 ```
+
+> **Files outside the vault.** A few daemon-managed files intentionally live at `<dataDir>/` and never enter the vault: `<dataDir>/prompts/` (dashboard-editable prompt templates), `<dataDir>/templates/` (project-note rendering templates), `<dataDir>/skill-curation-overlays/` (skill JSON overlay metadata), and `<dataDir>/agent-sessions/` (per-session scratch workdirs). The integration-mode snapshot previously lived at `<dataDir>/integrations.md`; the v2 restructure moved it into the vault at `policies/integrations.md`.
 
 ---
 
@@ -172,20 +201,21 @@ into the prompt by default:
 
 Other files (`plans/roadmap.md`, `journal/agent.md`, project pages, dossiers, etc.)
 are loaded on demand by the specific routines or skills that need them —
-see `context-index.md` for the per-flow mapping.
+see the reconciler block inside `_index.md` for the per-flow mapping.
 
 ---
 
 ## Top-level files
 
 ### `_index.md`
-Human-readable navigation hub. Tells you (the human) where things live and
-how the agent reads/writes the vault. Edit freely.
-
-### `context-index.md`
-Agent-facing file catalog. Used by the prompt loader to decide which
-non-always-injected files a given flow should pull in. Maintained from the
-filesystem; you generally do not need to edit it.
+Root navigation hub. The top portion is human-curated (edit freely); the lower
+portion sits inside a reserved `<!-- reconciler-section -->` … `<!-- /reconciler-section -->`
+block that the daemon rebuilds from the filesystem (daily at 03:45, on startup,
+and on file-event debounce). It serves as both the human-readable map and the
+agent-facing file catalog the prompt loader consults when deciding which
+non-always-injected files a given flow should pull in. (Pre-v2 installs kept
+the agent-facing catalog at a separate `context-index.md` file; the migration
+runner merges that file into the reconciler block.)
 
 ### `state/today.md`
 The current agent-day's working view. Daemon-managed structure:
@@ -230,7 +260,7 @@ routines. Not loaded for ordinary DM turns.
 
 ---
 
-## `user/` — who you are
+## `identity/` — who you are
 
 Slow-changing biographical facts. The `user-profile` and `user-interview`
 skills write here through the context API.
@@ -247,19 +277,19 @@ skills write here through the context API.
 
 **Growth pattern.** When a topic outgrows a single file (e.g. a multi-month
 sleep log), it can be promoted to a subdirectory: the API allows arbitrary
-`user/<area>/<file>.md` writes (e.g. `user/health/sleep-log.md`). The
+`identity/<area>/<file>.md` writes (e.g. `identity/health/sleep-log.md`). The
 default install does not seed any subdirectories.
 
 ---
 
-## `rules/` — how the agent should behave
+## `policies/` — how the agent should behave
 
 Natural-language policy files. Edits take effect at the next task-flow
 assembly. All writes go through the context API; the agent cannot `Edit` /
 `Write` these directly.
 
 ### `_index.md`
-Per-file navigation for the rules directory.
+Per-file navigation for the policies directory.
 
 ### `management.md`
 The structured registry of:
@@ -282,7 +312,7 @@ MCP usage rules. One global-policy block + one section per connected
 server (per-server read/write posture, scope rules).
 
 ### `journal-format.md`
-Format spec for `daily/YYYY-MM-DD.md`. Read by the morning routine's
+Format spec for `journal/daily/YYYY-MM-DD.md`. Read by the morning routine's
 Stage B as a natural-language template — required frontmatter fields,
 required body sections (`## Summary`, `## Schedule`, `## Tasks`,
 `## Conversations`), voice rules ("first-person from the user's
@@ -292,28 +322,40 @@ perspective"), wikilink rendering, and redaction layering.
 User-defined inclusion / exclusion rules layered on top of `redaction.md`
 when daily journal entries are mirrored to an external vault. Supports
 per-day opt-out via `no_journal_export: true` frontmatter on the
-individual `daily/<date>.md`.
+individual `journal/daily/<date>.md`.
 
 ### `redaction.md`
 Informational mirror of the built-in secret patterns. Actual redaction
 lives in `packages/shared/src/secret-redaction.ts` — this file exists so
 you can see what is being redacted from anything the agent writes.
 
-### `policies/_index.md`
+### `management-captures/_index.md`
 Auto-maintained registry of active policies (Active table + Removed
 table). Direct edits are overwritten by the reconciler; to add or modify
-a policy, edit its `policies/management-captures/<slug>.md` file or use the
+a policy, edit its `management-captures/<slug>.md` file or use the
 `management-policy` skill.
 
-### `policies/<slug>.md`
+### `management-captures/<slug>.md`
 One captured policy per file (origin DM, reasoning, linked routine).
 Policies are deactivated by setting `status: removed` in frontmatter —
 the file is preserved so the captured history survives. The directory is
 not exposed for arbitrary `DELETE` via the API.
 
+### `integrations.md`
+Daemon-rendered snapshot of integration delegation state — kept in
+bidirectional sync with the `integrations_json` settings row and
+chokidar-watched at this new path (`policies/integrations.md`, formerly
+`<dataDir>/integrations.md` before the v2 restructure). Hand-edits are
+parsed back on every save.
+
+### `skills/<slug>/SKILL.md`
+User-registered skills. Built-in skills remain in `agent-assets/skills/`
+(read-only, ships with the npm package). The directory is created lazily
+on first user-skill registration.
+
 ---
 
-## `routines/` — per-cadence rulebooks
+## `policies/routines/` — per-cadence rulebooks
 
 User-editable extension surfaces. Each routine's task-flow owns the fixed
 pipeline; the matching file here lists user-added checks executed after
@@ -334,26 +376,26 @@ when removed, the scheduler unregisters the cron job on the next reload.
 
 ---
 
-## `projects/` — one file per active project
+## `plans/projects/` — one file per active project
 
 | File | Holds |
 |---|---|
 | `_index.md` | Index of active projects. |
-| `_active.base` | Obsidian Bases live view: filtered to `state ≠ archived`, sorted by last update. |
+| `_active.base` | Obsidian Bases live view: filtered to `state ≠ archived`, sorted by last update. Query: `file.inFolder("plans/projects")`. |
 | `<slug>.md` | Per-project page. Frontmatter: `type: project`, `slug`, `state` (`active` / `incubating` / `on-hold` / `archived`), `owner`, `start`, optional `due`, `stakeholders`, `next_milestone`, `tags`, `agent_last_synced_at`. |
 
 ---
 
-## `git/` — unified per-repository pages
+## `knowledge/repos/` and `journal/repos/` — unified per-repository pages
 
 For repositories paired between a local clone and a GitHub remote.
 
 | File | Holds |
 |---|---|
-| `<slug>/overview.md` | Long-arc project overview (lifecycle phases, notable changes). Written by `git.project.init` and refreshed when something durable changes during a daily scan. |
-| `<slug>/journal/YYYY-MM-DD.md` | Per-day activity log, written by `git.project.update` on days that had activity. 365-day retention; older entries pruned by `retention.ts`. |
+| `knowledge/repos/<slug>/overview.md` | Long-arc project overview (lifecycle phases, notable changes). Written by `git.project.init` and refreshed when something durable changes during a daily scan. |
+| `journal/repos/<slug>/YYYY-MM-DD.md` | Per-day activity log, written by `git.project.update` on days that had activity. 365-day retention; older entries pruned by `retention.ts`. |
 
-Arbitrary writes under `git/` are not permitted — only these two patterns
+Arbitrary writes under `knowledge/repos/` and `journal/repos/` are not permitted — only these two patterns
 are whitelisted to keep the layout disciplined.
 
 ---
@@ -379,7 +421,7 @@ this period`, `## Open items`, `## Last run`. Injected into prompts via
 
 ---
 
-## `daily/YYYY-MM-DD.md` — synthesized daily journal
+## `journal/daily/YYYY-MM-DD.md` — synthesized daily journal
 
 Written by Stage B of the 04:00 morning routine. It is **the user's
 diary** — first-person, from the user's perspective ("I shipped X", "I
@@ -404,7 +446,7 @@ your edit.
 
 ---
 
-## `weekly/YYYY-Www.md` — weekly review
+## `journal/weekly/YYYY-Www.md` — weekly review
 
 Written by `routine.weekly_review` (Fridays by default). ISO year-week
 format, e.g. `2026-W19.md`.
@@ -414,7 +456,7 @@ survives in `journal/agent.md`'s monthly sections.
 
 ---
 
-## `monthly/YYYY-MM.md` — monthly review
+## `journal/monthly/YYYY-MM.md` — monthly review
 
 Written by `routine.monthly_review` (month-end). YYYY-MM format.
 
@@ -422,7 +464,7 @@ Written by `routine.monthly_review` (month-end). YYYY-MM format.
 
 ---
 
-## `inbox/` — paste bucket
+## `state/inbox/` — paste bucket
 
 Dump anything here — text snippets, captured links, pasted email,
 brainstorming notes. The morning routine triages each file and moves
@@ -434,7 +476,7 @@ No fixed format — write whatever you want.
 
 ---
 
-## `agent/` — agent's private notes
+## `state/scratch/` and `journal/agent.md` — agent's private workspace
 
 ### `journal/agent.md`
 Append-only self-reflection log. Created with one `PUT` at first
@@ -495,18 +537,21 @@ listed is read-only via the API.
 
 | Pattern | Methods |
 |---|---|
-| `today` · `yesterday` · `roadmap` · `_index` · `context-index` | `PUT`, `PATCH` |
-| `user/*` | `PUT`, `PATCH` |
-| `policies/_index` · `rules/*` | `PUT`, `PATCH` |
-| `policies/routines/_index` · `routines/*` | `PUT`, `PATCH` |
+| `state/today` · `state/yesterday` · `plans/roadmap` · `_index` | `PUT`, `PATCH` |
+| `identity/*` | `PUT`, `PATCH` |
+| `policies/_index` · `policies/*` (top-level files) | `PUT`, `PATCH` |
+| `policies/routines/_index` · `policies/routines/*` | `PUT`, `PATCH` |
 | `policies/routines/custom/*` | `PUT`, `PATCH`, `DELETE` |
-| `plans/projects/_index` · `projects/*` | `PUT`, `PATCH` |
+| `plans/projects/_index` · `plans/projects/*` | `PUT`, `PATCH` |
 | `plans/projects/_active` | `PUT` (the Obsidian Bases view) |
-| `git/{slug}/overview` · `git/{slug}/journal/{date}` | `PUT`, `PATCH` |
-| `daily/*` · `weekly/*` · `monthly/*` | `PUT`, `PATCH` |
+| `knowledge/repos/{slug}/overview` · `journal/repos/{slug}/{date}` | `PUT`, `PATCH` |
+| `journal/daily/*` · `journal/weekly/*` · `journal/monthly/*` | `PUT`, `PATCH` |
 | `knowledge/dossiers/_index` · `knowledge/dossiers/*` | `PUT`, `PATCH` |
-| `inbox/*` · `state/scratch/*` | `PUT`, `PATCH`, `DELETE` |
+| `state/inbox/*` · `state/scratch/*` | `PUT`, `PATCH`, `DELETE` |
 | `journal/agent` | `PUT` once (create-only), then `PATCH` (append) |
+| `policies/management-captures/_index` · `policies/management-captures/*` | `PUT`, `PATCH` |
+
+> Legacy URL forms (`/api/context/today.md`, `/api/context/user/profile`, `/api/context/rules/management`, `/api/context/agent/journal`, etc.) are normalized to the class-prefixed canonical paths in-process by `core/context-vault-aliases.ts` before any of the above checks run. Normalization is not a redirect (no HTTP 3xx) so legacy `curl -X PUT/PATCH` callers keep working. The alias bridge lives for one minor release after PR-6's content sweep lands. <!-- drift-allow -->
 
 ---
 
@@ -518,14 +563,14 @@ From `packages/daemon/src/core/retention.ts`:
 |---|---|---|
 | `state/today.md` | rotates every agent-day at 04:00 | morning routine writes the new file; previous becomes `state/yesterday.md` |
 | `state/yesterday.md` | one agent-day | overwritten by next rotation |
-| `daily/YYYY-MM-DD.md` | **persistent by design** | safety-net value `dailyMd: 36500` (~100 years); not enrolled in prune |
-| `weekly/YYYY-Www.md` | 365 days | `retention.ts:weeklyMd` |
-| `monthly/YYYY-MM.md` | **persistent** | no prune entry |
-| `git/<slug>/journal/<date>.md` | 365 days | `retention.ts:gitJournalMd` |
+| `journal/daily/YYYY-MM-DD.md` | **persistent by design** | safety-net value `dailyMd: 36500` (~100 years); not enrolled in prune |
+| `journal/weekly/YYYY-Www.md` | 365 days | `retention.ts:weeklyMd` |
+| `journal/monthly/YYYY-MM.md` | **persistent** | no prune entry |
+| `journal/repos/<slug>/<date>.md` | 365 days | `retention.ts:gitJournalMd` |
 | `journal/agent.md` weekly sections | last 12 | content-level rollup in `retention.ts` |
 | `journal/agent.md` monthly sections | last 24 | content-level rollup in `retention.ts` |
 | `state/scratch/*` | 48 hours | TTL sweep |
-| `inbox/*` | until next morning routine | triage moves to `state/scratch/` |
+| `state/inbox/*` | until next morning routine | triage moves to `state/scratch/` |
 | `md_file_snapshots` (DB) | 30 days | row-level prune |
 
 ---
@@ -536,10 +581,10 @@ Everything here is plain text. The usual tooling works:
 
 ```bash
 # Read your profile
-cat ~/.personal-agent/context/user/profile.md
+cat ~/.personal-agent/context/identity/profile.md
 
 # Edit any file
-$EDITOR ~/.personal-agent/context/today.md
+$EDITOR ~/.personal-agent/context/state/today.md
 
 # Version it
 cd ~/.personal-agent/context && git init && git add . && git commit -m "snapshot"

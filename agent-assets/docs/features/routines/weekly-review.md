@@ -70,10 +70,10 @@ a Mon–Thu catch-up is intentionally out of scope so the next week's
 
 ## What It Outputs
 
-- One file per week under `~/.personal-agent/context/weekly/YYYY-Www.md`
+- One file per week under `~/.personal-agent/context/journal/weekly/YYYY-Www.md`
   (zero-padded ISO week, e.g. `2026-W19.md`).
 - A `## Weekly YYYY-Www` block appended to
-  `~/.personal-agent/context/agent/journal.md`.
+  `~/.personal-agent/context/journal/agent.md`.
 
 ## Configuration
 

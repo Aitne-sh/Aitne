@@ -161,13 +161,13 @@ The Claude / Codex / Gemini session running in any given turn has the SDK `Edit`
 
 | File | PUT (replace) | PATCH (section) |
 |------|:---:|:---:|
-| `today.md` | ✓ | ✓ |
+| `state/today.md` | ✓ | ✓ |
 | `user/*.md` | — | ✓ (`Learned Context` section only on `profile.md`) |
-| `roadmap.md` | — | ✓ |
+| `plans/roadmap.md` | — | ✓ |
 | `projects/*.md` | ✓ | ✓ |
 | `daily/*.md` | ✓ | — |
 | `weekly/*.md` | ✓ | — |
-| `rules/management.md` | — | — |
+| `policies/management.md` | — | — |
 
 PATCH modes: `append`, `replace`, `clear`. The full matrix lives in `src/api/routes/context/` — when in doubt, the source is authoritative.
 

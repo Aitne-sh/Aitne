@@ -136,18 +136,35 @@ const logger = createLogger("claude-code-core");
  * in the session, the pre-pass produces no JSON, and the parent routine
  * collapses to a heartbeat-only shadow run.
  *
- * Opting in to `['user']` brings Claude in line with Codex and Gemini,
- * both of which load `~/.codex/config.toml` / `~/.gemini/settings.json`
- * by default at CLI spawn (they have no `--setting-sources=` equivalent
- * to suppress). This is the parity surface for native mode.
+ * `'project'` is also required: the SDK's `on1` skills loader bails out
+ * in bare mode unless `pJ("projectSettings")` is true (verified in the
+ * shipped `cli.js`), meaning the per-session `<sessionDir>/.claude/skills/`
+ * tree the SkillsCompiler materialises would not be auto-discovered.
+ * `sdk.d.ts` is explicit: "Must include 'project' to load CLAUDE.md
+ * files." Without it the daemon's `<sessionDir>/CLAUDE.md` (the entire
+ * agent profile + safety + skill-reference block) is also silently
+ * dropped, and `excludeDynamicSections: true` has nothing to strip /
+ * re-inject. Symptom: the agent lists user-scope skills (e.g.
+ * `webapp-testing` from `~/.claude/skills/`) but reports daemon-side
+ * project skills like `browser-task` as "not available".
+ *
+ * Opting in to `['user', 'project']` brings Claude in line with Codex
+ * and Gemini, both of which load `~/.codex/config.toml` /
+ * `~/.gemini/settings.json` AND per-session instruction files by
+ * default at CLI spawn (they have no `--setting-sources=` equivalent
+ * to suppress).
  *
  * Trade-off — user-scoped file hooks (e.g. notify.sh entries under
  * `~/.claude/settings.json` → `hooks.{Notification,Stop,PermissionRequest}`)
- * are also loaded. Programmatic hooks passed via `query({ hooks })`
- * layer on top rather than suppress them. Users with noisy file hooks
- * should scope them with matchers; the daemon does not strip them.
+ * are also loaded, plus any `<sessionDir>/.claude/settings.json` the
+ * daemon may add in the future. The SkillsCompiler does not currently
+ * write a per-session settings.json, so the project surface adds only
+ * the intended `<sessionDir>/.claude/skills/` + CLAUDE.md auto-discovery.
+ * Programmatic hooks passed via `query({ hooks })` layer on top rather
+ * than suppress them. Users with noisy file hooks should scope them
+ * with matchers; the daemon does not strip them.
  */
-const CLAUDE_SDK_SETTING_SOURCES: readonly SettingSource[] = ["user"];
+const CLAUDE_SDK_SETTING_SOURCES: readonly SettingSource[] = ["user", "project"];
 
 /**
  * `routine.fetch_window` is a short, lite-tier pre-pass with high

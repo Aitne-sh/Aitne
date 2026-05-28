@@ -56,7 +56,9 @@ describe("snapshotModelRegistry", () => {
     const snap = snapshotModelRegistry();
     const legacy = snap.models.claude.find((m) => m.id === "claude-opus-4-6");
     expect(legacy?.deprecated).toBe(true);
-    const current = snap.models.claude.find((m) => m.id === "claude-opus-4-7");
+    const priorLegacy = snap.models.claude.find((m) => m.id === "claude-opus-4-7");
+    expect(priorLegacy?.deprecated).toBe(true);
+    const current = snap.models.claude.find((m) => m.id === "claude-opus-4-8");
     expect(current?.deprecated).toBe(false);
   });
 });
@@ -82,11 +84,11 @@ describe("validateModelToken — alias path", () => {
 describe("validateModelToken — registered single-match", () => {
   it("resolves a claude model to (backendId, modelId)", () => {
     const snap = snapshotModelRegistry();
-    const result = validateModelToken("claude-opus-4-7", snap);
+    const result = validateModelToken("claude-opus-4-8", snap);
     expect(result).toEqual({
       kind: "model",
       backendId: "claude",
-      modelId: "claude-opus-4-7",
+      modelId: "claude-opus-4-8",
       deprecated: false,
     });
   });
@@ -120,11 +122,11 @@ describe("validateModelToken — registered single-match", () => {
     // under the opencode entry. Coverage for the prefix-not-backend
     // fall-through branch.
     const snap = snapshotModelRegistry();
-    const result = validateModelToken("anthropic/claude-opus-4-7", snap);
+    const result = validateModelToken("anthropic/claude-opus-4-8", snap);
     expect(result).toEqual({
       kind: "model",
       backendId: "opencode",
-      modelId: "anthropic/claude-opus-4-7",
+      modelId: "anthropic/claude-opus-4-8",
       deprecated: false,
     });
   });
@@ -157,11 +159,11 @@ describe("validateModelToken — deprecated path", () => {
 describe("validateModelToken — composite-form disambiguator", () => {
   it("resolves '<backend>/<model>' against the named backend", () => {
     const snap = snapshotModelRegistry();
-    const result = validateModelToken("claude/claude-opus-4-7", snap);
+    const result = validateModelToken("claude/claude-opus-4-8", snap);
     expect(result).toEqual({
       kind: "model",
       backendId: "claude",
-      modelId: "claude-opus-4-7",
+      modelId: "claude-opus-4-8",
       deprecated: false,
     });
   });
@@ -169,13 +171,13 @@ describe("validateModelToken — composite-form disambiguator", () => {
   it("resolves an opencode model through the explicit 'opencode/...' prefix", () => {
     const snap = snapshotModelRegistry();
     const result = validateModelToken(
-      "opencode/anthropic/claude-opus-4-7",
+      "opencode/anthropic/claude-opus-4-8",
       snap,
     );
     expect(result).toEqual({
       kind: "model",
       backendId: "opencode",
-      modelId: "anthropic/claude-opus-4-7",
+      modelId: "anthropic/claude-opus-4-8",
       deprecated: false,
     });
   });
@@ -189,7 +191,7 @@ describe("validateModelToken — composite-form disambiguator", () => {
     // The simplified payload excludes deprecated models so the LLM retry
     // can't immediately loop on a row the registry would have warned about.
     expect(result.validValues.models.claude).not.toContain("claude-opus-4-6");
-    expect(result.validValues.models.claude).toContain("claude-opus-4-7");
+    expect(result.validValues.models.claude).toContain("claude-opus-4-8");
   });
 
   it("treats a token whose part after the slash is empty as no composite match", () => {

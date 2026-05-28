@@ -162,6 +162,20 @@ export interface MessageHandlerDeps {
   getPurchaseHandler?: () =>
     | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
     | null;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 (Q#6 MVP blocker) — lazily-
+   * injected lite-final-confirm handler accessor. Null in tests and
+   * before the browser-task surface is wired at startup. Used by the
+   * inbound `!~xxxxxxxx` classifier alongside `getPurchaseHandler`: the
+   * adapter routes a reply by querying BOTH stores via `lookupByRaw`
+   * and dispatching to whichever returned a row. The strict-cancel-on-
+   * non-token-reply contract is replicated symmetrically across both
+   * surfaces so a single non-token reply cancels pending tokens of
+   * either kind on the affected channel.
+   */
+  getFinalConfirmHandler?: () =>
+    | import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler
+    | null;
 
   /** Live getter for the dispatcher's `currentSetupMode` flag. */
   getCurrentSetupMode: () => SetupMode | null;
@@ -211,6 +225,9 @@ export class MessageHandler {
   private readonly getPurchaseHandler: () =>
     | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
     | null;
+  private readonly getFinalConfirmHandler: () =>
+    | import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler
+    | null;
   private readonly getCurrentSetupMode: () => SetupMode | null;
   private readonly beginSetupMode: (mode: SetupMode) => void;
   private readonly lookupCustomBangCommandForEvent: (
@@ -249,6 +266,8 @@ export class MessageHandler {
     this.getAuthHealthMonitor = deps.getAuthHealthMonitor;
     this.getBangCommandRegistry = deps.getBangCommandRegistry;
     this.getPurchaseHandler = deps.getPurchaseHandler ?? ((): null => null);
+    this.getFinalConfirmHandler =
+      deps.getFinalConfirmHandler ?? ((): null => null);
     this.getCurrentSetupMode = deps.getCurrentSetupMode;
     this.beginSetupMode = deps.beginSetupMode;
     this.lookupCustomBangCommandForEvent = deps.lookupCustomBangCommandForEvent;
@@ -508,7 +527,35 @@ export class MessageHandler {
     // downstream DB check, so we log + skip on error.
     if (event.isDm) {
       const purchaseHandler = this.getPurchaseHandler();
-      if (purchaseHandler) {
+      const finalConfirmHandler = this.getFinalConfirmHandler();
+      // BROWSER_TASK_REDESIGN_PLAN.md §14.11 Q#6 — jti-prefix dispatch.
+      // The `!~xxxxxxxx` envelope is shared between B-4 purchase tokens
+      // and lite-final-confirm tokens. A pending token of EITHER kind
+      // must consume the reply (and a non-token reply must strict-
+      // cancel pending tokens of EITHER kind on the channel). The
+      // route in code:
+      //
+      //   1. classifyAdapterInbound is purchase-specific by name but
+      //      the `kind === "token_reply"` case carries only the parsed
+      //      `!~xxxxxxxx` string — that envelope is identical across
+      //      both surfaces (see `lite-final-confirm-tokens.parseLite…`).
+      //      Reusing the classifier keeps the shape-validation logic
+      //      in one place.
+      //   2. For `verify` / `cancel_purchase` — purchase-only slashes,
+      //      no lite equivalent — route to the purchase handler when
+      //      wired.
+      //   3. For `token_reply` — query BOTH stores via `lookupByRaw`.
+      //      Both jtis are uuid v4 so a colliding match is bounded by
+      //      uuid uniqueness. If both stores miraculously return a row,
+      //      we route to whichever was issued first (oldest issuedAt
+      //      wins) so the older surface deterministically resolves.
+      //      Whichever store consumed the row writes the audit + DM
+      //      via its own handler.
+      //   4. For `passthrough` — fan strict-cancel-on-non-token-reply
+      //      to BOTH handlers when wired. Each only cancels pending
+      //      rows it knows about on that channel; together they
+      //      preserve the rev3 strict-cancel contract symmetrically.
+      if (purchaseHandler || finalConfirmHandler) {
         try {
           const { classifyAdapterInbound } = await import(
             "../services/browser-history/automation/purchase-tokens.js"
@@ -516,52 +563,83 @@ export class MessageHandler {
           const decision = classifyAdapterInbound(event.content);
           const channelRef = `${event.platform}:${event.channel}`;
           if (decision.kind === "token_reply") {
-            await purchaseHandler.handleTokenReply({
-              body: event.content,
-              channelRef,
-            });
+            const purchaseRow = purchaseHandler?.lookupByRaw(decision.token)
+              ?? null;
+            const liteRow = finalConfirmHandler?.lookupByRaw(decision.token)
+              ?? null;
+            const { decideTokenReplyRoute } = await import(
+              "./dm-token-router.js"
+            );
+            const route = decideTokenReplyRoute({ purchaseRow, liteRow });
+            if (route.kind === "purchase" && purchaseHandler) {
+              await purchaseHandler.handleTokenReply({
+                body: event.content,
+                channelRef,
+              });
+              return;
+            }
+            if (route.kind === "lite_final_confirm" && finalConfirmHandler) {
+              await finalConfirmHandler.handleTokenReply({
+                body: event.content,
+                channelRef,
+              });
+              return;
+            }
+            // route.kind === "none" — neither store recognised the
+            // token. Fall through to the strict-cancel block below so
+            // the user's reply still reaches the LLM and any pending
+            // tokens on the channel get cancelled.
+          } else if (decision.kind === "verify") {
+            if (purchaseHandler) {
+              await purchaseHandler.handleVerifySlash({
+                tail: decision.tail,
+                channelRef,
+              });
+            }
+            // Purchase-only slash: short-circuit even when purchaseHandler
+            // is unwired so it never enters the lite strict-cancel fan-out
+            // below (verify/cancel have no lite equivalent — §12 Q#6).
+            return;
+          } else if (decision.kind === "cancel_purchase") {
+            if (purchaseHandler) {
+              await purchaseHandler.handleCancelPurchaseSlash({ channelRef });
+            }
+            // Purchase-only slash: short-circuit even when purchaseHandler
+            // is unwired so it never enters the lite strict-cancel fan-out
+            // below (verify/cancel have no lite equivalent — §12 Q#6).
             return;
           }
-          if (decision.kind === "verify") {
-            await purchaseHandler.handleVerifySlash({
-              tail: decision.tail,
-              channelRef,
-            });
-            return;
+          // decision.kind === "passthrough" (or token_reply with no
+          // match): apply strict-cancel-on-non-token-reply to BOTH
+          // handlers when wired. Each handler only cancels pending
+          // rows on the channel it knows about, so a single non-token
+          // reply cancels tokens of either kind without the two paths
+          // double-counting. The agent never sees the token surfaces
+          // by design (§17.7).
+          if (purchaseHandler) {
+            await purchaseHandler
+              .cancelPendingOnNonTokenReply({ channelRef })
+              .catch((err) => {
+                logger.warn(
+                  { err, channelRef },
+                  "B-4 strict-cancel on non-token reply raised (continuing)",
+                );
+              });
           }
-          if (decision.kind === "cancel_purchase") {
-            await purchaseHandler.handleCancelPurchaseSlash({ channelRef });
-            return;
+          if (finalConfirmHandler) {
+            await finalConfirmHandler
+              .cancelPendingOnNonTokenReply({ channelRef })
+              .catch((err) => {
+                logger.warn(
+                  { err, channelRef },
+                  "lite-final-confirm strict-cancel on non-token reply raised (continuing)",
+                );
+              });
           }
-          // decision.kind === "passthrough" —
-          // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 row 1
-          // (cancellation table). The user sent something that is
-          // neither the exact token, the `!verify` slash, nor the
-          // `!cancel-purchase` slash. Per the strict rule accepted in
-          // rev3, any non-token reply on a channel with pending tokens
-          // cancels every such token. The cancel runs BEFORE
-          // forwarding the message on to the bang interceptor / LLM
-          // so the user sees the cancellation follow-up DM before any
-          // LLM-generated reply lands. Fire-and-forget: the in-flight
-          // workflow's `awaitReply` poll sees the cancelled_at
-          // timestamp on its next 500ms tick and the SIGTERM of the
-          // parked Chromium happens via the runner's `release()`
-          // path. The inbound message itself still falls through to
-          // normal handling — the agent has no awareness of the
-          // pending token (by design — §17.7) and a silent drop
-          // would be a confusing "I never replied" UX hole.
-          await purchaseHandler
-            .cancelPendingOnNonTokenReply({ channelRef })
-            .catch((err) => {
-              logger.warn(
-                { err, channelRef },
-                "strict-cancel on non-token reply raised (continuing)",
-              );
-            });
         } catch (err) {
           logger.warn(
             { err, correlationId: event.correlationId, platform: event.platform },
-            "B-4 inbound classifier raised — falling through to normal dispatch",
+            "DM-token inbound classifier raised — falling through to normal dispatch",
           );
         }
       }

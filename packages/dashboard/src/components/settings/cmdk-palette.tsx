@@ -55,7 +55,14 @@ interface PaletteCtx {
 // Search index — every settings field across the 5 pages
 // ---------------------------------------------------------------------------
 
-const SETTINGS_INDEX: SettingsEntry[] = [
+/**
+ * Exported for the BROWSER_TASK_REDESIGN_PLAN.md §9a regression test —
+ * see `cmdk-palette.browser-tasks.test.ts`. Re-exporting an array of
+ * pure data has no runtime cost and lets the test snapshot the live
+ * surface so a stale `"Workflow Approvals (B-3)"` entry from a future
+ * merge cannot silently land.
+ */
+export const SETTINGS_INDEX: SettingsEntry[] = [
   // -- Profile (/settings) --
   { kind: "setting", label: "Display Name", configKey: "agentDisplayName", page: "/settings", section: "Agent Identity", keywords: "name agent" },
   { kind: "setting", label: "Character", configKey: "character", page: "/settings", section: "Personality", keywords: "character persona tone style voice prompt" },
@@ -105,13 +112,16 @@ const SETTINGS_INDEX: SettingsEntry[] = [
   { kind: "setting", label: "Autonomous Daily Cost Cap", configKey: "autonomousDailyCostCapUsd", page: "/settings/models", section: "Cost Guardrails", keywords: "daily cost cap autonomous routines budget" },
   { kind: "setting", label: "Autonomous Monthly Cost Cap", configKey: "autonomousMonthlyCostCapUsd", page: "/settings/models", section: "Cost Guardrails", keywords: "monthly cost cap autonomous notification alert budget" },
 
-  // -- Managed Chromium (/settings/integrations/browser-history-managed) — page-level navigation only --
-  { kind: "setting", label: "Managed Chromium (master toggle)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Managed Chromium", keywords: "chromium browser automation managed sync oauth instance s playwright sandbox bwrap" },
-  { kind: "setting", label: "Authenticated Sites (B-2.5)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Managed Chromium", keywords: "amazon netflix site auth sign-in profile connect reauth disconnect" },
-  { kind: "setting", label: "Workflow Approvals (B-3)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Managed Chromium", keywords: "approval token write workflow approve deny queue pending" },
-  { kind: "setting", label: "Purchase Workflows (B-4, experimental)", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Managed Chromium", keywords: "purchase b4 buy checkout cart token caps daily spend experimental danger" },
-  { kind: "setting", label: "B-4 Per-site caps", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Managed Chromium", keywords: "currency daily token cap spend cap per transaction limit site b4" },
-  { kind: "setting", label: "B-4 Primary DM channels", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Managed Chromium", keywords: "primary dm channel token delivery slack telegram discord whatsapp b4" },
+  // -- Browser Automation (/settings/integrations/browser-history-managed) — page-level navigation only --
+  { kind: "setting", label: "Browser Automation (master toggle)", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Browser Automation", keywords: "chromium browser automation managed sync oauth instance s playwright sandbox bwrap" },
+  { kind: "setting", label: "Authenticated sites", configKey: "", page: "/settings/integrations/browser-history-managed", section: "Browser Automation", keywords: "amazon netflix x twitter facebook instagram linkedin site auth sign-in profile connect reauth disconnect chromium" },
+  { kind: "setting", label: "Purchase confirmations (experimental)", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Browser Automation", keywords: "purchase b4 buy checkout cart token caps daily spend experimental danger workflows chromium" },
+  { kind: "setting", label: "Purchase per-site caps", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Browser Automation", keywords: "currency daily token cap spend cap per transaction limit site b4" },
+  { kind: "setting", label: "Purchase primary DM channels", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Browser Automation", keywords: "primary dm channel token delivery slack telegram discord whatsapp b4" },
+  // BROWSER_TASK_REDESIGN_PLAN.md §9a.1 — top-level browser-task surface.
+  { kind: "setting", label: "Browser Tasks (list)", configKey: "", page: "/browser-tasks", section: "Browser Tasks", keywords: "browser task list runs in-flight completed natural language" },
+  { kind: "setting", label: "Browser Task — needs your attention", configKey: "", page: "/browser-tasks", section: "Browser Tasks", keywords: "awaiting clarification final confirm pending parked needs attention" },
+  { kind: "setting", label: "Cancel browser task", configKey: "", page: "/browser-tasks", section: "Browser Tasks", keywords: "cancel browser task stop abort" },
 
   // -- Connections (top-level /connections) — page-level navigation only --
   { kind: "setting", label: "Slack", configKey: "", page: "/connections/messaging", section: "Messaging", keywords: "slack bot token channel messaging" },
@@ -155,8 +165,9 @@ const PAGE_LABELS: Record<string, string> = {
   "/settings/schedule": "Schedule",
   "/settings/models": "Models",
   "/settings/advanced": "Advanced",
-  "/settings/integrations/browser-history-managed": "Managed Chromium",
-  "/settings/integrations/browser-history-managed/b4": "Managed Chromium — B-4",
+  "/settings/integrations/browser-history-managed": "Browser Automation",
+  "/settings/integrations/browser-history-managed/b4": "Browser Automation — B-4",
+  "/browser-tasks": "Browser Tasks",
   "/connections/messaging": "Connections — Messaging",
   "/connections/repositories": "Connections — Repositories",
   "/connections/knowledge": "Connections — Knowledge",

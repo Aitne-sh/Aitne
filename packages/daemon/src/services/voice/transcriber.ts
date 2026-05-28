@@ -60,7 +60,11 @@ const PLACEHOLDER_PHRASE_REGEX =
   // Whole string is a single bracketed/parenthesized phrase whose content
   // matches a known meta-token vocabulary. We anchor with ^...$ so partial
   // matches inside a longer transcript do not trigger the retry.
-  /^\s*[([](?:\s*[a-z]{1,3}\s*\|\s*)?\s*(?:speaking(?:\s+in)?\s+(?:a\s+)?foreign\s+language|non[-\s]?english\s+speech|in\s+foreign\s+language|silence|silent|music|applause|laughter|inaudible|background\s+noise|静寂|無音|♪+|\.{3,}|\s*)\s*[)\]]\s*$/i;
+  // English-only vocabulary as of the 2026-05-27 revision; the
+  // brace-only fallback pattern below catches non-English placeholder
+  // shapes (e.g. `[♪♪♪]`, `(***)`, bracketed CJK silence tokens) via
+  // its script-agnostic `\P{L}*` content check.
+  /^\s*[([](?:\s*[a-z]{1,3}\s*\|\s*)?\s*(?:speaking(?:\s+in)?\s+(?:a\s+)?foreign\s+language|non[-\s]?english\s+speech|in\s+foreign\s+language|silence|silent|music|applause|laughter|inaudible|background\s+noise|♪+|\.{3,}|\s*)\s*[)\]]\s*$/i;
 
 // Bracketed/parenthesized fallback for meta-tokens we did not enumerate
 // above (e.g. `(***)`, `[♪♪♪]`, `(...)`). Uses Unicode property escapes so

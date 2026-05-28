@@ -58,7 +58,7 @@ read from this directory.
 
 ## What It Does
 
-Each file under `~/.personal-agent/context/daily/` corresponds to one
+Each file under `~/.personal-agent/context/journal/daily/` corresponds to one
 **agent day** (the file name uses the agent-day date, not the calendar
 date — see [Agent Day](../../concepts/agent-day.md)). The morning
 routine writes the file shortly after rolling `state/today.md` →

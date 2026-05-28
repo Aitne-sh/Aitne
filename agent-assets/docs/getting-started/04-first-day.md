@@ -85,7 +85,7 @@ and 2.
 
 The agent reads
 [`identity/profile.md`](../features/memory-files/user-profile.md) and
-the rest of the `user/*.md` Context Files at the start of every
+the rest of the `identity/*.md` Context Files at the start of every
 session. The faster those files have real content, the faster every
 reply gets useful.
 
@@ -101,7 +101,7 @@ Send 3–5 DMs that read like introductions to a new assistant:
 - *"I prefer terse replies in English. Don't summarize what I just
   said back to me."*
 
-The agent appends each fact to the right `user/*.md` file (work
+The agent appends each fact to the right `identity/*.md` file (work
 facts → `identity/work.md`, people → `identity/people.md`, preferences →
 `identity/personal.md`, and so on). Identity-class facts (legal name,
 primary timezone) are deferred for your explicit confirmation
@@ -125,7 +125,7 @@ second upload are skipped automatically.
 
 ### Verify what landed
 
-Open **Knowledge → Context Files** and skim each `user/*.md` file.
+Open **Knowledge → Context Files** and skim each `identity/*.md` file.
 If a bullet is wrong, edit it directly — the agent reads your edit
 on its next turn. The journal entry the import session writes
 (`journal/agent.md`) lists everything that was deferred or flagged
@@ -257,7 +257,7 @@ Shortest path from zero to that:
    - Max budget USD: `0.20`
    - Description: paste the four numbered steps above verbatim.
 3. **Watch the next firing in Activity** and iterate. The vault file
-   at `~/.personal-agent/context/routines/custom/morning-deep-prep.md`
+   at `~/.personal-agent/context/policies/routines/custom/morning-deep-prep.md`
    is a plain Markdown file — edit the `## Checks` section directly
    to refine the wording or change the schedule. The watcher picks
    up changes without a restart.
@@ -271,7 +271,7 @@ Shortest path from zero to that:
 
 By end of day one you should have:
 
-- At least 5–10 facts in `user/*.md` (DM and/or upload).
+- At least 5–10 facts in `identity/*.md` (DM and/or upload).
 - Two or more **Connections** connected and showing recent polls in
   **Activity**.
 - One DM whose answer references something only your connected
@@ -281,7 +281,7 @@ By end of day one you should have:
 
 ## If it fails
 
-- Replies never reference anything specific to you → `user/*.md` is
+- Replies never reference anything specific to you → `identity/*.md` is
   still mostly empty. DM more, or run a Knowledge upload.
 - A connected integration shows no observations after an hour →
   [Observation Not Detected](../troubleshooting/observation-not-detected.md).

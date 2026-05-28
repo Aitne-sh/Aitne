@@ -132,7 +132,7 @@ Retry the connection from the dashboard. No need to change the client ID or re-r
 
 ### Morning routine not running
 
-**Symptom**: `today.md` isn't generated in the morning.
+**Symptom**: `state/today.md` isn't generated in the morning.
 
 1. Scheduler registered:
    ```bash
@@ -166,7 +166,7 @@ Retry the connection from the dashboard. No need to change the client ID or re-r
 
 ### Context files missing
 
-**Symptom**: Agent can't find `user/profile.md` or `today.md`.
+**Symptom**: Agent can't find `identity/profile.md` or `state/today.md`.
 
 1. List the tree: `ls -la ~/.personal-agent/context/`
 2. Re-initialize — the daemon auto-creates the directory layout on startup; `aitne restart` is enough.

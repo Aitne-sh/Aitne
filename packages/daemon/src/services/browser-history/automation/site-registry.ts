@@ -73,11 +73,15 @@ export interface SiteDefinition {
  * load so neither the LLM nor a stray test helper can mutate it at
  * runtime.
  *
- * Sites ship one at a time per the B-2.5 observation gate — the
- * initial three below are the smallest set that exercises the
- * registry shape's variation (different signedInSelector idioms, JP
- * vs. US locale, retail vs. media). Add more in dedicated PRs after
- * the §10 observation window passes.
+ * The first three entries (amazon_jp, amazon_com, netflix) are the
+ * B-2.5 initial set. The next four (x_com, facebook, instagram,
+ * linkedin) land in BROWSER_TASK_REDESIGN_PLAN.md §8 (Phase 4) and
+ * widen the open-ended-task surface to the social platforms the
+ * `browser_task` sub-agent is most often asked to drive ("post X to
+ * Twitter at 09:00 tomorrow"). The `generic_anon` entry from earlier
+ * drafts is intentionally NOT added — its `.*` outer fence would
+ * invert the safety floor (see §8 of the plan for the rejection
+ * trail).
  */
 export const SITE_REGISTRY: Readonly<Record<string, SiteDefinition>> = Object.freeze({
   amazon_jp: {
@@ -108,6 +112,68 @@ export const SITE_REGISTRY: Readonly<Record<string, SiteDefinition>> = Object.fr
     profileVerifyUrl: "https://www.netflix.com/YourAccount",
     signedInSelector: "[data-uia='account-menu-item']",
     allowedHostPattern: /^https?:\/\/(www\.)?netflix\.com\//,
+    sessionMaxAgeDays: 60,
+  },
+  // BROWSER_TASK_REDESIGN_PLAN.md §8 — Phase 4 social-platform entries.
+  // The `allowedHostPattern` for `x_com` covers both `x.com` and
+  // `twitter.com` (the legacy domain still serves redirects + asset
+  // URLs); `*.amazon-style` CDN subdomains for the social sites live in
+  // `browser-task-allowlist.ts:EXTRA_ALLOWED_ETLD_HELPERS` so per-task
+  // `extraAllowedHosts` requests admitting them carry the same review
+  // weight as adding a new siteKey.
+  x_com: {
+    siteKey: "x_com",
+    displayName: "X (Twitter)",
+    signInUrl: "https://x.com/i/flow/login",
+    homeUrl: "https://x.com/",
+    profileVerifyUrl: "https://x.com/home",
+    signedInSelector: "[data-testid='SideNav_AccountSwitcher_Button']",
+    allowedHostPattern: /^https?:\/\/(www\.|mobile\.)?(x\.com|twitter\.com)\//,
+    sessionMaxAgeDays: 60,
+  },
+  facebook: {
+    siteKey: "facebook",
+    displayName: "Facebook",
+    signInUrl: "https://www.facebook.com/login/",
+    homeUrl: "https://www.facebook.com/",
+    profileVerifyUrl: "https://www.facebook.com/me",
+    signedInSelector: "[role='banner'] [aria-label*='account']",
+    allowedHostPattern: /^https?:\/\/(www\.|m\.)?facebook\.com\//,
+    sessionMaxAgeDays: 90,
+  },
+  instagram: {
+    siteKey: "instagram",
+    displayName: "Instagram",
+    signInUrl: "https://www.instagram.com/accounts/login/",
+    homeUrl: "https://www.instagram.com/",
+    profileVerifyUrl: "https://www.instagram.com/accounts/edit/",
+    // The Explore link in Instagram's top global nav is only rendered
+    // when signed in. The earlier draft used `[role='main']` (per
+    // BROWSER_TASK_REDESIGN_PLAN.md §8's original table) but that
+    // selector matches BOTH the signed-in edit form AND the signed-out
+    // login page (Instagram redirects `/accounts/edit/` → `/accounts/
+    // login/?next=...` when no session, and the login page also wraps
+    // its form in `<main role="main">`). The bootstrap probe at
+    // `site-bootstrap.ts:432` would have reported `signedIn: true`
+    // after a user closed the window without authenticating — a
+    // false-positive that leaves the per-site profile dir empty while
+    // the dashboard says "Connected". The `/explore/` link sits in the
+    // signed-in chrome only; the login page has no top nav. Selector
+    // uses `*=` (substring) to tolerate query-string suffixes Instagram
+    // sometimes appends (`/explore/?source=...`) and absolute-URL
+    // variants. Validated by site-registry.test.ts's regression guard.
+    signedInSelector: "a[href*='/explore/']",
+    allowedHostPattern: /^https?:\/\/(www\.)?instagram\.com\//,
+    sessionMaxAgeDays: 90,
+  },
+  linkedin: {
+    siteKey: "linkedin",
+    displayName: "LinkedIn",
+    signInUrl: "https://www.linkedin.com/login",
+    homeUrl: "https://www.linkedin.com/",
+    profileVerifyUrl: "https://www.linkedin.com/feed/",
+    signedInSelector: "[data-test-global-nav-link='me']",
+    allowedHostPattern: /^https?:\/\/(www\.)?linkedin\.com\//,
     sessionMaxAgeDays: 60,
   },
 });

@@ -30,11 +30,28 @@ function seedDb(): Database.Database {
 }
 
 describe("resolveDefaultBindingFor", () => {
-  it("seeds Sonnet for medium-tier process keys on Claude", () => {
-    const binding = resolveDefaultBindingFor("claude", "message.dm");
+  it("seeds Sonnet and the bare medium nominal for un-overridden medium keys on Claude", () => {
+    // `message.mention` rides the bare medium-tier envelope (no entry in
+    // ENVELOPE_OVERRIDES_BY_PROCESS_KEY), so it pins the tier nominal.
+    // (message.dm USED to be this fixture but now carries a $5.00
+    // override — see the dedicated test below.)
+    const binding = resolveDefaultBindingFor("claude", "message.mention");
     expect(binding.model).toBe(DEFAULT_CLAUDE_MEDIUM_MODEL);
     expect(binding.maxTurns).toBe(50);
     expect(binding.maxBudgetUsd).toBe(1.0);
+  });
+
+  // message.dm carries a wider $5.00 per-turn ceiling than the medium
+  // nominal because each turn re-processes the full DM history and
+  // routinely runs $0.70-0.80 on Sonnet — legitimate multi-step turns
+  // tipped over $1.00 mid-turn and surfaced BackendQuotaError(
+  // max_budget_usd). A `force: true` reset MUST land on 50/$5.00, not
+  // the medium nominal 50/$1.00. Kept in lock-step with the schema seed.
+  it("preserves the message.dm $5.00 envelope override on top of the medium tier", () => {
+    const binding = resolveDefaultBindingFor("claude", "message.dm");
+    expect(binding.model).toBe(DEFAULT_CLAUDE_MEDIUM_MODEL);
+    expect(binding.maxTurns).toBe(50);
+    expect(binding.maxBudgetUsd).toBe(5.0);
   });
 
   it("seeds Haiku and a tighter envelope for lite-tier keys on Claude", () => {
@@ -131,7 +148,10 @@ describe("resolveDefaultBindingFor", () => {
   });
 
   it("scales medium-tier envelopes for gemini (post-hoc enforcement)", () => {
-    const binding = resolveDefaultBindingFor("gemini", "message.dm");
+    // Uses `message.mention` (medium tier, no per-process override) so
+    // this test pins the pure tier-default scaling (1.0 × 1.5) rather
+    // than message.dm's $5.00 override.
+    const binding = resolveDefaultBindingFor("gemini", "message.mention");
     expect(binding.maxTurns).toBe(50);
     expect(binding.maxBudgetUsd).toBe(1.5);
   });

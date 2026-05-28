@@ -79,6 +79,7 @@
  */
 
 import { join } from "node:path";
+import { createReadStream } from "node:fs";
 import { randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 
@@ -309,6 +310,34 @@ export interface BootstrapEventPipelineResult {
   // ── Shutdown handles ──────────────────────────────────────────────────
   /** Daily auth-health keepalive sweep timer; cleared during graceful shutdown. */
   readonly keepaliveTimer: NodeJS.Timeout;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 ask_user + §5.1 pending-queue
+   * timeout. 30 s tick that sweeps overdue clarifications + queue
+   * timeouts. Cleared during graceful shutdown alongside the keepalive
+   * timer so the daemon process can exit cleanly.
+   */
+  readonly browserTaskDeadlineTimer: NodeJS.Timeout;
+
+  // ── Browser-task surface (BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1) ──
+  /**
+   * Shared in-memory slot state for the browser-task surface. The
+   * runner and the API route layer hold THIS instance (not a copy)
+   * so a cancel-while-pending and a runner-side promote race on the
+   * same value.
+   */
+  readonly browserTaskSlotStateRef: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).SlotStateRef;
+  /**
+   * Per-install browser-task runner. Phase 1 ships without
+   * `driver` wired so the runner returns `failed (not_implemented)`
+   * after acquiring + releasing the slot (state-machine round-trip
+   * still exercised). Phase 2 plumbs the Playwright + Claude SDK
+   * driver into the same factory call.
+   */
+  readonly browserTaskRunner: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).BrowserTaskRunner;
 }
 
 /**
@@ -794,6 +823,42 @@ export async function createEventPipeline(
   // DM chokepoint that runs ahead of every other interceptor.
   dispatcher.setBangCommandRegistry(createDefaultBangCommandRegistry());
 
+  // Browser-task screenshots (ask_user / finish / lite-final-confirm / B-4
+  // purchase confirmations) are delivered to the dashboard as real chat
+  // attachments — fetched by id through the authenticated /api proxy —
+  // instead of loopback trace URLs a raw <img> cannot authenticate. This
+  // hook ingests a trace-store PNG/JPEG into the AttachmentStore to mint a
+  // fetchable id; messaging adapters take the trace file directly via their
+  // native upload API and never reach it. Best-effort: an ingest failure
+  // (disallowed mime, missing file) returns null and the caller omits the
+  // image. Shared by the MCP notifier + both confirm senders.
+  const ingestBrowserTaskScreenshot = async (input: {
+    absPath: string;
+    mimeType: string;
+    originalFilename: string;
+  }) => {
+    try {
+      const result = await attachmentStore.ingestStream({
+        stream: createReadStream(input.absPath),
+        declaredMimeType: input.mimeType,
+        originalFilename: input.originalFilename,
+        direction: "outbound",
+        provenance: "agent",
+        maxSizeBytes: 5 * 1024 * 1024,
+      });
+      return {
+        id: result.id,
+        path: result.path,
+        originalFilename: result.originalFilename,
+        mimeType: result.mimeType,
+        sizeBytes: result.sizeBytes,
+      };
+    } catch (err) {
+      logger.warn({ err }, "browser-task screenshot ingest failed (omitting)");
+      return null;
+    }
+  };
+
   // ── Phase B-4 purchase handler ────────────────────────────────────────
   // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 / §13 step 50.
   //
@@ -817,13 +882,10 @@ export async function createEventPipeline(
     const { createPurchaseSystemMessageSender } = await import(
       "../messaging/purchase-system-message-sender.js"
     );
-    const traceUrlBase =
-      typeof config.apiPort === "number" && config.apiPort > 0
-        ? `http://127.0.0.1:${config.apiPort}`
-        : "";
     const sender = createPurchaseSystemMessageSender({
       messageHub,
-      traceUrlBase,
+      paDataDir: config.dataDir,
+      ingestOutboundImage: ingestBrowserTaskScreenshot,
     });
     const purchaseHandler = createPurchaseHandler({
       db,
@@ -912,6 +974,468 @@ export async function createEventPipeline(
       );
     }
   }
+
+  // ── Browser-task lite-final-confirm handler ───────────────────────────
+  // BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 (Q#6 MVP blocker).
+  //
+  // Parallel to the B-4 purchase handler block above. Same anti-spoofing
+  // capability pattern — the sender mints its credential from
+  // `final-confirm-handler`'s module-private getter, so an agent tool
+  // that imports the sender still cannot dispatch DMs. The dispatcher
+  // holds the canonical instance via `setFinalConfirmHandler`; the
+  // inbound `!~xxxxxxxx` classifier in `dispatcher-message-handler.ts`
+  // queries both stores by raw token and routes to whichever returns a
+  // row (jti-prefix dispatch in practice — both jtis are uuid v4, so
+  // collision is bounded by uuid uniqueness).
+  //
+  // Wired unconditionally so the inbound classifier can still write
+  // the strict-cancel-on-non-token-reply audit row even when no tokens
+  // are currently outstanding. Phase 2 plumbs the same handler instance
+  // into the browser-task driver (`DriverDeps.finalConfirmHandler`) so
+  // the sub-agent's final-confirm gate issues + awaits via the canonical
+  // surface — sharing a single instance is what makes the §14.11 Q#6
+  // jti-prefix dispatch deterministic.
+  const { createFinalConfirmHandler } = await import(
+    "../services/browser-history/automation/final-confirm-handler.js"
+  );
+  const { createFinalConfirmSystemMessageSender } = await import(
+    "../messaging/final-confirm-system-message-sender.js"
+  );
+  const finalConfirmSender = createFinalConfirmSystemMessageSender({
+    messageHub,
+    paDataDir: config.dataDir,
+    ingestOutboundImage: ingestBrowserTaskScreenshot,
+  });
+  const finalConfirmHandler = createFinalConfirmHandler({
+    db,
+    sender: finalConfirmSender,
+  });
+  dispatcher.setFinalConfirmHandler(finalConfirmHandler);
+
+  // ── Browser-task slot manager + runner + driver ───────────────────────
+  // BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — wire the in-memory slot
+  // state + the Phase 2 driver so `POST /api/browser-task` runs the
+  // real Playwright + Claude SDK loop.
+  //
+  // Two notifiers, one runner:
+  //  - `notifier` (structural): runner-side. Fans "queued" /
+  //    non-completed-terminal intents into MessageHub DMs. Stays terse
+  //    + templated.
+  //  - `driver.notifier` (MCP-side): the `mcp__aitne-browser__ask_user`
+  //    and `mcp__aitne-browser__finish` tool handlers DM through this
+  //    notifier so agent-authored prose lands on the originating channel.
+  //
+  // Both round-trip via `parseChannelRef` for the §14.8 attestation —
+  // unparseable refs log + skip rather than fan out to all primary
+  // channels (the originating value was already attestation-validated
+  // at task-creation time).
+  const { createBrowserTaskRunner, createSlotStateRef } = await import(
+    "../services/browser-task/browser-task-runner.js"
+  );
+  // BROWSER_TASK_REDESIGN_PLAN.md §9a.5 Shape B — the same emitter
+  // instance threads through runner + driver + tools so a single
+  // `browser_task` SSE event fans out on every state transition.
+  const { createBrowserTaskTransitionEmitter: createBrowserTaskTransitionEmitterAtBoot } =
+    await import(
+      "../services/browser-task/browser-task-transition-events.js"
+    );
+  const browserTaskTransitionEmitter =
+    createBrowserTaskTransitionEmitterAtBoot(eventBroadcaster);
+  const { parseChannelRef: parseBrowserTaskChannelRef } = await import(
+    "../db/browser-automation-purchase-primary-channels-store.js"
+  );
+  const { createHostProfile: createBrowserTaskHostProfile } = await import(
+    "../services/browser-history/lifecycle/platform.js"
+  );
+  const { createBrowserTaskMcpNotifier } = await import(
+    "../messaging/browser-task-mcp-notifier.js"
+  );
+  const browserTaskSlotStateRef = createSlotStateRef(
+    config.browserTaskMaxConcurrent,
+  );
+  const browserTaskMcpNotifier = createBrowserTaskMcpNotifier({
+    messageHub,
+    paDataDir: config.dataDir,
+    ingestOutboundImage: ingestBrowserTaskScreenshot,
+  });
+  const browserTaskHostProfile = createBrowserTaskHostProfile();
+  // Hoisted out of the `createBrowserTaskRunner({ notifier: ... })` arg
+  // so the same instance can also wire into the dispatcher's
+  // `scheduled.browser_task` fire-time-failure path (see
+  // BROWSER_TASK_REDESIGN_PLAN.md §7). One DM-emission contract covers
+  // both the runner's own non-completed terminals and the pre-runner
+  // dispatch failures (`site_unregistered`, `allowlist_rejected`,
+  // `runner_unavailable`) that the runner never sees.
+  const browserTaskTerminalNotifier: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).BrowserTaskNotifier = {
+    async notifyQueued(input): Promise<void> {
+      const ref = input.originatingChannel;
+      if (!ref) return;
+      const parsed = parseBrowserTaskChannelRef(ref);
+      if (!parsed) {
+        logger.warn(
+          { taskId: input.taskId, ref },
+          "browser-task notifyQueued: unparseable channel ref — skipping DM",
+        );
+        return;
+      }
+      try {
+        await messageHub.sendToPlatform(
+          parsed.platform,
+          parsed.channelId,
+          `🕒 Browser task ${input.taskId} is queued behind ${input.blockedCount} task(s). Aitne will start it once the slot opens.`,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, taskId: input.taskId, ref },
+          "browser-task queue DM dispatch failed (continuing)",
+        );
+      }
+    },
+    async notifyTerminal(input): Promise<void> {
+      // §5 "Reporting": on the success path the sub-agent's own
+      // `finish({ report, screenshotKeys })` tool fans the
+      // user-facing DM via the driver-side MCP notifier above. The
+      // structural notifier here is the FALLBACK signal — it covers
+      // every non-completed terminal (failures, timeouts,
+      // cancellations, abandons) where the agent never reached
+      // `finish` and the user would otherwise be left waiting.
+      if (input.state === "completed") return;
+      const ref = input.originatingChannel;
+      if (!ref) return;
+      const parsed = parseBrowserTaskChannelRef(ref);
+      if (!parsed) {
+        logger.warn(
+          { taskId: input.taskId, ref },
+          "browser-task notifyTerminal: unparseable channel ref — skipping DM",
+        );
+        return;
+      }
+      const detail = input.outcomeDetail ?? input.state;
+      try {
+        await messageHub.sendToPlatform(
+          parsed.platform,
+          parsed.channelId,
+          `🟦 Browser task ${input.taskId} ended: ${input.state} (${detail}).`,
+        );
+      } catch (err) {
+        logger.warn(
+          { err, taskId: input.taskId, ref },
+          "browser-task terminal DM dispatch failed (continuing)",
+        );
+      }
+    },
+  };
+  const { compileUserHostnameDenylist } = await import(
+    "../services/browser-history/automation/egress-denylist.js"
+  );
+  const browserTaskRunner = createBrowserTaskRunner({
+    db,
+    slotStateRef: browserTaskSlotStateRef,
+    notifier: browserTaskTerminalNotifier,
+    transitionEmitter: browserTaskTransitionEmitter,
+    driver: {
+      db,
+      paDataDir: config.dataDir,
+      workspaceDir: config.workspaceDir,
+      hostProfile: browserTaskHostProfile,
+      finalConfirmHandler,
+      notifier: browserTaskMcpNotifier,
+      transitionEmitter: browserTaskTransitionEmitter,
+      // User-curated hostname denylist for the browser-task CDP route
+      // handler + §14.7 screenshot retention check. Passed as a thunk
+      // (not a precompiled array) so a Dashboard PATCH /api/config —
+      // which mutates `config.browserTaskHostnameDenylist` in place via
+      // `applyConfigUpdates` — takes effect on the **next** task without
+      // a daemon restart. Recompilation per task is cheap (max 500
+      // entries × tiny regex).
+      getHostnameDenylist: () =>
+        compileUserHostnameDenylist(
+          config.browserTaskHostnameDenylist ?? [],
+        ),
+    },
+    });
+
+  // BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — Phase 3 wiring. The
+  // dispatcher's `scheduled.browser_task` branch reaches the runner
+  // through this setter. Wired right after the factory call so a
+  // fire-time event that races startup still finds the runner instead
+  // of falling through to `runner_unavailable`.
+  dispatcher.setBrowserTaskRunner(browserTaskRunner);
+  // BROWSER_TASK_REDESIGN_PLAN.md §7 — wire the same DM emitter the
+  // runner uses into the dispatcher so fire-time failures
+  // (`site_unregistered`, `allowlist_rejected`, `runner_unavailable`)
+  // that never reach the runner still notify the owner. Without this
+  // a user-scheduled task can silently fail at fire time hours/days
+  // after the user issued it.
+  dispatcher.setBrowserTaskTerminalNotifier(browserTaskTerminalNotifier);
+
+  // ── Browser-task deadline scanner tick ────────────────────────────────
+  // BROWSER_TASK_REDESIGN_PLAN.md §5 ask_user "Deadline enforcement" +
+  // §5.1 pending-queue timeout safety valve. Single 30 s tick handles
+  // both sweeps so the daemon has one mental model for time-based
+  // browser-task housekeeping (cadence preserved from the retired B-3
+  // approval-tokens supervisor; see browser-task-deadline-scanner.ts).
+  // The tick:
+  //   1. lists overdue clarifications (resolved=0 AND deadline_at < now)
+  //   2. asks the slot manager to sweep pending-queue timeouts
+  //   3. folds the two lists via `decideDeadlineActions`
+  //   4. for each action, writes the terminal transition + releases the
+  //      slot (clarifications also expire the clarification row so the
+  //      `awaiting_user → abandoned` edge is recorded)
+  //   5. DMs the originating channel once per affected task
+  //
+  // The tick is best-effort: it logs and continues on per-row failures
+  // so a single bad row cannot wedge the timer. Cleared during graceful
+  // shutdown alongside the keepalive timer (see
+  // BootstrapEventPipelineResult.browserTaskDeadlineTimer).
+  //
+  // Phase 2 — both branches delegate to `browserTaskRunner.expireForDeadline`
+  // so a parked Playwright handle gets `releaseDriverHandle`'d alongside
+  // the terminal DB write (clarification-deadline path) and the SSE +
+  // slot-manager fan-out stays consistent with the runner's own
+  // terminal-write paths. The runner method is idempotent on
+  // already-terminal rows, so a concurrent /cancel race is safe.
+  const browserTaskDeadlineTimer = await (async () => {
+    const {
+      decideDeadlineActions,
+      DEADLINE_SCAN_INTERVAL_MS,
+    } = await import(
+      "../services/browser-task/browser-task-deadline-scanner.js"
+    );
+    const { sweepPendingTimeouts } = await import(
+      "../services/browser-task/browser-task-slots.js"
+    );
+    const {
+      listOverdueClarifications,
+      expireClarification,
+    } = await import(
+      "../db/browser-task-clarifications-store.js"
+    );
+    // `parseBrowserTaskChannelRef` is the same `parseChannelRef` hoisted
+    // above for the runner notifier; reuse it so the deadline tick and
+    // the runner share one channel-parse contract.
+
+    async function tick(): Promise<void> {
+      try {
+        const now = Date.now();
+        const overdue = listOverdueClarifications(db, now);
+        const sweep = sweepPendingTimeouts(
+          browserTaskSlotStateRef.state,
+          now,
+          config.browserTaskPendingQueueTimeoutMinutes,
+        );
+        // Apply the pending-queue removals to the shared slot ref so a
+        // subsequent route-layer queueState read does not still see
+        // expired entries.
+        browserTaskSlotStateRef.state = sweep.state;
+
+        const actions = decideDeadlineActions({
+          overdueClarifications: overdue,
+          expiredPending: sweep.expired,
+          nowMs: now,
+        });
+        if (actions.length === 0) return;
+
+        for (const action of actions) {
+          try {
+            if (action.kind === "abandon_clarification") {
+              // Mark the clarification row expired first so the
+              // dashboard's clarification list reflects the deadline
+              // miss even if `expireForDeadline` hits a CAS race below.
+              expireClarification(db, action.clarificationId, action.nowMs);
+              // Delegate the parent-task transition to the runner so
+              // the parked Playwright handle is released alongside the
+              // terminal DB write — without this, every overdue
+              // clarification leaks a Chromium process + workdir.
+              // `expireForDeadline` is idempotent on already-terminal
+              // rows, so a concurrent cancel-race is safe.
+              const result = await browserTaskRunner.expireForDeadline(
+                action.taskId,
+                "clarification_deadline",
+              );
+              if (result.state === "abandoned") {
+                const row = (await import("../db/browser-task-store.js"))
+                  .getBrowserTask(db, action.taskId);
+                await sendDeadlineDm(
+                  row?.originatingChannel ?? null,
+                  `⏰ Browser task ${action.taskId}: the 5-minute clarification window elapsed without a reply. Task abandoned.`,
+                );
+              }
+            } else {
+              // Queue-timeout — the pending row never acquired a slot,
+              // so no Playwright handle exists to release. Still route
+              // through the runner so the slot-manager / DB / SSE
+              // emission stay coordinated; `expireForDeadline` flips
+              // the row to `failed (queue_timeout)` and is a no-op on
+              // the slot manager (the pending FIFO entry was already
+              // removed by `sweepPendingTimeouts` above).
+              const result = await browserTaskRunner.expireForDeadline(
+                action.taskId,
+                "queue_timeout",
+                action.waitedMs,
+              );
+              const terminal = result.state === "failed"
+                ? (await import("../db/browser-task-store.js"))
+                    .getBrowserTask(db, action.taskId)
+                : null;
+              if (terminal) {
+                // BROWSER_TASK_REDESIGN_PLAN.md §5.1 + §13 — the
+                // pending-queue timeout transition is the one slot-
+                // manager telemetry row the plan's test list pins
+                // explicitly ("emits agent_actions.queue.timeout + DM
+                // intent"). The DM intent is the sendDeadlineDm below;
+                // this writes the paired audit row so the operator can
+                // diagnose saturation episodes without dumping the
+                // in-memory slot map. The remaining queue.* events
+                // (enter / promote / release) power the dashboard
+                // "queue health" surface flagged as §9a future work and
+                // are deferred with the rest of that surface.
+                try {
+                  db.prepare(
+                    `INSERT INTO agent_actions
+                       (action_type, detail, result, started_at, completed_at)
+                     VALUES (?, ?, 'success', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+                  ).run(
+                    "browser_task.queue.timeout",
+                    JSON.stringify({
+                      taskId: action.taskId,
+                      siteKey: action.siteKey,
+                      waitedMs: action.waitedMs,
+                    }),
+                  );
+                } catch (err) {
+                  /* c8 ignore next 5 */
+                  logger.warn(
+                    { err, taskId: action.taskId },
+                    "browser-task queue.timeout audit insert failed (continuing)",
+                  );
+                }
+                await sendDeadlineDm(
+                  terminal.originatingChannel,
+                  `⏰ Browser task ${action.taskId}: queued for ${Math.round(action.waitedMs / 60000)} min behind a parked task and exceeded the pending-queue timeout. Task failed.`,
+                );
+              }
+            }
+          } catch (err) {
+            logger.warn(
+              { err, action },
+              "browser-task deadline action failed (continuing)",
+            );
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, "browser-task deadline tick failed (continuing)");
+      }
+    }
+
+    async function sendDeadlineDm(
+      ref: string | null,
+      text: string,
+    ): Promise<void> {
+      if (!ref) return;
+      const parsed = parseBrowserTaskChannelRef(ref);
+      if (!parsed) {
+        // Persisted via the §14.8-attested channel set, so an
+        // unparseable value here means a value drifted past the
+        // attestation — flag visibly even though we cannot deliver.
+        logger.warn(
+          { ref },
+          "browser-task deadline DM: unparseable channel ref — skipping",
+        );
+        return;
+      }
+      try {
+        await messageHub.sendToPlatform(parsed.platform, parsed.channelId, text);
+      } catch (err) {
+        logger.warn(
+          { err, ref },
+          "browser-task deadline DM dispatch failed (continuing)",
+        );
+      }
+    }
+
+    const timer = setInterval(() => {
+      void tick();
+    }, DEADLINE_SCAN_INTERVAL_MS);
+    // Allow the daemon to exit cleanly if every other timer has unrefed;
+    // a 30 s tick is housekeeping, not load-bearing for liveness.
+    if (typeof timer.unref === "function") timer.unref();
+    return timer;
+  })();
+
+  // ── Browser-task boot-recovery DM fan-out ─────────────────────────────
+  // BROWSER_TASK_REDESIGN_PLAN.md §6.5 — `initDatabase` flipped every
+  // non-terminal `browser_task` row to `failed (daemon_restarted)` and
+  // wrote `agent_actions(action_type='browser_task.boot_recovery')` rows
+  // (deferred DM dispatch because the messaging adapters were still
+  // constructing). Now that `messageHub` exists, scan the audit log for
+  // un-DM'd recovery rows and fan them out once. A per-row marker on
+  // `agent_actions.metadata` ensures a second boot cannot double-DM.
+  //
+  // Best-effort: failures log but do not abort startup. The audit log
+  // remains the source of truth — an operator can re-fan by running the
+  // same SQL manually if all DMs fail.
+  void (async (): Promise<void> => {
+    try {
+      const rows = db
+        .prepare<[], { id: number; detail: string }>(
+          `SELECT id, detail FROM agent_actions
+            WHERE action_type = 'browser_task.boot_recovery'
+              AND (metadata IS NULL
+                OR json_extract(metadata, '$.dmSentAt') IS NULL)
+            ORDER BY id ASC`,
+        )
+        .all();
+      if (rows.length === 0) return;
+      const markDmSent = db.prepare(
+        `UPDATE agent_actions
+            SET metadata = json_set(COALESCE(metadata, '{}'), '$.dmSentAt', ?)
+          WHERE id = ?`,
+      );
+      for (const row of rows) {
+        try {
+          const detail = JSON.parse(row.detail) as {
+            taskId?: string;
+            originatingChannel?: string | null;
+          };
+          const taskId = detail.taskId ?? "<unknown>";
+          const ref = detail.originatingChannel;
+          if (ref) {
+            const parsed = parseBrowserTaskChannelRef(ref);
+            if (parsed) {
+              await messageHub.sendToPlatform(
+                parsed.platform,
+                parsed.channelId,
+                `♻️ Browser task ${taskId} was running when the daemon restarted and could not resume. The task is marked failed; re-issue the request if you still want it run.`,
+              );
+            } else {
+              logger.warn(
+                { taskId, ref },
+                "browser-task boot-recovery DM: unparseable channel ref — skipping",
+              );
+            }
+          }
+          markDmSent.run(new Date().toISOString(), row.id);
+        } catch (err) {
+          logger.warn(
+            { err, auditId: row.id },
+            "browser-task boot-recovery DM failed (continuing; row stays unmarked for next-boot retry)",
+          );
+        }
+      }
+      logger.info(
+        { count: rows.length },
+        "browser-task boot-recovery: fanned DMs for restarted tasks",
+      );
+    } catch (err) {
+      logger.warn(
+        { err },
+        "browser-task boot-recovery DM fan-out failed (continuing)",
+      );
+    }
+  })();
 
   // P22 — wire the optimizer-workdir hooks. The `materialize` callback
   // captures db, dataDir, workspaceDir, contextDir, and secretStore so
@@ -1005,6 +1529,9 @@ export async function createEventPipeline(
     handleGoogleServicesReady,
     handlePromptContextChanged,
     keepaliveTimer,
+    browserTaskDeadlineTimer,
+    browserTaskSlotStateRef,
+    browserTaskRunner,
   };
 }
 

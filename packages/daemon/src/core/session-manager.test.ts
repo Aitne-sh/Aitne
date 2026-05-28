@@ -84,7 +84,7 @@ describe("SessionManager", () => {
       expect(session.id).toBeGreaterThan(0);
       expect(session.isActive).toBe(false);
       expect(session.sessionId).toBeNull();
-      expect(session.model).toBe("claude-opus-4-7");
+      expect(session.model).toBe("claude-opus-4-8");
     });
 
     it("returns existing active session within timeout", async () => {

@@ -141,7 +141,7 @@ export interface RouterExecuteParams {
    * tier does NOT match, `resolveBinding` will swap in a canonical model for
    * the requested tier on the same backend (e.g. Pro preset pins
    * `routine.hourly_check` to Sonnet; `requestedTier: "heavy"` swaps to
-   * `claude-opus-4-7`). This is the ONLY path through which the three
+   * `claude-opus-4-8`). This is the ONLY path through which the three
    * explicit-Opus escape hatches (dashboard chat picker, agent_schedule.model,
    * `/api/agent/run-now {requestedModel}`) can reach Opus on Pro plan.
    *

@@ -58,10 +58,10 @@ Meaning advisor is **silently unavailable** unless all four conditions hold:
 
 Additional per-call compatibility checks (`sQ4`):
 
-- **Base model** must match `opus-4-6` or `sonnet-4-6` (case-insensitive substring). **Haiku and Opus 4.7 cannot call advisor.** If a PersonalAgent process is pinned to Haiku or to `claude-opus-4-7` (the current default for the heavy tier), advisor is silently skipped — no error, no warning.
+- **Base model** must match `opus-4-6` or `sonnet-4-6` (case-insensitive substring). **Haiku and Opus 4.7 / 4.8 cannot call advisor.** If a PersonalAgent process is pinned to Haiku or to `claude-opus-4-8` (the current default for the heavy tier) — or to the legacy `claude-opus-4-7` — advisor is silently skipped — no error, no warning.
 - **Advisor model** must also match `opus-4-6` or `sonnet-4-6`. Anthropic only permits these two as valid advisors; PersonalAgent's Zod schema + dashboard dropdown enforce the same constraint at the settings boundary so a user can't accidentally pick an SDK-incompatible advisor.
 
-**⚠ Opus 4.7 advisor regression (SDK 0.2.98):** After migrating the daemon's default heavy model from `claude-opus-4-6` to `claude-opus-4-7`, Max-plan heavy sessions (which run on Opus 4.7) **silently lose advisor**. Pro plan (main = Sonnet 4.6) is unaffected. This resolves automatically when the SDK updates `zR6`/`w88` to include `opus-4-7`; until then, either (a) accept the regression on Max heavy sessions, (b) manually pin affected processes to `claude-opus-4-6` via `/settings/models` if advisor is required, or (c) leave advisor disabled on Max (the preset default).
+**⚠ Opus 4.7 / 4.8 advisor regression (SDK 0.2.98):** After migrating the daemon's default heavy model off `claude-opus-4-6` (first to 4.7, now to `claude-opus-4-8`), Max-plan heavy sessions (which run on the current Opus generation) **silently lose advisor** — the SDK's `zR6`/`w88` allowlist still matches only `opus-4-6` / `sonnet-4-6`. Pro plan (main = Sonnet 4.6) is unaffected. This resolves automatically when the SDK updates `zR6`/`w88` to include the newer Opus generation; until then, either (a) accept the regression on Max heavy sessions, (b) manually pin affected processes to `claude-opus-4-6` via `/settings/models` if advisor is required, or (c) leave advisor disabled on Max (the preset default).
 
 ### Implications
 
@@ -125,7 +125,7 @@ Even when no row pins Opus, the explicit-Opus escape hatches **do** reach Opus:
 - `agent_schedule.model = 'opus'`
 - `POST /api/agent/run-now { requestedModel: 'opus' }`
 
-The scheduler and `run-now` paths use `BackendRouter.resolveBinding`'s **tier override**: the caller passes `requestedTier`, and when the pinned model's registry tier doesn't match, the router swaps the main model to a canonical choice from the model registry (`claude-opus-4-7`) on the same backend, preserving the pre-existing fallback only if it too matches the requested tier. See `resolveBinding` → `maybeApplyTierOverride` in `backend-router.ts`.
+The scheduler and `run-now` paths use `BackendRouter.resolveBinding`'s **tier override**: the caller passes `requestedTier`, and when the pinned model's registry tier doesn't match, the router swaps the main model to a canonical choice from the model registry (`claude-opus-4-8`) on the same backend, preserving the pre-existing fallback only if it too matches the requested tier. See `resolveBinding` → `maybeApplyTierOverride` in `backend-router.ts`.
 
 The dashboard picker uses a **superset override**: the wire protocol accepts `{ requestedBackendId, requestedModelId }` in `POST /api/chat/messages`, validated against the enabled-backends list + model registry on the SSE boundary. When present, `resolveBinding` uses the exact pair as `main` and drops fallback (you picked a specific backend — we won't silently reroute to a different one). The legacy `requestedModel: "sonnet" | "opus"` form is still accepted by the scheduler/run-now paths, and mutually exclusive with the pair on the `/chat/messages` endpoint.
 

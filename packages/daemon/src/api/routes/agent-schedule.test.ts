@@ -83,7 +83,7 @@ describe("agent-schedule routes", () => {
           time: FUTURE_ISO,
           taskType: "wake",
           description: "persist registered model id pin check on the row",
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
         }),
       });
 
@@ -97,7 +97,7 @@ describe("agent-schedule routes", () => {
       expect(data.warnings).toEqual([]);
 
       const row = selectRow(db, Number(data.scheduleId));
-      expect(row.model).toBe("claude-opus-4-7");
+      expect(row.model).toBe("claude-opus-4-8");
       expect(row.backend_id).toBe("claude");
       expect(row.tier_override).toBeNull();
     });

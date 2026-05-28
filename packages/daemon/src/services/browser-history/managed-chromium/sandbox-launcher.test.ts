@@ -5,11 +5,15 @@ import { __testing } from "./sandbox-launcher.js";
 const { buildSandboxExecArgs, buildBwrapArgs, buildSystemdRunArgs } = __testing;
 
 describe("buildSandboxExecArgs", () => {
-  it("emits -f <profilePath> <binary> [...args]", () => {
-    const argv = buildSandboxExecArgs("/PA/sandbox/profile.sb", {
-      binary: "/Applications/Chromium.app/Contents/MacOS/Chromium",
-      args: ["--headless=new", "--user-data-dir=/PA/chromium-sync"],
-    });
+  it("emits -f <profilePath> <binary> [...args] on macOS ≤ 15 (middle ring works)", () => {
+    const argv = buildSandboxExecArgs(
+      "/PA/sandbox/profile.sb",
+      {
+        binary: "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        args: ["--headless=new", "--user-data-dir=/PA/chromium-sync"],
+      },
+      () => false,
+    );
     expect(argv).toEqual([
       "-f",
       "/PA/sandbox/profile.sb",
@@ -17,11 +21,35 @@ describe("buildSandboxExecArgs", () => {
       "--headless=new",
       "--user-data-dir=/PA/chromium-sync",
     ]);
+    // No --no-sandbox injection when the middle ring is viable.
+    expect(argv).not.toContain("--no-sandbox");
+  });
+
+  it("injects --no-sandbox ahead of the caller args on macOS 26+ (middle ring blocked)", () => {
+    const argv = buildSandboxExecArgs(
+      "/PA/sandbox/profile.sb",
+      {
+        binary: "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        args: ["--headless=new", "--user-data-dir=/PA/chromium-sync"],
+      },
+      () => true,
+    );
+    expect(argv).toEqual([
+      "-f",
+      "/PA/sandbox/profile.sb",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+      "--no-sandbox",
+      "--headless=new",
+      "--user-data-dir=/PA/chromium-sync",
+    ]);
+    // Exactly one injection — never duplicate a flag the caller already
+    // supplied. (Caller didn't pass --no-sandbox here, so we add it.)
+    expect(argv.filter((a) => a === "--no-sandbox")).toHaveLength(1);
   });
 
   it("throws when profile path is empty", () => {
     expect(() =>
-      buildSandboxExecArgs("", { binary: "/bin/false", args: [] }),
+      buildSandboxExecArgs("", { binary: "/bin/false", args: [] }, () => false),
     ).toThrowError(/profile path is empty/);
   });
 });

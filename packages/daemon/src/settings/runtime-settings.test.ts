@@ -144,3 +144,73 @@ describe("runtimeSettingsSchema — prePassBackoffMs length cross-field check (P
     expect(parsed.prePassBackoffMs).toEqual([]);
   });
 });
+
+// BROWSER_TASK_REDESIGN_PLAN.md §5.1 / §12 Q#5 — additive runtime-
+// settings keys for the open-ended browser sub-agent slot policy and
+// quiet-hours respect. The three keys ship in Phase 1; their defaults
+// match the design doc verbatim.
+describe("runtimeSettingsSchema — browser-task knobs (Phase 1)", () => {
+  it("defaults browserTaskMaxConcurrent to 3", () => {
+    expect(runtimeSettingsSchema.parse({}).browserTaskMaxConcurrent).toBe(3);
+  });
+
+  it("accepts 1..5 for browserTaskMaxConcurrent", () => {
+    for (const v of [1, 2, 3, 4, 5]) {
+      expect(
+        runtimeSettingsSchema.parse({ browserTaskMaxConcurrent: v })
+          .browserTaskMaxConcurrent,
+      ).toBe(v);
+    }
+  });
+
+  it("rejects browserTaskMaxConcurrent outside [1, 5]", () => {
+    expect(
+      runtimeSettingsSchema.safeParse({ browserTaskMaxConcurrent: 0 }).success,
+    ).toBe(false);
+    expect(
+      runtimeSettingsSchema.safeParse({ browserTaskMaxConcurrent: 6 }).success,
+    ).toBe(false);
+  });
+
+  it("defaults browserTaskPendingQueueTimeoutMinutes to 30", () => {
+    expect(
+      runtimeSettingsSchema.parse({}).browserTaskPendingQueueTimeoutMinutes,
+    ).toBe(30);
+  });
+
+  it("accepts 5..180 for browserTaskPendingQueueTimeoutMinutes", () => {
+    for (const v of [5, 30, 90, 180]) {
+      expect(
+        runtimeSettingsSchema.parse({
+          browserTaskPendingQueueTimeoutMinutes: v,
+        }).browserTaskPendingQueueTimeoutMinutes,
+      ).toBe(v);
+    }
+  });
+
+  it("rejects browserTaskPendingQueueTimeoutMinutes outside [5, 180]", () => {
+    expect(
+      runtimeSettingsSchema.safeParse({
+        browserTaskPendingQueueTimeoutMinutes: 4,
+      }).success,
+    ).toBe(false);
+    expect(
+      runtimeSettingsSchema.safeParse({
+        browserTaskPendingQueueTimeoutMinutes: 181,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("defaults browserTaskRespectQuietHours to true", () => {
+    expect(runtimeSettingsSchema.parse({}).browserTaskRespectQuietHours).toBe(
+      true,
+    );
+  });
+
+  it("accepts an explicit false override", () => {
+    expect(
+      runtimeSettingsSchema.parse({ browserTaskRespectQuietHours: false })
+        .browserTaskRespectQuietHours,
+    ).toBe(false);
+  });
+});

@@ -88,13 +88,13 @@ const NAV_ITEMS: NavItem[] = [
     href: "/settings/integrations/browser-history",
     label: "Browser History",
     icon: History,
-    description: "Consent, browser detection, lifecycle",
+    description: "Read from your existing Chrome",
   },
   {
     href: "/settings/integrations/browser-history-managed",
-    label: "Managed Chromium",
+    label: "Browser Automation",
     icon: MonitorCog,
-    description: "Daemon-supervised browser for sync + automation",
+    description: "Dedicated Chromium (OAuth + tasks)",
   },
   {
     href: "/settings/commands",
@@ -160,6 +160,22 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "browserHistorySearchQueryRetentionDays",
     "browserHistoryLifecycle",
   ],
+  // BROWSER_TASK_REDESIGN_PLAN.md §9a.10 — Phase 1 introduces three
+  // user-tunable settings (slot policy + quiet-hours respect) that live
+  // on the Browser Automation settings page (route still named
+  // `browser-history-managed` for backward compatibility). Without this
+  // PAGE_KEYS entry edits would silently lose their dirty marker and the
+  // sidebar dot wouldn't appear.
+  "/settings/integrations/browser-history-managed": [
+    "browserTaskMaxConcurrent",
+    "browserTaskPendingQueueTimeoutMinutes",
+    "browserTaskRespectQuietHours",
+    // 2026-05-27 open-navigation revision — user-curated hostname
+    // denylist for the browser-task surface. Editor lives in a new
+    // card on the same Browser Automation page so the sidebar dirty
+    // dot covers it without adding a new top-level entry.
+    "browserTaskHostnameDenylist",
+  ],
 };
 
 export function SettingsNavigation() {
@@ -183,10 +199,15 @@ export function SettingsNavigation() {
     >
       <ul className="flex flex-row gap-1 overflow-x-auto md:flex-col md:gap-0.5">
         {NAV_ITEMS.map((item) => {
+          // Use exact match OR prefix-with-`/` boundary so sibling routes
+          // don't fight for the active state — e.g. `/settings/integrations/
+          // browser-history-managed` previously matched both `/…/browser-
+          // history` and `/…/browser-history-managed` because plain
+          // `startsWith` ignores the segment boundary.
           const active =
-            item.href === "/settings"
-              ? pathname === item.href
-              : pathname.startsWith(item.href);
+            pathname === item.href
+            || (item.href !== "/settings"
+              && pathname.startsWith(item.href + "/"));
           const Icon = item.icon;
           const pageDirtyCount = dirtyCountForPage(item.href);
 

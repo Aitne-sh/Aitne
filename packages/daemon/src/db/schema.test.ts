@@ -61,6 +61,10 @@ describe("applySchema", () => {
       "owner_channels",
       "parse_failures",
       "process_backend_config",
+      "browser_task",
+      "browser_task_action_log",
+      "browser_task_clarifications",
+      "browser_task_final_confirm_tokens",
       "reading_highlights",
       "receipts",
       "recurring_schedules",
@@ -157,6 +161,20 @@ describe("applySchema", () => {
       "idx_repositories_local",
       "idx_triggers_event",
       "idx_triggers_repo",
+      // BROWSER_TASK_REDESIGN_PLAN.md §6.4 / §6.6 / §6.7 + §5 lite-final-
+      // confirm — every browser-task index is asserted here so a
+      // regression that silently drops one (e.g. typoed rename, missed
+      // ALTER) trips this test instead of producing a slow lookup at
+      // runtime.
+      "idx_browser_task_created_at",
+      "idx_browser_task_state_created",
+      "idx_browser_task_non_terminal",
+      "idx_browser_task_action_log_task",
+      "idx_browser_task_action_log_at",
+      "idx_browser_task_clarifications_task",
+      "idx_browser_task_clarifications_unresolved",
+      "idx_final_confirm_tokens_status_expires",
+      "idx_final_confirm_tokens_task",
     ]) {
       expect(names, `missing index: ${idx}`).toContain(idx);
     }
@@ -302,7 +320,7 @@ describe("applySchema", () => {
       default_backend: "claude",
       default_lite_model: "claude-haiku-4-5-20251001",
       default_medium_model: "claude-sonnet-4-6",
-      default_high_model: "claude-opus-4-7",
+      default_high_model: "claude-opus-4-8",
       advisor_enabled: 0,
     });
   });
@@ -369,11 +387,15 @@ describe("applySchema", () => {
 
     const dm = db
       .prepare(
-        "SELECT main_model, max_turns FROM process_backend_config WHERE process_key = 'message.dm'",
+        "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'message.dm'",
       )
-      .get() as { main_model: string; max_turns: number };
+      .get() as { main_model: string; max_turns: number; max_budget_usd: number };
     expect(dm.main_model).toBe("claude-sonnet-4-6");
     expect(dm.max_turns).toBe(50);
+    // Wider $5.00 per-turn ceiling than the $1.00 medium nominal — DM
+    // turns re-process the full history and tipped over $1.00 mid-turn.
+    // Lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY + migration 0006.
+    expect(dm.max_budget_usd).toBe(5.0);
 
     const gitProjectInit = db
       .prepare(
@@ -396,6 +418,19 @@ describe("applySchema", () => {
     expect(gitProjectUpdate.main_model).toBe("claude-sonnet-4-6");
     expect(gitProjectUpdate.max_turns).toBe(30);
     expect(gitProjectUpdate.max_budget_usd).toBe(0.5);
+
+    // BROWSER_TASK_REDESIGN_PLAN.md §5 / §6.1 — open-ended browser
+    // sub-agent. Medium tier (Sonnet), 30 turns / $1.00 envelope sized
+    // for the multimodal-input cost of ~5 screenshots over a 10-turn
+    // flow. Lock-step with the §5 envelope spec.
+    const browserTask = db
+      .prepare(
+        "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'browser_task'",
+      )
+      .get() as { main_model: string; max_turns: number; max_budget_usd: number };
+    expect(browserTask.main_model).toBe("claude-sonnet-4-6");
+    expect(browserTask.max_turns).toBe(30);
+    expect(browserTask.max_budget_usd).toBe(1.0);
 
     // Delegated/simple surfaces seed with Haiku, tighter envelope.
     const gmailClassify = db

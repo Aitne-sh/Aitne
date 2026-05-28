@@ -33,15 +33,16 @@ keywords:
   - context
   - markdown
   - SQLite
-  - today.md
-  - user/profile.md
-  - roadmap.md
-  - rules/management.md
-  - rules/policies
-  - agent journal
+  - state/today.md
+  - identity/profile.md
+  - plans/roadmap.md
+  - policies/management.md
+  - policies/management-captures
+  - journal/agent.md
   - context API
   - AgentWriteTracker
   - durable memory
+  - context-vault v2
 related:
   - features/memory-files/today
   - features/memory-files/user-profile
@@ -53,15 +54,15 @@ ui_anchors:
   - /knowledge
   - /connections/knowledge
 context_files:
-  - today.md
-  - user/profile.md
-  - roadmap.md
-  - agent/journal.md
-  - daily/<date>.md
-  - projects/<slug>.md
-  - rules/management.md
-  - rules/policies/<slug>.md
-  - rules/policies/_index.md
+  - state/today.md
+  - identity/profile.md
+  - plans/roadmap.md
+  - journal/agent.md
+  - journal/daily/<date>.md
+  - plans/projects/<slug>.md
+  - policies/management.md
+  - policies/management-captures/<slug>.md
+  - policies/management-captures/_index.md
 config_keys:
   - dayBoundaryHour
   - dataDir
@@ -75,7 +76,11 @@ Aitne treats Markdown files in `~/.personal-agent/context/`
 as its long-term memory and SQLite
 (`~/.personal-agent/data/personal_agent.db`) as session-scoped state.
 Anything you want the agent to remember between runs lives in an MD
-file you can read, diff, and edit by hand.
+file you can read, diff, and edit by hand. The vault is partitioned
+into six authority classes — `identity/`, `state/`, `plans/`, `journal/`,
+`knowledge/`, and `policies/` — each carrying its own authority and
+lifecycle contract. See [Knowledge Layout](../reference/knowledge-layout.md)
+for the canonical map.
 
 ## Why This Concept Exists
 
@@ -115,7 +120,7 @@ indexes, and configuration.
   retros, and judgement calls.
 - `journal/daily/2026-04-25.md` — per-date archive of that day's plan,
   synthesized by the morning routine.
-- `projects/<slug>.md` — one file per active project.
+- `plans/projects/<slug>.md` — one file per active project.
 - `policies/management.md` — the umbrella registry: Source-of-Truth
   bindings, Managed Tasks, an Active Policies summary. Always
   injected into every flow.
@@ -132,8 +137,9 @@ indexes, and configuration.
 
 ## Related
 
-- [today.md](../features/memory-files/today.md)
-- [user/profile.md](../features/memory-files/user-profile.md)
-- [roadmap.md](../features/memory-files/roadmap.md)
+- [Knowledge Layout](../reference/knowledge-layout.md) — canonical map of every vault file
+- [state/today.md](../features/memory-files/today.md)
+- [identity/profile.md](../features/memory-files/user-profile.md)
+- [plans/roadmap.md](../features/memory-files/roadmap.md)
 - [Skills](skills.md) — the per-skill SKILL.md files that tell the
   agent how to read and write each context file.

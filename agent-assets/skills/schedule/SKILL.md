@@ -158,7 +158,7 @@ curl -s -X POST http://localhost:8321/api/schedule \
 | `description` | Yes | Self-contained (min 20 chars). See format above. Doubles as the agent body unless `prompt` overrides it. |
 | `prompt` | No | Optional override for the agent body (min 20 chars when set). When set, the dispatcher injects this — not `description` — into the task-flow template. Use when you want a short list-friendly `description` plus a longer, separate instruction for the agent. |
 | `tier` | No | `lite` / `medium` / `high`. Omit to use the dispatcher's process-key default (medium for `scheduled.task`). See "Tier / Model selection" above. Mutually exclusive with `model`. |
-| `model` | No | Registered model id (`claude-opus-4-7`, `gpt-5.4`, …), legacy alias (`sonnet` / `opus`, auto-rewritten to `tier`), or composite `<backendId>/<modelId>`. See "Tier / Model selection" above. Mutually exclusive with `tier`. |
+| `model` | No | Registered model id (`claude-opus-4-8`, `gpt-5.4`, …), legacy alias (`sonnet` / `opus`, auto-rewritten to `tier`), or composite `<backendId>/<modelId>`. See "Tier / Model selection" above. Mutually exclusive with `tier`. |
 | `taskContext` | No | Structured metadata object |
 
 Response: `{ "status":"scheduled", "scheduleId":"123", "scheduledFor":"YYYY-MM-DD HH:MM:SS" }`. `scheduledFor` is the normalized UTC SQLite timestamp the daemon actually stored — log this verbatim instead of re-formatting the input `time`. Rejects times in the past (> 1 min ago), same as `/api/schedule/dm`.

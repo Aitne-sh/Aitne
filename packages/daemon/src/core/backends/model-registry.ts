@@ -24,7 +24,7 @@ import type {
 // Claude
 export const DEFAULT_CLAUDE_LITE_MODEL = "claude-haiku-4-5-20251001";
 export const DEFAULT_CLAUDE_MEDIUM_MODEL = "claude-sonnet-4-6";
-export const DEFAULT_CLAUDE_HIGH_MODEL = "claude-opus-4-7";
+export const DEFAULT_CLAUDE_HIGH_MODEL = "claude-opus-4-8";
 
 // Codex (gpt-5.4-mini is the lite-tier pick; gpt-5.4 is the medium-tier
 // default — morning_routine / hourly_check / evening_review run on this.
@@ -59,7 +59,7 @@ export const DEFAULT_GEMINI_HIGH_MODEL = "gemini-3.1-pro-preview";
 // in a later phase, so Phase 1 seeds Anthropic-compatible safe defaults.
 export const DEFAULT_OPENCODE_LITE_MODEL = "anthropic/claude-haiku-4-5";
 export const DEFAULT_OPENCODE_MEDIUM_MODEL = "anthropic/claude-sonnet-4-6";
-export const DEFAULT_OPENCODE_HIGH_MODEL = "anthropic/claude-opus-4-7";
+export const DEFAULT_OPENCODE_HIGH_MODEL = "anthropic/claude-opus-4-8";
 
 const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
   {
@@ -81,18 +81,41 @@ const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
   },
   {
     backendId: "claude",
-    modelId: "claude-opus-4-7",
-    label: "Claude Opus 4.7",
-    displayName: "Claude Opus 4.7",
+    modelId: "claude-opus-4-8",
+    label: "Claude Opus 4.8",
+    displayName: "Claude Opus 4.8",
     tier: "high",
     available: true,
     supportsToolUse: true,
     supportsStreaming: true,
     supportsPromptCaching: true,
+    // Anthropic Opus 4 tier: $15/$75/$1.50/$18.75 per MTok in/out/cache-read/cache-create
+    // — same band as 4.7. The SDK's `total_cost_usd` is the trusted source; pin
+    // `pricingTrusted` so the community price-fetcher can't clobber it with the
+    // stale 4.6-tier rate LiteLLM lists for the newest Opus generation.
+    usdPer1kIn: 0.015,
+    usdPer1kOut: 0.075,
+    usdPer1kCacheRead: 0.0015,
+    usdPer1kCacheCreate: 0.01875,
+    pricingTrusted: true,
+    maxInputTokens: 1_000_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    backendId: "claude",
+    modelId: "claude-opus-4-7",
+    label: "Claude Opus 4.7 (legacy)",
+    displayName: "Claude Opus 4.7 (legacy)",
+    tier: "high",
+    available: true,
+    deprecated: true,
+    supportsToolUse: true,
+    supportsStreaming: true,
+    supportsPromptCaching: true,
     // Anthropic Opus 4 tier: $15/$75/$1.50/$18.75 per MTok in/out/cache-read/cache-create.
-    // LiteLLM's community data lists 4-7 at 1/3 of this (4.6-tier rate); pin trust
-    // to the registry until upstream catches up. SDK's `total_cost_usd` confirms
-    // 4-7 is billed at the full Opus 4 rate.
+    // Demoted to legacy when 4.8 shipped; kept available so existing pins keep
+    // resolving with correct pricing. SDK's `total_cost_usd` confirms 4-7 is
+    // billed at the full Opus 4 rate.
     usdPer1kIn: 0.015,
     usdPer1kOut: 0.075,
     usdPer1kCacheRead: 0.0015,
@@ -172,11 +195,30 @@ const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
   },
   {
     backendId: "opencode",
-    modelId: "anthropic/claude-opus-4-7",
-    label: "OpenCode Claude Opus 4.7",
-    displayName: "Claude Opus 4.7",
+    modelId: "anthropic/claude-opus-4-8",
+    label: "OpenCode Claude Opus 4.8",
+    displayName: "Claude Opus 4.8",
     tier: "high",
     available: true,
+    supportsToolUse: true,
+    supportsStreaming: true,
+    supportsPromptCaching: true,
+    usdPer1kIn: 0.015,
+    usdPer1kOut: 0.075,
+    usdPer1kCacheRead: 0.0015,
+    usdPer1kCacheCreate: 0.01875,
+    pricingTrusted: true,
+    maxInputTokens: 1_000_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    backendId: "opencode",
+    modelId: "anthropic/claude-opus-4-7",
+    label: "OpenCode Claude Opus 4.7 (legacy)",
+    displayName: "Claude Opus 4.7 (legacy)",
+    tier: "high",
+    available: true,
+    deprecated: true,
     supportsToolUse: true,
     supportsStreaming: true,
     supportsPromptCaching: true,

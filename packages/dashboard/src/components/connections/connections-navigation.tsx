@@ -69,7 +69,12 @@ export function ConnectionsNavigation() {
     >
       <ul className="flex flex-row gap-1 overflow-x-auto md:flex-col md:gap-0.5">
         {NAV_ITEMS.map((item) => {
-          const active = pathname.startsWith(item.href);
+          // Boundary-aware match so sibling routes that share a prefix
+          // (e.g. a future `/connections/mail-search` next to `/connections/
+          // mail`) don't both light up. Mirrors settings-navigation.tsx.
+          const active =
+            pathname === item.href
+            || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
           return (
             <li key={item.href}>

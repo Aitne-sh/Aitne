@@ -27,6 +27,7 @@ import type { HostProfile, SandboxPrimitive } from "../types.js";
 import { extractSignedInUser } from "./reauth-detector.js";
 import { launchUnderSandbox } from "./sandbox-launcher.js";
 import { materialiseSandboxPrimitive } from "./sandbox-install.js";
+import { chromiumBundleRoot } from "../lifecycle/platform.js";
 import { buildBootstrapArgs, instanceSProfileDir } from "./supervisor-config.js";
 import {
   DEFAULT_BOOTSTRAP_TIMEOUT_MS,
@@ -133,7 +134,7 @@ export async function startBootstrap(
       binary: binaryPath,
       args: buildBootstrapArgs(profileDir, GOOGLE_SIGN_IN_URL),
       writableBindings: [profileDir],
-      readableBindings: [binaryPath],
+      readableBindings: [chromiumBundleRoot(binaryPath)],
       detached: true,
     }).child;
   } catch (err) {

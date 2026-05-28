@@ -33,7 +33,7 @@ export function SessionInfoBar({
   // by the page; binding only reflects the process config default and
   // ignores picker overrides and per-session history. Field-by-field
   // fallback would let a past-session model label pair with the current
-  // binding's backend, producing a label like `gemini / claude-opus-4-7`.
+  // binding's backend, producing a label like `gemini / claude-opus-4-8`.
   const source =
     sessionInfo?.model || sessionInfo?.modelLabel
       ? {

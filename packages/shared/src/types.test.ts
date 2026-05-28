@@ -7,6 +7,7 @@ import {
   isRoutineEvent,
   isAgentTaskEvent,
   isScheduledDmEvent,
+  isScheduledBrowserTaskEvent,
   isScheduledEvent,
 } from "./types.js";
 
@@ -114,7 +115,7 @@ describe("type guards", () => {
     expect(isScheduledDmEvent(message)).toBe(false);
   });
 
-  it("isScheduledEvent matches both scheduled.task and scheduled.dm", () => {
+  it("isScheduledEvent matches scheduled.task, scheduled.dm, and scheduled.browser_task", () => {
     const dm = createEvent({
       type: "scheduled.dm",
       source: "scheduler",
@@ -125,6 +126,11 @@ describe("type guards", () => {
       source: "scheduler",
       priority: EventPriority.NORMAL,
     });
+    const browserTask = createEvent({
+      type: "scheduled.browser_task",
+      source: "scheduler",
+      priority: EventPriority.NORMAL,
+    });
     const routine = createEvent({
       type: "routine.morning_routine",
       source: "cron",
@@ -132,6 +138,41 @@ describe("type guards", () => {
     });
     expect(isScheduledEvent(dm)).toBe(true);
     expect(isScheduledEvent(task)).toBe(true);
+    expect(isScheduledEvent(browserTask)).toBe(true);
     expect(isScheduledEvent(routine)).toBe(false);
+  });
+
+  it("isScheduledBrowserTaskEvent matches scheduled.browser_task only", () => {
+    const browserTask = createEvent({
+      type: "scheduled.browser_task",
+      source: "scheduler",
+      priority: EventPriority.NORMAL,
+    });
+    const dm = createEvent({
+      type: "scheduled.dm",
+      source: "scheduler",
+      priority: EventPriority.NORMAL,
+    });
+    const task = createEvent({
+      type: "scheduled.task",
+      source: "scheduler",
+      priority: EventPriority.NORMAL,
+    });
+    expect(isScheduledBrowserTaskEvent(browserTask)).toBe(true);
+    expect(isScheduledBrowserTaskEvent(dm)).toBe(false);
+    expect(isScheduledBrowserTaskEvent(task)).toBe(false);
+  });
+
+  it("isAgentTaskEvent does NOT match scheduled.browser_task", () => {
+    // The AgentTaskEvent SDK paths (`executeScheduledTask`, retemplate
+    // finalize, management scan finalize) must not pick up browser-task
+    // events — their handler is dedicated.
+    const browserTask = createEvent({
+      type: "scheduled.browser_task",
+      source: "scheduler",
+      priority: EventPriority.NORMAL,
+    });
+    expect(isAgentTaskEvent(browserTask)).toBe(false);
+    expect(isScheduledDmEvent(browserTask)).toBe(false);
   });
 });

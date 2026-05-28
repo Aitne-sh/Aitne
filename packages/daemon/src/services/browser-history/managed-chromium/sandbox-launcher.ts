@@ -25,6 +25,7 @@ import {
 } from "node:child_process";
 
 import type { SandboxPrimitive } from "../types.js";
+import { darwinTahoeOrLater } from "../lifecycle/platform.js";
 
 export interface SandboxLaunchOptions {
   binary: string;
@@ -129,17 +130,32 @@ function finalise(
  * `agent-assets/sandbox/macos/aitne-chromium.sb` into PA_DATA_DIR so
  * Apple's signature-validating wrapper can read it from a
  * non-quarantined location).
+ *
+ * On macOS 26+ (when `tahoeOrLater()` returns true) the launcher
+ * injects `--no-sandbox` ahead of the caller's argv. Apple's
+ * `forbidden-sandbox-reinit` default-deny in Tahoe makes Chromium's
+ * middle-ring helper sandboxes (`sandbox_init_with_parameters`) abort
+ * unconditionally — see `darwinTahoeOrLater` in
+ * `lifecycle/platform.ts` for the full rationale. The outer
+ * sandbox-exec ring + the inner CDP route filter remain in force; the
+ * middle ring is dropped because the OS no longer permits it. The
+ * `tahoeOrLater` parameter is exposed for unit-testing so the launcher
+ * can be exercised independently of the host's actual macOS version.
  */
 export function buildSandboxExecArgs(
   profilePath: string,
   options: SandboxLaunchOptions,
+  tahoeOrLater: () => boolean = darwinTahoeOrLater,
 ): string[] {
   if (!profilePath) {
     throw new Error(
       "sandbox-exec profile path is empty; sandbox-install must run before launch",
     );
   }
-  return ["-f", profilePath, options.binary, ...options.args];
+  const chromiumArgs = tahoeOrLater()
+    ? ["--no-sandbox", ...options.args]
+    : [...options.args];
+  return ["-f", profilePath, options.binary, ...chromiumArgs];
 }
 
 /**
@@ -157,8 +173,10 @@ export function buildSandboxExecArgs(
  *   --dev /dev              — minimal devfs (needed for /dev/null,
  *                              /dev/urandom, /dev/shm)
  *   --tmpfs /tmp            — private writable tmp
- *   --ro-bind <bin> <bin>   — read-only access to /usr, /bin, /lib*
- *                              for the Chromium binary's shared libs
+ *   --ro-bind <bin> <bin>   — read-only access to /usr (always present);
+ *                              /bin, /lib* are best-effort (--ro-bind-try)
+ *                              to accommodate merged-/usr layouts where they
+ *                              exist only via /usr and lack compat symlinks
  *   --bind <profile> <profile> — read-write access to the per-instance
  *                              user data dir only
  */
@@ -173,8 +191,8 @@ export function buildBwrapArgs(options: SandboxLaunchOptions): string[] {
     "--tmpfs", "/tmp",
     "--tmpfs", "/run",
     "--ro-bind", "/usr", "/usr",
-    "--ro-bind", "/bin", "/bin",
-    "--ro-bind", "/lib", "/lib",
+    "--ro-bind-try", "/bin", "/bin",
+    "--ro-bind-try", "/lib", "/lib",
     "--ro-bind-try", "/lib64", "/lib64",
     "--ro-bind-try", "/lib32", "/lib32",
     "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf",
@@ -233,13 +251,17 @@ export function buildSystemdRunArgs(options: SandboxLaunchOptions): string[] {
     "--property=RestrictRealtime=true",
     "--property=RestrictSUIDSGID=true",
   ];
+  // One --property per path: systemd merges repeated list-type unit
+  // properties, so this sidesteps the whitespace-split ambiguity of a
+  // space-joined list value (a path containing a space would otherwise be
+  // parsed as two bogus entries, leaving the profile dir non-writable).
   const writable = options.writableBindings ?? [];
-  if (writable.length > 0) {
-    argv.push(`--property=ReadWritePaths=${writable.join(" ")}`);
+  for (const p of writable) {
+    argv.push(`--property=ReadWritePaths=${p}`);
   }
   const readable = options.readableBindings ?? [];
-  if (readable.length > 0) {
-    argv.push(`--property=ReadOnlyPaths=${readable.join(" ")}`);
+  for (const p of readable) {
+    argv.push(`--property=ReadOnlyPaths=${p}`);
   }
   argv.push("--", options.binary, ...options.args);
   return argv;

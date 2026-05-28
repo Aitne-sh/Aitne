@@ -386,7 +386,7 @@ describe("Dashboard API", () => {
       expect(data.defaultBackend).toBe("claude");
       expect(data.defaultLiteModel).toBe("claude-haiku-4-5-20251001");
       expect(data.defaultMediumModel).toBe("claude-sonnet-4-6");
-      expect(data.defaultHighModel).toBe("claude-opus-4-7");
+      expect(data.defaultHighModel).toBe("claude-opus-4-8");
       expect(data.pricingDataSource).toMatchObject({
         source: "hardcoded",
         stale: true,
@@ -592,7 +592,7 @@ describe("Dashboard API", () => {
           defaultBackend: "opencode",
           defaultLiteModel: "anthropic/claude-haiku-4-5",
           defaultMediumModel: "anthropic/claude-sonnet-4-6",
-          defaultHighModel: "anthropic/claude-opus-4-7",
+          defaultHighModel: "anthropic/claude-opus-4-8",
         }),
       });
       expect([200, 201]).toContain(res.status);

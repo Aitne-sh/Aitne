@@ -1126,15 +1126,21 @@ CREATE TABLE IF NOT EXISTS browser_shopping_sessions (
 );
 
 -- ── Managed Chromium Automation (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.14, Phase B-2) ──
--- Per-workflow run audit row. One INSERT per \`runWorkflow\` call regardless of
--- outcome; the dashboard's "Recent automations" panel queries this table by
--- started_at DESC. \`outcome\` is the workflow-runner result tag (see
--- WorkflowRunOutcome in automation/types.ts) — schema-level CHECK enforces
--- the closed set so a typo in the runner cannot silently disable filtering.
--- \`target_urls\` and \`blocked_requests\` are JSON arrays (capped lengths
--- enforced application-side at write time). \`screenshot_path\` and
--- \`trace_path\` are NULL when the workflow did not capture either (e.g.,
--- input_validation_error outcomes that short-circuit before Playwright runs).
+-- Per-workflow run audit row. Originally populated by the
+-- workflow-runner; BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6 retired
+-- both the runner and the \`/api/browser-automation/{workflows,recent-
+-- runs}\` routes that fronted it. The table is INTENTIONALLY retained
+-- as a read-only historical store so users with pre-Phase-6 audit rows
+-- can still query their history out-of-band (sqlite shell). No live
+-- code writes to it; new audit lives in \`browser_task_action_log\`.
+-- The \`outcome\` CHECK constraint stays unchanged to preserve the
+-- shape of historical rows; the Zod mirror that paired with it was
+-- removed in the Phase 6.5 dead-code rip-out (shared/browser-history-
+-- schemas.ts).
+-- \`target_urls\` and \`blocked_requests\` were JSON arrays at write
+-- time. \`screenshot_path\` and \`trace_path\` were NULL when the
+-- workflow did not capture either (e.g., input_validation_error
+-- outcomes that short-circuited before Playwright ran).
 CREATE TABLE IF NOT EXISTS browser_automation_workflows (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     workflow_id       TEXT NOT NULL UNIQUE,
@@ -1157,24 +1163,24 @@ CREATE TABLE IF NOT EXISTS browser_automation_workflows (
         'playwright_error',
         'timeout',
         -- ── Phase B-3 (gated write automation) outcomes ──
-        -- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step 46.
+        -- Retained for historical audit rows. The B-3 approvals surface
+        -- (workflow runner + frozen registry + approvals table) was
+        -- retired in BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6; no new
+        -- rows with these outcomes are written post-Phase-6.
         -- \`needs_approval\` — workflow was rejected because the caller
-        --   did not present a valid approval token. The runner records
-        --   the audit row AND inserts the matching pending row into
-        --   browser_automation_approvals so the dashboard can surface it.
+        --   did not present a valid approval token. (Historical: the
+        --   companion pending row in browser_automation_approvals was
+        --   dropped by migration 0004 in the same plan.)
         -- \`approval_expired\` — caller presented a token bound to an
         --   approval whose 5-min TTL elapsed before redemption.
         -- \`approval_token_invalid\` — token shape was wrong, did not
         --   match any pending approval, or referenced an approval that
-        --   was already consumed / denied. Folded into a single outcome
-        --   for the LLM-facing surface so timing-based discrimination
-        --   between "expired" and "invalid" cannot leak via outcome
-        --   strings; categorical detail lives only in the audit row.
+        --   was already consumed / denied.
         -- \`payment_path_blocked\` — primary URL matched the hard-coded
         --   payment URL pattern set (/checkout, /payment, /place-order,
-        --   /buy, /place-bid). B-3 cannot touch payment paths even with
-        --   a valid approval token; those belong to B-4 purchase
-        --   workflows (§17.5) which use the DM-token gate.
+        --   /buy, /place-bid). B-3 could not touch payment paths even
+        --   with a valid approval token; those belonged to B-4
+        --   purchase workflows (§17.5) which use the DM-token gate.
         'needs_approval',
         'approval_expired',
         'approval_token_invalid',
@@ -1212,94 +1218,27 @@ CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_started_at
 CREATE INDEX IF NOT EXISTS idx_browser_automation_workflows_name
     ON browser_automation_workflows(workflow_name, started_at DESC);
 
--- Per-domain user allowlist. Deny-on-unknown invariant: a workflow that
--- targets a host not present here is rejected by the runner with
--- \`user_allowlist_blocked\`. Empty table = no automation runs at all.
--- \`domain\` is stored as the lower-cased eTLD+1 to keep the dashboard
--- "add example.com" UX consistent regardless of whether the agent's
--- workflow input URL was \`https://www.example.com/\` or \`https://EXAMPLE.com/\`.
--- \`mode='read'\` is the only value used today; \`'denied'\` is reserved
--- for a future user-blocklist surface (currently structural denial is
--- "just delete the row").
-CREATE TABLE IF NOT EXISTS browser_automation_allowlist (
-    domain     TEXT PRIMARY KEY,
-    mode       TEXT NOT NULL CHECK (mode IN ('read', 'denied')),
-    added_at   INTEGER NOT NULL,
-    added_by   TEXT NOT NULL CHECK (added_by IN ('user', 'system'))
-);
-
--- ── Phase B-3 (gated write automation) — per-action approvals ────────
+-- BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6.5 follow-up retired the
+-- Phase-B-2 per-domain user allowlist (\`browser_automation_allowlist\`).
+-- The workflow-runner's deny-on-unknown gate that consumed it was
+-- deleted in Phase 6; the four \`/api/browser-automation/allowlist*\`
+-- routes that mutated it likewise. Fresh installs no longer materialise
+-- the table; upgrading installs drop it via migration
+-- 0005-drop-browser-automation-allowlist. The browser-task surface
+-- gates host access through the registered \`site-registry.ts\`
+-- \`allowedHostPattern\` plus per-request \`extraAllowedHosts\` (the
+-- §14.1 subset rules in BROWSER_TASK_REDESIGN_PLAN.md), not a runtime
+-- DB allowlist.
 --
--- MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step 44.
---
--- Every B-3 workflow (riskTier=Approve, variant != purchase) is gated by
--- a single-use, 5-minute-TTL approval token issued from the dashboard.
--- The agent (or scheduler) calls POST /workflows/:name; if no token is
--- present the runner inserts a \`pending\` row here AND returns
--- \`needs_approval\` to the caller. The dashboard's pending-approvals
--- panel surfaces \`pending\` rows; the user clicks Approve, the daemon
--- mints a cryptographically-random token (32 hex chars, 128 bits), and
--- the row flips to \`approved\` carrying the SHA-256 hash of the token.
--- The raw token is shown to the user once (never re-readable from the
--- DB). The agent retries the workflow call with the token; the runner
--- atomically CAS-consumes the row (\`approved\`→\`consumed\`) before
--- running Playwright. A token bound to (workflow_name, params_hash)
--- cannot be used for any other workflow — the runner re-hashes the
--- caller's params and compares.
---
--- Why hash-only at rest: defence-in-depth against DB-file exfiltration.
--- A read-only attacker who copies personal_agent.db cannot then issue
--- tokens; only the dashboard, holding the bearer + the live HTTP
--- response of the approve handler, has the raw token. The retention
--- sweep rotates \`token_hash\` to NULL after \`consumed_at\` or
--- \`denied_at\` plus 1 day so even the hash does not linger.
---
--- The (workflow_name, params_hash, requested_at) tuple is intentionally
--- not UNIQUE: a user may legitimately issue the same workflow twice in
--- a row (re-running a flaky newsletter signup). Dedup is the caller's
--- responsibility — the runner inserts a new pending row on every
--- token-less call.
-CREATE TABLE IF NOT EXISTS browser_automation_approvals (
-    id              TEXT PRIMARY KEY,
-    workflow_name   TEXT NOT NULL,
-    params_hash     TEXT NOT NULL,
-    -- Compact JSON snapshot of the params object the runner saw.
-    -- Bounded application-side at insertion time (8 KB cap); not used
-    -- by the runner — surfaced only to the dashboard so the user can
-    -- see "Approve subscribeToNewsletter for https://example.com/?".
-    params_summary  TEXT NOT NULL,
-    -- 'agent' | 'dashboard' | 'schedule' — distinguishes who asked
-    -- for the approval so the dashboard can render the requester
-    -- alongside the row. The agent path inserts \`agent\`; the
-    -- dashboard's "pre-approve" flow (future) would use \`dashboard\`;
-    -- a scheduled-task path would use \`schedule\`. Closed set so
-    -- a future code-path that forgets to set it fails the CHECK.
-    origin          TEXT NOT NULL CHECK (origin IN ('agent', 'dashboard', 'schedule')),
-    status          TEXT NOT NULL CHECK (status IN (
-        'pending',
-        'approved',
-        'consumed',
-        'denied',
-        'expired'
-    )),
-    requested_at    INTEGER NOT NULL,
-    expires_at      INTEGER NOT NULL,
-    -- Populated when the dashboard approves the row; SHA-256 hex hash
-    -- of the raw token (the raw token is delivered to the dashboard
-    -- response only once and never persisted). NULL while pending,
-    -- denied, or expired; rotated back to NULL by the retention sweep
-    -- once consumed_at + 1 day has elapsed.
-    token_hash      TEXT,
-    approved_at     INTEGER,
-    consumed_at     INTEGER,
-    denied_at       INTEGER,
-    denial_reason   TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_browser_automation_approvals_status
-    ON browser_automation_approvals(status, requested_at DESC);
-CREATE INDEX IF NOT EXISTS idx_browser_automation_approvals_token_hash
-    ON browser_automation_approvals(token_hash)
-    WHERE token_hash IS NOT NULL;
+-- BROWSER_TASK_REDESIGN_PLAN.md §6.8 / Phase 6 retired the Phase-B-3
+-- approvals surface (workflow runner + frozen registry). The
+-- \`browser_automation_approvals\` table is no longer created on fresh
+-- installs; upgrading installs drop it via migration
+-- 0004-drop-browser-automation-approvals. The lite-final-confirm token
+-- table that replaces it lives below alongside the Phase B-4 purchase
+-- tokens — both write paths are owned by \`final-confirm-handler.ts\` /
+-- \`purchase-handler.ts\` and dispatch via \`jti\` prefix on incoming
+-- \`!~xxxxxxxx\` DM replies.
 
 -- ── Phase B-4 (experimental purchase) — DM-issued single-use tokens ──
 --
@@ -1484,6 +1423,230 @@ CREATE TABLE IF NOT EXISTS browser_automation_purchase_primary_channels (
     set_at       INTEGER NOT NULL,
     PRIMARY KEY (platform, channel_id)
 );
+
+-- ── Browser-task surface (BROWSER_TASK_REDESIGN_PLAN.md §6.4 / §6.6 / §6.7) ──
+--
+-- Open-ended natural-language browser sub-agent dispatched by
+-- POST /api/browser-task. A fresh Claude-only IAgentCore drives a single
+-- Playwright BrowserContext via the in-process \`aitne-browser\` MCP server.
+-- The agent calls a fixed envelope of tools (navigate / screenshot /
+-- dom_snapshot / click / type / press_key / wait_for / extract /
+-- ask_user / yield_for_clarification / finish); the runner enforces
+-- allowlist composition, the final-confirm gate, the §14 hardening
+-- floor, and writes one audit row per step.
+--
+-- Three tables — all additive via CREATE-IF-NOT-EXISTS:
+--   * browser_task                 — the task row + its terminal state
+--   * browser_task_action_log      — per-step audit (one row per tool call)
+--   * browser_task_clarifications  — ask_user round-trip queue
+-- and one parallel-to-B-4 token table for the lite-final-confirm flow:
+--   * browser_task_final_confirm_tokens
+--
+-- State machine (§4): pending → running → {awaiting_user|final_confirm}*
+--   → {completed|failed|timeout|cancelled|abandoned}. The CHECK pins the
+-- closed set so a hand-written transition cannot land an unknown state
+-- in the audit trail.
+--
+-- Boot-recovery (§6.5): every row in {pending, running, awaiting_user,
+-- final_confirm} is flipped to (failed, 'daemon_restarted') on next boot
+-- — the in-memory BrowserContext is unrecoverable across restarts.
+--
+-- Foreign-key shape: the API serves screenshots via the existing
+-- trace-store layer (\`<PA_DATA_DIR>/automation-traces/<taskId>/...\`), so
+-- \`screenshot_key\` on the action log is the relative filename only — the
+-- task id forms the directory.
+CREATE TABLE IF NOT EXISTS browser_task (
+    -- uuid v4 (crypto.randomUUID); shared with the trace-store sub-dir name.
+    id                          TEXT PRIMARY KEY,
+    -- Natural-language task description, the body of the sub-agent's
+    -- prompt. Capped 1..4096 chars at the route layer.
+    description                 TEXT NOT NULL,
+    -- Matches \`site-registry.ts\`. Nullable so a future Phase 4.1 anon
+    -- read path can land without a schema change; the Phase 1 route layer
+    -- still rejects null with 400 (\`generic_anon\` deferred per §8).
+    site_key                    TEXT,
+    -- JSON array<string>. §14.1 enforces: count <= 5, host-only shape,
+    -- eTLD+1 subset against the siteKey OR the \`EXTRA_ALLOWED_ETLD_HELPERS\`
+    -- set, scheme floor (https for auth profiles, http(s) otherwise).
+    -- Captured at task creation and never mutated mid-task (§14.1.5).
+    extra_allowed_hosts_json    TEXT,
+    -- "<platform>:<channel_id>". NULL when no DM channel is associable
+    -- (synthetic test runs); the runner falls back to
+    -- \`listPrimaryChannels()\` when emitting an ask_user / final-confirm DM.
+    -- §14.8: the value is intersected with primary-channels ∪ session
+    -- channel at task-creation time, never widened mid-task.
+    originating_channel         TEXT,
+    -- FK to agent_schedule when the task was inserted via \`scheduleAt\`.
+    -- Nullable for immediate-run tasks. ON DELETE SET NULL so deleting a
+    -- schedule row (rare) leaves the task row's history intact.
+    schedule_row_id             INTEGER REFERENCES agent_schedule(id) ON DELETE SET NULL,
+    -- §5 final-confirm gate toggle. Defaults true at the route layer.
+    -- Stored as INTEGER 0/1 (SQLite has no bool).
+    require_final_confirm       INTEGER NOT NULL DEFAULT 1
+        CHECK (require_final_confirm IN (0, 1)),
+    -- State machine — see §4.
+    state                       TEXT NOT NULL CHECK (state IN (
+        'pending',
+        'running',
+        'awaiting_user',
+        'final_confirm',
+        'completed',
+        'failed',
+        'timeout',
+        'cancelled',
+        'abandoned'
+    )),
+    -- Free-form categorical detail. Typically populated on non-success
+    -- terminal states (the success path carries its narrative in
+    -- \`report\`); the column accepts any short string the runner / boot
+    -- recovery / route handler chooses to record so a future success-
+    -- side audit hint stays cheap to add. Examples (non-success today):
+    --   'daemon_restarted', 'queue_timeout', 'cancelled_in_queue',
+    --   'site_unregistered', 'backend_unavailable', 'not_implemented',
+    --   'ask_user_without_yield', 'tool_loop_detected',
+    --   'blocked_request_spike', 'max_turns_exceeded',
+    --   'clarification_deadline', 'runner_unavailable'.
+    outcome_detail              TEXT,
+    -- Sub-agent's markdown report on the \`completed\` path. Null otherwise.
+    report                      TEXT,
+    -- Composed effective allowlist regex captured at task start (§14.1.5).
+    -- Persisted so the dashboard can render "why was this URL blocked".
+    -- TEXT (regex source) — the runner re-compiles to a RegExp on resume.
+    effective_allowlist_regex   TEXT,
+    -- Defence-in-depth: per-task CDP-blocked-request counter. The runner
+    -- aborts at >100 per §14.2; persisted so the dashboard surfaces the
+    -- spike post-mortem.
+    blocked_requests_count      INTEGER NOT NULL DEFAULT 0
+        CHECK (blocked_requests_count >= 0),
+    -- Cumulative untrusted-content cap (§14.6). 128 KB ceiling; the
+    -- counter is persisted so the cap survives a session resume from
+    -- yield_for_clarification.
+    extract_chars_total         INTEGER NOT NULL DEFAULT 0
+        CHECK (extract_chars_total >= 0),
+    created_at                  INTEGER NOT NULL,
+    started_at                  INTEGER,
+    finished_at                 INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_browser_task_created_at
+    ON browser_task(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_browser_task_state_created
+    ON browser_task(state, created_at DESC);
+-- The non-terminal index powers the "needs your attention" awaiting-count
+-- query (§9a.4) without scanning every historical row.
+CREATE INDEX IF NOT EXISTS idx_browser_task_non_terminal
+    ON browser_task(state)
+    WHERE state IN ('pending', 'running', 'awaiting_user', 'final_confirm');
+
+CREATE TABLE IF NOT EXISTS browser_task_action_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id         TEXT NOT NULL REFERENCES browser_task(id) ON DELETE CASCADE,
+    step_index      INTEGER NOT NULL,
+    -- Tool name as the agent called it (e.g. 'navigate', 'click', or
+    -- 'browser_internal' for the §14.3/§14.4 defence-in-depth handlers
+    -- that fire outside the agent's tool envelope).
+    tool_name       TEXT NOT NULL,
+    -- JSON-stringified args, redacted at insert time (text/screenshot
+    -- payloads truncated, secrets passed through the existing redaction
+    -- coverage guard).
+    args_json       TEXT NOT NULL,
+    -- ok | denied | error | allowlist_block | payment_block | timeout |
+    -- popup_blocked | dialog_dismissed | filechooser_cancelled |
+    -- download_blocked | extract_cap_exceeded | tool_loop_detected
+    outcome         TEXT NOT NULL,
+    blocked_reason  TEXT,
+    -- Relative filename under \`automation-traces/<task_id>/\`. Null when
+    -- the tool did not produce a screenshot.
+    screenshot_key  TEXT,
+    duration_ms     INTEGER NOT NULL CHECK (duration_ms >= 0),
+    at              INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_browser_task_action_log_task
+    ON browser_task_action_log(task_id, step_index);
+CREATE INDEX IF NOT EXISTS idx_browser_task_action_log_at
+    ON browser_task_action_log(at DESC);
+
+CREATE TABLE IF NOT EXISTS browser_task_clarifications (
+    -- uuid v4. Shared verbatim between the runner, the ask_user DM, and
+    -- the POST /clarify path.
+    id              TEXT PRIMARY KEY,
+    task_id         TEXT NOT NULL REFERENCES browser_task(id) ON DELETE CASCADE,
+    question        TEXT NOT NULL,
+    context_summary TEXT,
+    screenshot_key  TEXT,
+    asked_at        INTEGER NOT NULL,
+    -- asked_at + 5 min (CLARIFICATION_TTL_MS). The deadline scanner
+    -- sweeps overdue rows on the same 30 s tick that handles the
+    -- pending-queue timeout.
+    deadline_at     INTEGER NOT NULL,
+    answer          TEXT,
+    answered_at     INTEGER,
+    resolved        INTEGER NOT NULL DEFAULT 0
+        CHECK (resolved IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_browser_task_clarifications_task
+    ON browser_task_clarifications(task_id);
+-- Partial index over the unresolved set — the deadline scanner sweeps
+-- this once every 30 s.
+CREATE INDEX IF NOT EXISTS idx_browser_task_clarifications_unresolved
+    ON browser_task_clarifications(deadline_at)
+    WHERE resolved = 0;
+
+-- ── Lite-final-confirm tokens (BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11) ──
+--
+-- Parallel primitive to B-4's \`browser_automation_purchase_tokens\`. Same
+-- \`!~xxxxxxxx\` UX, same single-use + 5-min TTL CAS, same DM-with-
+-- screenshot dispatch — but no purchase site config + no amount + no
+-- spend caps. The two coexist with distinct DB tables and distinct
+-- dispatch paths so a future B-4 spend-cap change cannot accidentally
+-- widen the lite path.
+--
+-- Dispatch coexistence (§14.11 / Q#6): incoming \`!~xxxxxxxx\` replies are
+-- routed by \`jti\` prefix — \`purchase-handler\` and \`final-confirm-handler\`
+-- jointly inspect the inbound and dispatch to the correct waiter. The
+-- strict-cancel-on-non-token-reply contract is replicated symmetrically.
+CREATE TABLE IF NOT EXISTS browser_task_final_confirm_tokens (
+    jti                       TEXT PRIMARY KEY,
+    -- Raw "!~xxxxxxxx" string while pending. UNIQUE so a colliding mint
+    -- (cosmically unlikely under 40-bit entropy) fails at INSERT.
+    token                     TEXT UNIQUE,
+    task_id                   TEXT NOT NULL REFERENCES browser_task(id) ON DELETE CASCADE,
+    -- The action's natural-language summary (e.g. "post 'Hello world' to X").
+    -- Surfaced verbatim in the DM so the user knows what they're confirming.
+    action_summary            TEXT NOT NULL,
+    -- Relative trace-store filename — the would-be-clicked element's
+    -- screenshot captured immediately before the gate trips.
+    pre_screenshot_path       TEXT NOT NULL,
+    -- JSON array<string> of "<platform>:<channel_id>". Same shape as
+    -- B-4's \`delivered_channels\`. Validation rejects replies on
+    -- non-delivered channels (defence against DM forwarding).
+    delivered_channels        TEXT NOT NULL,
+    issued_at                 INTEGER NOT NULL,
+    expires_at                INTEGER NOT NULL,
+    consumed_at               INTEGER,
+    consumed_via_channel      TEXT,
+    cancelled_at              INTEGER,
+    -- Closed cancel-reason set so a hand-written cancel path cannot land
+    -- an unrecognised category in the audit trail.
+    cancel_reason             TEXT CHECK (cancel_reason IS NULL OR cancel_reason IN (
+        'user_reply',
+        'wrong_token',
+        'wrong_channel',
+        'timeout',
+        'explicit',
+        'task_cancelled',
+        'dashboard_cancel'
+    )),
+    status                    TEXT NOT NULL CHECK (status IN (
+        'pending',
+        'confirmed',
+        'cancelled',
+        'expired'
+    ))
+);
+CREATE INDEX IF NOT EXISTS idx_final_confirm_tokens_status_expires
+    ON browser_task_final_confirm_tokens(status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_final_confirm_tokens_task
+    ON browser_task_final_confirm_tokens(task_id);
 
 -- INTEGRATION-DRIFT-PHASE-7-PLAN.md §3.2 — persistent dedup for the
 -- 15-minute imminent-meeting reminder. Pre-Phase-7 the scheduler kept
@@ -1781,7 +1944,9 @@ VALUES
 --     routine, scheduled tasks, git.project.* one-shots. Standard
 --     50-turn / $1.00 envelope (git.project.* span 30–100 turns and
 --     $0.50–$2.00 — retemplate is widest because re-template work is
---     unbounded by shape).
+--     unbounded by shape). EXCEPTION: message.dm carries a wider $5.00
+--     per-turn ceiling (see the per-row note below) — its full-history
+--     re-processing tipped legitimate turns over the $1.00 nominal.
 --   - Haiku (DEFAULT_CLAUDE_LITE_MODEL) for "delegated/simple" surfaces —
 --     Gmail classification, GitHub event triage, git-poll observers,
 --     calendar-change handlers. Tight 20-turn / $0.20 envelope keeps an
@@ -1817,7 +1982,19 @@ VALUES
 INSERT OR IGNORE INTO process_backend_config
     (process_key, main_backend, main_model, max_turns, max_budget_usd, updated_by)
 VALUES
-    ('message.dm',              'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
+    -- message.dm carries a wider $5.00 envelope (vs the $1.00 medium
+    -- nominal its siblings keep). DM turns are the operator's primary
+    -- conversational surface: they re-process the full DM history (which
+    -- can carry prior browser-task reports + screenshots) on every turn
+    -- and routinely run $0.70-0.80 on Sonnet, hugging the old $1.00 cap.
+    -- Legitimate multi-step turns (dispatch a browser task, answer a
+    -- follow-up, do real tool work) tipped over $1.00 and surfaced a
+    -- BackendQuotaError(max_budget_usd) to the user even when the work
+    -- itself succeeded. $5.00 is a per-turn CEILING, not a target —
+    -- actual spend is governed by the turn's work. Kept in lock-step
+    -- with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in plan-presets.ts and
+    -- bumped for upgrading installs by migration 0006.
+    ('message.dm',              'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  5.00, 'preset'),
     ('message.mention',         'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     ('dashboard.chat',          'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     -- DOCS_QA_DESIGN.md §10.2 — seeded with updated_by='cascade' so the
@@ -1983,7 +2160,19 @@ VALUES
     --     bounded.
     ('routine.research_cluster_update', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',    5,  0.05, 'preset'),
     ('routine.research_dispatch',       'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50,  1.00, 'preset'),
-    ('routine.research_wiki_summary',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  0.50, 'preset');
+    ('routine.research_wiki_summary',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  0.50, 'preset'),
+    -- BROWSER_TASK_REDESIGN_PLAN.md §5 — open-ended browser sub-agent.
+    -- Medium tier (Sonnet) by default; the §6.1 safety floor pins claude
+    -- as the only eligible backend. 30 turns / $1.00 envelope absorbs
+    -- the multimodal-input cost of 4-5 screenshots over a 10-turn flow
+    -- without tripping BackendQuotaError ($0.50 was the initial target
+    -- but landed too close to the cap on Sonnet 4.6 with PNG <= 1MB
+    -- attachments).
+    --
+    -- Keep this row's (max_turns, max_budget_usd) in sync with §5's
+    -- envelope spec — a future widening to support multi-tab tasks
+    -- needs both this seed and the spec to move together.
+    ('browser_task',                    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  1.00, 'preset');
 
 INSERT OR IGNORE INTO settings (key, value_json, updated_at)
 VALUES (

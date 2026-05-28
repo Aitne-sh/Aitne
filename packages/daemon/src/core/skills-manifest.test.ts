@@ -466,6 +466,186 @@ describe("skills-manifest integrity", () => {
 });
 
 /**
+ * BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — wiring guards for the
+ * new `browser-task` skill. The skill replaces the historically-missing
+ * DM-driven entry point to the browser-task surface (the legacy
+ * `browser-history-managed` skill was never in `message.received.dm`).
+ *
+ * These tests pin three things a future refactor must not silently
+ * regress:
+ *   1. The slug is loaded by `message.received.dm` AND inherited by
+ *      `message.dm` / `dashboard.chat` via `PROCESS_TO_EVENT_TYPE`
+ *      (where `resolveSkillManifestForProcess` looks).
+ *   2. The slug is NOT loaded for mentions, scheduled DMs, scheduled
+ *      tasks, or routines — those surfaces have no DM-time
+ *      conversational bookend and the skill is dead weight there.
+ *   3. The skill body covers every contract the §10 spec calls out
+ *      (POST shape, /clarify, /cancel, awaiting_user listening, the
+ *      do-not-relay rule for `!~xxxxxxxx` tokens, registered siteKey
+ *      table). Drift here would replicate the gap the redesign exists
+ *      to close.
+ */
+describe("browser-task skill wiring (BROWSER_TASK_REDESIGN_PLAN Phase 5)", () => {
+  const SKILL_PATH = join(SKILLS_DIR, "browser-task", "SKILL.md");
+
+  test("SKILL.md exists at agent-assets/skills/browser-task/", () => {
+    expect(existsSync(SKILL_PATH)).toBe(true);
+  });
+
+  test("frontmatter declares name=browser-task with Bash(curl *) allowed-tool", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    const fm = body.match(/^---\n([\s\S]+?)\n---/);
+    expect(fm, "missing YAML frontmatter").toBeTruthy();
+    const fmBody = fm![1];
+    expect(fmBody).toMatch(/^name:\s*browser-task\s*$/m);
+    // `allowed-tools` must whitelist curl — the skill ships no other
+    // mechanism for the agent to reach localhost. A future widening
+    // (Read / Write / Edit) would let the agent bypass the daemon
+    // chokepoint that owns audit + redaction; pin the list.
+    expect(fmBody).toMatch(/allowed-tools:[\s\S]*Bash\(curl \*\)/);
+    expect(fmBody).not.toMatch(/Bash\(rm\s/);
+    expect(fmBody).not.toMatch(/^\s+-\s+(Read|Write|Edit|WebFetch)\b/m);
+  });
+
+  test("ALL_SKILLS includes browser-task", () => {
+    expect(ALL_SKILLS).toContain("browser-task");
+  });
+
+  test.each([
+    "message.received.dm",
+    "message.received.dm_first",
+  ])("loaded by event '%s' (static manifest)", (eventType) => {
+    const slugs = EVENT_SKILL_SETS[eventType];
+    expect(slugs, `event '${eventType}' has no manifest`).toBeDefined();
+    expect(slugs).toContain("browser-task");
+  });
+
+  test("loaded for message.dm + dashboard.chat process keys via PROCESS_TO_EVENT_TYPE", () => {
+    // Both process keys route through `message.received.dm`. A future
+    // PROCESS_TO_EVENT_TYPE edit that moves either off this event
+    // would silently drop the browser-task surface from that channel.
+    expect(getSkillsForProcess("message.dm")).toContain("browser-task");
+    expect(getSkillsForProcess("dashboard.chat")).toContain("browser-task");
+  });
+
+  test("resolveSkillManifestForProcess returns browser-task for the DM process keys", () => {
+    // The resolver wrapper is the production call site; pin its
+    // answer too so a future predicate that conditionally drops the
+    // skill cannot bypass the static assertion above.
+    expect(
+      resolveSkillManifestForProcess("message.dm"),
+    ).toContain("browser-task");
+    expect(
+      resolveSkillManifestForProcess("dashboard.chat"),
+    ).toContain("browser-task");
+  });
+
+  test.each([
+    "message.received",
+    "scheduled.dm",
+    "scheduled.task",
+    "routine.morning_routine",
+    "routine.hourly_check",
+    "routine.evening_review",
+  ])("NOT loaded for non-DM-chat event '%s'", (eventType) => {
+    const slugs = EVENT_SKILL_SETS[eventType];
+    expect(slugs, `event '${eventType}' has no manifest`).toBeDefined();
+    // Mentions land on `message.received` (shared-channel surface);
+    // scheduled DMs are daemon-initiated (no user-driven browser ask
+    // to relay); routines have no DM-bookend. Adding browser-task to
+    // any of these expands the skill's injection surface beyond the
+    // §10 spec.
+    expect(slugs, `event '${eventType}' must not carry browser-task`)
+      .not.toContain("browser-task");
+  });
+
+  test("body covers every §10 contract topic", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    // POST surface + how to compose
+    expect(body).toMatch(/POST\s+\/api\/browser-task\b/);
+    expect(body).toMatch(/\bdescription\b/);
+    expect(body).toMatch(/\bsiteKey\b/);
+    expect(body).toMatch(/\bscheduleAt\b/);
+    expect(body).toMatch(/\brequireFinalConfirm\b/);
+    // awaiting_user listening + /clarify shape
+    expect(body).toMatch(/awaiting_user/);
+    expect(body).toMatch(/clarificationId/);
+    expect(body).toMatch(/\/clarify\b/);
+    // /cancel shape (when user says "stop")
+    expect(body).toMatch(/\/cancel\b/);
+    // Final-confirm token do-not-relay rule
+    expect(body).toMatch(/!~xxxxxxxx/);
+    expect(body).toMatch(/never\s+(echo|read|paraphrase|relay)/i);
+    // Fire-and-forget contract — the DM agent must POST, ack, and end
+    // the turn; the daemon delivers the result directly. The skill MUST
+    // forbid completion-polling in prose, otherwise the agent re-reads
+    // GET /:id in a loop, re-processes the whole DM history each turn,
+    // and burns its per-turn budget (the false "per-turn budget limit"
+    // DM the user saw while the detached task still completed fine).
+    expect(body.toLowerCase()).toMatch(/never poll/i);
+    expect(body).toMatch(/end (your|the) turn/i);
+    // Open navigation (2026-05-27 revision) — the Phase-4 registered-
+    // siteKey table was removed at the owner's "no hardcoded domain
+    // denylist" directive, so the skill no longer carries amazon_jp /
+    // netflix / … rows. The skill instead teaches that navigation is
+    // open and gated by the user-curated denylist at runtime.
+    expect(body.toLowerCase()).toMatch(/open navigation|navigation is open/i);
+  });
+
+  test("body declares localhost-only contract (regression guard for the curl chokepoint)", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    expect(body).toContain("127.0.0.1:8321");
+    // The "localhost only" rule must be explicit prose, not just a
+    // curl example — otherwise a future agent edit could quote the
+    // example as "the daemon URL" while widening to a non-loopback
+    // host. Pin a phrase that asserts the constraint.
+    expect(body.toLowerCase()).toMatch(/localhost only/i);
+  });
+
+  test("body documents that siteKey / extraAllowedHosts were dropped (open navigation)", () => {
+    // 2026-05-27 open-navigation revision: the POST body no longer
+    // accepts `siteKey` or `extraAllowedHosts` (legacy callers are
+    // silently ignored). The skill must say so explicitly so the agent
+    // doesn't try to compose a pre-declared host set; navigation is open
+    // and gated by the user-curated denylist at runtime instead.
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    expect(body).toContain("siteKey");
+    expect(body).toContain("extraAllowedHosts");
+    expect(body.toLowerCase()).toMatch(/dropped both|silently ignored/i);
+  });
+
+  test("body carries no registered-siteKey table (open navigation guard)", async () => {
+    // 2026-05-27 open-navigation revision + the owner's "no hardcoded
+    // domain denylist" directive: browser-task navigation is open, so
+    // the skill must NOT enumerate a per-site table. SITE_REGISTRY still
+    // exists, but it backs the SEPARATE per-site sign-in / auth surface
+    // (`/api/browser-automation/sites/*`), NOT browser-task — so none of
+    // its keys should leak into a markdown table here. This guards
+    // against a future edit accidentally re-introducing the retired
+    // Phase-4 registered-site list.
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    const { SITE_REGISTRY } = await import(
+      "../services/browser-history/automation/site-registry.js"
+    );
+    const TABLE_ROW_RE = /^\|\s*`([a-z][a-z0-9_]+)`\s*\|/gm;
+    const referenced = new Set<string>();
+    let m: RegExpExecArray | null;
+    while ((m = TABLE_ROW_RE.exec(body)) !== null) {
+      referenced.add(m[1]);
+    }
+    for (const key of Object.keys(SITE_REGISTRY)) {
+      expect(
+        referenced.has(key),
+        `browser-task SKILL.md re-introduced a registered-site row for '${key}' — navigation is open (2026-05-27); the per-site table belongs to the sign-in surface, not this skill`,
+      ).toBe(false);
+    }
+    // Sign-in lives on the other surface — the skill must point there
+    // rather than implying browser-task drives per-site auth.
+    expect(body).toMatch(/\/api\/browser-automation\/sites/);
+  });
+});
+
+/**
  * Skill-body content invariants for the multi-purpose skills (`mail`,
  * `external-services`) whose direct-mode body must teach delegation-aware
  * routing for the integration that touches them. Without these
@@ -1639,7 +1819,17 @@ describe("description disjointness (P3)", () => {
  */
 describe("DM manifest body byte budget (P4)", () => {
   const DESIGN_BUDGET_BYTES = 80 * 1024;
-  const REGRESSION_CEILING_BYTES = 132 * 1024;
+  // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — bumped from 132 KB
+  // to 138 KB to admit the new `browser-task` SKILL.md (~6 KB) that
+  // teaches the DM agent the open-ended browser-task surface. The
+  // skill body is the smallest concrete artefact that closes the
+  // long-standing DM-driven browser-ops gap (the legacy
+  // `browser-history-managed` skill was never in message.received.dm).
+  // The aspirational 80 KB design target stands; per-skill phases in
+  // skills-improvement.md continue to step the ceiling back down as
+  // bodies trim. Do NOT raise this ceiling further without a similar
+  // justification — adding cost to the DM manifest is regression risk.
+  const REGRESSION_CEILING_BYTES = 138 * 1024;
 
   test("message.received.dm total SKILL.md bytes ≤ regression ceiling", () => {
     const slugs = EVENT_SKILL_SETS["message.received.dm"];

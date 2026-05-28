@@ -789,227 +789,25 @@ export type ChromiumInstallStartResponse = z.infer<
 >;
 
 // ─────────────────────────────────────────────────────────────────────
-// Browser Automation — Instance A workflow surface (Phase B-2).
-// MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.3–§8.10.
+// Browser Automation — Instance A workflow surface (Phase B-2 / B-3).
+// BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6 (Phase 6.5 follow-up) retired
+// the frozen workflow registry + the workflow-runner. The Phase-B-2
+// outcome enum, run-request / run-response shapes, recent-runs panel
+// schemas, and per-domain allowlist editor schemas all backed
+// `/api/browser-automation/{workflows,allowlist,recent-runs}` — every
+// one of those routes was deleted in `api/routes/browser-automation.ts`
+// (Phase 6). The schemas had no remaining callers and were removed in
+// the Phase 6.5 dead-code rip-out alongside the four allowlist store
+// functions and Migration 0005 (drop `browser_automation_allowlist`).
 //
-// These schemas live on the wire boundary — the daemon's route validates
-// the request body and renders the response. Per-workflow inputSchema /
-// outputSchema definitions live next to each workflow under
-// packages/daemon/src/services/browser-history/automation/workflows/
-// because they are workflow-specific (e.g., extractNewsArticle's
-// outputSchema is different from screenshotPage's).
+// `browser_automation_workflows` (audit table) is INTENTIONALLY
+// retained for historical lookup; its `outcome` CHECK constraint is
+// now data-only (no new INSERTs from any live code path), so a Zod
+// enum mirror is no longer load-bearing.
+//
+// New code (browser-task) uses `browser_task_action_log` for audit and
+// `browser_task` for terminal-state tracking — see schema.ts.
 // ─────────────────────────────────────────────────────────────────────
-
-/** Closed set of workflow-runner outcomes — kept in lockstep with the
- *  CHECK clause on `browser_automation_workflows.outcome` and with
- *  `WorkflowRunOutcome` in `automation/types.ts`. The schema's
- *  `superRefine` on the API layer cannot prevent drift between the three;
- *  the `outcome-drift.test.ts` lint enforces it. */
-export const browserAutomationOutcomeSchema = z.enum([
-  "success",
-  "unknown_workflow",
-  "input_validation_error",
-  "output_validation_error",
-  "url_not_allowlisted",
-  "user_allowlist_blocked",
-  "host_not_extractable",
-  "rate_limited",
-  "site_not_connected",
-  "playwright_launch_timeout",
-  "playwright_error",
-  "timeout",
-  // ── Phase B-3 (gated write automation) outcomes ──
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 steps 43-46.
-  // Kept in lockstep with the CHECK clause on
-  // `browser_automation_workflows.outcome` (see schema.ts) and with
-  // `WorkflowRunOutcome` in `automation/types.ts`.
-  "needs_approval",
-  "approval_expired",
-  "approval_token_invalid",
-  "payment_path_blocked",
-  // ── Phase B-4 (experimental purchase) runner-level outcomes ──
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17 / §13 steps 49-60.
-  //
-  // These fire BEFORE the workflow's `run()` is invoked — i.e., the
-  // master toggle is off, the site is not opted-in to B-4, a token is
-  // already pending for this site_key (per-site concurrency cap 1), or
-  // the per-site per-day token / spend cap is exhausted. In-flight
-  // branches (user replied wrong, timeout, page mutated under the
-  // pause, displayed total mismatch) surface through the workflow's
-  // structured `outputSchema.status` and the runner-level outcome stays
-  // `success` for those.
-  //
-  // The DM-token gate itself is enforced inside the workflow via
-  // `purchase-handler.awaitReply(jti)` — there is no runner-level
-  // `purchase_token_invalid` outcome because the agent CANNOT supply
-  // a token at the route layer (B-4's consent model is "daemon mints
-  // the token AFTER the pre-confirm screenshot; user types it in DM").
-  "purchase_b4_disabled",
-  "purchase_site_not_enabled",
-  "purchase_pending_exists",
-  "purchase_daily_cap_exceeded",
-]);
-export type BrowserAutomationOutcome = z.infer<
-  typeof browserAutomationOutcomeSchema
->;
-
-/** Workflow registry entry surfaced by `GET /api/browser-automation/workflows`. */
-export const browserAutomationWorkflowSummarySchema = z.object({
-  name: z.string().min(1).max(64).regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),
-  riskTier: z.enum(["autonomous", "read_sensitive", "approve"]),
-  /** Stringified RegExp source (sans flags). The runner enforces; this
-   *  is rendered for the dashboard's allowlist hint UI. */
-  allowlistRegex: z.string().max(512),
-  variant: z.enum(["anon", "auth", "purchase"]),
-  /** Defined when `variant !== "anon"` (B-2.5 / B-4 only). B-2 ships
-   *  anon workflows only; B-2.5+ workflows declare a registered site
-   *  key (e.g., `"amazon_jp"`). */
-  siteKey: z.string().min(1).max(64).optional(),
-  perWorkflowTimeoutMs: z.number().int().min(1000).max(600_000),
-});
-export type BrowserAutomationWorkflowSummary = z.infer<
-  typeof browserAutomationWorkflowSummarySchema
->;
-
-export const browserAutomationWorkflowListResponseSchema = z.object({
-  workflows: z.array(browserAutomationWorkflowSummarySchema).max(64),
-  /** True when the master managed-Chromium toggle is on AND the per-
-   *  install automation surface sub-toggle is on. The API layer reports
-   *  this so the dashboard's empty-state UX can distinguish "no
-   *  workflows registered" from "automation surface disabled". */
-  automationEnabled: z.boolean(),
-});
-export type BrowserAutomationWorkflowListResponse = z.infer<
-  typeof browserAutomationWorkflowListResponseSchema
->;
-
-/** Body of `POST /api/browser-automation/workflows/:name`. The runner
- *  forwards `params` to the workflow's `inputSchema.safeParse`; this
- *  outer schema only validates the envelope shape. */
-/** Single-use approval token — 32 hex characters (128 bits entropy)
- *  minted by `POST /api/browser-automation/approvals/:id/approve`.
- *  Required when invoking a B-3 workflow (riskTier=Approve, variant
- *  != purchase). The runner re-hashes and compares atomically; the
- *  raw token never lives in the DB. */
-export const browserAutomationApprovalTokenSchema = z
-  .string()
-  .regex(/^[0-9a-f]{32}$/);
-export type BrowserAutomationApprovalToken = z.infer<
-  typeof browserAutomationApprovalTokenSchema
->;
-
-export const browserAutomationRunRequestSchema = z.object({
-  /** Free-form params object. The per-workflow Zod schema lives daemon-
-   *  side and is the source of truth — duplicating it here would force
-   *  every workflow addition to touch the shared package. */
-  params: z.unknown(),
-  /** Required for B-3 workflows (riskTier=Approve, non-purchase
-   *  variant). Token must match a row in `browser_automation_approvals`
-   *  with status='approved' AND token_hash=sha256(token) AND
-   *  workflow_name AND params_hash AND expires_at > now. The runner
-   *  atomically flips the row to 'consumed' before Playwright fires. */
-  approvalToken: browserAutomationApprovalTokenSchema.optional(),
-});
-export type BrowserAutomationRunRequest = z.infer<
-  typeof browserAutomationRunRequestSchema
->;
-
-export const browserAutomationRunResponseSchema = z.object({
-  status: browserAutomationOutcomeSchema,
-  /** UUID-shape per-run id (matches `browser_automation_workflows.workflow_id`).
-   *  Returned for every status, including failures — so the dashboard's
-   *  trace viewer can link to the audit row even when the workflow
-   *  short-circuits before Playwright runs. */
-  workflowId: z.string().regex(/^[a-f0-9-]{36}$/),
-  /** Present only on `status === "success"`. Workflow-specific shape;
-   *  not Zod-validated here because the per-workflow outputSchema does
-   *  it daemon-side. */
-  output: z.unknown().optional(),
-  /** Present when input validation failed; Zod error tree. */
-  validationErrors: z.unknown().optional(),
-  /** Diagnostic detail for `host_not_extractable` /
-   *  `user_allowlist_blocked` / `url_not_allowlisted` /
-   *  `needs_approval` / `payment_path_blocked` / `site_not_connected`. */
-  detail: z
-    .object({
-      host: z.string().max(253).optional(),
-      url: z.string().url().max(2048).optional(),
-      reason: z.string().max(120).optional(),
-      siteKey: z.string().min(1).max(64).optional(),
-      // ── Phase B-3 surfaces ──
-      // Approval-handle returned alongside `needs_approval`. The
-      // caller (agent skill / dashboard) uses it to poll or to surface
-      // a deeplink. `expiresAt` is the 5-min TTL deadline; once it
-      // passes, the row flips to 'expired' and a fresh approval must
-      // be requested.
-      approvalId: z.string().regex(/^[a-f0-9-]{36}$/).optional(),
-      expiresAt: z.number().int().nonnegative().optional(),
-      // For `payment_path_blocked`: the category that matched
-      // (`checkout`, `payment`, `place-order`, `buy`, `place-bid`).
-      paymentPathCategory: z
-        .enum(["checkout", "payment", "place-order", "buy", "place-bid"])
-        .optional(),
-    })
-    .optional(),
-});
-export type BrowserAutomationRunResponse = z.infer<
-  typeof browserAutomationRunResponseSchema
->;
-
-export const browserAutomationAllowlistEntrySchema = z.object({
-  /** eTLD+1, lower-cased. The API rejects non-host strings (paths,
-   *  schemes, ports). */
-  domain: z
-    .string()
-    .min(1)
-    .max(253)
-    .regex(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/),
-  mode: z.enum(["read", "denied"]),
-  addedAt: z.number().int().nonnegative(),
-  addedBy: z.enum(["user", "system"]),
-});
-export type BrowserAutomationAllowlistEntry = z.infer<
-  typeof browserAutomationAllowlistEntrySchema
->;
-
-export const browserAutomationAllowlistResponseSchema = z.object({
-  entries: z.array(browserAutomationAllowlistEntrySchema).max(256),
-});
-export type BrowserAutomationAllowlistResponse = z.infer<
-  typeof browserAutomationAllowlistResponseSchema
->;
-
-export const browserAutomationAllowlistAddRequestSchema = z.object({
-  domain: browserAutomationAllowlistEntrySchema.shape.domain,
-  mode: z.enum(["read", "denied"]).default("read"),
-});
-export type BrowserAutomationAllowlistAddRequest = z.infer<
-  typeof browserAutomationAllowlistAddRequestSchema
->;
-
-export const browserAutomationRecentRunSchema = z.object({
-  workflowId: z.string().regex(/^[a-f0-9-]{36}$/),
-  workflowName: z.string(),
-  paramsHash: z.string(),
-  targetUrls: z.array(z.string().url()).max(10),
-  blockedRequests: z.array(z.string().url().max(2048)).max(200),
-  durationMs: z.number().int().nonnegative(),
-  outcome: browserAutomationOutcomeSchema,
-  startedAt: z.number().int().nonnegative(),
-  finishedAt: z.number().int().nonnegative(),
-  screenshotPath: z.string().nullable(),
-  tracePath: z.string().nullable(),
-});
-export type BrowserAutomationRecentRun = z.infer<
-  typeof browserAutomationRecentRunSchema
->;
-
-export const browserAutomationRecentRunsResponseSchema = z.object({
-  runs: z.array(browserAutomationRecentRunSchema).max(50),
-});
-export type BrowserAutomationRecentRunsResponse = z.infer<
-  typeof browserAutomationRecentRunsResponseSchema
->;
 
 // ─────────────────────────────────────────────────────────────────────
 // Browser Automation Sites — per-site authenticated sessions (Phase B-2.5).
@@ -1096,144 +894,16 @@ export type BrowserAutomationSiteActionResponse = z.infer<
 >;
 
 // ─────────────────────────────────────────────────────────────────────
-// Browser Automation Approvals — single-use, 5-min-TTL approval tokens
-// gating Phase B-3 write workflows.
-// MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 steps 43-46.
+// Browser Automation Approvals + Observation Gate (Phase B-3) — REMOVED.
+// BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6 + §6.8 Migration 0004 dropped
+// the `browser_automation_approvals` table and the
+// `/api/browser-automation/{approvals,observation-gate}` routes. The
+// approval-row / approval-status / approval-origin / approve-issue /
+// deny-request / deny-response / observation-gate schemas backed only
+// those routes; they were removed in the Phase 6.5 dead-code rip-out.
+// The B-3 single-use confirmation contract is replaced by:
+//   - `browser_task_clarifications` (mid-task ask_user from §5)
+//   - `browser_task_final_confirm_tokens` (DM token from §5; the plan
+//     drafted the name with a `lite_` prefix but the implementation
+//     shipped without — the table semantic is unchanged)
 // ─────────────────────────────────────────────────────────────────────
-
-export const browserAutomationApprovalStatusSchema = z.enum([
-  "pending",
-  "approved",
-  "consumed",
-  "denied",
-  "expired",
-]);
-export type BrowserAutomationApprovalStatus = z.infer<
-  typeof browserAutomationApprovalStatusSchema
->;
-
-export const browserAutomationApprovalOriginSchema = z.enum([
-  "agent",
-  "dashboard",
-  "schedule",
-]);
-export type BrowserAutomationApprovalOrigin = z.infer<
-  typeof browserAutomationApprovalOriginSchema
->;
-
-/** One row from `browser_automation_approvals`, projected for the
- *  dashboard. `tokenHash` and the raw token are never surfaced — the
- *  dashboard only needs the row's metadata + status. */
-export const browserAutomationApprovalRowSchema = z.object({
-  id: z.string().regex(/^[a-f0-9-]{36}$/),
-  workflowName: z.string().min(1).max(64).regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),
-  paramsHash: z.string().min(1).max(64),
-  /** JSON snippet of the params object the runner saw, truncated to
-   *  8 KB at insertion. Surface-only; the runner re-validates the
-   *  caller's params against the workflow's input schema on every
-   *  retry, so this field is not load-bearing. */
-  paramsSummary: z.string().max(8192),
-  status: browserAutomationApprovalStatusSchema,
-  origin: browserAutomationApprovalOriginSchema,
-  requestedAt: z.number().int().nonnegative(),
-  expiresAt: z.number().int().nonnegative(),
-  approvedAt: z.number().int().nonnegative().nullable(),
-  consumedAt: z.number().int().nonnegative().nullable(),
-  deniedAt: z.number().int().nonnegative().nullable(),
-  denialReason: z.string().max(200).nullable(),
-});
-export type BrowserAutomationApprovalRow = z.infer<
-  typeof browserAutomationApprovalRowSchema
->;
-
-export const browserAutomationApprovalsListResponseSchema = z.object({
-  /** Pending rows the dashboard surfaces with Approve / Deny buttons.
-   *  Sorted by `requestedAt` DESC; capped at 64 (a single user is the
-   *  only producer, so 64 active pending is enormous). */
-  pending: z.array(browserAutomationApprovalRowSchema).max(64),
-  /** Recently terminal rows (approved + consumed + denied + expired)
-   *  for the dashboard's "recent approvals" audit table. Capped at 50
-   *  rows, sorted by terminal timestamp DESC. */
-  recent: z.array(browserAutomationApprovalRowSchema).max(50),
-});
-export type BrowserAutomationApprovalsListResponse = z.infer<
-  typeof browserAutomationApprovalsListResponseSchema
->;
-
-/** Response of `POST /api/browser-automation/approvals/:id/approve`.
- *  The minted token is returned ONCE here and never re-readable —
- *  the dashboard renders it inline with a one-time-display banner and
- *  copy button. The user pastes it into the agent prompt or the
- *  dashboard's manual retry form. */
-export const browserAutomationApprovalIssueResponseSchema = z.object({
-  ok: z.literal(true),
-  approval: browserAutomationApprovalRowSchema,
-  /** 32 hex chars (128 bits entropy). Returned exactly once; never
-   *  fetchable from any later API call. */
-  token: browserAutomationApprovalTokenSchema,
-});
-export type BrowserAutomationApprovalIssueResponse = z.infer<
-  typeof browserAutomationApprovalIssueResponseSchema
->;
-
-export const browserAutomationApprovalDenyRequestSchema = z.object({
-  reason: z.string().min(1).max(200).optional(),
-});
-export type BrowserAutomationApprovalDenyRequest = z.infer<
-  typeof browserAutomationApprovalDenyRequestSchema
->;
-
-export const browserAutomationApprovalDenyResponseSchema = z.object({
-  ok: z.literal(true),
-  approval: browserAutomationApprovalRowSchema,
-});
-export type BrowserAutomationApprovalDenyResponse = z.infer<
-  typeof browserAutomationApprovalDenyResponseSchema
->;
-
-// ─────────────────────────────────────────────────────────────────────
-// Phase B-3 readiness panel — observation-gate criteria values.
-// MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 (table) + §13 milestone.
-// ─────────────────────────────────────────────────────────────────────
-
-export const browserAutomationObservationGateCriterionSchema = z.object({
-  /** Slug — stable identifier for the dashboard table row. */
-  id: z.enum([
-    "absolute_block_hits",
-    "compromise_signals",
-    "playwright_error_rate",
-    "timeout_rate",
-    "denylist_hits_per_workflow",
-    "reauth_false_positives",
-    "user_reported_high_severity",
-    "sandbox_refusals",
-  ]),
-  /** Display label rendered in the panel. */
-  label: z.string().min(1).max(120),
-  /** Numeric value observed across the 6-week observation window. */
-  value: z.number().nonnegative(),
-  /** Numeric threshold the value must remain at or under to pass. */
-  threshold: z.number().nonnegative(),
-  /** Coarse health bucket — green = passing, amber = trending toward
-   *  threshold (>= 75% of it), red = exceeded. */
-  status: z.enum(["green", "amber", "red"]),
-  /** Free-form context (one-liner explaining what the value counts). */
-  description: z.string().max(240),
-});
-export type BrowserAutomationObservationGateCriterion = z.infer<
-  typeof browserAutomationObservationGateCriterionSchema
->;
-
-export const browserAutomationObservationGateResponseSchema = z.object({
-  /** Window-start epoch ms — the daemon computes 42 days back from now. */
-  windowStartedAt: z.number().int().nonnegative(),
-  /** Window-end epoch ms — always `now`. */
-  windowEndedAt: z.number().int().nonnegative(),
-  criteria: z.array(browserAutomationObservationGateCriterionSchema).max(16),
-  /** Overall verdict — `green` only when every criterion is green;
-   *  `red` if any is red; otherwise `amber`. */
-  overall: z.enum(["green", "amber", "red"]),
-});
-export type BrowserAutomationObservationGateResponse = z.infer<
-  typeof browserAutomationObservationGateResponseSchema
->;

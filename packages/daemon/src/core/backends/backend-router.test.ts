@@ -212,12 +212,12 @@ describe("BackendRouter", () => {
 
     expect(binding.resolvedTier).toBe("high");
     // Model swapped to canonical high, max_turns/budget preserved.
-    // Canonical high = DEFAULT_CLAUDE_HIGH_MODEL (claude-opus-4-7);
+    // Canonical high = DEFAULT_CLAUDE_HIGH_MODEL (claude-opus-4-8);
     // backend_global_defaults is seeded by applySchema above, so
     // resolveCanonicalTierModel picks the seeded value.
     expect(binding.main).toEqual({
       backendId: "claude",
-      modelId: "claude-opus-4-7",
+      modelId: "claude-opus-4-8",
       maxTurns: 99,
       maxBudgetUsd: 9.9,
     });
@@ -244,7 +244,7 @@ describe("BackendRouter", () => {
       requestedTier: "high",
     });
 
-    expect(binding.main.modelId).toBe("claude-opus-4-7");
+    expect(binding.main.modelId).toBe("claude-opus-4-8");
     expect(binding.fallback).toBeNull();
   });
 
@@ -267,7 +267,7 @@ describe("BackendRouter", () => {
       requestedTier: "high",
     });
 
-    expect(binding.main.modelId).toBe("claude-opus-4-7");
+    expect(binding.main.modelId).toBe("claude-opus-4-8");
     expect(binding.fallback).not.toBeNull();
     expect(binding.fallback?.modelId).toBe("claude-opus-4-6");
   });
@@ -728,7 +728,7 @@ describe("BackendRouter", () => {
     // Core.execute should be called with the OVERRIDDEN model id.
     expect(core.execute).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelId: "claude-opus-4-7",
+        modelId: "claude-opus-4-8",
       }),
       undefined,
     );
@@ -2150,7 +2150,7 @@ describe("BackendRouter", () => {
       });
 
       // Tier-override behaviour preserved: sonnet → opus on heavy.
-      expect(binding.main.modelId).toBe("claude-opus-4-7");
+      expect(binding.main.modelId).toBe("claude-opus-4-8");
       // Pre-Phase-D this expected `null` because gmail was claimed by
       // morning_routine. Now the gate is silent for proxied integrations,
       // so the configured gemini fallback survives.

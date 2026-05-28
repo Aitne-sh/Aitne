@@ -153,7 +153,7 @@ describe("model-registry", () => {
   it("registers OpenCode provider/model composite defaults", () => {
     expect(latestLiteFor("opencode")).toBe("anthropic/claude-haiku-4-5");
     expect(latestMediumFor("opencode")).toBe("anthropic/claude-sonnet-4-6");
-    expect(latestHighFor("opencode")).toBe("anthropic/claude-opus-4-7");
+    expect(latestHighFor("opencode")).toBe("anthropic/claude-opus-4-8");
     expect(cheapestLiteFor("opencode")).toBe("anthropic/claude-haiku-4-5");
     expect(defaultModelForTier("opencode", "lite")).toBe(
       "anthropic/claude-haiku-4-5",
@@ -162,13 +162,33 @@ describe("model-registry", () => {
       "anthropic/claude-sonnet-4-6",
     );
     expect(defaultModelForTier("opencode", "high")).toBe(
-      "anthropic/claude-opus-4-7",
+      "anthropic/claude-opus-4-8",
     );
 
     const model = findRegisteredModel("opencode", "anthropic/claude-sonnet-4-6");
     expect(model?.backendId).toBe("opencode");
     expect(model?.usdPer1kIn).toBe(0.003);
     expect(model?.usdPer1kOut).toBe(0.015);
+  });
+
+  it("registers claude-opus-4-8 as the canonical high-tier model with Opus-4 pricing", () => {
+    // Opus 4.8 is the current Claude high-tier default. 4.7 and 4.6 stay
+    // registered but flagged deprecated so existing pins keep resolving with
+    // correct pricing while `latestHighFor` skips them.
+    expect(latestHighFor("claude")).toBe("claude-opus-4-8");
+    expect(defaultModelForTier("claude", "high")).toBe("claude-opus-4-8");
+
+    const model = findRegisteredModel("claude", "claude-opus-4-8");
+    expect(model?.tier).toBe("high");
+    expect(model?.deprecated).toBeUndefined();
+    expect(model?.usdPer1kIn).toBe(0.015);
+    expect(model?.usdPer1kOut).toBe(0.075);
+    expect(model?.usdPer1kCacheRead).toBe(0.0015);
+    expect(model?.usdPer1kCacheCreate).toBe(0.01875);
+
+    // Superseded Opus generations remain available but flagged legacy.
+    expect(findRegisteredModel("claude", "claude-opus-4-7")?.deprecated).toBe(true);
+    expect(findRegisteredModel("claude", "claude-opus-4-6")?.deprecated).toBe(true);
   });
 
   it("collapses cache-create cost to 0 when the model lacks usdPer1kCacheCreate", () => {

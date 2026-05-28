@@ -128,3 +128,29 @@ export function selectFirstPairedPlatform(
   return eligible[0]!;
 }
 
+/**
+ * Resolve the owner's most-recently-active DM channel as
+ * `{ platform, channelId }`, or null when no owner channel is paired.
+ *
+ * Used by the browser-task originating-channel resolver as a fallback when
+ * no B-4 primary channel is registered (the common case — B-4 is opt-in /
+ * default-off): the sub-agent's `ask_user` / `finish` DMs then land on
+ * whichever channel the owner last messaged from — in practice the channel
+ * that triggered the task, since the triggering inbound DM stamps
+ * `last_inbound_at`. Ordering: most recent inbound, then most recent
+ * outbound, then earliest-paired (`rowid`) as a stable tiebreak.
+ */
+export function selectDefaultOwnerChannel(
+  db: Database.Database,
+): { platform: string; channelId: string } | null {
+  const row = db
+    .prepare(
+      `SELECT platform, channel_id
+         FROM owner_channels
+        ORDER BY COALESCE(last_inbound_at, last_outbound_at, '') DESC, rowid ASC
+        LIMIT 1`,
+    )
+    .get() as { platform: string; channel_id: string } | undefined;
+  return row ? { platform: row.platform, channelId: row.channel_id } : null;
+}
+

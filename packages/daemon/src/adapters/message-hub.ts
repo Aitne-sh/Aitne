@@ -6,7 +6,11 @@ import {
 } from "../messaging/constants.js";
 import { formatAgentOutboundLabel } from "@aitne/shared";
 import { getOwnerChannel, upsertOwnerChannel } from "../messaging/owner-channels.js";
-import type { MessageAdapter, ProcessingIndicatorHandle } from "./types.js";
+import type {
+  MessageAdapter,
+  OutboundAttachmentRef,
+  ProcessingIndicatorHandle,
+} from "./types.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("message-hub");
@@ -397,6 +401,7 @@ export class MessageHub {
     channel: string,
     text: string,
     threadId?: string,
+    attachments?: OutboundAttachmentRef[],
   ): Promise<MessageDelivery> {
     const adapter = this.adapters.get(platform);
     if (!adapter) {
@@ -415,6 +420,7 @@ export class MessageHub {
       channel: resolvedChannel,
       text: this.decorateOutboundText(platform, text),
       threadId,
+      attachments,
     });
 
     if (channel === "user" && this.db) {

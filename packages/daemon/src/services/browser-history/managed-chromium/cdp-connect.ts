@@ -44,8 +44,19 @@ export type AcquirePlaywrightContextOptions =
       paDataDir: string;
       workflowId: string;
       variant: "anon";
-      /** Per-workflow positive selector (the workflow's `allowlistRegex`). */
-      allowlistRegex: RegExp;
+      /**
+       * Per-workflow positive selector. When `null` (the 2026-05-27
+       * open-navigation default for browser-task) the CDP layer
+       * enforces only the denylist. The legacy Instance A workflow
+       * path passes a real regex.
+       */
+      allowlistRegex: RegExp | null;
+      /**
+       * User-curated hostname denylist (compiled regexes). Threaded
+       * into the CDP route handler. Empty/undefined means "rely on
+       * IP CIDR + payment-path layers only".
+       */
+      hostnameDenylist?: ReadonlyArray<RegExp>;
     }
   | {
       db: Database.Database;
@@ -61,6 +72,9 @@ export type AcquirePlaywrightContextOptions =
        *  is a subset of the site's `allowedHostPattern` before reaching
        *  the launcher. */
       allowlistRegex: RegExp;
+      /** User-curated hostname denylist applied alongside the positive
+       *  selector. See `variant: "anon"` for the full semantics. */
+      hostnameDenylist?: ReadonlyArray<RegExp>;
     }
   | {
       db: Database.Database;
@@ -77,6 +91,9 @@ export type AcquirePlaywrightContextOptions =
       /** Per-workflow positive selector. The workflow declares this in
        *  its `allowlistRegex` (e.g. checkout-page subpath). */
       allowlistRegex: RegExp;
+      /** User-curated hostname denylist applied alongside the positive
+       *  selector. See `variant: "anon"` for the full semantics. */
+      hostnameDenylist?: ReadonlyArray<RegExp>;
     };
 
 /** Minimal CDP-side surface we need from playwright-core. Kept local so
@@ -95,8 +112,11 @@ export interface ManagedPlaywrightHandle {
    *  that don't need the strong type avoid a transitive playwright-core
    *  import. */
   context: unknown;
-  /** Per-workflow blocked-request audit accumulator. Read at release-
-   *  time to persist into `browser_automation_workflows.blocked_requests`. */
+  /** Per-task blocked-request audit accumulator. Read at release-
+   *  time by the browser-task runner to persist the count onto the
+   *  parent `browser_task` row (BROWSER_TASK_REDESIGN_PLAN.md §14.2);
+   *  pre-Phase-6 the workflow-runner persisted the list into
+   *  `browser_automation_workflows.blocked_requests` (retained audit). */
   blockedRequests: BlockedRequestRecorder;
   /** Idempotent teardown — closes context (anon-only — for auth/purchase
    *  the persistent default context is left in place so Chromium's own
@@ -235,6 +255,7 @@ export async function acquirePlaywrightContext(
       workflowId: opts.workflowId,
       allowlistRegex: opts.allowlistRegex,
       recorder,
+      hostnameDenylist: opts.hostnameDenylist,
     });
   } catch (err) {
     logger.warn(

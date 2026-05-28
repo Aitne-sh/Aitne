@@ -109,7 +109,7 @@ export const scheduleRequestSchema = z.object({
   // Free-form model token. Accepts:
   //   - the legacy aliases "sonnet" / "opus" (rewritten to tier_override
   //     at the route),
-  //   - any registered model id (e.g. "claude-opus-4-7", "gpt-5.4"),
+  //   - any registered model id (e.g. "claude-opus-4-8", "gpt-5.4"),
   //   - the disambiguator form "<backendId>/<modelId>" when the same
   //     model id appears under multiple backends.
   // Route-level `validateModelToken` enforces the registry-backed check

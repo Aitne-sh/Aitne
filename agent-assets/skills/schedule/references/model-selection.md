@@ -25,7 +25,7 @@ even after `/settings/models` re-routes the process key). The two are
   route to `tier:"medium"` / `tier:"high"`; the alias is not stored
   verbatim.
 - **Registered model ids** — any id from `MODEL_REGISTRY` across the
-  four backends. Examples: `claude-opus-4-7`, `claude-sonnet-4-6`,
+  four backends. Examples: `claude-opus-4-8`, `claude-sonnet-4-6`,
   `claude-haiku-4-5-20251001`, `gpt-5.4`, `gemini-3.1-pro-preview`.
   The row persists `(model, backend_id)` together so the dispatcher
   honors the pin at fire time.
@@ -33,7 +33,7 @@ even after `/settings/models` re-routes the process key). The two are
   registry that has the same model id under multiple backends (today
   unreachable but accepted). The prefix MUST be one of `claude` /
   `codex` / `gemini` / `opencode`; opencode model ids like
-  `anthropic/claude-opus-4-7` are NOT composites and fall through to
+  `anthropic/claude-opus-4-8` are NOT composites and fall through to
   the cross-backend scan.
 
 Unknown / ambiguous / deprecated model tokens surface through the
@@ -76,7 +76,7 @@ Response shape:
   "tiers": ["lite", "medium", "high"],
   "modelAliases": { "sonnet": "medium", "opus": "high" },
   "models": {
-    "claude":   [{ "id": "claude-opus-4-7", "tier": "high", "deprecated": false }, ...],
+    "claude":   [{ "id": "claude-opus-4-8", "tier": "high", "deprecated": false }, ...],
     "codex":    [...],
     "gemini":   [...],
     "opencode": [...]

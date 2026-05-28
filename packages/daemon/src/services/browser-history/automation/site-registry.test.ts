@@ -27,16 +27,117 @@ describe("site-registry", () => {
     expect(Object.isFrozen(SITE_REGISTRY)).toBe(true);
   });
 
-  it("exposes the initial B-2.5 sites", () => {
+  it("exposes the initial B-2.5 sites plus the Phase-4 social additions", () => {
+    // BROWSER_TASK_REDESIGN_PLAN.md §8 widens the registry from the
+    // B-2.5 initial three (amazon_jp, amazon_com, netflix) to seven
+    // by adding x_com, facebook, instagram, linkedin. Pin the full
+    // expected set so an accidental delete or duplicate surfaces here.
     const keys = listSites()
       .map((d) => d.siteKey)
       .sort();
-    expect(keys).toEqual(["amazon_com", "amazon_jp", "netflix"]);
+    expect(keys).toEqual([
+      "amazon_com",
+      "amazon_jp",
+      "facebook",
+      "instagram",
+      "linkedin",
+      "netflix",
+      "x_com",
+    ]);
   });
 
   it("getSite returns the right def by key", () => {
     const def = getSite("amazon_jp");
     expect(def?.displayName).toBe("Amazon Japan");
+  });
+
+  it("x_com allowedHostPattern admits both x.com and twitter.com (incl. mobile.)", () => {
+    // The Phase-4 registry entry intentionally widens to the legacy
+    // twitter.com host because the live site still serves redirects
+    // and asset URLs through it. Pin the positive + negative shape so
+    // a tightening of the pattern surfaces here.
+    const def = getSite("x_com");
+    expect(def).not.toBeNull();
+    const pattern = def!.allowedHostPattern;
+    expect(pattern.test("https://x.com/")).toBe(true);
+    expect(pattern.test("https://x.com/home")).toBe(true);
+    expect(pattern.test("https://www.x.com/")).toBe(true);
+    expect(pattern.test("https://mobile.x.com/")).toBe(true);
+    expect(pattern.test("https://twitter.com/")).toBe(true);
+    expect(pattern.test("https://www.twitter.com/")).toBe(true);
+    expect(pattern.test("https://mobile.twitter.com/")).toBe(true);
+    // Negative: a non-x host that prefix-collides on the eTLD label
+    // must NOT match.
+    expect(pattern.test("https://x.com.attacker.test/")).toBe(false);
+    expect(pattern.test("https://notx.com/")).toBe(false);
+    expect(pattern.test("https://twitter.com.attacker.test/")).toBe(false);
+  });
+
+  it("facebook allowedHostPattern admits both www. and m. (mobile) subdomains", () => {
+    const def = getSite("facebook");
+    expect(def).not.toBeNull();
+    const pattern = def!.allowedHostPattern;
+    expect(pattern.test("https://www.facebook.com/")).toBe(true);
+    expect(pattern.test("https://www.facebook.com/me")).toBe(true);
+    expect(pattern.test("https://m.facebook.com/")).toBe(true);
+    expect(pattern.test("https://facebook.com/")).toBe(true);
+    // Negative: prefix-collision rejection.
+    expect(pattern.test("https://facebook.com.attacker.test/")).toBe(false);
+    expect(pattern.test("https://notfacebook.com/")).toBe(false);
+  });
+
+  it("instagram allowedHostPattern admits only the canonical host", () => {
+    const def = getSite("instagram");
+    expect(def).not.toBeNull();
+    const pattern = def!.allowedHostPattern;
+    expect(pattern.test("https://www.instagram.com/")).toBe(true);
+    expect(pattern.test("https://www.instagram.com/accounts/edit/")).toBe(true);
+    expect(pattern.test("https://instagram.com/")).toBe(true);
+    expect(pattern.test("https://instagram.com.attacker.test/")).toBe(false);
+  });
+
+  it("linkedin allowedHostPattern admits only the canonical host", () => {
+    const def = getSite("linkedin");
+    expect(def).not.toBeNull();
+    const pattern = def!.allowedHostPattern;
+    expect(pattern.test("https://www.linkedin.com/")).toBe(true);
+    expect(pattern.test("https://www.linkedin.com/feed/")).toBe(true);
+    expect(pattern.test("https://linkedin.com/")).toBe(true);
+    expect(pattern.test("https://linkedin.com.attacker.test/")).toBe(false);
+  });
+
+  it("Phase-4 entries carry sane displayName + selector + sessionMaxAge", () => {
+    // Defence-in-depth: validateSiteRegistry already covers the
+    // structural invariants, but pin the human-readable fields too so
+    // a future refactor that swaps the displayName for a key string
+    // surfaces here.
+    const xCom = getSite("x_com")!;
+    expect(xCom.displayName).toBe("X (Twitter)");
+    expect(xCom.signedInSelector).toContain("data-testid");
+    expect(xCom.sessionMaxAgeDays).toBeGreaterThanOrEqual(30);
+
+    const fb = getSite("facebook")!;
+    expect(fb.displayName).toBe("Facebook");
+    expect(fb.signedInSelector).toContain("aria-label");
+
+    const ig = getSite("instagram")!;
+    expect(ig.displayName).toBe("Instagram");
+    // Regression guard: the original BROWSER_TASK_REDESIGN_PLAN.md §8
+    // table specified `[role='main']` for Instagram, but that matches
+    // BOTH the signed-in `/accounts/edit/` page AND the signed-out
+    // `/accounts/login/...` redirect target (Instagram's login page
+    // also wraps its form in `<main role="main">`). The bootstrap
+    // probe would have returned a false-positive `signedIn: true`
+    // after a user closed the window without authenticating. The fix
+    // pins the selector to the Explore link in the signed-in top nav,
+    // which the login page does not render. Keep both assertions so a
+    // future revert lights up here.
+    expect(ig.signedInSelector).not.toBe("[role='main']");
+    expect(ig.signedInSelector).toContain("/explore/");
+
+    const li = getSite("linkedin")!;
+    expect(li.displayName).toBe("LinkedIn");
+    expect(li.signedInSelector).toContain("data-test-global-nav-link");
   });
 
   it("getSite returns null for unknown keys (no exception)", () => {

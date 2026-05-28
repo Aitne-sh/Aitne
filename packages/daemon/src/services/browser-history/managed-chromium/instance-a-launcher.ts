@@ -52,6 +52,7 @@ import {
 } from "./instance-a-config.js";
 import { launchUnderSandbox } from "./sandbox-launcher.js";
 import { materialiseSandboxPrimitive } from "./sandbox-install.js";
+import { chromiumBundleRoot } from "../lifecycle/platform.js";
 
 const logger = createLogger("instance-a-launcher");
 
@@ -176,7 +177,7 @@ export async function launchInstanceA(
     const result = launchUnderSandbox(sandbox, {
       binary: binaryPath,
       args,
-      readableBindings: [binaryPath],
+      readableBindings: [chromiumBundleRoot(binaryPath)],
       writableBindings: [profileDir],
       detached: false,
     });

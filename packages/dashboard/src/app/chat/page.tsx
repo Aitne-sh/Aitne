@@ -129,7 +129,7 @@ export default function ChatPage() {
   // What to render in the top bar. Priority is past > override > live:
   //   - past: viewing a closed/browser-history session — model comes from
   //     the stored `conversation_sessions.model` row, translated via
-  //     formatShortModelName so the raw id ("claude-opus-4-7") renders as
+  //     formatShortModelName so the raw id ("claude-opus-4-8") renders as
   //     "Opus 4.7" with the correct backend badge color.
   //   - override: the user picked a non-default model in the picker but
   //     hasn't sent a turn yet (sessionInfo still reflects the last

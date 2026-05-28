@@ -75,7 +75,7 @@ coordinates the high-level gather → analyze → write loop.
    ```
    curl -s 'http://localhost:8321/api/schedule?status=pending,running&roadmapEligible=true'
    ```
-   The response is `{ items: [{ id, scheduledFor, taskType, description, status, model, backendId, tier, taskContext, createdAt }, ...] }`. `model` is a registered id verbatim (`claude-opus-4-7`, `gpt-5.4`, …) paired with `backendId` when the row pins a specific model; otherwise the pin lives in `tier`.
+   The response is `{ items: [{ id, scheduledFor, taskType, description, status, model, backendId, tier, taskContext, createdAt }, ...] }`. `model` is a registered id verbatim (`claude-opus-4-8`, `gpt-5.4`, …) paired with `backendId` when the row pins a specific model; otherwise the pin lives in `tier`.
    The daemon has already applied the roadmap visibility filter:
    `transient` / `low` are excluded, `normal` / unspecified rows are
    included only beyond the 7-day horizon, and `strategic` rows are

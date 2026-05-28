@@ -14,9 +14,19 @@
  *     needed for `connectOverCDP` (the daemon is the only consumer);
  *     including it would silently widen the local-CDP surface.
  *   - Per-workflow `--user-data-dir=<paDataDir>/chromium-automation-anon/<wfid>`.
- *   - `--no-sandbox` is **not** added — the OS-level sandbox primitive
- *     is the outer ring and Chromium's renderer sandbox stays as the
- *     middle ring.
+ *   - `--no-sandbox` is **not** added here. On macOS ≤ 25 / Linux /
+ *     Windows it is genuinely never added — the OS-level sandbox
+ *     primitive is the outer ring and Chromium's helper-process
+ *     renderer sandbox stays as the middle ring. On macOS 26+ the
+ *     launcher (`sandbox-launcher.ts:buildSandboxExecArgs`) injects
+ *     `--no-sandbox` itself when both the sandbox primitive is
+ *     `sandbox-exec` and `darwinTahoeOrLater()` is true, because
+ *     Tahoe's `forbidden-sandbox-reinit` default-deny makes the
+ *     middle ring fail unconditionally; the outer + inner rings
+ *     remain in force. Keeping the injection at the launcher rather
+ *     than this builder means an operator who chooses
+ *     `SandboxPrimitive.kind === "none"` (no outer ring) still gets
+ *     Chromium's middle ring as the only line of defence.
  *
  * Kept as a pure helper so the 100% coverage gate locks in:
  *   - the CDP port flag's exact shape (a typo would silently disable

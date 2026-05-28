@@ -13,17 +13,17 @@ import type { AgentConfig } from "../config.js";
 import { getContextDir } from "../config.js";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import {
-  deleteApprovalsOlderThan,
-  expireStaleApprovals,
-  scrubConsumedTokenHashes,
-} from "../db/browser-automation-approvals-store.js";
-import {
   expireStalePurchaseTokens,
   scrubRotatedPurchaseTokens,
   sweepOrphanedConsumedPurchaseTokens,
 } from "../db/browser-automation-purchase-tokens-store.js";
 import { deletePurchaseRepliesOlderThan } from "../db/browser-automation-purchase-replies-store.js";
 import { deleteWorkflowRunsOlderThan } from "../db/browser-automation-store.js";
+import { deleteTerminalBrowserTasksOlderThan } from "../db/browser-task-store.js";
+import {
+  expireStaleLiteFinalConfirmTokens,
+  scrubRotatedLiteFinalConfirmTokens,
+} from "../db/browser-task-final-confirm-tokens-store.js";
 import {
   cleanupConsumedObservations,
   getStalePendingObservationStats,
@@ -59,16 +59,6 @@ const RETENTION_DAYS = {
    */
   browserAutomationWorkflows: TRACE_RETENTION_DAYS,
   /**
-   * Phase B-3 (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step
-   * 43). Audit rows in `browser_automation_approvals` live for 30 d
-   * after they reach a terminal state (consumed / denied / expired).
-   * `token_hash` is rotated to NULL one day after `consumed_at` /
-   * `denied_at` so even the hash does not linger beyond the user-
-   * facing retention window.
-   */
-  browserAutomationApprovals: 30,
-  browserAutomationApprovalTokenHashScrub: 1,
-  /**
    * Phase B-4 (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.6 / §13 step
    * 60). The raw `!~xxxxxxxx` string is rotated to NULL 1 day after
    * the row reaches a terminal state — bounding the window in which a
@@ -78,6 +68,30 @@ const RETENTION_DAYS = {
    */
   browserAutomationPurchaseTokenScrub: 1,
   browserAutomationPurchaseReplies: 90,
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §6.5 deferred follow-up + §14.7.
+   * Terminal `browser_task` rows age out at 30 days — mirroring the
+   * trace-store screenshot window so a row never references missing
+   * screenshots. Children (`browser_task_action_log`,
+   * `browser_task_clarifications`, `browser_task_final_confirm_tokens`)
+   * cascade via FK ON DELETE CASCADE.
+   *
+   * Non-terminal rows (`pending` / `running` / `awaiting_user` /
+   * `final_confirm`) are NEVER deleted by retention — the boot-recovery
+   * sweep is the only path that mutates them past their owner's
+   * daemon-restart, so retention seeing one of them means the boot
+   * sweep itself is broken and we should not paper over it.
+   */
+  browserTask: TRACE_RETENTION_DAYS,
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §14.11 Q#6 — lite-final-confirm tokens
+   * carry the same `!~xxxxxxxx` shape as B-4 purchase tokens. Mirror the
+   * 1-day scrub window so a terminal row's raw token is rotated to NULL
+   * shortly after redemption / cancel / expiry. Reduces at-rest footprint
+   * without touching the row itself (which gets pruned via `browserTask`
+   * once the parent task ages out).
+   */
+  browserTaskFinalConfirmTokenScrub: 1,
   mailParseFailures: 30,
   managementParseFailures: 30,
   skillCurationSignals: 180,
@@ -228,15 +242,6 @@ export interface RetentionResult {
    *  `<PA_DATA_DIR>/automation-traces/`. Same retention horizon as
    *  `browserAutomationWorkflows`. */
   browserAutomationTraceDirs: number;
-  /** Phase B-3 — pending/approved approval rows flipped to expired
-   *  during the sweep (past their 5-min TTL). */
-  browserAutomationApprovalsExpired: number;
-  /** Phase B-3 — terminal approval rows whose `token_hash` was
-   *  rotated to NULL during this sweep. */
-  browserAutomationApprovalsScrubbed: number;
-  /** Phase B-3 — terminal approval rows older than the retention
-   *  horizon, deleted during this sweep. */
-  browserAutomationApprovalsDeleted: number;
   /** Phase B-4 — pending purchase tokens past their 5-min TTL flipped
    *  to expired (and their `cancel_reason` set to `timeout`) during
    *  the sweep. */
@@ -252,6 +257,25 @@ export interface RetentionResult {
   /** Phase B-4 — `_replies` audit rows older than the retention
    *  horizon, deleted during this sweep. */
   browserAutomationPurchaseRepliesDeleted: number;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §6.5 — terminal `browser_task` rows
+   * pruned during this sweep (children cascade via FK). Non-terminal
+   * rows are never counted here; boot-recovery owns them.
+   */
+  browserTask: number;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 — pending lite-final-confirm
+   * tokens past their 5-min TTL flipped to `expired` during this sweep
+   * (mirrors B-4's `browserAutomationPurchaseTokensExpired`).
+   */
+  browserTaskFinalConfirmTokensExpired: number;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §14.11 Q#6 — terminal
+   * lite-final-confirm token rows whose raw `token` was rotated to NULL
+   * during this sweep (mirrors B-4's
+   * `browserAutomationPurchaseTokensScrubbed`).
+   */
+  browserTaskFinalConfirmTokensScrubbed: number;
   /** Whether FTS5 segment optimization ran after content-table deletions. */
   ftsOptimized: boolean;
   /** Whether WAL checkpoint (TRUNCATE) succeeded after all DB operations. */
@@ -301,13 +325,13 @@ export function runRetentionCleanup(
     imminentEventNotifications: 0,
     browserAutomationWorkflows: 0,
     browserAutomationTraceDirs: 0,
-    browserAutomationApprovalsExpired: 0,
-    browserAutomationApprovalsScrubbed: 0,
-    browserAutomationApprovalsDeleted: 0,
     browserAutomationPurchaseTokensExpired: 0,
     browserAutomationPurchaseTokensOrphaned: 0,
     browserAutomationPurchaseTokensScrubbed: 0,
     browserAutomationPurchaseRepliesDeleted: 0,
+    browserTask: 0,
+    browserTaskFinalConfirmTokensExpired: 0,
+    browserTaskFinalConfirmTokensScrubbed: 0,
     ftsOptimized: false,
     walCheckpointed: false,
   };
@@ -341,13 +365,13 @@ export function runRetentionCleanup(
     integrationWrites: 0,
     imminentEventNotifications: 0,
     browserAutomationWorkflows: 0,
-    browserAutomationApprovalsExpired: 0,
-    browserAutomationApprovalsScrubbed: 0,
-    browserAutomationApprovalsDeleted: 0,
     browserAutomationPurchaseTokensExpired: 0,
     browserAutomationPurchaseTokensOrphaned: 0,
     browserAutomationPurchaseTokensScrubbed: 0,
     browserAutomationPurchaseRepliesDeleted: 0,
+    browserTask: 0,
+    browserTaskFinalConfirmTokensExpired: 0,
+    browserTaskFinalConfirmTokensScrubbed: 0,
   };
   db.transaction(() => {
     counts.mdFileSnapshots = deleteOlderThan(
@@ -516,40 +540,6 @@ export function runRetentionCleanup(
       );
     }
 
-    // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 step 43 —
-    // Phase B-3 approvals sweep. Three passes:
-    //   1. Flip stale pending/approved rows past expires_at →
-    //      'expired' so the dashboard's pending panel does not show
-    //      stale entries and a leaked token cannot redeem past TTL.
-    //   2. Rotate token_hash → NULL on terminal rows older than
-    //      `browserAutomationApprovalTokenHashScrub` days. Reduces
-    //      at-rest token-hash footprint.
-    //   3. Delete terminal rows older than
-    //      `browserAutomationApprovals` days. Caps audit-trail size.
-    try {
-      const now = Date.now();
-      counts.browserAutomationApprovalsExpired = expireStaleApprovals(db, now);
-      const scrubCutoff =
-        now -
-        RETENTION_DAYS.browserAutomationApprovalTokenHashScrub *
-          86_400_000;
-      counts.browserAutomationApprovalsScrubbed = scrubConsumedTokenHashes(
-        db,
-        scrubCutoff,
-      );
-      const deleteCutoff =
-        now - RETENTION_DAYS.browserAutomationApprovals * 86_400_000;
-      counts.browserAutomationApprovalsDeleted = deleteApprovalsOlderThan(
-        db,
-        deleteCutoff,
-      );
-    } catch (err) {
-      /* c8 ignore next 5 */
-      logger.warn(
-        { err },
-        "browser_automation_approvals sweep skipped (table missing)",
-      );
-    }
     // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.6 / §13 step 60 —
     // Phase B-4 purchase-tokens sweep. Four passes:
     //   1. Expire PRE-consume pending tokens past their TTL (in case
@@ -596,6 +586,38 @@ export function runRetentionCleanup(
         "browser_automation_purchase_tokens sweep skipped (table missing)",
       );
     }
+
+    // BROWSER_TASK_REDESIGN_PLAN.md §6.5 deferred follow-up — three
+    // passes on the new browser_task surface:
+    //   1. Expire pending lite-final-confirm tokens past their TTL.
+    //      A daemon-restart sweep handles the cold-start case; this
+    //      catches a daemon that ran past a token's 5-min window
+    //      without the runner's own deadline check firing.
+    //   2. Rotate `token` -> NULL on terminal lite-final-confirm rows
+    //      older than the 1-day scrub window (B-4 parity).
+    //   3. Delete terminal browser_task rows older than the
+    //      browserTask retention window. Children cascade via FK.
+    try {
+      const now = Date.now();
+      const expiredTokens = expireStaleLiteFinalConfirmTokens(db, now);
+      counts.browserTaskFinalConfirmTokensExpired = expiredTokens.length;
+      const tokenScrubCutoff =
+        now - RETENTION_DAYS.browserTaskFinalConfirmTokenScrub * 86_400_000;
+      counts.browserTaskFinalConfirmTokensScrubbed =
+        scrubRotatedLiteFinalConfirmTokens(db, tokenScrubCutoff);
+      const browserTaskCutoff =
+        now - RETENTION_DAYS.browserTask * 86_400_000;
+      counts.browserTask = deleteTerminalBrowserTasksOlderThan(
+        db,
+        browserTaskCutoff,
+      );
+    } catch (err) {
+      /* c8 ignore next 5 */
+      logger.warn(
+        { err },
+        "browser_task retention sweep skipped (tables missing)",
+      );
+    }
   })();
   // Transaction committed — safe to copy counts into result.
   result.mdFileSnapshots = counts.mdFileSnapshots;
@@ -626,12 +648,11 @@ export function runRetentionCleanup(
   result.integrationWrites = counts.integrationWrites;
   result.imminentEventNotifications = counts.imminentEventNotifications;
   result.browserAutomationWorkflows = counts.browserAutomationWorkflows;
-  result.browserAutomationApprovalsExpired =
-    counts.browserAutomationApprovalsExpired;
-  result.browserAutomationApprovalsScrubbed =
-    counts.browserAutomationApprovalsScrubbed;
-  result.browserAutomationApprovalsDeleted =
-    counts.browserAutomationApprovalsDeleted;
+  result.browserTask = counts.browserTask;
+  result.browserTaskFinalConfirmTokensExpired =
+    counts.browserTaskFinalConfirmTokensExpired;
+  result.browserTaskFinalConfirmTokensScrubbed =
+    counts.browserTaskFinalConfirmTokensScrubbed;
 
   // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.7 — pair the SQL prune
   // above with the FS prune of `<PA_DATA_DIR>/automation-traces/`.

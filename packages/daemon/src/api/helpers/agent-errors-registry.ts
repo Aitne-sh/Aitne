@@ -117,20 +117,20 @@ export const AGENT_ERROR_REGISTRY = {
     // pick from the live list rather than guessing.
     expected: "'sonnet' | 'opus' | a registered model id | omitted",
     hint:
-      "Pass one of: a legacy alias ('sonnet'/'opus' — rewritten to tier 'medium'/'high'); a full registered model id (e.g. 'claude-opus-4-7', 'gpt-5.4'); the composite form '<backendId>/<modelId>' when an id collides across backends; or omit `model` and use `tier` (recommended). The response's validValues lists every alias + every currently-registered model per backend — pick from that list and resubmit.",
+      "Pass one of: a legacy alias ('sonnet'/'opus' — rewritten to tier 'medium'/'high'); a full registered model id (e.g. 'claude-opus-4-8', 'gpt-5.4'); the composite form '<backendId>/<modelId>' when an id collides across backends; or omit `model` and use `tier` (recommended). The response's validValues lists every alias + every currently-registered model per backend — pick from that list and resubmit.",
     skillAnchor: "schedule#model-selection",
     docsUrl: "agent-assets/skills/schedule/references/errors.md#model_unknown",
     constraint: { type: "string", maxLength: 120 },
   },
   "schedule.model_ambiguous": {
-    // Today unreachable from the live registry (`claude-opus-4-7` vs
-    // opencode's `anthropic/claude-opus-4-7` differ), but the registry
+    // Today unreachable from the live registry (`claude-opus-4-8` vs
+    // opencode's `anthropic/claude-opus-4-8` differ), but the registry
     // is editable and a future entry could collide. The route's
     // validValues carries the per-backend matches list so the caller's
     // retry can disambiguate via the composite form.
     expected: "an unambiguous model token (use '<backendId>/<modelId>')",
     hint:
-      "The model id you supplied is registered under more than one backend. Resubmit using the composite '<backendId>/<modelId>' form (e.g. 'claude/claude-opus-4-7') so the daemon doesn't have to guess which backend you meant. The response's validValues.matches lists the colliding entries.",
+      "The model id you supplied is registered under more than one backend. Resubmit using the composite '<backendId>/<modelId>' form (e.g. 'claude/claude-opus-4-8') so the daemon doesn't have to guess which backend you meant. The response's validValues.matches lists the colliding entries.",
     skillAnchor: "schedule#model-selection",
     docsUrl: "agent-assets/skills/schedule/references/errors.md#model_ambiguous",
     constraint: { type: "string" },

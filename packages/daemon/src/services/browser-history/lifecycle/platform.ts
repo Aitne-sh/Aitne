@@ -1,7 +1,8 @@
 import { accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { readlink } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { homedir, release } from "node:os";
+import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ChromiumBrowserKey, HostProfile, SandboxPrimitive } from "../types.js";
@@ -219,17 +220,140 @@ function resolveLinuxSandboxPrimitive(): SandboxPrimitive {
  * `playwright install chromium` has been run on this host (either by
  * the daemon's opt-in install button or by an operator manually).
  *
- * Probes the OS-conventional cache root, enumerates `chromium-<build>`
- * subdirs (excluding `chromium_headless_shell-*` — Aitne needs the
- * headed binary for interactive sign-in), and returns the executable
- * inside the newest build that actually exists on disk. Returns null
- * when nothing matches.
+ * Strategy:
+ *   1. Ask `playwright-core` itself — its `chromium.executablePath()` is
+ *      the authoritative source for the current package layout, which
+ *      changes between Playwright minor versions (e.g. >=1.49 switched
+ *      macOS from `chrome-mac/Chromium.app/Contents/MacOS/Chromium` to
+ *      `chrome-mac-{arm64|x64}/Google Chrome for Testing.app/.../Google
+ *      Chrome for Testing`). Hardcoding the path here drifts every
+ *      time Playwright bumps its bundle naming, which is exactly the
+ *      bug this function was first written with.
+ *   2. Fall back to scanning the cache for any known build layout when
+ *      `playwright-core` is unresolvable (partial install) or returns a
+ *      path that no longer exists (operator removed the binary). The
+ *      fallback enumerates every layout we've ever shipped against so
+ *      stale caches and future renames degrade gracefully rather than
+ *      reporting "not installed".
  *
  * Side-effect-free; synchronous. Called from `browserBinaryFor` as the
  * fallback path AFTER the OS-package probe so a system-installed
  * Chromium (brew / apt / dnf) still wins when present.
  */
 function playwrightChromiumCacheCandidate(): string | null {
+  const fromPlaywright = playwrightExecutablePathSync();
+  if (fromPlaywright) return fromPlaywright;
+  return scanPlaywrightCacheForChromium();
+}
+
+/**
+ * Synchronous resolver for the Playwright-managed Chromium binary path.
+ * Exported so the install-completion callback in chromium-install.ts
+ * can share the same source of truth as the HostProfile probe.
+ */
+export function playwrightExecutablePathSync(): string | null {
+  try {
+    const req = createRequire(import.meta.url);
+    const pw = req("playwright-core") as {
+      chromium?: { executablePath?: () => string };
+    };
+    const exe = pw.chromium?.executablePath?.();
+    if (exe && existsSync(exe)) return exe;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compute the "bundle root" of a Chromium binary — the directory the OS
+ * sandbox layer must allow so Chromium can load its own helpers,
+ * frameworks, and resources at runtime.
+ *
+ * macOS: the nearest `.app` ancestor. Covers both `/Applications/
+ *        Chromium.app` (system) and `~/Library/Caches/ms-playwright/
+ *        chromium-*\/chrome-mac-*\/Google Chrome for Testing.app`
+ *        (Playwright cache) layouts. Without the .app subpath in the
+ *        `sandbox-exec` profile, `(deny default)` blocks Chromium from
+ *        reading its own `.framework/*` bundles and the spawn fails
+ *        silently with a renderer crash loop.
+ * Linux/Windows: the binary's parent directory. Playwright ships the
+ *        full chromium build inside `chrome-linux/` or
+ *        `chrome-win{64,}/`; system installs colocate helpers next to
+ *        the binary (`/usr/lib/chromium/` mounted via `/usr` for system
+ *        Chromium). Passing the parent dir as a `--ro-bind` covers all
+ *        the helper binaries bwrap would otherwise hide.
+ *
+ * Side-effect-free; pure path arithmetic. Returns the binary's parent
+ * directory on Apple paths that lack a `.app` ancestor — a safe
+ * conservative default rather than the binary path itself, which only
+ * covers the entrypoint file.
+ */
+/**
+ * macOS 26 (Tahoe, codename Tahoe) ships as Darwin 25.x.y. The kernel
+ * sandbox in this release default-denies the
+ * `forbidden-sandbox-reinit` operation, which is the operation
+ * Chromium's middle ring uses when each helper process (renderer,
+ * GPU, network, utility) calls `sandbox_init_with_parameters()` to
+ * apply its own additional seatbelt profile on top of the outer
+ * sandbox-exec profile.
+ *
+ * Concretely, on macOS 26 a Chromium spawned under our sandbox-exec
+ * outer ring sees every helper abort with
+ * `Failed to initialize sandbox. sandbox initialization failed:
+ * Operation not permitted`, the GPU/network services flap, and
+ * `gpu_data_manager_impl_private.cc` fatals with `GPU process isn't
+ * usable. Goodbye.` This is not a profile-language issue —
+ * `forbidden-sandbox-reinit` is not an operation name v1 sandbox
+ * profiles can `(allow ...)`; it is gated by Apple at a layer below
+ * sandbox-exec, addressable only via private entitlements we have no
+ * legitimate way to acquire.
+ *
+ * The architectural pivot — see also the `--no-sandbox` comment in
+ * `instance-a-config.ts:INSTANCE_A_SHARED_FLAGS` — is to drop the
+ * middle ring on macOS 26+ and rely on the outer (sandbox-exec) +
+ * inner (CDP route filter) rings only. Returning `true` from this
+ * helper instructs the sandbox launcher to inject `--no-sandbox` into
+ * the Chromium argv so the helpers skip the seatbelt reinit step
+ * entirely instead of aborting on it.
+ *
+ * Darwin major-version mapping for reference: macOS 13 → Darwin 22,
+ * macOS 14 → Darwin 23, macOS 15 → Darwin 24, macOS 26 → Darwin 25
+ * (Apple skipped the macOS 16–25 names in favour of a year-aligned
+ * jump). The threshold is `darwinMajor >= 25`.
+ */
+export function darwinTahoeOrLater(
+  platform: NodeJS.Platform = process.platform,
+  osRelease: () => string = release,
+): boolean {
+  if (platform !== "darwin") return false;
+  const major = Number.parseInt(osRelease().split(".")[0] ?? "0", 10);
+  return Number.isFinite(major) && major >= 25;
+}
+
+export function chromiumBundleRoot(binaryPath: string): string {
+  if (process.platform === "darwin") {
+    let current = binaryPath;
+    // Walk parent dirs until we find a *.app or reach the filesystem
+    // root. The `parent === current` check terminates at `/` (or `C:\`)
+    // where `dirname` becomes a fixed point.
+    while (true) {
+      const parent = dirname(current);
+      if (parent === current) break;
+      if (parent.endsWith(".app")) return parent;
+      current = parent;
+    }
+    return dirname(binaryPath);
+  }
+  return dirname(binaryPath);
+}
+
+/**
+ * Cache scan fallback. Enumerates every macOS / Linux / Windows
+ * Chromium-bundle layout Playwright has shipped against so a stale or
+ * mixed cache still resolves.
+ */
+function scanPlaywrightCacheForChromium(): string | null {
   const home = homedir();
   const cacheRoot =
     process.platform === "darwin"
@@ -247,6 +371,10 @@ function playwrightChromiumCacheCandidate(): string | null {
   } catch {
     return null;
   }
+  // `chromium_headless_shell-*` lives under the same cache root but
+  // starts with `chromium_` (underscore), not `chromium-` — the
+  // startsWith filter already excludes it, the explicit negation is
+  // defensive for any future name drift.
   const chromiumBuilds = entries.filter(
     (name) =>
       name.startsWith("chromium-") && !name.startsWith("chromium_headless_shell-"),
@@ -258,20 +386,34 @@ function playwrightChromiumCacheCandidate(): string | null {
     return bN - aN;
   });
   for (const build of chromiumBuilds) {
-    const exe =
-      process.platform === "darwin"
-        ? join(
-            cacheRoot,
-            build,
-            "chrome-mac",
-            "Chromium.app",
-            "Contents",
-            "MacOS",
-            "Chromium",
-          )
-        : process.platform === "win32"
-          ? join(cacheRoot, build, "chrome-win", "chrome.exe")
-          : join(cacheRoot, build, "chrome-linux", "chrome");
+    const buildPath = join(cacheRoot, build);
+    const exe = pickPlatformBinaryInBuild(buildPath);
+    if (exe) return exe;
+  }
+  return null;
+}
+
+function pickPlatformBinaryInBuild(buildPath: string): string | null {
+  const candidates =
+    process.platform === "darwin"
+      ? [
+          // Playwright 1.49+ chrome-for-testing layout, per architecture.
+          ["chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+          ["chrome-mac-x64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+          // Older Playwright Chromium layout (pre-1.49).
+          ["chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"],
+        ]
+      : process.platform === "win32"
+        ? [
+            // Playwright 1.49+ may emit chrome-win64; older builds used chrome-win.
+            ["chrome-win64", "chrome.exe"],
+            ["chrome-win", "chrome.exe"],
+          ]
+        : [
+            ["chrome-linux", "chrome"],
+          ];
+  for (const parts of candidates) {
+    const exe = join(buildPath, ...parts);
     if (existsSync(exe)) return exe;
   }
   return null;
@@ -309,17 +451,34 @@ function binaryOnPathSync(name: string): boolean {
  * some Chromium forks, PID not parseable, or dead PID. Callers should
  * fall through to a process-table probe for those cases.
  */
-export async function singletonLockHasLiveOwner(userDataDir: string): Promise<boolean> {
+/**
+ * Parses the SingletonLock symlink target (`<hostname>-<pid>`) and
+ * returns the encoded PID, or `null` when the symlink is missing,
+ * malformed, or the lock is a regular file (some Chromium forks).
+ *
+ * Does NOT verify the PID is still alive — callers that need a
+ * liveness check should compose this with `process.kill(pid, 0)` or
+ * use `singletonLockHasLiveOwner` instead. The supervisor's terminate
+ * path needs the raw PID even when liveness is unclear, so the parse
+ * is exposed separately from the liveness probe.
+ */
+export async function readSingletonLockOwnerPid(userDataDir: string): Promise<number | null> {
   let target: string;
   try {
     target = await readlink(join(userDataDir, "SingletonLock"));
   } catch {
-    return false;
+    return null;
   }
   const match = /-(\d+)$/.exec(target);
-  if (!match) return false;
+  if (!match) return null;
   const pid = Number(match[1]);
-  if (!Number.isFinite(pid) || pid <= 0) return false;
+  if (!Number.isFinite(pid) || pid <= 0) return null;
+  return pid;
+}
+
+export async function singletonLockHasLiveOwner(userDataDir: string): Promise<boolean> {
+  const pid = await readSingletonLockOwnerPid(userDataDir);
+  if (pid === null) return false;
   try {
     process.kill(pid, 0);
     return true;

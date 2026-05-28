@@ -1,15 +1,15 @@
 /**
  * Pure path helpers for the automation trace store.
  *
- * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.7.
- *
- * The trace store lives under `${PA_DATA_DIR}/automation-traces/`. Each
- * workflow run gets a subdirectory keyed by its UUID; the dashboard
- * serves trace + screenshot files via
- * `/api/browser-automation/traces/<workflowId>/<file>`. The file-system
- * side lives in `trace-store.ts` (I/O); this module owns the path
- * arithmetic, which is shared by the workflow runner, the API route's
- * static-file handler, and the daily cleanup cron.
+ * BROWSER_TASK_REDESIGN_PLAN.md §6.4 — the disk layout stayed the same
+ * (one subdirectory per task id under `${PA_DATA_DIR}/automation-traces/`)
+ * but the legacy `/api/browser-automation/traces/...` route was retired in
+ * Phase 6 alongside the workflow-runner. Screenshot URLs are now served
+ * from `/api/browser-task/:id/screenshots/:file`, defined in
+ * `api/routes/browser-task.ts`. The file-system side lives in
+ * `trace-store.ts` (I/O); this module owns the path arithmetic shared
+ * by the browser-task runner, the screenshot route's static-file
+ * handler, and the daily cleanup cron.
  *
  * The two purposes of pulling these helpers out as pure functions:
  *
@@ -57,7 +57,7 @@ export function tracesRootDir(paDataDir: string): string {
 
 /**
  * Resolve an API-served trace path (e.g.
- * `/api/browser-automation/traces/<wfid>/<file>`) to an on-disk
+ * `/api/browser-task/<taskId>/screenshots/<file>`) to an on-disk
  * absolute path under `paDataDir`, OR return null when the inputs do
  * not pass validation.
  *
@@ -102,14 +102,23 @@ export function resolveTraceFilePath(
   return candidate;
 }
 
-/** Build the API-served path the workflow stores in its output
- *  schema's `screenshotPath` field. The runner uses this to publish
- *  the URL the dashboard will fetch. */
+/** Build the API-served path for a captured screenshot.
+ *
+ *  BROWSER_TASK_REDESIGN_PLAN.md §6.4 — the URL is served by
+ *  `/api/browser-task/:id/screenshots/:file` (see
+ *  `api/routes/browser-task.ts`). `taskId` is the `browser_task.id`
+ *  (uuid v4); `fileName` must pass `TRACE_FILE_PATTERN`.
+ *
+ *  Previously named for the now-removed `/api/browser-automation/traces/...`
+ *  route. Kept as `apiPathForTraceFile` so its existing call sites in
+ *  `browser-task-tools/server.ts` continue to compile; the parameter
+ *  name on disk + in callers (`workflowId`) is a historical artefact
+ *  the browser-task runtime carries through unchanged. */
 export function apiPathForTraceFile(
   workflowId: string,
   fileName: string,
 ): string {
-  return `/api/browser-automation/traces/${workflowId}/${fileName}`;
+  return `/api/browser-task/${workflowId}/screenshots/${fileName}`;
 }
 
 /** Per-asset filename built from a label + a tag (timestamp or seq).

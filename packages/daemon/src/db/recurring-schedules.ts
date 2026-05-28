@@ -79,6 +79,26 @@ function rowToDTO(row: RecurringScheduleRow): RecurringScheduleDTO {
 
 // ── CRUD ─────────────────────────────────────────────────────────────
 
+/**
+ * Task types that MUST NOT become recurring rows.
+ * `reconcileRecurringSchedules` copies the parent row's `task_context`
+ * verbatim into every generated `agent_schedule` occurrence, so a recurring
+ * `browser_task` reuses a single fixed `preGeneratedTaskId` on each fire —
+ * the dispatcher's `getBrowserTask` dedup then hits `row_already_exists` and
+ * silently no-ops every occurrence after the first, so the recurring browser
+ * task only ever runs once. Recurring browser tasks are explicitly out of
+ * scope per BROWSER_TASK_REDESIGN_PLAN.md (one-shot scheduleAt path only);
+ * close the hole here rather than enable an undesigned feature.
+ *
+ * Note: `dm` / `dm_session` are intentionally NOT listed — the scheduler
+ * dispatches them per-occurrence with no preGeneratedTaskId dedup
+ * (`handleDirectDm` / a fresh `scheduled.dm` event), so recurring DMs /
+ * briefings are a supported, designed feature.
+ */
+const NON_RECURRING_ELIGIBLE_TASK_TYPES = new Set([
+  "browser_task",
+]);
+
 export function createRecurringSchedule(
   db: Database.Database,
   params: {
@@ -99,6 +119,16 @@ export function createRecurringSchedule(
     taskContext?: Record<string, unknown>;
   },
 ): RecurringScheduleDTO {
+  // Reject task types that can't safely recur (browser_task) as recurring
+  // task types. See NON_RECURRING_ELIGIBLE_TASK_TYPES — copying such a row's
+  // task_context into every occurrence reuses a single fixed
+  // preGeneratedTaskId, so only the first fire ever runs.
+  if (NON_RECURRING_ELIGIBLE_TASK_TYPES.has(params.taskType)) {
+    throw new Error(
+      `task_type '${params.taskType}' is not supported for recurring schedules`,
+    );
+  }
+
   const rule = params.recurrenceRule;
   const nextOccurrence = computeNextOccurrence(rule, new Date());
   const nextRunAt = nextOccurrence ? formatSqliteDatetime(nextOccurrence) : null;

@@ -658,26 +658,21 @@ export default defineConfig({
         "packages/daemon/src/api/routes/browser-history-managed.ts",
         "packages/daemon/src/bootstrap/managed-chromium.ts",
         // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-2 (Instance A) ──
-        // Same rationale as the B-1 exclusions above. Pure-logic peers
-        // (`automation/egress-denylist`, `automation/external-content`,
-        // `automation/trace-store-paths`, `automation/workflow-runner-utils`,
-        // `automation/workflows/registry`, `managed-chromium/instance-a-config`,
-        // `db/browser-automation-store`) stay in the covered set and are
-        // exercised by their peer *.test.ts files. The exclusions below are
-        // I/O-bound (Playwright `connectOverCDP`, `chromium` spawn,
-        // `fs/promises` against per-workflow profile dirs, kernel-assigned
-        // CDP port + HTTP fetch loop, dynamic `await import("playwright-core")`)
-        // and match the existing `chromium-launcher.ts` / `setup-bootstrap.ts`
-        // exclusion rationale.
+        // BROWSER_TASK_REDESIGN_PLAN.md Phase 6 retired the workflow runner
+        // and its registry; only the I/O primitives the new browser-task
+        // surface re-uses survive. Pure-logic peers (`automation/egress-
+        // denylist`, `automation/external-content`, `automation/trace-
+        // store-paths`, `db/browser-automation-store`) stay in the covered
+        // set and are exercised by their peer *.test.ts files. The
+        // exclusions below are I/O-bound (Playwright `connectOverCDP`,
+        // `chromium` spawn, `fs/promises` against per-task profile dirs,
+        // kernel-assigned CDP port + HTTP fetch loop, dynamic
+        // `await import("playwright-core")`) and match the existing
+        // `chromium-launcher.ts` / `setup-bootstrap.ts` exclusion rationale.
         "packages/daemon/src/services/browser-history/managed-chromium/instance-a-launcher.ts",
         "packages/daemon/src/services/browser-history/managed-chromium/cdp-connect.ts",
         "packages/daemon/src/services/browser-history/automation/cdp-network-interception.ts",
         "packages/daemon/src/services/browser-history/automation/trace-store.ts",
-        "packages/daemon/src/services/browser-history/automation/workflow-runner.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/extract-news-article.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/get-page-plain-text.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/screenshot-page.ts",
-        "packages/daemon/src/api/routes/browser-automation.ts",
         // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-2.5 (per-site
         // authenticated sessions) ── Pure-logic peers (`automation/site-registry`,
         // `db/managed-chromium-sites-store`) stay in the covered set and
@@ -686,20 +681,7 @@ export default defineConfig({
         // window, FS-bound per-site profile dir lifecycle) and match the
         // existing `setup-bootstrap.ts` exclusion rationale.
         "packages/daemon/src/services/browser-history/managed-chromium/site-bootstrap.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/get-amazon-purchase-history.ts",
         "packages/daemon/src/api/routes/browser-automation-sites.ts",
-        // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-3 (gated
-        // write automation) ── Pure-logic peers (`automation/payment-path-
-        // blocker`, `automation/approval-tokens`, `automation/workflow-
-        // runner-utils` B-3 branches, `automation/observation-gate`) stay
-        // in the covered set and are exercised by their peer *.test.ts
-        // files. The exclusions below are I/O-bound (`browser-automation-
-        // approvals-store` is pure SQL; the three B-3 workflow `run()`
-        // bodies hit Playwright same as the B-2 / B-2.5 workflows above).
-        "packages/daemon/src/db/browser-automation-approvals-store.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/subscribe-to-newsletter.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/fill-and-save-form.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/search-and-add-to-personal-notes.ts",
 
         // ── MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md Phase B-4 (purchase
         // confirmation flow) ── Pure-logic peers stay in the covered set:
@@ -720,8 +702,41 @@ export default defineConfig({
         "packages/daemon/src/db/browser-automation-purchase-replies-store.ts",
         "packages/daemon/src/db/browser-automation-purchase-tokens-store.ts",
         "packages/daemon/src/messaging/purchase-system-message-sender.ts",
+        "packages/daemon/src/messaging/final-confirm-system-message-sender.ts",
+        "packages/daemon/src/messaging/browser-task-mcp-notifier.ts",
         "packages/daemon/src/services/browser-history/automation/purchase-handler.ts",
-        "packages/daemon/src/services/browser-history/automation/workflows/confirm-cart-checkout.ts",
+
+        // ── BROWSER_TASK_REDESIGN_PLAN.md Phase 1 (browser-task surface) ──
+        // Pure-logic peers stay in the covered set: the slot manager
+        // (`services/browser-task/browser-task-slots.ts`), the deadline
+        // scanner pure function, the lite-final-confirm classifier
+        // (`automation/lite-final-confirm-tokens.ts`), and the
+        // allowlist-composition / boot-recovery / final-confirm-gate
+        // helpers all carry peer tests. The exclusions below are
+        // I/O-bound — SQL stores (better-sqlite3 prepare/run catches),
+        // the Hono route handler (multipart, originating-channel
+        // attestation, SSE), the runner stub (will become the real
+        // Playwright + Claude SDK driver in Phase 2), and the
+        // final-confirm-handler DM dispatch (mirrors the B-4
+        // purchase-handler exclusion). Mirrors the B-1..B-4 rationale.
+        "packages/daemon/src/db/browser-task-store.ts",
+        "packages/daemon/src/db/browser-task-action-log-store.ts",
+        "packages/daemon/src/db/browser-task-clarifications-store.ts",
+        "packages/daemon/src/db/browser-task-final-confirm-tokens-store.ts",
+        "packages/daemon/src/api/routes/browser-task.ts",
+        "packages/daemon/src/services/browser-history/automation/final-confirm-handler.ts",
+        "packages/daemon/src/services/browser-task/browser-task-runner.ts",
+        // ── BROWSER_TASK_REDESIGN_PLAN.md Phase 2 (Playwright + SDK driver) ──
+        // Pure-logic peers stay covered: tool schemas, navigate-guard,
+        // final-confirm-gate, loop-guard, extract-cap, extract-output,
+        // screenshot-output, dom-snapshot-output. The exclusions
+        // below are I/O-bound: the per-task MCP server composer
+        // (Playwright Page calls inside every tool handler), the
+        // driver (acquirePlaywrightContext + Claude SDK query stream
+        // consumer), and the route layer. Same rationale as the
+        // Phase 1 sibling exclusions above.
+        "packages/daemon/src/services/browser-history/automation/browser-task-tools/server.ts",
+        "packages/daemon/src/services/browser-task/browser-task-driver.ts",
 
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──
         // FS-locked write coordinator + best-effort cleanup helpers.

@@ -332,7 +332,7 @@ curl -s -X POST http://localhost:8321/api/schedule \
   -H 'Content-Type: application/json' \
   -d '{"time": "2026-04-06T16:00:00-04:00", "taskType": "wake", "description": "Check PR #42 status and notify user.", "tier": "medium", "taskContext": {"scheduledBy": "dm_conversation"}}'
 ```
-Fields: `time` (required), `taskType` (`wake`), `description` (required, min 20 chars), `tier` (`lite`/`medium`/`high`) **or** `model` (registered id like `claude-opus-4-7`, legacy alias `sonnet`/`opus`, or composite `<backendId>/<modelId>`) — mutually exclusive, `taskContext` (optional metadata). See the `schedule` skill body for the full surface and `/api/schedule/options` for the live model list.
+Fields: `time` (required), `taskType` (`wake`), `description` (required, min 20 chars), `tier` (`lite`/`medium`/`high`) **or** `model` (registered id like `claude-opus-4-8`, legacy alias `sonnet`/`opus`, or composite `<backendId>/<modelId>`) — mutually exclusive, `taskContext` (optional metadata). See the `schedule` skill body for the full surface and `/api/schedule/options` for the live model list.
 
 ### Manage pending items
 ```bash

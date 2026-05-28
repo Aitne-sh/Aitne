@@ -35,6 +35,18 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   // Monthly Review kill switch — defaults off pre-release; see
   // packages/daemon/src/settings/runtime-settings.ts for the rationale.
   "monthlyReviewEnabled",
+  // BROWSER_TASK_REDESIGN_PLAN.md §5.1 / §12 Q#5 — slot-policy + quiet-
+  // hours knobs for the open-ended browser sub-agent surface. All three
+  // are user-tunable from /settings/integrations/browser-history-managed
+  // and surface a dirty-dot via PAGE_KEYS in settings-navigation.tsx.
+  "browserTaskMaxConcurrent",
+  "browserTaskPendingQueueTimeoutMinutes",
+  "browserTaskRespectQuietHours",
+  // User-curated hostname denylist for the browser-task surface.
+  // Replaces the previously-hardcoded HOSTNAME_DENYLIST in
+  // egress-denylist.ts (which the framework no longer ships). Empty
+  // by default; operators add entries via Dashboard /settings/browser.
+  "browserTaskHostnameDenylist",
   "hourlyCheckEnabled", "hourlyCheckIntervalMinutes",
   "hourlyCheckActiveStartHour", "hourlyCheckActiveEndHour", "hourlyCheckMinObservations",
   // cost-reduction-structural §B — three-stage gate knobs.

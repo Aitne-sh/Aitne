@@ -98,7 +98,7 @@ describe("resolveModelToken — conflict + alias + registered + unknown", () => 
 
   it("captures (model, backendId) for a registered non-deprecated id", () => {
     const result = resolveModelToken({
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       tier: undefined,
       fieldBase: "model",
       tierField: "tier",
@@ -106,7 +106,7 @@ describe("resolveModelToken — conflict + alias + registered + unknown", () => 
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.model).toBe("claude-opus-4-7");
+    expect(result.model).toBe("claude-opus-4-8");
     expect(result.backendId).toBe("claude");
     expect(result.tierOverride).toBeNull();
     expect(result.warnings).toEqual([]);

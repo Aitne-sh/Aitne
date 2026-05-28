@@ -73,7 +73,7 @@ file and re-reads the frontmatter on every change.
 ## Configuration
 
 Each custom routine is a Markdown file under
-`~/.personal-agent/context/routines/custom/<slug>.md` whose
+`~/.personal-agent/context/policies/routines/custom/<slug>.md` whose
 frontmatter carries:
 
 | Field | Type | Notes |

@@ -550,7 +550,7 @@ describe("recurring-schedules routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...VALID_BODY,
-          model: "claude-opus-4-7",
+          model: "claude-opus-4-8",
         }),
       });
       expect(res.status).toBe(201);
@@ -558,7 +558,7 @@ describe("recurring-schedules routes", () => {
         item: { model: string | null; backendId: string | null; tier: string | null };
         warnings: unknown[];
       };
-      expect(data.item.model).toBe("claude-opus-4-7");
+      expect(data.item.model).toBe("claude-opus-4-8");
       expect(data.item.backendId).toBe("claude");
       expect(data.item.tier).toBeNull();
       expect(data.warnings).toEqual([]);

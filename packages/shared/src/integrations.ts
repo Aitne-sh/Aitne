@@ -1230,15 +1230,6 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
       // `status` GET as gated and let the mutation routes go through
       // the route-level risk-tier gate instead.
       "/api/browser-history/managed/status",
-      // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.10 — Phase B-2 workflow
-      // surface (Instance A). The list endpoint surfaces registered
-      // workflow names + per-workflow risk tier; gate it here so it
-      // only resolves while the parent integration is enabled.
-      // Workflow execution is route-level Approve-tier (see
-      // risk-classifier.ts); the listing GET stays Autonomous so the
-      // dashboard's "available workflows" badge can poll without a
-      // bearer.
-      "/api/browser-automation/workflows",
     ],
     userManagedConnector: false,
   },
@@ -1334,25 +1325,26 @@ export const BROWSER_HISTORY_PROCESS_KEYS: Readonly<
     rationale:
       "External write path (Obsidian/Notion); needs deny-rule layer covering the write surface.",
   },
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.13 — Phase B-2 scheduler /
-  // routine driven invocations. Workflow outputs include attacker-
-  // controlled prose (article body, page-text, search results) tagged
-  // with `<external-content>` wrappers. Claude's PreToolUse hook + the
-  // `classifyAbsoluteBlock` regex is the strongest enforcement surface
-  // for those payloads; Codex's allow mode cannot apply the absolute
-  // layer to shell commands (documented gap in 09-safety-cost.md §6.4),
-  // so even strict Codex is refused here for the same "constant approvals"
-  // argument cluster_update uses. Gemini is permitted because its admin-
-  // policy TOML carries the curl-flag denylist that closes the in-page
-  // exfiltration shape; opencode shares Claude's PreToolUse mechanic.
-  "routine.browser_automation_request": {
-    eligible: ["claude", "gemini", "opencode"],
-    forbiddenModes: [
-      { backend: "codex", mode: "allow" },
-      { backend: "codex", mode: "strict" },
-    ],
+  // BROWSER_TASK_REDESIGN_PLAN.md §5 + §2 — open-ended browser sub-agent.
+  // Claude-only. Two structural blockers behind that call:
+  //   (a) the 10 browser tools ship as an in-process `createSdkMcpServer`
+  //       instance that only Claude's `@anthropic-ai/claude-agent-sdk`
+  //       consumes — Codex/Gemini take stdio MCP servers as out-of-process
+  //       subprocesses and the daemon would have to redo the entire
+  //       per-task lifetime model to fit that;
+  //   (b) `allowedToolsOverride` is Claude-only per `agent-core.ts` JSDoc,
+  //       so Codex/Gemini have no way to enforce the "only these 10 tools"
+  //       envelope the safety floor demands.
+  // Sub-agent's safety floor matches `routine.research_dispatch`
+  // (attacker-controlled prose + external-content wrappers + PreToolUse
+  // enforcement). Fallback target intentionally NOT registered — on
+  // BackendQuotaError the task transitions to `failed
+  // (backend_unavailable)` rather than re-spawning on a backend that
+  // cannot consume the per-task SDK MCP server.
+  "browser_task": {
+    eligible: ["claude"],
     rationale:
-      "Medium-tier workflow invocation; workflow outputs carry attacker-influenced prose (`<external-content>` blocks). Requires PreToolUse / admin-policy enforcement; Codex's lack of either is the disqualifier in both modes.",
+      "DOM-driving sub-agent; in-process SDK MCP server is Claude-only; tool allowlist enforcement requires `allowedToolsOverride` which is Claude-only.",
   },
 };
 

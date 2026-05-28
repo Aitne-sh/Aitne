@@ -1164,6 +1164,7 @@ async function startup(): Promise<void> {
     handleGoogleServicesReady,
     handlePromptContextChanged,
     keepaliveTimer,
+    browserTaskDeadlineTimer,
   } = eventPipeline;
 
   // ── 11. Hono HTTP Server ──
@@ -1215,6 +1216,12 @@ async function startup(): Promise<void> {
     primaryVaultWatcher,
     delegatedBackendInvoker,
     gitAccountRegistry,
+    // BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — runner + shared slot
+    // state. Constructed in event-pipeline; threaded through here so
+    // the API surface's POST / GET / cancel routes operate on the
+    // same in-memory state as the runner's promote/release cascade.
+    browserTaskRunner: eventPipeline.browserTaskRunner,
+    browserTaskSlotStateRef: eventPipeline.browserTaskSlotStateRef,
     writeTracker,
     auditLogger,
     attachmentStore,
@@ -1613,6 +1620,8 @@ async function startup(): Promise<void> {
     });
     clearInterval(vaultHealthTimer);
     clearInterval(keepaliveTimer);
+    // BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — 30 s deadline tick.
+    clearInterval(browserTaskDeadlineTimer);
     clearTimeout(migrationBackupSweepInitial);
     clearInterval(migrationBackupSweepTimer);
     if (managementMdWatcher) {

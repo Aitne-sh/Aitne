@@ -555,6 +555,339 @@ describe("0003-browser-automation-workflows-b4-outcomes", () => {
   });
 });
 
+// BROWSER_TASK_REDESIGN_PLAN.md §6.8 / Phase 6 — peer test for the
+// `0004-drop-browser-automation-approvals` migration. Mirrors CLAUDE.md
+// non-negotiable #4: fresh DB → no-op + id recorded; pre-migration-
+// shape DB → DROP runs + id recorded; re-run on the dropped state →
+// no second drop.
+describe("0004-drop-browser-automation-approvals", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0004-drop-browser-automation-approvals",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when the browser_automation_approvals table does not exist (fresh DB)", () => {
+    // A fresh install no longer materialises the table from schema.ts
+    // (Phase 6 dropped the CREATE TABLE stanza). The migration body
+    // short-circuits on `!tableExists`; the runner still records the
+    // id so a subsequent boot doesn't re-evaluate.
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0004-drop-browser-automation-approvals",
+    ]);
+    expect(tableExists(db, "browser_automation_approvals")).toBe(false);
+    // schema_migrations row landed.
+    const recorded = db
+      .prepare<[], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0004-drop-browser-automation-approvals");
+    expect(recorded).toEqual({ id: "0004-drop-browser-automation-approvals" });
+  });
+
+  it("drops the table on an upgrading install that still carries it (pre-migration shape)", () => {
+    // Re-materialise the legacy shape — same CREATE the retired
+    // `schema.ts` stanza used — then run the migration. The body must
+    // drop the table without disturbing surrounding objects.
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_automation_approvals (
+        id              TEXT PRIMARY KEY,
+        workflow_name   TEXT NOT NULL,
+        params_hash     TEXT NOT NULL,
+        params_summary  TEXT NOT NULL,
+        origin          TEXT NOT NULL CHECK (origin IN ('agent', 'dashboard', 'schedule')),
+        status          TEXT NOT NULL CHECK (status IN (
+            'pending', 'approved', 'consumed', 'denied', 'expired'
+        )),
+        requested_at    INTEGER NOT NULL,
+        expires_at      INTEGER NOT NULL,
+        token_hash      TEXT,
+        approved_at     INTEGER,
+        consumed_at     INTEGER,
+        denied_at       INTEGER,
+        denial_reason   TEXT
+      );
+      CREATE INDEX idx_browser_automation_approvals_status
+        ON browser_automation_approvals(status, requested_at DESC);
+      CREATE INDEX idx_browser_automation_approvals_token_hash
+        ON browser_automation_approvals(token_hash)
+        WHERE token_hash IS NOT NULL;
+      INSERT INTO browser_automation_approvals
+        (id, workflow_name, params_hash, params_summary, origin, status,
+         requested_at, expires_at)
+        VALUES ('row-1', 'legacy_workflow', 'h', '{}', 'agent',
+                'consumed', 1, 2);
+    `);
+    expect(tableExists(db, "browser_automation_approvals")).toBe(true);
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0004-drop-browser-automation-approvals",
+    ]);
+    expect(tableExists(db, "browser_automation_approvals")).toBe(false);
+    // Indexes go with the table — SQLite's DROP TABLE cascades.
+    expect(indexExists(db, "idx_browser_automation_approvals_status")).toBe(
+      false,
+    );
+    expect(indexExists(db, "idx_browser_automation_approvals_token_hash")).toBe(
+      false,
+    );
+  });
+
+  it("is idempotent — re-running on the dropped state does not re-apply", () => {
+    // Same path as the fresh-DB case: the first call records the id;
+    // the second call finds the id in `schema_migrations` and skips
+    // the body. The table never reappears.
+    const db = openDb();
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(tableExists(db, "browser_automation_approvals")).toBe(false);
+  });
+});
+
+// BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6.5 dead-code rip-out. Same
+// CLAUDE.md non-negotiable #4 contract as the 0004 peer test above:
+// fresh DB → no-op + id recorded; pre-migration-shape DB → DROP runs +
+// id recorded; re-run on the dropped state → no second drop.
+describe("0005-drop-browser-automation-allowlist", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0005-drop-browser-automation-allowlist",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when the browser_automation_allowlist table does not exist (fresh DB)", () => {
+    // Fresh installs no longer materialise the table from schema.ts
+    // (Phase 6.5 dropped the CREATE stanza). The migration body short-
+    // circuits on `!tableExists`; the runner still records the id so a
+    // subsequent boot doesn't re-evaluate.
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0005-drop-browser-automation-allowlist",
+    ]);
+    expect(tableExists(db, "browser_automation_allowlist")).toBe(false);
+    const recorded = db
+      .prepare<[], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0005-drop-browser-automation-allowlist");
+    expect(recorded).toEqual({
+      id: "0005-drop-browser-automation-allowlist",
+    });
+  });
+
+  it("drops the table on an upgrading install that still carries it (pre-migration shape)", () => {
+    // Re-materialise the legacy shape — same CREATE the retired
+    // `schema.ts` stanza used — then run the migration. The body must
+    // drop the table without disturbing surrounding objects.
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_automation_allowlist (
+        domain     TEXT PRIMARY KEY,
+        mode       TEXT NOT NULL CHECK (mode IN ('read', 'denied')),
+        added_at   INTEGER NOT NULL,
+        added_by   TEXT NOT NULL CHECK (added_by IN ('user', 'system'))
+      );
+      INSERT INTO browser_automation_allowlist
+        (domain, mode, added_at, added_by)
+        VALUES ('example.com', 'read', 1, 'user');
+    `);
+    expect(tableExists(db, "browser_automation_allowlist")).toBe(true);
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0005-drop-browser-automation-allowlist",
+    ]);
+    expect(tableExists(db, "browser_automation_allowlist")).toBe(false);
+  });
+
+  it("is idempotent — re-running on the dropped state does not re-apply", () => {
+    const db = openDb();
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(tableExists(db, "browser_automation_allowlist")).toBe(false);
+  });
+});
+
+// `0006-message-dm-budget-bump` — same CLAUDE.md non-negotiable #4
+// contract: fresh DB (no table) → no-op + id recorded; pre-migration
+// preset-default row at $1.00 → bumped to $5.00 + id recorded;
+// operator-pinned ('user') or already-custom rows → untouched; re-run
+// → no second bump. Mirrors the "bump a default without clobbering
+// operator overrides" pattern.
+describe("0006-message-dm-budget-bump", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0006-message-dm-budget-bump",
+  );
+
+  function seedProcessConfigTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE process_backend_config (
+        process_key    TEXT PRIMARY KEY,
+        main_backend   TEXT NOT NULL,
+        main_model     TEXT NOT NULL,
+        max_turns      INTEGER NOT NULL,
+        max_budget_usd REAL NOT NULL,
+        updated_by     TEXT NOT NULL
+      );
+    `);
+  }
+
+  function insertRow(
+    db: Database.Database,
+    processKey: string,
+    maxBudgetUsd: number,
+    updatedBy: string,
+    backend = "claude",
+  ): void {
+    db.prepare(
+      `INSERT INTO process_backend_config
+         (process_key, main_backend, main_model, max_turns, max_budget_usd, updated_by)
+       VALUES (?, ?, 'seed-model', 50, ?, ?)`,
+    ).run(processKey, backend, maxBudgetUsd, updatedBy);
+  }
+
+  function budgetOf(db: Database.Database, processKey: string): number {
+    return (
+      db
+        .prepare<[string], { max_budget_usd: number }>(
+          "SELECT max_budget_usd FROM process_backend_config WHERE process_key = ?",
+        )
+        .get(processKey) as { max_budget_usd: number }
+    ).max_budget_usd;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when process_backend_config does not exist (fresh/empty DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0006-message-dm-budget-bump"]);
+    const recorded = db
+      .prepare<[], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0006-message-dm-budget-bump");
+    expect(recorded).toEqual({ id: "0006-message-dm-budget-bump" });
+  });
+
+  it("is a no-op on a fresh install where the seed already wrote the new $5.00", () => {
+    // Real fresh installs run applySchema (which now seeds message.dm at
+    // $5.00) BEFORE the migration runner. The band gate must recognise
+    // $5.00 as already-migrated and leave it alone — no double-touch.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 5.0, "preset", "claude");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(5.0);
+  });
+
+  it("bumps a claude preset-default message.dm row from $1.00 to $5.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.0, "preset", "claude");
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0006-message-dm-budget-bump"]);
+    expect(budgetOf(db, "message.dm")).toBe(5.0);
+  });
+
+  it("bumps an opencode preset-default message.dm row from $1.00 to $5.00", () => {
+    // opencode rides the Anthropic SDK — post-hoc factor 1, so its old
+    // and new defaults match claude (no scaling).
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.0, "preset", "opencode");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(5.0);
+  });
+
+  it("bumps a codex preset row from the scaled $1.50 to $7.50", () => {
+    // applyDefaultPresets stores the post-hoc-scaled budget — codex
+    // medium x1.5 → message.dm was seeded at $1.50, not $1.00. The
+    // migration must recognise that as the old default and lift it to
+    // the scaled new default ($5.00 x 1.5 = $7.50), NOT $5.00.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.5, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(7.5);
+  });
+
+  it("bumps a gemini preset row from the scaled $1.50 to $7.50", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.5, "preset", "gemini");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(7.5);
+  });
+
+  it("does not bump a codex preset row sitting at the claude $1.00 band", () => {
+    // Defensive: a codex row should only be lifted from its own scaled
+    // old default ($1.50). A codex row at $1.00 is not a recognised old
+    // default (it would be an operator oddity), so leave it untouched
+    // rather than guessing.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.0, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(1.0);
+  });
+
+  it("leaves a codex operator-pinned ('user') row untouched even at $1.50", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.5, "user", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(1.5);
+  });
+
+  it("leaves operator-pinned ('user') rows untouched even at $1.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.0, "user");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(1.0);
+  });
+
+  it("leaves a preset row already at a custom value untouched", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 2.5, "preset");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.dm")).toBe(2.5);
+  });
+
+  it("does not touch sibling conversational rows (message.mention)", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.mention", 1.0, "preset");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "message.mention")).toBe(1.0);
+  });
+
+  it("is idempotent — re-running does not bump again", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "message.dm", 1.0, "preset");
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(budgetOf(db, "message.dm")).toBe(5.0);
+  });
+});
+
 describe("schema introspection helpers", () => {
   it("tableExists returns true for an existing table and false otherwise", () => {
     const db = openDb();

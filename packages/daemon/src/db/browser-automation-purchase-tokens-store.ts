@@ -11,9 +11,13 @@
  * predicate columns, no application-side races possible.
  *
  * The pure decision tree (shape match, category, expiry) lives in
- * `automation/purchase-tokens.ts`; this module is the I/O wrapper. Same
- * separation pattern as `browser-automation-approvals-store.ts` /
- * `approval-tokens.ts`.
+ * `automation/purchase-tokens.ts`; this module is the I/O wrapper. The
+ * browser-task lite-final-confirm path uses the same I/O-vs-pure split
+ * (`browser-task-final-confirm-tokens-store.ts` + `automation/lite-final-
+ * confirm-tokens.ts`). The retired B-3 surface (`approval-tokens.ts` /
+ * `browser-automation-approvals-store.ts`) established this pattern;
+ * BROWSER_TASK_REDESIGN_PLAN.md §9 Phase 6 removed those files but the
+ * shape carries forward.
  *
  * Excluded from the 100% coverage gate — the file is prepared
  * statements and the SQL behaviour itself is exercised by integration
@@ -428,7 +432,7 @@ export interface ConsumePurchaseTokenInput {
   jti: string;
   channelRef: string;
   consumedAt: number;
-  /** Wall clock — drives the `expires_at > nowMs` CAS predicate. */
+  /** Wall clock — drives the `expires_at >= nowMs` CAS predicate. */
   nowMs: number;
 }
 
@@ -460,7 +464,7 @@ export function consumePurchaseToken(
             AND status = 'pending'
             AND consumed_at IS NULL
             AND cancelled_at IS NULL
-            AND expires_at > ?`,
+            AND expires_at >= ?`,
       )
       .run(input.consumedAt, input.channelRef, input.jti, input.nowMs);
     if (result.changes === 0) return null;

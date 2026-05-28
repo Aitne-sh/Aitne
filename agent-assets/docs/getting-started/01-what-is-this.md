@@ -135,7 +135,7 @@ an opaque vector store.
 
 - [`identity/profile.md`](../features/memory-files/user-profile.md) —
   what the agent knows about you.
-- [`projects/*.md`](../features/memory-files/projects.md) — one file
+- [`plans/projects/*.md`](../features/memory-files/projects.md) — one file
   per active project.
 - [`plans/roadmap.md`](../features/memory-files/roadmap.md) — longer-term
   goals.

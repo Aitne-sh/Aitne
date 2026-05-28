@@ -11,19 +11,23 @@
  * `finalize()` once the post-confirm click + screenshot are recorded.
  *
  * The agent CANNOT reach this module directly: it lives daemon-side
- * with no API route, the only entry point is the workflow's `run()`
- * (executed under `workflow-runner.ts`), and the system-message dispatch
- * goes through a module-level capability the agent cannot mint
- * (`PurchaseSystemMessageSender`). This is the structural anti-spoofing
- * layer §17.7 specifies: "agent tools cannot construct a fake
- * confirmation request because the credentialed sender refuses
- * unauthenticated callers".
+ * with no API route, the only entry points are the B-4 purchase
+ * workflow's `run()` (orchestrated by `browser-task-runner.ts` post-
+ * Phase 6 — the legacy `workflow-runner.ts` was retired in
+ * BROWSER_TASK_REDESIGN_PLAN.md §9) and the dispatcher's
+ * `jti`-prefix dispatch path shared with `final-confirm-handler.ts`,
+ * and the system-message dispatch goes through a module-level
+ * capability the agent cannot mint (`PurchaseSystemMessageSender`).
+ * This is the structural anti-spoofing layer §17.7 specifies: "agent
+ * tools cannot construct a fake confirmation request because the
+ * credentialed sender refuses unauthenticated callers".
  *
  * I/O-shaped (DB writes, async DM dispatch, polling timer). The
  * coverage gate excludes this module — the pure decision logic lives
  * in `purchase-tokens.ts` (shape parsing, classifyPurchaseReply,
  * classifyPurchaseTokenEcho) and is the covered surface. Integration
- * tests through the workflow runner exercise the full flow end-to-end.
+ * tests against the browser-task runner exercise the full flow end-
+ * to-end.
  */
 
 import type Database from "better-sqlite3";
@@ -332,6 +336,18 @@ export interface PurchaseHandler {
     reason: PurchaseCancelReason,
     mode?: CancelMode,
   ): Promise<PurchaseTokenRow | null>;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §14.11 Q#6 — jti-prefix dispatcher
+   * read side. Look up a token by raw `!~xxxxxxxx` string so the
+   * messaging adapter's inbound classifier can decide BEFORE calling
+   * `handleTokenReply` whether B-4 or the lite-final-confirm surface
+   * owns the matching row. Both jtis are uuid v4 so a colliding match
+   * is bounded by uuid uniqueness; the dispatcher resolves ties by
+   * `issuedAt`. Returns null when no row exists in this store —
+   * cosmically cheap (single indexed SELECT) so calling unconditionally
+   * is fine. Mirrors `FinalConfirmHandler.lookupByRaw`.
+   */
+  lookupByRaw(raw: string): PurchaseTokenRow | null;
   /** Adapter-side entry — see HandleTokenReplyOutcome above. */
   handleTokenReply(input: {
     body: string;
@@ -942,11 +958,16 @@ export function createPurchaseHandler(
     return cancelled;
   }
 
+  function lookupByRaw(raw: string): PurchaseTokenRow | null {
+    return getPurchaseTokenByRaw(deps.db, raw);
+  }
+
   return {
     issueToken,
     awaitReply,
     finalize,
     cancel,
+    lookupByRaw,
     handleTokenReply,
     handleVerifySlash,
     handleCancelPurchaseSlash,

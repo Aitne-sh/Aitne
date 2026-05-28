@@ -83,7 +83,7 @@ describe("trace-store-paths", () => {
   describe("apiPathForTraceFile", () => {
     it("builds the canonical API-served URL the dashboard fetches", () => {
       expect(apiPathForTraceFile(WFID, "1234-primary.png")).toBe(
-        `/api/browser-automation/traces/${WFID}/1234-primary.png`,
+        `/api/browser-task/${WFID}/screenshots/1234-primary.png`,
       );
     });
   });

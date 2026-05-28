@@ -160,25 +160,19 @@ export const CONFIGURABLE_PROCESS_KEYS = [
   "routine.research_offer_dm",
   "routine.research_dispatch",
   "routine.research_wiki_summary",
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.8 — Instance S health
-  // check. Lite tier; 6h cadence; reads `/api/browser-history/managed/
-  // status`, surfaces a summary in the agent journal when state is
-  // non-`ready`. Does NOT DM the user — DMs are sent deterministically
-  // by the `reauth-detector` in `managed-chromium-supervisor.ts`. This
-  // routine is for the agent's own awareness only.
-  "routine.managed_sync_health_check",
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.13 — scheduler / routine
-  // driven invocations of the Instance A browser-automation workflow
-  // surface. User-driven invocations from a DM stay under `message.dm`;
-  // this key is only emitted from `agent_schedule` rows that name a
-  // workflow (e.g. "every morning at 07:00, screenshotPage
-  // https://news.ycombinator.com"). Medium tier so the operator can
-  // pin a heavier model for shopping comparison / multi-step
-  // extraction workflows if needed. Backend safety floor: Claude only
-  // (workflow outputs include attacker-controlled prose; Claude's
-  // PreToolUse hook + absolute-block layer is the strongest
-  // enforcement surface; see plan §8.13 backend-floor rationale).
-  "routine.browser_automation_request",
+  // BROWSER_TASK_REDESIGN_PLAN.md §6.1 — open-ended browser sub-agent
+  // dispatched from `POST /api/browser-task` (DM-driven, dashboard, or
+  // scheduler). A fresh Claude-only IAgentCore drives a single Playwright
+  // BrowserContext via the in-process `aitne-browser` MCP server's
+  // tool envelope (navigate/screenshot/dom/click/type/extract/ask_user/
+  // yield_for_clarification/finish + `final-confirm` gate). Configurable
+  // so the schema-seed envelope (medium tier, 30 turns, $1.00) cascades
+  // through `applyDefaultPresets` on a main-backend switch — but the
+  // §6.1 backend safety floor in `BROWSER_HISTORY_PROCESS_KEYS` refuses
+  // non-Claude bindings outright (the SDK MCP server is Claude-only and
+  // `allowedToolsOverride` is the per-execute envelope enforcement; both
+  // are Claude-SDK-only features).
+  "browser_task",
 ] as const;
 
 const DEFAULT_PROCESS_KEYS = [
@@ -424,16 +418,12 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   "routine.research_offer_dm": "lite",
   "routine.research_dispatch": "medium",
   "routine.research_wiki_summary": "medium",
-  // Managed Chromium health-check awareness routine; lite tier because
-  // the task is a single GET + journal append.
-  "routine.managed_sync_health_check": "lite",
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.13 — Instance A workflow
-  // invocation entry point. Medium tier (Sonnet-class) because the
-  // session orchestrates one or more workflows (input shaping,
-  // post-run summarisation, optional follow-up DM); lite tier is too
-  // narrow when comparison-shopping workflows emit multi-vendor
-  // structured output the agent must condense for the user.
-  "routine.browser_automation_request": "medium",
+  // BROWSER_TASK_REDESIGN_PLAN.md §5 — Sonnet by default. Multimodal
+  // input cost from 4-5 screenshots over a 10-turn flow lands close to
+  // the medium-tier $1.00 cap; the schema seed pins 30/$1.00 in
+  // lock-step with the §5 envelope so a future widening keeps both in
+  // sync. Operators can pin lite/high per-row from /settings/models.
+  "browser_task": "medium",
 };
 
 export function isProcessKey(value: string): value is KnownProcessKey {

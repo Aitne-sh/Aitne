@@ -95,7 +95,16 @@ function createTestSetup() {
       notification_dispatch_id TEXT,
       timestamp TEXT DEFAULT (datetime('now'))
     );
-    CREATE TABLE agent_actions (id INTEGER PRIMARY KEY, action_type TEXT, trigger TEXT, result TEXT, cost_usd REAL DEFAULT 0, started_at TEXT DEFAULT (datetime('now')));
+    CREATE TABLE agent_actions (
+      id INTEGER PRIMARY KEY,
+      action_type TEXT,
+      trigger TEXT,
+      result TEXT,
+      cost_usd REAL DEFAULT 0,
+      detail JSON,
+      started_at TEXT DEFAULT (datetime('now')),
+      completed_at TEXT
+    );
     CREATE TABLE notification_log (
       id INTEGER PRIMARY KEY,
       dispatch_id TEXT NOT NULL DEFAULT '',
@@ -127,6 +136,13 @@ function createTestSetup() {
     timezone: "",
     schedulePollIntervalSeconds: 60,
     sessionTimeoutDmMinutes: 60,
+    // Defaults that the scheduler's new `browser_task` branch consults.
+    // Quiet-hours respect is on by default in production but `00:00`/
+    // `00:00` is the "disabled" sentinel — same idiom used by
+    // notification-manager.test.ts.
+    quietHoursStart: "00:00",
+    quietHoursEnd: "00:00",
+    browserTaskRespectQuietHours: true,
   } as unknown as AgentConfig;
 
   return { db, eventBus, config, tmpDir };
@@ -520,6 +536,155 @@ describe("AgentScheduler", () => {
       pin_to_quiet_hours_end: true,
     });
     expect(event.scheduleId).toBe(1);
+  });
+
+  // BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — `scheduled.browser_task`
+  // event firing from a `task_type='browser_task'` row. The plan §12 Q#5
+  // quiet-hours deferral peer-test follows.
+  it("dispatches task_type='browser_task' as a scheduled.browser_task event", async () => {
+    const ctx = JSON.stringify({
+      preGeneratedTaskId: "11111111-2222-3333-4444-555555555555",
+      description: "send a contact form on amazon",
+      siteKey: "amazon_jp",
+      extraAllowedHosts: [],
+      originatingChannel: "slack:U123",
+      requireFinalConfirm: true,
+    });
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status) VALUES (datetime('now', '-1 minutes'), 'browser_task', 'send a contact form on amazon', ?, 'pending')",
+    ).run(ctx);
+
+    setup.config.schedulePollIntervalSeconds = 0.1;
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, setup.config);
+    scheduler2.start();
+
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    const row = setup.db.prepare(
+      "SELECT status FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string };
+    expect(row.status).toBe("running");
+
+    const event = await setup.eventBus.get() as {
+      type: string;
+      source: string;
+      scheduleId: number;
+      taskContext: Record<string, unknown>;
+    };
+    expect(event.type).toBe("scheduled.browser_task");
+    expect(event.source).toBe("browser_task");
+    expect(event.scheduleId).toBe(1);
+    expect(event.taskContext).toEqual({
+      preGeneratedTaskId: "11111111-2222-3333-4444-555555555555",
+      description: "send a contact form on amazon",
+      siteKey: "amazon_jp",
+      extraAllowedHosts: [],
+      originatingChannel: "slack:U123",
+      requireFinalConfirm: true,
+    });
+  });
+
+  it("defers task_type='browser_task' when current time falls inside quiet hours", async () => {
+    // Set a 23-hour quiet-hours window that covers every wall-clock
+    // minute except 23:00-23:01. Whatever time the test runs, the
+    // window is in quiet hours. The branch should re-schedule the row
+    // forward to the end of the window and revert `status` to `pending`.
+    const cfg = { ...setup.config } as AgentConfig;
+    (cfg as { quietHoursStart: string }).quietHoursStart = "00:00";
+    (cfg as { quietHoursEnd: string }).quietHoursEnd = "23:00";
+    (cfg as { browserTaskRespectQuietHours: boolean }).browserTaskRespectQuietHours = true;
+    cfg.schedulePollIntervalSeconds = 0.1;
+
+    const ctx = JSON.stringify({
+      preGeneratedTaskId: "22222222-2222-3333-4444-555555555555",
+      description: "noop",
+      siteKey: "amazon_jp",
+    });
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status) VALUES (datetime('now', '-1 minutes'), 'browser_task', 'noop', ?, 'pending')",
+    ).run(ctx);
+
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, cfg);
+    scheduler2.start();
+
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    // Row should still be 'pending' — the scheduler reverted from
+    // 'running' (after the CAS claim) to 'pending' for retry.
+    const row = setup.db.prepare(
+      "SELECT status, scheduled_for FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string; scheduled_for: string };
+    expect(row.status).toBe("pending");
+    // scheduled_for must have moved forward past the original
+    // 'now - 1 minute' (the row was due in the past initially).
+    const nowMs = Date.now();
+    const newDueMs = Date.parse(row.scheduled_for.replace(" ", "T") + "Z");
+    expect(newDueMs).toBeGreaterThan(nowMs);
+
+    // EventBus must NOT have received a scheduled.browser_task event.
+    // The watcher loop bumped + continued without dispatching.
+    expect(setup.eventBus.size).toBe(0);
+
+    // Audit row recorded.
+    const audit = setup.db.prepare(
+      "SELECT action_type, result FROM agent_actions WHERE action_type = 'browser_task.deferred_for_quiet_hours'",
+    ).get() as { action_type: string; result: string } | undefined;
+    expect(audit).toBeDefined();
+    expect(audit?.result).toBe("success");
+  });
+
+  it("does NOT defer task_type='browser_task' when browserTaskRespectQuietHours is false", async () => {
+    const cfg = { ...setup.config } as AgentConfig;
+    (cfg as { quietHoursStart: string }).quietHoursStart = "00:00";
+    (cfg as { quietHoursEnd: string }).quietHoursEnd = "23:00";
+    (cfg as { browserTaskRespectQuietHours: boolean }).browserTaskRespectQuietHours = false;
+    cfg.schedulePollIntervalSeconds = 0.1;
+
+    const ctx = JSON.stringify({
+      preGeneratedTaskId: "33333333-2222-3333-4444-555555555555",
+      description: "noop",
+      siteKey: "amazon_jp",
+    });
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status) VALUES (datetime('now', '-1 minutes'), 'browser_task', 'noop', ?, 'pending')",
+    ).run(ctx);
+
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, cfg);
+    scheduler2.start();
+
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    // Row claimed + dispatched normally.
+    const row = setup.db.prepare(
+      "SELECT status FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string };
+    expect(row.status).toBe("running");
+    expect(setup.eventBus.size).toBeGreaterThanOrEqual(1);
+  });
+
+  it("marks task_type='browser_task' row failed when task_context is malformed JSON", async () => {
+    // Bypass the JSON-shape default by inserting raw garbage. The
+    // scheduler's per-branch JSON.parse catches the error and marks
+    // the row failed without dispatching an event.
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status) VALUES (datetime('now', '-1 minutes'), 'browser_task', 'noop', '{not json}', 'pending')",
+    ).run();
+
+    setup.config.schedulePollIntervalSeconds = 0.1;
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, setup.config);
+    scheduler2.start();
+
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    const row = setup.db.prepare(
+      "SELECT status FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string };
+    expect(row.status).toBe("failed");
+    expect(setup.eventBus.size).toBe(0);
   });
 
   it("skips future-scheduled tasks", async () => {

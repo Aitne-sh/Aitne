@@ -24,6 +24,11 @@ import {
   MessageDeliveryError,
   type MessageHub,
 } from "../adapters/message-hub.js";
+import type { OutboundAttachmentRef } from "../adapters/types.js";
+import {
+  resolveScreenshotAttachment,
+  type IngestOutboundImage,
+} from "./browser-task-screenshot-attachment.js";
 import {
   parseChannelRef,
 } from "../db/browser-automation-purchase-primary-channels-store.js";
@@ -68,10 +73,14 @@ function formatExpiry(expiresAtMs: number, nowMs: number): string {
 
 export interface CreatePurchaseSenderDeps {
   messageHub: MessageHub;
-  /** Base URL the daemon serves traces at — defaults to
-   *  `http://localhost:<PA_API_PORT>`; injected so the dashboard can
-   *  swap to a public-facing tunnel URL in tests. */
-  traceUrlBase?: string;
+  /** Daemon data directory (`PA_DATA_DIR`). Resolves the pre-confirm
+   *  screenshot key to its on-disk trace file so the bytes are attached
+   *  inline (messaging native upload / dashboard ingest) rather than sent
+   *  as a loopback URL the user cannot reach. */
+  paDataDir?: string;
+  /** Ingest hook for the `dashboard` platform — see
+   *  `browser-task-screenshot-attachment.ts`. */
+  ingestOutboundImage?: IngestOutboundImage;
   /** Override for tests; production uses Date.now. */
   nowFn?: () => number;
 }
@@ -90,7 +99,7 @@ export function createPurchaseSystemMessageSender(
 ): PurchaseSystemMessageSender {
   const expected = __aitneB4_getPurchaseHandlerCapability();
   const now = deps.nowFn ?? (() => Date.now());
-  const base = deps.traceUrlBase ?? "";
+  const paDataDir = deps.paDataDir ?? null;
 
   function assertCapability(received: PurchaseHandlerCapability): void {
     if (received !== expected) {
@@ -100,25 +109,36 @@ export function createPurchaseSystemMessageSender(
     }
   }
 
-  function buildTraceUrl(path: string): string {
-    if (!path) return "";
-    if (path.startsWith("http://") || path.startsWith("https://")) return path;
-    return base ? `${base}${path}` : path;
-  }
-
+  // The pre-confirm screenshot is delivered as actual image bytes — native
+  // upload for messaging adapters, AttachmentStore ingest for the dashboard —
+  // never a loopback trace URL (a phone cannot reach it; a raw dashboard
+  // <img> cannot authenticate it). See `browser-task-screenshot-attachment`.
   async function dispatch(
     ref: string,
     text: string,
+    screenshotKey?: string,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const parsed = parseChannelRef(ref);
     if (!parsed) {
       return { ok: false, reason: "invalid_ref" };
+    }
+    let attachments: OutboundAttachmentRef[] | undefined;
+    if (screenshotKey) {
+      const att = await resolveScreenshotAttachment({
+        platform: parsed.platform,
+        key: screenshotKey,
+        paDataDir,
+        ingestOutboundImage: deps.ingestOutboundImage,
+      });
+      if (att) attachments = [att];
     }
     try {
       await deps.messageHub.sendToPlatform(
         parsed.platform,
         parsed.channelId,
         text,
+        undefined,
+        attachments,
       );
       return { ok: true };
     } catch (err) {
@@ -139,13 +159,11 @@ export function createPurchaseSystemMessageSender(
       failed: readonly string[];
     }> {
       assertCapability(capability);
-      const traceUrl = buildTraceUrl(input.preScreenshotPath);
       const headerLine = `🔐 ${PURCHASE_CONFIRMATION_HEADER}`;
       const lines = [
         headerLine,
         `Site: ${input.siteKey}`,
         `Total: ${formatAmount(input.displayedTotalMinor, input.currency)}`,
-        `Pre-confirm screenshot: ${traceUrl}`,
         input.notesForUser
           ? `Agent's rationale: ${input.notesForUser}`
           : null,
@@ -157,10 +175,11 @@ export function createPurchaseSystemMessageSender(
       ]
         .filter((s): s is string => s !== null)
         .join("\n");
+      const screenshotKey = input.preScreenshotPath || undefined;
       const delivered: string[] = [];
       const failed: string[] = [];
       for (const ref of input.channels) {
-        const result = await dispatch(ref, lines);
+        const result = await dispatch(ref, lines, screenshotKey);
         if (result.ok) delivered.push(ref);
         else failed.push(ref);
       }

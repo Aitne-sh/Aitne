@@ -1,10 +1,14 @@
 import type Database from "better-sqlite3";
 import type { Event, MessageEvent } from "@aitne/shared";
-import { isMessageEvent, getAgentDayBoundsUtc, nowInTimezone } from "@aitne/shared";
+import { isMessageEvent, getAgentDayBoundsUtc } from "@aitne/shared";
 import { randomUUID } from "node:crypto";
 import type { AgentConfig } from "../config.js";
 import type { INotificationManager, ReplyActivityHandle } from "../core/dispatcher.js";
 import type { MessageReplyTarget } from "../core/dispatcher-types.js";
+import {
+  isInQuietHoursAt,
+  nextQuietHoursEndMs as computeNextQuietHoursEndMs,
+} from "../core/quiet-hours.js";
 import type { SignalDetector } from "../core/signal-detector.js";
 import type { MessageHub } from "./message-hub.js";
 import { recordProactiveForwardDeliveries } from "../core/channel-timeline.js";
@@ -747,44 +751,34 @@ export class NotificationManager implements INotificationManager {
    * null when quiet hours are not active. Used by
    * {@link scheduleBatchFlush} to defer pending batches past the
    * quiet-hours boundary so they actually deliver instead of being
-   * suppressed at flush time. Walks forward minute-by-minute (capped at
-   * 24 h) so configured timezone + overnight windows stay correct
-   * without re-deriving the boundary math here.
+   * suppressed at flush time.
+   *
+   * Thin wrapper around the shared `core/quiet-hours.ts` helper —
+   * NotificationManager and `ScheduleWatcher` (BROWSER_TASK_REDESIGN_PLAN
+   * §12 Q#5) share the same overnight-window math.
    */
   private nextQuietHoursEndMs(): number | null {
-    if (!this.isQuietHoursAt(new Date())) return null;
-    const startMs = Date.now();
-    for (let minutes = 1; minutes <= 24 * 60; minutes++) {
-      const probeAt = new Date(startMs + minutes * 60_000);
-      if (!this.isQuietHoursAt(probeAt)) return probeAt.getTime();
-    }
-    return null;
+    return computeNextQuietHoursEndMs(new Date(), this.quietHoursWindow());
   }
 
   /** Check if current time is within quiet hours (uses configured timezone) */
   isQuietHours(): boolean {
-    return this.isQuietHoursAt(new Date());
+    return isInQuietHoursAt(new Date(), this.quietHoursWindow());
   }
 
-  /**
-   * Quiet-hours predicate evaluated against an arbitrary wall-clock
-   * instant. Extracted from {@link isQuietHours} so {@link nextQuietHoursEndMs}
-   * can probe future times without mutating globals.
-   */
-  private isQuietHoursAt(at: Date): boolean {
-    const local = nowInTimezone(this.config.timezone || undefined, at);
-    const currentMinutes = local.hours * 60 + local.minutes;
-    const [startH, startM] = this.config.quietHoursStart.split(":").map(Number);
-    const [endH, endM] = this.config.quietHoursEnd.split(":").map(Number);
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-
-    if (startMinutes <= endMinutes) {
-      // Same day range (e.g., 09:00-17:00)
-      return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-    }
-    // Overnight range (e.g., 23:00-07:00)
-    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+  /** Frozen snapshot of the configured window — kept inline so the
+   *  cache invalidates naturally on every call (config can hot-reload
+   *  via PATCH /api/config). */
+  private quietHoursWindow(): {
+    start: string;
+    end: string;
+    timezone?: string;
+  } {
+    return {
+      start: this.config.quietHoursStart,
+      end: this.config.quietHoursEnd,
+      timezone: this.config.timezone || undefined,
+    };
   }
 
   /** Check if hourly or daily notification limits have been reached */

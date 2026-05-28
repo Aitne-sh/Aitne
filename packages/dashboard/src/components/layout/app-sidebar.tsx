@@ -22,6 +22,7 @@ import {
   NotebookText,
   Plug,
   GitBranch,
+  Globe2,
   Plane,
   Wallet,
   Heart,
@@ -35,6 +36,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { ConnectionStatus } from "./connection-status";
 import { useHealth } from "@/lib/hooks/use-health";
 import { useApprovals } from "@/lib/hooks/use-approvals";
+import { useAwaitingBrowserTasksCount } from "@/lib/hooks/use-browser-tasks";
 import { useConfig } from "@/lib/hooks/use-config";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 
@@ -145,6 +147,7 @@ export function AppSidebar() {
   // Data for badges
   const { data: health } = useHealth();
   const { data: approvals } = useApprovals();
+  const { data: awaitingBrowserTasks } = useAwaitingBrowserTasksCount();
   const streamEvents = useEventStream(100);
 
   const isActive = (href: string) => {
@@ -173,6 +176,13 @@ export function AppSidebar() {
 
   const pendingApprovals = approvals?.approvals.length ?? 0;
   const newEventCount = streamEvents.length;
+  // BROWSER_TASK_REDESIGN_PLAN.md §9a.4 — nav-entry red dot when any
+  // task sits in awaiting_user / final_confirm. Source of truth is the
+  // `awaiting-count` query (same anchor as the shell banner + the list
+  // strip), kept in lock-step by the Shape B SSE invalidation in
+  // sse-provider.tsx.
+  const awaitingBrowserTaskCount =
+    awaitingBrowserTasks?.total ?? awaitingBrowserTasks?.tasks.length ?? 0;
   const agentDisplayName = config?.agentDisplayName ?? DEFAULT_AGENT_DISPLAY_NAME;
 
   const sections: NavSection[] = [
@@ -201,6 +211,18 @@ export function AppSidebar() {
           ) : undefined,
         },
         { label: "Wake-ups", href: "/schedule", icon: Clock },
+        {
+          label: "Browser Tasks",
+          href: "/browser-tasks",
+          icon: Globe2,
+          badge:
+            !collapsed && awaitingBrowserTaskCount > 0 ? (
+              <span
+                className="ml-auto h-2 w-2 rounded-full bg-red-500"
+                aria-label={`${awaitingBrowserTaskCount} browser task(s) need your attention`}
+              />
+            ) : undefined,
+        },
         {
           label: "Analytics", href: "/analytics", icon: BarChart3,
           badge: health && !collapsed ? (

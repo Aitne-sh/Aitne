@@ -312,18 +312,46 @@ ambiguous-intent surfaces.
 ## Today.md
 
 The current agent day's main memory file under
-`~/.personal-agent/context/today.md`. Rebuilt once per day by the
+`~/.personal-agent/context/state/today.md`. Rebuilt once per day by the
 morning routine and edited by every DM, observation, and routine that
 needs to record state for the day.
 
 ## Wiki Workspace
 
 A single named root the wiki feature writes into. Either **internal**
-(`~/.personal-agent/wiki/`) or **external** (a path you point at, often
-an existing Obsidian vault). Every wiki bang command targets a
-workspace; omitting the `@<workspace>` token addresses the default.
+(`~/.personal-agent/context/knowledge/wiki/` after the context-vault v2 restructure;
+pre-v2 installs lived at `~/.personal-agent/wiki/`) or **external**
+(a path you point at, often an existing Obsidian vault). Every wiki bang
+command targets a workspace; omitting the `@<workspace>` token addresses the default.
 See [Wiki Overview](features/wiki/overview.md) and
 [Multiple Wikis](guides/multiple-wikis-for-multiple-domains.md).
+
+## Authority Class
+
+One of the six top-level partitions of the vault — `identity/`, `state/`,
+`plans/`, `journal/`, `knowledge/`, `policies/`. Each class carries a
+distinct authority + lifecycle contract; the daemon enforces by reading
+file frontmatter (Phase 1 advisory; Phase 2 strict). Established by the
+context-vault v2 restructure (CONTEXT_VAULT_REDESIGN_PLAN.md). See
+[Knowledge Layout](reference/knowledge-layout.md) for what lives in each.
+
+## Context Vault v2
+
+The vault layout introduced by the context-vault v2 restructure
+(migration id `0004-context-vault-restructure`) — six authority classes,
+in-process legacy path alias, `wiki/` and `integrations.md` and user
+`skills/` consolidated under the vault root. Migrates forward-only on
+first boot of the cutover release; never destroys user data. See
+[Knowledge Layout](reference/knowledge-layout.md).
+
+## Frontmatter Contract
+
+YAML preamble in each vault MD file declaring `kind` (one of the six
+class names), `authority` (`user` / `agent` / `mixed`), `mutability`
+(`replace` / `patch` / `append` / `readonly`), `slug`, and `title`.
+Parsed by `core/context-validation/frontmatter.ts`. Phase 1 logs
+warnings on missing/invalid frontmatter; Phase 2 rejects the write.
+Toggle: `runtimeSettings.contextVault.enforceFrontmatter` (default `false`).
 
 ## Wiki Layers
 

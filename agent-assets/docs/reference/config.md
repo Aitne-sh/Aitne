@@ -200,7 +200,7 @@ case-sensitive.
 | Key | Type | Notes |
 |---|---|---|
 | `advisorEnabled` | boolean | SDK advisor toggle. |
-| `advisorModel` | string | Model id (current SDK pins this to `opus-4-6` / `sonnet-4-6`; `opus-4-7` silently skips). |
+| `advisorModel` | string | Model id (current SDK pins this to `opus-4-6` / `sonnet-4-6`; newer Opus generations like `opus-4-7` / `opus-4-8` silently skip). |
 
 ## Routine Schedule Keys Don't Exist
 

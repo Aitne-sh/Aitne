@@ -2377,8 +2377,8 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Task that explicitly pins claude-opus-4-7 for a one-off run",
-          model: "claude-opus-4-7",
+          description: "Task that explicitly pins claude-opus-4-8 for a one-off run",
+          model: "claude-opus-4-8",
         }),
       });
 
@@ -2386,6 +2386,7 @@ describe("Agent API routes", () => {
       const body = await res.json() as { warnings: unknown[] };
       // Non-deprecated pin → no warning.
       expect(body.warnings).toEqual([]);
+      // (model pinned above is the current non-deprecated Opus generation)
       const row = db
         .prepare(
           "SELECT model, tier_override, backend_id FROM agent_schedule WHERE id = 1",
@@ -2395,7 +2396,7 @@ describe("Agent API routes", () => {
           tier_override: string | null;
           backend_id: string | null;
         };
-      expect(row.model).toBe("claude-opus-4-7");
+      expect(row.model).toBe("claude-opus-4-8");
       expect(row.backend_id).toBe("claude");
       expect(row.tier_override).toBeNull();
     });

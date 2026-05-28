@@ -222,45 +222,6 @@ const API_RISK: Record<string, RiskTier> = {
   "POST /api/browser-history/managed/install-chromium": RiskTier.Approve,
   "GET /api/browser-history/managed/install-chromium/status": RiskTier.Autonomous,
 
-  // ── Browser Automation (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.12) ──
-  // Phase B-2 Instance A workflow surface. `GET /workflows` is the
-  // dashboard's "available workflows" probe + the DM agent's
-  // discovery surface (the skill body documents that calling list is
-  // the legitimate way to see what's registered) — Autonomous so the
-  // skill's curl from a session workdir works without a bearer.
-  // Workflow execution itself is route-level Approve so a future
-  // B-3 / B-4 write workflow lands behind the bearer-gate without
-  // further classifier changes; the agent's path is the DM session,
-  // whose curl carries the daemon's per-session token via the
-  // existing `x-read-token` mechanism. The per-workflow risk tier
-  // declared in the workflow definition is the safety floor enforced
-  // inside `workflow-runner.ts`.
-  "GET /api/browser-automation/workflows": RiskTier.Autonomous,
-  "POST /api/browser-automation/workflows/{*}": RiskTier.Autonomous,
-  // Trace + screenshot read — files are bounded under
-  // `<PA_DATA_DIR>/automation-traces/<wfid>/`, the runner enforces the
-  // shape, and `resolveTraceFilePath` blocks directory-traversal
-  // attempts before any I/O. ReadSensitive so the agent can render a
-  // captured screenshot link in a DM (the dashboard reads with its
-  // bearer; the agent's curl carries the read-token). Two `{*}`
-  // segments because the route is `/traces/:wfid/:file` — the
-  // pattern matcher requires segment-count parity.
-  "GET /api/browser-automation/traces/{*}/{*}": RiskTier.ReadSensitive,
-  // Per-domain allowlist editor — dashboard-only. The agent has no
-  // legitimate path to widen its own automation reach (the skill body
-  // forbids it; the classifier tier is the structural defence).
-  "GET /api/browser-automation/allowlist": RiskTier.Autonomous,
-  "POST /api/browser-automation/allowlist": RiskTier.Approve,
-  "DELETE /api/browser-automation/allowlist/{*}": RiskTier.Approve,
-  // Recent runs — same shape as `/api/agent/actions`; the dashboard
-  // owns it and the agent reads via the read-token for its self-audit
-  // path (a future routine that surfaces "you ran 12 automations today
-  // but 4 failed" type DMs). ReadSensitive over Approve because the
-  // payload carries no raw URLs from the workflow inputs (only the
-  // hashes), so the dashboard's bearer is enough — Approve would be
-  // operationally noisy on a high-cadence run.
-  "GET /api/browser-automation/recent-runs": RiskTier.ReadSensitive,
-
   // ── Browser Automation Sites (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §16.9) ──
   // Phase B-2.5 per-site sign-in surface. Reads (`sites`,
   // `sites/{*}/status`) are Autonomous so the dashboard's per-site
@@ -278,21 +239,6 @@ const API_RISK: Record<string, RiskTier> = {
   "POST /api/browser-automation/sites/{*}/finalize": RiskTier.Approve,
   "POST /api/browser-automation/sites/{*}/reauth": RiskTier.Approve,
   "POST /api/browser-automation/sites/{*}/disconnect": RiskTier.Approve,
-
-  // ── Browser Automation Approvals (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10) ──
-  // Phase B-3 single-use, 5-min-TTL approval gate. The list endpoint
-  // is Autonomous so the agent's skill can self-survey "is there a
-  // pending approval already?" (curl from the session workdir works
-  // without a bearer). Approve / Deny are dashboard-only — the user's
-  // explicit click is what mints / cancels the token; the agent
-  // cannot reach these endpoints by design (its read-token tier
-  // tops out at ReadSensitive). The observation-gate read is
-  // Autonomous so the dashboard's status card polls without a
-  // bearer; it carries only aggregate counts, no PII.
-  "GET /api/browser-automation/approvals": RiskTier.Autonomous,
-  "POST /api/browser-automation/approvals/{*}/approve": RiskTier.Approve,
-  "POST /api/browser-automation/approvals/{*}/deny": RiskTier.Approve,
-  "GET /api/browser-automation/observation-gate": RiskTier.Autonomous,
 
   // ── Browser Automation Purchase (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.10) ──
   // Phase B-4 experimental purchase surface. Token issuance is
@@ -315,6 +261,44 @@ const API_RISK: Record<string, RiskTier> = {
   "PATCH /api/browser-automation/sites/{*}/b4-config": RiskTier.Approve,
   "GET /api/browser-automation/b4/primary-channels": RiskTier.Autonomous,
   "PATCH /api/browser-automation/channels/{*}/{*}/primary": RiskTier.Approve,
+
+  // ── Browser Task (BROWSER_TASK_REDESIGN_PLAN.md §3) ──
+  // Open-ended natural-language browser sub-agent surface. POST is
+  // Autonomous — the only production caller today is the DM-agent
+  // `browser-task` skill, whose curl shim carries only `x-read-token`
+  // (sufficient for ReadSensitive, never enough for Approve). The
+  // historical Approve tier here assumed a Phase 2 "DM-agent adapter
+  // holds the dashboard bearer" path that was never wired, producing
+  // a 401 on every DM-driven dispatch. Matching the sibling agent-
+  // driven write paths (clarify + cancel, both Autonomous) keeps the
+  // surface coherent. Defense-in-depth that actually matters lives
+  // downstream and is independent of the API auth tier:
+  //   1. Host-header loopback gate + sec-fetch-site / origin checks
+  //      in `evaluateLoopbackBrowserGate` — CSRF protection survives
+  //      at Autonomous (only same-origin POSTs from localhost:3000
+  //      reach the handler).
+  //   2. `x-pa-channel-ref` attestation against `listPrimaryChannels()`
+  //      inside the POST handler — a request whose channel is out of
+  //      the primary set is silently downgraded with a
+  //      `browser_task_channel_override` audit row.
+  //   3. Per-task global cap, user-curated `browserTaskHostnameDenylist`,
+  //      hardcoded payment-path block, and the B-4 final-confirm
+  //      token gate inside the runner.
+  //   4. Every dispatched task surfaces to the user via DM — there is
+  //      no covert dispatch path. A future dashboard re-run button
+  //      that calls this endpoint will still authenticate via Bearer
+  //      because the dashboard proxy attaches one by default; the
+  //      tier change only affects what's required, not what's offered.
+  // The list / detail / events / screenshot reads stay ReadSensitive
+  // because the task description + action log can carry personal
+  // context (account ids, free-text intent).
+  "POST /api/browser-task": RiskTier.Autonomous,
+  "GET /api/browser-task": RiskTier.ReadSensitive,
+  "GET /api/browser-task/{*}": RiskTier.ReadSensitive,
+  "GET /api/browser-task/{*}/events": RiskTier.ReadSensitive,
+  "GET /api/browser-task/{*}/screenshots/{*}": RiskTier.ReadSensitive,
+  "POST /api/browser-task/{*}/clarify": RiskTier.Autonomous,
+  "POST /api/browser-task/{*}/cancel": RiskTier.Autonomous,
 
   "/api/setup": RiskTier.Approve,
   "POST /api/setup/redetect-browsers": RiskTier.Approve,

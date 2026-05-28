@@ -187,12 +187,12 @@ function findInSnapshot(
  *      ambiguous match is impossible by construction. A slash-bearing
  *      token whose prefix is NOT a backend id falls through to the
  *      cross-backend scan — opencode model ids like
- *      `anthropic/claude-opus-4-7` would otherwise be unreachable.
+ *      `anthropic/claude-opus-4-8` would otherwise be unreachable.
  *   3. Cross-backend exact match in the snapshot:
  *        - exactly one match → kind:"model"
  *        - multiple matches  → kind:"ambiguous" (future-proof; today
- *          unreachable because `claude-opus-4-7` and opencode's
- *          `anthropic/claude-opus-4-7` differ — but the registry is
+ *          unreachable because `claude-opus-4-8` and opencode's
+ *          `anthropic/claude-opus-4-8` differ — but the registry is
  *          editable and a future entry could collide).
  *   4. No match → kind:"unknown" with the simplified validValues payload.
  *
@@ -227,7 +227,7 @@ export function validateModelToken(
       // picked a backend; ambiguous is impossible).
       return { kind: "unknown", validValues: simplifyForUnknownPayload(snapshot) };
     }
-    // Prefix did not match a backend id (e.g. "anthropic/claude-opus-4-7"
+    // Prefix did not match a backend id (e.g. "anthropic/claude-opus-4-8"
     // intended for opencode but lacking the explicit "opencode/" prefix).
     // Fall through to the cross-backend scan — `anthropic/...` IS a
     // registered opencode modelId, so step 3 still recognises it.

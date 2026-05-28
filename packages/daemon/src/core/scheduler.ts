@@ -12,6 +12,7 @@ import {
   nowInTimezone,
   type RoutineEvent,
   type AgentTaskEvent,
+  type ScheduledBrowserTaskEvent,
   type ScheduledDmEvent,
 } from "@aitne/shared";
 import type { AgentConfig } from "../config.js";
@@ -28,6 +29,7 @@ import {
 } from "../bootstrap/schedule-helpers.js";
 import { readRuntimeState, writeRuntimeState } from "../db/runtime-state.js";
 import { recordProactiveForwardDeliveries } from "./channel-timeline.js";
+import { isInQuietHoursAt, nextQuietHoursEndMs } from "./quiet-hours.js";
 
 /**
  * Runtime-state key holding the agent-day date string (`YYYY-MM-DD`) on
@@ -200,7 +202,7 @@ interface ScheduleRow {
   tier_override: string | null;
   /** SCHEDULE_API_REDESIGN_PLAN §4.3a — captured backend pin that
    *  companions `model`. Non-NULL only when the operator pinned a
-   *  registered full model id (e.g. 'claude-opus-4-7'). The dispatcher's
+   *  registered full model id (e.g. 'claude-opus-4-8'). The dispatcher's
    *  override block guards on BOTH `requestedBackendId` AND
    *  `requestedModelId` together; without this companion, a stored
    *  full-id `model` value is silently dropped at dispatch. */
@@ -1220,6 +1222,127 @@ export class AgentScheduler {
                 logger.info(
                   { taskId: row.id, taskType: row.task_type },
                   "Scheduled DM session dispatched",
+                );
+                continue;
+              }
+
+              // BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §12 Q#5 — open-ended
+              // browser sub-agent firing at its scheduled time. The body
+              // of the original POST lives in `task_context` (frozen at
+              // schedule time); the dispatcher's `scheduled.browser_task`
+              // handler is responsible for creating the `browser_task`
+              // row at fire time and handing off to the runner.
+              //
+              // Quiet-hours deferral: when `browserTaskRespectQuietHours`
+              // is true (default) and the current wall-clock instant is
+              // inside the configured quiet-hours window, the row is
+              // pushed forward to the next quiet-hours-end boundary
+              // instead of being dispatched. One `agent_actions` audit
+              // row is written per deferral so the user can see the
+              // delay; the row's status is reverted to `pending` so
+              // the next ScheduleWatcher tick re-evaluates.
+              if (row.task_type === "browser_task") {
+                const fireAt = new Date();
+                const respectQuietHours =
+                  this.config.browserTaskRespectQuietHours !== false;
+                if (respectQuietHours) {
+                  const quietHoursWindow = {
+                    start: this.config.quietHoursStart,
+                    end: this.config.quietHoursEnd,
+                    timezone: this.config.timezone || undefined,
+                  };
+                  if (isInQuietHoursAt(fireAt, quietHoursWindow)) {
+                    const deferUntilMs = nextQuietHoursEndMs(
+                      fireAt,
+                      quietHoursWindow,
+                    );
+                    if (deferUntilMs !== null) {
+                      const deferredFor = formatSqliteDatetime(
+                        new Date(deferUntilMs),
+                      );
+                      this.db
+                        .prepare(
+                          `UPDATE agent_schedule
+                              SET scheduled_for = ?, status = 'pending'
+                            WHERE id = ?`,
+                        )
+                        .run(deferredFor, row.id);
+                      try {
+                        this.db
+                          .prepare(
+                            `INSERT INTO agent_actions
+                               (action_type, detail, result, started_at, completed_at)
+                             VALUES (?, ?, 'success', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+                          )
+                          .run(
+                            "browser_task.deferred_for_quiet_hours",
+                            JSON.stringify({
+                              scheduleId: row.id,
+                              originalScheduledFor: row.scheduled_for,
+                              deferredUntil: deferredFor,
+                              quietHoursStart: this.config.quietHoursStart,
+                              quietHoursEnd: this.config.quietHoursEnd,
+                            }),
+                          );
+                      } catch (auditErr) {
+                        /* c8 ignore start -- defensive against schema partials */
+                        logger.warn(
+                          { err: auditErr, scheduleId: row.id },
+                          "Failed to record browser_task.deferred_for_quiet_hours audit",
+                        );
+                        /* c8 ignore stop */
+                      }
+                      logger.info(
+                        {
+                          scheduleId: row.id,
+                          deferredUntil: deferredFor,
+                          quietHoursStart: this.config.quietHoursStart,
+                          quietHoursEnd: this.config.quietHoursEnd,
+                        },
+                        "scheduled.browser_task deferred for quiet hours",
+                      );
+                      continue;
+                    }
+                    // `nextQuietHoursEndMs` returning null inside a quiet-
+                    // hours predicate that just returned true would mean
+                    // a 24-hour window — the runtime-settings schema
+                    // disallows this (equal start/end short-circuits the
+                    // predicate), so it cannot occur in normal operation.
+                    // Fall through to dispatch rather than re-deferring
+                    // forever.
+                  }
+                }
+
+                const base = createEvent({
+                  type: "scheduled.browser_task",
+                  source: row.task_type,
+                  priority: EventPriority.NORMAL,
+                });
+                let parsedContext: Record<string, unknown>;
+                try {
+                  parsedContext = JSON.parse(row.task_context ?? "{}");
+                } catch (parseErr) {
+                  logger.error(
+                    { err: parseErr, scheduleId: row.id },
+                    "scheduled.browser_task: task_context JSON parse failed — marking row failed",
+                  );
+                  this.db
+                    .prepare(
+                      "UPDATE agent_schedule SET status = 'failed' WHERE id = ? AND status = 'running'",
+                    )
+                    .run(row.id);
+                  continue;
+                }
+                const event = {
+                  ...base,
+                  taskContext: parsedContext,
+                  correlationId: row.correlation_id ?? base.correlationId,
+                  scheduleId: row.id,
+                } as ScheduledBrowserTaskEvent;
+                await this.eventBus.put(event);
+                logger.info(
+                  { scheduleId: row.id, taskType: row.task_type },
+                  "Scheduled browser-task dispatched",
                 );
                 continue;
               }

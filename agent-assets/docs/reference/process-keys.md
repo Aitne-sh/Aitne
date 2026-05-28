@@ -105,8 +105,7 @@ related:
 | `routine.research_offer_dm` | Two-Option Offer DM composition when a research cluster qualifies | lite | yes |
 | `routine.research_dispatch` | Accept path for the "research dive" option — WebSearch + WebFetch parallel research. Claude-only per §10.3 backend safety floor. | medium | yes |
 | `routine.research_wiki_summary` | Accept path for the "wiki summary" option — writes a wiki note into Obsidian inbox / Notion / local context per integration availability | medium | yes |
-| `routine.managed_sync_health_check` | B-4 managed-Chromium Instance S health check (6h cadence; agent journal only, never DMs) | lite | yes |
-| `routine.browser_automation_request` | B-4 scheduled / routine-driven Instance A workflow invocation. Claude-only backend floor. | medium | yes |
+| `browser_task` | Open-ended browser sub-agent (BROWSER_TASK_REDESIGN_PLAN.md §6.1). Claude-only backend floor; dispatched from `POST /api/browser-task` (DM, dashboard, or scheduler). | medium | yes |
 
 "Configurable" = the operator can override the backend / tier on
 `/settings/models` (i.e. the key appears in `CONFIGURABLE_PROCESS_KEYS`).

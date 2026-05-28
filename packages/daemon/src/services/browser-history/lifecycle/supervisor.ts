@@ -22,7 +22,7 @@ import type {
 } from "../types.js";
 import { createHostProfile } from "./platform.js";
 import { checkBrowserProfileHealth } from "./health-check.js";
-import { launchChromiumProfile } from "./chromium-launcher.js";
+import { launchChromiumProfile, terminateLaunchedChromium } from "./chromium-launcher.js";
 import { nextBrowserLifecycleState } from "./failure-escalation.js";
 import {
   cleanupStaleBrowserHistorySnapshots,
@@ -233,6 +233,22 @@ export class BrowserLifecycleSupervisor implements Observer {
     let actionTaken: BrowserLifecycleTelemetry["actionTaken"] = "noop";
     let outcome: BrowserLifecycleTelemetry["outcome"] = "success";
     let error: string | undefined;
+    // Captured when the supervisor spawned Chromium itself (vs. found
+    // it already running). The `finally` block below terminates this
+    // PID — without it the daemon-launched Chrome lingers in the
+    // user's dock after every cycle and 24h later starts producing
+    // `sync_unresponsive` events because no actual browsing advances
+    // the History mtime.
+    //
+    // Scope of this recovery: this only covers Chromes the supervisor
+    // launched during *this* cycle. Pre-existing Chromes (launched by
+    // an earlier daemon process and orphaned across a restart, or
+    // started by the user / a LaunchAgent) are left alone — we have
+    // no in-memory PID to verify they were ours, and killing a
+    // user-launched Chrome would be unacceptable. Users in that state
+    // recover by quitting Chrome once manually, after which subsequent
+    // supervisor launches self-clean.
+    let spawnedPid: number | null = null;
 
     try {
       if (!healthBefore.running && quiet) {
@@ -241,9 +257,9 @@ export class BrowserLifecycleSupervisor implements Observer {
       } else if (!healthBefore.running) {
         actionTaken = "launch";
         const launched = await launchChromiumProfile(this.host, profile);
-        if (launched === "missing_binary") {
+        if (launched.outcome === "missing_binary") {
           outcome = "launch_failed";
-        } else if (launched === "already_running") {
+        } else if (launched.outcome === "already_running") {
           // The pre-launch health probe raced a user-initiated start
           // (Finder / Dock / restored-session). Chromium is up but we
           // did not spawn it, so the mtime advancement gate below would
@@ -252,6 +268,7 @@ export class BrowserLifecycleSupervisor implements Observer {
           // `checkBrowserProfileHealth` and route via the running path.
           actionTaken = "noop";
         } else {
+          spawnedPid = launched.pid;
           await sleep(waitSecondsForProfile(this.config.browserHistoryLifecycle, profile) * 1000);
           // BROWSER_HISTORY_INTEGRATION_PLAN.md §7.4.3 — post-launch
           // mtime advancement gate. If the History file has not been
@@ -316,6 +333,31 @@ export class BrowserLifecycleSupervisor implements Observer {
         outcome,
         error,
       });
+    } finally {
+      if (spawnedPid !== null) {
+        const terminationResult = await terminateLaunchedChromium(
+          this.host,
+          profile,
+          spawnedPid,
+        ).catch((err) => {
+          logger.warn(
+            { err, browser: profile.browser, spawnedPid },
+            "Chromium terminate threw",
+          );
+          return "failed" as const;
+        });
+        if (terminationResult === "ownership_changed") {
+          logger.info(
+            { browser: profile.browser, spawnedPid },
+            "Skipping Chromium terminate — SingletonLock owner changed mid-flush (user opened the browser)",
+          );
+        } else if (terminationResult === "failed") {
+          logger.warn(
+            { browser: profile.browser, spawnedPid },
+            "Daemon-launched Chromium failed to exit after SIGKILL — will retry next tick",
+          );
+        }
+      }
     }
   }
 

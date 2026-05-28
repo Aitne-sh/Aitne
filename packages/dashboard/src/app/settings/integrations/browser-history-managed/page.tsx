@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import {
@@ -17,11 +17,6 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
-  BrowserAutomationApprovalDenyResponse,
-  BrowserAutomationApprovalIssueResponse,
-  BrowserAutomationApprovalRow,
-  BrowserAutomationApprovalsListResponse,
-  BrowserAutomationObservationGateResponse,
   BrowserAutomationSiteActionResponse,
   BrowserAutomationSitesResponse,
   BrowserAutomationSiteStatusResponse,
@@ -35,17 +30,14 @@ import type {
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { BrowserTaskHostnameDenylistCard } from "@/components/settings/browser-task-hostname-denylist-card";
 import { api } from "@/lib/api-client";
 
 const STATUS_QUERY_KEY = ["browser-history-managed-status"] as const;
 const SETUP_QUERY_KEY = ["browser-history-managed-setup-status"] as const;
 const SITES_QUERY_KEY = ["browser-automation-sites"] as const;
-const APPROVALS_QUERY_KEY = ["browser-automation-approvals"] as const;
-const OBSERVATION_GATE_QUERY_KEY = [
-  "browser-automation-observation-gate",
-] as const;
 const INSTALL_STATUS_QUERY_KEY = [
   "managed-chromium-install-status",
 ] as const;
@@ -103,22 +95,6 @@ function useSiteSetupStatus(siteKey: string | null) {
   });
 }
 
-/** Phase B-3 — list of pending + recent approvals. Polled while
- *  managed Chromium is ready so the user sees new pending rows as
- *  they arrive from the agent. */
-function useApprovals(enabled: boolean) {
-  return useQuery({
-    queryKey: APPROVALS_QUERY_KEY,
-    queryFn: () =>
-      api.get<BrowserAutomationApprovalsListResponse>(
-        "/browser-automation/approvals",
-      ),
-    refetchInterval: enabled ? 5_000 : false,
-    enabled,
-    staleTime: 2_000,
-  });
-}
-
 /** Playwright Chromium install — progress poller. The cadence ramps
  *  up to 1 s while a download is mid-flight (so the progress bar feels
  *  live) and falls back to 5 s otherwise. The query is always mounted
@@ -139,22 +115,6 @@ function useInstallStatus() {
   });
 }
 
-/** Phase B-3 — observation-gate panel data. Polled at a slow cadence
- *  (60 s) — the underlying aggregates change at the workflow run
- *  granularity, which is on the order of minutes. */
-function useObservationGate(enabled: boolean) {
-  return useQuery({
-    queryKey: OBSERVATION_GATE_QUERY_KEY,
-    queryFn: () =>
-      api.get<BrowserAutomationObservationGateResponse>(
-        "/browser-automation/observation-gate",
-      ),
-    refetchInterval: enabled ? 60_000 : false,
-    enabled,
-    staleTime: 30_000,
-  });
-}
-
 export default function ManagedChromiumPage() {
   const queryClient = useQueryClient();
   const status = useManagedStatus(15_000);
@@ -168,13 +128,6 @@ export default function ManagedChromiumPage() {
   // per-site UI is hidden until that prerequisite is satisfied.
   const sitesEnabled = data?.state === "ready";
   const sitesQuery = useSites(Boolean(sitesEnabled));
-  // Approvals + observation-gate panels are visible once the managed
-  // Chromium flow is ready. The agent's needs_approval responses surface
-  // here; the readiness panel reports whether the experimental purchase
-  // flow is on track to ship behind a green / amber / red rollup.
-  const approvalsEnabled = sitesEnabled;
-  const approvalsQuery = useApprovals(Boolean(approvalsEnabled));
-  const observationGateQuery = useObservationGate(Boolean(approvalsEnabled));
 
   // Install state — auto-ramps cadence to 1 s when downloading.
   const installStatusQuery = useInstallStatus();
@@ -182,6 +135,19 @@ export default function ManagedChromiumPage() {
     installStatusQuery.data?.state === "downloading" ||
     installStatusQuery.data?.state === "verifying";
   const installStatusData = installStatusQuery.data;
+
+  // Install transitions on its own cadence — the install mutation
+  // resolves the moment `playwright install` spawns, NOT when it
+  // finishes. Without this, the managed-Chromium status would only
+  // notice `chromiumBinaryFound: true` on its 15 s poll, delaying both
+  // the ConsentCard's `chromiumMissing` flip and the deferred-enable
+  // effect inside it.
+  const installCompleted = installStatusData?.state === "completed";
+  useEffect(() => {
+    if (installCompleted) {
+      queryClient.invalidateQueries({ queryKey: STATUS_QUERY_KEY });
+    }
+  }, [installCompleted, queryClient]);
 
   const installMutation = useMutation({
     mutationFn: () =>
@@ -263,14 +229,14 @@ export default function ManagedChromiumPage() {
     return (
       <div className="space-y-6">
         <PageHeader
-          title="Browser History — Managed Chromium"
+          title="Browser Automation"
           description="Optional daemon-supervised Chromium for OAuth-bound sync + automation."
         />
         <Card>
-          <CardHeader className="flex flex-row items-center gap-3">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Loading managed Chromium status…</span>
-          </CardHeader>
+          </div>
         </Card>
       </div>
     );
@@ -280,14 +246,14 @@ export default function ManagedChromiumPage() {
     return (
       <div className="space-y-6">
         <PageHeader
-          title="Browser History — Managed Chromium"
+          title="Browser Automation"
           description="Optional daemon-supervised Chromium for OAuth-bound sync + automation."
         />
         <Alert variant="error">
           <div className="font-medium">Status unavailable.</div>
           <p className="mt-1">
-            The daemon did not return a managed-chromium status payload. Check the daemon logs
-            and reload this page.
+            The daemon did not return a status payload for Browser
+            Automation. Check the daemon logs and reload this page.
           </p>
         </Alert>
       </div>
@@ -299,11 +265,10 @@ export default function ManagedChromiumPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Browser History — Managed Chromium"
+        title="Browser Automation"
         description="Optional daemon-supervised Chromium for OAuth-bound sync + automation."
-      >
-        <StatePill state={data.state} />
-      </PageHeader>
+        actions={<StatePill state={data.state} />}
+      />
 
       {!consented && (
         <ConsentCard
@@ -315,6 +280,10 @@ export default function ManagedChromiumPage() {
             })
           }
           pending={enableMutation.isPending}
+          enableError={enableMutation.error}
+          installStatus={installStatusData ?? null}
+          onInstall={() => installMutation.mutate()}
+          installPending={installMutation.isPending || installActive}
         />
       )}
 
@@ -337,7 +306,9 @@ export default function ManagedChromiumPage() {
                 OS-package alternative — macOS:{" "}
                 <code>brew install --cask chromium</code>; Debian/Ubuntu:{" "}
                 <code>sudo apt install chromium</code>; Fedora:{" "}
-                <code>sudo dnf install chromium</code>.
+                <code>sudo dnf install chromium</code>; Windows:{" "}
+                <code>winget install Hibbiki.Chromium</code> (or{" "}
+                <code>choco install chromium</code>).
               </p>
             </Alert>
           )}
@@ -394,28 +365,18 @@ export default function ManagedChromiumPage() {
             />
           )}
 
-          {approvalsEnabled && (
-            <ApprovalsSection
-              data={approvalsQuery.data}
-              isLoading={approvalsQuery.isLoading}
-              onMutated={() => {
-                queryClient.invalidateQueries({
-                  queryKey: APPROVALS_QUERY_KEY,
-                });
-              }}
-            />
-          )}
-
-          {approvalsEnabled && (
-            <ObservationGateSection
-              data={observationGateQuery.data}
-              isLoading={observationGateQuery.isLoading}
-            />
-          )}
-
-          {approvalsEnabled && <B4SubpageCard />}
+          {sitesEnabled && <B4SubpageCard />}
         </>
       )}
+
+      {/*
+        2026-05-27 open-navigation revision — user-curated hostname
+        exclusion list for the browser-task surface. Replaces the
+        previously-hardcoded HOSTNAME_DENYLIST. Surface lives here
+        (under Browser Automation settings) because browser-task is
+        the surface the list gates. Empty by default.
+       */}
+      <BrowserTaskHostnameDenylistCard />
     </div>
   );
 }
@@ -440,14 +401,36 @@ function InstallChromiumPanel({
   const percent = status?.progressPercent ?? 0;
   const total = status?.totalMib;
   const downloaded = status?.downloadedMib;
+  // Throughput + elapsed surface so the user can tell a slow download
+  // from a stuck one. Playwright's CDN can take 30+ seconds to start
+  // serving bytes; without these numbers the panel looks frozen.
+  // Re-render every second while downloading so the elapsed clock ticks
+  // even when no fresh `/status` payload arrived this poll cycle.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (!downloading) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [downloading]);
+  const elapsedMs =
+    status?.startedAt != null ? Math.max(0, now - status.startedAt) : 0;
+  const elapsedLabel = formatElapsed(elapsedMs);
+  const speedMibPerSec =
+    downloaded != null && elapsedMs > 1000
+      ? downloaded / (elapsedMs / 1000)
+      : null;
+  const speedLabel =
+    speedMibPerSec != null && speedMibPerSec > 0
+      ? `${speedMibPerSec.toFixed(1)} MiB/s`
+      : null;
   return (
     <div className="mt-3 space-y-2">
       {state === "completed" ? (
-        <div className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800">
+        <div className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
           <CheckCircle2 className="h-4 w-4" />
           Chromium installed
           {status?.binaryPath ? (
-            <code className="ml-1 text-xs text-emerald-900/70">
+            <code className="ml-1 text-xs text-emerald-900/70 dark:text-emerald-300/70">
               {shortPath(status.binaryPath)}
             </code>
           ) : null}
@@ -475,6 +458,10 @@ function InstallChromiumPanel({
               aria-label={`Install progress ${percent}%`}
             />
           </div>
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>Elapsed {elapsedLabel}</span>
+            {speedLabel ? <span>{speedLabel}</span> : <span>connecting…</span>}
+          </div>
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
@@ -501,6 +488,13 @@ function InstallChromiumPanel({
   );
 }
 
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min}m ${sec.toString().padStart(2, "0")}s` : `${sec}s`;
+}
+
 function shortPath(p: string): string {
   if (p.length <= 60) return p;
   return `…${p.slice(p.length - 57)}`;
@@ -508,29 +502,28 @@ function shortPath(p: string): string {
 
 function B4SubpageCard() {
   return (
-    <Card className="border-amber-200">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-base font-semibold">
-              <ShieldAlert className="h-4 w-4 text-amber-600" />
-              Experimental purchase workflows (B-4)
-            </div>
-            <p className="text-sm text-muted-foreground">
-              DM-token-gated checkout flows. Default off — every safety
-              gate (master toggle, per-site caps, primary DM channel,
-              §23 hard-deny categories) is configured on a dedicated
-              page.
-            </p>
+    <Card tone="warning">
+      <CardHeader className="items-start">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-amber-700 dark:text-amber-300" />
+            <CardTitle className="text-base">
+              Experimental purchase confirmations (B-4)
+            </CardTitle>
           </div>
-          <Link
-            href="/settings/integrations/browser-history-managed/b4"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-          >
-            Open B-4 settings
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          <p className="text-sm text-muted-foreground">
+            DM-token-gated checkout flows. Default off — every safety gate
+            (master toggle, per-site caps, primary DM channel, §23 hard-deny
+            categories) is configured on a dedicated page.
+          </p>
         </div>
+        <Link
+          href="/settings/integrations/browser-history-managed/b4"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent"
+        >
+          Open B-4 settings
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </CardHeader>
     </Card>
   );
@@ -539,24 +532,28 @@ function B4SubpageCard() {
 function StatePill({ state }: { state: ManagedChromiumStatusResponse["state"] }) {
   if (state === "ready") {
     return (
-      <Badge variant="default" className="bg-emerald-100 text-emerald-900">
+      <Badge variant="green">
         <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Ready
       </Badge>
     );
   }
   if (state === "needs_setup") {
-    return <Badge variant="gray"><PlugZap className="mr-1 h-3.5 w-3.5" /> Needs setup</Badge>;
+    return (
+      <Badge variant="gray">
+        <PlugZap className="mr-1 h-3.5 w-3.5" /> Needs setup
+      </Badge>
+    );
   }
   if (state === "needs_reauth") {
     return (
-      <Badge variant="gray" className="border-amber-500 text-amber-700">
+      <Badge variant="amber">
         <ShieldAlert className="mr-1 h-3.5 w-3.5" /> Re-auth needed
       </Badge>
     );
   }
   if (state === "missing_binary" || state === "missing_sandbox") {
     return (
-      <Badge variant="gray" className="border-red-500 text-red-700">
+      <Badge variant="red">
         <XCircle className="mr-1 h-3.5 w-3.5" /> {state.replace("_", " ")}
       </Badge>
     );
@@ -571,59 +568,181 @@ function ConsentCard({
   status,
   onAccept,
   pending,
+  enableError,
+  installStatus,
+  onInstall,
+  installPending,
 }: {
   status: ManagedChromiumStatusResponse;
   onAccept: () => void;
   pending: boolean;
+  enableError: unknown;
+  installStatus: ChromiumInstallStatusResponse | null;
+  onInstall: () => void;
+  installPending: boolean;
 }) {
   const sandboxNone = status.sandboxPrimitive === "none";
+  const chromiumMissing = !status.chromiumBinaryFound;
+  const installState = installStatus?.state ?? "idle";
+  const installing =
+    installState === "downloading" || installState === "verifying";
+
+  // Auto-install-then-enable flow. Clicking the consent button when
+  // Chromium is missing triggers `playwright install chromium` first;
+  // when the install completes and the status query re-fetches with
+  // `chromiumBinaryFound=true`, the effect below fires the deferred
+  // enable call. Without this, the daemon's enable handler 409s on
+  // `missing_binary` and the click appears to do nothing.
+  const [deferredEnable, setDeferredEnable] = useState(false);
+  const onAcceptRef = useRef(onAccept);
+  useEffect(() => {
+    onAcceptRef.current = onAccept;
+  }, [onAccept]);
+  useEffect(() => {
+    if (!deferredEnable) return;
+    if (chromiumMissing) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a one-shot trigger after firing it is the documented pattern; mirrors managed-tasks-card.tsx:412
+    setDeferredEnable(false);
+    onAcceptRef.current();
+  }, [chromiumMissing, deferredEnable]);
+  useEffect(() => {
+    if (installState === "failed" && deferredEnable) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a deferred opt-in when its precondition (install success) is no longer reachable
+      setDeferredEnable(false);
+    }
+  }, [installState, deferredEnable]);
+
+  const installFailed = installState === "failed";
+  const handleAccept = () => {
+    if (chromiumMissing) {
+      setDeferredEnable(true);
+      if (!installing) onInstall();
+      return;
+    }
+    onAccept();
+  };
+
+  const showInstalling = chromiumMissing && (installing || deferredEnable);
+  const buttonLabel = chromiumMissing
+    ? showInstalling
+      ? "Installing Chromium…"
+      : installFailed
+        ? "Retry: download Chromium then enable"
+        : "Download Chromium (~150 MiB) then enable"
+    : "I understand — enable Browser Automation";
+
+  const buttonDisabled = pending || installPending || showInstalling;
+
+  const enableErrorMessage =
+    enableError instanceof Error ? enableError.message : null;
+
   return (
-    <Card className="border-amber-300 bg-amber-50">
+    <Card tone="warning">
       <CardHeader>
-        <div className="flex items-center gap-2 text-base font-semibold">
-          <ShieldAlert className="h-5 w-5 text-amber-700" />
-          Managed Chromium is off until you consent.
-        </div>
-        <div className="mt-3 space-y-3 text-sm leading-relaxed">
-          <p>
-            Enabling Managed Chromium gives Aitne control of a dedicated browser process signed
-            in to your Google account. This allows continuous phone-history sync and, in later
-            phases, opt-in automation workflows.
-          </p>
-          <p>
-            <strong>What this means.</strong> Aitne will hold an OAuth refresh token for your
-            Google account. If the Aitne daemon were ever compromised, an attacker could use
-            that token to access your Gmail, Drive, Calendar, and other Google services.
-          </p>
-          <p>
-            <strong>Mitigations.</strong> The Chromium process runs under an OS-level sandbox
-            ({status.sandboxPrimitive}) and cannot exfiltrate to arbitrary networks. The agent
-            layer has no tool capable of reading the profile directory. Disconnecting at any
-            time removes the token from this machine.
-          </p>
-          {sandboxNone && (
-            <Alert variant="warning">
-              <div className="font-medium">No sandbox primitive detected on this host.</div>
-              <p className="mt-1">
-                Enabling will run Chromium unsandboxed. We strongly recommend installing
-                <code className="mx-1">bubblewrap</code>or
-                <code className="mx-1">systemd-run</code>before proceeding.
-              </p>
-            </Alert>
-          )}
-          <p>
-            <strong>Alternative.</strong> The unmanaged Browser History integration on the
-            other settings page works against your existing Chrome installation without holding
-            an OAuth token.
-          </p>
-          <div className="pt-2">
-            <Button onClick={onAccept} disabled={pending} size="sm">
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              I understand — enable Managed Chromium
-            </Button>
-          </div>
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="h-5 w-5 text-amber-700 dark:text-amber-300" />
+          <CardTitle className="text-base">
+            Consent required to enable Browser Automation
+          </CardTitle>
         </div>
       </CardHeader>
+
+      <div className="space-y-4 text-sm leading-relaxed text-foreground">
+        <p>
+          Aitne wants to run a dedicated Chromium browser signed in to your
+          Google account so it can continuously sync your phone&apos;s browser
+          history and, on opt-in, drive open-ended tasks on signed-in sites.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-md border border-border bg-background/60 p-3 dark:bg-background/30">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+              <ShieldAlert className="h-3.5 w-3.5" /> Risk
+            </div>
+            <p className="mt-1.5">
+              Aitne holds an OAuth refresh token for your Google account. If
+              the daemon were ever compromised, an attacker could use that
+              token to access your Gmail, Drive, Calendar, and other Google
+              services.
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-background/60 p-3 dark:bg-background/30">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+              <ShieldCheck className="h-3.5 w-3.5" /> Mitigations
+            </div>
+            <p className="mt-1.5">
+              Chromium runs under an OS-level sandbox (
+              <code className="font-mono text-xs">{status.sandboxPrimitive}</code>
+              ) and cannot exfiltrate to arbitrary networks. The agent layer
+              has no tool capable of reading the profile directory.
+              Disconnecting at any time removes the token from this machine.
+            </p>
+          </div>
+        </div>
+
+        {sandboxNone && (
+          <Alert variant="warning">
+            <div className="font-medium">
+              No sandbox primitive detected on this host.
+            </div>
+            <p className="mt-1">
+              Enabling will run Chromium unsandboxed. We strongly recommend
+              installing <code className="mx-1">bubblewrap</code> or{" "}
+              <code className="mx-1">systemd-run</code> before proceeding.
+            </p>
+          </Alert>
+        )}
+
+        {chromiumMissing && (
+          <Alert variant="warning">
+            <div className="font-medium">Chromium isn&apos;t installed yet.</div>
+            <p className="mt-1">
+              Clicking the button below will download the Playwright-managed
+              Chromium build (~150 MiB) into your Playwright cache and then
+              enable Browser Automation. You can also start the download
+              manually here:
+            </p>
+            <InstallChromiumPanel
+              status={installStatus}
+              onInstall={onInstall}
+              pending={installPending}
+            />
+            <p className="mt-3 text-xs text-muted-foreground">
+              OS-package alternative — macOS:{" "}
+              <code>brew install --cask chromium</code>; Debian/Ubuntu:{" "}
+              <code>sudo apt install chromium</code>; Fedora:{" "}
+              <code>sudo dnf install chromium</code>; Windows:{" "}
+              <code>winget install Hibbiki.Chromium</code> (or{" "}
+              <code>choco install chromium</code>).
+            </p>
+          </Alert>
+        )}
+
+        {enableErrorMessage && (
+          <Alert variant="error">
+            <div className="font-medium">Enable failed.</div>
+            <p className="mt-1">{enableErrorMessage}</p>
+          </Alert>
+        )}
+
+        <p className="text-muted-foreground">
+          <strong className="font-medium text-foreground">Alternative.</strong>{" "}
+          The unmanaged Browser History integration on the other settings page
+          works against your existing Chrome installation without holding an
+          OAuth token.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Button onClick={handleAccept} disabled={buttonDisabled} size="sm">
+            {pending || showInstalling ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-4 w-4" />
+            )}
+            {buttonLabel}
+          </Button>
+        </div>
+      </div>
     </Card>
   );
 }
@@ -638,33 +757,33 @@ function StatusCard({
   return (
     <Card>
       <CardHeader>
-        <div className="text-base font-semibold">Sync status</div>
-        <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-          <Row label="Signed-in user" value={status.signedInUser ?? "—"} />
-          <Row label="Sandbox" value={sandboxLabel} />
-          <Row
-            label="Last successful check"
-            value={status.lastCheckAt ? formatTime(status.lastCheckAt) : "Never"}
-          />
-          <Row
-            label="Last sync (History mtime)"
-            value={status.lastSyncAt ? formatTime(status.lastSyncAt) : "Never"}
-          />
-          <Row
-            label="Consecutive failures"
-            value={String(status.consecutiveFailures)}
-          />
-          <Row
-            label="Paused until"
-            value={status.pausedUntil ? formatTime(status.pausedUntil) : "—"}
-          />
-          <Row
-            label="Chromium binary"
-            value={status.chromiumBinaryFound ? "Found" : "Not installed"}
-          />
-          <Row label="Display present" value={status.hasDisplay ? "Yes" : "No"} />
-        </dl>
+        <CardTitle className="text-base">Sync status</CardTitle>
       </CardHeader>
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <Row label="Signed-in user" value={status.signedInUser ?? "—"} />
+        <Row label="Sandbox" value={sandboxLabel} />
+        <Row
+          label="Last successful check"
+          value={status.lastCheckAt ? formatTime(status.lastCheckAt) : "Never"}
+        />
+        <Row
+          label="Last sync (History mtime)"
+          value={status.lastSyncAt ? formatTime(status.lastSyncAt) : "Never"}
+        />
+        <Row
+          label="Consecutive failures"
+          value={String(status.consecutiveFailures)}
+        />
+        <Row
+          label="Paused until"
+          value={status.pausedUntil ? formatTime(status.pausedUntil) : "—"}
+        />
+        <Row
+          label="Chromium binary"
+          value={status.chromiumBinaryFound ? "Found" : "Not installed"}
+        />
+        <Row label="Display present" value={status.hasDisplay ? "Yes" : "No"} />
+      </dl>
     </Card>
   );
 }
@@ -691,33 +810,46 @@ function BootstrapCard({
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2 text-base font-semibold">
-          <Clock3 className="h-5 w-5 text-blue-600" />
-          Sign-in in progress
+        <div className="flex items-center gap-2">
+          <Clock3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <CardTitle className="text-base">Sign-in in progress</CardTitle>
         </div>
-        <p className="mt-2 text-sm">
-          A Chromium window is open. Complete the Google sign-in (including 2FA if prompted).
-          Once you&apos;re signed in, the dashboard will automatically detect the change and you
-          can confirm below.
+      </CardHeader>
+
+      <div className="space-y-3 text-sm">
+        <p>
+          A Chromium window is open. Complete the Google sign-in (including
+          2FA if prompted). Once you&apos;re signed in, the dashboard will
+          automatically detect the change and you can confirm below.
         </p>
-        <div className="mt-3 flex items-center gap-3 text-sm">
+        <div className="flex items-center gap-3">
           {signedIn ? (
-            <Badge variant="default" className="bg-emerald-100 text-emerald-900">
-              <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Signed in as {setupStatus?.observedUser ?? "(unknown)"}
+            <Badge variant="green">
+              <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Signed in as{" "}
+              {setupStatus?.observedUser ?? "(unknown)"}
             </Badge>
           ) : (
             <Badge variant="gray">
-              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Waiting for sign-in…
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Waiting for
+              sign-in…
             </Badge>
           )}
         </div>
-        <div className="mt-4">
-          <Button onClick={onFinish} disabled={!signedIn || finishPending} size="sm">
-            {finishPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+        <div>
+          <Button
+            onClick={onFinish}
+            disabled={!signedIn || finishPending}
+            size="sm"
+          >
+            {finishPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
             Confirm + close sign-in window
           </Button>
         </div>
-      </CardHeader>
+      </div>
     </Card>
   );
 }
@@ -748,44 +880,60 @@ function ActionCard({
   return (
     <Card>
       <CardHeader>
-        <div className="text-base font-semibold">Actions</div>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={onSetup} disabled={!canSetup || setupPending}>
-            {setupPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlugZap className="h-4 w-4" />}
-            Connect Google account
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={onReconnect}
-            disabled={!canReconnect || reconnectPending}
-          >
-            {reconnectPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Reconnect / re-authenticate
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-red-500 text-red-700 hover:bg-red-50"
-            onClick={onDisconnect}
-            disabled={disconnectPending}
-          >
-            {disconnectPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
-            Disconnect
-          </Button>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Disconnect quits the managed Chromium, deletes the profile directory from this device,
-          and clears the cached state. Revoke the OAuth grant separately at
-          {" "}
-          <a
-            href="https://myaccount.google.com/permissions"
-            className="underline"
-            target="_blank"
-            rel="noreferrer"
-          >myaccount.google.com/permissions</a> for full account-side revocation.
-        </p>
+        <CardTitle className="text-base">Actions</CardTitle>
       </CardHeader>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={onSetup} disabled={!canSetup || setupPending}>
+          {setupPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <PlugZap className="h-4 w-4" />
+          )}
+          Connect Google account
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onReconnect}
+          disabled={!canReconnect || reconnectPending}
+        >
+          {reconnectPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          Reconnect / re-authenticate
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="border-red-500 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+          onClick={onDisconnect}
+          disabled={disconnectPending}
+        >
+          {disconnectPending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <AlertTriangle className="h-4 w-4" />
+          )}
+          Disconnect
+        </Button>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Disconnect quits the managed Chromium, deletes the profile directory
+        from this device, and clears the cached state. Revoke the OAuth grant
+        separately at{" "}
+        <a
+          href="https://myaccount.google.com/permissions"
+          className="underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          myaccount.google.com/permissions
+        </a>{" "}
+        for full account-side revocation.
+      </p>
     </Card>
   );
 }
@@ -796,10 +944,12 @@ function formatTime(ms: number): string {
 
 /**
  * Phase B-2.5 per-site authenticated-profile section. Renders one
- * card per registered site (the frozen `SITE_REGISTRY` —
- * `amazon_jp` / `amazon_com` / `netflix` at MVP). Each card surfaces
- * the connection state and exposes Connect / Re-auth / Disconnect
- * mutations against `/api/browser-automation/sites/{siteKey}/*`.
+ * card per registered site (the frozen `SITE_REGISTRY` — at the time
+ * of writing: `amazon_jp`, `amazon_com`, `netflix`, `x_com`,
+ * `facebook`, `instagram`, `linkedin`; the canonical list is whatever
+ * `/api/browser-automation/sites` returns, not this comment). Each
+ * card surfaces the connection state and exposes Connect / Re-auth /
+ * Disconnect mutations against `/api/browser-automation/sites/{siteKey}/*`.
  *
  * Per §16.3 of MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md the dashboard
  * is the only place these mutations can originate; the agent has no
@@ -818,35 +968,32 @@ function SitesSection({
   return (
     <Card>
       <CardHeader>
-        <div className="text-base font-semibold">Authenticated sites (B-2.5)</div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Sign in once per site to let Aitne run authenticated workflows
-          (e.g. fetch your Amazon order history). Each site keeps a
-          separate profile dir under{" "}
-          <code>~/.personal-agent/chromium-automation-auth/&lt;site&gt;/</code>;
-          cookies for one site are never reachable from another.
-        </p>
-        <div className="mt-4 space-y-3">
-          {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading sites…
-            </div>
-          )}
-          {!isLoading && sites.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No sites registered. Add an entry to{" "}
-              <code>site-registry.ts</code> and rebuild the daemon.
-            </p>
-          )}
-          {sites.map((site) => (
-            <SiteCard
-              key={site.siteKey}
-              site={site}
-              onMutated={onMutated}
-            />
-          ))}
-        </div>
+        <CardTitle className="text-base">Authenticated sites</CardTitle>
       </CardHeader>
+
+      <p className="text-sm text-muted-foreground">
+        Sign in once per site to let Aitne run authenticated browser tasks
+        (e.g. fetch your Amazon order history). Each site keeps a separate
+        profile dir under{" "}
+        <code>~/.personal-agent/chromium-automation-auth/&lt;site&gt;/</code>;
+        cookies for one site are never reachable from another.
+      </p>
+      <div className="mt-4 space-y-3">
+        {isLoading && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading sites…
+          </div>
+        )}
+        {!isLoading && sites.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            No sites registered. Add an entry to{" "}
+            <code>site-registry.ts</code> and rebuild the daemon.
+          </p>
+        )}
+        {sites.map((site) => (
+          <SiteCard key={site.siteKey} site={site} onMutated={onMutated} />
+        ))}
+      </div>
     </Card>
   );
 }
@@ -900,7 +1047,7 @@ function SiteCard({
   const stateBadge = (() => {
     if (site.state === "connected") {
       return (
-        <Badge variant="default" className="bg-emerald-100 text-emerald-900">
+        <Badge variant="green">
           <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Connected
         </Badge>
       );
@@ -914,7 +1061,7 @@ function SiteCard({
     }
     if (site.state === "needs_reauth") {
       return (
-        <Badge variant="gray" className="border-amber-500 text-amber-700">
+        <Badge variant="amber">
           <ShieldAlert className="mr-1 h-3.5 w-3.5" /> Re-auth needed
         </Badge>
       );
@@ -940,14 +1087,14 @@ function SiteCard({
       </div>
 
       {site.state === "bootstrap_running" && (
-        <div className="mt-3 rounded-sm border border-blue-200 bg-blue-50 p-3 text-xs">
-          <div className="flex items-center gap-2 font-medium text-blue-900">
+        <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <div className="flex items-center gap-2 font-medium">
             <Clock3 className="h-3.5 w-3.5" /> Sign-in window open
           </div>
-          <p className="mt-1 text-blue-900">
-            Complete the sign-in in the Chromium window that just
-            opened. Aitne is watching for{" "}
-            <code className="text-blue-900">
+          <p className="mt-1">
+            Complete the sign-in in the Chromium window that just opened.
+            Aitne is watching for{" "}
+            <code className="font-mono">
               {setup.data?.signedIn
                 ? `the signed-in selector (detected${
                     setup.data.accountLabel
@@ -962,9 +1109,7 @@ function SiteCard({
             <Button
               size="sm"
               onClick={() => finalizeMutation.mutate()}
-              disabled={
-                !setup.data?.signedIn || finalizeMutation.isPending
-              }
+              disabled={!setup.data?.signedIn || finalizeMutation.isPending}
             >
               {finalizeMutation.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1013,7 +1158,7 @@ function SiteCard({
           <Button
             size="sm"
             variant="outline"
-            className="border-red-500 text-red-700 hover:bg-red-50"
+            className="border-red-500 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
             onClick={() => disconnectMutation.mutate()}
             disabled={disconnectMutation.isPending}
           >
@@ -1030,403 +1175,3 @@ function SiteCard({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Phase B-3 — pending-approvals panel + observation-gate panel.
-// MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §10 / §13 steps 43-46.
-// ─────────────────────────────────────────────────────────────────────
-
-function ApprovalsSection({
-  data,
-  isLoading,
-  onMutated,
-}: {
-  data: BrowserAutomationApprovalsListResponse | undefined;
-  isLoading: boolean;
-  onMutated: () => void;
-}) {
-  const pending = data?.pending ?? [];
-  const recent = data?.recent ?? [];
-  return (
-    <Card>
-      <CardHeader>
-        <div className="text-base font-semibold">
-          Workflow approvals (B-3)
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Phase B-3 write workflows (e.g. <code>subscribeToNewsletter</code>,
-          <code>fillAndSaveForm</code>) ask for an explicit per-invocation
-          approval. The agent requests; you approve below; you paste the
-          minted token into the next agent prompt. Tokens are single-use,
-          expire after 5 minutes, and are never re-shown.
-        </p>
-        <div className="mt-4 space-y-3">
-          {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading approvals…
-            </div>
-          )}
-          {!isLoading && pending.length === 0 && recent.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No pending or recent approval requests.
-            </p>
-          )}
-          {pending.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-sm font-medium">
-                Pending ({pending.length})
-              </div>
-              {pending.map((row) => (
-                <PendingApprovalCard
-                  key={row.id}
-                  row={row}
-                  onMutated={onMutated}
-                />
-              ))}
-            </div>
-          )}
-          {recent.length > 0 && (
-            <div className="space-y-2">
-              <div className="mt-4 text-sm font-medium">
-                Recent ({recent.length})
-              </div>
-              {recent.map((row) => (
-                <RecentApprovalCard key={row.id} row={row} />
-              ))}
-            </div>
-          )}
-        </div>
-      </CardHeader>
-    </Card>
-  );
-}
-
-function PendingApprovalCard({
-  row,
-  onMutated,
-}: {
-  row: BrowserAutomationApprovalRow;
-  onMutated: () => void;
-}) {
-  const [issuedToken, setIssuedToken] = useState<string | null>(null);
-  const [denyReason, setDenyReason] = useState("");
-  const [showDenyForm, setShowDenyForm] = useState(false);
-
-  const approveMutation = useMutation({
-    mutationFn: () =>
-      api.post<BrowserAutomationApprovalIssueResponse>(
-        `/browser-automation/approvals/${row.id}/approve`,
-        {},
-      ),
-    onSuccess: (res) => {
-      setIssuedToken(res.token);
-      onMutated();
-    },
-    onSettled: onMutated,
-  });
-
-  const denyMutation = useMutation({
-    mutationFn: () =>
-      api.post<BrowserAutomationApprovalDenyResponse>(
-        `/browser-automation/approvals/${row.id}/deny`,
-        denyReason.trim().length > 0 ? { reason: denyReason.trim() } : {},
-      ),
-    onSettled: () => {
-      setShowDenyForm(false);
-      setDenyReason("");
-      onMutated();
-    },
-  });
-
-  // Display the absolute expiry timestamp; the parent polls every 5 s
-  // so the user sees a fresh row well before the deadline. Render
-  // purity rules forbid calling Date.now() during render, so we
-  // intentionally avoid a "expires in Xs" countdown here.
-  const expiresAtLabel = useMemo(
-    () => new Date(row.expiresAt).toLocaleTimeString(),
-    [row.expiresAt],
-  );
-
-  return (
-    <div className="rounded border border-amber-200 bg-amber-50/50 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="gray" className="border-amber-400 text-amber-800">
-              <Clock3 className="mr-1 h-3 w-3" /> Pending
-            </Badge>
-            <code className="text-sm font-medium">{row.workflowName}</code>
-            <span className="text-xs text-muted-foreground">
-              requested by {row.origin}
-            </span>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            id: <code>{row.id.slice(0, 8)}…</code> · params hash:{" "}
-            <code>{row.paramsHash.slice(0, 8)}</code> · expires at{" "}
-            {expiresAtLabel}
-          </p>
-          <pre className="mt-2 max-h-32 overflow-auto rounded bg-white/60 p-2 text-xs">
-            {row.paramsSummary || "(empty params)"}
-          </pre>
-        </div>
-      </div>
-
-      {issuedToken ? (
-        <div className="mt-3 rounded border border-emerald-300 bg-emerald-50 p-3 text-sm">
-          <div className="flex items-center gap-2 font-medium text-emerald-900">
-            <CheckCircle2 className="h-4 w-4" /> Approved. Copy this token —
-            it is shown only once.
-          </div>
-          <div className="mt-2 flex items-center gap-2">
-            <code className="select-all rounded bg-white px-2 py-1 font-mono text-base">
-              {issuedToken}
-            </code>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                void navigator.clipboard?.writeText(issuedToken);
-              }}
-            >
-              Copy
-            </Button>
-          </div>
-          <p className="mt-2 text-xs text-emerald-900/80">
-            Paste it back into the agent prompt so the workflow can proceed.
-            The token is single-use, expires at the row&apos;s deadline,
-            and is bound to this exact (workflow, params).
-          </p>
-        </div>
-      ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            onClick={() => approveMutation.mutate()}
-            disabled={approveMutation.isPending}
-          >
-            {approveMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldCheck className="h-4 w-4" />
-            )}
-            Approve & mint token
-          </Button>
-          {showDenyForm ? (
-            <div className="flex flex-1 items-center gap-2">
-              <input
-                className="flex-1 rounded border px-2 py-1 text-sm"
-                placeholder="Optional reason"
-                value={denyReason}
-                onChange={(e) => setDenyReason(e.target.value)}
-                maxLength={200}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => denyMutation.mutate()}
-                disabled={denyMutation.isPending}
-              >
-                {denyMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <XCircle className="h-4 w-4" />
-                )}
-                Deny
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowDenyForm(false)}
-                disabled={denyMutation.isPending}
-              >
-                Cancel
-              </Button>
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowDenyForm(true)}
-            >
-              <XCircle className="h-4 w-4" /> Deny…
-            </Button>
-          )}
-        </div>
-      )}
-      {approveMutation.isError && (
-        <p className="mt-2 text-xs text-red-700">
-          Approval failed:{" "}
-          {(approveMutation.error as Error | undefined)?.message ?? "unknown"}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function RecentApprovalCard({ row }: { row: BrowserAutomationApprovalRow }) {
-  const stateBadge = (() => {
-    if (row.status === "consumed") {
-      return (
-        <Badge variant="default" className="bg-emerald-100 text-emerald-900">
-          <CheckCircle2 className="mr-1 h-3 w-3" /> Consumed
-        </Badge>
-      );
-    }
-    if (row.status === "approved") {
-      return (
-        <Badge variant="gray" className="border-amber-400 text-amber-800">
-          <Clock3 className="mr-1 h-3 w-3" /> Approved (unredeemed)
-        </Badge>
-      );
-    }
-    if (row.status === "denied") {
-      return (
-        <Badge variant="gray" className="border-red-400 text-red-700">
-          <XCircle className="mr-1 h-3 w-3" /> Denied
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="gray">
-        <AlertTriangle className="mr-1 h-3 w-3" /> Expired
-      </Badge>
-    );
-  })();
-  const timestamp =
-    row.consumedAt ??
-    row.deniedAt ??
-    row.approvedAt ??
-    row.requestedAt;
-  return (
-    <div className="rounded border bg-muted/30 p-2 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        {stateBadge}
-        <code className="font-medium">{row.workflowName}</code>
-        <span className="text-xs text-muted-foreground">
-          {new Date(timestamp).toLocaleString()}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          via {row.origin}
-        </span>
-      </div>
-      {row.denialReason && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          Reason: {row.denialReason}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function ObservationGateSection({
-  data,
-  isLoading,
-}: {
-  data: BrowserAutomationObservationGateResponse | undefined;
-  isLoading: boolean;
-}) {
-  const overallBadge = (() => {
-    if (!data) return null;
-    if (data.overall === "green") {
-      return (
-        <Badge variant="default" className="bg-emerald-100 text-emerald-900">
-          <ShieldCheck className="mr-1 h-3.5 w-3.5" /> On track
-        </Badge>
-      );
-    }
-    if (data.overall === "amber") {
-      return (
-        <Badge variant="gray" className="border-amber-500 text-amber-700">
-          <ShieldAlert className="mr-1 h-3.5 w-3.5" /> Trending
-        </Badge>
-      );
-    }
-    return (
-      <Badge variant="gray" className="border-red-500 text-red-700">
-        <XCircle className="mr-1 h-3.5 w-3.5" /> Gate failing
-      </Badge>
-    );
-  })();
-
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="text-base font-semibold">
-            B-3 readiness gate (§10)
-          </div>
-          {overallBadge}
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Six-week observation window. B-3 advances to general
-          availability only when every criterion below passes.
-        </p>
-        <div className="mt-4 space-y-2">
-          {isLoading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-            </div>
-          )}
-          {!isLoading && data && (
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th className="py-1 pr-2 font-normal">Criterion</th>
-                  <th className="py-1 pr-2 font-normal">Value</th>
-                  <th className="py-1 pr-2 font-normal">Threshold</th>
-                  <th className="py-1 pr-2 font-normal">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.criteria.map((c) => (
-                  <tr key={c.id} className="border-b last:border-b-0">
-                    <td className="py-1.5 pr-2 align-top">
-                      <div className="font-medium">{c.label}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {c.description}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 pr-2 align-top">
-                      {c.value}
-                    </td>
-                    <td className="whitespace-nowrap py-1.5 pr-2 align-top">
-                      {c.threshold === 0 ? "0" : `≤ ${c.threshold}`}
-                    </td>
-                    <td className="py-1.5 pr-2 align-top">
-                      <CriterionStatusBadge status={c.status} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </CardHeader>
-    </Card>
-  );
-}
-
-function CriterionStatusBadge({
-  status,
-}: {
-  status: "green" | "amber" | "red";
-}) {
-  if (status === "green") {
-    return (
-      <Badge variant="default" className="bg-emerald-100 text-emerald-900">
-        Pass
-      </Badge>
-    );
-  }
-  if (status === "amber") {
-    return (
-      <Badge variant="gray" className="border-amber-500 text-amber-700">
-        Watch
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="gray" className="border-red-500 text-red-700">
-      Fail
-    </Badge>
-  );
-}

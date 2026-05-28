@@ -1,9 +1,17 @@
 "use client";
 
 /**
- * Phase B-4 dashboard — experimental purchase workflows.
+ * Phase B-4 dashboard — experimental purchase confirmations.
  *
  * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.8 / §13 step 55.
+ * BROWSER_TASK_REDESIGN_PLAN.md §9a.6 — post-rename: the legacy
+ * workflow registry is gone; the audit-join column
+ * `browser_automation_purchase_tokens.workflow_invocation_id` is kept
+ * by name (Option b) for forward-compat and now covers EITHER a
+ * legacy workflow invocation id OR a `browser_task.id`. The dashboard
+ * never renders that value as a user-visible label — see the
+ * `workflowInvocationId` field note below — so the post-rename
+ * semantic stretch stays invisible to the user.
  *
  * Surfaces:
  *   - Global enable toggle with experimental-danger confirmation modal.
@@ -11,7 +19,12 @@
  *     caps + optional per-transaction cap override).
  *   - Primary channel selection (only primary channels receive the
  *     confirmation DM; at least one is required to enable B-4).
- *   - Pending tokens panel (live; user can manually cancel).
+ *   - Pending purchase-token panel — PURCHASE tokens ONLY. Lite-final-
+ *     confirm tokens minted by browser tasks (BROWSER_TASK_REDESIGN_PLAN.md
+ *     §5 "Final-confirm tokens are NOT B-4 purchase tokens") share the
+ *     `!~xxxxxxxx` UX but live in their own DB table; they surface on
+ *     `/browser-tasks/<id>` instead and the panel description points
+ *     users there. §12 Open Q#8 (v0.2) tracks unifying the two panels.
  *   - Recent purchases + cancellations (audit trail).
  *
  * Explicitly NOT surfaced:
@@ -20,8 +33,9 @@
  *     attacker who briefly compromises dashboard credentials cannot
  *     extract live tokens via this page.
  *   - A "mint a token" form. Tokens are minted by the daemon during a
- *     B-4 workflow invocation; the dashboard's role is configuration +
- *     audit, never issuance.
+ *     B-4 purchase invocation (originally a workflow run, now also a
+ *     `browser_task`-triggered checkout); the dashboard's role is
+ *     configuration + audit, never issuance.
  */
 
 import Link from "next/link";
@@ -90,6 +104,12 @@ interface PrimaryChannelRow {
 
 interface PurchaseTokenWire {
   jti: string;
+  /**
+   * §9a.6 (Option b) — post-rename this is the legacy workflow
+   * invocation id OR a `browser_task.id`. The wire-field name is
+   * preserved for forward-compat with the daemon's row shape; the
+   * dashboard never renders it as a user-visible label.
+   */
   workflowInvocationId: string;
   siteKey: string;
   status: "pending" | "confirmed" | "cancelled" | "expired";
@@ -206,12 +226,12 @@ export default function B4Page(): React.ReactElement {
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        Back to Managed Chromium
+        Back to Browser Automation
       </Link>
 
       <PageHeader
         title="Experimental purchase (B-4)"
-        description="DM-token-gated checkout workflows. Aitne can be tricked. The DM-token guard is experimental and bypassable if the daemon or messaging platform is compromised. Money lost via approved purchases cannot be recovered."
+        description="DM-token-gated checkout confirmations. Aitne can be tricked. The DM-token guard is experimental and bypassable if the daemon or messaging platform is compromised. Money lost via approved purchases cannot be recovered."
       />
 
       <Alert variant="warning" className="flex items-start gap-3">
@@ -371,7 +391,7 @@ function ExperimentalEnableModal(props: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-amber-600" aria-hidden />
-            Enable experimental purchase workflows?
+            Enable experimental purchase confirmations?
           </DialogTitle>
           <DialogDescription className="space-y-3 pt-2 text-sm">
             <p>
@@ -688,10 +708,25 @@ function PendingTokensCard(props: {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold">Pending tokens</h2>
+            <h2 className="text-base font-semibold">Pending purchase tokens</h2>
             <p className="text-sm text-muted-foreground">
-              In-flight confirmation requests waiting on the user&apos;s
-              DM reply. Raw token strings are NEVER shown here.
+              In-flight purchase-confirmation requests waiting on the
+              user&apos;s DM reply. Raw token strings are NEVER shown here.
+            </p>
+            <p
+              className="mt-1 text-xs text-muted-foreground"
+              data-testid="lite-final-confirm-pointer"
+            >
+              Browser-task confirmations (non-purchase) share the same{" "}
+              <code>!~</code> token shape but live on their per-task detail
+              page —{" "}
+              <Link
+                href="/browser-tasks"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                open Browser Tasks
+              </Link>{" "}
+              to find them.
             </p>
           </div>
           {props.loading && (
@@ -701,7 +736,7 @@ function PendingTokensCard(props: {
         <div className="mt-3 space-y-2">
           {props.tokens.length === 0 ? (
             <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-              No pending tokens.
+              No pending purchase tokens.
             </div>
           ) : (
             props.tokens.map((tok) => (

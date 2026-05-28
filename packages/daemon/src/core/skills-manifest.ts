@@ -184,31 +184,6 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
   "routine.research_offer_dm": ["browser-history", "context"],
   "routine.research_dispatch": ["browser-history", "context", "notify"],
   "routine.research_wiki_summary": ["browser-history", "context", "notify"],
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.8 — managed-Chromium
-  // health-check routine. Loads the narrow `browser-history-managed`
-  // skill (status GET only, no profile-dir access) plus `context` for
-  // the agent-journal append step. No `notify` — the supervisor in
-  // `managed-chromium-supervisor.ts` already DMs the user when the
-  // state machine transitions out of `ready`; a second DM from this
-  // routine would be noise.
-  "routine.managed_sync_health_check": ["browser-history-managed", "context"],
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.13 — Phase B-2 Instance A
-  // workflow request. Scheduler / routine driven (DM-driven workflow
-  // invocations stay under `message.received.dm`). Loads:
-  //   - `browser-history-managed` — owner of the curl chokepoint for
-  //     `/api/browser-automation/workflows/*` (workflow list +
-  //     invoke + recent-runs).
-  //   - `context` — vault-path writes are how the session leaves a
-  //     trace of "I ran a screenshot of news.ycombinator.com today"
-  //     in today.md's agent-log.
-  //   - `notify` — the user-facing DM for workflows scheduled to
-  //     report back ("screenshot taken, here it is"). Without `notify`
-  //     the routine has no canonical channel to surface its result.
-  "routine.browser_automation_request": [
-    "browser-history-managed",
-    "context",
-    "notify",
-  ],
   // Dashboard-triggered manual refresh of today.md's User Schedule
   // section. Intentionally narrow — the flow only reads the calendar
   // and PATCHes user_schedule / agent_log. No mail, no roadmap, no
@@ -278,6 +253,15 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // queue when the user answers a previously-asked one. See
     // profile-interview-queue.md §3.3 + the latent-opportunity block.
     "user-interview",
+    // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — also loaded for the
+    // user's first DM. The redesign's stated intent ("DM agent can hand
+    // any natural-language browser request") covers first-time DMs too;
+    // omitting it here would mean the user's literal first message
+    // "post to X" silently misses the skill and the agent has to
+    // bluff. The `browser-history-respond` skill is correctly absent
+    // (no prior research offer to respond to) — that exclusion does
+    // not generalise.
+    "browser-task",
   ],
   "message.received.dm": [
     "context",
@@ -302,6 +286,25 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // the skill itself no-ops when `GET /offers/pending` is empty,
     // and the cost of having the skill text in DM context is small.
     "browser-history-respond",
+    // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — DM-driven entry
+    // point to the open-ended browser-task surface. The legacy
+    // `browser-history-managed` skill (and the
+    // `routine.browser_automation_request` / `routine.managed_sync_health_check`
+    // process keys that loaded it) was retired in Phase 6; the new
+    // `browser-task` skill teaches the DM agent to POST a
+    // natural-language description, relay sub-agent clarifications via
+    // /clarify, and cancel on user request — without ever touching the
+    // `!~xxxxxxxx` final-confirm token (that round-trip stays between
+    // the daemon and the user). Loaded for `message.received.dm` AND
+    // `message.received.dm_first` (`dashboard.chat` and `message.dm`
+    // inherit the former via PROCESS_TO_EVENT_TYPE). Mentions /
+    // scheduled DMs / routines do not carry it — mentions land on
+    // `message.received` which is a shared-channel surface, and
+    // scheduled DMs are daemon-initiated (no user-driven browser ask
+    // to relay). No conditional gate — the skill body is small and
+    // the agent simply does not call its endpoints when the user's
+    // request doesn't ask for a browser task.
+    "browser-task",
   ],
   // ── Task events ──
   "schedule.approaching": [
@@ -556,6 +559,12 @@ export const ALL_SKILLS = [
   // structured dispatch call. The full `browser-history` skill is
   // intentionally NOT loaded for message.dm — DM agent isolation.
   "browser-history-respond",
+  // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — DM-driven entry
+  // point to the open-ended browser-task surface. Loaded only for
+  // `message.received.dm` (DM agent + dashboard chat). The legacy
+  // `browser-history-managed` skill that fronted the frozen workflow
+  // registry was retired alongside the route + routines in Phase 6.
+  "browser-task",
 ];
 
 const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
@@ -576,8 +585,6 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
   "routine.research_offer_dm": "routine.research_offer_dm",
   "routine.research_dispatch": "routine.research_dispatch",
   "routine.research_wiki_summary": "routine.research_wiki_summary",
-  "routine.managed_sync_health_check": "routine.managed_sync_health_check",
-  "routine.browser_automation_request": "routine.browser_automation_request",
   "message.dm": "message.received.dm",
   "message.mention": "message.received",
   "dashboard.chat": "message.received.dm",

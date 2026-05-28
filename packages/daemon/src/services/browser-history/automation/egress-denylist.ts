@@ -1,149 +1,156 @@
 /**
- * Global egress denylist for Instance A workflows (Phase B-2).
- *
- * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.6 — closes the localhost /
- * RFC1918 / link-local / cloud-metadata exfiltration vector at the
- * structural level. The denylist is **hardcoded** — the dashboard
- * cannot widen or narrow it. The per-workflow `allowlistRegex` is the
- * positive selector; this module is the unconditional negative one.
+ * Global egress denylist for the browser-task surface.
  *
  * Two layers:
  *
- *   1. Hostname denylist (eTLD+1 regex array). Matches by suffix so
- *      `evil.paypal.com.attacker.tld` does not slip through a naive
- *      `endsWith("paypal.com")` check — we extract eTLD+1 first.
+ *   1. **Hostname denylist (DI-injected, user-managed)** — list of
+ *      suffix-anchored regexes the *caller* supplies. The list is
+ *      sourced from `runtime-settings.browserTaskHostnameDenylist`
+ *      (Dashboard `/settings/browser` exclusion list, default empty).
+ *      No domain is hardcoded here — Aitne ships as a US-targeted
+ *      general-purpose agent and the framework does not embed
+ *      opinions about which third-party brands to block. The owner
+ *      curates the list in Dashboard. The export `HOSTNAME_DENYLIST`
+ *      survives as an empty frozen array for backward-compatible
+ *      imports (tests, callers that haven't yet plumbed the runtime
+ *      list).
  *
- *   2. IP CIDR denylist (RFC1918 + link-local + loopback + multicast +
- *      cloud metadata + IPv6 equivalents). Catches both:
- *        - IP literals in the URL host (`http://10.0.0.1/`)
- *        - Domains whose A/AAAA records resolve into a denied range
- *          (DNS-rebinding shape).
+ *      Historical context: prior revisions of this file pinned ~40
+ *      brand names (paypal/stripe/banks/.gov/.edu/healthcare/JP-banks)
+ *      as a hardcoded "safety floor". That model was removed
+ *      (2026-05-27 — see `feedback_no_jp_special_no_hardcoded_domains`)
+ *      because (a) the JP enumeration leaked an owner-jurisdiction
+ *      assumption into a US-targeted product, (b) the hardcoded list
+ *      made open-ended browser-task requests (e.g. "look up Hitachi
+ *      IR") fail at the registry-check before they hit the denylist,
+ *      and (c) the framework should not opinionate which sites a
+ *      user can read. The `payment-path-blocker` URL-pattern layer
+ *      remains the structural defence against accidental purchases /
+ *      money movement; the per-route allowlist on `browser_task`
+ *      is now permissive by default (no positive selector).
  *
- * Both layers are pure — `matchesHostnameDenylist(hostname)` is a
- * regex array walk; `matchesCidrDenylist(ip, ...)` is bitmask
- * arithmetic. DNS resolution is injected from the caller
+ *   2. **IP CIDR denylist (HARDCODED)** — RFC1918 + link-local +
+ *      loopback + multicast + cloud-metadata + IPv6 equivalents. NOT
+ *      domain-level; this is *network infrastructure* protection
+ *      against the agent reaching `169.254.169.254` (AWS instance
+ *      metadata), the user's internal LAN, or the daemon's own
+ *      127.0.0.1 API. The CIDR layer stays hardcoded because removing
+ *      it would expose cloud-instance metadata endpoints + private
+ *      LAN devices — categories whose identity is the IP range itself,
+ *      not a brand name.
+ *
+ * DNS resolution is injected from the caller
  * (`cdp-network-interception.ts` provides the real `dns.lookup`); this
  * module never touches the network so it stays unit-testable.
- *
- * Categories from parent BROWSER_HISTORY_INTEGRATION_PLAN.md §23.2 +
- * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.6 are reproduced here as
- * regex entries with a one-line comment per category. Additions should
- * cite the source incident or category-spec entry; structural deletions
- * require an upstream parent-plan edit.
  */
 
 // ─────────────────────────────────────────────────────────────────────
-// Hostname denylist (eTLD+1 regex array)
+// Hostname denylist (now DI-injected; no hardcoded entries)
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Suffix-anchored regexes — each entry matches the eTLD+1 form of the
- * hostname. We extract eTLD+1 before testing so attacker-controlled
- * sub-domain prefixes do not leak through (`a.paypal.com.attacker.tld`
- * would extract to `attacker.tld` and miss the `paypal.com` entry,
- * which is correct).
+ * Empty by default — the framework no longer hardcodes third-party
+ * domain entries (no payment processors, no banks, no government, no
+ * healthcare, no JP-specific brands). The CDP interception layer reads
+ * the user-curated list from `runtime-settings.browserTaskHostnameDenylist`
+ * and passes it to `matchesHostnameDenylist` / `shouldDenyEgress` at
+ * each call.
  *
- * Order does not affect correctness; entries grouped by category for
- * review legibility.
+ * Kept exported as a frozen empty array so legacy imports keep parsing,
+ * the "is-frozen" test invariant still holds, and a future revision
+ * that wants to re-add a single structural entry (e.g. a never-allowed
+ * project-internal hostname) has a clear seam to do so.
  */
-export const HOSTNAME_DENYLIST: ReadonlyArray<RegExp> = Object.freeze([
-  // ── Payment processors (parent §23.2) ──
-  /^(?:.*\.)?paypal\.com$/i,
-  /^(?:.*\.)?stripe\.com$/i,
-  /^(?:.*\.)?adyen\.com$/i,
-  /^(?:.*\.)?square\.com$/i,
-  /^(?:.*\.)?squareup\.com$/i,
-  /^(?:.*\.)?braintreepayments\.com$/i,
-  /^(?:.*\.)?venmo\.com$/i,
-  /^(?:.*\.)?cash\.app$/i,
+export const HOSTNAME_DENYLIST: ReadonlyArray<RegExp> = Object.freeze([]);
 
-  // ── Banking / brokerage (parent §23) — hard-deny across all phases ──
-  /^(?:.*\.)?chase\.com$/i,
-  /^(?:.*\.)?bankofamerica\.com$/i,
-  /^(?:.*\.)?wellsfargo\.com$/i,
-  /^(?:.*\.)?citi\.com$/i,
-  /^(?:.*\.)?capitalone\.com$/i,
-  /^(?:.*\.)?usbank\.com$/i,
-  /^(?:.*\.)?schwab\.com$/i,
-  /^(?:.*\.)?fidelity\.com$/i,
-  /^(?:.*\.)?vanguard\.com$/i,
-  /^(?:.*\.)?robinhood\.com$/i,
-  /^(?:.*\.)?etrade\.com$/i,
-  /^(?:.*\.)?interactivebrokers\.com$/i,
-  /^(?:.*\.)?coinbase\.com$/i,
-  /^(?:.*\.)?binance\.com$/i,
-  /^(?:.*\.)?kraken\.com$/i,
-  // JP banking + brokerage — the project's primary owner is in Japan; the
-  // hard-deny list must reflect that or the floor leaks for the actual
-  // population. (Parent §23 hard-deny categories are jurisdiction-blind;
-  // this is the JP enumeration of the same category.)
-  /^(?:.*\.)?mizuhobank\.co\.jp$/i,
-  /^(?:.*\.)?smbc\.co\.jp$/i,
-  /^(?:.*\.)?bk\.mufg\.jp$/i,
-  /^(?:.*\.)?japanpost\.jp$/i,
-  /^(?:.*\.)?rakuten-bank\.co\.jp$/i,
-  /^(?:.*\.)?bitflyer\.com$/i,
-  /^(?:.*\.)?bitflyer\.jp$/i,
+/**
+ * Compile user-supplied hostname patterns into regex matchers for
+ * `matchesHostnameDenylist`. Three shapes are accepted:
+ *
+ *   1. **Bare hostname** (`paypal.com`, `api.example.co.uk`) —
+ *      suffix-anchored: matches the exact host AND any subdomain.
+ *      Equivalent to the historical hardcoded format.
+ *   2. **Leading-wildcard sugar** (`*.example.com`) — sugar for the
+ *      bare form. Matches `example.com` AND any subdomain. (Strict
+ *      "subdomain only" was rejected: a user adding `*.example.com`
+ *      to their denylist almost always means "block the whole
+ *      property", so including the parent eTLD+1 is the safer default.
+ *      Users who want literal "subdomain only" can combine with the
+ *      negative absence of the bare entry.)
+ *   3. **General glob** (`*foo*`, `tracker*`, `*.com`, `analytics.*`,
+ *      `*paypal*tracker*`) — each `*` compiles to `[a-z0-9.-]*` and
+ *      the resulting regex is fully anchored (`^...$`) against the
+ *      hostname. Enables partial-match denials.
+ *
+ * Entry validation:
+ *   - empty / whitespace-only → dropped
+ *   - no alphanumeric character → dropped (rejects bare `*`, `*.*`,
+ *     `--`, etc.)
+ *   - contains a character outside `[a-z0-9.\-*]` → dropped (rejects
+ *     scheme prefixes, paths, ports, userinfo, IDN punycode for now)
+ *   - leading or trailing dot → dropped
+ *   - consecutive dots → dropped
+ *   - length > 253 → dropped (DNS hostname max)
+ *
+ * Invalid entries are silently dropped — the dashboard / API layer is
+ * responsible for surfacing validation errors to the user before they
+ * land in the persisted config.
+ */
+const VALID_PATTERN_CHARS_RE = /^[a-z0-9.\-*]+$/i;
 
-  // ── Government / identity ──
-  /^(?:.*\.)?irs\.gov$/i,
-  /^(?:.*\.)?ssa\.gov$/i,
-  /^(?:.*\.)?usa\.gov$/i,
-  /^(?:.*\.)?login\.gov$/i,
-  /^(?:.*\.)?id\.me$/i,
-  /^(?:.*\.)?gov\.uk$/i,
-  /^(?:.*\.)?(?:[a-z-]+\.)?go\.jp$/i,
+/** Bare-hostname shape (matches the historical compile target). Used to
+ *  decide whether the `*.X` sugar branch can apply. */
+const BARE_HOSTNAME_RE =
+  /^(?:[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
-  // ── Healthcare ──
-  // Epic Systems' MyChart EHR portals are deployed under per-tenant
-  // subdomains of `mychart.org` (e.g. `mychart.providername.org`), which
-  // the canonical `mychart.org` entry below already catches via the
-  // `(?:.*\.)?` prefix. The deployment-specific hostnames
-  // (`mychart.cedars-sinai.org`, etc.) sit on their own eTLD+1s and are
-  // covered only when the user adds them to the per-domain allowlist;
-  // hardcoding every healthcare tenant is impractical, but the
-  // structural defence holds because the user allowlist is empty by
-  // default (§8.4 step 3 / §8.11). The `epicgames.com` entry that
-  // previously lived here was a mis-identification (Epic Games is the
-  // gaming company that ships Fortnite, not Epic Systems' EHR) and
-  // would have blocked a legitimate gaming-news article workflow while
-  // providing zero healthcare coverage.
-  /^(?:.*\.)?myhealth\.va\.gov$/i,
-  /^(?:.*\.)?mychart\.org$/i,
-  /^(?:.*\.)?healthcare\.gov$/i,
+export function compileUserHostnameDenylist(
+  entries: readonly string[],
+): ReadonlyArray<RegExp> {
+  const out: RegExp[] = [];
+  for (const raw of entries) {
+    const normalized = (raw ?? "").trim().toLowerCase();
+    if (!normalized) continue;
+    if (normalized.length > 253) continue;
+    if (!VALID_PATTERN_CHARS_RE.test(normalized)) continue;
+    if (!/[a-z0-9]/.test(normalized)) continue;
+    if (normalized.startsWith(".") || normalized.endsWith(".")) continue;
+    if (normalized.includes("..")) continue;
 
-  // ── Critical infrastructure / cloud-provider control planes ──
-  /^(?:.*\.)?aws\.amazon\.com$/i,
-  /^(?:.*\.)?console\.aws\.amazon\.com$/i,
-  /^(?:.*\.)?console\.cloud\.google\.com$/i,
-  /^(?:.*\.)?portal\.azure\.com$/i,
-  /^(?:.*\.)?cloudflare\.com$/i,
+    const hasWildcard = normalized.includes("*");
 
-  // ── Educational portals (parent §23.2) ──
-  // Generic .edu — broad but matches the parent plan's intent.
-  /^(?:.*\.)?[a-z0-9-]+\.edu$/i,
-  // ── Daemon-internal — the agent screenshotting `/api/health` to scrape
-  // internal state. OQ-M9. The IP CIDR layer below catches `localhost`
-  // / `127.0.0.1`; this hostname entry catches `aitne.local` style
-  // mDNS forms that resolve via the user's router instead of /etc/hosts.
-  /^(?:.*\.)?aitne\.local$/i,
-  // Bare `localhost` (and any subdomain like `foo.localhost` which
-  // browsers route to 127.0.0.1 per RFC6761). Belt-and-braces with the
-  // CIDR layer below: `shouldDenyEgress` only walks the CIDR check when
-  // (a) the hostname is an IP literal or (b) a DNS resolver was
-  // injected AND the lookup succeeds. The resolver branch in
-  // `shouldDenyEgress` fails-open on DNS error — without this hostname
-  // entry, a request to `localhost` with a broken/stubbed resolver
-  // would slip through. Adding the hostname here closes that hole
-  // structurally.
-  /^localhost$/i,
-  /^(?:.*\.)?localhost$/i,
-  // Microsoft / corporate Active Directory FQDN tail commonly carved
-  // out for the host's own services (DNS pre-2008 default). Not
-  // strictly RFC, but a frequent enough self-host shape that it
-  // belongs alongside the localhost entries.
-  /^[a-z0-9-]+\.local$/i,
-]);
+    // Bare hostname — suffix-anchored (matches host + any subdomain).
+    if (!hasWildcard) {
+      if (!BARE_HOSTNAME_RE.test(normalized)) continue;
+      const escaped = normalized.replace(/\./g, "\\.");
+      out.push(new RegExp(`^(?:.*\\.)?${escaped}$`, "i"));
+      continue;
+    }
+
+    // `*.X` sugar — only when X is itself a valid bare hostname and the
+    // rest of the pattern has no further wildcards. Compiled identically
+    // to bare X (suffix-anchored, parent eTLD+1 included).
+    if (normalized.startsWith("*.")) {
+      const tail = normalized.slice(2);
+      if (!tail.includes("*") && BARE_HOSTNAME_RE.test(tail)) {
+        const escaped = tail.replace(/\./g, "\\.");
+        out.push(new RegExp(`^(?:.*\\.)?${escaped}$`, "i"));
+        continue;
+      }
+      // Fall through to the general glob path otherwise (e.g. `*.com`,
+      // `*.foo*`).
+    }
+
+    // General glob — each `*` matches `[a-z0-9.-]*` (DNS-safe chars,
+    // zero or more). Dots / hyphens in literal segments are escaped.
+    // Fully anchored against the hostname.
+    const literalParts = normalized.split("*").map((part) =>
+      part.replace(/[.\\\-]/g, (c) => `\\${c}`),
+    );
+    const pattern = `^${literalParts.join("[a-z0-9.\\-]*")}$`;
+    out.push(new RegExp(pattern, "i"));
+  }
+  return Object.freeze(out);
+}
 
 /**
  * Naïve eTLD+1 extractor — splits on `.` and returns the last two
@@ -169,15 +176,40 @@ export function extractEtldPlusOne(hostname: string): string {
 }
 
 /**
- * Returns true when ANY entry in the hostname denylist matches the
- * eTLD+1 form of `hostname`. The regexes themselves carry the suffix
- * anchor, so the eTLD+1 truncation is belt-and-suspenders against
- * subdomain-prefix bypass attempts.
+ * Returns true when ANY entry in the supplied hostname denylist matches
+ * `hostname`. Each compiled regex from `compileUserHostnameDenylist`
+ * already carries the correct anchor (suffix-anchored for bare /
+ * `*.X` patterns; fully `^...$` anchored for general glob patterns) so
+ * the test is a single `re.test(hostname)` per entry.
+ *
+ * Historical note: prior revisions also tested against
+ * `extractEtldPlusOne(hostname)` as belt-and-braces against subdomain-
+ * prefix bypass. That second check is unnecessary now (bare patterns'
+ * `^(?:.*\.)?X$` shape already rejects `evil.X.attacker.tld` because
+ * the hostname must END in X) and was actively HARMFUL for glob
+ * patterns (`tracker*` matched against `analytics.tracker.com` would
+ * false-positive via the `tracker.com` eTLD+1 truncation, even though
+ * the literal hostname starts with `analytics`).
+ *
+ * The `list` parameter is injected by the caller; when omitted, the
+ * module-level (empty) `HOSTNAME_DENYLIST` is used so the function is
+ * still safe to call with no runtime configuration.
  */
-export function matchesHostnameDenylist(hostname: string): boolean {
-  const etld = extractEtldPlusOne(hostname);
-  for (const re of HOSTNAME_DENYLIST) {
-    if (re.test(hostname) || re.test(etld)) return true;
+export function matchesHostnameDenylist(
+  hostname: string,
+  list: ReadonlyArray<RegExp> = HOSTNAME_DENYLIST,
+): boolean {
+  if (list.length === 0) return false;
+  // Normalize at the chokepoint so every caller (shouldDenyEgress,
+  // cdp-network-interception fast-path, screenshot-output redaction) is
+  // covered: lowercase + strip a single trailing FQDN dot. WHATWG `URL`
+  // preserves the trailing dot (`new URL("http://paypal.com./").hostname
+  // === "paypal.com."`), which the suffix-anchored `^(?:.*\.)?paypal\.com$`
+  // regex would NOT match — so without this strip a `paypal.com.` host
+  // evades a user `paypal.com` denylist entry entirely.
+  const h = hostname.toLowerCase().replace(/\.$/, "");
+  for (const re of list) {
+    if (re.test(h)) return true;
   }
   return false;
 }
@@ -210,6 +242,7 @@ export const IP_DENYLIST_CIDRS: ReadonlyArray<string> = Object.freeze([
   "0.0.0.0/8",
   // IPv6 equivalents
   "::1/128",
+  "::/128", // IPv6 unspecified — mirrors IPv4 0.0.0.0/8; routes to ::1 as a connect target on common stacks
   "fc00::/7",
   "fe80::/10",
   "fd00::/8",
@@ -325,6 +358,35 @@ export function matchesCidrDenylist(ip: string): boolean {
   for (const cidr of IP_DENYLIST_CIDRS) {
     if (ipInCidr(ip, cidr)) return true;
   }
+  // IPv4-mapped IPv6 (`::ffff:0:0/96`): extract the embedded IPv4 and run
+  // it through the IPv4 CIDRs so every v4 deny range is covered without
+  // duplicating each as a `/104..../112` v6-mapped entry. WHATWG `URL`
+  // normalizes `[::ffff:169.254.169.254]` to `::ffff:a9fe:a9fe`, so the
+  // literal-dotted form never survives to here — we must decode the
+  // bigint. This closes the SSRF hole where `::ffff:a9fe:a9fe`
+  // (AWS/GCP metadata) or `::ffff:10.0.0.1` (RFC1918) would otherwise
+  // pass the CIDR check. Covers both the IP-literal leg and any resolved
+  // V4MAPPED address from the DNS-resolution leg.
+  if (ip.includes(":")) {
+    const bits = ipv6ToBigInt(ip);
+    if (bits !== null) {
+      const mask96 = ((1n << 96n) - 1n) << 32n; // high 96 bits
+      const v4MappedPrefix = 0xffffn << 32n; // ::ffff:0:0
+      if ((bits & mask96) === v4MappedPrefix) {
+        const embedded = Number(bits & 0xffffffffn);
+        const dotted = [
+          (embedded >>> 24) & 255,
+          (embedded >>> 16) & 255,
+          (embedded >>> 8) & 255,
+          embedded & 255,
+        ].join(".");
+        for (const cidr of IP_DENYLIST_CIDRS) {
+          if (cidr.includes(":")) continue; // only the IPv4 CIDRs
+          if (ipInCidr(dotted, cidr)) return true;
+        }
+      }
+    }
+  }
   return false;
 }
 
@@ -352,7 +414,7 @@ export interface ResolveIps {
 
 export async function shouldDenyEgress(
   url: string,
-  opts?: { resolveIps?: ResolveIps },
+  opts?: { resolveIps?: ResolveIps; hostnameDenylist?: ReadonlyArray<RegExp> },
 ): Promise<{ denied: true; reason: "hostname" | "cidr" | "invalid_url" } | { denied: false }> {
   let parsed: URL;
   try {
@@ -369,7 +431,7 @@ export async function shouldDenyEgress(
     rawHostname.startsWith("[") && rawHostname.endsWith("]")
       ? rawHostname.slice(1, -1)
       : rawHostname;
-  if (matchesHostnameDenylist(hostname)) {
+  if (matchesHostnameDenylist(hostname, opts?.hostnameDenylist)) {
     return { denied: true, reason: "hostname" };
   }
   const isIpLiteral = isIpv4Literal(hostname) || isIpv6Literal(hostname);

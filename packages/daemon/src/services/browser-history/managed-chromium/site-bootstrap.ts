@@ -56,6 +56,7 @@ import { authProfileDir } from "./instance-a-config.js";
 import { launchUnderSandbox } from "./sandbox-launcher.js";
 import { materialiseSandboxPrimitive } from "./sandbox-install.js";
 import { buildAuthBootstrapArgs } from "./supervisor-config.js";
+import { chromiumBundleRoot } from "../lifecycle/platform.js";
 import { DEFAULT_BOOTSTRAP_TIMEOUT_MS } from "./types.js";
 import type { HostProfile, SandboxPrimitive } from "../types.js";
 import { getSite, type SiteDefinition } from "../automation/site-registry.js";
@@ -164,7 +165,7 @@ export async function startSiteBootstrap(
         cdpPort,
       }),
       writableBindings: [profileDir],
-      readableBindings: [binaryPath],
+      readableBindings: [chromiumBundleRoot(binaryPath)],
       detached: true,
     });
     child = result.child;

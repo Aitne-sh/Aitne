@@ -379,7 +379,7 @@ Global rules (apply at every step):
 
     **POST the batch.** Each row carries **either** `tier`
     (`lite`/`medium`/`high`, the default cost knob) **or** `model` (a
-    registered id like `claude-opus-4-7`, a legacy alias `sonnet`/`opus`,
+    registered id like `claude-opus-4-8`, a legacy alias `sonnet`/`opus`,
     or composite `<backendId>/<modelId>`) — never both. Prefer `tier`;
     only pin `model` for rows that must outlive a `/settings/models`
     re-route (e.g. a row whose `expected_output` depends on Opus-class
@@ -409,7 +409,7 @@ Global rules (apply at every step):
           "scheduledFor": "2026-05-15T20:00:00-04:00",
           "taskType": "wake",
           "taskDescription": "Synthesise the Q2 roadmap revision draft based on today's risk discussion.",
-          "model": "claude-opus-4-7",
+          "model": "claude-opus-4-8",
           "taskContext": {
             "background": "User asked at standup for a written revision proposal by EOD; row pins Opus because the draft quality depends on the higher-tier reasoning.",
             "expected_output": "plans/projects/q2-roadmap.md revision section appended with three concrete proposals + rationale.",

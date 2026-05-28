@@ -62,6 +62,7 @@ import {
 } from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { bootstrapManagedTaskSeq } from "../db/managed-tasks-store.js";
+import { sweepNonTerminalRowsForBootRecovery } from "../db/browser-task-store.js";
 import { setWikiWorkspaceTokenResolver } from "../core/skills-compiler-tree.js";
 import {
   listWikiWorkspaces,
@@ -385,6 +386,18 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
   // POST. No-op when the table is empty (steady-state cost: one SELECT).
   bootstrapManagedTaskSeq(db);
 
+  // BROWSER_TASK_REDESIGN_PLAN.md §6.5 — flip every non-terminal
+  // browser_task row to (failed, 'daemon_restarted', now()). The
+  // in-memory BrowserContext + slot manager are unrecoverable across
+  // restarts; the per-task DM intent is logged at warn-level here
+  // because at this stage of boot we do not yet hold a `sendNotification`
+  // handle. `index.ts` later picks the affected ids out of the
+  // `agent_actions` log via `boot_recovery_browser_task` (or via the
+  // returned summary if a future bootstrap factory passes a sender
+  // through). For now: log + WARN so the operator can grep the boot
+  // line and a per-row reconciliation tool can fan DMs separately.
+  surfaceBrowserTaskBootRecovery(db);
+
   closeOrphanedDashboardChatSessions(db);
 
   // Chat attachment store — constructed early so adapter reload functions
@@ -642,6 +655,61 @@ function surfaceLegacyModelRows(db: Database.Database): void {
     { count: rows.length },
     "Found pre-Phase-D schedule rows with a full model id but no backend_id companion — see `aitne audit --type schedule.legacy_model`",
   );
+}
+
+/**
+ * BROWSER_TASK_REDESIGN_PLAN.md §6.5 boot-recovery — flip every
+ * non-terminal `browser_task` row to `failed (daemon_restarted)` and
+ * emit a single `agent_actions(action_type='browser_task.boot_recovery')`
+ * row per affected task so the operator can DM-fan them out post-boot
+ * via a reconciliation tool. We do NOT call the sender here because
+ * the messaging adapters are still constructing at this stage of boot.
+ *
+ * Pure SQL UPDATE inside `sweepNonTerminalRowsForBootRecovery`; this
+ * wrapper handles the audit-row emission + the log line. Exported so
+ * a peer test can exercise both branches (no rows vs. some rows).
+ */
+export function surfaceBrowserTaskBootRecovery(db: Database.Database): number {
+  let affected: readonly { id: string; originatingChannel: string | null }[];
+  try {
+    affected = sweepNonTerminalRowsForBootRecovery(db, Date.now());
+  } catch (err) {
+    /* c8 ignore start -- the schema script creates the table; this catch
+     * exists for defence-in-depth against a hand-crafted partial DB. */
+    logger.warn(
+      { err },
+      "surfaceBrowserTaskBootRecovery: sweep failed — browser_task table likely missing; skipping",
+    );
+    return 0;
+    /* c8 ignore stop */
+  }
+  if (affected.length === 0) return 0;
+  const insert = db.prepare(`
+    INSERT INTO agent_actions (action_type, detail, result, started_at, completed_at)
+    VALUES (?, ?, 'success', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  `);
+  const tx = db.transaction(
+    (batch: readonly { id: string; originatingChannel: string | null }[]) => {
+      for (const row of batch) {
+        insert.run(
+          "browser_task.boot_recovery",
+          JSON.stringify({
+            taskId: row.id,
+            originatingChannel: row.originatingChannel,
+            reason: "daemon_restarted",
+            remediation:
+              "DM the originating channel that the task was running when the daemon restarted and could not resume. Future revisions may checkpoint state to disk to enable resume.",
+          }),
+        );
+      }
+    },
+  );
+  tx(affected);
+  logger.warn(
+    { count: affected.length },
+    "browser-task boot recovery — non-terminal rows flipped to failed(daemon_restarted)",
+  );
+  return affected.length;
 }
 
 export function applyDelegatedTaskModeDefaultCorrection(

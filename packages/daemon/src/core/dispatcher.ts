@@ -11,9 +11,12 @@ import {
   isMessageEvent,
   isRoutineEvent,
   isAgentTaskEvent,
+  isScheduledEvent,
+  isScheduledBrowserTaskEvent,
   isScheduledDmEvent,
   isKnowledgeImportEvent,
   parseSqliteUtcMs,
+  type ScheduledBrowserTaskEvent,
 } from "@aitne/shared";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -179,6 +182,41 @@ export class EventDispatcher {
    */
   private purchaseHandler:
     | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
+    | null = null;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 — lite-final-confirm
+   * handler. Wired at daemon startup from `bootstrap/event-pipeline.ts`
+   * via `setFinalConfirmHandler`. The inbound classifier (§14.11 Q#6)
+   * routes `!~xxxxxxxx` replies between this handler and
+   * `purchaseHandler` by querying both stores via `lookupByRaw` and
+   * dispatching to whichever returned a row.
+   */
+  private finalConfirmHandler:
+    | import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler
+    | null = null;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — Phase 3 wiring. The
+   * dispatcher routes `scheduled.browser_task` events to the runner.
+   * Wired at daemon startup from `bootstrap/event-pipeline.ts` via
+   * `setBrowserTaskRunner`. Null when the runner factory has not yet
+   * landed (test harness or stripped-down boot path) — the dispatch
+   * branch flips the `agent_schedule` row to `failed
+   * (runner_unavailable)` in that case so the row doesn't park.
+   */
+  private browserTaskRunner:
+    | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
+    | null = null;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §7 — "the user is DMed" on fire-time
+   * dispatch failure (`site_unregistered`, `allowlist_rejected`,
+   * `runner_unavailable`). The runner's own `notifier.notifyTerminal`
+   * only fires when the runner is reached, which is exactly NOT the
+   * case for these pre-runner failure paths. Wired from `event-pipeline.ts`
+   * alongside the runner factory so a fire-time failure DMs the owner
+   * instead of leaving the row silently flipped to `failed` in the DB.
+   */
+  private browserTaskTerminalNotifier:
+    | import("../services/browser-task/browser-task-runner.js").BrowserTaskNotifier
     | null = null;
   /**
    * Current setup mode — scope-agnostic flag that survives internal
@@ -681,6 +719,7 @@ export class EventDispatcher {
       getAuthHealthMonitor: () => this.authHealthMonitor,
       getBangCommandRegistry: () => this.bangCommandRegistry,
       getPurchaseHandler: () => this.purchaseHandler,
+      getFinalConfirmHandler: () => this.finalConfirmHandler,
       getCurrentSetupMode: () => this.currentSetupMode,
       beginSetupMode: (mode) => this.beginSetupMode(mode),
       lookupCustomBangCommandForEvent: (event) =>
@@ -739,6 +778,60 @@ export class EventDispatcher {
     | import("../services/browser-history/automation/purchase-handler.js").PurchaseHandler
     | null {
     return this.purchaseHandler;
+  }
+
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 — wire the lite-final-
+   * confirm handler. Mirrors `setPurchaseHandler` so the inbound `!~`
+   * classifier and the route layer share one instance via the
+   * dispatcher.
+   */
+  setFinalConfirmHandler(
+    handler: import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler | null,
+  ): void {
+    this.finalConfirmHandler = handler;
+  }
+
+  getFinalConfirmHandler():
+    | import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler
+    | null {
+    return this.finalConfirmHandler;
+  }
+
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — wire the browser-task
+   * runner so the `scheduled.browser_task` dispatch branch can hand
+   * fire-time events to it. Pairs with the `event-pipeline.ts`
+   * `createBrowserTaskRunner` factory call (Phase 3).
+   */
+  setBrowserTaskRunner(
+    runner:
+      | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
+      | null,
+  ): void {
+    this.browserTaskRunner = runner;
+  }
+
+  getBrowserTaskRunner():
+    | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
+    | null {
+    return this.browserTaskRunner;
+  }
+
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §7 — wire the terminal-state DM
+   * emitter used by the `scheduled.browser_task` failure paths (see
+   * `browserTaskTerminalNotifier` field doc). `event-pipeline.ts` passes
+   * the same `BrowserTaskNotifier` instance that's threaded into the
+   * runner so a single DM-emission contract covers both pre-runner
+   * fire-time failures and the runner's own non-completed terminals.
+   */
+  setBrowserTaskTerminalNotifier(
+    notifier:
+      | import("../services/browser-task/browser-task-runner.js").BrowserTaskNotifier
+      | null,
+  ): void {
+    this.browserTaskTerminalNotifier = notifier;
   }
 
   /** Set the dashboard stream adapter for real-time response streaming. */
@@ -1255,6 +1348,32 @@ export class EventDispatcher {
     return !!row;
   }
 
+  /**
+   * Release a claimed `agent_schedule` row back to `pending` when an
+   * autonomous scheduled event is short-circuited before its dispatch
+   * branch can run (setup gate or autonomous cost cap). The ScheduleWatcher
+   * claims the row as `running` and hands the event to the EventBus before
+   * these gates are evaluated, so a silent skip would otherwise leave the
+   * row stuck in `running` forever — blocking both boot recovery (there is
+   * none for stuck `running` schedule rows) and the recurring
+   * `NOT EXISTS(status IN pending/running)` reconcile guard. Reverting to
+   * `pending` (rather than `failed`/`skipped`) is correct because the skip
+   * is transient: once the cost-cap window rolls over or setup completes,
+   * the next ScheduleWatcher tick should re-evaluate and fire the row. This
+   * matches the quiet-hours deferral precedent in the scheduler. The
+   * `WHERE ... status = 'running'` clause keeps it idempotent — a no-op for
+   * non-scheduled events or already-terminal rows.
+   */
+  private releaseClaimedSchedule(event: Event): void {
+    if (isScheduledEvent(event) && event.scheduleId) {
+      this.db
+        .prepare(
+          "UPDATE agent_schedule SET status = 'pending' WHERE id = ? AND status = 'running'",
+        )
+        .run(event.scheduleId);
+    }
+  }
+
   private async dispatchSafe(event: Event): Promise<void> {
     const trigger: "reactive" | "autonomous" = this.isReactive(event) ? "reactive" : "autonomous";
     const startMs = Date.now();
@@ -1285,6 +1404,7 @@ export class EventDispatcher {
       if (!this.isReactive(event)) {
         const setupBlock = this.isAutonomousAllowed();
         if (setupBlock !== null) {
+          this.releaseClaimedSchedule(event);
           this.audit.logSkip(event, setupBlock, trigger);
           logger.info(
             { eventType: event.type, source: event.source, reason: setupBlock },
@@ -1298,6 +1418,7 @@ export class EventDispatcher {
         // Reactive sessions always pass. Degradation priority: hourly_check is
         // skipped first, morning_routine last.
         if (this.shouldSkipForCostCap(event)) {
+          this.releaseClaimedSchedule(event);
           this.audit.logSkip(event, "autonomous_cost_cap_exceeded", trigger);
           logger.info(
             { eventType: event.type, source: event.source },
@@ -1487,8 +1608,93 @@ export class EventDispatcher {
       // scheduled.task — no gate, retains existing parallel-execution
       // behavior. (scheduled.dm subtype is handled above.)
       await this.scheduledTasks.executeScheduledTask(event);
+    } else if (isScheduledBrowserTaskEvent(event)) {
+      // BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — fire-time row
+      // creation + runner handoff. The helper module
+      // `dispatcher-scheduled-browser-task.ts` owns the decision
+      // logic; here we wire it into the agent_schedule lifecycle.
+      await this.handleScheduledBrowserTaskDispatch(event);
     } else {
       await this.scheduledTasks.executeDefault(event);
+    }
+  }
+
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — dispatch branch for
+   * `scheduled.browser_task`. Defers the heavy lifting to
+   * `handleScheduledBrowserTask` (validation + row creation + runner
+   * handoff) and translates the discriminated outcome into the
+   * `agent_schedule.status` write so the row lifecycle stays in sync.
+   *
+   * Outcomes map to:
+   *   - `dispatched` / `row_already_exists` → `agent_schedule` row
+   *     `completed` (the dispatch itself succeeded; the `browser_task`
+   *     row's own state machine tracks the long-running outcome).
+   *   - `site_unregistered` / `allowlist_rejected` / `task_context_invalid`
+   *     / `runner_unavailable` → `agent_schedule` row `failed` (the
+   *     dispatch could not proceed).
+   *
+   * A throw escapes upward into the `dispatch()` try/catch, where
+   * `errorRouter.handleError` flips the schedule row to `failed` via
+   * the existing `isScheduledEvent(event) && event.scheduleId` branch
+   * (defence-in-depth — the explicit `failed` writes here cover every
+   * normal-path failure so the error route never has to).
+   */
+  private async handleScheduledBrowserTaskDispatch(
+    event: ScheduledBrowserTaskEvent,
+  ): Promise<void> {
+    const { handleScheduledBrowserTask } = await import(
+      "./dispatcher-scheduled-browser-task.js"
+    );
+    const outcome = await handleScheduledBrowserTask(
+      {
+        db: this.db,
+        runner: this.browserTaskRunner,
+        notifier: this.browserTaskTerminalNotifier,
+      },
+      event,
+    );
+
+    const succeeded =
+      outcome.kind === "dispatched" || outcome.kind === "row_already_exists";
+    const newStatus = succeeded ? "completed" : "failed";
+    this.db
+      .prepare(
+        "UPDATE agent_schedule SET status = ? WHERE id = ? AND status = 'running'",
+      )
+      .run(newStatus, event.scheduleId);
+
+    // Audit row so the operator can grep the audit log for non-trivial
+    // dispatch outcomes (registry drift, runner misconfiguration). The
+    // happy path is intentionally NOT audited at this layer — the
+    // runner's own `agent_actions.browser_task.queue.*` rows cover the
+    // post-dispatch lifecycle.
+    if (!succeeded) {
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO agent_actions
+               (action_type, detail, result, started_at, completed_at)
+             VALUES (?, ?, 'failure', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          )
+          .run(
+            "browser_task.scheduled_dispatch_failed",
+            JSON.stringify({
+              scheduleId: event.scheduleId,
+              kind: outcome.kind,
+              ...("taskId" in outcome ? { taskId: outcome.taskId } : {}),
+              ...("siteKey" in outcome ? { siteKey: outcome.siteKey } : {}),
+              ...("reason" in outcome ? { reason: outcome.reason } : {}),
+            }),
+          );
+      } catch (auditErr) {
+        /* c8 ignore start -- defensive */
+        logger.warn(
+          { err: auditErr, scheduleId: event.scheduleId, kind: outcome.kind },
+          "failed to record browser_task.scheduled_dispatch_failed audit row",
+        );
+        /* c8 ignore stop */
+      }
     }
   }
 

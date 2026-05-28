@@ -360,6 +360,68 @@ export const runtimeSettingsSchema = z.object({
   // or PATCH /api/config — the scheduler reads the live flag at fire time
   // so the flip takes effect on the next month-end without restart.
   monthlyReviewEnabled: z.boolean().default(false),
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5.1 — global concurrency cap for the
+   * `POST /api/browser-task` sub-agent surface. Per-siteKey slots are
+   * held across the entire non-terminal lifetime including parking
+   * (`awaiting_user` / `final_confirm`), so a parked context still
+   * occupies a slot until the round-trip resolves. Default 3; range
+   * [1, 5]. Lowering at runtime takes effect on the NEXT slot release
+   * (already-acquired slots are not preemptively yanked).
+   *
+   * Rationale for the upper bound: each parked context keeps a full
+   * Playwright BrowserContext resident in memory — the RAM ceiling at
+   * 5 is roughly 5 * ~200 MB. Users with more headroom can raise from
+   * the dashboard; the structural blocker for "checkpoint-to-disk and
+   * release the slot" (Plan B) is Chromium's SingletonLock on the
+   * per-siteKey user-data-dir.
+   */
+  browserTaskMaxConcurrent: z.number().int().min(1).max(5).default(3),
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5.1 — safety valve for tasks that
+   * sit `pending` too long behind a parked task ahead of them. After
+   * this many minutes a queued task transitions directly to
+   * `failed (queue_timeout)` and DMs the originating channel. Default
+   * 30; range [5, 180]. The deadline scanner owns this sweep alongside
+   * the clarification-deadline scan on the same 30 s tick.
+   */
+  browserTaskPendingQueueTimeoutMinutes: z
+    .number()
+    .int()
+    .min(5)
+    .max(180)
+    .default(30),
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §12 Q#5 — when true (default), a
+   * `scheduled.browser_task` fire that would land inside quiet hours is
+   * deferred until quiet-hours-end. The scheduler writes a single
+   * `agent_actions(action_type='browser_task.deferred_for_quiet_hours')`
+   * row so the user can see the delay in audit. Flip to false for
+   * "run anyway" semantics — in which case the final-confirm DM is
+   * stashed in a pending queue and surfaced when quiet hours end (no
+   * quiet-hours DM noise either way).
+   */
+  browserTaskRespectQuietHours: z.boolean().default(true),
+  /**
+   * User-curated hostname denylist for the browser-task surface. Each
+   * entry is a bare hostname (`paypal.com`, `chase.com`, `*.example.com`);
+   * the runtime compiles them into suffix-anchored regexes via
+   * `compileUserHostnameDenylist` and passes the result to both the
+   * CDP route handler (`cdp-network-interception.ts`) and the §14.7
+   * screenshot retention check.
+   *
+   * Empty by default — the framework no longer ships hardcoded brand
+   * entries (payment processors, banks, government, healthcare, JP-
+   * specific). Operators add entries via Dashboard `/settings/browser`
+   * (PATCH /api/config). The IP CIDR layer (RFC1918 / loopback /
+   * cloud-metadata) remains hardcoded inside `shouldDenyEgress` and is
+   * NOT configurable here — it covers network-infrastructure protection,
+   * not third-party brand opinions.
+   */
+  browserTaskHostnameDenylist: z
+    .array(z.string().min(1).max(253))
+    .max(500)
+    .default([]),
   hourlyCheckEnabled: z.boolean().default(true),
   // Any positive integer in [1, 1440] minutes (1 minute up to 24 hours).
   // Despite the "hourly" name, the operator can dial this anywhere in that
@@ -923,6 +985,10 @@ export const RUNTIME_SETTING_KEYS = [
   "timezone",
   "dayBoundaryHour",
   "monthlyReviewEnabled",
+  "browserTaskMaxConcurrent",
+  "browserTaskPendingQueueTimeoutMinutes",
+  "browserTaskRespectQuietHours",
+  "browserTaskHostnameDenylist",
   "hourlyCheckEnabled",
   "hourlyCheckIntervalMinutes",
   "hourlyCheckActiveStartHour",

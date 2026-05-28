@@ -223,7 +223,7 @@ describe("process-config cascade-write internals", () => {
       // Forces the outer `tier === "high" ? ...` true branch in the
       // ternary chain at line 232-237.
       const model = _internals.resolveTierModel(db, "claude", "high");
-      expect(model).toBe("claude-opus-4-7");
+      expect(model).toBe("claude-opus-4-8");
     });
 
     it("resolves a lite-tier model (covers tier !== 'medium' inner branch)", () => {

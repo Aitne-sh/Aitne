@@ -16,7 +16,7 @@ function invalidateAllSchedule(qc: ReturnType<typeof useQueryClient>) {
  * Tier is a closed enum (`lite`/`medium`/`high`) — keep the literal
  * union so accidental typos at call sites surface at compile-time. Model
  * is free-form per SCHEDULE_API_REDESIGN_PLAN.md §4.3: legacy aliases
- * (`sonnet`/`opus`), registered IDs (`claude-opus-4-7`), and composite
+ * (`sonnet`/`opus`), registered IDs (`claude-opus-4-8`), and composite
  * disambiguators (`<backend>/<model>`) are all valid wire values. Server
  * validates and surfaces `schedule.model_unknown` on bad tokens.
  */

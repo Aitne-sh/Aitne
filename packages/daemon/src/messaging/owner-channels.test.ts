@@ -4,6 +4,7 @@ import {
   upsertOwnerChannel,
   getOwnerChannel,
   selectFirstPairedPlatform,
+  selectDefaultOwnerChannel,
 } from "./owner-channels.js";
 
 describe("owner-channels", () => {
@@ -206,4 +207,53 @@ describe("owner-channels", () => {
     });
   });
 
+  describe("selectDefaultOwnerChannel", () => {
+    // Explicit timestamps via raw SQL — CURRENT_TIMESTAMP has 1-second
+    // resolution, so seeding distinct ordering needs hand-set values.
+    const seed = (
+      platform: string,
+      channelId: string,
+      inbound: string | null,
+      outbound: string | null = null,
+    ): void => {
+      db.prepare(
+        `INSERT INTO owner_channels (platform, channel_id, last_inbound_at, last_outbound_at)
+         VALUES (?, ?, ?, ?)`,
+      ).run(platform, channelId, inbound, outbound);
+    };
+
+    it("returns null when no owner channel is paired", () => {
+      expect(selectDefaultOwnerChannel(db)).toBeNull();
+    });
+
+    it("returns the channel with the most recent inbound activity", () => {
+      seed("dashboard", "dash-1", "2026-05-28 03:00:00");
+      seed("whatsapp", "18589107283@s.whatsapp.net", "2026-05-28 04:00:00");
+
+      expect(selectDefaultOwnerChannel(db)).toEqual({
+        platform: "whatsapp",
+        channelId: "18589107283@s.whatsapp.net",
+      });
+    });
+
+    it("falls back to outbound recency when inbound is absent", () => {
+      seed("dashboard", "dash-1", null, "2026-05-28 05:00:00");
+      seed("telegram", "T1", null, "2026-05-28 02:00:00");
+
+      expect(selectDefaultOwnerChannel(db)).toEqual({
+        platform: "dashboard",
+        channelId: "dash-1",
+      });
+    });
+
+    it("breaks ties by earliest-paired rowid when no timestamps exist", () => {
+      seed("slack", "S1", null, null);
+      seed("discord", "D1", null, null);
+
+      expect(selectDefaultOwnerChannel(db)).toEqual({
+        platform: "slack",
+        channelId: "S1",
+      });
+    });
+  });
 });

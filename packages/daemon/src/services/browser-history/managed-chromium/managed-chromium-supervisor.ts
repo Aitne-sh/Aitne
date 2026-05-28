@@ -25,7 +25,7 @@ import {
 import { createLogger } from "../../../logging.js";
 import type { Observer } from "../../../observers/manager.js";
 import type { MessageHub } from "../../../adapters/message-hub.js";
-import { createHostProfile } from "../lifecycle/platform.js";
+import { chromiumBundleRoot, createHostProfile } from "../lifecycle/platform.js";
 import { cleanupStaleSingletonLock } from "../lifecycle/chromium-launcher.js";
 import { checkBrowserProfileHealth } from "../lifecycle/health-check.js";
 import type {
@@ -237,11 +237,15 @@ export class ManagedChromiumSupervisor implements Observer {
           },
         );
         const launcher = this.deps.launcher ?? launchUnderSandbox;
+        // The bundle root (parent dir of binary on Linux, .app root on
+        // macOS) is what bwrap / sandbox-exec actually needs to bind —
+        // binding just the entrypoint file leaves Chromium unable to
+        // load helpers and shared libs from its own install dir.
         const child = launcher(sandbox, {
           binary: config.binaryPath,
           args: [...config.extraArgs],
           writableBindings: [config.userDataDir],
-          readableBindings: [config.binaryPath],
+          readableBindings: [chromiumBundleRoot(config.binaryPath)],
           detached: true,
         }).child;
         if (!child.pid) outcome = "launch_failed";
@@ -287,13 +291,27 @@ export class ManagedChromiumSupervisor implements Observer {
       return;
     }
 
-    // Non-healthy: either reauth detected an explicit problem, or the
-    // launch failed. Emit a DM (subject to per-kind cap) and update
-    // failure-escalation counters.
-    const dmKind: Exclude<ManagedChromiumReauthKind, "healthy"> =
-      reauth.kind === "healthy"
-        ? "sync_silent"
-        : reauth.kind;
+    // Launch failed but the on-disk profile is fine — this is a spawn /
+    // sandbox problem (e.g. a transient sandbox-exec failure), NOT a
+    // sign-out. Bump failure counters so escalation/pause still fires,
+    // but do NOT tell the user to re-authenticate or flip state to
+    // needs_reauth (it stays "ready"); no reauth DM.
+    if (reauth.kind === "healthy") {
+      updateManagedChromiumState(this.deps.db, (draft) => {
+        draft.lastCheckAt = now;
+        const failures = draft.consecutiveFailures + 1;
+        draft.consecutiveFailures = failures;
+        if (failures >= PAUSE_AFTER_FAILURES) {
+          draft.pausedUntil = now + PAUSE_DURATION_MS;
+        }
+      });
+      return;
+    }
+
+    // Non-healthy: the reauth-detector observed an explicit problem.
+    // Emit a DM (subject to per-kind cap) and update failure-escalation
+    // counters. `reauth.kind` is provably non-"healthy" here.
+    const dmKind: Exclude<ManagedChromiumReauthKind, "healthy"> = reauth.kind;
     const lastDmAt = prevState.lastDmAt[dmKind] ?? 0;
     const shouldDm = now - lastDmAt >= DM_RATE_LIMIT_MS;
     if (shouldDm) {

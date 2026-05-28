@@ -153,11 +153,10 @@ authenticated reads (B-2.5), and B-4. Per-site state lives in
 | Surface | Source |
 |---|---|
 | Operator asks the agent to "buy X" / "checkout" via DM | `message.dm` → checkout path |
-| Scheduled / routine workflow request | `routine.browser_automation_request` (medium tier, Claude-only) |
-| Health-check awareness | `routine.managed_sync_health_check` (lite, 6h, journal-only) |
+| Open-ended browser request (DM, dashboard, or scheduler) | `browser_task` (medium tier, Claude-only) — see `BROWSER_TASK_REDESIGN_PLAN.md` |
 
-The health check never DMs — proactive re-auth DMs come from the
-`reauth-detector` in `managed-chromium-supervisor.ts`.
+Proactive re-auth DMs come from the `reauth-detector` in
+`managed-chromium-supervisor.ts`.
 
 ## Why You'd Turn It On
 

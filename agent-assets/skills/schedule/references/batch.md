@@ -57,7 +57,7 @@ curl -s -X POST http://localhost:8321/api/schedule/batch \
 | `rows[].taskContext.sub_flow` | No | Branches the task-flow rendering when the dispatcher needs a specialised sub-flow. |
 | `rows[].taskPrompt` | No | Override for the agent body (min 20 chars when set). |
 | `rows[].correlationId` | No | Defaults to the morning routine's correlation id when omitted. |
-| `rows[].model` | No | Registered model id (`claude-opus-4-7`, `claude-sonnet-4-6`, `gpt-5.4`, `gemini-3.1-pro-preview`, …), legacy alias (`sonnet` / `opus` — auto-rewritten to `tier`), composite `<backendId>/<modelId>`, or `null`. Mutually exclusive with `rows[].tier`. Omit both to let `process_backend_config` decide. |
+| `rows[].model` | No | Registered model id (`claude-opus-4-8`, `claude-sonnet-4-6`, `gpt-5.4`, `gemini-3.1-pro-preview`, …), legacy alias (`sonnet` / `opus` — auto-rewritten to `tier`), composite `<backendId>/<modelId>`, or `null`. Mutually exclusive with `rows[].tier`. Omit both to let `process_backend_config` decide. |
 | `atomic` | No | `true` (default) wraps inserts in one transaction — any row error rolls back all. `false` commits successful rows individually. |
 
 ## Success

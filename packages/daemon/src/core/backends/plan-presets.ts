@@ -137,11 +137,27 @@ export function applyBackendBudgetFactor(
  * Inclusion rule: a process key needs an entry here iff its schema-seed
  * envelope differs from `ENVELOPE_BY_TIER[<its default tier>]`. Process
  * keys whose schema seed matches the bare tier envelope (e.g.
- * `message.dm` = medium 50/$1.00) do not need an entry.
+ * `message.mention` / `dashboard.chat` = medium 50/$1.00) do not need
+ * an entry. (`message.dm` USED to be such a key, but now carries a
+ * wider $5.00 ceiling — see its entry below.)
  */
 const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   Record<ProcessKey, { maxTurns: number; maxBudgetUsd: number }>
 > = {
+  // ── Medium-tier WIDER envelope ────────────────────────────────────────
+  //
+  // `message.dm` is the operator's primary conversational surface. Each
+  // turn re-processes the full DM history (which can carry prior
+  // browser-task reports + screenshots) and routinely runs $0.70-0.80 on
+  // Sonnet, hugging the old $1.00 medium nominal. Legitimate multi-step
+  // turns (dispatch a browser task, answer a follow-up, do real tool
+  // work) tipped over $1.00 mid-turn and surfaced a
+  // BackendQuotaError(max_budget_usd) to the user even when the work
+  // itself succeeded. $5.00 is a per-turn CEILING, not a target. Kept in
+  // lock-step with the schema-seed row; bumped for upgrading installs by
+  // migration 0006. (message.mention / dashboard.chat stay on the bare
+  // medium nominal and need no entry.)
+  "message.dm": { maxTurns: 50, maxBudgetUsd: 5.0 },
   // ── Medium-tier tighter envelopes ────────────────────────────────────
   //
   // `routine.today_refresh` is drift-triggered. A typical refresh on
@@ -255,6 +271,15 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   "routine.research_offer_dm": { maxTurns: 5, maxBudgetUsd: 0.02 },
   "routine.research_dispatch": { maxTurns: 50, maxBudgetUsd: 1.0 },
   "routine.research_wiki_summary": { maxTurns: 30, maxBudgetUsd: 0.5 },
+  // BROWSER_TASK_REDESIGN_PLAN.md §5 — open-ended browser sub-agent.
+  // Medium-tier nominal is 50/$1.00; the §5 envelope picks a tighter
+  // 30-turn cap because the per-turn cost rises with multimodal
+  // screenshot input (one PNG ≤ 1MB per visual confirmation, and the
+  // typical sub-agent loop captures 4-5 over its lifetime). 30 turns
+  // keeps the upper bound bounded while $1.00 absorbs the screenshot
+  // cost without tripping BackendQuotaError. Lock-step with the
+  // schema-seed row.
+  "browser_task": { maxTurns: 30, maxBudgetUsd: 1.0 },
 };
 
 /**

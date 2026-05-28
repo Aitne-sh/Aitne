@@ -38,6 +38,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 import { createLogger } from "../../../logging.js";
+import { playwrightExecutablePathSync } from "./platform.js";
 
 const logger = createLogger("chromium-install");
 
@@ -84,20 +85,14 @@ export function getChromiumInstallStatus(): ChromiumInstallStatus {
 /**
  * Resolve the headed Chromium binary path inside the Playwright cache,
  * if Playwright has been installed via `playwright install chromium`.
- * Returns null when the package itself is missing, when no compatible
- * build is present, or when the cached path no longer exists on disk
- * (e.g., user manually removed the cache dir).
+ * Async wrapper over the synchronous resolver in `platform.ts` — kept
+ * as a `Promise` because the install-completion callback below was
+ * written against an async signature and other future callers may want
+ * to chain a real verification step here (e.g. spawning the binary
+ * with `--version`).
  */
 export async function getPlaywrightChromiumPath(): Promise<string | null> {
-  try {
-    const pw = await import("playwright-core");
-    const exe = pw.chromium.executablePath();
-    if (exe && existsSync(exe)) return exe;
-    return null;
-  } catch (err) {
-    logger.debug({ err }, "playwright-core executablePath() raised");
-    return null;
-  }
+  return playwrightExecutablePathSync();
 }
 
 function resolveCliPath(): string | null {
@@ -174,14 +169,20 @@ export function startChromiumInstall(): StartInstallResult {
       line,
     );
     if (pct) {
-      const percent = Math.max(0, Math.min(100, parseFloat(pct[1]) ?? 0));
-      const total = parseFloat(pct[2]);
+      // `\d+` in the regex guarantees both groups parse, but be defensive:
+      // a future regex tweak that allows e.g. an empty group would otherwise
+      // surface as NaN downstream (Math.round(NaN) → NaN → schema rejection).
+      const rawPercent = parseFloat(pct[1]);
+      const rawTotal = parseFloat(pct[2]);
+      const percent = Number.isFinite(rawPercent)
+        ? Math.max(0, Math.min(100, rawPercent))
+        : current.progressPercent ?? 0;
       current = {
         ...current,
         progressPercent: Math.round(percent),
-        totalMib: Number.isFinite(total) ? total : current.totalMib,
-        downloadedMib: Number.isFinite(total)
-          ? Math.round((percent / 100) * total * 10) / 10
+        totalMib: Number.isFinite(rawTotal) ? rawTotal : current.totalMib,
+        downloadedMib: Number.isFinite(rawTotal)
+          ? Math.round((percent / 100) * rawTotal * 10) / 10
           : current.downloadedMib,
       };
       return;

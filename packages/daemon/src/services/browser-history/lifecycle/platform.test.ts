@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { singletonLockHasLiveOwner } from "./platform.js";
+import {
+  chromiumBundleRoot,
+  darwinTahoeOrLater,
+  singletonLockHasLiveOwner,
+} from "./platform.js";
 
 describe("singletonLockHasLiveOwner", () => {
   let root: string;
@@ -46,5 +50,69 @@ describe("singletonLockHasLiveOwner", () => {
 
   it("returns false when the user-data-dir itself does not exist", async () => {
     expect(await singletonLockHasLiveOwner(join(root, "missing"))).toBe(false);
+  });
+});
+
+describe("chromiumBundleRoot", () => {
+  // The function branches on `process.platform`; gate the macOS-specific
+  // .app-walk assertions to darwin and assert the non-darwin dirname
+  // fallback elsewhere. Both branches use only pure path arithmetic.
+  if (process.platform === "darwin") {
+    it("returns the nearest .app ancestor for a Playwright-cache binary", () => {
+      const exe =
+        "/Users/x/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+      expect(chromiumBundleRoot(exe)).toBe(
+        "/Users/x/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app",
+      );
+    });
+
+    it("returns the nearest .app ancestor for a system /Applications binary", () => {
+      const exe = "/Applications/Chromium.app/Contents/MacOS/Chromium";
+      expect(chromiumBundleRoot(exe)).toBe("/Applications/Chromium.app");
+    });
+
+    it("falls back to the parent dir on macOS when no .app ancestor exists", () => {
+      // e.g. operator points us at a binary in /usr/local/bin/.
+      const exe = "/usr/local/bin/chromium";
+      expect(chromiumBundleRoot(exe)).toBe("/usr/local/bin");
+    });
+  } else {
+    it("returns the parent dir on non-darwin platforms", () => {
+      // Tested on the host's actual platform (linux/win32). The macOS
+      // .app-walk branch is unreachable here and covered above.
+      const exe = process.platform === "win32"
+        ? "C:\\cache\\ms-playwright\\chromium-1223\\chrome-win64\\chrome.exe"
+        : "/home/x/.cache/ms-playwright/chromium-1223/chrome-linux/chrome";
+      const expected = process.platform === "win32"
+        ? "C:\\cache\\ms-playwright\\chromium-1223\\chrome-win64"
+        : "/home/x/.cache/ms-playwright/chromium-1223/chrome-linux";
+      expect(chromiumBundleRoot(exe)).toBe(expected);
+    });
+  }
+});
+
+describe("darwinTahoeOrLater", () => {
+  it("returns false on non-darwin platforms regardless of release string", () => {
+    expect(darwinTahoeOrLater("linux", () => "6.5.0")).toBe(false);
+    expect(darwinTahoeOrLater("win32", () => "26.0.0")).toBe(false);
+    expect(darwinTahoeOrLater("freebsd", () => "99.9.9")).toBe(false);
+  });
+
+  it("returns false for darwin majors < 25 (macOS ≤ 15)", () => {
+    expect(darwinTahoeOrLater("darwin", () => "22.6.0")).toBe(false); // macOS 13
+    expect(darwinTahoeOrLater("darwin", () => "23.1.0")).toBe(false); // macOS 14
+    expect(darwinTahoeOrLater("darwin", () => "24.0.0")).toBe(false); // macOS 15
+  });
+
+  it("returns true for darwin major 25 (macOS 26 Tahoe) and beyond", () => {
+    expect(darwinTahoeOrLater("darwin", () => "25.0.0")).toBe(true);
+    expect(darwinTahoeOrLater("darwin", () => "25.5.0")).toBe(true);
+    expect(darwinTahoeOrLater("darwin", () => "26.1.0")).toBe(true);
+    expect(darwinTahoeOrLater("darwin", () => "40.0.0")).toBe(true);
+  });
+
+  it("treats unparseable release strings as below the threshold", () => {
+    expect(darwinTahoeOrLater("darwin", () => "")).toBe(false);
+    expect(darwinTahoeOrLater("darwin", () => "garbage")).toBe(false);
   });
 });

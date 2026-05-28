@@ -64,6 +64,31 @@ describe("recurring-schedules DB", () => {
       expect(scheduleRow!.recurring_schedule_id).toBe(dto.id);
     });
 
+    it("rejects `browser_task` as a recurring task type (preGeneratedTaskId reuse would no-op every fire after the first)", () => {
+      expect(() =>
+        createRecurringSchedule(db, {
+          taskType: "browser_task",
+          description: "Check the order status page every morning",
+          recurrenceRule: makeRule(),
+        }),
+      ).toThrow(/browser_task.*not supported for recurring/);
+      // No partial row should have been written.
+      const rows = db
+        .prepare("SELECT COUNT(*) AS n FROM agent_schedule")
+        .get() as { n: number };
+      expect(rows.n).toBe(0);
+    });
+
+    it("still accepts `dm` / `dm_session` recurring types (designed per-occurrence dispatch, no dedup)", () => {
+      expect(() =>
+        createRecurringSchedule(db, {
+          taskType: "dm_session",
+          description: "Recurring morning briefing in DM",
+          recurrenceRule: makeRule(),
+        }),
+      ).not.toThrow();
+    });
+
     it("persists model as NULL when caller does not pin one (no `process_backend_config` override)", () => {
       // Regression: previously `?? 'sonnet'` plus the schema's
       // `DEFAULT 'sonnet'` made every unpinned recurring row force

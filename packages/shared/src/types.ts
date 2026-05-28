@@ -125,7 +125,7 @@ export interface AgentTaskEvent extends Event {
    * Explicit backend + model pin propagated from `agent_schedule.backend_id`
    * + `agent_schedule.model` (SCHEDULE_API_REDESIGN_PLAN §4.3a). Set together
    * by the scheduler when the operator pinned a registered full model id
-   * (e.g. `claude-opus-4-7`). The dispatcher's scheduled-task override block
+   * (e.g. `claude-opus-4-8`). The dispatcher's scheduled-task override block
    * (`dispatcher-scheduled-tasks.ts`) guards on BOTH fields together — emitting
    * only one silently drops the pin. Daemon-owned integration cron events
    * (trigger-dispatch, repository_run) also produce this pair via the same
@@ -230,11 +230,70 @@ export function isScheduledDmEvent(e: Event): e is ScheduledDmEvent {
 }
 
 /**
+ * BROWSER_TASK_REDESIGN_PLAN.md §6.2 + §7 — `scheduled.browser_task` is
+ * emitted from the ScheduleWatcher when an `agent_schedule` row with
+ * `task_type='browser_task'` becomes due. The `taskContext` carries the
+ * original `POST /api/browser-task` body (frozen at schedule time),
+ * augmented with a `preGeneratedTaskId` so the user-facing taskId
+ * returned at schedule-time matches the row id created at fire-time.
+ *
+ * This event does NOT flow through the normal scheduled.task / agent
+ * SDK dispatch — the dispatcher routes it to a dedicated handler that
+ * (a) re-validates the site registry, (b) creates the `browser_task`
+ * row, and (c) hands off to `BrowserTaskRunner.runFromScheduleRow`. The
+ * runner's RunResult is what determines the `browser_task` lifecycle;
+ * the `agent_schedule` row only tracks dispatch success.
+ *
+ * `isScheduledEvent` returns `true` for this event so the shared
+ * `agent_schedule.status` lifecycle (mark `completed` / `failed` /
+ * cleanup on error) still applies. `isAgentTaskEvent` and
+ * `isScheduledDmEvent` both return `false` so the AgentTaskEvent SDK
+ * paths (`executeScheduledTask`, `finalizeRetemplateRunIfApplicable`,
+ * etc.) do not pick it up.
+ */
+export interface ScheduledBrowserTaskEvent extends Event {
+  type: "scheduled.browser_task";
+  /** Persisted original POST body — shape mirrors the route's
+   *  `postBodySchema`. Validated at fire time before row creation. */
+  taskContext: {
+    /** UUID v4 minted at schedule-time so the schedule POST's response
+     *  can hand the user a stable taskId before the row exists. */
+    preGeneratedTaskId: string;
+    description: string;
+    siteKey: string | null;
+    extraAllowedHosts?: string[];
+    originatingChannel?: string | null;
+    /** What the user picked at schedule time — re-applied to the new
+     *  row at fire time. The runner consults registry state at fire
+     *  time for the final-confirm trip semantics; this field only
+     *  governs whether the gate is armed. */
+    requireFinalConfirm?: boolean;
+  };
+  /** `agent_schedule.id` of the row that fired this event. Used by
+   *  the dispatcher handler to mark the schedule row completed /
+   *  failed once the runner accepts (or rejects) the dispatch. */
+  scheduleId: number;
+}
+
+export function isScheduledBrowserTaskEvent(
+  e: Event,
+): e is ScheduledBrowserTaskEvent {
+  return e.type === "scheduled.browser_task";
+}
+
+/**
  * Umbrella guard for any scheduler-fired event (currently
- * `scheduled.task` or `scheduled.dm`). Replaces `isAgentTaskEvent` at
- * call sites where both subtypes should be treated uniformly — e.g.
- * marking the parent `agent_schedule` row completed/failed, gating
- * final-text DM delivery, or injecting calendar/origin context.
+ * `scheduled.task`, `scheduled.dm`, or `scheduled.browser_task`).
+ * Replaces `isAgentTaskEvent` at call sites where every subtype should
+ * be treated uniformly — e.g. marking the parent `agent_schedule` row
+ * completed/failed, gating final-text DM delivery, or injecting
+ * calendar/origin context.
+ *
+ * The fallback path (`scheduled.browser_task` lands here) returns the
+ * event widened to `AgentTaskEvent`'s structural shape; callers that
+ * need the browser-task subtype must use `isScheduledBrowserTaskEvent`
+ * explicitly. This umbrella guard exists solely for the lifecycle
+ * cross-cutting concerns enumerated above.
  */
 export function isScheduledEvent(e: Event): e is AgentTaskEvent {
   return e.type.startsWith("scheduled.");

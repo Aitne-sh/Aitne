@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { AppSidebar } from "./app-sidebar";
 import { DegradedBanner } from "./degraded-banner";
 import { VaultRestructureModal } from "./vault-restructure-modal";
+import { AwaitingAttentionStrip } from "@/components/browser-tasks/awaiting-attention-strip";
 import { CmdkPalette } from "@/components/settings/cmdk-palette";
 import { DocsHelpButton } from "@/components/docs/docs-help-button";
 import { DocsHelpKeybinding } from "@/components/docs/docs-help-keybinding";
@@ -32,6 +33,11 @@ function LayoutShellInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {!isInitialSetup && <DegradedBanner />}
+      {/* BROWSER_TASK_REDESIGN_PLAN.md §9a.4 — persistent shell banner
+          when any browser-task row sits in awaiting_user / final_confirm.
+          Renders null on the happy path; mounts above the sidebar+main
+          row so it stays visible while the main content scrolls. */}
+      {!isInitialSetup && <AwaitingAttentionStrip variant="shell" />}
       <div className="flex min-h-0 flex-1">
         {!isInitialSetup && <AppSidebar />}
         <main className="flex flex-1 flex-col overflow-hidden">

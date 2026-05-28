@@ -161,7 +161,7 @@ here.
 
 `model` accepts a free-form token after SCHEDULE_API_REDESIGN_PLAN
 §4.3: legacy aliases (`sonnet` / `opus` — rewritten to `tier` at
-the route), full registered model ids (e.g. `claude-opus-4-7`,
+the route), full registered model ids (e.g. `claude-opus-4-8`,
 `gpt-5.4`), or the composite `<backendId>/<modelId>` form when an
 id appears under multiple backends. `tier` (`lite` | `medium` |
 `high`) is the abstract cost knob and is mutually exclusive with

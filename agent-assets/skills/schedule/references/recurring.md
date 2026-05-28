@@ -53,7 +53,7 @@ curl -s -X POST http://localhost:8321/api/recurring-schedules \
 | `prompt` | No | Optional override for the agent body (min 20 chars when set). Each materialized one-shot row inherits this from the recurring parent. |
 | `recurrenceRule` | Yes | `{ frequency, time?, timezone?, intervalHours?, minuteOfHour?, daysOfWeek?, daysOfMonth?, onMissingDay? }` — fields gated by `frequency`; see grammar below. |
 | `tier` | No | `lite` / `medium` / `high`. Mutually exclusive with `model`. |
-| `model` | No | Registered model id (`claude-opus-4-7`, `gpt-5.4`, `gemini-3.1-pro-preview`, …), legacy alias (`sonnet` / `opus` — auto-rewritten to `tier`), or composite `<backendId>/<modelId>` for future disambiguation. Mutually exclusive with `tier`. The row stores `(model, backend_id)` together so the dispatcher honors the pin at fire time. |
+| `model` | No | Registered model id (`claude-opus-4-8`, `gpt-5.4`, `gemini-3.1-pro-preview`, …), legacy alias (`sonnet` / `opus` — auto-rewritten to `tier`), or composite `<backendId>/<modelId>` for future disambiguation. Mutually exclusive with `tier`. The row stores `(model, backend_id)` together so the dispatcher honors the pin at fire time. |
 | `taskContext` | No | Structured metadata object |
 
 ### Recurrence rule grammar (engine)
@@ -141,7 +141,7 @@ Response: `{ "items":[{ "id","taskType","description","recurrenceRule","enabled"
 # Swap a daily rule to hourly + change model to Opus in one PATCH
 curl -s -X PATCH http://localhost:8321/api/recurring-schedules/1 \
   -H 'Content-Type: application/json' \
-  -d '{"recurrenceRule":{"frequency":"hourly","intervalHours":2,"minuteOfHour":0},"tier":null,"model":"claude-opus-4-7"}'
+  -d '{"recurrenceRule":{"frequency":"hourly","intervalHours":2,"minuteOfHour":0},"tier":null,"model":"claude-opus-4-8"}'
 ```
 
 Updatable: `recurrenceRule`, `description`, `prompt` (string sets an

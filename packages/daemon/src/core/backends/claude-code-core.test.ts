@@ -2173,7 +2173,7 @@ describe("ClaudeCodeCore", () => {
 
   describe("resolveActualModelId", () => {
     it("resolves opus alias to heavy model", () => {
-      expect((core as any).resolveActualModelId("opus")).toBe("claude-opus-4-7");
+      expect((core as any).resolveActualModelId("opus")).toBe("claude-opus-4-8");
     });
 
     it("resolves sonnet alias to light model", () => {

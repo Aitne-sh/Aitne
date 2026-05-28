@@ -156,7 +156,9 @@ describe("proxy-model-registry", () => {
       const opus46 = claude.find((o) => o.modelId === "claude-opus-4-6");
       expect(opus46?.deprecated).toBe(true);
       const opus47 = claude.find((o) => o.modelId === "claude-opus-4-7");
-      expect(opus47?.deprecated).toBe(false);
+      expect(opus47?.deprecated).toBe(true);
+      const opus48 = claude.find((o) => o.modelId === "claude-opus-4-8");
+      expect(opus48?.deprecated).toBe(false);
     });
 
     it("falls back to null pricing fields when the registry has no rate", () => {

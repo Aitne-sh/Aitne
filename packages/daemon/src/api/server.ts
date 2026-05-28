@@ -61,9 +61,9 @@ import { createWikiRoutes } from "./routes/wiki.js";
 import { createFsRoutes } from "./routes/fs.js";
 import { createBrowserHistoryRoutes } from "./routes/browser-history.js";
 import { createBrowserHistoryManagedRoutes } from "./routes/browser-history-managed.js";
-import { createBrowserAutomationRoutes } from "./routes/browser-automation.js";
 import { createBrowserAutomationSitesRoutes } from "./routes/browser-automation-sites.js";
 import { createBrowserAutomationPurchaseRoutes } from "./routes/browser-automation-purchase.js";
+import { createBrowserTaskRoutes } from "./routes/browser-task.js";
 import {
   buildManagedTasksRoutesDepsFromApi,
   createManagedTasksRoutes,
@@ -268,6 +268,31 @@ export interface ApiDependencies {
   purchaseHandler?: import(
     "../services/browser-history/automation/purchase-handler.js"
   ).PurchaseHandler;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — browser-task sub-agent
+   * runner + shared slot state. Both wired together at boot in
+   * `index.ts`. Optional in tests; when absent the POST /api/browser-task
+   * route writes a synthetic terminal transition so the row doesn't
+   * hang in pending. Phase 1 runner is the `not_implemented` stub;
+   * Phase 2 lands the real Playwright + Claude SDK driver.
+   */
+  browserTaskRunner?: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).BrowserTaskRunner;
+  browserTaskSlotStateRef?: import(
+    "../services/browser-task/browser-task-runner.js"
+  ).SlotStateRef;
+  /**
+   * BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 — lite-final-confirm
+   * token handler. The runner calls into it from the final-confirm
+   * gate; the messaging adapter's `!~xxxxxxxx` inbound dispatcher
+   * routes via `jti`-prefix between this and `purchaseHandler`. Phase 1
+   * wires the handler but the runner stub does not exercise it; Phase 2
+   * lights up the gate.
+   */
+  finalConfirmHandler?: import(
+    "../services/browser-history/automation/final-confirm-handler.js"
+  ).FinalConfirmHandler;
   /** Called when /setup/start arrives so the dispatcher can pause autonomous work. */
   onSetupStart?: (mode: "initial" | "update") => void;
   /** Called after setup/save-rules to clear the setup mode from the dispatcher */
@@ -938,15 +963,6 @@ export function createApp(deps: ApiDependencies): Hono {
   const fsRoutes = createFsRoutes(deps);
   const browserHistoryRoutes = createBrowserHistoryRoutes(deps);
   const browserHistoryManagedRoutes = createBrowserHistoryManagedRoutes(deps);
-  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §8.10 — Phase B-2 workflow
-  // execution surface (Instance A). Mounted unconditionally because the
-  // GET /workflows endpoint is the dashboard's "available workflows"
-  // probe — it returns `automationEnabled: false` when the parent
-  // managed-Chromium toggle is off rather than 404ing. The runner
-  // itself gates with the same flag so a POST /workflows/:name lands
-  // on a 409 `automation_disabled` when the parent integration isn't
-  // ready, without ever spawning Chromium.
-  const browserAutomationRoutes = createBrowserAutomationRoutes(deps);
   // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §16.9 — Phase B-2.5
   // per-site sign-in surface. Same mounting rationale as the parent
   // automation routes: the per-site list is the dashboard's "available
@@ -961,6 +977,12 @@ export function createApp(deps: ApiDependencies): Hono {
   // attempted enable).
   const browserAutomationPurchaseRoutes =
     createBrowserAutomationPurchaseRoutes(deps);
+  // BROWSER_TASK_REDESIGN_PLAN.md §3 — Phase 1 browser-task surface.
+  // Mounted unconditionally so the dashboard /browser-tasks page
+  // (Phase 7a) reaches a stable surface even when the runner is not
+  // wired (tests / lite installs). The route handlers degrade
+  // gracefully on absent runner / slot ref.
+  const browserTaskRoutes = createBrowserTaskRoutes(deps);
   // Management Registry & Entities (docs/design/21-management-registry-
   // and-entities.md). The managed-tasks and sot-bindings routes MUST
   // share one lock manager — separate instances would let back-to-back
@@ -1020,9 +1042,9 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", fsRoutes);
   app.route("/api", browserHistoryRoutes);
   app.route("/api", browserHistoryManagedRoutes);
-  app.route("/api", browserAutomationRoutes);
   app.route("/api", browserAutomationSitesRoutes);
   app.route("/api", browserAutomationPurchaseRoutes);
+  app.route("/api", browserTaskRoutes);
 
   // ── Chat file attachments (Phase 1) ──
   if (deps.attachmentStore) {

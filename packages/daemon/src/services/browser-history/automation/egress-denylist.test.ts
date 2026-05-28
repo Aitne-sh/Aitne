@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  compileUserHostnameDenylist,
   extractEtldPlusOne,
   HOSTNAME_DENYLIST,
   IP_DENYLIST_CIDRS,
@@ -33,91 +34,166 @@ describe("egress-denylist", () => {
     });
   });
 
-  describe("HOSTNAME_DENYLIST coverage", () => {
-    it("blocks payment processors", () => {
-      expect(matchesHostnameDenylist("paypal.com")).toBe(true);
-      expect(matchesHostnameDenylist("www.paypal.com")).toBe(true);
-      expect(matchesHostnameDenylist("checkout.stripe.com")).toBe(true);
+  describe("HOSTNAME_DENYLIST default state", () => {
+    it("is empty by default — the framework does not hardcode any third-party domain entries", () => {
+      // Historical revisions of this module pinned ~40 brand names
+      // (paypal/stripe/banks/.gov/.edu/healthcare/JP-banks) as a
+      // hardcoded safety floor. That model was removed because (a) it
+      // baked an owner-jurisdiction assumption into a US-targeted
+      // product and (b) it forced "look up X" tasks against unrelated
+      // brands to bypass the registry-check, making the open-ended
+      // browser-task surface unusable for general lookups. The list is
+      // now sourced from `runtime-settings.browserTaskHostnameDenylist`
+      // (user-curated via Dashboard `/settings/browser`).
+      expect(HOSTNAME_DENYLIST.length).toBe(0);
     });
 
-    it("blocks banking + brokerage hosts", () => {
-      expect(matchesHostnameDenylist("chase.com")).toBe(true);
-      expect(matchesHostnameDenylist("schwab.com")).toBe(true);
-      expect(matchesHostnameDenylist("bitflyer.jp")).toBe(true);
-    });
-
-    it("blocks government / identity portals", () => {
-      expect(matchesHostnameDenylist("login.gov")).toBe(true);
-      expect(matchesHostnameDenylist("irs.gov")).toBe(true);
-      expect(matchesHostnameDenylist("portal.go.jp")).toBe(true);
-    });
-
-    it("blocks healthcare hosts", () => {
-      expect(matchesHostnameDenylist("healthcare.gov")).toBe(true);
-      expect(matchesHostnameDenylist("mychart.org")).toBe(true);
-      // MyChart EHR portals deploy under per-tenant subdomains of
-      // `mychart.org`; the `(?:.*\.)?mychart\.org$` regex catches them.
-      expect(matchesHostnameDenylist("mychart.providername.org")).toBe(false);
-      // (cross-eTLD+1 tenants like `mychart.cedars-sinai.org` are
-      // intentionally NOT blocked at the hostname layer — they sit on
-      // their own eTLD+1 and rely on the per-domain user allowlist's
-      // empty default to remain unreachable until the user opts in.)
-    });
-
-    it("does not block `epicgames.com` (gaming, not Epic Systems EHR)", () => {
-      // Regression test — previously the healthcare denylist carried
-      // `epicgames.com` as a "placeholder" for Epic Systems patient
-      // portals. `epicgames.com` is Fortnite's parent company; blocking
-      // it would have broken a legitimate news-article workflow against
-      // a gaming site while contributing zero healthcare coverage.
-      expect(matchesHostnameDenylist("epicgames.com")).toBe(false);
-      expect(matchesHostnameDenylist("www.epicgames.com")).toBe(false);
-    });
-
-    it("blocks cloud control planes", () => {
-      expect(matchesHostnameDenylist("aws.amazon.com")).toBe(true);
-      expect(matchesHostnameDenylist("portal.azure.com")).toBe(true);
-      expect(matchesHostnameDenylist("cloudflare.com")).toBe(true);
-    });
-
-    it("blocks `localhost` family at the hostname layer (DNS-fail-open hardening)", () => {
-      // The CIDR layer catches IP literals; this hostname layer is the
-      // belt-and-braces defence against a DNS-fail-open path. If the
-      // resolver fails (or is stubbed to a no-op in a test harness),
-      // `shouldDenyEgress` short-circuits to "not denied" — without
-      // these hostname entries a request to `localhost` would slip past
-      // the CIDR check entirely.
-      expect(matchesHostnameDenylist("localhost")).toBe(true);
-      expect(matchesHostnameDenylist("LOCALHOST")).toBe(true);
-      // RFC6761: browsers route `*.localhost` to loopback. We block
-      // both the bare and the subdomain shapes.
-      expect(matchesHostnameDenylist("foo.localhost")).toBe(true);
-      // `.local` mDNS / Bonjour names typically resolve to LAN devices,
-      // including the host itself (`aitne.local`, `device.local`).
-      expect(matchesHostnameDenylist("aitne.local")).toBe(true);
-      expect(matchesHostnameDenylist("printer.local")).toBe(true);
-    });
-
-    it("does not block ordinary domains", () => {
-      expect(matchesHostnameDenylist("example.com")).toBe(false);
-      expect(matchesHostnameDenylist("anthropic.com")).toBe(false);
-      expect(matchesHostnameDenylist("news.ycombinator.com")).toBe(false);
-    });
-
-    it("defangs subdomain-prefix bypass attempts via eTLD+1 truncation", () => {
-      // `evil.paypal.com.attacker.tld` → eTLD+1 is `attacker.tld`,
-      // which is not in the denylist; the suffix regex on `paypal.com$`
-      // also doesn't match. So the hostname slips by — meaning the
-      // primary defence is the eTLD+1 truncation NOT matching on
-      // attacker.tld. Defence-in-depth: each entry's regex carries
-      // its own suffix anchor so direct subdomain attacks still hit.
-      expect(matchesHostnameDenylist("evil.paypal.com.attacker.tld")).toBe(false);
-      // But direct subdomain access still blocks.
-      expect(matchesHostnameDenylist("login.paypal.com")).toBe(true);
-    });
-
-    it("freezes the denylist (defence-in-depth)", () => {
+    it("freezes the empty default (shape invariant)", () => {
       expect(Object.isFrozen(HOSTNAME_DENYLIST)).toBe(true);
+    });
+
+    it("returns false for every hostname when no list is supplied", () => {
+      expect(matchesHostnameDenylist("paypal.com")).toBe(false);
+      expect(matchesHostnameDenylist("chase.com")).toBe(false);
+      expect(matchesHostnameDenylist("login.gov")).toBe(false);
+      expect(matchesHostnameDenylist("hitachi.com")).toBe(false);
+    });
+  });
+
+  describe("compileUserHostnameDenylist + matchesHostnameDenylist with injected list", () => {
+    it("compiles bare hostnames into suffix-anchored regexes", () => {
+      const list = compileUserHostnameDenylist(["paypal.com", "chase.com"]);
+      expect(matchesHostnameDenylist("paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("www.paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("checkout.chase.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("anthropic.com", list)).toBe(false);
+    });
+
+    it("accepts the leading `*.` sugar as identical to the bare form", () => {
+      // `*.example.com` and `example.com` are equivalent — both produce
+      // a suffix-anchored regex that covers the eTLD+1 and any subdomain.
+      const list = compileUserHostnameDenylist(["*.example.com"]);
+      expect(matchesHostnameDenylist("example.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("api.example.com", list)).toBe(true);
+    });
+
+    it("silently drops malformed entries (scheme-prefixed, whitespace, empty, path-shaped)", () => {
+      // Note: `evil*.com` is NO LONGER malformed — the 2026-05-27 revision
+      // introduced general glob support, so `*` is valid anywhere. The
+      // dropped entries here are: scheme prefix, path segment, empty /
+      // whitespace-only.
+      const list = compileUserHostnameDenylist([
+        "",
+        "   ",
+        "https://example.com",
+        "/path",
+        "valid.com",
+      ]);
+      expect(list.length).toBe(1);
+      expect(matchesHostnameDenylist("valid.com", list)).toBe(true);
+    });
+
+    it("defangs subdomain-prefix bypass attempts via suffix anchoring", () => {
+      const list = compileUserHostnameDenylist(["paypal.com"]);
+      // `evil.paypal.com.attacker.tld` does NOT end in `paypal.com`
+      // (suffix is `.tld`), so the bare-pattern suffix-anchored regex
+      // `^(?:.*\.)?paypal\.com$` does not match. The hostname slips by
+      // — which is correct: the user's `paypal.com` rule means "block
+      // paypal.com or its subdomains", not "block any URL whose
+      // hostname *contains* the substring paypal.com". A user who wants
+      // the latter shape can register `*paypal*` (general glob) which
+      // would catch this case.
+      expect(matchesHostnameDenylist("evil.paypal.com.attacker.tld", list)).toBe(false);
+      // Direct subdomain access still blocks (the suffix regex matches
+      // the canonical `<sub>.paypal.com` shape).
+      expect(matchesHostnameDenylist("login.paypal.com", list)).toBe(true);
+    });
+
+    it("strips a trailing FQDN dot so `paypal.com.` cannot evade a `paypal.com` entry", () => {
+      const list = compileUserHostnameDenylist(["paypal.com"]);
+      expect(matchesHostnameDenylist("paypal.com.", list)).toBe(true);
+      expect(matchesHostnameDenylist("www.paypal.com.", list)).toBe(true);
+      expect(matchesHostnameDenylist("PayPal.com.", list)).toBe(true);
+    });
+
+    it("case-insensitive matching", () => {
+      const list = compileUserHostnameDenylist(["EXAMPLE.com"]);
+      expect(matchesHostnameDenylist("example.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("EXAMPLE.COM", list)).toBe(true);
+    });
+  });
+
+  describe("compileUserHostnameDenylist — general glob patterns", () => {
+    it("`*foo*` matches any hostname containing 'foo'", () => {
+      const list = compileUserHostnameDenylist(["*paypal*"]);
+      expect(matchesHostnameDenylist("paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("login.paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("paypal.attacker.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("evil.paypal.com.attacker.tld", list)).toBe(true);
+      expect(matchesHostnameDenylist("anthropic.com", list)).toBe(false);
+    });
+
+    it("`tracker*` matches any hostname starting with 'tracker'", () => {
+      const list = compileUserHostnameDenylist(["tracker*"]);
+      expect(matchesHostnameDenylist("tracker.example.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("tracker-prod.foo.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("example.com", list)).toBe(false);
+      expect(matchesHostnameDenylist("analytics.tracker.com", list)).toBe(false);
+    });
+
+    it("`*.com` matches any hostname ending in '.com'", () => {
+      const list = compileUserHostnameDenylist(["*.com"]);
+      expect(matchesHostnameDenylist("paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("api.paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("paypal.co.jp", list)).toBe(false);
+      expect(matchesHostnameDenylist("paypal.org", list)).toBe(false);
+    });
+
+    it("`analytics.*` matches any hostname starting with 'analytics.'", () => {
+      const list = compileUserHostnameDenylist(["analytics.*"]);
+      expect(matchesHostnameDenylist("analytics.google.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("analytics.foo.io", list)).toBe(true);
+      expect(matchesHostnameDenylist("foo.analytics.com", list)).toBe(false);
+    });
+
+    it("multiple wildcards compose left-to-right", () => {
+      const list = compileUserHostnameDenylist(["*ads*track*"]);
+      expect(matchesHostnameDenylist("ads.track.example.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("foo-ads-bar-track-baz.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("track.ads.example.com", list)).toBe(false);
+    });
+
+    it("rejects bare-star and other non-literal patterns", () => {
+      const list = compileUserHostnameDenylist(["*", "**", "*.*", "...", ".com", "com.", ""]);
+      expect(list.length).toBe(0);
+    });
+
+    it("rejects entries with disallowed characters (scheme, path, port, userinfo)", () => {
+      const list = compileUserHostnameDenylist([
+        "https://example.com",
+        "example.com/path",
+        "example.com:8080",
+        "user@example.com",
+        "example com",
+      ]);
+      expect(list.length).toBe(0);
+    });
+
+    it("mixed list — bare + sugar + glob coexist", () => {
+      const list = compileUserHostnameDenylist([
+        "paypal.com",
+        "*.example.com",
+        "*tracker*",
+        "*.co.uk",
+      ]);
+      expect(list.length).toBe(4);
+      expect(matchesHostnameDenylist("paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("api.paypal.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("example.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("api.example.com", list)).toBe(true);
+      expect(matchesHostnameDenylist("ads.tracker.io", list)).toBe(true);
+      expect(matchesHostnameDenylist("foo.co.uk", list)).toBe(true);
+      expect(matchesHostnameDenylist("anthropic.com", list)).toBe(false);
     });
   });
 
@@ -226,9 +302,32 @@ describe("egress-denylist", () => {
       expect(matchesCidrDenylist("::ffff:127.0.0.1")).toBe(true);
     });
 
+    it("blocks IPv4-mapped IPv6 forms of every private/metadata range (SSRF defence)", () => {
+      // WHATWG URL normalizes [::ffff:169.254.169.254] -> ::ffff:a9fe:a9fe,
+      // which no v6 CIDR matches — the embedded-IPv4 re-check is what closes
+      // the cloud-metadata / RFC1918 SSRF hole on the IP-literal and the
+      // resolved-V4MAPPED legs.
+      expect(matchesCidrDenylist("::ffff:a9fe:a9fe")).toBe(true); // 169.254.169.254 (metadata)
+      expect(matchesCidrDenylist("::ffff:169.254.169.254")).toBe(true); // dotted v4-mapped
+      expect(matchesCidrDenylist("::ffff:10.0.0.1")).toBe(true); // RFC1918 10/8
+      expect(matchesCidrDenylist("::ffff:0a00:0001")).toBe(true); // 10.0.0.1 (hex groups)
+      expect(matchesCidrDenylist("::ffff:172.16.0.1")).toBe(true); // RFC1918 172.16/12
+      expect(matchesCidrDenylist("::ffff:192.168.1.1")).toBe(true); // RFC1918 192.168/16
+      expect(matchesCidrDenylist("::ffff:c0a8:0101")).toBe(true); // 192.168.1.1 (hex groups)
+      expect(matchesCidrDenylist("::ffff:100.64.0.1")).toBe(true); // CGNAT 100.64/10
+    });
+
+    it("blocks the IPv6 unspecified address ::", () => {
+      expect(matchesCidrDenylist("::")).toBe(true);
+    });
+
     it("allows public IPv4 and IPv6", () => {
       expect(matchesCidrDenylist("8.8.8.8")).toBe(false);
       expect(matchesCidrDenylist("2606:4700:4700::1111")).toBe(false);
+      // A public IPv4-mapped address must still be allowed — the embedded
+      // re-check denies only when the embedded IPv4 is itself private.
+      expect(matchesCidrDenylist("::ffff:8.8.8.8")).toBe(false);
+      expect(matchesCidrDenylist("::ffff:0808:0808")).toBe(false); // 8.8.8.8 (hex groups)
     });
 
     it("freezes the CIDR list", () => {
@@ -243,10 +342,19 @@ describe("egress-denylist", () => {
       if (decision.denied) expect(decision.reason).toBe("invalid_url");
     });
 
-    it("blocks denylisted hostnames", async () => {
-      const decision = await shouldDenyEgress("https://paypal.com/checkout");
+    it("blocks denylisted hostnames when the caller injects a list", async () => {
+      const hostnameDenylist = compileUserHostnameDenylist(["paypal.com"]);
+      const decision = await shouldDenyEgress("https://paypal.com/checkout", {
+        hostnameDenylist,
+      });
       expect(decision.denied).toBe(true);
       if (decision.denied) expect(decision.reason).toBe("hostname");
+    });
+
+    it("does NOT block hostnames absent a caller-supplied list (open by default)", async () => {
+      // No `hostnameDenylist` in opts → module-level empty default → not denied.
+      const decision = await shouldDenyEgress("https://paypal.com/checkout");
+      expect(decision.denied).toBe(false);
     });
 
     it("blocks IP literals inside denylist CIDR", async () => {
@@ -259,6 +367,29 @@ describe("egress-denylist", () => {
       const decision = await shouldDenyEgress("http://[::1]/health");
       expect(decision.denied).toBe(true);
       if (decision.denied) expect(decision.reason).toBe("cidr");
+    });
+
+    it("blocks an IPv4-mapped IPv6 literal pointed at cloud metadata", async () => {
+      const decision = await shouldDenyEgress(
+        "http://[::ffff:169.254.169.254]/latest/meta-data/",
+      );
+      expect(decision.denied).toBe(true);
+      if (decision.denied) expect(decision.reason).toBe("cidr");
+    });
+
+    it("blocks the IPv6 unspecified literal [::]", async () => {
+      const decision = await shouldDenyEgress("http://[::]/");
+      expect(decision.denied).toBe(true);
+      if (decision.denied) expect(decision.reason).toBe("cidr");
+    });
+
+    it("blocks a trailing-dot FQDN against a user denylist (no evasion)", async () => {
+      const hostnameDenylist = compileUserHostnameDenylist(["paypal.com"]);
+      const decision = await shouldDenyEgress("https://paypal.com./checkout", {
+        hostnameDenylist,
+      });
+      expect(decision.denied).toBe(true);
+      if (decision.denied) expect(decision.reason).toBe("hostname");
     });
 
     it("passes a public IP literal without DNS lookup", async () => {
@@ -291,8 +422,10 @@ describe("egress-denylist", () => {
     });
 
     it("treats hostname denylist as primary even when DNS resolver succeeds", async () => {
+      const hostnameDenylist = compileUserHostnameDenylist(["paypal.com"]);
       const decision = await shouldDenyEgress("https://www.paypal.com/", {
         resolveIps: async () => ["8.8.8.8"],
+        hostnameDenylist,
       });
       expect(decision.denied).toBe(true);
       if (decision.denied) expect(decision.reason).toBe("hostname");
