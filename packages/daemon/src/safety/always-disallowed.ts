@@ -231,12 +231,18 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Bash(cp ~/Library/Application Support/Chromium/*)",
   "Bash(cp ~/Library/Application Support/Microsoft Edge/*)",
   "Bash(cp ~/Library/Application Support/BraveSoftware/*)",
+  // Comet's real macOS user-data dir is vendorless "Comet" (see
+  // platform.ts comet.macProfileRoots). The legacy "Perplexity Comet"
+  // guard below never matched a path that exists, leaving the real
+  // profile unprotected — keep both.
+  "Bash(cp ~/Library/Application Support/Comet/*)",
   "Bash(cp ~/Library/Application Support/Perplexity Comet/*)",
   "Bash(cp ~/Library/Application Support/com.openai.atlas/*)",
   "Bash(cp ~/.config/google-chrome/*)",
   "Bash(cp ~/.config/chromium/*)",
   "Bash(cp ~/.config/microsoft-edge/*)",
   "Bash(cp ~/.config/BraveSoftware/*)",
+  "Bash(cp ~/.config/Comet/*)",
   "Bash(cp ~/.var/app/com.google.Chrome/*)",
   "Bash(cp /mnt/c/Users/*)",
   "Bash(curl file://*)",
@@ -244,12 +250,14 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Read(~/Library/Application Support/Chromium/**)",
   "Read(~/Library/Application Support/Microsoft Edge/**)",
   "Read(~/Library/Application Support/BraveSoftware/**)",
+  "Read(~/Library/Application Support/Comet/**)",
   "Read(~/Library/Application Support/Perplexity Comet/**)",
   "Read(~/Library/Application Support/com.openai.atlas/**)",
   "Read(~/.config/google-chrome/**)",
   "Read(~/.config/chromium/**)",
   "Read(~/.config/microsoft-edge/**)",
   "Read(~/.config/BraveSoftware/**)",
+  "Read(~/.config/Comet/**)",
   "Read(~/.var/app/com.google.Chrome/**)",
   "Read(/mnt/c/Users/**)",
   // Symmetric Write/Edit twins — the Read/Write symmetry invariant
@@ -261,12 +269,14 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Write(~/Library/Application Support/Chromium/**)", "Edit(~/Library/Application Support/Chromium/**)",
   "Write(~/Library/Application Support/Microsoft Edge/**)", "Edit(~/Library/Application Support/Microsoft Edge/**)",
   "Write(~/Library/Application Support/BraveSoftware/**)", "Edit(~/Library/Application Support/BraveSoftware/**)",
+  "Write(~/Library/Application Support/Comet/**)", "Edit(~/Library/Application Support/Comet/**)",
   "Write(~/Library/Application Support/Perplexity Comet/**)", "Edit(~/Library/Application Support/Perplexity Comet/**)",
   "Write(~/Library/Application Support/com.openai.atlas/**)", "Edit(~/Library/Application Support/com.openai.atlas/**)",
   "Write(~/.config/google-chrome/**)", "Edit(~/.config/google-chrome/**)",
   "Write(~/.config/chromium/**)", "Edit(~/.config/chromium/**)",
   "Write(~/.config/microsoft-edge/**)", "Edit(~/.config/microsoft-edge/**)",
   "Write(~/.config/BraveSoftware/**)", "Edit(~/.config/BraveSoftware/**)",
+  "Write(~/.config/Comet/**)", "Edit(~/.config/Comet/**)",
   "Write(~/.var/app/com.google.Chrome/**)", "Edit(~/.var/app/com.google.Chrome/**)",
   "Write(/mnt/c/Users/**)", "Edit(/mnt/c/Users/**)",
 
@@ -738,6 +748,7 @@ export function looksLikeBrowserProfileBash(cmd: string): boolean {
     "library/application support/chromium",
     "library/application support/microsoft edge",
     "library/application support/bravesoftware",
+    "library/application support/comet",
     "library/application support/perplexity comet",
     "library/application support/com.openai.atlas",
     // Linux / XDG roots
@@ -745,12 +756,17 @@ export function looksLikeBrowserProfileBash(cmd: string): boolean {
     ".config/chromium",
     ".config/microsoft-edge",
     ".config/bravesoftware",
+    ".config/comet",
     ".var/app/com.google.chrome",
     // Windows / WSL
     "appdata/local/google/chrome",
     "appdata/local/chromium",
     "appdata/local/microsoft/edge",
     "appdata/local/bravesoftware",
+    // Comet on Windows lands under either %LOCALAPPDATA%\Comet\ or
+    // %LOCALAPPDATA%\Perplexity\Comet\ depending on build (see platform.ts).
+    "appdata/local/comet",
+    "appdata/local/perplexity/comet",
     "/mnt/c/users/",
     // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11 — the daemon-owned
     // Chromium profile directories. The path lives under PA_DATA_DIR
@@ -791,14 +807,16 @@ export function looksLikeBrowserProfilePath(raw: string): boolean {
     /library\/application support\/chromium/,
     /library\/application support\/microsoft edge/,
     /library\/application support\/bravesoftware/,
+    /library\/application support\/comet/,
     /library\/application support\/perplexity comet/,
     /library\/application support\/com\.openai\.atlas/,
     /\.config\/google-chrome/,
     /\.config\/chromium/,
     /\.config\/microsoft-edge/,
     /\.config\/bravesoftware/,
+    /\.config\/comet/,
     /\.var\/app\/com\.google\.chrome/,
-    /appdata[\\/]local[\\/](google[\\/]chrome|chromium|microsoft[\\/]edge|bravesoftware)/,
+    /appdata[\\/]local[\\/](google[\\/]chrome|chromium|microsoft[\\/]edge|bravesoftware|comet|perplexity[\\/]comet)/,
     /\/mnt\/c\/users\//,
     // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §7.11 — daemon-owned
     // Chromium profile dirs under PA_DATA_DIR. The trailing-component

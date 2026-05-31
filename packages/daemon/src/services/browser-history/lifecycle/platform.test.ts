@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   chromiumBundleRoot,
+  createHostProfile,
   darwinTahoeOrLater,
   singletonLockHasLiveOwner,
 } from "./platform.js";
@@ -89,6 +90,39 @@ describe("chromiumBundleRoot", () => {
       expect(chromiumBundleRoot(exe)).toBe(expected);
     });
   }
+});
+
+describe("Comet profile-root candidates (regression)", () => {
+  // Comet (Perplexity's Chromium fork) stored its user-data under the
+  // wrong directory in the original metadata: one folder literally named
+  // "Perplexity Comet". The real layout is vendorless "Comet" (macOS /
+  // Linux) or "Perplexity\\Comet" (Windows vendor\\product). The old guess
+  // matched nothing on disk, so detectChromiumBrowser reported Comet as
+  // `not_installed`. These assertions are host-platform-gated like the
+  // `chromiumBundleRoot` suite above.
+  const candidates = createHostProfile().profileRootCandidatesFor("comet");
+
+  it("never resolves the buggy single-folder 'Perplexity Comet' path", () => {
+    for (const candidate of candidates) {
+      expect(candidate).not.toMatch(/Perplexity Comet/);
+    }
+  });
+
+  it("includes the correct vendorless Comet root for the host platform", () => {
+    if (process.platform === "darwin") {
+      expect(candidates).toContain(
+        join(homedir(), "Library/Application Support/Comet"),
+      );
+    } else if (process.platform === "win32") {
+      // %LOCALAPPDATA%\Comet\User Data and the vendor-prefixed variant.
+      expect(candidates.some((c) => /[\\/]Comet[\\/]User Data$/.test(c))).toBe(true);
+      expect(
+        candidates.some((c) => /Perplexity[\\/]Comet[\\/]User Data$/.test(c)),
+      ).toBe(true);
+    } else {
+      expect(candidates).toContain(join(homedir(), ".config/Comet"));
+    }
+  });
 });
 
 describe("darwinTahoeOrLater", () => {

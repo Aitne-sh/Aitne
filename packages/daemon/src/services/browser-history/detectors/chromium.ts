@@ -164,6 +164,25 @@ export async function detectChromiumBrowser(
     }
   }
 
+  // Atlas stores real browsing under per-account `user-<id>__<uuid>`
+  // profile dirs. The `Default` (and `Profile N`) dirs are vestigial stubs
+  // created on first launch and abandoned the moment the user signs into
+  // their ChatGPT account; the stub's `History` then freezes forever. The
+  // generic enumeration above picks up BOTH the stub and the live account
+  // profile (the latter via the `existsSync(History)` clause), so the
+  // lifecycle supervisor ends up tracking the frozen stub too — emitting a
+  // perpetual `browser_lifecycle.atlas` / `sync_unresponsive` failure every
+  // tick because the stub's mtime never advances. Drop the stubs whenever a
+  // live account profile is present so only real profiles are reported.
+  if (browser === "atlas") {
+    const accountProfiles = profiles.filter((profile) =>
+      profile.profileName.startsWith("user-"),
+    );
+    if (accountProfiles.length > 0 && accountProfiles.length !== profiles.length) {
+      profiles.splice(0, profiles.length, ...accountProfiles);
+    }
+  }
+
   if (profiles.length === 0 && browser === "atlas") {
     const atlasProfiles = await detectAtlasFallback(host, cacheRoot);
     profiles.push(...atlasProfiles);

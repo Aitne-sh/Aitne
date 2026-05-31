@@ -64,12 +64,36 @@ const CHROMIUM_METADATA: Record<
     windowsProfileRoots: ["BraveSoftware\\Brave-Browser\\User Data"],
   },
   comet: {
+    // Perplexity Comet — a Chromium fork. Ships on macOS (Apple Silicon)
+    // and Windows 10/11 only; a native Linux build is not released yet
+    // ("coming soon" per Perplexity), so the Linux entries below are
+    // forward-looking best-guesses that currently match nothing on disk.
+    //
+    // Profile-root layout cross-checked against three independent browser
+    // forensic enumerators — Wazuh (chrome.hpp), mondoohq/mql (chrome.go),
+    // and irachrist1/daylens (browser.ts) — plus a live macOS install:
+    //   macOS   : ~/Library/Application Support/Comet           (vendorless)
+    //   Windows : %LOCALAPPDATA%\Comet\User Data   OR
+    //             %LOCALAPPDATA%\Perplexity\Comet\User Data
+    //             (mql vs Wazuh disagree across builds — probe BOTH; the
+    //             detector tries every candidate and skips missing roots)
+    //   Linux   : ~/.config/Comet (unreleased; lowercase variant hedged)
+    //
+    // The original single "Perplexity Comet" guess (one folder, a space)
+    // was wrong on every OS: the real macOS dir is vendorless "Comet" and
+    // the Windows vendor prefix is "Perplexity\Comet" (backslash). That bug
+    // made detectChromiumBrowser skip a non-existent root and report Comet
+    // as `not_installed` even while it was the user's primary, actively
+    // syncing browser.
     macApps: ["/Applications/Comet.app/Contents/MacOS/Comet"],
     linuxBins: ["comet", "perplexity-comet"],
-    windowsBins: ["Perplexity Comet\\Application\\comet.exe"],
-    macProfileRoots: ["Library/Application Support/Perplexity Comet"],
-    linuxProfileRoots: [".config/Perplexity Comet", ".config/perplexity-comet"],
-    windowsProfileRoots: ["Perplexity Comet\\User Data"],
+    windowsBins: [
+      "Comet\\Application\\comet.exe",
+      "Perplexity\\Comet\\Application\\comet.exe",
+    ],
+    macProfileRoots: ["Library/Application Support/Comet"],
+    linuxProfileRoots: [".config/Comet", ".config/comet"],
+    windowsProfileRoots: ["Comet\\User Data", "Perplexity\\Comet\\User Data"],
   },
   atlas: {
     // OpenAI rebranded the macOS bundle to "ChatGPT Atlas.app" with a
