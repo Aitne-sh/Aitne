@@ -866,9 +866,16 @@ async function appendOverviewDailyLog(
   await withOverviewWriteLock(absolutePath, () => {
     if (!existsSync(absolutePath)) return;
     const current = readFileSync(absolutePath, "utf-8");
+    // Normalize CRLF→LF for the split/filter/join + marker work, then
+    // restore the original line ending at the single final emit. Mirrors
+    // `mergeArchitectureSection`, which writes the same overview file and
+    // already treats it as possibly CRLF — without this, a CRLF overview
+    // would collapse to LF here and show a dirty git diff on Windows.
+    const wasCrlf = /\r\n/.test(current);
+    const normalized = wasCrlf ? current.replace(/\r\n/g, "\n") : current;
     const summary =
       `- ${params.date}: ${params.commitCount} commits; ${params.prEvents} PR/notification events; ${params.workflowEvents} workflow events.`;
-    const withoutOldSameDay = current
+    const withoutOldSameDay = normalized
       .split("\n")
       .filter((line) => keepDailyLogLine(line, params.date))
       .join("\n");
@@ -877,7 +884,8 @@ async function appendOverviewDailyLog(
     const next = withUpdated.includes(marker)
       ? withUpdated.replace(marker, `${marker}\n\n${summary}`)
       : `${withUpdated.trimEnd()}\n\n${marker}\n\n${summary}\n`;
-    writeManagedContextFile(deps, params.overviewPath, next, "repository_management_scan_overview");
+    const out = wasCrlf ? next.replace(/\n/g, "\r\n") : next;
+    writeManagedContextFile(deps, params.overviewPath, out, "repository_management_scan_overview");
   });
 }
 

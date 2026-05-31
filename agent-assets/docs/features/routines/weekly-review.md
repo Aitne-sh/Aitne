@@ -8,14 +8,18 @@ aliases:
   - sunday review
 category: features
 summary: |
-  Once a week, the agent reads the past seven days of journal
-  entries, completed tasks, and roadmap progress, then writes a
-  weekly retro into the weekly/ directory.
+  Once a week (Friday evening), the agent reads the current ISO
+  week's daily journal entries, the week's calendar retrospective,
+  and roadmap progress, then writes a weekly retro into
+  journal/weekly/YYYY-Www.md. Its Carry Over / Next Week Focus /
+  Lessons sections are lifted into every morning routine of the
+  following ISO week.
 section: routines
 tags:
   - routines
   - autonomous
-  - light-tier
+  - journal
+  - reflection
 status: stable
 ask_examples:
   - When does the weekly review run?
@@ -23,40 +27,52 @@ ask_examples:
   - Where do weekly retros get stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - weekly review
   - Friday review
   - week roll-up
   - agent week
+  - ISO week
+  - next week focus
 related:
   - concepts/routines
+  - features/routines/evening-review
   - features/memory-files/agent-journal
 process_keys:
   - routine.weekly_review
+config_keys:
+  - timezone
+  - dayBoundaryHour
+ui_anchors:
+  - /settings/models
+  - /settings/routines
+context_files:
+  - journal/weekly/YYYY-Www.md
+  - journal/agent.md
 ---
 
 # Weekly Review
 
 ## In One Sentence
 
-A light-tier weekly retro fires once per week and writes a synthesis
-into `weekly/YYYY-Www.md` (ISO week), whose **Carry Over / Next Week
-Focus / Lessons** sections are then lifted into every morning routine
-of the following ISO week.
+A medium-tier weekly retro fires every Friday evening and writes a
+synthesis into `journal/weekly/YYYY-Www.md` (ISO week), whose
+**Carry Over / Next Week Focus / Lessons** sections are then lifted
+into every morning routine of the following ISO week.
 
 ## What It Does
 
-- Reads daily files for the current ISO week, the past-7-day calendar
-  retrospective, roadmap, and active projects.
+- Reads each `journal/daily/YYYY-MM-DD.md` for the current ISO week,
+  the week's calendar retrospective, the roadmap, and active projects.
 - Synthesizes three axes — Outcomes, Forward items, Behavioral
   Lessons — and writes the user-facing snapshot.
-- Appends an agent-internal block to `journal/agent.md` for self-
-  critique, filter quality, and improvement ideas.
-- Sends a brief Friday-evening notification by default (silence gate
-  triggers only on an essentially blank week).
-- Refreshes `user/reading-taste.md` and Book Candidates when enough
-  new highlights have accumulated.
+- Appends an agent-internal block to `journal/agent.md` for
+  self-critique, filter quality, and improvement ideas.
+- Sends a brief Friday-evening notification by default (the silence
+  gate triggers only on an essentially blank week).
+- Refreshes `identity/reading-taste.md` and Book Candidates when
+  enough new highlights have accumulated.
 
 ## When It Runs / How It Is Triggered
 
@@ -77,8 +93,11 @@ a Mon–Thu catch-up is intentionally out of scope so the next week's
 
 ## Configuration
 
-This routine has no operator-tunable knobs. The fire time, day-of-week,
-and tier are fixed in code.
+The fire time (Friday 19:00 local) and day-of-week are fixed in code
+and are not operator-tunable. The backend and model that handle this
+routine, however, are configurable: `routine.weekly_review` is a
+configurable process key (default **medium** tier — Sonnet on Claude)
+that you can repoint from **Settings → Models**.
 
 ## When Something Goes Wrong
 

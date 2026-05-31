@@ -20,6 +20,8 @@ tags:
   - guide
   - operations
   - reinstall
+  - migration
+  - backup
 status: stable
 ask_examples:
   - How do I reinstall Aitne?
@@ -28,7 +30,7 @@ ask_examples:
   - Do I need to wipe the DB to upgrade Aitne?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - reinstall
   - factory reset
@@ -36,9 +38,13 @@ keywords:
   - fresh install
   - PA_DATA_DIR
   - aitne uninstall
+  - schema migration
+  - corrupt database
+  - clean-context
 related:
   - guides/backup-and-restore
   - guides/migrate-machines
+  - guides/pause-the-agent
   - glossary
 ---
 
@@ -47,10 +53,10 @@ related:
 ## You Almost Never Need This
 
 Aitne upgrades through **forward-only schema migrations** applied at
-daemon boot — your DB and context files survive every `npm i -g
-@aitne-sh/aitne` upgrade. If you're reading this because you just
-upgraded, **don't run the steps below**; restart the daemon and let
-the migration runner do its job.
+daemon boot — your DB and context files survive every
+`npm install -g @aitne-sh/aitne@latest` upgrade. If you're reading this
+because you just upgraded, **don't run the steps below**; restart the
+daemon and let the migration runner do its job.
 
 This guide is the last-resort escape hatch for:
 
@@ -66,6 +72,19 @@ For everything else, prefer:
 - **Recovering from accidental edits** →
   [Backup and Restore](backup-and-restore.md).
 - **Just pausing the agent** → [Pause the Agent](pause-the-agent.md).
+
+## Pick the Right Reset
+
+This guide wipes **only the SQLite database** (sessions, actions,
+observations) and keeps your context Markdown. Three other resets exist
+with different scopes — make sure you're running the one you mean:
+
+| You want to… | Run | Wipes |
+|---|---|---|
+| Reset the DB, keep memory | this guide (`rm …/personal_agent.db*`) | SQLite only |
+| Reset memory, keep the DB | `aitne restart --clean-context` | `context/` + `md_file_snapshots` (tarball backup first; type `CLEAN` to confirm) |
+| Remove Aitne entirely | `aitne uninstall --wipe-data` | the whole `~/.personal-agent` data dir |
+| Keep all data, just remove the binary | `aitne uninstall --keep-data` | nothing under the data dir |
 
 ## Before You Wipe
 

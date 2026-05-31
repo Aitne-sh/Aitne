@@ -329,6 +329,26 @@ export function startApiServer(deps: BootstrapApiDeps): BootstrapApiResult {
     overrideGlobalObjects: false,
   });
 
+  // @hono/node-server's serve() calls http.Server.listen() without attaching
+  // an 'error' listener, so a failed bind (most commonly EADDRINUSE from a
+  // stale daemon or PID reuse) escalates into an uncaughtException that
+  // surfaces as an opaque "process will exit" crash. Attach a listener so the
+  // port-conflict case produces an actionable message. ServerType extends
+  // net.Server/EventEmitter on every platform and libuv reports EADDRINUSE
+  // identically on macOS/Linux/Windows, so no platform branch is warranted.
+  server.on("error", (err) => {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code === "EADDRINUSE") {
+      logger.fatal(
+        { port: deps.config.apiPort },
+        `API port ${deps.config.apiPort} already in use — another daemon may be running; run 'aitne stop' first, or set PA_API_PORT to a free port`,
+      );
+    } else {
+      logger.fatal({ err }, "API server error — process will exit");
+    }
+    process.exit(1);
+  });
+
   logger.info({ port: deps.config.apiPort }, "API server listening");
 
   return { app, server, eventBroadcaster: deps.eventBroadcaster };

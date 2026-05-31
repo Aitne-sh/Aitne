@@ -82,7 +82,7 @@ export class NativePersonalAgentKeychainClient implements PersonalAgentKeychainC
           "-a", KEYCHAIN_ACCOUNT,
           "-w", value,
           "-T", "/usr/bin/security",
-        ], { encoding: "utf8" });
+        ], { encoding: "utf8", timeout: 5_000 });
         return;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -96,7 +96,7 @@ export class NativePersonalAgentKeychainClient implements PersonalAgentKeychainC
       "-s", service,
       "-a", KEYCHAIN_ACCOUNT,
       "-w", value,
-    ], { encoding: "utf8" });
+    ], { encoding: "utf8", timeout: 5_000 });
   }
 
   async delete(secretName: string): Promise<void> {

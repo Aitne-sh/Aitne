@@ -23,22 +23,31 @@ ask_examples:
   - How do I limit how often it notifies me?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - notification
   - notify
   - quiet hours
   - rate limit
   - notification batch
+  - safety category
 related:
   - features/operations/quiet-hours
   - features/operations/approvals
   - features/messaging/overview
+ui_anchors:
+  - /activity?tab=notifications
+  - /connections/messaging
 config_keys:
   - maxNotificationsPerHour
   - maxNotificationsPerDay
   - batchIntervalMinutes
   - primaryPlatform
+  - defaultNotificationPlatforms
+  - quietHoursStart
+  - quietHoursEnd
+api_endpoints:
+  - POST /api/notify
 ---
 
 # Notifications
@@ -50,26 +59,58 @@ by quiet hours and rate limits.
 
 ## What It Does
 
-- Routines and observations enqueue notifications.
+- Routines, observations, and approvals enqueue notifications.
 - Quiet hours hold notifications until the window ends.
 - Per-hour and per-day rate limits cap the volume.
-- Batching folds multiple small alerts into a single message.
+- Batching folds multiple small alerts of the same event type into a
+  single message.
+
+## How a Notification Flows
+
+1. A routine, observation, or approval enqueues a notification.
+2. Quiet hours and rate limits decide whether it is suppressed.
+3. If it survives, batching may hold it briefly to merge with siblings
+   of the same event type; otherwise it is delivered immediately.
+4. It is sent to the operator over `primaryPlatform` (or, when set, the
+   exact channels in `defaultNotificationPlatforms`).
+
+### Safety categories always get through
+
+Notifications tagged `security`, `deadline`, `error`, or `critical`
+**bypass quiet hours, rate limits, and batching** — they are delivered
+immediately on at least one paired channel. So even during a quiet-hours
+window or after the hourly cap is spent, a genuine alert still reaches
+you. Replies to a direct message you sent also bypass these gates.
 
 ## Configuration
 
-| Setting | Default |
-|---|---|
-| `maxNotificationsPerHour` | 3 |
-| `maxNotificationsPerDay` | 12 |
-| `batchIntervalMinutes` | 15 |
-| `primaryPlatform` | first paired |
+`PATCH /api/config` keys (defaults shown):
+
+| Setting | Default | What it controls |
+|---|---|---|
+| `maxNotificationsPerHour` | 3 | Per-hour cap on non-safety notifications. |
+| `maxNotificationsPerDay` | 12 | Per-day cap on non-safety notifications. |
+| `batchIntervalMinutes` | 15 | Window for folding same-type alerts into one message. |
+| `quietHoursStart` | `"22:00"` | Start of the hold window (local time). |
+| `quietHoursEnd` | `"08:00"` | End of the hold window (local time). |
+| `primaryPlatform` | `"slack"` | Default channel notifications are delivered to. |
+| `defaultNotificationPlatforms` | `[]` (empty) | When non-empty, deliver only to these exact channels instead of the default fan-out. |
+
+The agent can also emit a one-off notification via `POST /api/notify`
+(a module capability, not directly agent-forgeable).
 
 ## When Something Goes Wrong
 
-- A notification you expected: check the rate-limit counters and the
-  quiet-hours window.
+- **A notification you expected never arrived:** check the rate-limit
+  counters (`maxNotificationsPerHour` / `maxNotificationsPerDay`) and the
+  quiet-hours window — a non-safety alert can be suppressed by either.
+  Safety-category alerts (`error`/`critical`/`security`/`deadline`) are
+  never suppressed, so a missing one points at delivery/pairing instead.
+- **Too many notifications:** lower the per-hour / per-day caps or widen
+  the batch window so more small alerts collapse into one message.
 
 ## Related
 
 - [Quiet Hours](quiet-hours.md)
 - [Approvals](approvals.md)
+- [Messaging Overview](../messaging/overview.md)

@@ -31,7 +31,7 @@ ask_examples:
   - How does Gemini's per-day quota work?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - cost
   - budget
@@ -43,6 +43,7 @@ keywords:
   - opencode
   - openrouter
   - daily cap
+  - monthly cap
   - autonomous cap
 related:
   - concepts/backends-and-tiers
@@ -53,6 +54,11 @@ ui_anchors:
   - /settings/models
 config_keys:
   - autonomousDailyCostCapUsd
+  - autonomousMonthlyCostCapUsd
+process_keys:
+  - routine.morning_routine
+  - routine.fetch_window
+  - routine.hourly_check
 ---
 
 # Costs and Quotas
@@ -92,8 +98,13 @@ agent's problem to *avoid*: the dashboard shows you what each routine
 costs so you can re-pin tiers if a routine has gotten too expensive.
 
 The autonomous daily-cost cap (`autonomousDailyCostCapUsd`) is a
-bumper, not a budget — it pauses autonomous routines when crossed but
-does not interrupt reactive (in-the-loop) traffic.
+bumper, not a budget — once the day's autonomous spend crosses it the
+dispatcher starts shedding the *lowest-priority* routines first
+(hourly check), and only escalates to higher-priority ones as spend
+climbs further; the morning routine is the last to be cut. Reactive
+(in-the-loop) DMs and dashboard chat always pass through. A separate
+`autonomousMonthlyCostCapUsd` is a notifications-only soft cap — it
+fires an alert when crossed but never skips a session.
 
 ## Authentication policy
 
@@ -137,13 +148,23 @@ register an API key on `/settings/models`.
   `codex login`, `gemini auth`). Used only when no API key is
   configured. Cost behaviour then matches whatever the subscription
   enforces (e.g. Claude's rolling 5-hour Opus window on a Max plan).
-- **Daily cost cap**: `autonomousDailyCostCapUsd` — autonomous routines
-  pause on the day they cross it. Reactive DMs / dashboard chat keep
-  running; you can always reach the agent.
+- **Daily cost cap**: `autonomousDailyCostCapUsd` (default unset) —
+  once the day's autonomous spend crosses it, lower-priority routines
+  are skipped first (hourly check at 100% of the cap, the morning
+  routine only at 200%). Reactive DMs / dashboard chat keep running;
+  you can always reach the agent. Distinct from the removed
+  `maxDailyCostUsd`, which used to blanket-block reactive traffic too.
+- **Monthly cost cap**: `autonomousMonthlyCostCapUsd` (default unset) —
+  a notifications-only soft threshold across the rolling agent month;
+  it raises an alert in the Notifications Center but never skips a
+  session.
 - **Per-process tier**: each ProcessKey has its own tier, max-turns,
   and max-budget USD. Configurable on `/settings/models`.
 - **Quota error**: `BackendQuotaError` thrown by an SDK / CLI tells
-  the router to fail over to the fallback backend.
+  the router to fail over to the fallback backend. Its sibling
+  `BackendDecisiveFailure` (e.g. an auth failure) triggers the same
+  failover — these two signals are why a routine that started on
+  Claude can finish on Codex.
 
 ## Concrete Examples
 
@@ -162,21 +183,35 @@ register an API key on `/settings/models`.
   `routine.morning_routine` envelope (medium tier) with a
   daemon-prepared `<roadmap_skeleton>` block.
 - Gemini hourly check on Flash via `GEMINI_API_KEY` = ~$0.0005 per
-  fire on the paid tier; free tier instead consumes a per-day quota
-  slot.
+  fire on the paid tier; the free tier instead consumes one of a
+  fixed per-day request budget (Aitne caps Gemini at 450 requests/day
+  to match Google's free-tier daily limit — this ceiling is
+  Gemini-only by design; Claude and Codex meter per-window and surface
+  exhaustion as a quota error).
 - Claude Code without an API key (subscription fallback on a Max20
   login) = covered by the subscription, but the daemon flags the
   fallback because it falls outside Anthropic's published policy.
 
-## Where You See It in the Dashboard
+## Where You See It
 
-- **Analytics** rolls today's cost by backend, by ProcessKey, and by
-  hour. When a backend is running on the subscription fallback,
-  remaining-window math is shown there too.
+In the dashboard:
+
+- **Analytics** (`/analytics`) rolls today's cost by backend, by
+  ProcessKey, and by hour. When a backend is running on the
+  subscription fallback, remaining-window math is shown there too.
 - **Sidebar footer** shows the day's running total.
 - **Activity** event details include the per-execute cost.
-- **Settings → Models** exposes the per-backend API-key panel and a
-  warning banner whenever a backend is running on subscription auth.
+- **Settings → Models** (`/settings/models`) exposes the per-backend
+  API-key panel and a warning banner whenever a backend is running on
+  subscription auth.
+
+From a DM or the terminal:
+
+- **`!cost`** (and `!cost claude` / `!cost codex` / `!cost gemini`)
+  DM the agent for trailing-7-day spend, broken down or per-backend.
+- **`aitne status`** prints today's action count and spend;
+  **`aitne audit`** lists the action log (filter with `--since`,
+  `--backend`, `--result`).
 
 ## Related
 

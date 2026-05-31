@@ -7,29 +7,36 @@ aliases:
   - pairing failed
   - magic phrase not working
   - messaging not paired
+  - pairing card stuck waiting
 category: troubleshooting
 summary: |
-  The magic phrase isn't pairing your messaging account. Usually the
-  bot can't see DMs, the phrase expired, or the message went to a
-  group instead of a direct channel.
-section: messaging-not-pairing
+  Your messaging account won't pair: the dashboard's pairing card stays in
+  "waiting". Usually the secret expired (5-minute window), the phrase was
+  wrapped in a sentence instead of sent by itself, the bot can't see your
+  DM, or the message landed in a group instead of a direct channel.
+section: messaging
 tags:
   - troubleshooting
   - messaging
   - pairing
 status: stable
-ask_examples:
-  - Why isn't my magic phrase pairing?
-  - Where do I send the magic phrase?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - magic phrase
   - owner channel
   - pairing
   - bot token
-  - OAuth
+  - QR pairing
+  - deep link
+ui_anchors:
+  - /connections/messaging
+ask_examples:
+  - Why isn't my magic phrase pairing?
+  - Where do I send the magic phrase?
+  - My Telegram QR isn't pairing, what's wrong?
+  - The pairing card is stuck on waiting.
 related:
   - features/messaging/pairing-and-magic-phrase
   - features/messaging/overview
@@ -37,28 +44,65 @@ related:
 
 # Messaging Not Pairing
 
-## What You See
+## What you see
 
-- After DMing the magic phrase, the dashboard's pairing card stays in
-  "waiting" state.
+After you send the magic phrase (Slack / Discord) or scan/tap the QR or
+deep link (Telegram / WhatsApp), the pairing card on
+**Connections → Messaging** (`/connections/messaging`) stays in the
+"waiting" state and never flips to "paired".
 
-## Most Likely Causes
+## Know which secret your platform uses
 
-1. Phrase expired — generate a new one.
-2. Bot does not have DM permission (Discord, Slack).
-3. DM was sent in a group / channel by mistake.
-4. Bot token wrong — paste it in again.
+Not every platform uses the typed phrase, so the fix depends on the
+platform:
 
-## Diagnostic Steps
+| Platform | Secret | How you send it |
+|---|---|---|
+| **Slack** | Magic phrase | DM the 4-word phrase (e.g. `apple-banana-cherry-date`) to the bot, by itself. |
+| **Discord** | Magic phrase | Same as Slack — DM the displayed phrase to the bot. |
+| **Telegram** | QR / deep link | Tap **START** so the bot receives `/start <token>`. |
+| **WhatsApp** | Device QR | Scan the dashboard QR from your phone (Linked Devices). |
 
-1. Click "Regenerate phrase" on `/connections/messaging`.
-2. Confirm bot privileges in the messaging app.
-3. Send the phrase from a direct chat with the bot.
+All secrets are single-use and expire after **5 minutes**.
 
-## Confirming the Fix
+## Most likely causes
 
-- The pairing card shows your owner identity.
+1. **The secret expired.** The phrase or token is only valid for 5
+   minutes. If you took longer, it has lapsed — regenerate a fresh one.
+2. **You wrapped the phrase in a sentence (Slack / Discord).** The
+   matcher requires the four words to be the **only** content of the
+   message. Sending "my phrase is apple-banana-cherry-date" is rejected
+   by design, and the agent replies asking you to send the phrase on its
+   own. Matching otherwise ignores case, punctuation, and emoji.
+3. **You sent it in a group or channel.** Pairing — and all agent
+   messaging — works only in a one-to-one DM. Group chats are out of
+   scope.
+4. **The bot can't see your DM.** On Discord and Slack the bot needs
+   permission to receive direct messages from you; without it your
+   message never reaches the daemon.
+5. **A token is wrong.** A mistyped or stale bot token means the daemon
+   isn't connected at all. Re-paste it in the platform's card.
+
+## Diagnostic steps
+
+1. On `/connections/messaging`, click **Regenerate phrase** (Slack /
+   Discord) or re-open the QR / deep link (Telegram / WhatsApp) so you
+   start a fresh 5-minute window.
+2. For Slack / Discord, send **only** the four words — no surrounding
+   text — from a direct chat with the bot, not a channel.
+3. For Telegram, tap **START** so the bot gets `/start <token>`. For
+   WhatsApp, set the owner phone number first, then click **Pair device**
+   and scan.
+4. If the card still doesn't react at all, confirm the bot's tokens and
+   DM permissions in the messaging app, then re-paste any token on the
+   card.
+
+## Confirming the fix
+
+The pairing card flips to "paired" and shows your owner identity. A DM to
+that channel now reaches the agent.
 
 ## Related
 
-- [Pairing & Magic Phrase](../features/messaging/pairing-and-magic-phrase.md)
+- [Pairing and Magic Phrase](../features/messaging/pairing-and-magic-phrase.md)
+- [Messaging Overview](../features/messaging/overview.md)

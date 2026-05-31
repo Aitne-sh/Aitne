@@ -20,6 +20,8 @@ tags:
   - integrations
   - observations
   - browser-history
+  - polling
+  - autonomous
 status: stable
 ask_examples:
   - How does Aitne use my browser history?
@@ -29,7 +31,7 @@ ask_examples:
   - How do I opt out of browser history?
 locale: en-US
 created: 2026-05-22
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - browser history
   - browser history poller
@@ -39,6 +41,7 @@ keywords:
   - "!research"
   - shopping comparison
   - two-option offer
+  - local-only
 related:
   - features/messaging/bang-commands
   - features/integrations/notion
@@ -56,6 +59,17 @@ config_keys:
   - browserHistoryLifecycle
   - browserHistoryResearchDomainAllowlist
   - browserHistoryResearchDomainDenylist
+process_keys:
+  - routine.research_cluster_update
+  - routine.research_offer_dm
+  - routine.research_dispatch
+  - routine.research_wiki_summary
+api_endpoints:
+  - GET /api/browser-history/status
+  - GET /api/browser-history/research-clusters
+  - POST /api/browser-history/offers/:slug/accept
+  - POST /api/browser-history/offers/:slug/decline
+  - GET /api/browser-history/reloads/weekly
 ---
 
 # Browser History
@@ -78,7 +92,7 @@ clicks leave the daemon.
   checked" block.
 - **Derives research clusters** when a topic crosses meaningful-visits
   / foreground-time / distinct-domain thresholds. Clusters live in
-  `research_clusters` with a slug, display name, journal at
+  `browser_research_clusters` with a slug, display name, journal at
   `context/research/<slug>.md`, and a status (`active | dormant |
   muted | concluded`).
 - **Offers engagement DMs** via the Two-Option Offer pattern when a
@@ -96,8 +110,11 @@ clicks leave the daemon.
 ## Privacy and Consent
 
 - **Default off.** The integration does not start until the operator
-  flips `browserHistoryConsentAccepted = true` at
-  `/settings/browser-history`.
+  flips `browserHistoryConsentAccepted = true` on the
+  **Settings → Integrations → Browser History**
+  (`/settings/integrations/browser-history`) page. The integration only
+  supports `direct` (the daemon poller) or `disabled` — there is no
+  delegated or native mode.
 - **Local-only.** No request leaves the daemon. The browser's
   history file is opened read-only; the daemon never reaches into
   cookies, login sessions, or profile dirs other than the history DB.
@@ -119,11 +136,15 @@ clicks leave the daemon.
 A research cluster qualifies when the combination of meaningful visits,
 foreground time, and distinct domains crosses the thresholds in
 `DEFAULT_OFFER_THRESHOLDS` (tunable via `browserHistoryLifecycle`).
-The poller calls `evaluateOfferTriggers` per active cluster on each
-tick; once the rate-limit gate (`gateOfferRateLimit`) approves, a
-Two-Option Offer DM is composed by `routine.research_offer_dm`. The
-seventh-pass policy clears all pending-offer rows for the slug on
-either accept path so a later cycle cannot re-offer the same cluster.
+On each tick the poller evaluates the offer triggers per active cluster
+(`evaluateOfferTriggers`); once the **per-cluster offer rate-limit gate**
+(`gateOfferRateLimit`) approves — this is the 14-day, per-slug offer
+backoff, not the daemon-wide session gate that Phase 9 removed — a
+Two-Option Offer DM is composed by the `routine.research_offer_dm`
+process key.
+
+Accepting either path clears every pending-offer row for that slug, so a
+later tick cannot re-offer the same cluster.
 
 ## Owner Controls
 
@@ -153,10 +174,10 @@ either accept path so a later cycle cannot re-offer the same cluster.
 
 ## When Something Goes Wrong
 
-- **`/settings/browser-history` shows no browsers.** Run `aitne
-  doctor` — the platform detector might be failing to resolve the
-  user's profile dir. The daemon log line will name the candidate
-  paths it tried.
+- **The settings page shows no browsers.** Open
+  `/settings/integrations/browser-history` and run `aitne doctor` — the
+  platform detector might be failing to resolve the user's profile dir.
+  The daemon log line will name the candidate paths it tried.
 - **A cluster keeps re-offering.** Check the `lastResearchOfferAt` /
   `lastWikiOfferAt` columns; the rate-limit gate uses those for the
   14-day backoff. `!research decline <slug>` stamps both fields.
@@ -168,7 +189,7 @@ either accept path so a later cycle cannot re-offer the same cluster.
 - [Managed Chromium](../operations/managed-chromium.md) — separate
   experimental flow for *driving* a Chromium profile (B-4), not
   reading browser history.
-- [Weekly Review](../policies/routines/weekly-review.md)
-- [Morning Routine](../policies/routines/morning-routine.md)
+- [Weekly Review](../routines/weekly-review.md)
+- [Morning Routine](../routines/morning-routine.md)
 - [Bang Commands](../messaging/bang-commands.md)
 - [Glossary: Research Cluster](../../glossary.md#research-cluster)

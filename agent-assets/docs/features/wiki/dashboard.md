@@ -37,7 +37,7 @@ ask_examples:
   - What does the Enable Wiki button do?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-21
+updated: 2026-05-28
 keywords:
   - /wiki
   - /wiki/timeline
@@ -73,6 +73,11 @@ api_endpoints:
   - /api/wiki/:workspace/compile/preview
 process_keys:
   - wiki.ask
+  - wiki.compile
+  - wiki.ingest_url
+  - wiki.lint
+  - wiki.trace
+  - wiki.connect
 ---
 
 # Wiki Dashboard Surfaces
@@ -177,16 +182,25 @@ The configuration surface. Two-state:
 
 ### Disabled (no active workspace)
 
-A single **Enable Internal Workspace** CTA plus an external-path
-picker. The picker opens your OS-native folder dialog (Finder on
-macOS, File Explorer on Windows, the system folder dialog on Linux)
-and shows an inline validation banner once you pick a path:
+A two-card chooser:
+
+- **Internal** (recommended) — managed by Aitne in its data directory
+  (default `~/.personal-agent/wiki`), schema seeded automatically.
+  The **Enable internal wiki** button turns it on with nothing else
+  to configure.
+- **Existing Obsidian vault** (external) — point Aitne at a folder you
+  already own via the path picker, then confirm with **Use this
+  folder**.
+
+The path picker opens your OS-native folder dialog (Finder on macOS,
+File Explorer on Windows, the system folder dialog on Linux) and shows
+an inline validation banner once you pick a path:
 
 - Path-collision rules — the external root must not overlap
   `dataDir`, your primary Obsidian vault, or another wiki workspace.
 - Existing-Obsidian-vault detection — when the picker finds an
-  Obsidian vault at the target, the **Migrate** branch surfaces so
-  you can import the vault's content into the wiki layout (see
+  Obsidian vault at the target, the wiki layout is detected and
+  migrated on demand so you can import the vault's content (see
   [guides/use-an-existing-obsidian-vault](../../guides/use-an-existing-obsidian-vault.md)
   and [features/wiki/workspaces](workspaces.md)).
 
@@ -203,9 +217,12 @@ The full configuration:
 - **Git auto-commit before `!compile full`** toggle (only meaningful
   on a git-tracked external vault).
 - **Approval threshold (USD)** for `!compile full`.
-- **Per-command model selectors** — pick the backend + model + budget
-  for each `wiki.*` process key. The presets seed Sonnet with a
-  reasonable maxTurns / maxBudgetUsd; you can override per key.
+- **Commands & models** — per-command selectors for the backend,
+  model, turn limit, and per-run budget on each `wiki.*` process key
+  (`wiki.ingest_url`, `wiki.compile`, `wiki.ask`, `wiki.lint`,
+  `wiki.trace`, `wiki.connect`). All six default to the medium tier
+  (Claude Sonnet 4.6) with a sensible `maxTurns` / `maxBudgetUsd`; you
+  can override per key.
 - **Archive / delete** — archive keeps the row but flips `active=0`;
   delete drops the row (data on disk is untouched on external mode).
 
@@ -231,6 +248,8 @@ auth layer accepts any `wiki.*` key for GETs (see
 ## Contextual help
 
 Every wiki page in the dashboard exposes a `?` Help button in the
-top-right action strip. Clicking it opens this doc set in a
+top-right action strip. Clicking it opens the relevant wiki doc in a
 slide-over for in-context reading (mirrors the global help pattern
-used everywhere else in the dashboard).
+used everywhere else in the dashboard). `/wiki/timeline` opens this
+doc; `/wiki` opens [features/wiki/overview](overview.md) and
+`/settings/wiki` opens [features/wiki/workspaces](workspaces.md).

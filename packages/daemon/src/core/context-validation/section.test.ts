@@ -71,6 +71,17 @@ describe("findSection", () => {
     expect(findSection(content, "raw signals")).not.toBeNull();
     expect(findSection(content, "RAW_SIGNALS")).not.toBeNull();
   });
+
+  it("is CRLF-tolerant: matches headers and reports correct byte bounds on a \\r\\n file", () => {
+    // A CRLF-bodied vault file (Windows daemon, or Obsidian/git with
+    // core.autocrlf). split("\n") leaves a trailing \r on every header line;
+    // the matcher must strip it while byte offsets still account for the \r.
+    const content = "# Title\r\n\r\n## First\r\nbody\r\n## Second\r\nmore\r\n";
+    const bounds = findSection(content, "First");
+    expect(bounds).not.toBeNull();
+    // start = just after "## First\r\n"; end = start of "## Second\r\n".
+    expect(content.slice(bounds!.start, bounds!.end)).toBe("body\r\n");
+  });
 });
 
 describe("getAvailableSections", () => {
@@ -89,5 +100,10 @@ describe("getAvailableSections", () => {
 
   it("returns [] when the file has no H2 headers", () => {
     expect(getAvailableSections("# Title\nbody\n### Sub\n")).toEqual([]);
+  });
+
+  it("is CRLF-tolerant: strips trailing \\r before matching headers", () => {
+    const content = "# Title\r\n## First Section\r\nbody\r\n## Second\r\nmore\r\n";
+    expect(getAvailableSections(content)).toEqual(["first_section", "second"]);
   });
 });

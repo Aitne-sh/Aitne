@@ -20,8 +20,9 @@
 //   4. Rewrites the file via `PUT /api/context/roadmap`.
 //
 // The mint endpoint (now Autonomous) does not require auth, but PUT
-// does — the script reads the bearer token from the macOS keychain
-// the same way the daemon stores it.
+// does — the script reads the bearer token from the OS secret store
+// (macOS Keychain / Windows DPAPI / Linux libsecret / encrypted file)
+// via the shared cross-platform reader, the same place the daemon stores it.
 //
 // Usage:
 //   node scripts/remint-roadmap-ids.mjs            # detect + remint
@@ -38,7 +39,7 @@
 // table) before running without `--dry-run`. Live execution requires
 // `--yes` to avoid accidental writes.
 
-import { execFileSync } from "node:child_process";
+import { readApiToken as readApiTokenFromStore } from "./lib/read-api-token.mjs";
 import { argv, exit } from "node:process";
 
 // Heuristic mirror of `looksFabricatedRoadmapId` in
@@ -75,26 +76,17 @@ function parseArgs(args) {
 }
 
 function readApiToken() {
-  try {
-    return execFileSync(
-      "security",
-      [
-        "find-generic-password",
-        "-s",
-        "com.personal-agent.secret.apiToken",
-        "-w",
-      ],
-      { encoding: "utf-8" },
-    ).trim();
-  } catch (err) {
+  const token = readApiTokenFromStore();
+  if (!token) {
     process.stderr.write(
-      `Failed to read API token from macOS keychain: ${err.message}\n`,
+      "Failed to read the daemon API token from the OS secret store.\n",
     );
     process.stderr.write(
       "(The script needs the daemon's apiToken to PUT the rewritten roadmap.)\n",
     );
     exit(1);
   }
+  return token;
 }
 
 async function fetchJson(url, init = {}) {

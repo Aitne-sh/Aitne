@@ -115,6 +115,10 @@ export function writeFileAtomically(fullPath: string, content: string): void {
   // temp path even if they can guess the pid. 16 hex chars = 64 bits of
   // entropy, more than enough for collision avoidance.
   const tempPath = `${fullPath}.tmp.${process.pid}.${randomBytes(8).toString("hex")}`;
+  // O_NOFOLLOW is undefined on Windows (Node defines it only on POSIX). This is
+  // already cross-platform-safe: a bitwise OR coerces `undefined` to 0
+  // (ToInt32(undefined) === 0), so on Windows it contributes nothing while
+  // macOS/Linux keep the real symlink-refusal semantics.
   const flags =
     fsConstants.O_WRONLY |
     fsConstants.O_CREAT |

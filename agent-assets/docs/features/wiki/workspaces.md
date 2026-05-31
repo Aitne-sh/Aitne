@@ -37,7 +37,7 @@ ask_examples:
   - Can two wikis live in nested folders?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-21
+updated: 2026-05-28
 keywords:
   - wiki workspace
   - workspace
@@ -72,6 +72,16 @@ api_endpoints:
   - /api/wiki/workspaces/probe
   - /api/wiki/workspaces/:workspace
   - /api/wiki/workspaces/:workspace/archive
+process_keys:
+  - wiki.ingest_url
+  - wiki.compile
+  - wiki.ask
+  - wiki.lint
+  - wiki.trace
+  - wiki.connect
+config_keys:
+  - primaryVaultPath
+  - externalObsidianVaultPath
 ---
 
 # Wiki Workspaces, Vaults, and Write Strategy
@@ -86,16 +96,16 @@ side-by-side wikis as you have distinct knowledge domains.
 
 | | Internal (recommended) | External |
 |---|---|---|
-| Root path | `$PA_DATA_DIR/wiki/<name>` (daemon-owned) | Any path you pick (typically an existing Obsidian vault) |
+| Root path | `$PA_DATA_DIR/context/knowledge/wiki/<name>` (daemon-owned, inside the context vault) | Any path you pick (typically an existing Obsidian vault) |
 | Writes | Atomic local-fs writes | Atomic local-fs writes when permitted; Obsidian-CLI fallback for sandboxed paths |
 | Backup surface | `md_file_snapshots` table | git auto-commit (when the vault is git-tracked) + sibling backup mirror under `90_meta/health/pre-migrate-<date>/` |
 | iCloud-friendly | Yes (lives in `~/.personal-agent`) | Yes via the Obsidian CLI fallback (requires the Obsidian app running) |
 | Best for | First-time users, isolated wiki, no Obsidian dependency | Power users with an existing Obsidian vault they want the agent to extend |
 
 Path-collision rules apply to both modes:
-- The workspace root must not overlap `dataDir`.
-- It must not overlap your primary Obsidian vault (`obsidian.vaultPath`).
-- It must not overlap the external Obsidian vault (`obsidian.externalVaultPath`).
+- The workspace root must not overlap `PA_DATA_DIR`.
+- It must not overlap your primary Obsidian vault (`primaryVaultPath`).
+- It must not overlap the external Obsidian vault (`externalObsidianVaultPath`).
 - Two wiki workspaces may not nest — neither root can be inside the other.
 
 The dashboard probe (`POST /api/wiki/workspaces/probe`) runs these
@@ -136,13 +146,15 @@ multi-word topics and comma-separated arguments work as normal:
 !connect @research diffusion models, score matching
 ```
 
-Omit the token and the command targets the **default** workspace
-(the one named `default`, or the first active workspace if `default`
-has been archived).
+Omit the token and the command targets the **default** workspace —
+in practice the oldest active workspace (lowest id), which is the one
+named `default` on a fresh install, or the next-oldest active
+workspace if `default` has been archived.
 
-The workspace name must be lowercase ASCII letters, digits, `-`, and
-`_`. Reserved name: `__system__` (used internally; rejected by the
-create endpoint).
+A workspace name after `@` must start with a letter or digit and then
+contain only letters, digits, `.`, `_`, or `-` (max 64 chars). An
+invalid token is rejected with a usage error rather than silently
+falling back to the default.
 
 See [guides/multiple-wikis-for-multiple-domains](../../guides/multiple-wikis-for-multiple-domains.md)
 for a walkthrough.
@@ -159,9 +171,9 @@ write. Three values:
   Catalyst-only CLI shipped since 2026-02; requires the Obsidian app
   running). Used for external vaults that live in sandboxed
   locations (typically iCloud-synced vaults) where direct fs writes
-  fail with `EPERM` / `EACCES` / `EROFS`.
+  fail with `EPERM` / `EACCES` / `EROFS` / `EBUSY`.
 - **`auto`** — the resolver tries `fs` first, falls back to `cli`
-  on the sandbox error codes, and persists the resolved value back
+  on those sandbox error codes, and persists the resolved value back
   to the row so subsequent writes skip the probe.
 
 Internal workspaces are pinned to `fs`. External workspaces start in
@@ -169,9 +181,10 @@ Internal workspaces are pinned to `fs`. External workspaces start in
 `/settings/wiki` if you need to force one path or the other (e.g. to
 test the CLI path on a non-sandboxed vault).
 
-The full design is in WIKI_BUILDER_DESIGN.md §P2.B / §8. Telemetry
-lives on the `agent_actions` audit row for each wiki write — the
-`detail.write_strategy` field tells you which path was used.
+The resolved strategy is surfaced in the workspace API response and
+on the `/settings/wiki` row, so you can always see which path
+(`fs` or `cli`) `auto` settled on. The full design is in
+WIKI_BUILDER_DESIGN.md §P2.B / §8.
 
 ## Dispatch mode (`parallel` / `serial`)
 
@@ -212,8 +225,8 @@ wiki in English, and vice versa.
 - **Delete** — drops the row. On-disk data is **not** removed for
   external workspaces (the daemon never deletes the user's vault).
   For internal workspaces, the disk tree is also left in place under
-  `$PA_DATA_DIR/wiki/<name>` — recover by re-creating a workspace at
-  the same name.
+  `$PA_DATA_DIR/context/knowledge/wiki/<name>` — recover by re-creating
+  a workspace at the same name.
 
 ## Fields and defaults reference
 
@@ -223,7 +236,7 @@ Quick map between the dashboard knobs and the `wiki_workspaces` row:
 |---|---|---|
 | Workspace name | `name` | `default` |
 | Kind | `kind` | `internal` |
-| Root path | `root_path` | `$PA_DATA_DIR/wiki/<name>` (internal) |
+| Root path | `root_path` | `$PA_DATA_DIR/context/knowledge/wiki/<name>` (internal) |
 | Language | `language` | `en` |
 | Dispatch mode | `dispatch_mode` | `parallel` |
 | Concurrency cap | `concurrency_cap` | `3` |

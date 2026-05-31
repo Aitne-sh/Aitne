@@ -16,7 +16,7 @@ summary: |
   approval before promoting them.
 section: maintain-wiki-health
 tags:
-  - guide
+  - guides
   - wiki
   - health
 status: stable
@@ -28,21 +28,33 @@ ask_examples:
   - What is a taxonomy candidate?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
   - wiki health
   - wiki lint
   - wiki maintenance
   - wiki freshness
   - orphan notes
+  - taxonomy candidates
 related:
   - features/wiki/overview
   - features/wiki/commands
+  - features/wiki/cost-and-approval
   - guides/explore-with-trace-and-connect
+process_keys:
+  - wiki.lint
+  - wiki.compile
+  - wiki.ingest_url
+  - wiki.ask
+  - wiki.trace
+api_endpoints:
+  - /api/wiki/:workspace/files/:path{.+}
+  - /api/wiki/:workspace/health
 ui_anchors:
   - /wiki
   - /wiki/timeline
   - /settings/wiki
+  - /settings/wiki/timeline
 ---
 
 # Maintain Wiki Health
@@ -55,9 +67,10 @@ notes itself.
 
 ## When to Run
 
-`!lint` is cheap (Sonnet medium tier, default $0.50 envelope) and
-non-destructive. Run it whenever you want a snapshot of wiki
-health. A practical cadence:
+`!lint` runs on the `wiki.lint` process key (medium tier — Sonnet
+by default, $1.00 budget envelope) and never changes your notes.
+Run it whenever you want a snapshot of wiki health. A practical
+cadence:
 
 - **Weekly**, after a busy ingest week, to catch orphans early.
 - **Before promoting a candidate** to the taxonomy or graduating
@@ -104,9 +117,8 @@ makes the change visible.
 
 Open **My Life → Wiki → Timeline & health** (`/wiki/timeline`). The
 page is also reachable from a button at the top of `/settings/wiki`,
-and the legacy `/settings/wiki/timeline` URL redirects here so old
-bookmarks still work. The most-recent report is parsed and rendered
-with:
+and the same view is mirrored under `/settings/wiki/timeline`. The
+most-recent report is parsed and rendered with:
 
 - A coloured date badge.
 - The `## Summary` bullets.
@@ -135,6 +147,18 @@ item:
 - **Term inconsistencies** → decide on the canonical slug, then
   update `90_meta/taxonomy.md` manually so future ingests pick the
   right name.
+
+For example, if the report flags `formal-methods.md` as an orphan,
+you might first ask the agent whether it still matters, then either
+link it or archive it:
+
+```
+!ask Is formal-methods still relevant, or has it been folded into another note?
+```
+
+If the answer says it's superseded, archive the note; otherwise add
+a `[[formal-methods]]` link from a related article and re-run
+`!compile` so the index picks it up.
 
 ## Taxonomy Candidates
 
@@ -167,8 +191,9 @@ chokepoint, so:
 
 - It's visible to `!ask` (you can literally ask "what did the last
   lint find?").
-- The DM read-only surface (`/api/wiki/.../files/90_meta/health/...`)
-  serves it back to a DM-agent for follow-up questions.
+- The DM read-only surface
+  (`GET /api/wiki/:workspace/files/90_meta/health/<date>.md`) serves
+  it back to a DM-agent for follow-up questions.
 - Internal-mode workspaces snapshot the previous version into
   `.snapshots/` before each rewrite; external-mode relies on your
   git or cloud sync.

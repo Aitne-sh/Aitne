@@ -64,6 +64,11 @@ export interface SpawnTarArgs {
 
 export interface SpawnTarResult {
   status: number | null;
+  /**
+   * Spawn-level error code (e.g. "ENOENT" when `tar` is absent from PATH).
+   * Optional → backward-compatible with stubs that return only `status`.
+   */
+  errorCode?: string;
 }
 
 export interface ReinstallDeps {
@@ -265,6 +270,16 @@ async function createTarballBackup(
     leaf,
   });
   if (result.status !== 0) {
+    // On Windows hosts that lack `tar`/`bsdtar` on PATH, `spawnSync` returns
+    // status null with a spawn-level ENOENT instead of a non-zero exit. The
+    // backup-first ordering guarantees nothing was deleted yet, so surface an
+    // actionable message rather than the opaque "exited with status null".
+    if (result.errorCode === "ENOENT" || result.status === null) {
+      throw new Error(
+        "Cannot create the safety backup: the 'tar' command was not found on PATH. " +
+          "Install tar/bsdtar (bundled with Windows 10 1803+ and Windows 11) or run the reinstall on a host that has it.",
+      );
+    }
     throw new Error(
       `tar exited with status ${result.status} while writing ${backupPath}`,
     );
@@ -277,5 +292,8 @@ function defaultSpawnTar(args: SpawnTarArgs): SpawnTarResult {
     ["-czf", args.target, "-C", args.parent, args.leaf],
     { stdio: "ignore" },
   );
-  return { status: result.status };
+  // `spawnSync().error` is typed as plain Error, but a failed spawn carries an
+  // errno `code` (e.g. "ENOENT" when `tar` is absent from PATH on Windows).
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  return { status: result.status, errorCode };
 }

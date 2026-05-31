@@ -9,8 +9,10 @@
  *     `docs/design/appendices/evening-review-slimdown.md` §2.2.
  *
  * Implementation:
- *   - Reads the daemon's apiToken from the macOS Keychain (the same
- *     entry the dashboard proxy uses). Bearer-auth required because
+ *   - Reads the daemon's apiToken from the OS secret store (macOS
+ *     Keychain, Windows DPAPI, Linux libsecret, or the encrypted file
+ *     fallback) via the shared cross-platform reader — the same entry
+ *     the dashboard proxy uses. Bearer-auth required because
  *     `POST /api/agent/run-now/*` routes are Approve-tier in the
  *     `risk-classifier`.
  *   - POSTs to `http://127.0.0.1:<PA_API_PORT>/api/agent/run-now/<job>`.
@@ -23,7 +25,7 @@
  *   - 3  daemon not running, not reachable, or 5xx
  *   - 4  result.status === "failed" — the job reported errors[]
  */
-import { execFileSync } from "node:child_process";
+import { readApiToken } from "../lib/read-api-token.mjs";
 
 const SUPPORTED_JOBS = new Set(["roadmap_maintenance"]);
 
@@ -53,7 +55,7 @@ export async function run(args, ctx) {
   const token = readApiToken();
   if (!token) {
     process.stderr.write(
-      "Failed to read daemon API token from the macOS Keychain.\n" +
+      "Failed to read the daemon API token from the OS secret store.\n" +
         "Is the daemon initialized? Run `aitne start` once first.\n",
     );
     process.exit(3);
@@ -123,23 +125,6 @@ function parseArgs(args) {
     opts.job = a;
   }
   return opts;
-}
-
-function readApiToken() {
-  try {
-    return execFileSync(
-      "security",
-      [
-        "find-generic-password",
-        "-s",
-        "com.personal-agent.secret.apiToken",
-        "-w",
-      ],
-      { encoding: "utf-8" },
-    ).trim();
-  } catch {
-    return null;
-  }
 }
 
 function printSummary(job, result) {

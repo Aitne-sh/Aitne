@@ -19,6 +19,7 @@ tags:
   - reference
   - config
   - operations
+  - backends
 status: stable
 ask_examples:
   - What configuration keys does the agent expose?
@@ -27,10 +28,13 @@ ask_examples:
   - Which config keys are runtime-editable from the dashboard?
   - Which keys need a daemon restart?
   - Where is the pre-pass freshness window set?
+  - What is the default daily cost cap?
 locale: en-US
 keywords:
   - AgentConfig
   - applyConfigUpdates
+  - EDITABLE_RUNTIME_KEY_TUPLE
+  - RESTART_REQUIRED_KEY_TUPLE
   - dayBoundaryHour
   - hourlyCheckIntervalMinutes
   - quietHoursStart
@@ -40,10 +44,41 @@ keywords:
   - allowedToolsOverride
   - voiceTranscriptionEnabled
   - hourlyCheckPrePassFreshnessMinutes
+  - vaultMode
   - PA_DATA_DIR
   - PA_API_PORT
+config_keys:
+  - dayBoundaryHour
+  - timezone
+  - primaryLanguage
+  - vaultMode
+  - hourlyCheckEnabled
+  - hourlyCheckIntervalMinutes
+  - hourlyCheckPrePassFreshnessMinutes
+  - quietHoursStart
+  - quietHoursEnd
+  - maxNotificationsPerHour
+  - maxNotificationsPerDay
+  - maxConcurrentSessions
+  - maxReactiveSessions
+  - executeTimeoutMinutes
+  - autonomousDailyCostCapUsd
+  - autonomousMonthlyCostCapUsd
+  - disallowedTools
+  - allowedToolsOverride
+  - claudeExecutionPermissionMode
+  - enabledMailProviders
+  - voiceTranscriptionEnabled
+  - advisorEnabled
+  - advisorModel
+api_endpoints:
+  - PATCH /api/config
+  - POST /api/voice/install
+ui_anchors:
+  - /settings/advanced
+  - /settings/models
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
 related:
   - reference/api
   - reference/cli-commands
@@ -92,9 +127,9 @@ case-sensitive.
 | `agentDisplayName` | string | What the agent calls itself in DMs. |
 | `character` | string | Persona key (one of the entries in `agent-assets/agent-profiles/`). |
 | `timezone` | IANA tz | Empty falls back to the system tz. |
-| `dayBoundaryHour` | 0–23 | Default `4`. Controls the agent-day rollover. |
+| `dayBoundaryHour` | 0–9 | Default `4`. Controls the agent-day rollover (must be an early-morning hour). |
 | `primaryLanguage` | BCP-47 | Output language for DMs, journal, and Obsidian writes. Templates stay English-headered. |
-| `vaultMode` | enum | Where context lives — `internal` / `obsidian`. |
+| `vaultMode` | enum | Where context lives — `plain` (default; `<dataDir>/context`) or `obsidian` (an external Obsidian vault). |
 
 ### Hourly check and gate
 
@@ -130,7 +165,7 @@ case-sensitive.
 | `executeTimeoutMinutes` | number | Per-execute wall-clock cap. |
 | `sessionTimeoutDmMinutes` / `…ChannelMinutes` / `…DashboardMinutes` | number | Idle TTLs per surface. |
 | `historyInjectionMaxMessages` / `…MaxTokens` | number | History-window caps for next-turn injection. |
-| `autonomousDailyCostCapUsd` / `…MonthlyCostCapUsd` | number | Per-day / per-month spend ceilings for autonomous work; `0` = off. |
+| `autonomousDailyCostCapUsd` / `…MonthlyCostCapUsd` | number / null | Spend ceilings for autonomous work; default `null` (off). When set, must be positive. The daily cap makes the dispatcher skip autonomous sessions once the day's cumulative cost exceeds it — reactive DMs/mentions always pass through. The monthly cap is a notifications-only soft cap (no dispatcher enforcement). Distinct from the removed Phase-9 `maxDailyCostUsd`, which blanket-blocked every session. |
 
 ### Safety and execution mode
 
@@ -162,7 +197,7 @@ case-sensitive.
 | Key | Type | Notes |
 |---|---|---|
 | `mailPollIntervalSeconds` / `mailIdleEnabled` / `mailIdleInstabilityThreshold` / `mailIdleFallbackRecoveryMinutes` / `mailMaxMessagesPerPoll` / `mailAuthFailureRetryHours` | various | Mail-poller knobs (multi-provider). |
-| `enabledMailProviders` | enum[] | Which providers participate (`gmail`, `outlook_mail`, `yahoo`, `icloud`, `generic_imap`). |
+| `enabledMailProviders` | enum[] | Which providers participate. One or more of `gmail`, `outlook`, `yahoo`, `icloud`. Default `["gmail"]`. |
 | `vipMailSenders` | string[] | Sender list that bumps mail priority. |
 | `outlookDeltaPageSize` / `outlookGraphConcurrency` | number | Outlook Graph API tuning. |
 | `imapReconnectBaseMs` / `imapReconnectMaxMs` | number | IMAP reconnect backoff. |
@@ -188,7 +223,7 @@ case-sensitive.
 
 | Key | Type | Notes |
 |---|---|---|
-| `delegatedTaskModeEnabled` | boolean | Master kill switch (DELEGATED-TASK-MODE-DESIGN.md §17). |
+| `delegatedTaskModeEnabled` | boolean | Master kill switch for the `/api/integrations/:key/exec` task-mode endpoints. Default `false`; mutable at runtime so an emergency disable needs no restart. |
 | `delegatedTaskMaxPerDay` | number | Per-day quota. |
 | `delegatedTaskDefaultMaxToolCalls` / `…DefaultMaxBudgetUsd` / `…DefaultTimeoutMs` | various | Per-task defaults. |
 | `delegatedTaskHeavyEnabled` | boolean | Approve-tier opt-in gate for the heavy variant. |
@@ -200,23 +235,24 @@ case-sensitive.
 | Key | Type | Notes |
 |---|---|---|
 | `advisorEnabled` | boolean | SDK advisor toggle. |
-| `advisorModel` | string | Model id (current SDK pins this to `opus-4-6` / `sonnet-4-6`; newer Opus generations like `opus-4-7` / `opus-4-8` silently skip). |
+| `advisorModel` | string / null | Model id; default `null`. Validated against `ADVISOR_ALLOWED_MODELS`, which the SDK pins to `claude-sonnet-4-6` and `claude-opus-4-6` only. Newer Opus generations (`claude-opus-4-7`, `claude-opus-4-8`) are silently skipped by the SDK advisor path — see `docs/advisor.md`. |
 
-## Routine Schedule Keys Don't Exist
+## Routine Schedule Times Are Not Configurable
 
-Morning, evening, and weekly routines fire at fixed times in
-`packages/daemon/src/core/scheduler.ts`. There is no
-`morningRoutineHour`, `eveningReviewHour`, or `weeklyReviewDay` key.
+The morning, evening, weekly, and monthly routines fire at fixed times
+defined in `packages/daemon/src/core/scheduler.ts`. There is no
+`morningRoutineHour`, `eveningReviewHour`, or `weeklyReviewDay` key — to
+shift the whole day, change `dayBoundaryHour` instead.
 
 | Routine | Trigger |
 |---|---|
-| `routine.morning_routine` | Daily at `dayBoundaryHour`. |
+| `routine.morning_routine` | Daily at `dayBoundaryHour` (default 04:00). |
 | `routine.evening_review` | Daily at `18:00` local. |
-| `routine.weekly_review` | Friday `18:00` local. |
-| `routine.monthly_review` | Disabled by default (`monthlyReviewEnabled = false`). |
+| `routine.weekly_review` | Friday `19:00` local (one hour after the evening review). |
+| `routine.monthly_review` | Last day of the month at `18:00` local, but **disabled by default** (`monthlyReviewEnabled = false`). |
 
-Only the hourly check has a configurable cadence
-(`hourlyCheckIntervalMinutes`) and an active window
+The hourly check is the one autonomous routine with a configurable
+cadence (`hourlyCheckIntervalMinutes`) and active window
 (`hourlyCheckActiveStartHour` / `…ActiveEndHour`).
 
 ## Restart-Required Keys

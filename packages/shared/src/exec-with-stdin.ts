@@ -32,6 +32,16 @@ export function execWithStdin(
     // Handle spawn errors (e.g., command not found) before writing to stdin
     child.on("error", reject);
 
+    // Handle write-side stream errors. When the child closes/exits its stdin
+    // before the piped input fully drains — PowerShell DPAPI on Windows, or
+    // `secret-tool store` on Linux exiting early (locked keyring, malformed
+    // args, fast startup failure) — Node emits EPIPE / ERR_STREAM_DESTROYED
+    // on `child.stdin`. Without this listener that event is unhandled and
+    // crashes the entire daemon. `child.on("error")` only catches spawn
+    // failures, not write-side stream errors, so this is a distinct listener.
+    // (macOS uses the native Keychain client and never routes through here.)
+    child.stdin.on("error", reject);
+
     child.on("close", (code) => {
       if (code === 0) resolve({ stdout, stderr });
       else reject(new Error(`Exit ${code}: ${stderr}`));

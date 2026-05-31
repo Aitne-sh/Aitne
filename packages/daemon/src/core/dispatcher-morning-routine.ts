@@ -315,11 +315,23 @@ export class MorningRoutineRunner {
         pipelineRun = null;
       }
     } finally {
-      this.setMorningRoutineInProgress(false);
+      // B3 fix: the today.md write-lock is released here (Stage B /
+      // journal / parent-audit do not touch today.md, so early release
+      // is safe), but `morningRoutineInProgress` is NOT cleared here.
+      // Clearing the flag before the authoritative
+      // `routine.morning_routine` success audit row is durable opens a
+      // window where, for a cron-triggered (non-wake) run, both
+      // `isMorningRoutineActive()` and `morningRoutineRanToday()` read
+      // false — an hourly_check tick would then take the
+      // `morning_routine_pending_for_today` branch and enqueue a
+      // spurious morning_routine wake. The flag is instead cleared in
+      // the post-finally try/finally below, AFTER the journal append +
+      // parent-audit emit, on every exit path.
       if (lockId && this.todayWriteLock) {
         this.todayWriteLock.release(lockId);
       }
     }
+    try {
     // Per-stage `agent_actions` rows are written from inside
     // `orchestrator.run()` (each stage runs through
     // `resultProcessor.processResult(stageResult, stageEvent)` so each
@@ -485,6 +497,14 @@ export class MorningRoutineRunner {
           "Skipping post-morning roadmap_refresh — agent populated roadmap.md inline",
         );
       }
+    }
+    } finally {
+      // B3 fix: clear `morningRoutineInProgress` only AFTER the parent
+      // audit row is durable (journal append + emitParentAuditRow above).
+      // Reached on every post-finally exit path — success/catchup,
+      // retry-scheduled, and the `pipelineRun === null` branch — so a
+      // Stage-A failure cannot leak the flag and wedge hourly_check.
+      this.setMorningRoutineInProgress(false);
     }
   }
 

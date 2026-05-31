@@ -836,8 +836,21 @@ export class GeminiCliCore implements IAgentCore {
 
     try {
       idleWatchdog.start();
+      // Spawn the resolved CLI path, not the bare name. `this.cliPath` is the
+      // PATHEXT-resolved binary (e.g. `gemini.cmd` on Windows, where the npm
+      // shim has no extensionless entry); a literal `"gemini"` ENOENTs there.
+      // Mirrors the delegated/probe paths (~2330, ~2781). The getter is typed
+      // `string | null`, so narrow before assigning to the `string` field —
+      // `checkAuth()` already returns ok:false when null but doesn't narrow.
+      if (!this.cliPath) {
+        throw new BackendDecisiveFailure(
+          this.backendId,
+          "auth",
+          new Error("gemini CLI not found on PATH"),
+        );
+      }
       const runResult = await runLineCommand({
-        command: "gemini",
+        command: this.cliPath,
         args: this.buildArgs(params, policyPath),
         cwd: sessionDir,
         env: {

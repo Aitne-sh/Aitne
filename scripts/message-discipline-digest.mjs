@@ -74,11 +74,13 @@
 //     scheduler already understands).
 //   - Posts via global `fetch` (Node ≥ 18). Project pins Node ≥ 22.
 
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = path.join(__dirname, "..");
 
 const FORBIDDEN_OPENERS_RE =
   /^(?:Good\s+(?:morning|evening|afternoon)|Evening\s+check-in|Morning\s+briefing|Heads-up|FYI|Quick\s+update|Summary|Done|Sent|OK|Here's|Here\sis)\b/i;
@@ -163,24 +165,19 @@ function localIsoAt(dateStr, hhmm) {
   );
 }
 
-function querySqlite(dbPath, sql) {
-  if (!existsSync(dbPath)) {
-    throw new Error(`SQLite DB not found at ${dbPath}`);
-  }
-  let out;
+async function querySqlite(dbPath, sql) {
+  // Open the DB in-process via better-sqlite3 (the same native binding the
+  // daemon runs) rather than shelling out to the system `sqlite3` CLI, which
+  // is absent on Windows and many Linux/macOS installs. `loadBetterSqlite3`
+  // handles the pnpm-dev vs installed-package resolution on all three OSes.
+  const { loadBetterSqlite3 } = await import("./lib/sqlite-loader.mjs");
+  const Database = await loadBetterSqlite3(PROJECT_ROOT);
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    out = execFileSync("sqlite3", ["-json", dbPath, sql], {
-      encoding: "utf-8",
-      maxBuffer: 32 * 1024 * 1024,
-    });
-  } catch (err) {
-    throw new Error(
-      `sqlite3 invocation failed (${err.message}). The script needs the system sqlite3 CLI (macOS ships it).`,
-    );
+    return db.prepare(sql).all();
+  } finally {
+    db.close();
   }
-  const trimmed = out.trim();
-  if (!trimmed) return [];
-  return JSON.parse(trimmed);
 }
 
 /**
@@ -216,7 +213,7 @@ function truncate(s, n) {
   return s.length <= n ? s : `${s.slice(0, n - 1)}…`;
 }
 
-function loadDayData(dbPath, date) {
+async function loadDayData(dbPath, date) {
   // notification_log carries every user-facing emission. The
   // notification_type column distinguishes the source surface:
   //
@@ -247,7 +244,7 @@ function loadDayData(dbPath, date) {
   // The buckets below mirror the §5.1 surfaces — /api/notify, scheduled
   // DMs (LLM and direct), DM replies — so the regex classifier runs over
   // every user-visible row produced that day.
-  const notifications = querySqlite(
+  const notifications = await querySqlite(
     dbPath,
     `SELECT id, notification_type, priority, content_summary, status, platform, created_at
        FROM notification_log
@@ -262,7 +259,7 @@ function loadDayData(dbPath, date) {
   // filter on 'schedule.approaching' would always be 0). Reporting a fake
   // split produced misleading "100% skipped" digests; an honest total
   // plus the global notify-row classifier covers regression detection.
-  const approachingActions = querySqlite(
+  const approachingActions = await querySqlite(
     dbPath,
     `SELECT id, started_at, completed_at, result
        FROM agent_actions
@@ -431,7 +428,7 @@ async function runDigest(args) {
   const dbPath = resolveDbPath(args.dbPath);
   const baseUrl = args.baseUrl ?? "http://localhost:8321";
 
-  const data = loadDayData(dbPath, date);
+  const data = await loadDayData(dbPath, date);
   const digest = buildDigest(date, data);
 
   if (args.send) {

@@ -707,6 +707,22 @@ describe("PATCH /books/:id", () => {
     expect(row.status).toBe("abandoned");
     expect(row.completed_at).toBeNull();
   });
+
+  it("clears completed_at when status leaves 'completed' (regression: stale completion date)", async () => {
+    await patch(bookId, { status: "completed" });
+    const completed = db.prepare("SELECT completed_at FROM books WHERE id = ?").get(bookId) as { completed_at: string | null };
+    expect(completed.completed_at).not.toBeNull();
+
+    const res = await patch(bookId, { status: "reading" });
+    expect(res.status).toBe(200);
+
+    const app = createBookRoutes({ db } as unknown as ApiDependencies);
+    const listRes = await app.request("/books");
+    const body = (await listRes.json()) as { books: Array<{ id: number; status: string; completedAt: string | null }> };
+    const book = body.books.find((b) => b.id === bookId);
+    expect(book?.status).toBe("reading");
+    expect(book?.completedAt).toBeNull();
+  });
 });
 
 describe("POST /books/import-clippings", () => {

@@ -396,13 +396,14 @@ describe("composePrePassAllowedTools", () => {
 
   it("emits the daemon-REST + jq baseline regardless of integration state", () => {
     const tools = composePrePassAllowedTools(8321, {}, "claude" as const);
-    // The baseline covers every endpoint the partials hit in `direct`
-    // mode plus the delegated-cross proxy plus the always-needed jq.
+    // The baseline covers every READ endpoint the partials hit in `direct`
+    // mode plus the delegated-cross proxy plus the always-needed jq. The
+    // observations WRITE surface is backend-specific (claude → MCP tool,
+    // codex/gemini → curl) and is asserted separately below.
     // The `curl *URL*` shape (wildcard between `curl` and the URL)
     // tolerates the Haiku fetcher emitting flags before the URL —
     // `curl -X POST -H ... <url>` matched the same glob as
     // `curl <url> -X POST -H ...`.
-    expect(tools).toContain("Bash(curl *http://localhost:8321/api/observations*)");
     expect(tools).toContain("Bash(curl *http://localhost:8321/api/mail/*)");
     expect(tools).toContain("Bash(curl *http://localhost:8321/api/calendar/*)");
     expect(tools).toContain("Bash(curl *http://localhost:8321/api/notion/*)");
@@ -433,8 +434,10 @@ describe("composePrePassAllowedTools", () => {
     const tools = composePrePassAllowedTools(9999, {}, "claude" as const);
     // The override REPLACES the SDK default — a hardcoded `8321`
     // would silently deny every call on a non-default deployment.
-    expect(tools).toContain("Bash(curl *http://localhost:9999/api/observations*)");
-    expect(tools).not.toContain("Bash(curl *http://localhost:8321/api/observations*)");
+    // (Assert on a read endpoint present for every backend; the
+    // observations write curl is omitted on claude — see below.)
+    expect(tools).toContain("Bash(curl *http://localhost:9999/api/mail/*)");
+    expect(tools).not.toContain("Bash(curl *http://localhost:8321/api/mail/*)");
   });
 
   it("includes the descriptor's MCP tool names for delegated-same gmail (claude session)", () => {
@@ -546,6 +549,39 @@ describe("composePrePassAllowedTools", () => {
         backend,
       );
       expect(tools).not.toContain("mcp__aitne-observations__submit_observations");
+    }
+  });
+
+  it("omits the observations-write curl pattern on claude pre-pass (MCP tool is the only write path)", () => {
+    // Root-cause fix for the recurring google_calendar `budget-cap`: a
+    // `curl … -d @- <<'JSON'` body carrying Unicode whitespace (U+3000 in
+    // JP calendar titles, NBSP/ZWS in promo mail subjects) trips the SDK's
+    // `Ae6` bash preflight ("Contains Unicode whitespace") → too-complex →
+    // dontAsk denial → retried until budget-cap. Dropping the curl allow
+    // rule forces claude onto `mcp__aitne-observations__submit_observations`
+    // (structured JSON, never shell-parsed). The READ curls are untouched.
+    const tools = composePrePassAllowedTools(8321, {}, "claude" as const);
+    expect(tools).not.toContain(
+      "Bash(curl *http://localhost:8321/api/observations*)",
+    );
+    expect(tools).toContain("mcp__aitne-observations__submit_observations");
+    expect(tools).toContain("Bash(curl *http://localhost:8321/api/mail/*)");
+  });
+
+  it("retains the observations-write curl pattern on codex/gemini pre-pass (no MCP transport)", () => {
+    // Codex/Gemini have no in-process SDK MCP server, so the curl write
+    // path is their only way to POST observations — keep it. They remain
+    // exposed to the Unicode-whitespace preflight class until those
+    // backends gain a structured channel (accepted gap, see
+    // composePrePassAllowedTools).
+    for (const backend of ["codex", "gemini"] as const) {
+      const tools = composePrePassAllowedTools(8321, {}, backend);
+      expect(tools).toContain(
+        "Bash(curl *http://localhost:8321/api/observations*)",
+      );
+      expect(tools).not.toContain(
+        "mcp__aitne-observations__submit_observations",
+      );
     }
   });
 
@@ -786,7 +822,14 @@ describe("RoutineFetchWindowRunner.run — success path", () => {
       allowedToolsOverride?: readonly string[];
     };
     expect(Array.isArray(executeCall.allowedToolsOverride)).toBe(true);
+    // Claude pre-pass (makeBinding defaults to claude): the observations
+    // WRITE surface is the in-process MCP tool, not a curl pattern — the
+    // curl-to-/api/observations rule is deliberately omitted to close the
+    // Unicode-whitespace `Ae6` preflight → budget-cap failure class.
     expect(executeCall.allowedToolsOverride).toContain(
+      "mcp__aitne-observations__submit_observations",
+    );
+    expect(executeCall.allowedToolsOverride).not.toContain(
       "Bash(curl *http://localhost:0/api/observations*)",
     );
     expect(executeCall.allowedToolsOverride).toContain(

@@ -14,11 +14,12 @@ summary: |
   How to use `!trace <topic>` to reconstruct the evolution of an
   idea across your raw / wiki / outputs layers, and `!connect <a>
   <b>` to find bridges between two domains.
-section: explore-with-trace-and-connect
+section: guides
 tags:
-  - guide
+  - guides
   - wiki
   - exploration
+  - bang-commands
 status: stable
 ask_examples:
   - How do I trace an idea across the wiki?
@@ -26,19 +27,27 @@ ask_examples:
   - How do I find connections between two topics?
   - Where does the !trace output land?
   - Can I use multi-word topics with !connect?
+  - How do I run !trace against a non-default wiki workspace?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
-  - !trace
-  - !connect
+  - "!trace"
+  - "!connect"
   - wiki exploration
   - topic history
   - topic bridges
+  - bridging domains
+prerequisites:
+  - guides/build-your-wiki
 related:
   - features/wiki/overview
   - features/wiki/commands
   - guides/maintain-wiki-health
+  - features/messaging/bang-commands
+process_keys:
+  - wiki.trace
+  - wiki.connect
 ui_anchors:
   - /wiki/timeline
   - /settings/wiki
@@ -46,10 +55,16 @@ ui_anchors:
 
 # Explore Your Wiki with `!trace` and `!connect`
 
-`!trace` and `!connect` are the two Phase 3 exploration commands.
-Both produce a one-off output document in `30_outputs/` and never
-touch your raw or wiki notes. Think of them as cited essays
-written from what your wiki actually contains.
+`!trace` and `!connect` are the two wiki exploration commands. Both
+produce a one-off output document in `30_outputs/` and never touch
+your raw or wiki notes. Think of them as cited essays written from
+what your wiki actually contains.
+
+Both run as owner-DM bang commands. Both also accept an optional
+leading `@<workspace>` token to target a non-default wiki workspace
+— for example `!trace @research formal methods` or
+`!connect @research category theory, distributed systems`. Omit the
+token and the command runs against your default workspace.
 
 ## `!trace <topic>` — Time-Based Exploration
 
@@ -114,13 +129,15 @@ your wiki. The agent surfaces four kinds of bridges:
 
 ### Argument Forms
 
-`!connect` requires exactly two topics. Whitespace separates them
-by default; a comma lets you use multi-word topics:
+`!connect` requires exactly two topics (after any optional
+`@<workspace>` token). Whitespace separates them by default; a
+comma lets you use multi-word topics:
 
 ```
 !connect quantum gravity
 !connect quantum computing, classical computing
 !connect category theory, distributed systems
+!connect @research category theory, distributed systems
 ```
 
 The handler rejects a single topic, three-or-more topics, a

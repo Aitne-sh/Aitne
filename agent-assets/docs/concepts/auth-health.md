@@ -20,6 +20,7 @@ tags:
   - safety
   - backends
   - operations
+  - health
 status: stable
 ask_examples:
   - Why is the dashboard showing a degraded backend?
@@ -28,7 +29,7 @@ ask_examples:
   - What is the SubscriptionAuthWarning banner?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - auth
   - authentication
@@ -49,6 +50,12 @@ ui_anchors:
 config_keys:
   - authProbeDisabled
   - authPreflightFreshnessMs
+api_endpoints:
+  - POST /api/backends/:backendId/check-auth
+  - POST /api/backends/:backendId/recovery/start
+  - GET /api/backends/:backendId/recovery/status
+  - POST /api/backends/:backendId/recovery/code
+  - POST /api/backends/:backendId/recovery/cancel
 ---
 
 # Auth Health
@@ -74,12 +81,21 @@ routine fails.
   is live. Without an API key, the probe checks whatever local CLI
   login Aitne fell back to (Claude credentials store, Codex token,
   Gemini ADC).
-- **Preflight freshness**: how long the daemon trusts a successful
-  probe before re-running.
-- **Recovery**: backend-specific repair. The recommended path is
-  re-pasting the API key on `/settings/models`; for the fallback
-  path, re-running the matching CLI login (`claude`,
-  `codex login`, `gemini auth`).
+- **Preflight freshness**: how long the daemon trusts a cached probe
+  result before the router consults the backend again. Controlled by
+  `authPreflightFreshnessMs` (default 600000 = 10 min). A cached
+  `expired`/`missing` status younger than this window makes the router
+  skip the main backend and route straight to fallback. Set to `0` to
+  disable the pre-flight check entirely.
+- **Recovery**: backend-specific repair. The recommended path is always
+  re-pasting a paid API key on `/settings/models`. If you run on CLI
+  subscription auth instead, you can recover the login from the same
+  page: `/settings/models` exposes a recovery dialog that drives the
+  backend's own interactive login subprocess —
+  `claude auth login --claudeai` (browser OAuth), `codex login
+  --device-auth` (device code), or Gemini's direct OAuth flow. As a
+  manual fallback you can always re-run the backend's CLI login in a
+  terminal yourself.
 
 ## Concrete Examples
 
@@ -89,7 +105,9 @@ routine fails.
 - Operator never registered an API key, ran on the subscription
   fallback, and the underlying `claude` CLI session expired → probe
   fails → card flips amber → recommended fix is to register an API
-  key on `/settings/models`; otherwise re-run the CLI login.
+  key on `/settings/models`. To keep using subscription auth instead,
+  open the recovery dialog on the same page and complete the browser
+  OAuth login it launches.
 
 Cloud-provider credentials (Bedrock / Vertex / Foundry / Azure
 OpenAI / Gemini-Vertex) are not probed against a `models` endpoint —
@@ -97,7 +115,23 @@ those providers trust the SDK's runtime auth chain, so the auth-
 health card stays neutral until the first execution either succeeds
 or surfaces a runtime auth error.
 
+## The "API key recommended" warning
+
+Separate from probe failures, `/settings/models` (and the setup
+wizard's AI Backends step) shows a standing **API-key-recommended**
+warning whenever a backend has no registered key. Skipping the key
+falls the daemon back to that backend's local CLI subscription login,
+which most providers do not officially support for automated agents —
+Anthropic in particular currently prohibits running the Claude Agent
+SDK on a Claude Pro / Max subscription. The warning is advisory, not a
+probe result: it stays visible while you are on the fallback so you can
+register a paid key and leave the gray area.
+
 ## Related
 
-- [Backends and Tiers](backends-and-tiers.md)
-- [Troubleshooting: Auth Failed](../troubleshooting/auth-failed.md)
+- [Backends and Tiers](backends-and-tiers.md) — tiers, models, and
+  fallback routing.
+- [Costs and Quotas](costs-and-quotas.md) — how API-key billing and
+  quota signals interact.
+- [Troubleshooting: Auth Failed](../troubleshooting/auth-failed.md) —
+  step-by-step recovery when a card goes red.

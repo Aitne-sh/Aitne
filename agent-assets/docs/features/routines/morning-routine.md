@@ -26,12 +26,16 @@ ask_examples:
   - What model does morning routine use?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-17
+updated: 2026-05-28
 keywords:
   - morning
   - day plan
   - 04:00
   - day boundary
+  - two-stage pipeline
+  - stage A
+  - stage B
+  - daily journal
 related:
   - concepts/agent-day
   - features/memory-files/today
@@ -39,6 +43,9 @@ prerequisites:
   - concepts/agent-day
 ui_anchors:
   - /settings/routines
+  - /settings/models
+  - /schedule
+  - /activity
   - /
 process_keys:
   - routine.morning_routine
@@ -47,8 +54,9 @@ process_keys:
 config_keys:
   - dayBoundaryHour
 context_files:
-  - today.md
-  - daily/<date>.md
+  - state/today.md
+  - journal/daily/<date>.md
+  - journal/agent.md
 ---
 
 # Morning Routine
@@ -62,24 +70,30 @@ roadmap, and recent observations.
 ## What It Does
 
 The morning routine is the single highest-value process in Aitne.
-It runs as a **two-stage pipeline** — Stage A (`routine.morning_routine_today`)
-on the medium tier rebuilds `state/today.md`, walks the roadmap, fans out
-the day's schedule, and self-reports structured metadata; Stage B
-(`routine.morning_routine_journal`) on the lite tier authors
-`daily/<yesterday>.md` in parallel from a daemon-prepared skeleton.
-Every downstream routine for the next 24 hours reads Stage A's
-output, so a bad morning briefing still degrades the entire day —
-hence the medium-tier ceiling on Stage A even after the split.
+It runs as a **two-stage pipeline**, with both stages dispatched in
+parallel:
 
-In sequence, the routine:
+- **Stage A** (`routine.morning_routine_today`, medium tier) rebuilds
+  `state/today.md`, walks the roadmap, fans out the day's schedule, and
+  self-reports structured metadata.
+- **Stage B** (`routine.morning_routine_journal`, lite tier) authors
+  yesterday's daily journal at `journal/daily/<yesterday>.md` from a
+  daemon-prepared skeleton, then drops the run's audit-trail paragraph
+  into `journal/agent.md`.
 
-1. Reads the previous day's `state/today.md` and rolls forward unfinished items.
-2. Pulls today's calendar events from any connected calendar integration.
-3. Scans recent unread mail and surfaces the few that need owner attention.
-4. Walks the roadmap looking for items whose **Preparation Timeline** rows fire today.
-5. Consumes any pending observations the hourly check has already dropped into the queue.
-6. Writes the rebuilt `state/today.md` and the per-date snapshot at `daily/YYYY-MM-DD.md`.
-7. Logs a single status line to the dashboard activity feed.
+Every downstream routine for the next 24 hours reads Stage A's output,
+so a bad morning briefing degrades the entire day — hence the
+medium-tier ceiling on Stage A even after the split.
+
+Within Stage A, the work proceeds in this order:
+
+1. Read the previous day's `state/today.md` and roll forward unfinished items.
+2. Pull today's calendar events from any connected calendar integration.
+3. Scan recent unread mail and surface the few that need owner attention.
+4. Walk the roadmap for items whose **Preparation Timeline** rows fire today.
+5. Consume any pending observations the hourly check has already queued.
+6. Write the rebuilt `state/today.md`.
+7. Log a single status line to the dashboard activity feed.
 
 ## When It Runs / How It Is Triggered
 
@@ -94,14 +108,16 @@ setup is detected inline by Stage A from the absence of `state/yesterday.md`;
 the daemon injects a `<roadmap_skeleton>` block carrying the pre-aggregated
 Annual Goals / Quarterly Focus / Preparation Timeline facts so Stage A
 can populate the wizard's placeholder roadmap on medium tier instead of
-paying for a one-shot heavy session. (Pre-Phase 7, this branch dispatched
-under `routine.morning_routine_initial` on the heavy tier.)
+paying for a one-shot high-tier session. (The dedicated
+`routine.morning_routine_initial` process key was retired in Phase 4, and
+Phase 7 — 2026-05-16 — removed its high-tier seed entirely.)
 
 ## What It Outputs
 
-- A rebuilt `state/today.md` with sections for User Schedule, Tasks, Agent Plan, Agent Log, and Handoff.
-- A per-date `daily/YYYY-MM-DD.md` capturing the day's calendar snapshot.
-- A short notification ("Good morning, here's today...") when notifications are enabled and quiet hours have ended.
+- A rebuilt `state/today.md` with sections for User Schedule, User Tasks, Agent Plan, Agent Log, and Handoff (Stage A).
+- Yesterday's daily journal at `journal/daily/<date>.md` (Stage B).
+- A run audit paragraph appended to `journal/agent.md` (Stage B).
+- A short morning notification when notifications are enabled and quiet hours have ended.
 - An entry in the Activity feed.
 
 ## Where in the Dashboard
@@ -116,15 +132,17 @@ under `routine.morning_routine_initial` on the heavy tier.)
 |---|---|---|
 | `dayBoundaryHour` | `4` | Both the agent-day boundary and the morning-routine fire time. See [Agent Day](../../concepts/agent-day.md). |
 | Stage A tier (`routine.morning_routine_today`) | medium (Sonnet 4.6) | Synthesises `state/today.md` + the day's roadmap fan-out. Adjustable per-row in Settings → Models. |
-| Stage B tier (`routine.morning_routine_journal`) | lite (Haiku 4.5) | Appends yesterday's entry to `agent-journal.md`. |
-| Max turns | 50 | Stage A default. Adjustable per-process in Settings → Models. |
-| Max budget USD | 2.00 (Stage A: 0.50, Stage B: 0.10) | Per-execute envelope cap. The router enforces this before token costs accumulate. |
+| Stage B tier (`routine.morning_routine_journal`) | lite (Haiku 4.5) | Authors `journal/daily/<date>.md` and the `journal/agent.md` audit paragraph. |
+| Stage A max turns / budget | 50 turns / $1.50 | Per-execute envelope for `routine.morning_routine_today`. Adjustable in Settings → Models. |
+| Stage B max turns / budget | 20 turns / $0.30 | Per-execute envelope for `routine.morning_routine_journal`. |
+
+The parent `routine.morning_routine` key keeps its own envelope (50 turns / $2.00) for the pipeline entry point. Codex and Gemini backends scale the dollar caps by a per-tier factor (lite ×2.5, medium ×1.5); the router enforces the cap before token costs accumulate.
 
 ## When Something Goes Wrong
 
-- The most common failure is **morning routine did not run** because the daemon was offline at the trigger window. The next launch picks the run up via the catch-up scheduler if it is still the same agent day.
-- A failed morning routine emits a fallback-success notification when the secondary backend caught the run, or a fallback-failed notification (high priority) when both failed.
-- Backend quota exhaustion is the second most common cause: a provider rate limit on your `ANTHROPIC_API_KEY`, or — when running on the subscription fallback — the rolling window of the underlying Claude plan. Switch the routine's model in Settings → Models (or wait for the provider window to refresh); if a fallback backend is configured, the router will automatically retry there first.
+- The most common failure is **morning routine did not run** because the daemon was offline at the trigger window. The next launch picks the run up via the boot-time catch-up scheduler if it is still the same agent day (a stale or missing `state/today.md` triggers an inline catch-up run).
+- If Stage A runs but fails to produce a valid `state/today.md`, the daemon schedules retries with exponential back-off (5 → 10 → 15 minutes, max 3 attempts) via the `agent_schedule` path, so the retry survives daemon restarts. After the third failure it sends a single **critical** notification asking you to regenerate from the dashboard, and stops retrying. (Stage B is not re-fired on retry — only Stage A regen fixes `state/today.md`.)
+- Backend quota exhaustion is the second most common cause: a provider rate limit, or — when running on the subscription fallback — the rolling window of the underlying Claude plan. The router surfaces this as a `BackendQuotaError` and automatically retries on the configured fallback backend first; switch the routine's model in Settings → Models or wait for the provider window to refresh.
 
 ## Related
 

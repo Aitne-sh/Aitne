@@ -13,28 +13,36 @@ summary: |
 section: integrations
 tags:
   - integrations
+  - notion
   - knowledge
   - observations
 status: stable
 ask_examples:
   - How do I connect Notion?
   - Will Notion notify me on every page change?
+  - What does Notion native mode do?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - notion
   - page
   - database
   - notion observer
   - notion poller
+  - integration modes
 related:
   - features/integrations/obsidian
   - features/routines/hourly-check
+  - concepts/delegated-mode
+  - concepts/observations
 ui_anchors:
   - /connections/knowledge
 config_keys:
   - notionPollIntervalSeconds
+api_endpoints:
+  - POST /api/integrations/:key/probe
+  - POST /api/observations
 ---
 
 # Notion
@@ -68,7 +76,11 @@ Notion supports all four integration modes (`direct` / `delegated` /
 - **`native`** — the main backend reaches Notion through its own MCP
   connector on demand; the daemon does no polling. Observations
   flow in only when the main backend POSTs them in-turn via
-  `/api/observations`. Available with Claude (`mcp__notion__*`).
+  `POST /api/observations`. Supported when the main backend is
+  Claude, Codex, or Gemini (each ships a Notion connector — e.g.
+  Claude's is `mcp__claude_ai_Notion__*`). OpenCode hosts no native
+  connectors, so selecting it as the main backend cascades Notion to
+  `disabled`.
 - **`disabled`** — silence; no observations, no daemon access.
 
 Switching modes requires the integration flip-lock probe to pass

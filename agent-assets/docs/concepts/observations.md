@@ -29,7 +29,7 @@ ask_examples:
   - Where does the routine pre-pass write observations?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - observation
   - observations
@@ -40,16 +40,31 @@ keywords:
   - pre-pass
   - AgentWriteTracker
   - contentHash
+  - recordObservation
+  - observation queue
+  - dedupe
 related:
   - features/routines/hourly-check
   - features/routines/morning-routine
   - concepts/process-keys
   - concepts/routines
+  - features/integrations/git
+  - features/integrations/obsidian
 ui_anchors:
   - /activity
+process_keys:
+  - routine.hourly_check
+  - routine.fetch_window
 config_keys:
   - hourlyCheckIntervalMinutes
   - hourlyCheckPrePassFreshnessMinutes
+api_endpoints:
+  - POST /api/observations
+  - GET /api/observations
+  - POST /api/observations/consume
+context_files:
+  - packages/daemon/src/core/routine-windows.ts
+  - packages/daemon/src/api/routes/observations.ts
 ---
 
 # Observations
@@ -62,13 +77,15 @@ SQLite. A single `routine.hourly_check` consumes the queue and decides
 what is worth surfacing.
 
 Since 2026-05, observations have a **second writer**: every main
-routine (morning, today_refresh, hourly_check, evening, weekly) is
-preceded by a lite-tier `routine.fetch_window` pre-pass that fetches
-mail / calendar / Notion windows and POSTs them to
-`/api/observations`. The main routine then reads them via the same
-`pending=true` queue that the polling path feeds. Observation rows
-look identical regardless of which writer produced them — the
-distinction is invisible to downstream consumers.
+routine (`routine.morning_routine`, `routine.today_refresh`,
+`routine.hourly_check`, `routine.evening_review`,
+`routine.weekly_review`) is preceded by a lite-tier
+`routine.fetch_window` pre-pass that fetches mail / calendar / Notion
+windows and POSTs them to `/api/observations`.
+(`routine.monthly_review` has no pre-pass window.) The main routine
+then reads them via the same `pending=true` queue that the polling
+path feeds. Observation rows look identical regardless of which writer
+produced them — the distinction is invisible to downstream consumers.
 
 ## Why This Concept Exists
 
@@ -79,6 +96,18 @@ hour the agent looks at the bag and decides whether the pattern adds
 up to something the operator should hear about.
 
 ## Definitions
+
+**Two writer paths feed one queue.** Observations enter the
+`observations` table from two places, and downstream consumers cannot
+tell them apart:
+
+1. **Background pollers** (Obsidian, Git, GitHub, Notion, Calendar,
+   Mail) call `recordObservation` when they detect a change.
+2. **The pre-pass** — the lite-tier `routine.fetch_window` session
+   spawned ahead of each main routine — POSTs mail / calendar / Notion
+   windows to `/api/observations`.
+
+Both write rows of the same shape; the consumer reads the merged queue.
 
 - **Observation**: one row in the `observations` table.
 - **Actor**: who caused the change. `actor='agent'` rows are filtered
@@ -93,9 +122,10 @@ up to something the operator should hear about.
   session spawned by each main routine's dispatcher. Fetches a
   per-routine window (`ROUTINE_WINDOWS` in
   `packages/daemon/src/core/routine-windows.ts`) for each enabled
-  mail / calendar / Notion integration and POSTs observations. The
-  server computes `contentHash` from `(source, payload)`, so an
-  unchanged item written twice in the same cadence dedupes to a 409.
+  mail / calendar / Notion integration and POSTs the results to
+  `/api/observations`. The server computes `contentHash` from
+  `(source, payload)`, so an unchanged item written twice in the same
+  cadence dedupes to a 409.
 
 ## Concrete Examples
 
@@ -111,5 +141,8 @@ up to something the operator should hear about.
 ## Related
 
 - [Hourly Check](../features/routines/hourly-check.md)
+- [Morning Routine](../features/routines/morning-routine.md)
+- [Process Keys](./process-keys.md)
+- [Routines](./routines.md)
 - [Git](../features/integrations/git.md)
 - [Obsidian](../features/integrations/obsidian.md)

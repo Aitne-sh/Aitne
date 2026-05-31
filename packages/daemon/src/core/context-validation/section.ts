@@ -38,8 +38,13 @@ export function findSection(
   let headerEnd = -1;
 
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith("## ")) {
-      const lineNormalized = normalizeSection(lines[i]);
+    // CRLF-tolerant: split("\n") leaves a trailing \r on CRLF files (Windows
+    // daemon, or an Obsidian/git vault synced with core.autocrlf). Strip it
+    // for the header comparison only; the raw byte offsets (incl. \r) are
+    // preserved for write-back.
+    const line = lines[i].endsWith("\r") ? lines[i].slice(0, -1) : lines[i];
+    if (line.startsWith("## ")) {
+      const lineNormalized = normalizeSection(line);
       if (lineNormalized === normalized) {
         sectionStart = i;
         const lineStart = sumLength(lines, i);
@@ -56,7 +61,9 @@ export function findSection(
   // Find end: next ## header or EOF
   let sectionEnd = content.length;
   for (let i = sectionStart + 1; i < lines.length; i++) {
-    if (lines[i].startsWith("## ")) {
+    // CRLF-tolerant header check (see note in the start-scan above).
+    const line = lines[i].endsWith("\r") ? lines[i].slice(0, -1) : lines[i];
+    if (line.startsWith("## ")) {
       sectionEnd = sumLength(lines, i);
       break;
     }
@@ -86,6 +93,8 @@ export function sumLength(lines: string[], upToIndex: number): number {
 export function getAvailableSections(content: string): string[] {
   return content
     .split("\n")
+    // CRLF-tolerant: strip a trailing \r before matching/normalizing headers.
+    .map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l))
     .filter((l) => l.startsWith("## "))
     .map((l) => normalizeSection(l));
 }

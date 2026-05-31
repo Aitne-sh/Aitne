@@ -39,7 +39,7 @@ You steer it through natural-language DMs ("skip morning routine on Sundays", "p
 
 ## Aitne's plan for today
 
-`today.md` — written each morning into `~/.personal-agent/context/`. Plain Markdown you can `cat`, `vim`, or sync to Obsidian. Sample:
+`today.md` — written each morning into `~/.personal-agent/context/state/`. Plain Markdown you can `cat`, `vim`, or sync to Obsidian. Sample:
 
 ```text
 2026-05-20 (Wednesday)
@@ -139,13 +139,13 @@ You also need at least one AI backend installed and one API key. The documented 
 | **Claude Code** | `npm install -g @anthropic-ai/claude-code` | `ANTHROPIC_API_KEY` in the wizard (Anthropic's headless-agent policy disallows Pro/Max subscriptions for SDK sessions) |
 | **OpenAI Codex CLI** | `npm install -g @openai/codex` | `OPENAI_API_KEY` in the wizard, or `codex login --device-auth` |
 | **Google Gemini CLI** | `npm install -g @google/gemini-cli` | `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or OAuth on first use |
-| **OpenCode** (sst/opencode) | _preview_ — wizard opens when the runtime executor ships | _preview_ |
+| **OpenCode** (sst/opencode) | `npm install -g opencode-ai` | provider via `opencode auth login`, set in the wizard |
 
 ### Verify
 
 ```bash
 aitne status   # PIDs, uptime, connected platforms, today's spend
-aitne doctor   # 10-check install diagnostic
+aitne doctor   # install-health diagnostic (Node, ports, keychain, CLIs, native bindings)
 aitne logs -f  # tail the daemon log
 ```
 
@@ -183,7 +183,7 @@ flowchart LR
     subgraph LOCAL["Your laptop"]
         direction TB
         DAEMON["Aitne daemon<br/>(always on, 127.0.0.1)"]
-        BRAIN["AI session<br/>Claude / Codex / Gemini<br/>(OpenCode coming soon)"]
+        BRAIN["AI session<br/>Claude / Codex / Gemini / OpenCode"]
         MEMORY["Markdown memory<br/>plain files you own"]
         DAEMON --- BRAIN
         BRAIN --- MEMORY
@@ -207,14 +207,14 @@ A pre-pass `routine.fetch_window` session runs before each routine, fanning out 
 
 ## Backends
 
-Aitne abstracts four AI runtimes behind one `IAgentCore` interface. Every kind of work has a `ProcessKey` mapped to a tier (`lite` / `medium` / `high`) and a backend; for Claude those tiers map to **Haiku 4.5 / Sonnet 4.6 / Opus 4.7**.
+Aitne abstracts four AI runtimes behind one `IAgentCore` interface. Every kind of work has a `ProcessKey` mapped to a tier (`lite` / `medium` / `high`) and a backend; for Claude those tiers map to **Haiku 4.5 / Sonnet 4.6 / Opus 4.8**. The high tier is opt-in — no install-time surface defaults to it; pin it per row from `:3000/settings/models`.
 
 | Backend | Implementation | Resume | Strengths |
 |---|---|---|---|
 | **Claude Code** | `@anthropic-ai/claude-agent-sdk` | ✓ | Routines, deep context, server-side advisor |
 | **Codex CLI** | OpenAI Codex CLI subprocess + JSONL stream | ✓ | Code-heavy tasks, fast iteration |
 | **Gemini CLI** | Google Gemini CLI subprocess + JSONL stream | ✓ | Free-tier headroom, large-context summarization |
-| **OpenCode** _(preview)_ | `opencode-ai` HTTP server + SDK client | ✓ | Multi-provider — routes to any `opencode auth login` provider. Dashboard selectors disabled until the runtime executor ships. |
+| **OpenCode** | `opencode-ai` HTTP server + SDK client | ✓ | Multi-provider — routes to any `opencode auth login` provider |
 
 The router fails over to a configured fallback automatically on `BackendQuotaError` or decisive failure, re-materializing the fallback's instruction file and skill directories into the session workdir. Per-process tier defaults and routing are editable at `:3000/settings/models`.
 
@@ -282,7 +282,7 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 
 - Local Git: `git log`, `git diff`, `git show` exposed via daemon proxy
 - GitHub: PR lists, comments, issues, webhook receivers (HMAC-SHA256 verified)
-- Per-repo cron triggers — "every Monday at 09:00, summarize merged PRs into `projects/<repo>.md`"
+- Per-repo cron triggers — "every Monday at 09:00, summarize merged PRs into the repo's daily journal"
 - Auto-detect when a coworker modified a file you're about to ship
 - Unified Repositories: one row pairs a local clone with a GitHub remote; the doctor flags drift
 </details>
@@ -291,7 +291,7 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 <summary><b>Self-management via natural language</b></summary>
 
 - "Don't run hourly checks on weekends" — patches the cron window
-- "Remember my partner's birthday is March 14" — appends to `user/profile.md`
+- "Remember my partner's birthday is March 14" — appends to `identity/profile.md`
 - "I prefer concise replies — no preamble" — updates the agent's `character` field
 - "Email me a summary every Friday at 5pm" — creates a recurring schedule
 - "Switch to Codex for code reviews" — flips the per-process backend mapping
@@ -315,20 +315,26 @@ Everything Aitne writes lives in `~/.personal-agent/context/`:
 
 ```
 context/
-├── today.md             # Working view, always injected
-├── yesterday.md         # Daemon-rotated archive
-├── roadmap.md           # Long-term goals
-├── user/                # profile.md, people.md, work.md, …
-├── rules/               # Policy files (management, redaction)
-├── projects/            # One file per active project
-├── daily/YYYY-MM-DD.md  # Synthesized daily journal
-├── weekly/              # Weekly retrospectives
-└── agent/journal.md     # Private agent self-reflection
+├── state/
+│   ├── today.md            # Working view, always injected
+│   ├── yesterday.md        # Daemon-rotated archive
+│   ├── inbox/              # Captured snippets
+│   └── scratch/            # Short-lived agent notes (48h TTL)
+├── plans/
+│   ├── roadmap.md          # Long-term goals
+│   └── projects/           # One file per active project
+├── identity/              # profile.md, people.md, work.md, …
+├── policies/              # Management rules, MCP config, redaction, routines
+├── journal/
+│   ├── daily/YYYY-MM-DD.md # Synthesized daily journal
+│   ├── weekly/            # Weekly retrospectives
+│   └── agent.md           # Private agent self-reflection
+└── knowledge/             # wiki, per-repo overviews, entities, dossiers
 ```
 
-Context writes flow through `curl http://localhost:8321/api/context/<path>`, not the SDK's `Edit`/`Write` tools — this gives the daemon a single chokepoint for write locks, frontmatter validation, and 30-day snapshots. SQLite (`better-sqlite3` with FTS5) backs sessions, observations, agent actions, and history.
+Context writes flow through `curl http://localhost:8321/api/context/<class>/<path>` — where `<class>` is one of `identity`, `state`, `plans`, `journal`, `knowledge`, `policies` — not the SDK's `Edit`/`Write` tools. This gives the daemon a single chokepoint for write locks, frontmatter validation, and 30-day snapshots. SQLite (`better-sqlite3` with FTS5) backs sessions, observations, agent actions, and history.
 
-Schema upgrades are forward-only and idempotent — `aitne update` preserves your SQLite history and Markdown context across releases.
+Schema upgrades are forward-only and idempotent — the migration runner preserves your SQLite history and Markdown context across releases. (`aitne update` prints the `npm install -g @aitne-sh/aitne@latest` command; there is no self-updater.)
 
 ---
 
@@ -377,7 +383,7 @@ Typical day for an active user: **~$0.50** (morning routine + briefing + 2× hou
 
 | Command | What it does |
 |---|---|
-| `aitne doctor [--json]` | 10 install-health checks + repo-drift expansion |
+| `aitne doctor [--json]` | Eight install-health checks + per-repo GitHub-link drift expansion |
 | `aitne audit [flags]` | Read the agent action log — `--since`, `--type`, `--result`, `--backend`, `--detail`, `--json` |
 | `aitne setup` | Re-open the `/setup` wizard |
 | `aitne open` | Open the dashboard in your browser |

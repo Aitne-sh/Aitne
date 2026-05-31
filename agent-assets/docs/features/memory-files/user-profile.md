@@ -1,18 +1,19 @@
 ---
 schema_version: 1
 slug: features/memory-files/user-profile
-title: user/profile.md
+title: identity/profile.md
 id: user-profile
 aliases:
   - user.md
   - user/profile.md
+  - identity/profile.md
   - user profile
   - about-me
 category: features
 summary: |
-  user/profile.md is the agent's stable profile of the operator — role,
-  focus areas, preferences, names of important people. The agent reads
-  it on every session and appends with the operator's permission.
+  identity/profile.md is the agent's stable profile of the operator — role,
+  focus areas, preferences, names of important people. The agent reads it
+  on every session and appends only with the operator's permission.
 section: memory-files
 tags:
   - memory
@@ -20,31 +21,36 @@ tags:
   - core
 status: stable
 ask_examples:
-  - What is user/profile.md?
+  - What is identity/profile.md?
   - How do I tell the agent something about me?
   - Will the agent change my profile without asking?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - user profile
-  - user/profile.md
-  - user slices
+  - identity/profile.md
+  - identity slices
   - people
   - expertise
 related:
   - getting-started/04-first-day
   - concepts/memory-model
+process_keys:
+  - routine.user_profile_sweep
+api_endpoints:
+  - PUT /api/context/*
+  - PATCH /api/context/*
 context_files:
-  - user/profile.md
-  - user/people.md
-  - user/work.md
-  - user/expertise.md
-  - user/personal.md
-  - user/goals.md
+  - identity/profile.md
+  - identity/people.md
+  - identity/work.md
+  - identity/expertise.md
+  - identity/personal.md
+  - identity/goals.md
 ---
 
-# user/profile.md
+# identity/profile.md
 
 ## In One Sentence
 
@@ -53,35 +59,59 @@ every session and appends only with explicit permission.
 
 ## What It Does
 
-- Captures who you are, what you do, who matters in your life.
-- Pinned at the top of every session prompt so the agent has the
-  same baseline understanding turn-to-turn.
-- The companion files in the `user/` directory split the dossier into
-  topic-shaped slices: `identity/people.md`, `identity/work.md`,
-  `identity/expertise.md`, `identity/personal.md`, `identity/goals.md`. The agent
-  loads them on demand instead of inlining everything.
+- Captures who you are, what you do, and who matters in your life.
+- Is pinned at the top of every session prompt, so the agent keeps
+  the same baseline understanding of you turn-to-turn.
+- Anchors a set of companion slices in the `identity/` directory that
+  split the dossier into topic-shaped files:
+  `identity/people.md`, `identity/work.md`, `identity/expertise.md`,
+  `identity/personal.md`, `identity/goals.md`. The agent loads these on
+  demand instead of inlining everything into every prompt.
+
+> Older docs and exports may call these files `user/profile.md`,
+> `user/people.md`, and so on. `user/` is a legacy alias for
+> `identity/`; the daemon rewrites it in-process, so the current
+> canonical location is `identity/`.
 
 ## When It Runs / How It Is Triggered
 
-Read continuously. Written only when the operator says "remember
-that…" or during a profile sweep routine
-(`routine.user_profile_sweep`).
+- **Read continuously** — loaded at the start of every session.
+- **Written** only when you say "remember that…" in a DM, or during
+  the profile sweep routine (`routine.user_profile_sweep`), which
+  routes captured facts into the appropriate `identity/*.md` slice.
+
+The agent never edits these files directly. It writes through the
+daemon's context API — for example
+`PATCH /api/context/identity/profile.md` — the single validated write
+path with locks and backup snapshots.
 
 ## Where in the Dashboard
 
-- **Knowledge → Context Files → user/profile.md** to view and edit.
-  The other `user/*.md` slices are listed alongside.
-- **Knowledge → Upload** to seed `user/*.md` from a Markdown / text
-  file — useful for migrating an existing profile out of ChatGPT,
-  Gemini, Obsidian, or Notion. See
-  [Import a Knowledge File](../../guides/import-knowledge-file.md).
+- **Knowledge → Context Files** (`/knowledge?tab=context-files`) to
+  view and edit `identity/profile.md`. The other `identity/*.md`
+  slices are listed alongside it.
+- **Knowledge → Upload** (`/knowledge?tab=upload`) to seed the
+  `identity/*.md` slices from a Markdown or text file — useful when
+  migrating an existing profile out of ChatGPT, Gemini, Obsidian, or
+  Notion. See [Import a Knowledge File](../../guides/import-knowledge-file.md).
+
+## Example
+
+To tell the agent a durable fact about yourself, just say it in a DM:
+
+> remember that my manager is Priya and we sync every Monday at 10am
+
+The agent appends a line to the relevant slice (here `identity/people.md`)
+after confirming, and recalls it in future sessions.
 
 ## When Something Goes Wrong
 
-- The agent forgets something it should remember: append it to
-  the appropriate `user/*.md` slice by hand.
+- **The agent forgets something it should remember:** open
+  **Knowledge → Context Files** and append it to the appropriate
+  `identity/*.md` slice by hand.
 
 ## Related
 
 - [Memory Model](../../concepts/memory-model.md)
+- [First Day](../../getting-started/04-first-day.md)
 - [Import a Knowledge File](../../guides/import-knowledge-file.md)

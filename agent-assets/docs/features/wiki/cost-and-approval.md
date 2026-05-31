@@ -39,7 +39,7 @@ ask_examples:
   - Can I see the cost before running !compile full?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-21
+updated: 2026-05-28
 keywords:
   - cost estimate
   - cost bracket
@@ -71,7 +71,7 @@ related:
   - troubleshooting/wiki-ingest-full-blocked
 ui_anchors:
   - /settings/wiki
-  - /approvals
+  - /
 api_endpoints:
   - /api/wiki/:workspace/estimate
   - /api/wiki/:workspace/compile/preview
@@ -133,19 +133,19 @@ The estimator never returns a single number. It always returns three:
 
 | Field | Meaning |
 |---|---|
-| `optimisticUsd` | 0.5× the expected token count × tier input cost. The "everything compresses well, the LLM exits early" scenario. |
-| `expectedUsd` | The point estimate. |
-| `pessimisticUsd` | 2× the expected. The "the LLM rewrites every page from scratch" scenario. The approval gate uses this. |
+| `expectedUsd` | The point estimate: total approximated tokens × tier input cost. |
+| `optimisticUsd` | 0.5× `expectedUsd` — the "everything compresses well, the LLM exits early" scenario. |
+| `pessimisticUsd` | 2× `expectedUsd` — the "the LLM rewrites every page from scratch" scenario. **The approval gate compares this against your threshold.** |
 
-The bracket is wide on purpose — `!compile` is an LLM and may merge
-or skip pages inside the agent loop in ways the estimator can't
-predict from on-disk content alone. The bracket will not undercount
-the actual touch set.
+The bracket is wide on purpose. `!compile` is an LLM and may merge
+or skip pages inside the agent loop in ways the estimator cannot
+predict from on-disk content alone — but the pessimistic bound will
+not undercount the actual touch set.
 
-P2 originally shipped a flat `rawCount × 1500` heuristic. P4.C
-upgraded to the per-file char→token approximation above because the
-flat heuristic under-counted on long ingested articles and
-over-counted on one-line stubs.
+(History: P2 originally shipped a flat `rawCount × 1500` heuristic.
+P4.C upgraded to the per-file char→token approximation above because
+the flat heuristic under-counted on long ingested articles and
+over-counted on one-line stubs.)
 
 ## The cost gate
 
@@ -161,9 +161,9 @@ The `!compile full` flow:
    `full_compile_approval_threshold_usd` (default $2.00), the run
    starts autonomously.
 4. **Approval** — if `pessimisticUsd` > the threshold, the run is
-   queued under **Approvals** in the dashboard. The DM that
-   acknowledges the bang command includes a `/approvals` link.
-   Approve from the dashboard to start the compile.
+   queued under the **Approvals** panel on the dashboard home (`/`).
+   The acknowledgement DM links there; approve from the dashboard to
+   start the compile.
 5. **Completion** — a completion DM lands with the actual spend (not
    the estimate). Significant overshoots are flagged in the audit
    row.
@@ -221,10 +221,10 @@ would do without spending tokens:
 - **est. duration** — Rough wall-clock estimate (intentionally
   pessimistic).
 
-The preview is an upper bound. The compile is an LLM and may merge
-or skip pages inside the agent loop; the preview cannot predict
-that exactly, but it will not undercount the touch set. Reply
-`!compile` (or `!compile full`) to actually run.
+The preview is an upper bound for the same reason the cost bracket is
+(the compile is an LLM and may merge or skip pages mid-loop), but it
+will not undercount the touch set. Reply `!compile` (or `!compile
+full`) to actually run.
 
 The preview is free — no agent session runs, no tokens spent.
 

@@ -36,7 +36,7 @@ ask_examples:
   - What is fts_wiki?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-21
+updated: 2026-05-28
 keywords:
   - wiki search
   - fts_wiki
@@ -60,6 +60,7 @@ related:
   - features/wiki/dashboard
 ui_anchors:
   - /wiki
+  - /wiki/timeline
 api_endpoints:
   - /api/wiki/:workspace/search
   - /api/wiki/:workspace/index
@@ -69,6 +70,9 @@ process_keys:
   - wiki.trace
   - wiki.connect
   - wiki.compile
+  - wiki.lint
+context_files:
+  - knowledge/wiki
 ---
 
 # Wiki Search and Index
@@ -115,8 +119,8 @@ is the file on disk, not a row in another SQL table. This matters:
   because the source rows live in SQLite.
 - Wiki content lives on the filesystem. There's no source table to
   trigger off, so the wiki API write endpoints
-  (`POST /wiki/:ws/files/:path`, `PATCH /wiki/:ws/files/:path`,
-  `DELETE /wiki/:ws/files/:path`) call
+  (`POST /api/wiki/:ws/files/:path`, `PATCH /api/wiki/:ws/files/:path`,
+  `DELETE /api/wiki/:ws/files/:path`) call
   `upsertWikiFulltextRow` / `deleteWikiFulltextRow` directly after a
   successful disk write.
 
@@ -141,9 +145,7 @@ mixed-script wikis.
 
 ### Layer prefixes
 
-`fts_wiki.layer` is one of `raw`, `wiki`, `output`, `meta`, `log`,
-`inbox`. The classifier in `wiki-fts.ts` maps each on-disk path to
-its layer:
+The path classifier maps each on-disk file to one of six layers:
 
 - `10_raw/...` → `raw`
 - `20_wiki/...` → `wiki`
@@ -152,30 +154,46 @@ its layer:
 - `log.md` (workspace root) → `log`
 - `00_inbox/...` → `inbox`
 
-Searches can filter by layer to restrict the result set (e.g. only
-canonical wiki pages, not raw notes).
+Only four of these are actually indexed. `upsertWikiFulltextRow`
+**drops `log` and `inbox` rows** before insert: `log.md` is an
+append-only audit trail and `00_inbox/` is human-only, so indexing
+them would bury wiki and raw matches under log noise. So the values
+you ever see in `fts_wiki.layer` are `raw`, `wiki`, `output`, and
+`meta`.
+
+Searches can filter by layer to restrict the result set — e.g.
+`layer=wiki` for only canonical pages, not raw notes.
 
 ### Querying the index
 
 `GET /api/wiki/:workspace/search` is the daemon-internal search
-endpoint. The `!ask`, `!trace`, and `!connect` skills call it
-(through the wiki SDK adapter) to pull a candidate set of pages
-before the LLM picks evidence. The query supports:
+endpoint. The `!ask`, `!trace`, and `!connect` skills call it (via
+`curl`) to pull a candidate set of pages before the LLM picks
+evidence. The query supports:
 
-- `q` — FTS5 MATCH query (standard FTS5 syntax: phrases, prefix
-  searches `term*`, boolean operators).
-- `layer` — restrict to a single layer (`raw` / `wiki` / `output` /
-  …).
-- `limit` — default 25, max 200.
+- `q` — the search query. Each whitespace-separated token is quoted
+  and joined by implicit AND, so a multi-word query narrows the
+  result set. (Tokens are quoted to neutralise FTS5's `AND`/`OR`/
+  `NOT`/`NEAR` operator vocabulary — typing literally `rust AND go`
+  matches those words, it does not parse as a boolean.)
+- `layer` — restrict to a single indexed layer (`raw` / `wiki` /
+  `output` / `meta`). Unknown values are ignored.
+- `limit` — default 20, clamped to the range 1–50.
+- `kind` — `fts` (default) queries `fts_wiki`; `grep` is a literal
+  case-insensitive substring fallback over the files on disk. When
+  an FTS query returns zero hits for a non-empty `q`, the caller gets
+  empty FTS results; an **empty** `q` automatically falls back to
+  grep so `/search?q=` enumerates the workspace.
 
-The response shape includes `workspace_id`, `path`, `layer`, `title`,
-a body snippet (FTS5 `snippet()` output), and `mtime` so the caller
-can rank by recency.
+Each result row carries `path`, `layer`, `title`, a body `snippet`
+(FTS5 `snippet()` output, `<mark>`-wrapped), `mtime` so the caller
+can rank by recency, and a BM25 `rank` (lower is better, `title`
+weighted above `body`).
 
-There is no dashboard search bar today — the FTS surface is used by
-the agent, not by the user UI. The dashboard timeline does carry a
-process-key filter, but that's a filter over `log.md` rather than a
-content search.
+There is no dashboard content-search bar today — the FTS surface is
+used by the agent, not the user UI. The dashboard timeline
+(`/wiki/timeline`) does carry a process-key filter, but that filters
+over `log.md` rather than searching content.
 
 ## Rebuilding the index
 
@@ -198,17 +216,22 @@ into the SQL index.
 
 A simplified flow for `!ask <question>`:
 
-1. The skill loads `_index.md` to get a list of all known wiki pages
-   with short summaries.
-2. It runs an FTS query against `fts_wiki` filtered to the `wiki`
-   and `raw` layers to find pages that mention the question's key
-   terms.
-3. The LLM synthesises an answer from the union of (a) the
-   index-summarised pages it picked from the catalogue and (b) the
-   FTS-found pages.
+1. The skill orients on `_index.md` for the lay of the land, then
+   searches and reads relevant `20_wiki/` pages first — running FTS
+   queries against `fts_wiki` to find pages that mention the
+   question's key terms.
+2. It reads `10_raw/` notes only when the wiki pages need source
+   verification.
+3. The LLM synthesises an answer from the pages it pulled.
 4. The answer is written to
-   `30_outputs/<YYYY-MM-DD>-ask-<slug>.md` with a `## Citations`
-   section listing the wiki pages and raw notes it drew from.
+   `30_outputs/<YYYY-MM-DD>-<slug>.md` (the date-prefixed output
+   shape the `OUTPUT_RE` path check enforces). The file records the
+   question, a short answer, the evidence, source links, and any
+   follow-up gaps; if the wiki lacks enough evidence the skill says
+   so and lists what is missing.
+5. The skill ends the turn with a short plain-prose reply forwarded
+   to the channel the command came from, citing pages inline as
+   `see [[<slug>]]` and pointing at the full answer file.
 
 `!trace` and `!connect` follow a similar pattern but with
 trace-specific (chronological) or connect-specific (cross-domain)
@@ -218,7 +241,7 @@ search queries.
 
 Aitne's wiki is local-first and keychain-isolated; running embedding
 inference adds either a remote API dependency or a heavy local model
-neither of which fits the "your laptop, your data" promise. FTS5
+— neither of which fits the "your laptop, your data" promise. FTS5
 unicode61 covers the common case (find pages by keyword) without a
 network round-trip and without a model file. The compile step's
 wikilinks + the LLM-maintained `_index.md` carry the semantic

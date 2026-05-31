@@ -98,6 +98,7 @@ const PUBLIC_CONFIG_RUNTIME_KEYS = [
   "browserHistoryLifecycle",
   "browserHistoryResearchDomainAllowlist",
   "browserHistoryResearchDomainDenylist",
+  "browserTaskHostnameDenylist",
   "mcpAutoProbeIntervalMinutes",
   "delegatedProbeIntervalMinutes",
   "autonomousDailyCostCapUsd",

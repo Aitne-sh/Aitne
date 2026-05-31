@@ -26,9 +26,9 @@ tags:
   - lifestyle
   - git
   - github
-  - automation
+  - autonomous
   - observations
-  - architecture
+  - core
 status: stable
 ask_examples:
   - What is the My Life › Git page for?
@@ -46,7 +46,7 @@ ask_examples:
   - How much does one Architecture refresh cost?
 locale: en-US
 created: 2026-05-05
-updated: 2026-05-17
+updated: 2026-05-28
 keywords:
   - my life
   - git
@@ -69,6 +69,20 @@ ui_anchors:
   - /connections/repositories
 config_keys:
   - gitPollIntervalSeconds
+process_keys:
+  - git.project.init
+  - git.project.update
+  - git.project.refresh_architecture
+  - git.project.retemplate
+api_endpoints:
+  - PUT /api/repositories/:id/architecture-section
+  - POST /api/repositories/:id/management/init
+  - POST /api/repositories/:id/management/refresh-architecture
+  - POST /api/repositories/:id/management/scan
+context_files:
+  - knowledge/repos/<slug>/overview.md
+  - knowledge/repos/<slug>/README.md
+  - journal/repos/<slug>/<date>.md
 ---
 
 # My Life — Git
@@ -86,8 +100,7 @@ mirror of the source README.
 
 The page lists every repository registered on
 **Connections → Repositories** and exposes three collapsible sections
-per repo (now **all open by default** so the controls are visible at
-a glance):
+per repo (all open by default so the controls are visible at a glance):
 
 1. **Polling** — overrides the global `gitPollIntervalSeconds` for
    this repository alone. Useful when one repo is high-traffic and
@@ -102,12 +115,12 @@ a glance):
 3. **Daily git management** — opt-in per repo. Enabling it does three
    distinct kinds of work, on different cadences:
    - On the first **Run init now** click, writes the curated
-     `git/<slug>/overview.md` skeleton, mirrors the source `README.*`
-     to `git/<slug>/README.md`, and **automatically queues a
-     one-shot Architecture refresh** so the AI agent fills in the
-     deep Architecture section for you.
-   - Once a day, the `repository-management-cron` observer iterates
-     enabled rows and writes `git/<slug>/journal/YYYY-MM-DD.md` if
+     `knowledge/repos/<slug>/overview.md` skeleton, mirrors the source
+     `README.*` to `knowledge/repos/<slug>/README.md`, and
+     **automatically queues a one-shot Architecture refresh** so the AI
+     agent fills in the deep Architecture section for you.
+   - Once a day, the `RepositoryManagementCron` observer iterates
+     enabled rows and writes `journal/repos/<slug>/YYYY-MM-DD.md` if
      there was activity, plus a one-line entry under
      `## Daily Activity Log` in `overview.md`.
    - **Refresh architecture** (the button) re-runs the Architecture
@@ -120,8 +133,9 @@ The agent never pushes, amends, or force-resets. Read-only by design.
 
 ## Architecture Section — Deep AI Analysis
 
-The `## Architecture` block of `git/<slug>/overview.md` is wrapped in
-`<!-- architecture:start -->` / `<!-- architecture:end -->` markers
+The `## Architecture` block of `knowledge/repos/<slug>/overview.md` is
+wrapped in `<!-- architecture:start -->` / `<!-- architecture:end -->`
+markers
 and contains a **module map, runtime shape, data flow, persistence
 model, integrations, build pipeline, and design choices** produced by
 a Sonnet-class agent that reads the actual code.
@@ -162,8 +176,8 @@ for recovery.
 
 ## README Mirror
 
-`git/<slug>/README.md` is a **mechanical verbatim copy** of the
-repository's `README.*` (whichever extension exists, with `.md`
+`knowledge/repos/<slug>/README.md` is a **mechanical verbatim copy** of
+the repository's `README.*` (whichever extension exists, with `.md`
 preferred). It is refreshed on:
 
 - Every **Run init now** (initial mirror).
@@ -201,13 +215,13 @@ README is rewritten.
 
 ## What It Outputs
 
-Per repository, under `<contextDir>/git/<slug>/`:
+Per repository, under `<contextDir>/`:
 
 | File | Source | Refresh cadence |
 |---|---|---|
-| `overview.md` | Daemon (skeleton + Notable Changes + journal log) + Agent (Architecture section) | Skeleton on init; Architecture on init/refresh; daily entry appended on each scan |
-| `README.md` | Verbatim copy of `<repo>/README.*` | Every init + every architecture refresh |
-| `journal/YYYY-MM-DD.md` | Daemon (commits + PR/workflow observations + diff stat) | Once per day per repo, when activity exists |
+| `knowledge/repos/<slug>/overview.md` | Daemon (skeleton + Notable Changes + journal log) + Agent (Architecture section) | Skeleton on init; Architecture on init/refresh; daily entry appended on each scan |
+| `knowledge/repos/<slug>/README.md` | Verbatim copy of `<repo>/README.*` | Every init + every architecture refresh |
+| `journal/repos/<slug>/<date>.md` | Daemon (commits + PR/workflow observations + diff stat) | Once per day per repo, when activity exists |
 
 Polling additionally produces `observation` rows in the database;
 triggers spawn autonomous sessions whose task-flow is selected by the
@@ -216,7 +230,10 @@ trigger's process key.
 ## Where in the Dashboard
 
 - **My Life → Git** (`/git`) — this page. Polling, Triggers, and Daily
-  git management are now all expanded by default.
+  git management are all expanded by default. The Daily-git-management
+  panel's buttons appear in lifecycle order — **Run init now → Refresh
+  architecture → Run today's scan now** — and each surfaces an inline
+  green confirmation on success or a red error message on failure.
 - **Connections → Repositories** (`/connections/repositories`) —
   register a repo (link a `localPath` and/or `owner/repo`), rename,
   set `local-only`, delete. The model-binding cards visible on this
@@ -226,24 +243,11 @@ trigger's process key.
   `github.pull_request.review_requested`, `github.workflow_run.failed`)
   were folded back into the default routing. To pin a different model
   for any of those, use **Settings → Models** instead.
-- **Knowledge** (`/knowledge?path=git/<slug>/overview`) — quick links
-  on each Daily-git-management panel open the generated overview, the
-  current day's journal, and (after the architecture refresh
-  completes) the AI-rich Architecture section in context.
-
-## UI polish (2026-05-07)
-
-- The Daily git management toggle is now a styled switch instead of a
-  raw checkbox — same behavior, more legible state.
-- Init / Refresh architecture / Run today's scan now buttons surface
-  inline confirmation messages (green) on success and inline error
-  messages (red) on failure, instead of the previous silent return.
-- The button order on the panel is **Run init now → Refresh
-  architecture → Run today's scan now**, matching the lifecycle order
-  (one-time skeleton → one-time deep analysis → daily increments).
-- The Polling, Triggers, and Daily git management collapsibles all
-  open by default so a freshly-loaded `/git` page exposes every
-  per-repo control without an extra click.
+- **Knowledge → Context Files** (`/knowledge?tab=context-files`) — quick
+  links on each Daily-git-management panel open the generated overview
+  (`knowledge/repos/<slug>/overview.md`), the current day's journal
+  (`journal/repos/<slug>/<date>.md`), and (after the architecture
+  refresh completes) the AI-rich Architecture section in context.
 
 ## Configuration
 
@@ -318,5 +322,5 @@ repository has a `localPath`:
 - [GitHub integration](../integrations/github.md) — remote-side data
   (notifications, workflow runs) reachable via `gh` even without a
   local clone.
-- [Hourly check](../policies/routines/hourly-check.md) — the routine that
+- [Hourly check](../routines/hourly-check.md) — the routine that
   consumes the observations this page's polling generates.

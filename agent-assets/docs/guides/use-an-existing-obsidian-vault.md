@@ -14,27 +14,44 @@ summary: |
   through Adopt vs Migrate vs Split.
 section: use-an-existing-obsidian-vault
 tags:
-  - guide
+  - guides
   - wiki
   - obsidian
+  - knowledge
 status: stable
 ask_examples:
   - Can the wiki use my existing Obsidian vault?
   - How does the iCloud-sandbox fallback work?
   - What does Adopt vs Migrate mean?
+  - Why is Split greyed out?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
   - external vault
   - existing obsidian vault
   - point at vault
   - wiki external
+  - obsidian cli fallback
+  - adopt migrate split
 related:
   - features/wiki/overview
+  - features/wiki/workspaces
   - guides/build-your-wiki
   - guides/budget-and-cost-for-wiki
+  - guides/multiple-wikis-for-multiple-domains
   - troubleshooting/wiki-write-failed
+prerequisites:
+  - features/wiki/overview
+ui_anchors:
+  - /settings/wiki
+  - /wiki
+api_endpoints:
+  - GET /api/fs/probe
+  - POST /api/wiki/workspaces/probe
+  - POST /api/wiki/workspaces
+process_keys:
+  - wiki.compile
 ---
 
 # Use an Existing Obsidian Vault
@@ -49,9 +66,9 @@ vs Split**.
 
 ## Step 1 — Open Settings → Wiki
 
-Click **Setup → Settings → Wiki** in the dashboard sidebar (or open
-`/wiki` and follow the **Enable Wiki** button — both land on the same
-page). If you have no workspace yet, the page shows two CTAs:
+Open **`/settings/wiki`** in the dashboard (or open `/wiki` and follow
+the **Enable Wiki** button — both land on the same page). If you have
+no workspace yet, the page shows two CTAs:
 
 - **Enable Internal Workspace** — uses the daemon-owned root.
 - **Probe & Create External** — points at the path you choose with
@@ -67,10 +84,9 @@ to type the path by hand or worry about typos:
 - **Linux** — one of `zenity`, `kdialog`, or `yad` opens (whichever
   is installed on your system).
 
-If you prefer to paste a path you already have on the clipboard, the
-text field accepts that too — typing or pasting and clicking the
-folder button are equivalent. Aitne refuses paths that overlap
-`dataDir`, your primary vault, or the external Obsidian vault path so
+You can also type or paste a path directly — the text field and the
+folder button are equivalent. Aitne refuses any path that overlaps
+`dataDir`, your primary vault, or the external Obsidian vault path, so
 two writers never claim the same files.
 
 ### Inline validation banner
@@ -120,7 +136,7 @@ classifications comes back:
 |---|---|
 | **Adopt** | Keeps your existing schema and subdirectory layout verbatim. Aitne's wiki agent gets a workspace-specific addendum so it follows your conventions. |
 | **Migrate** | Flattens type-based subdirectories (`20_wiki/concepts/x.md → 20_wiki/x.md`) and renames legacy frontmatter keys (`topic → title`, `source_url → url`, …) to Aitne's Bases-era schema. Always writes a backup mirror under `90_meta/health/pre-migrate-<date>/` first. |
-| **Split** | Refuses to touch the existing vault and creates a sibling workspace instead. Available once multi-workspace lands. |
+| **Split** | Would leave the existing vault untouched and create a sibling workspace instead. **Not yet available** — the wizard greys it out and the import API rejects `decision: "split"` with `import_split_unsupported`; for now choose Adopt or Migrate. To run several wikis side by side, see [Multiple wikis for multiple domains](multiple-wikis-for-multiple-domains.md). |
 
 When you pick **Migrate**, the dashboard renders the plan — files
 that will be moved, frontmatter renames per file, slug collisions to

@@ -606,6 +606,11 @@ export class CodexCore implements IAgentCore {
         new Error(auth.reason),
       );
     }
+    // checkAuth() returns {ok:false} when cliPath is null, so reaching here
+    // proves it is a resolved absolute path. Pin it to a local const — TS
+    // cannot narrow `this.cliPath` (a getter) through the await above, and
+    // we avoid a non-null assertion. Used as the spawn `command` below.
+    const cliPath: string = this.cliPath as string;
     this.assertPromptWithinMaxBudget(params.prompt, params.maxBudgetUsd, params.modelId);
 
     const startMs = Date.now();
@@ -711,7 +716,13 @@ export class CodexCore implements IAgentCore {
 
       idleWatchdog.start();
       const runResult = await runLineCommand({
-        command: "codex",
+        // Resolved absolute CLI path, not a bare name — on Windows with
+        // shell:false, spawn does no PATHEXT resolution, so a bare "codex"
+        // would never match an npm `codex.cmd` or native `codex.exe`. The
+        // checkAuth() pre-flight above guarantees cliPath is non-null
+        // (checkAuth returns {ok:false} when it is, and the gate throws).
+        // Matches the delegated/probe sibling call sites.
+        command: cliPath,
         args: this.buildArgs(params, outputPath),
         cwd: sessionDir,
         env: {

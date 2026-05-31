@@ -17,19 +17,29 @@ tags:
   - troubleshooting
   - cost
   - backends
+  - quotas
+  - routing
 status: stable
 ask_examples:
   - Why did Aitne fall over to the fallback backend?
   - Why is my Anthropic API call returning a quota error?
+  - Why did an autonomous run get skipped for the cost cap?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-04
+updated: 2026-05-28
 keywords:
   - quota
   - BackendQuotaError
   - rate limit
   - fallback fired
   - 5h window
+  - cost cap
+ui_anchors:
+  - /analytics
+  - /settings/models
+config_keys:
+  - autonomousDailyCostCapUsd
+  - autonomousMonthlyCostCapUsd
 related:
   - concepts/costs-and-quotas
   - concepts/auth-health
@@ -42,15 +52,25 @@ related:
 
 - A `BackendQuotaError` row in Activity.
 - Fallback ran the next routine instead of main.
-- Analytics shows the budget close to or past the cap.
+- Or: an autonomous run was skipped with reason
+  `autonomous_cost_cap_exceeded` — this is a *separate* safety net
+  (`autonomousDailyCostCapUsd` / `autonomousMonthlyCostCapUsd`,
+  default off) that skips only autonomous work, never reactive DMs.
+  It is not a provider quota error; raise the cap on `/settings/models`
+  or wait for the next agent day.
 
 ## Most Likely Causes
 
 1. **Provider rate limit** on your API key (Anthropic / OpenAI /
    Google) — the supported path. Check the provider console for the
    per-minute / per-day caps tied to your billing.
-2. **Gemini per-day cap** for `gemini-2.5-flash` reached on the free
-   tier (`GEMINI_API_KEY` without billing).
+2. **Gemini per-agent-day request ceiling** reached. Aitne caps
+   Gemini at 450 model requests per agent day (a conservative fraction
+   of Google's free-tier daily limit on `GEMINI_API_KEY` /
+   `GOOGLE_API_KEY` without billing). This ceiling is Gemini-only and
+   model-agnostic — it is not tied to any one model id. The error reads
+   "Gemini daily-request ceiling reached" and resets at the next
+   agent-day boundary (04:00 local).
 3. **Cloud-provider quota** — Bedrock / Vertex / Foundry / Azure
    OpenAI / Gemini-Vertex enforce their own per-region / per-model
    quotas. The error surfaces the same way as a direct-API quota.
@@ -79,7 +99,11 @@ related:
 
 ## Confirming the Fix
 
-- The next run after the window resets succeeds on the main backend.
+- After a **provider window / Gemini ceiling** resets, the next run
+  succeeds on the main backend (no `BackendQuotaError` row, no
+  fallback).
+- After raising or clearing the **autonomous cost cap**, autonomous
+  runs stop logging `autonomous_cost_cap_exceeded` skips.
 
 ## Related
 

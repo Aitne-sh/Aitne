@@ -17,8 +17,9 @@ section: memory
 tags:
   - core
   - memory
-  - storage
   - knowledge
+  - context
+  - safety
 status: stable
 ask_examples:
   - Where are my context files stored?
@@ -28,7 +29,7 @@ ask_examples:
   - How does the daemon prevent the agent from writing to disk directly?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - context
   - markdown
@@ -66,6 +67,11 @@ context_files:
 config_keys:
   - dayBoundaryHour
   - dataDir
+api_endpoints:
+  - GET /api/context/*
+  - PUT /api/context/*
+  - PATCH /api/context/*
+  - DELETE /api/context/*
 ---
 
 # Memory Model
@@ -105,6 +111,31 @@ indexes, and configuration.
 - **Context API**: the daemon's `/api/context/*` endpoint, the **only**
   legal write path. The agent does not have direct `Edit` / `Write`
   permissions on the filesystem; it must go through the daemon.
+
+## How the Agent Writes
+
+The agent has no `Edit` or `Write` tool. To change a context file it
+calls the daemon over HTTP, and every write funnels through one
+endpoint family so the daemon can validate, hold locks, and snapshot a
+backup before touching disk. Paths are class-prefixed
+(`/api/context/<class>/<path>`):
+
+```bash
+# Append a section to today.md
+curl -X PATCH http://localhost:8321/api/context/state/today.md \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"append","section":"Notes","content":"Booked the dentist."}'
+```
+
+- `PUT /api/context/*` replaces a whole file; `PATCH` does a section op
+  (`append`, `replace`, `clear`, `clear_before`, `append_to_file`);
+  `DELETE` removes a file (permitted only for custom routines).
+- Legacy bare paths (`/api/context/today.md`) still resolve — the daemon
+  rewrites them to the canonical class-prefixed form in process, so a
+  plain `curl -X PATCH` without `-L` keeps working — but new writes
+  emit the class-prefixed path.
+- `state/today.md` and `plans/roadmap.md` are serialized behind
+  dedicated write locks, so two flows can't clobber each other.
 
 ## Concrete Examples
 

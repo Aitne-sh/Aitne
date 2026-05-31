@@ -1,6 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, unlinkSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, join, normalize } from "node:path";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 
@@ -50,7 +50,16 @@ export async function runLineCommand(
   const stderrLines: string[] = [];
 
   return await new Promise<CommandRunResult>((resolve, reject) => {
-    const child = spawn(options.command, options.args, {
+    // Windows: resolve bare names via PATHEXT and route `.cmd`/`.bat` batch
+    // shims through an explicit, hand-escaped `cmd.exe` wrapper. POSIX is left
+    // exactly as-is. `win` is null when no rewrite is needed (POSIX always, or
+    // an unresolvable bare name that should ENOENT naturally). See
+    // {@link resolveWin32Invocation}.
+    const win =
+      process.platform === "win32"
+        ? resolveWin32Invocation(options.command, options.args)
+        : null;
+    const child = spawn(win?.command ?? options.command, win?.args ?? options.args, {
       cwd: options.cwd,
       env: options.env,
       stdio: ["pipe", "pipe", "pipe"],
@@ -62,11 +71,14 @@ export async function runLineCommand(
       // (`auth-recovery` device-auth/login flows go through bespoke
       // spawn calls, not this helper), so the new process-group identity
       // is invisible to them. Windows has no process groups; we rely on
-      // taskkill /T below to walk the parent-pid chain instead, and
-      // hide the helper console window so background CLI calls don't
-      // flash one on screen.
+      // taskkill /T below to walk the parent-pid chain instead (the chain
+      // includes the cmd.exe wrapper above), and hide the helper console
+      // window so background CLI calls don't flash one on screen.
       detached: process.platform !== "win32",
       windowsHide: true,
+      // The cmd.exe wrapper's args are already escaped for cmd.exe; tell Node
+      // not to re-quote them. Inert/false on POSIX and the direct-.exe path.
+      windowsVerbatimArguments: win?.windowsVerbatimArguments ?? false,
     });
 
     let timedOut = false;
@@ -395,6 +407,132 @@ export function findExecutable(command: string): string | null {
   }
 
   return null;
+}
+
+// ── Windows `.cmd`/`.bat` shim launching ─────────────────────────────────
+//
+// On Windows with Node ≥ 22, spawning a resolved `.cmd`/`.bat` with the
+// default `shell: false` throws EINVAL (the CVE-2024-27980 "BatBadBut"
+// mitigation), and spawning a bare command name never consults PATHEXT (throws
+// ENOENT). npm-installed CLIs ship exactly these batch shims (`codex.cmd`,
+// `gemini.cmd`, `npm.cmd`, …), so every Codex/Gemini turn, auth-recovery probe,
+// and in-dashboard CLI install/verify that flows through `runLineCommand`
+// would crash on a Windows host.
+//
+// We therefore (win32-only) resolve a bare name to its absolute shim via
+// `findExecutable()` and, when the target is a batch shim, launch it through an
+// explicit `cmd.exe /d /s /c` wrapper. The naive `shell: true` shortcut is
+// UNSAFE here: callers pass arbitrary LLM prompts as discrete argv elements,
+// and under `shell: true` Node hands the joined line to cmd.exe whose metachar
+// parsing (`%VAR%`, `&`, `|`, `<`, `>`, `^`, embedded `"`, newlines) is NOT
+// neutralized by Node's quoting — turning a crash into prompt corruption and a
+// command-injection surface. Instead we escape every element for cmd.exe
+// ourselves and pass the pre-escaped line with `windowsVerbatimArguments: true`
+// so Node does not re-quote on top.
+//
+// The escaping below is replicated faithfully from the battle-tested
+// `cross-spawn` package (MIT, v7.0.6) and https://qntm.org/cmd: each argument
+// is first made safe for the MS C runtime argv parser (backslash / double-
+// quote rules, using cross-spawn's ReDoS-hardened regexes — our args are
+// arbitrary LLM prompts), then cmd.exe metacharacters are caret-escaped. The
+// caret-escaping is applied a *second* time only for `node_modules/.bin/*.cmd`
+// shims, whose extra cmd.exe re-invocation layer consumes one level of escaping
+// (a plain global shim like `npm.cmd` must NOT be double-escaped or its args
+// would be corrupted).
+
+/** cmd.exe metacharacters (space included) that require caret-escaping. */
+const WIN_CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * Matches a `node_modules/.bin/<name>.cmd` shim — the only case that needs
+ * double-escaped metachars (mirrors cross-spawn's `isCmdShimRegExp`).
+ */
+const WIN_CMD_BIN_SHIM = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i;
+
+function escapeCmdCommand(command: string): string {
+  // Command path: caret-escape metachars (spaces included) but do NOT wrap in
+  // quotes — matches cross-spawn, which relies on caret-escaped spaces here.
+  return command.replace(WIN_CMD_META, "^$1");
+}
+
+function escapeCmdArgument(arg: string, doubleEscapeMetaChars: boolean): string {
+  let s = `${arg}`;
+  // 1. MS C runtime argv quoting (qntm.org/cmd, ReDoS-hardened): double up a
+  //    backslash run that precedes a double quote and escape the quote; double
+  //    up a trailing run (it ends up before the closing quote); wrap in quotes.
+  s = s.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"').replace(/(?=(\\+?)?)\1$/, "$1$1");
+  s = `"${s}"`;
+  // 2. Caret-escape cmd.exe metachars; a second pass only for node_modules/.bin
+  //    shims (their extra cmd layer consumes one level of ^-escaping).
+  s = s.replace(WIN_CMD_META, "^$1");
+  if (doubleEscapeMetaChars) {
+    s = s.replace(WIN_CMD_META, "^$1");
+  }
+  return s;
+}
+
+/**
+ * Build the `cmd.exe` argv that launches a `.cmd`/`.bat` shim with the given
+ * arguments, fully escaped against cmd.exe re-parsing. Pure (no filesystem),
+ * exported for unit testing of the escaping. Pair with
+ * `windowsVerbatimArguments: true` so Node passes the line verbatim.
+ */
+export function buildCmdShimArgs(shimPath: string, args: string[]): string[] {
+  const doubleEscape = WIN_CMD_BIN_SHIM.test(shimPath);
+  const line = [
+    escapeCmdCommand(shimPath),
+    ...args.map((a) => escapeCmdArgument(a, doubleEscape)),
+  ].join(" ");
+  return ["/d", "/s", "/c", `"${line}"`];
+}
+
+export interface Win32Invocation {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments: boolean;
+}
+
+/**
+ * Windows-only spawn rewrite for {@link runLineCommand}. Returns the
+ * substitute `{ command, args, windowsVerbatimArguments }`, or `null` when no
+ * rewrite is needed (so the caller spawns the original command unchanged, and
+ * an unresolvable bare name still ENOENTs naturally as before).
+ *
+ * - Bare name → resolved to its absolute path via PATHEXT (`findExecutable`).
+ * - Resolved `.cmd`/`.bat` → launched through a hand-escaped
+ *   `cmd.exe /d /s /c` wrapper (verbatim args).
+ * - Resolved `.exe`/`.com`/extensionless → spawned directly (`shell:false` is
+ *   safe for these); the only change vs. today is bare-name → absolute
+ *   resolution, which also closes the bare-name PATHEXT ENOENT.
+ */
+export function resolveWin32Invocation(
+  command: string,
+  args: string[],
+): Win32Invocation | null {
+  const hasPathSeparator = /[\\/]/.test(command);
+  // A pathed command is normalized (forward slashes → native, matching
+  // cross-spawn, which otherwise ENOENTs on posix-style paths); a bare name is
+  // resolved through PATH/PATHEXT.
+  const resolved = hasPathSeparator ? normalize(command) : findExecutable(command);
+  if (!resolved) {
+    // Unresolvable bare name: leave it to spawn so the ENOENT surfaces as the
+    // child "error" event exactly as it does today.
+    return null;
+  }
+  if (/\.(?:cmd|bat)$/i.test(resolved)) {
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: buildCmdShimArgs(resolved, args),
+      windowsVerbatimArguments: true,
+    };
+  }
+  if (resolved === command) {
+    // Already an absolute/pathed non-batch target; nothing to rewrite.
+    return null;
+  }
+  // Bare name resolved to an absolute .exe/.com (or extensionless): spawn it
+  // directly. Node's standard argv quoting is correct for non-batch targets.
+  return { command: resolved, args, windowsVerbatimArguments: false };
 }
 
 /**

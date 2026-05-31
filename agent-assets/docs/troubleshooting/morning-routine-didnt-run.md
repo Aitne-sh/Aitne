@@ -9,29 +9,51 @@ aliases:
   - no morning briefing
 category: troubleshooting
 summary: |
-  The most common operator pain. Causes are ordered by frequency:
-  daemon was stopped, fallback failed, quota exhausted, schedule
-  configuration mismatch, day-boundary subtlety.
+  The morning routine produced no fresh state/today.md and no briefing.
+  Causes are ordered by frequency: daemon was stopped at the trigger
+  time, both backends failed, quota exhausted, the routine threw and is
+  mid-retry, or it is a day-boundary subtlety. Most cases self-heal via
+  boot-time catch-up or the retry/stall watchdog.
 section: morning-routine-didnt-run
 tags:
   - troubleshooting
   - routines
   - autonomous
+  - scheduler
+  - dispatch
 status: stable
 ask_examples:
   - Why didn't my morning routine fire?
   - Why is today.md empty?
+  - How do I regenerate today.md by hand?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - morning routine didn't run
   - morning routine skipped
   - morning routine gate
+  - empty today.md
+  - regenerate today
 related:
   - features/routines/morning-routine
+  - features/routines/hourly-check
+  - concepts/agent-day
   - troubleshooting/auth-failed
   - troubleshooting/quota-exhausted
+process_keys:
+  - routine.morning_routine
+  - routine.morning_routine_today
+  - routine.morning_routine_journal
+api_endpoints:
+  - POST /api/agent/regenerate
+config_keys:
+  - dayBoundaryHour
+context_files:
+  - state/today.md
+ui_anchors:
+  - /settings/routines
+  - /activity
 ---
 
 # Morning Routine Didn't Run
@@ -42,33 +64,69 @@ related:
 - No morning notification.
 - Activity has no `routine.morning_routine` row for today.
 
+## Before You Worry: It Often Self-Heals
+
+The morning routine has two recovery paths that usually fix this
+without any action from you:
+
+- **Boot-time catch-up.** If the daemon was stopped during the trigger
+  window, it fires the unrun morning routine the next time it starts.
+  So a missed routine often resolves itself on the next `aitne start`
+  or `aitne restart`.
+- **Retry on failure.** If the routine runs but fails to produce a
+  fresh `state/today.md`, the daemon retries up to 3 times with an
+  exponential back-off (5, then 10, then 15 minutes). After 3 failed
+  attempts it sends you a DM asking you to regenerate manually. If the
+  wake row sits unfinished for ~2 hours (the stall watchdog threshold),
+  you also get an owner DM so the silence never goes unnoticed.
+
+Give it a few minutes, or restart the daemon, before digging deeper.
+
 ## Most Likely Causes (in probability order)
 
 1. **Daemon was stopped at the trigger time.** Check `aitne status`.
-2. **Fallback failed too.** Look for a `fallback-failed` notification.
-3. **Heavy-tier quota exhausted on both backends.** See
-   [Quota Exhausted](quota-exhausted.md).
-4. **Hourly check skip-gate fired during the trigger window.** The
-   morning routine and the hourly check share an atomic flag — if the
-   hourly check was already running at the rollover instant, the
-   morning routine won't double-fire.
-5. **Day-boundary subtlety.** Before `dayBoundaryHour`, the routine
-   still "belongs to" yesterday — see
+   Boot-time catch-up should cover this once the daemon is back up.
+2. **Both backends failed.** The routine tried the main backend, fell
+   back, and the fallback failed too. Check `/activity` for an error
+   outcome and `aitne logs` for the failure.
+3. **Quota exhausted on both backends.** The morning routine runs on
+   the medium tier (Sonnet by default for Claude); a backend that is
+   out of quota fails over, and if the fallback is also out you get no
+   run. See [Quota Exhausted](quota-exhausted.md).
+4. **Mid-retry.** The routine threw and is in the 5/10/15-minute
+   retry window — the row may simply not have landed yet.
+5. **Day-boundary subtlety.** Before `dayBoundaryHour` (default 04:00),
+   the routine still "belongs to" yesterday — see
    [Agent Day](../concepts/agent-day.md).
+
+Note: the morning routine takes priority over the hourly check, not the
+other way around. The hourly check skips itself while the morning
+routine is active, so a running hourly check never blocks the morning
+routine.
 
 ## Diagnostic Steps
 
-1. `aitne status` — daemon up?
-2. `/activity` — any row for `routine.morning_routine`?
+1. `aitne status` — is the daemon up?
+2. `/activity` — is there a row for `routine.morning_routine`? An error
+   outcome points to a backend failure (cause 2 or 3).
 3. `/settings/routines` — the routine list shows the next scheduled
    fire and recent runs.
-4. `aitne logs` — search for `morning_routine`.
+4. `aitne logs` — search for `morning_routine` to see the trigger,
+   any fallback, and retry scheduling.
+
+## Forcing a Regenerate
+
+If you want today's `state/today.md` rebuilt right now, click
+**Regenerate** on the dashboard (it POSTs to `/api/agent/regenerate`
+with `target: today`). This bypasses the schedule and runs the
+synthesis immediately.
 
 ## Confirming the Fix
 
-- The next morning's routine fires within 60 seconds of
-  `dayBoundaryHour` (default 04:00).
-- Activity shows the row with a non-error outcome.
+- The next morning's routine fires shortly after `dayBoundaryHour`
+  (default 04:00).
+- `/activity` shows a `routine.morning_routine` row with a non-error
+  outcome.
 
 ## When None of the Above Help
 
@@ -78,3 +136,5 @@ related:
 ## Related
 
 - [Morning Routine](../features/routines/morning-routine.md)
+- [Hourly Check](../features/routines/hourly-check.md)
+- [Agent Day](../concepts/agent-day.md)

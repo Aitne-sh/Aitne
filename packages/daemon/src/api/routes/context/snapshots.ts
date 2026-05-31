@@ -44,6 +44,29 @@ export function registerSnapshotsRoutes(
     const contextDir = getCurrentContextDir();
     const todayPath = join(contextDir, "state", "today.md");
     const yesterdayPath = join(contextDir, "state", "yesterday.md");
+    // The rotation source is fixed to state/today.md, so the same
+    // morning-routine-lock guard that PUT/PATCH/restore-snapshot apply
+    // to state/today must hold here too. The per-path serializer below
+    // only prevents byte-level interleaving — it does NOT stop a
+    // concurrent non-morning session from logically rotating
+    // today.md → yesterday.md while the morning routine holds the
+    // exclusive lock mid-build, which would defeat the lock's
+    // exclusivity invariant. Mirror restore-snapshot's guard.
+    if (morningRoutineLock.getHolder()) {
+      const lockId = c.req.header("X-Lock-Id");
+      if (!morningRoutineLock.isHeldBy(lockId)) {
+        logger.info(
+          { path: "state/today" },
+          "Archive-today rejected — morning routine lock held",
+        );
+        return respondWithAgentError(c, 409, [
+          composeIssue("context.morning_routine_lock_held", {
+            field: "X-Lock-Id",
+            received: lockId ?? "<missing>",
+          }),
+        ]);
+      }
+    }
     // Acquire today.md FIRST, then yesterday.md inside. The fixed
     // lock order (alphabetical by absolute path is the convention)
     // prevents deadlock against any other caller that needs both.

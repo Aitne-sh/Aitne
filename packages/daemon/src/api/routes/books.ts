@@ -521,6 +521,8 @@ export function createBookRoutes(deps: ApiDependencies): Hono {
       params.push(body.status);
       if (body.status === "completed") {
         updates.push("completed_at = datetime('now')");
+      } else {
+        updates.push("completed_at = NULL");
       }
     }
     if (body.rating !== undefined) {

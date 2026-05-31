@@ -15,16 +15,17 @@ summary: |
   because schema migrations auto-forward at boot.
 section: migrate-machines
 tags:
-  - guide
+  - guides
   - operations
   - migration
+  - backup
 status: stable
 ask_examples:
   - Can I move Aitne to a new laptop?
   - Will my DB still work after upgrading on the new machine?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - migrate
   - move install
@@ -67,8 +68,9 @@ upgrading (not downgrading), the same DB works.
    (Or rsync just `context/` and `data/` if you want to skip logs.)
 3. **On the new machine:** install per [Install and Run](install-and-run.md).
 4. **Re-register secrets and re-pair messaging** through the dashboard:
-   - Re-register each backend's API key (or re-run `claude login` /
-     `codex login` / `gemini auth` for the subscription fallback path).
+   - Re-register each backend's API key, or re-run its CLI auth flow for
+     the subscription path: `claude auth login`, `codex login`, or for
+     Gemini run `gemini` and choose **Sign in with Google**.
    - Walk the setup wizard's messaging pairing steps for each app you
      had paired.
    - Re-authorize each integration's OAuth grant (Gmail / Calendar /
@@ -88,11 +90,14 @@ aitne logs -n 200 | grep -i migration
 
 ## Verify
 
-- `aitne status` shows the same activity counts you had on the old
+- `aitne status` reports today's action count and spend, the connected
+  platforms, and uptime — confirming the daemon booted against the
+  carried DB.
+- The dashboard's activity feed contains your historical rows; `aitne
+  audit --since 30d` lists the same past actions you had on the old
   machine.
 - Routines fire on the new machine's local schedule (timezone follows
   the OS).
-- The dashboard's activity feed contains your historical rows.
 
 ## If It Fails
 

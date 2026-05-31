@@ -30,7 +30,7 @@ ask_examples:
   - Which routine uses the high tier by default?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - routine
   - routines
@@ -52,13 +52,24 @@ related:
 ui_anchors:
   - /connections/routines
   - /settings/routines
+process_keys:
+  - routine.morning_routine
+  - routine.morning_routine_today
+  - routine.morning_routine_journal
+  - routine.evening_review
+  - routine.weekly_review
+  - routine.monthly_review
+  - routine.hourly_check
+  - routine.today_refresh
+  - routine.fetch_window
+  - routine.hourly_check.triage
 config_keys:
   - dayBoundaryHour
   - hourlyCheckEnabled
   - hourlyCheckIntervalMinutes
+  - hourlyCheckActiveStartHour
+  - hourlyCheckActiveEndHour
   - hourlyCheckPrePassFreshnessMinutes
-  - activeHoursStart
-  - activeHoursEnd
   - monthlyReviewEnabled
 ---
 
@@ -68,8 +79,9 @@ config_keys:
 
 A routine is a unit of agent work that runs on a schedule, not in
 response to a message. The morning routine fires once per agent day at
-`dayBoundaryHour`; evening and weekly retros fire on fixed schedules
-in code; the hourly check coalesces accumulated observations on a
+`dayBoundaryHour`; the evening review (18:00 daily), weekly review
+(Friday 19:00), and optional monthly review fire on fixed schedules in
+code; the hourly check coalesces accumulated observations on a
 configurable cadence.
 
 ## Why This Concept Exists
@@ -90,30 +102,34 @@ DM is who fired the event.
   a ProcessKey starting with `routine.`.
 - **Agent day**: the 24-hour window starting at `dayBoundaryHour`
   (default 04:00) — see [Agent Day](agent-day.md).
-- **Catch-up**: if the daemon was offline at the trigger time, the
-  scheduler re-fires the routine on next launch when it is still in
-  the same agent day.
-- **Tier policy**: no routine runs heavy by default. The morning
-  routine's first-run branch ran on heavy until
-  `docs/design/appendices/morning-routine-optimization.md` Phase 7
-  (2026-05-16) retired `routine.morning_routine_initial`; the
-  first-run branch now uses the medium-tier parent
-  `routine.morning_routine` with a daemon-prepared
-  `<roadmap_skeleton>` block. Every recurring routine — morning,
-  evening, weekly, hourly check — defaults to **medium**
-  (Sonnet on Claude). The morning routine itself is a two-stage
-  pipeline: Stage A `routine.morning_routine_today` (medium) runs
-  in parallel with Stage B `routine.morning_routine_journal` (lite).
-  The lite (Haiku) tier is reserved for Stage B plus mechanical
-  sub-jobs (the hourly-check triage gate and the pre-pass fetcher).
-  See [Backends and Tiers](backends-and-tiers.md).
+- **Catch-up**: if the daemon was offline at the trigger time, a
+  boot-time check re-fires any routine whose window has already
+  opened but never ran (morning routine within the agent day; evening
+  review once it is past 18:00; weekly review across Fri–Sun). It never
+  double-fires a routine that already succeeded.
+- **Tier policy**: **no routine runs the high tier by default.** Every
+  recurring routine — morning, evening, weekly, hourly check —
+  defaults to **medium** (Sonnet on Claude). The **lite** (Haiku) tier
+  is reserved for the morning routine's Stage B and for mechanical
+  sub-jobs (the hourly-check triage gate and the pre-pass fetcher). The
+  only high-tier ProcessKey in the whole system is `delegated_task_heavy`,
+  which is opt-in and not a routine. See
+  [Backends and Tiers](backends-and-tiers.md).
+- **Two-stage morning routine**: the morning routine runs as a parent
+  envelope `routine.morning_routine` (medium) that fans out two stages
+  in parallel — Stage A `routine.morning_routine_today` (medium, builds
+  `state/today.md`) and Stage B `routine.morning_routine_journal` (lite,
+  authors the previous day's journal). The legacy heavy-tier
+  `routine.morning_routine_initial` first-run branch was retired in
+  Phase 7 (2026-05-16); a first run is now detected inline from a
+  missing `state/yesterday.md` and handled by the same medium-tier
+  parent with a daemon-prepared `<roadmap_skeleton>` block.
 - **Pre-pass fetcher**: each main routine that needs fresh mail /
   calendar / Notion data is preceded by a lite-tier
   `routine.fetch_window` session that fetches the relevant window and
-  POSTs observations. The main routine consumes the resulting
-  `<fetch_report>` block plus pending observations instead of
-  fetching upstream APIs itself. This is the cost-savings split
-  introduced in 2026-05.
+  POSTs observations. The main routine then consumes the resulting
+  `<fetch_report>` block plus pending observations instead of hitting
+  upstream APIs itself — a cost-savings split introduced in 2026-05.
 
 ## Concrete Examples
 
@@ -121,20 +137,23 @@ DM is who fired the event.
 |---|---|---|
 | `routine.morning_routine` | `dayBoundaryHour` daily (parent envelope; first-run branch detected inline from missing `state/yesterday.md`) | medium |
 | `routine.morning_routine_today` | Stage A of every morning routine (today.md synthesis + roadmap maintenance + schedule fan-out) | medium |
-| `routine.morning_routine_journal` | Stage B of every morning routine (daily/<yesterday>.md authoring) | lite |
-| `routine.today_refresh` | Every 4h inside the active window | medium |
+| `routine.morning_routine_journal` | Stage B of every morning routine (`journal/daily/<yesterday>.md` authoring) | lite |
 | `routine.evening_review` | 18:00 daily (fixed) | medium |
+| `routine.weekly_review` | Friday 19:00 (fixed, one hour after evening review) | medium |
+| `routine.monthly_review` | Last day of month at 18:00, **default off** (`monthlyReviewEnabled`) | medium |
 | `routine.hourly_check` | Every `hourlyCheckIntervalMinutes` (default 60) inside the active window | medium |
-| `routine.weekly_review` | Friday 18:00 (fixed) | medium |
-| `routine.fetch_window` | Spawned before each routine above | lite |
+| `routine.today_refresh` | On calendar drift or a dashboard "refresh today" request (not a fixed cron) | medium |
+| `routine.fetch_window` | Spawned before each routine above that needs fresh upstream data | lite |
 | `routine.hourly_check.triage` | Stage 2 gate of every hourly check | lite |
-| `routine.custom.<slug>` | Operator-defined recurrence | configurable |
+| `routine.custom.<slug>` | Operator-defined recurrence | medium (override per routine via `backend_tier`) |
 
 ## Where You See It in the Dashboard
 
-- **Settings → Routines** is where the hourly check active window, the
-  hourly check cadence, and any custom routines live. Morning, evening,
-  and weekly fire times are fixed in code and not surfaced here.
+- **Settings → Routines** is where the hourly check active window
+  (`hourlyCheckActiveStartHour` / `hourlyCheckActiveEndHour`), the
+  hourly check cadence (`hourlyCheckIntervalMinutes`), and any custom
+  routines live. Morning, evening, weekly, and monthly fire times are
+  fixed in code and not surfaced here.
 - **Connections → Routines** is the unified view of next-fire times.
 - **Activity** logs each routine run with its outcome.
 

@@ -31,12 +31,18 @@ keywords:
   - dashboard onboarding
   - health pill
 created: 2026-04-27
-updated: 2026-05-15
+updated: 2026-05-28
 related:
   - getting-started/01-what-is-this
   - getting-started/03-what-can-this-do
   - getting-started/04-first-day
   - guides/setup-wizard
+ui_anchors:
+  - /setup
+  - /
+  - /activity
+  - /connections
+  - /settings/models
 ---
 
 # First Steps in the Dashboard
@@ -63,9 +69,9 @@ in (a backend, a messaging pair). Run through it once, top to bottom.
    [Messaging Overview](../features/messaging/overview.md) for the
    list of supported apps and what each one does well.
 3. **Pick a main backend and register an API key.** Pick the LLM
-   the agent uses for "think hard" turns (Claude / Codex / Gemini)
-   and paste a provider API key — the supported way to run a
-   headless agent. If you skip the key, the daemon falls back to
+   the agent uses for "think hard" turns (Claude / Codex / Gemini /
+   OpenCode) and paste a provider API key — the supported way to run
+   a headless agent. If you skip the key, the daemon falls back to
    whatever subscription login the matching CLI already has on your
    machine; the dashboard surfaces a warning when this happens
    because most providers do not support running agents on a
@@ -73,10 +79,9 @@ in (a backend, a messaging pair). Run through it once, top to bottom.
    backend at a cloud provider (Bedrock / Vertex / Foundry / Azure
    OpenAI / Gemini-Vertex) instead of the direct API key — the
    provider dropdown on `/settings/models` is the single surface for
-   both direct keys and cloud-provider credentials.
-   Defaults are sensible and can be changed later from
-   `/settings/models`. Background:
-   [Backends and Tiers](../concepts/backends-and-tiers.md).
+   both direct keys and cloud-provider credentials. Defaults are
+   sensible and can be changed later from `/settings/models`.
+   Background: [Backends and Tiers](../concepts/backends-and-tiers.md).
 4. **Skip integrations you do not need yet.** Mail, calendar, git,
    Notion, Obsidian are all optional and re-runnable any time from
    `/connections`.

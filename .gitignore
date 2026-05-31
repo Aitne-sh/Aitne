@@ -42,6 +42,9 @@ tmp/
 # Claude Code — tool-local directory, fully ignored
 .claude/
 
+# Agent feedback/run artifacts (e.g. correctness-bro structured output)
+.agents/
+
 # Obsidian workspace settings (auto-generated)
 .obsidian/
 
@@ -79,6 +82,9 @@ FILE_SPLIT_PLAN_CONTEXT_BUILDER.md
 MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md
 WEEKLY_INTERESTS_REFLECTION_PLAN.md
 BROWSER_TASK_REDESIGN_PLAN.md
+AGENT_DEFINITIONS_IMPLEMENTATION_PLAN.md
+CROSS_PLATFORM_AUDIT.md
+DOCS_CONSISTENCY_AUDIT.md
 
 # Local opencode probe/capture artifacts
 /.opencode/

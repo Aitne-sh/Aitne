@@ -182,11 +182,17 @@ async function checkSecretStore(ctx) {
     }
   }
   if (platform === "win32") {
-    const psBinary = whichSync("powershell.exe") ? "powershell.exe" : "pwsh.exe";
+    // Match the factory's terminal fallback (secret-client-factory.ts:37-41): prefer
+    // in-box powershell.exe, else pwsh.exe, else default to powershell.exe — the exact
+    // binary the daemon will exec — so a both-missing FAIL names the right binary.
+    const psBinary = whichSync("powershell.exe") ? "powershell.exe" : (whichSync("pwsh.exe") ? "pwsh.exe" : "powershell.exe");
     try {
+      // Mirror WindowsDpapiSecretClient's real encrypt path: ConvertTo/From-SecureString
+      // (no -Key => DPAPI). Works on both powershell.exe (5.1) and pwsh.exe (7+); the prior
+      // [ProtectedData] type check false-fails on PowerShell-Core-only hosts that work fine.
       execFileSync(psBinary, [
-        "-NoProfile", "-Command",
-        "[System.Security.Cryptography.ProtectedData] | Out-Null; exit 0",
+        "-NoProfile", "-NonInteractive", "-Command",
+        "$s = ConvertTo-SecureString 'probe' -AsPlainText -Force; $e = ConvertFrom-SecureString $s; if (-not $e) { exit 1 }; exit 0",
       ], { stdio: "pipe", timeout: 5000 });
       return { status: "pass", label: "Secret store", detail: `Windows DPAPI via ${psBinary} reachable` };
     } catch (err) {

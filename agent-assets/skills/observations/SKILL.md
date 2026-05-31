@@ -138,6 +138,16 @@ that caps each curl invocation at one HTTP request and strips heredoc
 bodies before URL validation. The batch endpoint resolves the
 cardinality mismatch without weakening either hook.
 
+> **If `mcp__aitne-observations__submit_observations` is in your allowed
+> tools (the `routine.fetch_window` pre-pass on Claude), submit the batch
+> through that MCP tool instead of the curl below.** The structured
+> transport never goes through the SDK bash preflight, so Unicode-bearing
+> payloads (NBSP/ZWS in subjects, U+3000 in titles) can't trip its
+> `too-complex` gate and cascade to a denied curl / wasted retry /
+> `budget-cap`. The tool input is the same `{"observations":[…]}` envelope
+> and the response is identical. The curl form below is the fallback for
+> sessions without the MCP tool (the hourly check, Codex/Gemini).
+
 ```bash
 curl -s -X POST http://localhost:8321/api/observations/batch \
   -H 'Content-Type: application/json' \

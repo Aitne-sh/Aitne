@@ -21,22 +21,32 @@ status: stable
 ask_examples:
   - How do I start using the wiki?
   - How do I add my first source to the wiki?
+  - How do I compile my ingested notes into wiki articles?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
   - wiki
   - build wiki
-  - !ingest
-  - !compile
-  - !ask
+  - "!ingest"
+  - "!compile"
+  - "!ask"
   - workspace
   - first day wiki
+ui_anchors:
+  - /wiki
+  - /settings/wiki
+process_keys:
+  - wiki.ingest_url
+  - wiki.compile
+  - wiki.ask
 related:
   - features/wiki/overview
   - features/wiki/commands
   - guides/use-an-existing-obsidian-vault
   - guides/budget-and-cost-for-wiki
+prerequisites:
+  - features/messaging/pairing-and-magic-phrase
 ---
 
 # Build Your Wiki
@@ -49,7 +59,8 @@ article, and run a question against the result.
 ## Prerequisites
 
 - A paired messaging channel (Telegram, Slack, Discord, WhatsApp, or
-  dashboard chat).
+  dashboard chat) — see
+  [Pairing and the Magic Phrase](../messaging/pairing-and-magic-phrase.md).
 - The daemon is running and the dashboard is reachable.
 
 ## Where you'll work in the dashboard
@@ -74,10 +85,12 @@ you enable a workspace, so you do not need to remember the URL.
 1. Click **My Life → Wiki** in the sidebar (`/wiki`). The page shows
    a "Wiki not enabled" card with an **Enable Wiki** button —
    clicking it jumps you to `/settings/wiki`.
-2. On the settings page, click **Enable Internal Workspace**. The
-   daemon creates `$PA_DATA_DIR/wiki/` and seeds `90_meta/taxonomy.md`
-   plus the schema templates. (To point at an existing Obsidian
-   vault instead, follow
+2. On the settings page, click **Enable internal wiki**. The daemon
+   creates the workspace under your context vault at
+   `knowledge/wiki/` (the daemon-owned default root) and seeds the
+   skeleton: `10_raw/`, `20_wiki/`, `30_outputs/`, `90_meta/` plus
+   `90_meta/taxonomy.md` and the schema templates. (To point at an
+   existing Obsidian vault instead, follow
    [Use An Existing Obsidian Vault](use-an-existing-obsidian-vault.md).)
 3. The sidebar's **My Life → Wiki** entry now lands on a workspace
    summary instead of the disabled CTA. Open it to confirm the root

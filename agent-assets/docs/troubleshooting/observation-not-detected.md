@@ -12,19 +12,21 @@ category: troubleshooting
 summary: |
   An expected change (commit, note, calendar move) didn't surface in
   the hourly check. Most often a polling delay, a vault/repo not
-  watched, or the change was authored by the agent itself.
-section: observation-not-detected
+  watched, or a change the agent authored itself (filtered out).
+section: troubleshooting
 tags:
   - troubleshooting
   - observations
   - polling
+  - hourly-check
 status: stable
 ask_examples:
   - Why didn't the agent notice my new commit?
   - Why didn't a calendar change show up?
+  - Why is the hourly check empty?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - observation
   - polling
@@ -33,37 +35,87 @@ keywords:
   - hourly check
 related:
   - concepts/observations
+  - features/routines/hourly-check
   - features/integrations/git
   - features/integrations/obsidian
-  - features/routines/hourly-check
+config_keys:
+  - hourlyCheckMinObservations
+  - hourlyCheckEnabled
+  - hourlyCheckIntervalMinutes
+process_keys:
+  - routine.hourly_check
+ui_anchors:
+  - /connections/repositories
+  - /connections/calendar
+  - /settings/schedule
+context_files:
+  - state/today.md
 ---
 
 # Observation Not Detected
 
-## What You See
+You made a change by hand — a commit, an Obsidian note, a calendar move — and
+expected the agent to notice it on the next hourly check. It didn't.
 
-- A change you made by hand, not echoed by the hourly check.
-- The hourly check ran but did not mention it.
+This is almost always one of four things: the poller hasn't run yet, the
+source isn't being watched, the agent itself made the change (so it was
+filtered out), or there weren't enough observations to clear the hourly-check
+gate. Work through them in that order.
 
-## Most Likely Causes
+## How detection actually works
 
-1. Poll has not yet fired since your change.
-2. The repo / vault is not on the watched list.
-3. The change was tagged `actor='agent'` (anti-loop filter).
-4. Below the `hourlyCheckMinObservations` threshold.
+Observers (Obsidian, Git, Notion, Calendar) do **not** fire an event per
+change. They poll on a cadence and call `recordObservation(...)`, which
+appends a row to the `observations` table. The hourly check later reads those
+rows in a single batch. So a "missing" observation is usually a row that was
+never written, or one that was written but filtered.
 
-## Diagnostic Steps
+`AgentWriteTracker` tags every change as `actor='agent'` or `actor='user'`.
+Changes the agent itself wrote are tagged `actor='agent'` and skipped by the
+hourly check — this is the deliberate anti-loop filter that stops the agent
+from observing its own output.
 
-1. Confirm the integration's "last polled" timestamp on
-   `/connections/...`.
-2. Confirm the observed path is in the watched set.
-3. Lower `hourlyCheckMinObservations` to test.
+## Most likely causes
 
-## Confirming the Fix
+1. **The poll hasn't fired since your change.** Each integration runs on its
+   own interval; a fresh change can sit for several minutes before the next
+   poll picks it up.
+2. **The repo / vault / calendar isn't on the watched list.** If the source
+   was never connected, nothing polls it.
+3. **The change was tagged `actor='agent'`.** If the agent (not you) authored
+   the commit or note, the anti-loop filter drops it.
+4. **It was below the gate threshold.** The hourly check only runs its full
+   pass when at least `hourlyCheckMinObservations` (default `1`) pending
+   observations exist. A single low-signal change can be held back.
 
-- Future changes record observations and surface in the next
-  hourly check.
+## Diagnostic steps
+
+1. **Check the "last polled" timestamp.** On the relevant connection page —
+   `/connections/repositories` for Git/GitHub, `/connections/calendar` for
+   calendars, or the matching `/connections/...` page — confirm the source
+   polled *after* you made the change. If the timestamp predates your change,
+   you're just early; wait for the next poll.
+2. **Confirm the source is watched.** Verify the repo/vault/calendar is
+   actually connected and enabled on its connection page. A disabled or
+   never-added source produces no observations.
+3. **Rule out the agent-authored filter.** If the commit or note was written
+   by the agent, that's expected — it's filtered by design. Look for a change
+   *you* made by hand to test detection.
+4. **Lower the gate threshold to test.** Temporarily set
+   `hourlyCheckMinObservations` to `1` (its default) on `/settings/schedule`
+   so even a single observation triggers the check, then make a manual change
+   and wait for the next hourly run.
+
+## Confirming the fix
+
+After the next poll runs, a manual change you made should record an
+observation and surface in the next hourly check. You can cross-check recent
+agent activity from the CLI with `aitne audit`, which reads the `agent_actions`
+log read-only.
 
 ## Related
 
-- [Observations](../concepts/observations.md)
+- [Observations](../concepts/observations.md) — what gets recorded and why
+- [Hourly Check](../features/routines/hourly-check.md) — the gate and its thresholds
+- [Git integration](../features/integrations/git.md)
+- [Obsidian integration](../features/integrations/obsidian.md)

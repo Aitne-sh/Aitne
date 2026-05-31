@@ -18,15 +18,17 @@ tags:
   - skills
   - safety
   - knowledge
+  - backends
 status: stable
 ask_examples:
   - What skills does the agent have?
   - How do I add a new skill?
   - Why does the agent refuse to run a tool?
   - How does skill self-optimization work?
+  - Where do skill overlays live?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - SKILL.md
   - allowed-tools
@@ -45,10 +47,15 @@ ui_anchors:
   - /knowledge
   - /connections/mcp
   - /settings/self-learning
+process_keys:
+  - dashboard.docs_qa
+  - routine.skill_curation
 config_keys:
-  - skillCurationEnabled
   - allowedToolsOverride
   - disallowedTools
+api_endpoints:
+  - GET /api/skills
+  - GET /api/skills/manifest/:processKey
 ---
 
 # Skills
@@ -75,9 +82,11 @@ visible to the model.
 
 - **SKILL.md**: the Markdown file that defines a single skill. Lives
   under `agent-assets/skills/<slug>/SKILL.md` in the repo and is
-  materialized into each session workdir as `.claude/skills/<slug>/SKILL.md`
-  (Codex uses `.codex/skills/`, Gemini uses `.gemini/skills/`, OpenCode
-  reuses `.claude/skills/` per V2 of docs/design/appendices/opencode-backend.md).
+  materialized into each session workdir under a per-backend namespace —
+  `.claude/skills/<slug>/` for Claude, `.codex/skills/` for Codex,
+  `.gemini/skills/` for Gemini, and `.opencode/skills/` for OpenCode.
+  The frontmatter (`name`, `description`, `allowed-tools`) is byte-identical
+  across all four; only the destination directory changes.
 - **`allowed-tools`**: a YAML list in the skill's frontmatter naming
   tools and patterns the session may use. Patterns like
   `Bash(curl http://localhost:8321/api/context/*)` are the daemon's
@@ -101,26 +110,29 @@ visible to the model.
 
 Skills aren't frozen. A background process — **skill curation** —
 watches how your knowledge layout drifts (file moves, new
-sub-folders, schema tweaks in `user/`, `projects/`, etc.) and
-proposes JSON **overlays** that update specific sections of the
+sub-folders, schema tweaks under `identity/`, `plans/projects/`, etc.)
+and proposes JSON **overlays** that update specific sections of the
 relevant skill: knowledge layout, routing tables, frontmatter
 schema, search recipes, convention notes, cross-references.
 
-Overlays live at `<dataDir>/overlays/<skill>/<section-id>.json` and
-are merged in by the SkillsCompiler at session-init. The original
+Overlays live at `<dataDir>/skill-curation-overlays/<slug>/<section_id>.json`
+and are merged in by the SkillsCompiler at session-init. The original
 `SKILL.md` files in `agent-assets/skills/` are never rewritten;
-disabling the overlay (or deleting the JSON file) reverts to the
+disabling self-learning (or deleting the JSON file) reverts to the
 seed payload immediately.
 
 The optimizer agent runs in an isolated workdir with a tightly
 scoped toolset (`Bash(curl http://localhost:8321/api/skill-curation/*)`,
-`Read`) and an auto-revert safety net — if the next run sees more
-drift signals than the previous overlay generated, the section is
-reverted and frozen for two cycles.
+`Read`) and an auto-revert safety net: each cadence cycle the daemon
+re-checks recently-applied overlays, and any section that has
+accumulated *more* drift signal weight after the overlay was applied
+than before is rolled back automatically and frozen for two cycles to
+stop thrashing. This is the only roll-back path — there is no
+per-proposal approve/reject API, just the on/off toggle.
 
-Curation cadence, manual-run trigger, and the per-skill exclusion
-list are surfaced at **Settings → Self-learning**
-(`/settings/self-learning`).
+Skill curation is **off by default**. The master toggle, curation
+cadence, manual-run trigger, and the per-skill exclusion list are all
+surfaced at **Settings → Self-learning** (`/settings/self-learning`).
 
 ## Where You See It in the Dashboard
 

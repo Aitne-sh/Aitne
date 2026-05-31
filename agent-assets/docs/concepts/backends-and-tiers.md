@@ -31,7 +31,7 @@ ask_examples:
   - How does Aitne fail over when a backend hits its quota?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - claude
   - codex
@@ -55,11 +55,24 @@ related:
   - features/operations/backend-routing
 ui_anchors:
   - /settings/models
+  - /analytics
+process_keys:
+  - message.dm
+  - dashboard.chat
+  - dashboard.docs_qa
+  - routine.morning_routine
+  - gmail_classify
+  - calendar.change
+  - delegated_task
+  - delegated_task_heavy
 config_keys:
   - claudeExecutionPermissionMode
   - codexExecutionPermissionMode
   - geminiExecutionPermissionMode
   - opencodeExecutionPermissionMode
+  - opencodeBaseUrl
+  - opencodeServerUsername
+  - delegatedTaskHeavyEnabled
 ---
 
 # Backends and Tiers
@@ -67,27 +80,39 @@ config_keys:
 ## TL;DR
 
 Four backends are supported: **Claude Code** (default), **Codex**,
-**Gemini CLI**, and **OpenCode**. Each backend exposes three classes
-of model used at install time:
+**Gemini CLI**, and **OpenCode**. Each backend exposes three model
+tiers. The per-backend defaults seeded at install time are:
 
-- **Medium / Main** (Sonnet 4.6 / GPT-5.4-mini / Gemini 3 Flash /
-  Sonnet 4.6 via OpenCode) — the default for owner-facing work (DMs,
-  daily / weekly review, morning routine, dashboard chat, scheduled
-  tasks).
-- **Lite / Delegated** (Haiku 4.5 on Claude and OpenCode; latest
-  light tier on Codex / Gemini) — cheaper model used for "simple"
-  backend surfaces with no owner in the loop: Gmail classification,
-  GitHub event triage, git-poll observers, calendar-change
-  handlers, the routine pre-pass fetcher, the `delegated_task`
-  invoker.
-- **High / Heavy** (Opus 4.7 / GPT-5.5 / Gemini 3 Pro / Opus 4.7
-  via OpenCode) — registered but *not* auto-selected. Operators opt
-  in per-process from `/settings/models`. After morning-routine
-  Phase 7 (2026-05-16) the only flows that run heavy by default are
-  `setup` (one-shot wizard) and `knowledge.import` (owner-uploaded
-  files). The first morning routine after setup runs on medium
-  tier with a daemon-prepared `<roadmap_skeleton>` block instead of
-  the retired heavy `routine.morning_routine_initial`.
+| Tier | Claude | Codex | Gemini | OpenCode |
+|---|---|---|---|---|
+| **medium** (main) | Sonnet 4.6 | GPT-5.4 | Gemini 3.1 Pro (preview) | Sonnet 4.6 |
+| **lite** (delegated) | Haiku 4.5 | GPT-5.4 Mini | Gemini 3.1 Flash Lite (preview) | Haiku 4.5 |
+| **high** (heavy) | Opus 4.8 | GPT-5.4¹ | Gemini 3.1 Pro (preview)¹ | Opus 4.8 |
+
+¹ Codex and Gemini have no separately-seeded high model — their high
+tier collapses to the medium model via `SEED_HIGH_TIER_OVERRIDE`.
+Codex's flagship GPT-5.5 is Opus-priced and stays an opt-in; Gemini
+has no Opus-priced Google flagship worth defaulting to. Pin a higher
+model per row from `/settings/models` if you want it.
+
+What each tier is for:
+
+- **Medium / Main** — the default for owner-facing work: DMs and
+  mentions, dashboard chat, morning / evening / weekly / monthly
+  review, the hourly check, scheduled tasks.
+- **Lite / Delegated** — the cheaper model for "simple" backend
+  surfaces with no owner in the loop: Gmail classification, GitHub
+  event triage, git-poll observers, calendar-change handlers, the
+  routine pre-pass fetcher, the `delegated_task` invoker.
+- **High / Heavy** — registered but *not* auto-selected. After the
+  "no Opus by default" pass (2026-05-16), **no install-time-seeded
+  surface defaults to high.** The only `high`-tagged ProcessKey is
+  `delegated_task_heavy`, and it is opt-in (gated by the
+  `delegatedTaskHeavyEnabled` config flag). Operators can pin any
+  other ProcessKey to high per row from `/settings/models`. The
+  first morning routine after setup runs on **medium** tier with a
+  daemon-prepared `<roadmap_skeleton>` block instead of the retired
+  heavy `routine.morning_routine_initial`.
 
 Every ProcessKey resolves to a backend + model binding via
 `BackendRouter`. Aitne **does not store or read subscription-plan
@@ -131,11 +156,13 @@ top of the `@opencode-ai/sdk` HTTP server and supports the same
 `ProcessKey` set as the other backends. Two operating modes:
 
 - **Managed** — the daemon spawns and supervises a local
-  `opencode` HTTP server on loopback. Configuration (model,
-  permissions, agent dir) is written into a managed `opencode.json`
-  under `<dataDir>/opencode-home/`.
+  `opencode` HTTP server on loopback (`127.0.0.1`, OS-picked port).
+  Per-session config (model, permissions, agent dir) is passed
+  inline to the server via the `OPENCODE_CONFIG_CONTENT` env var —
+  no config file is written to disk.
 - **Remote** — you point Aitne at an existing OpenCode server
-  baseUrl (your own cluster or a managed deployment).
+  baseUrl (your own cluster or a managed deployment), set via the
+  `opencodeBaseUrl` / `opencodeServerUsername` config keys.
 
 OpenCode is a runtime peer of Claude / Codex / Gemini for
 dispatching ProcessKeys, but it intentionally does **not** host
@@ -161,10 +188,12 @@ Claude's quota is exhausted, or use Gemini for cheap polling tasks.
 - **Backend**: the agent runtime. One of `claude`, `codex`, `gemini`,
   `opencode`.
 - **Tier**: `lite`, `medium`, or `high`. `high` maps to the strongest
-  model (Opus 4.7 / GPT-5.5 / Gemini 3 Pro / Opus 4.7 via OpenCode).
-  `medium` (Sonnet 4.6 and equivalents) is the operator's day-to-day
-  tier for owner-facing work; `lite` (Haiku 4.5 and equivalents) is
-  reserved for mechanical / delegated surfaces.
+  model class (Opus-class — Opus 4.8 on Claude and OpenCode; on Codex
+  and Gemini the seeded high binding collapses to the medium model).
+  `medium` (Sonnet-class — Sonnet 4.6 and equivalents) is the
+  operator's day-to-day tier for owner-facing work; `lite`
+  (Haiku-class — Haiku 4.5 and equivalents) is reserved for
+  mechanical / delegated surfaces.
 - **Main / Fallback**: each ProcessKey has a `main` backend and a
   `fallback`. The router fails over on `BackendQuotaError` /
   `BackendDecisiveFailure`.
@@ -179,12 +208,13 @@ Claude's quota is exhausted, or use Gemini for cheap polling tasks.
 | `routine.hourly_check` | claude | Sonnet 4.6 |
 | `message.dm` | claude | Sonnet 4.6 |
 | `dashboard.chat` | claude | Sonnet 4.6 |
-| `dashboard.docs_qa` | inherits from `message.dm` | Sonnet 4.6 (light forced) |
+| `dashboard.docs_qa` | inherits from `message.dm` | Sonnet 4.6 (locked to medium) |
 | `gmail_classify` | claude | Haiku 4.5 |
 | `github.*` | claude | Haiku 4.5 |
 | `git.push.detected` (and other git-poll keys) | claude | Haiku 4.5 |
 | `calendar.change` | claude | Haiku 4.5 |
 | `delegated_task` | claude | Haiku 4.5 |
+| `delegated_task_heavy` | claude | Opus 4.8 (high; opt-in, off by default) |
 
 ## Where You See It in the Dashboard
 

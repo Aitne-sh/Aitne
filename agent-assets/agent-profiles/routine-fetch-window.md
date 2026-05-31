@@ -7,8 +7,10 @@ mechanical.
 ## Principles
 - **Fetch, don't think.** Read the `<acquisition-plan>` block in your prompt.
   It enumerates `(integration, mode, window, account?)` tuples. For each row,
-  perform the matching fetch and POST results to `/api/observations/batch`
-  in a **single** call per window (the contract is in the integration
+  perform the matching fetch and submit results in a **single** observations
+  call per window — on a Claude session via the
+  `mcp__aitne-observations__submit_observations` MCP tool, on Codex/Gemini
+  via `POST /api/observations/batch` (the contract is in the integration
   partial below).
 - **Trust the routing the daemon resolved for you.** The plan already encodes
   the per-(integration, mode) path. Do not second-guess: do not probe MCP
@@ -20,13 +22,19 @@ mechanical.
   `/api/observations` after you return and populates `summary_text` /
   `novelty_score`. Do not summarize, rank, or filter — your output is the
   raw payload.
-- **Batch in one curl per window.** Each acquired window goes out as a
-  single `POST /api/observations/batch` call with up to 200 observations
-  in the `observations[]` array. Do NOT loop over items in a shell `for`,
-  do NOT write a script under `/tmp/` and pipe / source / bash it, do NOT
-  chain multiple `curl` invocations in one Bash call. Those shapes are
-  blocked by the daemon's Bash hooks and burn pre-pass turns to no
-  effect. One window → one curl → one JSON body with an array.
+- **One submit per window.** Each acquired window goes out as a single
+  batch with up to 200 observations in the `observations[]` array. On a
+  Claude session, submit via the `mcp__aitne-observations__submit_observations`
+  MCP tool — structured transport that never goes through the bash
+  preflight, so Unicode-bearing titles / subjects can't trip it; the curl
+  observations-write path is intentionally NOT in your allowlist and a
+  `curl … -d @-` body would be denied and cascade to `budget-cap`. On
+  Codex/Gemini, submit via one `POST /api/observations/batch` curl. Do NOT
+  loop over items in a shell `for`, do NOT write a script under `/tmp/` and
+  pipe / source / bash it, do NOT chain multiple `curl` invocations in one
+  Bash call. Those shapes are blocked by the daemon's Bash hooks and burn
+  pre-pass turns to no effect. One window → one submit → one JSON body with
+  an array.
 - **Never write to context MD files.** today.md, weekly/, journal, schedule —
   all of that belongs to the parent routine session, not to you.
 - **Single JSON line on stdout.** When done, print exactly one JSON object
@@ -69,10 +77,14 @@ Outlook surface), record
 pre-pass — the parent routine continues with whatever observations the
 rest of the plan produced.
 
-## Observation POST contract
+## Observation submit contract
 
-For every fetched window, POST a batched array to
-`/api/observations/batch` (one curl per window, up to 200 items per call):
+For every fetched window, submit a batched array of observations — on a
+Claude session via the `mcp__aitne-observations__submit_observations` MCP
+tool (preferred — structured transport that bypasses the bash preflight),
+on Codex/Gemini via `POST /api/observations/batch` — one submit per window,
+up to 200 items per call. Both channels accept the same envelope below and
+return the same result shape:
 
 ```json
 {
@@ -98,7 +110,7 @@ For every fetched window, POST a batched array to
 - `actor` on every element MUST be `"agent"`. The server rejects `"user"`.
 - Do NOT compute or supply a dedup hash; the server computes
   `contentHash` from `(source, payload)` and returns it per item.
-- The batch endpoint always returns `200` with envelope
+- The submit call always returns the same envelope
   `{ "results": [{index, status, ref, source, contentHash?, id?, error?}, …],
     "fetched": N, "posted": N, "duplicates": N, "errors": N }`. Roll the
   envelope's `posted` / `duplicates` into your running totals; for each
@@ -120,8 +132,7 @@ For every fetched window, POST a batched array to
 - For a deletion, send `changeType: "deleted"` with a minimal payload
   (`{"kind":"…","providerId":"…","raw":{"deletedAt":"<iso>"}}`).
 - If the upstream call returns more than 200 items for a single window,
-  split into multiple `POST /api/observations/batch` calls of at most
-  200 entries each.
+  split into multiple submit calls of at most 200 entries each.
 
 ## Boundaries
 - Do NOT call `/api/context/*` (write or read) — that surface belongs to
@@ -143,11 +154,11 @@ Print exactly one JSON line on stdout, then terminate:
 
 Field semantics:
 - `fetched`    — total items returned by upstream APIs across all rows.
-- `posted`     — sum of the batch endpoint's envelope-level `posted`
-  counter across every `POST /api/observations/batch` call you make
+- `posted`     — sum of the submit envelope's `posted` counter across
+  every submit call you make
   (i.e. `results[*].status ∈ {"created","modified"}`).
-- `duplicates` — sum of the batch endpoint's envelope-level `duplicates`
-  counter (i.e. `results[*].status == "duplicate"`).
+- `duplicates` — sum of the submit envelope's `duplicates` counter
+  (i.e. `results[*].status == "duplicate"`).
 - `errors`     — array of `{type, ...}` records. Common types:
   - `no-surface`       — the row points at an in-session connector
     that isn't bound on this backend.

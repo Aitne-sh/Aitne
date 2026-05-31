@@ -22,7 +22,7 @@ tags:
   - reference
   - core
   - memory
-  - context
+  - knowledge
   - operations
 status: stable
 ask_examples:
@@ -34,7 +34,7 @@ ask_examples:
   - Which files can the agent write to?
 locale: en-US
 created: 2026-05-18
-updated: 2026-05-21
+updated: 2026-05-28
 keywords:
   - context
   - knowledge
@@ -56,6 +56,22 @@ related:
   - features/memory-files/projects
 ui_anchors:
   - /knowledge
+  - /knowledge?tab=context-files
+process_keys:
+  - routine.morning_routine
+  - routine.morning_routine_journal
+  - routine.evening_review
+  - routine.weekly_review
+  - routine.monthly_review
+  - routine.hourly_check
+  - routine.roadmap_refresh
+config_keys:
+  - dayBoundaryHour
+api_endpoints:
+  - PUT /api/context/state/today
+  - PATCH /api/context/state/today
+  - PUT /api/context/plans/roadmap
+  - PUT /api/context/policies/management
 context_files:
   - state/today.md
   - plans/roadmap.md
@@ -413,11 +429,12 @@ routine to run without re-scanning the full vault.
 | `evening.md` | `routine.evening_review` |
 | `weekly.md` | `routine.weekly_review` |
 | `monthly.md` | `routine.monthly_review` |
-| `plans/roadmap.md` | `routine.roadmap_refresh` |
+| `roadmap.md` | `routine.roadmap_refresh` (this is the dossier `knowledge/dossiers/roadmap.md`, not the plan at `plans/roadmap.md`) |
 
 Each dossier carries a fixed shape: `## Standing checklist`, `## Focus
-this period`, `## Open items`, `## Last run`. Injected into prompts via
-`context-index.md`.
+this period`, `## Open items`, `## Last run`. Pulled into prompts on
+demand via the file catalog in the `_index.md` reconciler block (the
+pre-v2 `context-index.md` catalog was merged there by the migration).
 
 ---
 
@@ -538,13 +555,16 @@ listed is read-only via the API.
 | Pattern | Methods |
 |---|---|
 | `state/today` · `state/yesterday` · `plans/roadmap` · `_index` | `PUT`, `PATCH` |
-| `identity/*` | `PUT`, `PATCH` |
+| `state/profile-questions` · `state/activity/*` | `PUT`, `PATCH` |
+| `identity/_index` · `identity/*` | `PUT`, `PATCH` |
 | `policies/_index` · `policies/*` (top-level files) | `PUT`, `PATCH` |
 | `policies/routines/_index` · `policies/routines/*` | `PUT`, `PATCH` |
 | `policies/routines/custom/*` | `PUT`, `PATCH`, `DELETE` |
 | `plans/projects/_index` · `plans/projects/*` | `PUT`, `PATCH` |
 | `plans/projects/_active` | `PUT` (the Obsidian Bases view) |
 | `knowledge/repos/{slug}/overview` · `journal/repos/{slug}/{date}` | `PUT`, `PATCH` |
+| `knowledge/repos/legacy-registry/*` | `PUT`, `PATCH` (cleanup of dangling entries only) |
+| `knowledge/entities/{domain}/_index` · `knowledge/entities/{domain}/{typePlural}/{slug}` | `PUT`, `PATCH` |
 | `journal/daily/*` · `journal/weekly/*` · `journal/monthly/*` | `PUT`, `PATCH` |
 | `knowledge/dossiers/_index` · `knowledge/dossiers/*` | `PUT`, `PATCH` |
 | `state/inbox/*` · `state/scratch/*` | `PUT`, `PATCH`, `DELETE` |

@@ -12,14 +12,15 @@ aliases:
 category: getting-started
 summary: |
   Aitne is a local-first proactive personal AI agent. It runs
-  as a daemon on your own machine, calls Claude / Codex / Gemini via
-  API keys you register (with the local CLI's subscription auth as a
-  fallback), and stores all memory as plain Markdown files.
+  as a daemon on your own machine, drives Claude / Codex / Gemini /
+  OpenCode via API keys you register (with the local CLI's
+  subscription auth as a fallback), and stores all memory as plain
+  Markdown files.
 section: getting-started
 tags:
   - core
   - getting-started
-  - overview
+  - backends
 status: stable
 ask_examples:
   - What is Aitne?
@@ -28,6 +29,9 @@ ask_examples:
   - What can Aitne actually do for me?
   - Which backends can Aitne drive?
 locale: en-US
+ui_anchors:
+  - /
+  - /settings/models
 keywords:
   - introduction
   - overview
@@ -38,7 +42,12 @@ keywords:
   - markdown memory
   - backends
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
+context_files:
+  - state/today.md
+  - plans/roadmap.md
+  - journal/agent.md
+  - identity/profile.md
 related:
   - getting-started/02-first-steps
   - getting-started/03-what-can-this-do
@@ -139,9 +148,9 @@ an opaque vector store.
   per active project.
 - [`plans/roadmap.md`](../features/memory-files/roadmap.md) — longer-term
   goals.
-- [`schedule/YYYY-MM-DD.md`](../features/memory-files/schedule.md) —
-  per-day plans.
 - [`state/today.md`](../features/memory-files/today.md) — today's plan.
+- [`journal/daily/YYYY-MM-DD.md`](../features/memory-files/schedule.md) —
+  per-day archived plans.
 - [`journal/agent.md`](../features/memory-files/agent-journal.md) —
   what the agent did and noticed.
 
@@ -166,13 +175,16 @@ If you skip the API key, Aitne falls back to whatever local
 subscription login the CLI already has on your machine (`claude`,
 `codex login`, `gemini auth`). This fallback works mechanically, but
 most providers do not officially support running automated agents on
-a personal subscription — Anthropic currently prohibits using the
-Claude Agent SDK with a Claude Pro / Max subscription. The dashboard
-surfaces a warning whenever a backend is running on subscription
-auth.
+a personal subscription — Anthropic, for example, currently prohibits
+using the Claude Agent SDK with a Claude Pro / Max subscription. The
+dashboard surfaces a warning whenever a backend is running on
+subscription auth.
 
-Each kind of work (heavy reasoning vs. a quick reply) is mapped to a
-backend; you can change the mapping any time.
+Each kind of work is mapped to a backend and a tier — most work runs
+on medium (Claude Sonnet 4.6 by default) and quick triage on lite
+(Claude Haiku 4.5). The high tier (Claude Opus 4.8) is registered but
+left unseeded; you opt into it per task from the dashboard. You can
+change any of this mapping at any time.
 
 → [Backends and Tiers](../concepts/backends-and-tiers.md) ·
 [Costs and Quotas](../concepts/costs-and-quotas.md) ·

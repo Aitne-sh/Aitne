@@ -26,7 +26,7 @@ ask_examples:
   - Can I point the wiki at my Obsidian vault?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-21
+updated: 2026-05-28
 keywords:
   - wiki
   - wiki workspace
@@ -85,6 +85,8 @@ and questions you ask it.
 
 ## What It Does
 
+The three commands you reach for daily:
+
 - **URL ingest**: send `!ingest <url>` from a paired DM channel; the wiki
   agent fetches the source, summarises it, and stores a raw note.
 - **Compile**: `!compile` (incremental) and `!compile full` (full
@@ -93,9 +95,15 @@ and questions you ask it.
 - **Ask**: `!ask <question>` searches the wiki and writes a cited
   answer under `30_outputs/`.
 
-The wiki uses its own process keys (`wiki.ingest_url`, `wiki.compile`,
-`wiki.ask`) with independent backend / model / budget settings, so it
-never competes for budget with daily reactive memory.
+Three more for upkeep and exploration: `!lint` (health report),
+`!trace` (reconstruct an idea's evolution), and `!connect` (bridge two
+domains). `!wiki` prints workspace status. See the
+[commands reference](commands.md) for all of them.
+
+The wiki uses its own process keys — `wiki.ingest_url`, `wiki.compile`,
+`wiki.ask`, `wiki.lint`, `wiki.trace`, `wiki.connect` — each with
+independent backend / model / budget settings, so the wiki never
+competes for budget with daily reactive memory.
 
 ## Internal vs External
 
@@ -130,12 +138,14 @@ process keys can write wiki layers.
 ## Cost Safety
 
 `!compile full` rebuilds the entire wiki from raw notes and is the
-most expensive command. The dashboard banner shows the bracketed
-estimate ($0.5×–$2× the assumed input-token spend) before you run
-it. If the pessimistic estimate exceeds the per-workspace threshold
-(default $2.00), the command escalates to the dashboard `/approvals`
-queue and requires your explicit confirmation before the compile
-starts.
+most expensive command. Before you run it, the dashboard shows a
+bracketed estimate — the optimistic (0.5×) and pessimistic (2×)
+multiples of the assumed input-token spend. If the pessimistic
+estimate exceeds the per-workspace threshold (default $2.00), the
+command escalates to the approval queue and requires your explicit
+confirmation before the compile starts. The pending-approval card
+surfaces on the dashboard home page (`/`), where you Approve or Deny
+it.
 
 On a git-tracked external vault, Aitne also runs
 `git add -A && git commit -m "aitne wiki: pre-compile snapshot <ts>"`

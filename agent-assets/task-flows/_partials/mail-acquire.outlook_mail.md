@@ -32,8 +32,9 @@ The four non-disabled branches therefore split into two real flows:
 
 Submit every returned message — for a whole window in **one** call — via the
 `mcp__aitne-observations__submit_observations` MCP tool when it is in your
-allowed tools (preferred — bypasses the SDK bash preflight which denies
-Unicode-whitespace-bearing bodies). Build the tool input as
+allowed tools (preferred — the structured MCP transport carries
+Unicode-bearing subjects / snippets that would deterministically trip
+`curl … -d '{…}'` on the SDK's bash preflight). Build the tool input as
 `{"observations":[…]}` with one entry per message.
 
 If the MCP tool is unavailable (non-Claude session backend), fall back to

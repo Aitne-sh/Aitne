@@ -10,13 +10,15 @@ aliases:
 category: guides
 summary: |
   Run more than one wiki workspace inside the same daemon. Address
-  them from DMs with `@<workspace>`, manage them independently from
-  /settings/wiki, and keep their file trees isolated on disk.
-section: multiple-wikis-for-multiple-domains
+  them from DMs with `@<workspace>`, create and configure additional
+  workspaces through the daemon API, and keep their file trees isolated
+  on disk.
+section: guides
 tags:
-  - guide
+  - guides
   - wiki
-  - multi-workspace
+  - workspaces
+  - knowledge
 status: stable
 ask_examples:
   - How do I run multiple wikis?
@@ -24,26 +26,49 @@ ask_examples:
   - What does `@research` do before a wiki command?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
   - multi-workspace
   - wiki workspace
   - default workspace
-  - @workspace token
+  - "@workspace token"
 related:
   - features/wiki/overview
+  - features/wiki/workspaces
   - features/wiki/commands
   - guides/build-your-wiki
   - guides/use-an-existing-obsidian-vault
+ui_anchors:
+  - /settings/wiki
+api_endpoints:
+  - /api/wiki/workspaces
+  - /api/wiki/workspaces/probe
+  - /api/wiki/workspaces/:workspace
+  - /api/wiki/workspaces/:workspace/archive
+process_keys:
+  - wiki.ingest_url
+  - wiki.compile
+  - wiki.ask
+  - wiki.lint
+  - wiki.trace
+  - wiki.connect
 ---
 
 # Multiple Wikis for Multiple Domains
 
-Phase 5 lifted Aitne's single-workspace ceiling. If you keep distinct
-knowledge bases — say, a research vault, a parenting journal, and an
-ops runbook — you can run each as its own wiki workspace inside the
-same daemon. The DM agent routes commands per workspace; the file
-trees never overlap.
+Aitne can run more than one wiki workspace inside the same daemon. If
+you keep distinct knowledge bases — say, a research vault, a parenting
+journal, and an ops runbook — each can be its own wiki workspace. The
+DM agent routes commands per workspace; the file trees never overlap.
+
+> **Where this lives today.** The multi-workspace machinery is real at
+> the daemon, API, and DM layers: you address any workspace from a DM
+> with an `@<workspace>` token, and each row carries its own per-
+> workspace settings. The dashboard's `/settings/wiki` page, however,
+> currently manages only the **one active workspace** — it has no
+> workspace picker and no "Add Workspace" button. Additional
+> workspaces are created and archived through the daemon API
+> (`POST /api/wiki/workspaces`), described below.
 
 ## Why you might want this
 
@@ -52,9 +77,9 @@ trees never overlap.
   separate `_index.md` and `20_wiki/` trees so the agent never has to
   filter across domains.
 - **Different audiences.** A workspace synced via Obsidian to a shared
-  iCloud folder for a team is governed differently from a private
-  workspace in `$PA_DATA_DIR`. Per-workspace settings handle the
-  asymmetry.
+  iCloud folder for a team is governed differently from the daemon's
+  internal workspace under its data directory. Per-workspace settings
+  handle the asymmetry.
 - **Different cadences.** A "current project" wiki gets multiple
   ingests per day; a long-term commonplace book may compile weekly.
   Per-workspace dispatch / cost / approval thresholds let you tune
@@ -62,21 +87,35 @@ trees never overlap.
 
 ## Creating a second workspace
 
-1. Open `/settings/wiki`. You will see your current (default)
-   workspace.
-2. Scroll to **Add Workspace** (Phase 5 surface). Choose either:
-   - **Internal**, which lives under `$PA_DATA_DIR/wiki-<name>/`. Best
-     for private notes you never sync to another device.
-   - **External**, which points at an existing folder on disk (your
-     Obsidian vault, an iCloud-synced directory, a git working copy).
-3. Pick a unique `name` (lowercase letters, digits, `.`, `_`, `-`). The
-   name is what you address from DMs.
-4. The wizard probes the candidate path against §2.1.1 collision rules
-   — it refuses to nest a wiki inside your primary vault, the data
-   directory, or another active wiki. Iterate until the probe is green.
-5. Click **Create**. The vault skeleton (`00_inbox/`, `10_raw/`,
-   `20_wiki/`, `30_outputs/`, `90_meta/`) is seeded and the workspace
-   joins the active set.
+The first workspace — the one named `default` — can be **internal**
+(managed by the daemon under its own data directory at
+`<contextDir>/knowledge/wiki/`) or **external** (an existing folder you
+own). You pick that during initial setup on `/settings/wiki`.
+
+Every *additional* workspace must be **external** — it points at a
+folder on disk (an Obsidian vault, an iCloud-synced directory, a git
+working copy). Only `default` is internal. Create a second workspace by
+POSTing to the daemon API:
+
+    curl -X POST http://localhost:8321/api/wiki/workspaces \
+      -H 'content-type: application/json' \
+      -d '{"kind":"external","name":"research","rootPath":"/Users/you/vaults/research"}'
+
+- **`name`** — unique, 1–64 chars matching `[A-Za-z0-9][A-Za-z0-9._-]*`
+  (letters, digits, `.`, `_`, `-`). This is what you address from DMs.
+- **`rootPath`** — required for external workspaces. The daemon
+  validates it before creating the row: it refuses to nest a wiki
+  inside your primary vault, the data directory, or another active wiki
+  (see [Path collision rules](#path-collision-rules-recap)). A failed
+  validation returns a `4xx` with the collision reason — fix the path
+  and retry.
+- **`language`** (optional) — defaults to the daemon's wiki language.
+
+Use `POST /api/wiki/workspaces/probe` with `{ "rootPath": "…" }` first
+if you want the read-only collision diagnostics before committing the
+row. On success the vault skeleton (`00_inbox/`, `10_raw/`, `20_wiki/`,
+`30_outputs/`, `90_meta/`) is seeded into the folder and the workspace
+joins the active set.
 
 ## Addressing a workspace from DMs
 
@@ -122,16 +161,22 @@ you which workspace `!ask` (with no `@`) will route to.
 
 ## Configuring each workspace independently
 
-`/settings/wiki` shows a workspace picker at the top once you have
-more than one. Each workspace's panel carries its own:
+Each workspace row carries its own settings:
 
 - language (`en`, `ja`, …)
 - dispatch mode (parallel / serial) and concurrency cap
 - write strategy (`fs` / `cli` / `auto`) — external mode only
 - full-compile approval threshold (USD)
 - git pre-compile auto-commit toggle (external git vaults only)
-- bridge feature gate + measurement mode + min confidence (Phase 5)
+- bridge feature gate + measurement mode + min confidence
 - DM-agent bridge write toggle
+
+The dashboard's `/settings/wiki` page edits these for the single active
+workspace it surfaces. For any other workspace, PATCH the row directly:
+
+    curl -X PATCH http://localhost:8321/api/wiki/workspaces/research \
+      -H 'content-type: application/json' \
+      -d '{"dispatchMode":"serial","fullCompileApprovalThresholdUsd":2.0}'
 
 `POST /api/backends/apply-defaults` re-seeds the per-process backend /
 model / budget rows but leaves the per-workspace columns alone — those
@@ -146,34 +191,38 @@ bound to each key applies across all workspaces — they share the
 binding because the daemon resolves the row by process key, not by
 workspace.
 
-If you need a research vault on Opus 4.7 and a parenting journal on
-Haiku 4.5 at the same time, the supported path today is:
+There is no per-workspace model binding today. If you want a research
+vault on Opus 4.8 and a parenting journal on Haiku 4.5 at the same
+time, you cannot — the `wiki.ask` row resolves to one backend/model for
+every workspace. The pragmatic shape is:
 
-- Bind `wiki.ask` to medium-tier Sonnet (a sensible cross-workspace
-  default).
-- Use the workspace-aware `!ask @research` for the research vault and
-  rely on per-workspace token budgets via the cost ceiling.
+- Bind `wiki.ask` to its medium-tier default (Sonnet 4.6), a sensible
+  cross-workspace balance of cost and quality.
+- Keep cost differences per workspace through each workspace's own
+  full-compile approval threshold (see above).
 
-A future enhancement is per-workspace model bindings; the present
-shape was chosen to keep `/settings/models` legible without a
-workspace dimension.
+Per-workspace model bindings are a possible future enhancement; the
+present shape keeps `/settings/models` legible without a workspace
+dimension.
 
 ## Archiving a workspace
 
-The dashboard's **Archive** button on a workspace card flips its
-`active` column to `0`. Archived workspaces:
+`POST /api/wiki/workspaces/<name>/archive` flips a workspace's `active`
+column to `0`. (The dashboard exposes a Stop/Remove control for the one
+active workspace it surfaces; other workspaces are archived via the API
+call.) Archived workspaces:
 
 - disappear from `!wiki` listings,
-- reject all daemon API requests with `wiki_not_enabled`,
+- reject daemon API requests with `wiki_not_enabled`,
 - drop out of `/search` and `/index`,
 - keep their files on disk (you can re-activate later with no data
   loss),
 - have their `fts_wiki` rows cleared eagerly so a same-id re-enable
   re-indexes from disk.
 
-`DELETE /wiki/workspaces/:name` removes the row entirely (filesystem
-contents are preserved — the daemon never deletes vault content). Use
-this when you are sure you will not re-enable.
+`DELETE /api/wiki/workspaces/<name>` removes the row entirely
+(filesystem contents are preserved — the daemon never deletes vault
+content). Use this when you are sure you will not re-enable.
 
 ## Path collision rules (recap)
 
@@ -185,17 +234,19 @@ can overlap:
 - `externalObsidianVaultPath` — your owner-facing Obsidian vault.
 - `$PA_DATA_DIR` — the daemon's data home.
 
-The wizard's pre-create probe enforces this; PATCH cannot widen past
-it. If you want to migrate a workspace to a new disk location, archive
-the old row, create a fresh row pointing at the new path, then
-manually copy the vault contents.
+The pre-create validation (`POST /api/wiki/workspaces` and the
+`/probe` endpoint) enforces this, and PATCH cannot widen past it. If
+you want to migrate a workspace to a new disk location, archive the old
+row, create a fresh row pointing at the new path, then manually copy
+the vault contents.
 
 ## See also
 
-- `docs/design/23-wiki-builder.md` — Phase summary table for the
-  overall wiki feature.
-- `docs/design/appendices/wiki-external-vault.md` — write strategy,
-  iCloud handling, snapshot exclusion.
-- `docs/design/appendices/wiki-bridge-mechanism.md` — Phase 5 bridge
-  capture from DMs into a workspace's raw layer.
-- `docs/user/features/wiki/commands.md` — full bang command reference.
+- **features/wiki/overview** — what the wiki feature is and the four
+  vault layers.
+- **features/wiki/workspaces** — workspace lifecycle, internal vs
+  external, and per-workspace settings in depth.
+- **features/wiki/commands** — full bang-command reference, including
+  the `@<workspace>` token.
+- **guides/use-an-existing-obsidian-vault** — pointing a workspace at a
+  folder you already own.

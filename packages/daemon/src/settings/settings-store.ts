@@ -37,14 +37,60 @@ class SqliteSettingsStore implements SettingsStore {
     }
 
     const defaults = runtimeSettingsSchema.parse({});
+
+    // Gather every persisted key, then attempt a SINGLE full-object parse.
+    // Validating each key in isolation against peer *defaults* breaks
+    // cross-field refinements (e.g. prePassBackoffMs length must be
+    // >= prePassMaxAttemptsPerIntegration - 1): during a peer's per-key parse
+    // the other field still holds its default, so a mutually-consistent
+    // persisted pair could be wrongly rejected and silently reverted. The full
+    // parse lets such peers see each other.
+    const known: Record<string, unknown> = {};
+    for (const key of RUNTIME_SETTING_KEYS) {
+      if (key in rawValues) {
+        known[key] = (rawValues as Record<string, unknown>)[key];
+      }
+    }
+
     const result: Partial<RuntimeSettings> = {};
+    const full = runtimeSettingsSchema.safeParse({ ...defaults, ...known });
+    if (full.success) {
+      // Project back down to only the persisted keys — getAll() returns a
+      // Partial of what was stored, never schema defaults for absent keys.
+      for (const key of RUNTIME_SETTING_KEYS) {
+        if (key in known) {
+          (result as Record<string, unknown>)[key] = full.data[key];
+        }
+      }
+      return result;
+    }
+
+    // Fallback: the full parse failed, so at least one persisted row is
+    // corrupt or part of an inconsistent cross-field combination. Seed peers
+    // from the persisted values that are INDIVIDUALLY valid (over defaults) —
+    // not raw `known` — so a corrupt value (e.g. a string where a number is
+    // expected) can't poison every other key's per-key parse. A valid
+    // cross-field pair still sees its persisted peer through `validPeers`.
+    const validPeers: Record<string, unknown> = {};
+    for (const key of RUNTIME_SETTING_KEYS) {
+      if (!(key in rawValues)) {
+        continue;
+      }
+      const single = runtimeSettingsSchema.safeParse({
+        ...defaults,
+        [key]: rawValues[key],
+      });
+      if (single.success) {
+        validPeers[key] = (rawValues as Record<string, unknown>)[key];
+      }
+    }
     for (const key of RUNTIME_SETTING_KEYS) {
       if (!(key in rawValues)) {
         continue;
       }
       const candidate = runtimeSettingsSchema.safeParse({
         ...defaults,
-        ...result,
+        ...validPeers,
         [key]: rawValues[key],
       });
       if (!candidate.success) {

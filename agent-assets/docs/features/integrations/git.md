@@ -17,19 +17,22 @@ tags:
   - integrations
   - git
   - observations
+  - polling
 status: stable
 ask_examples:
   - How do I add a git repo to watch?
   - Will the agent message me on every commit?
   - Can the agent push to my repos?
+  - How often does the daemon poll my repos?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - git
   - commit
   - repository
   - observer
+  - polling
 related:
   - features/integrations/github
   - features/routines/hourly-check
@@ -38,6 +41,13 @@ ui_anchors:
   - /connections/repositories
 config_keys:
   - gitPollIntervalSeconds
+process_keys:
+  - git.push.detected
+  - git.lifecycle.poll
+api_endpoints:
+  - /api/git/log
+  - /api/git/diff
+  - /api/git/show
 ---
 
 # Git
@@ -70,19 +80,22 @@ by design.
 
 ## Where in the Dashboard
 
-- **Connections → Git** lists the watched paths and last-poll times.
+- **Connections → Repositories** lists the watched paths and last-poll
+  times. Git repos are managed as part of the unified Repositories
+  surface (the same place that links a local checkout to its GitHub
+  remote).
 
 ## Configuration
 
 | Setting | Default | Notes |
 |---|---|---|
-| `gitPollIntervalSeconds` | 300 | How often to scan watched repos. |
+| `gitPollIntervalSeconds` | 3600 | How often to scan watched repos. |
 
 ## When Something Goes Wrong
 
 - A **missing observation** for a commit you just made: check that the
-  repo path is actually watched on `/connections/git` and that the
-  poll has fired since.
+  repo path is actually watched on `/connections/repositories` and that
+  the poll has fired since (it runs every `gitPollIntervalSeconds`).
 - A repo that **never appears** in observations: the agent's own
   writes are filtered out (see `AgentWriteTracker`); make sure the
   commit was authored by you, not by an agent session.
@@ -90,4 +103,4 @@ by design.
 ## Related
 
 - [GitHub](github.md) — separate integration for remote-side data.
-- [Hourly Check](../policies/routines/hourly-check.md) — the consumer.
+- [Hourly Check](../routines/hourly-check.md) — the consumer.

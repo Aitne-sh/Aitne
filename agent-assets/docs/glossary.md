@@ -8,6 +8,7 @@ aliases:
   - vocabulary
   - lexicon
 category: glossary
+section: glossary
 summary: |
   Single flat term list for Aitne vocabulary. Cross-references
   link to a single canonical anchor here so concept docs do not drift.
@@ -34,7 +35,7 @@ ask_examples:
   - What is an observation?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-24
+updated: 2026-05-28
 keywords:
   - terminology
   - vocabulary
@@ -69,6 +70,23 @@ related:
   - features/wiki/overview
   - features/integrations/browser-history
   - features/messaging/bang-commands
+ui_anchors:
+  - /settings/models
+  - /docs
+  - /settings/integrations/browser-history-managed/b4
+process_keys:
+  - dashboard.docs_qa
+  - delegated_task_heavy
+  - routine.fetch_window
+  - routine.hourly_check
+  - routine.research_cluster_update
+config_keys:
+  - dayBoundaryHour
+  - browserTaskHostnameDenylist
+  - delegatedTaskHeavyEnabled
+  - claudeExecutionPermissionMode
+api_endpoints:
+  - POST /api/observations
 ---
 
 # Glossary
@@ -106,11 +124,16 @@ Experimental purchase-confirmation flow that drives a daemon-spawned
 Chromium profile to complete a vendor checkout the agent has already
 prepared. **Default-off.** Requires per-site opt-in, the experimental-
 danger acknowledgement modal, at least one DM channel, a single-use
-`!~xxxxxxxx` token, screenshot-first consent, and a 5-min timeout. The
-§23 hard-deny categories (banking, brokerage, government, healthcare,
-identity / legal, generic payment processors) remain denied even with a
-valid token. Operator self-testing only until B-3 has been stable for
-six weeks. See [Managed Chromium](features/operations/managed-chromium.md).
+`!~xxxxxxxx` token, screenshot-first consent, and a 5-min timeout. There
+is no longer a hardcoded domain category denylist (banks, government,
+payment processors, etc. were removed at the framework level on
+2026-05-27); domain-level deny is operator-managed via **Settings →
+Integrations → Browser History (Managed) → B-4** (`browserTaskHostnameDenylist`,
+default empty). The structural defences that remain: the IP CIDR layer
+in `shouldDenyEgress` (RFC1918 / loopback / cloud-metadata), the
+form-submit `payment-path-blocker`, and the single-use token primitive.
+Operator self-testing only until B-3 has been stable for six weeks. See
+[Managed Chromium](features/operations/managed-chromium.md).
 
 ## Bang Command
 
@@ -191,25 +214,29 @@ hardcode an integration reference outside
 ## Heavy Tier
 
 Synonym for the **high** tier — the expensive, high-quality model lane
-on each backend (Claude Opus 4.7, GPT-5.5, Gemini 3 Pro, Opus 4.7 via
-OpenCode). Registered but not auto-selected on any routine: after
-`docs/design/appendices/morning-routine-optimization.md` Phase 7
-(2026-05-16) the only flows that default to this tier are `setup` and
-`knowledge.import`. Operators can pin any other process key to high
-per row from `/settings/models`.
+on each backend (Claude Opus 4.8 / `claude-opus-4-8`, `gpt-5.5` on
+Codex, `gemini-3.1-pro-preview` on Gemini, Opus 4.8 via OpenCode).
+Registered but not auto-selected on any install-seeded surface: after
+the "no Opus by default" pass (2026-05-16) the **only** process key that
+defaults to high tier is `delegated_task_heavy` (opt-in, gated by the
+`delegatedTaskHeavyEnabled` flag). Every other process key — including
+`setup` and `knowledge.import` — defaults to medium. Operators can pin
+any other process key to high per row from the `/settings/models`
+dashboard page.
 
 ## Light Tier
 
 Operator-facing umbrella for the two non-heavy lanes on each backend:
 
-- **Medium / Main** (Claude Sonnet 4.6, GPT-5.4-mini, Gemini 3 Flash,
-  Sonnet 4.6 via OpenCode) — default for owner DMs, dashboard chat,
-  the hourly check, and the morning / evening / weekly review
-  routines.
-- **Lite / Delegated** (Claude Haiku 4.5 and equivalents) — reserved
-  for mechanical / delegated surfaces: Gmail classification, GitHub
-  triage, calendar-change handlers, the routine pre-pass fetcher,
-  the `delegated_task` invoker.
+- **Medium / Main** (Claude Sonnet 4.6, `gpt-5.4` on Codex,
+  `gemini-3.1-pro-preview` on Gemini, Sonnet 4.6 via OpenCode) —
+  default for owner DMs, dashboard chat, the hourly check, and the
+  morning / evening / weekly review routines.
+- **Lite / Delegated** (Claude Haiku 4.5, `gpt-5.4-mini` on Codex,
+  `gemini-3.1-flash-lite-preview` on Gemini, Haiku 4.5 via OpenCode) —
+  reserved for mechanical / delegated surfaces: Gmail classification,
+  GitHub triage, calendar-change handlers, the routine pre-pass
+  fetcher, the `delegated_task` invoker.
 
 ## OpenCode
 
@@ -278,8 +305,11 @@ upgrade path** — see [Reinstall Cleanly](guides/reinstall-cleanly.md).
 
 The right-side pane on `/docs` and the bottom of the `?`-button
 slide-over that runs grounded question answering over the docs corpus.
-Runs on the operator's DM-bound backend at the **light tier** —
-inherited from `message.dm`'s binding via the cascade-write helper.
+Dispatched under the `dashboard.docs_qa` ProcessKey, which is **hard
+tier-locked to medium** (`TIER_LOCKED_PROCESS_KEYS` in
+`packages/shared/src/process-key.ts`) — an operator pin to a different
+tier is ignored. The backend itself is inherited from the operator's
+DM-bound backend via the cascade-write helper.
 
 ## Skill
 
@@ -296,9 +326,14 @@ the row key in `fts_docs`, and the first half of every
 
 ## Tier
 
-Short for **model tier**: `light` or `heavy`. Each ProcessKey has a
-default tier; per-process pins and per-call requested-tier overrides can
-deviate from that default.
+Short for **model tier**. The code-level enum (`ProcessModelTier` in
+`packages/shared/src/process-key.ts`) has three values — `lite`,
+`medium`, `high`. This doc also uses the operator-facing two-way split
+**light** (lite + medium) vs **heavy** (high); see [Light Tier](#light-tier)
+and [Heavy Tier](#heavy-tier). Each ProcessKey has a default tier;
+per-process pins and per-call requested-tier overrides can deviate from
+that default, except for keys in `TIER_LOCKED_PROCESS_KEYS` (today only
+`dashboard.docs_qa`, locked to medium).
 
 ## Two-Option Offer DM
 

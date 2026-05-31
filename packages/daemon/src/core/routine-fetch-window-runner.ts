@@ -291,6 +291,15 @@ const FETCH_WINDOW_INTEGRATION_PARTIAL_PLACEHOLDER = "{integration_partial}";
  * remains the host/port/exfil chokepoint; this clamp now restricts only
  * the daemon-API namespace, which is what we actually need.
  *
+ * 2026-05-29: the observations-WRITE curl pattern is omitted ENTIRELY on
+ * the Claude backend (see `buildPrePassDaemonRestPatterns`). Claude posts
+ * via the in-process `mcp__aitne-observations__submit_observations` MCP
+ * tool — structured transport, never shell-parsed — the only path that
+ * survives the SDK's `Ae6` Unicode-whitespace bash preflight that
+ * otherwise denies `curl … -d @-` bodies and cascades to `budget-cap`.
+ * The wildcard rationale above still governs the surviving READ curls
+ * (mail/calendar/notion/integrations) and codex/gemini's write curl.
+ *
  * `jq *` stays allowed because direct-mode partials pipe curl output
  * through jq for compact projection before posting to /api/observations.
  *
@@ -299,12 +308,31 @@ const FETCH_WINDOW_INTEGRATION_PARTIAL_PLACEHOLDER = "{integration_partial}";
  * `process_backend_config` envelope (`max_turns=20`, `max_budget_usd=0.50`)
  * remains the floor on those backends.
  */
-function buildPrePassDaemonRestPatterns(apiPort: number): readonly string[] {
+function buildPrePassDaemonRestPatterns(
+  apiPort: number,
+  sessionBackend: BackendId,
+): readonly string[] {
   const root = `http://localhost:${apiPort}/api`;
+  // Observations WRITE surface — the only write the pre-pass performs (GET
+  // reads of pending observations live in the hourly-check session, never
+  // here). For Claude the structured MCP tool
+  // `mcp__aitne-observations__submit_observations` (added by
+  // `composePrePassAllowedTools`) is the ONLY sanctioned write path, so we
+  // deliberately OMIT the curl pattern: a `curl … -d @- <<'JSON'` body whose
+  // calendar titles / mail subjects carry Unicode whitespace (U+3000 in JP
+  // titles, NBSP/ZWS in promo subjects) makes the SDK's `Ae6` bash preflight
+  // mark the command `too-complex` ("Contains Unicode whitespace") and deny
+  // it under dontAsk — which the runner then retries until it trips the
+  // per-integration `budget-cap`. Dropping the curl allow-rule forces Claude
+  // onto the MCP transport (structured JSON, never shell-parsed) and closes
+  // that failure class. codex/gemini have no MCP transport, so they retain
+  // the curl pattern (accepted gap — see `composePrePassAllowedTools`).
+  const observationsWrite =
+    sessionBackend === "claude"
+      ? []
+      : [`Bash(curl *${root}/observations*)`];
   return [
-    // Observations — the only write surface the pre-pass touches.
-    // Catches both POST /api/observations and GET /api/observations*.
-    `Bash(curl *${root}/observations*)`,
+    ...observationsWrite,
     // Direct-mode mail / calendar / notion reads.
     `Bash(curl *${root}/mail/*)`,
     `Bash(curl *${root}/calendar/*)`,
@@ -473,7 +501,7 @@ export function composePrePassAllowedTools(
   const observationsMcpTools =
     sessionBackend === "claude" ? [OBSERVATIONS_MCP_TOOL_NAME] : [];
   return [
-    ...buildPrePassDaemonRestPatterns(apiPort),
+    ...buildPrePassDaemonRestPatterns(apiPort, sessionBackend),
     ...integrationTools,
     ...observationsMcpTools,
     ...(needsDeferredDiscovery ? ["ToolSearch"] : []),

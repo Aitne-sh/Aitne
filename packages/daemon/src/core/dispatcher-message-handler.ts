@@ -1192,7 +1192,7 @@ export class MessageHandler {
               id: row.id,
               safeFilename: row.safeFilename,
               mimeType: row.mimeType,
-              absolutePath: `${sessionDir}/_attachments/${row.safeFilename}`,
+              absolutePath: join(sessionDir, "_attachments", row.safeFilename),
               relativePath: `_attachments/${row.safeFilename}`,
             }))
           : [];
@@ -1384,7 +1384,7 @@ export class MessageHandler {
               id: row.id,
               safeFilename: row.safeFilename,
               mimeType: row.mimeType,
-              absolutePath: `${sessionDir}/_attachments/${row.safeFilename}`,
+              absolutePath: join(sessionDir, "_attachments", row.safeFilename),
               relativePath: `_attachments/${row.safeFilename}`,
             }))
           : [];

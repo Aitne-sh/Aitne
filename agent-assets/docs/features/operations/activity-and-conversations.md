@@ -18,6 +18,7 @@ tags:
   - core
   - operations
   - audit
+  - dashboard
 status: stable
 ask_examples:
   - Where can I see what the agent did today?
@@ -25,7 +26,7 @@ ask_examples:
   - How do I find why a routine failed?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - activity
   - conversations
@@ -36,6 +37,12 @@ related:
   - features/operations/notifications
   - features/operations/cost-tracking
   - features/operations/backend-routing
+config_keys:
+  - executeTimeoutMinutes
+process_keys:
+  - routine.morning_routine
+api_endpoints:
+  - POST /api/system/purge-history
 ui_anchors:
   - /
   - /activity
@@ -62,15 +69,16 @@ Activity is the unified view of:
 
 Each row links to the underlying conversation when one exists.
 
-## When It Runs / How It Is Triggered
+## How It Works
 
-There is no trigger — Activity is a read-only projection. It is
-written to as a side-effect of every other event in the system
-(`agent_actions` / `conversation_sessions` / `messages`).
+Activity has no trigger of its own — it is a read-only projection.
+Every other event in the system writes to it as a side effect, landing
+in three SQLite tables: `agent_actions` (what happened), and
+`conversation_sessions` + `messages` (what was said).
 
-## What It Outputs
+## What You See
 
-- A timeline filterable by event type, ProcessKey, backend, outcome.
+- A timeline filterable by event type, ProcessKey, backend, and outcome.
 - Per-row cost, token counts, and turn count.
 - A direct link to the message transcript for any session.
 
@@ -81,21 +89,42 @@ written to as a side-effect of every other event in the system
 - **Conversations (`/conversations/<id>`)** opens a single session's
   message-by-message transcript.
 
+To read the morning routine's full reply, open Activity, filter to the
+`routine.morning_routine` row, and click through to its conversation —
+the transcript holds the agent's complete output, not just the summary
+that reached your DM.
+
 ## Configuration
 
 There is nothing to configure on the Activity view itself; what shows
 up is a function of which routines are enabled and which integrations
-are connected. Retention is unlimited locally — the SQLite database
-keeps everything until you `aitne stop && rm ~/.personal-agent/data/personal_agent.db*` (the `*` also clears the `-shm`/`-wal` companions).
+are connected.
+
+Retention is unlimited locally — the SQLite database keeps every row
+forever. To prune history without losing your configuration, use
+`POST /api/system/purge-history` (it clears `agent_actions`,
+`conversation_sessions`, and `messages` but leaves settings and the
+context vault intact). To wipe everything, `aitne uninstall --wipe-data`
+removes the whole `~/.personal-agent` data directory after a `WIPE`
+confirmation.
 
 ## When Something Goes Wrong
 
-- A row showing **"timed out"** points at a backend or SDK hang.
-  `executeTimeoutMinutes` (`/settings/models`) is the wall-clock cap.
-- A row showing **"fallback"** means main backend failed; check the
-  detail for the `BackendQuotaError` / `BackendDecisiveFailure`.
-- A row showing **"blocked_absolute"** means the absolute-block layer
-  refused a tool call. The detail names which tool and why.
+To find why a routine failed, open Activity, filter the outcome to
+**failed**, and open the offending row. Its outcome label tells you the
+failure class; the linked conversation shows the exact error and the
+turn it happened on.
+
+Common outcome labels:
+
+- **"timed out"** — a backend or SDK hang. `executeTimeoutMinutes`
+  (`/settings/models`) is the wall-clock cap.
+- **"fallback"** — the main backend failed and routing moved to the
+  fallback; the detail carries the `BackendQuotaError` or
+  `BackendDecisiveFailure` that triggered it.
+- **"blocked_absolute"** — the absolute-block layer refused a tool call.
+  The detail names which tool and why (logged as
+  `agent_actions.action_type='blocked_absolute'`).
 
 ## Related
 

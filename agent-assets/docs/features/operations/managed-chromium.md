@@ -28,10 +28,10 @@ ask_examples:
   - Can Aitne buy things for me?
   - What is the !~ token in my DM?
   - How do I enable managed Chromium purchases?
-  - What categories can't B-4 ever touch?
+  - How do I block a site from managed Chromium?
 locale: en-US
 created: 2026-05-22
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - managed chromium
   - browser automation
@@ -40,7 +40,7 @@ keywords:
   - "!~xxxxxxxx"
   - per-site opt-in
   - experimental danger
-  - hard-deny
+  - hostname denylist
 related:
   - features/integrations/browser-history
   - features/operations/approvals
@@ -50,8 +50,17 @@ related:
 ui_anchors:
   - /settings/integrations/browser-history-managed
   - /settings/integrations/browser-history-managed/b4
+process_keys:
+  - browser_task
+  - message.dm
 config_keys:
-  - "runtime_state.managed_chromium.b4_enabled"
+  - browserTaskHostnameDenylist
+api_endpoints:
+  - POST /api/browser-automation/b4/enabled
+  - PATCH /api/browser-automation/sites/:siteKey/b4-config
+  - GET /api/browser-automation/purchase-tokens
+  - POST /api/browser-automation/sites/:siteKey/connect
+  - POST /api/browser-task
 ---
 
 # Managed Chromium (B-4)
@@ -77,8 +86,8 @@ Before B-4 can run, every one of these must be true:
    `POST /api/browser-automation/b4/enabled` with body
    `{ enabled: true, acknowledge: true }` (Approve-tier).
 2. You've acknowledged the **experimental-danger modal** on
-   `/settings/browser-automation`. The modal lists the failure modes,
-   the §23 hard-deny categories, and that the guard is bypassable if
+   `/settings/integrations/browser-history-managed/b4`. The modal
+   lists the failure modes and warns that the guard is bypassable if
    the daemon or messaging platform is compromised.
 3. At least one **primary DM channel** is set (Slack / Telegram /
    Discord / WhatsApp). The single-use token is delivered there; the
@@ -94,21 +103,33 @@ Before B-4 can run, every one of these must be true:
    restricted directory the absolute-block layer protects from any
    skill.
 
-## The §23 Hard-Deny List
+## Structural Defences (no hardcoded category denylist)
 
-These categories are **absolutely denied** even with a valid token
-and a fully approved site:
+Earlier builds hardcoded a category denylist (banking, brokerages,
+government, healthcare, identity / legal, payment processors). **That
+framework-level category denylist was removed on 2026-05-27** — Aitne
+is not a Japan-specific product and does not ship an opinionated brand
+or category blocklist. What protects you now is structural, not a
+category list:
 
-- Banking
-- Brokerages
-- Government services
-- Healthcare
-- Identity / legal
-- Generic payment processors not bound to a registered commerce
-  workflow
+1. **IP CIDR egress layer (hardcoded, not configurable).** Any
+   navigation that resolves to a private (RFC1918), loopback,
+   link-local, multicast, cloud-metadata (`169.254.169.254`), or the
+   IPv6 equivalents is denied at the egress chokepoint
+   (`shouldDenyEgress` in `egress-denylist.ts`). This is the
+   defence-in-depth against SSRF — it cannot be turned off.
+2. **Payment-path blocker.** A URL-pattern matcher
+   (`payment-path-blocker.ts`) trips at form-submit time on
+   payment-handoff paths so the agent can't silently push a
+   transaction through.
+3. **The B-4 token primitive itself** — no final confirm without a
+   live, matched, single-use token (see below).
 
-The check lives in the parent-plan policy and runs before the token
-is even minted. There is no operator override.
+**Domain-level deny is now user-managed.** If you want to keep B-4 (or
+any browser task) away from specific hostnames, add them to
+`browserTaskHostnameDenylist` (default empty, up to 500 entries) from
+Dashboard → `/settings/integrations/browser-history-managed`. The list
+ships empty.
 
 ## The Token Flow
 
@@ -116,9 +137,9 @@ is even minted. There is no operator override.
    pauses at the final confirm step.
 2. The daemon mints a single-use token with the prefix `!~` followed
    by 8 random hex characters (e.g. `!~3a1f9c7b`), inserts a
-   `purchase_tokens` row keyed on a server-side `jti`, and DMs the
-   token to a primary channel together with a screenshot of the
-   exact cart state.
+   `browser_automation_purchase_tokens` row keyed on a server-side
+   `jti`, and DMs the token to a primary channel together with a
+   screenshot of the exact cart state.
 3. You reply with the token on the same DM channel. The daemon
    matches inbound text against pending tokens; a match advances the
    flow and the agent clicks confirm.
@@ -137,8 +158,8 @@ token before its timeout.
 ## Site Bootstrap (B-2.5)
 
 The same site infrastructure powers anonymous reads (B-2),
-authenticated reads (B-2.5), and B-4. Per-site state lives in
-`managed_chromium_sites_store`; the bootstrap UI flow is:
+authenticated reads (B-2.5), and B-4. Per-site state is managed by
+`managed-chromium-sites-store.ts`; the bootstrap UI flow is:
 
 | Step | Route |
 |---|---|
@@ -176,8 +197,11 @@ full hand-off.
 - Vendor flows change. A working B-4 site today can break tomorrow if
   the vendor restructures the checkout DOM — the agent's recovery
   story is "abandon and DM you", but you'll still see a partial cart.
-- The categories listed in §23 above are intentionally off-limits.
-  If your use case lives there, B-4 is not the right tool.
+- There is no built-in category guard. Aitne will not refuse a
+  high-stakes site for you (banks, brokerages, government, healthcare)
+  — those decisions are yours. If you don't trust B-4 with a site,
+  simply don't add it to the per-site allowlist, or add its hostname
+  to `browserTaskHostnameDenylist`.
 
 ## Related
 

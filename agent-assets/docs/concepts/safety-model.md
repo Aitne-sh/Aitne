@@ -12,19 +12,20 @@ aliases:
   - on-demand retrospective
 category: concepts
 summary: |
-  Aitne's safety model collapsed from four tiers to two: most
-  actions run autonomously, a small set of posture-changing operations
-  require explicit Approve. The previous Notify tier (DM the operator
-  before / during a write) was abolished — the operator's `deniedTools`
-  list is now the primary defense, and "what did the agent do?" is
-  answered on demand via `GET /api/agent/actions` instead of pushed as
-  a daily digest.
+  Aitne's risk classifier dropped from three write tiers to two: most
+  actions run autonomously, and a small set of posture-changing
+  operations require explicit Approve. The previous Notify tier (DM the
+  operator before / during a write) was abolished — the operator's
+  `deniedTools` list is now the primary defense, and "what did the
+  agent do?" is answered on demand via `GET /api/agent/actions` instead
+  of pushed as a daily digest. (The read-gating `ReadSensitive` tier is
+  unchanged.)
 section: safety
 tags:
   - core
   - safety
   - integrations
-  - skills
+  - audit
 status: stable
 ask_examples:
   - Why doesn't the agent ask before sending an email anymore?
@@ -33,7 +34,7 @@ ask_examples:
   - Where do I see what the agent has been doing?
 locale: en-US
 created: 2026-04-26
-updated: 2026-05-17
+updated: 2026-05-28
 keywords:
   - deniedTools
   - safety floor
@@ -50,10 +51,16 @@ related:
   - reference/disallowed-tools
 ui_anchors:
   - /connections
-  - /settings/cost
-config_keys:
-  - integrations
-  - deniedTools
+  - /connections/mail
+  - /connections/calendar
+  - /analytics
+api_endpoints:
+  - GET /api/agent/actions
+  - POST /api/integrations/:key/exec
+  - PATCH /api/integrations/:key
+context_files:
+  - policies/integrations.md
+  - journal/agent.md
 ---
 
 # Safety Model (deniedTools + Approve Tier)
@@ -123,12 +130,9 @@ of "report to me" events. Information about what the agent did is
   bare `*`.
 - **`/api/integrations/:key/exec`** — the cross-backend chokepoint
   (task mode; the RPC-style `/invoke` route was retired 2026-05-01,
-  see `docs/design/17-delegated-mode-v2.md` §4.2). Enforces `deniedTools`
-  server-side by filtering the integration's `capabilityTools` through
-  the deny list before spawning the delegated backend, so the
-  task-mode planner can only pick from the allowed surface. A
-  fully-denied surface short-circuits with `errorClass: "denied_tool"`
-  before any subprocess spawn.
+  see `docs/design/17-delegated-mode-v2.md` §4.2). It enforces
+  `deniedTools` server-side — see the *Where the Defenses Apply* table
+  below for the exact mechanism.
 - **`agent_actions`** — SQLite table of every agent action. Direct +
   cross-backend rows are full-fidelity (current cross-backend writes
   emit `delegated_task.run` / `delegated_task.exec` /
@@ -227,12 +231,15 @@ and answers in conversation. The endpoint:
 
 - Lives at `Autonomous` tier — the agent reads only its own audit
   trail, no operator data.
-- Accepts `since`, `kind` (repeat for multiple values, e.g.
-  `?kind=a&kind=b`), `limit` (default 50, max 200).
-- Redacts values via the standard secret-redaction utility before
-  serializing.
-- Returns rows from `agent_actions`, optionally joined with
-  `mcp_tool_calls` when `kind=mcp` (same-backend / native MCP).
+- Accepts `since` (ISO-8601; defaults to the last 24h if omitted),
+  `kind` (an `action_type` filter — repeat for multiple values, e.g.
+  `?kind=a&kind=b`), and `limit` (default 50, max 200).
+- Redacts the free-text `error` / `detail` fields via the standard
+  secret-redaction utility before serializing.
+- Returns rows from `agent_actions` only. Same-backend / native MCP
+  calls surface as their own `action_type` rows (e.g. `kind=mcp`);
+  the per-call detail lives in `mcp_tool_calls`, which this endpoint
+  does not join — query it separately if you need step-level fidelity.
 
 Common `kind` values for the cross-backend proxy: `delegated_task.run`
 (one row per `/exec` call), `delegated_task.exec` (the planner's
@@ -268,15 +275,16 @@ Approve still gates:
 
 ## Where You See It in the Dashboard
 
-- **Connections → \<integration\> → Tool Permissions** — the
+- **Connections → \<integration\> → Tool Permissions**
+  (e.g. `/connections/mail`, `/connections/calendar`) — the
   `deniedTools` editor with the starter list pre-populated. Above the
-  editor, the safety guidance prose explains each entry and which the
-  team recommends keeping.
-- **Settings → Cost → Delegated proxy facet** — only cross-backend
-  invocations show here; same-backend rolls up under the parent
-  session.
-- **Activity / Audit** — every action with full attribution, queried
-  the same way the agent queries `GET /api/agent/actions`.
+  editor, the safety guidance prose explains each entry and which ones
+  are recommended to keep.
+- **Analytics** (`/analytics`) — spend and the delegated-task facet;
+  only cross-backend invocations show here, while same-backend MCP
+  rolls up under the parent session.
+- **Activity** (`/activity`) — every action with full attribution,
+  the same audit trail the agent reads via `GET /api/agent/actions`.
 
 ## Related
 

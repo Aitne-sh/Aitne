@@ -173,6 +173,47 @@ describe("SettingsStore", () => {
     expect(all.executeTimeoutMinutes).toBeUndefined();
     expect(all.agentDisplayName).toBe("OkBot");
   });
+
+  it("getAll preserves a mutually-consistent cross-field pair (B1)", () => {
+    // prePassBackoffMs length must be >= prePassMaxAttemptsPerIntegration - 1.
+    // The pair max=5 / backoff=[1000,2000,4000,8000] (4 entries) is individually
+    // valid and mutually consistent. Per-key validation against peer *defaults*
+    // (the default backoff is shorter) wrongly dropped max=5; getAll must see
+    // both persisted values together and keep them intact.
+    db.prepare(
+      "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+    ).run("prePassMaxAttemptsPerIntegration", "5");
+    db.prepare(
+      "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+    ).run("prePassBackoffMs", "[1000,2000,4000,8000]");
+
+    const store = createSettingsStore(db);
+    const all = store.getAll();
+    expect(all.prePassMaxAttemptsPerIntegration).toBe(5);
+    expect(all.prePassBackoffMs).toEqual([1000, 2000, 4000, 8000]);
+  });
+
+  it("getAll keeps a valid cross-field pair when a separate row is corrupt (B1)", () => {
+    // The valid cross-field pair from above...
+    db.prepare(
+      "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+    ).run("prePassMaxAttemptsPerIntegration", "5");
+    db.prepare(
+      "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+    ).run("prePassBackoffMs", "[1000,2000,4000,8000]");
+    // ...plus an unrelated, individually-invalid row (executeTimeoutMinutes is a
+    // number; a stored string passes JSON.parse but fails the schema).
+    db.prepare(
+      "INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+    ).run("executeTimeoutMinutes", '"oops"');
+
+    const store = createSettingsStore(db);
+    const all = store.getAll();
+    // The corrupt row is dropped without poisoning the valid cross-field pair.
+    expect(all.executeTimeoutMinutes).toBeUndefined();
+    expect(all.prePassMaxAttemptsPerIntegration).toBe(5);
+    expect(all.prePassBackoffMs).toEqual([1000, 2000, 4000, 8000]);
+  });
 });
 
 describe("getRuntimeSettingsDefaults", () => {

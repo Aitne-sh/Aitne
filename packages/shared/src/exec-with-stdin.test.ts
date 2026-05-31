@@ -34,4 +34,21 @@ describe("execWithStdin", () => {
       ),
     ).rejects.toThrow("oops");
   });
+
+  it("rejects (does not crash) when the child closes stdin before input drains", async () => {
+    // The child exits immediately without reading stdin. Writing a payload
+    // larger than the OS pipe buffer to the now-closed stdin emits an
+    // 'error' (EPIPE / ERR_STREAM_DESTROYED) on child.stdin. Without the
+    // stdin 'error' listener this is an unhandled event that crashes the
+    // whole process; with it, the promise rejects. The child exits non-zero
+    // so the assertion holds regardless of whether the stdin error or the
+    // close event wins the race. This mirrors the real-world DPAPI/secret-tool
+    // early-exit broken-pipe scenario (secrets-store-1).
+    const bigInput = "x".repeat(8 * 1024 * 1024); // 8 MB ≫ pipe buffer
+    await expect(
+      execWithStdin("node", ["-e", "process.exit(1)"], bigInput, {
+        timeout: 5_000,
+      }),
+    ).rejects.toThrow();
+  });
 });

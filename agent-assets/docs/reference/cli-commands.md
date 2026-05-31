@@ -28,7 +28,7 @@ ask_examples:
   - How do I check my install with aitne doctor?
 locale: en-US
 created: 2026-04-27
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - aitne start
   - aitne stop
@@ -52,6 +52,12 @@ related:
   - guides/reinstall-cleanly
   - features/wiki/commands
   - features/messaging/bang-commands
+  - reference/knowledge-layout
+  - reference/config
+ui_anchors:
+  - /setup
+  - /activity
+  - /health
 ---
 
 # CLI Commands
@@ -61,9 +67,14 @@ related:
 `aitne` is the project's CLI (`bin/aitne.mjs`). The `pnpm <cmd>` forms are
 workspace scripts that delegate to the same entry point. Use whichever you
 prefer — `aitne start` and `pnpm start` do the same thing. After installing
-the npm package globally (`npm i -g aitne`) the `aitne` binary is on
-your `$PATH` and you no longer need to be inside the repo to use it. The
-tables below show both forms.
+the npm package globally (`npm install -g @aitne-sh/aitne`) the `aitne`
+binary is on your `$PATH` and you no longer need to be inside the repo to
+use it. The tables below show both forms.
+
+Note: `pnpm build` is *not* the same as `aitne build`. `pnpm build` runs
+`turbo run build` directly; `aitne build` runs the same build **and** writes
+the `.buildstamp` that `aitne start` uses to decide whether a rebuild is
+needed.
 
 ## Lifecycle
 
@@ -84,7 +95,7 @@ tables below show both forms.
 | `aitne open` | Open the dashboard root in the default browser. |
 | `aitne doctor` | Install-health checks (Node, ports, OS keychain, backend CLIs, native bindings, …). |
 | `aitne audit [--since 24h] [--type X] [--result failed]` | Show the agent action log; flags filter by time, action type, result, or backend. `--json` for machine-readable. |
-| `aitne run-now <job>` | Fire a daemon-internal maintenance job on demand (e.g. `roadmap_maintenance`). |
+| `aitne run-now <job>` | Fire a daemon-internal maintenance job on demand. The only supported job today is `roadmap_maintenance`. Reads the API token from the macOS Keychain, so this command is macOS-only. |
 | `aitne verify [target]` | Run post-launch verification for a shipped design surface (e.g. `evening-review-slimdown`). |
 | `aitne version [--json]` | Print version, Node version, install path, last build time. |
 | `aitne update [--check]` | Print the npm command to upgrade. `--check` makes one network call to compare against the latest published version. |
@@ -146,18 +157,20 @@ lives under `PA_DATA_DIR`, **not** inside the repo.
 
 ## Where data lives
 
+The context vault is partitioned into six authority classes (context-vault
+v2). The agent never writes these files directly — it goes through the
+daemon at `http://localhost:8321/api/context/<class>/<path>`.
+
 ```
 ~/.personal-agent/
 ├── data/personal_agent.db    # SQLite (sessions, actions, observations, FTS)
 ├── context/                  # Markdown memory the agent reads and writes
-│   ├── user/profile.md       # user identity + topic slices alongside
-│   ├── today.md
-│   ├── roadmap.md
-│   ├── agent/journal.md
-│   ├── projects/
-│   ├── schedule/
-│   ├── daily/                # Per-day archives (YYYY-MM-DD.md)
-│   ├── rules/                # Management registry + policies index
+│   ├── identity/profile.md   # user identity + people / work / goals slices
+│   ├── state/today.md        # today.md, yesterday.md, inbox/, scratch/
+│   ├── plans/roadmap.md      # roadmap + plans/projects/
+│   ├── journal/agent.md      # agent decision log; daily/, weekly/, monthly/
+│   ├── knowledge/            # wiki/, repos/<slug>/, entities/, dossiers/
+│   ├── policies/             # management.md, mcp.md, routines/, skills/
 │   └── …
 ├── logs/                     # Daemon and dashboard logs
 └── run/                      # Process IDs for aitne start/stop (daemon.pid, dashboard.pid)

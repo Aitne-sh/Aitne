@@ -367,10 +367,19 @@ export class AuthRecovery {
       throw new Error("Daemon is shutting down, cannot start recovery.");
     }
 
+    // Windows npm installs resolve `codex`/`claude` to a .cmd/.bat shim that
+    // spawn() cannot exec without a shell (ENOENT). POSIX resolves to
+    // extensionless binaries, so the regex is false there and shell stays
+    // false. When the shell IS used, Node hands the command line to cmd.exe
+    // verbatim without auto-quoting, so a cliPath containing spaces
+    // (`C:\Program Files\…`) must be double-quoted; the static args are safe
+    // literals needing no quoting.
+    const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cliPath);
     // Spawn `codex login --device-auth`
-    const child = spawn(cliPath, ["login", "--device-auth"], {
+    const child = spawn(useShell ? `"${cliPath}"` : cliPath, ["login", "--device-auth"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, TERM: "dumb", NO_COLOR: "1" },
+      shell: useShell,
     });
 
     // Parse device code from stdout (collected until first \n\n after code)
@@ -472,10 +481,15 @@ export class AuthRecovery {
       throw new Error("Daemon is shutting down, cannot start recovery.");
     }
 
+    // See the device-auth spawn above: win32 .cmd/.bat shims need a shell;
+    // when the shell is used the cliPath must be double-quoted for paths with
+    // spaces, and POSIX stays shell:false on extensionless binaries.
+    const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(cliPath);
     // Spawn with BROWSER=echo to suppress daemon-initiated browser launch
-    const child = spawn(cliPath, ["auth", "login", "--claudeai"], {
+    const child = spawn(useShell ? `"${cliPath}"` : cliPath, ["auth", "login", "--claudeai"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, TERM: "dumb", NO_COLOR: "1", BROWSER: "echo" },
+      shell: useShell,
     });
 
     // Parse OAuth URL from stdout

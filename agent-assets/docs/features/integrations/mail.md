@@ -27,7 +27,7 @@ ask_examples:
   - How do I add a second mail account?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - mail
   - gmail
@@ -48,6 +48,14 @@ ui_anchors:
   - /connections/mail
 api_endpoints:
   - /api/mail
+  - /api/mail/accounts
+  - /api/mail/search
+config_keys:
+  - enabledMailProviders
+  - mailPollIntervalSeconds
+  - gmailPollIntervalSeconds
+context_files:
+  - state/today.md
 ---
 
 # Mail
@@ -67,15 +75,21 @@ the provider for every query.
 - **Surface** the small set of mail items in the morning routine that
   actually need owner action.
 
-The agent does **not** send mail on your behalf. Drafting is supported
-(via the provider's draft API where available) but sending is an
-operator action.
+The agent **prefers drafts** over sending. By convention it creates a
+draft (`POST /mail/:account/drafts`) and lets you review and hit send
+yourself. Direct send (`POST /mail/:account/messages/send`) is *not*
+blocked — it is classified as an autonomous action, so the daemon does
+not DM you for approval first. The agent only sends directly when it
+judges you'd clearly want it to, and it tells you afterward; during the
+hourly check the `mail` skill is hard read-only (no sending, drafting,
+labeling, or filing).
 
 ## When It Runs / How It Is Triggered
 
-- In `direct` mode a poller pulls new messages every
-  `gmailPollIntervalSeconds` (or the per-provider equivalent) — see
-  Settings → Advanced.
+- In `direct` mode a poller pulls new messages on a cadence. Gmail uses
+  `gmailPollIntervalSeconds` (default 600); IMAP-backed accounts (Yahoo,
+  iCloud, generic IMAP) use `mailPollIntervalSeconds` (default 180).
+  Adjust both under **Settings → Advanced**.
 - The morning routine reads the labeled queue and decides which need
   surfacing.
 - Reactive turns (you DM "what's in my mail?") use the `mail` skill on
@@ -115,10 +129,11 @@ mode lifecycle.
 
 ## Configuration
 
-Per-account settings: provider kind (`gmail` / `outlook` / `yahoo` /
-`icloud`), credential store, label conventions, polling interval.
-Yahoo and iCloud use IMAP transport internally; the operator picks
-the kind, not the transport.
+Per account you choose a provider kind (`gmail` / `outlook` / `yahoo` /
+`icloud`) plus credentials, label conventions, and polling interval. You
+pick the kind, not the transport — Yahoo and iCloud connect over IMAP
+under the hood, but that is an implementation detail. The set of enabled
+providers is `enabledMailProviders` (default `["gmail"]`).
 
 ## When Something Goes Wrong
 
@@ -130,4 +145,5 @@ the kind, not the transport.
 ## Related
 
 - [Connect a new mail account](../../guides/connect-a-new-mail-account.md)
-- [Morning Routine](../policies/routines/morning-routine.md)
+- [Morning Routine](../routines/morning-routine.md)
+- [Delegated Mode](../../concepts/delegated-mode.md)

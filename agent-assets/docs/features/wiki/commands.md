@@ -34,7 +34,7 @@ ask_examples:
   - How do I bridge two domains with `!connect`?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
   - !ingest
   - !compile
@@ -52,18 +52,24 @@ related:
   - guides/maintain-wiki-health
   - guides/explore-with-trace-and-connect
   - troubleshooting/wiki-ingest-full-blocked
+process_keys:
+  - wiki.ingest_url
+  - wiki.compile
+  - wiki.ask
+  - wiki.lint
+  - wiki.trace
+  - wiki.connect
 ui_anchors:
   - /wiki
   - /wiki/timeline
   - /settings/wiki
-  - /approvals
 ---
 
 # Wiki Commands
 
-Use these from a paired DM channel after enabling the wiki — open
-**Setup → Settings → Wiki** to enable, then browse from **My Life →
-Wiki**.
+Use these from a paired DM channel after enabling the wiki. Open
+**Settings → Wiki** (`/settings/wiki`) to enable a workspace, then
+browse the result from **My Life → Wiki** (`/wiki`).
 
 | Command | Effect |
 |---|---|
@@ -125,29 +131,32 @@ Settings → Wiki:
 
 - **Parallel** (default): all URLs fan out simultaneously up to the
   per-URL concurrency cap. Fastest; small risk of bursting rate
-  limits at the URL host.
+  limits at the URL host. Each URL replies on its own completion.
 - **Serial**: URLs are enqueued in submitted order; each agent
   session starts only after the previous one completes. Slower but
-  predictable budget and rate.
+  predictable budget and rate. You get a single consolidated reply
+  when the whole batch finishes.
 
-The acknowledgement DM tells you which mode ran
-(`in parallel` / `serially`).
+The acknowledgement DM names the mode that ran (`in parallel` /
+`serially`).
 
 ## `!compile full` — the Cost Gate
 
 Full rebuilds touch every wiki note and are the most expensive
 command in the wiki surface. The flow:
 
-1. The bang handler estimates the cost (raw count × assumed input
-   tokens × Sonnet unit cost, bracketed at 0.5× / 1× / 2×).
+1. The bang handler estimates the cost (raw note count × assumed
+   input tokens × Sonnet 4.6 input price, bracketed optimistic 0.5× /
+   expected 1× / pessimistic 2×).
 2. On an external git-tracked vault with **Auto-commit before
    `!compile full`** enabled and a clean working tree, Aitne runs
    `git add -A && git commit -m "aitne wiki: pre-compile snapshot <ts>"`
    before continuing. A dirty tree refuses the operation — commit or
    stash first.
-3. If the pessimistic estimate exceeds your per-workspace approval
-   threshold (default $2.00), the run is queued under **Approvals**
-   in the dashboard. Approve from `/approvals` to start the compile.
+3. If the pessimistic estimate (expected spend × 2) exceeds your
+   per-workspace approval threshold (default $2.00), the run is queued
+   for approval. Open **Settings → Wiki** (`/settings/wiki`) and
+   confirm it in the Approvals queue there to start the compile.
 4. Otherwise, the run starts autonomously and you receive a
    completion DM with actual spend.
 
@@ -225,9 +234,10 @@ finding is itself useful.
 
 When no active wiki workspace exists, every `wiki.*`-routed bang
 command (`!ingest`, `!compile`, `!ask`, `!lint`, `!trace`, `!connect`)
-replies with:
+replies with a message like:
 
-> Wiki is not enabled. Open `/settings/wiki` to enable.
+> Wiki is not enabled. Open `/settings/wiki` to enable the internal
+> workspace.
 
 `!wiki help` is exempt — it returns the command list regardless of
 enablement so you can discover the surface before opting in.

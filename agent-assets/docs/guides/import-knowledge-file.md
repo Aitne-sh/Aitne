@@ -11,15 +11,13 @@ aliases:
 category: guides
 summary: |
   Upload a Markdown or text file of personal facts so the agent folds
-  it into your user/*.md Context Files. Includes step-by-step recipes
-  for exporting your existing profile out of ChatGPT and Gemini.
+  it into your identity/*.md Context Files. Includes step-by-step
+  recipes for exporting your existing profile out of ChatGPT and Gemini.
 section: import-knowledge-file
 tags:
-  - guide
+  - guides
   - knowledge
   - import
-  - chatgpt
-  - gemini
   - memory
 status: stable
 ask_examples:
@@ -29,15 +27,23 @@ ask_examples:
   - What format does the Knowledge upload accept?
 locale: en-US
 created: 2026-04-28
-updated: 2026-04-28
+updated: 2026-05-28
 ui_anchors:
   - /knowledge
 keywords:
   - import
   - chatgpt history
   - gemini history
-  - json import
   - knowledge
+  - profile
+process_keys:
+  - knowledge.import
+api_endpoints:
+  - POST /api/knowledge/import
+context_files:
+  - identity/profile.md
+  - identity/people.md
+  - journal/agent.md
 related:
   - concepts/memory-model
   - features/memory-files/user-profile
@@ -51,20 +57,21 @@ related:
 Bring a single Markdown (`.md`, `.markdown`) or plain-text (`.txt`)
 file you wrote elsewhere — a hand-written profile, an Obsidian or
 Notion export, or a summary you produced in ChatGPT / Gemini — into
-Aitne's `user/*.md` Context Files. The agent reads the file once and
-appends each fact verbatim into the right topic file. Existing bullets
-are never overwritten; identity-class facts are deferred for your
-explicit confirmation.
+Aitne's `identity/*.md` Context Files. The agent reads the file once
+and appends each fact verbatim into the right topic file. Existing
+bullets are never overwritten; identity-class facts are deferred for
+your explicit confirmation.
 
 ## Prerequisites
 
 - Initial setup is complete (`policies/management.md` saved). Pre-setup
   imports are rejected with `409 setup_incomplete` because the
-  `user/*.md` skeleton has not been seeded yet.
-- At least one backend (Claude, Codex, or Gemini CLI) is authenticated
-  with a CLI binary on `PATH`.
-- The file is at most **64 KB after UTF-8 encoding** (Japanese / non-
-  ASCII characters take 3 bytes each — ≈ 21 K Japanese characters).
+  `identity/*.md` skeleton has not been seeded yet.
+- At least one backend (Claude, Codex, Gemini CLI, or OpenCode) is
+  authenticated and runnable — enabled, with its CLI binary on `PATH`.
+- The file is at most **64 KB after UTF-8 encoding** (non-ASCII
+  characters take up to 3 bytes each, so a Unicode-heavy file holds
+  fewer characters than its byte budget suggests).
 - The file does not contain private keys, API tokens, or credentials.
   The route rejects these at upload time and never persists them.
 
@@ -98,7 +105,8 @@ date inline, so you can resolve them later without losing data.
    have at least one model available. Pick `Use default routing` to
    let the daemon's main backend run it.
 5. Click **Import**. The form returns immediately with a 202 + trace id
-   — the heavy-tier session runs in the background.
+   — the import session (`knowledge.import`, medium tier) runs in the
+   background.
 6. Watch progress under the linked **Activity** view (filtered by the
    trace id) and review the resulting bullets under
    `/knowledge?tab=context-files` once the run finishes.
@@ -114,8 +122,8 @@ date inline, so you can resolve them later without losing data.
   `journal/agent.md` summarising the run — counts of facts written /
   skipped, pending conflicts, and identity-class facts awaiting
   confirmation.
-- Open each affected `user/*.md` file under Context Files. New bullets
-  should be verbatim copies of lines in your source file.
+- Open each affected `identity/*.md` file under Context Files. New
+  bullets should be verbatim copies of lines in your source file.
 
 ## If It Fails
 
@@ -130,16 +138,18 @@ date inline, so you can resolve them later without losing data.
 - **`409 setup_incomplete`** — finish the setup wizard first
   (`/setup`).
 - **`No authenticated backends`** in the Execution agent dropdown —
-  set up a backend under Connections → Backends, then return.
+  authenticate a backend under Settings → Models (`/settings/models`),
+  then return. The dropdown lists only backends that are enabled and
+  whose CLI binary is on `PATH`.
 
 ---
 
-# Recipe: Export your profile from ChatGPT
+## Recipe: Export your profile from ChatGPT
 
 OpenAI does not ship a one-click "export as Markdown" button, but the
 following two paths produce a file that uploads cleanly.
 
-## Recommended: ask ChatGPT to write it for you (≈ 2 min)
+### Recommended: ask ChatGPT to write it for you (≈ 2 min)
 
 Works against ChatGPT's *Memory* feature — the model already holds a
 list of personal facts about you. This procedure asks it to dump them
@@ -181,7 +191,7 @@ in the exact format the upload expects.
    imported — the upload writes facts verbatim.
 5. Upload via Knowledge → Upload, with **Source** = `Other`.
 
-## Comprehensive: official Data Export → convert (≈ 30 min, large)
+### Comprehensive: official Data Export → convert (≈ 30 min, large)
 
 Use this when you want to seed Aitne with the *complete* history.
 Output is bulky and requires manual filtering.
@@ -204,7 +214,7 @@ Output is bulky and requires manual filtering.
    upload one at a time.
 5. Upload via Knowledge → Upload, with **Source** = `Other`.
 
-## Bonus: copy your saved memory list
+### Bonus: copy your saved memory list
 
 ChatGPT's Memory page exposes the structured fact list directly.
 
@@ -216,13 +226,13 @@ ChatGPT's Memory page exposes the structured fact list directly.
 
 ---
 
-# Recipe: Export your profile from Gemini
+## Recipe: Export your profile from Gemini
 
 Google Gemini's options mirror ChatGPT's at a high level — no native
 Markdown export, but the in-conversation prompt method works the same
 way, and Google Takeout produces a comprehensive archive.
 
-## Recommended: ask Gemini to write it for you (≈ 2 min)
+### Recommended: ask Gemini to write it for you (≈ 2 min)
 
 1. Open <https://gemini.google.com> and start a **new conversation**.
    The model uses **Saved info** (the Gemini equivalent of ChatGPT's
@@ -233,7 +243,7 @@ way, and Google Takeout produces a comprehensive archive.
 3. Copy the response into `gemini-profile.md`, skim, and upload via
    Knowledge → Upload with **Source** = `Other`.
 
-## Comprehensive: Google Takeout (≈ 1 hr, archive may take longer)
+### Comprehensive: Google Takeout (≈ 1 hr, archive may take longer)
 
 1. Visit <https://takeout.google.com>.
 2. **Deselect all**, then check **Gemini Apps Activity** (and
@@ -248,7 +258,7 @@ way, and Google Takeout produces a comprehensive archive.
    them under the right H2 headings, save as `gemini-export.md`,
    keep under 64 KB, upload.
 
-## Bonus: copy your Saved info list
+### Bonus: copy your Saved info list
 
 1. Open Gemini → click your avatar / settings → **Saved info**.
 2. Copy each saved row into a new `gemini-saved-info.md` under the
@@ -265,8 +275,8 @@ way, and Google Takeout produces a comprehensive archive.
   for personal facts. This is easier to review than one large mixed
   upload.
 - **Edit before you upload.** The agent writes verbatim. Anything in
-  the file *will* land in `user/*.md` (after dedup and identity-class
-  deferral). Trim aggressively.
+  the file *will* land in `identity/*.md` (after dedup and
+  identity-class deferral). Trim aggressively.
 - **Identity is special.** Even if your file says
   `- Name: <Your Name>`, the agent will *not* write it to
   `identity/profile.md`. It surfaces in the journal entry instead, where
@@ -282,5 +292,5 @@ way, and Google Takeout produces a comprehensive archive.
 ## Related
 
 - [Memory Model](../concepts/memory-model.md)
-- [user/profile.md](../features/memory-files/user-profile.md)
+- [identity/profile.md](../features/memory-files/user-profile.md)
 - [First Day](../getting-started/04-first-day.md)

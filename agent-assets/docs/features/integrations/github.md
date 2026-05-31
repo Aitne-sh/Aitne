@@ -13,20 +13,23 @@ summary: |
   GitHub is the remote-side counterpart to the Git integration. The
   daemon polls notifications and CI failures via the local `gh` CLI;
   high-priority signals (review requests, default-branch CI failures,
-  security alerts, assignments) become direct DMs.
+  security alerts, assignments) become direct DMs. Watched repos are
+  registered as unified Repository rows, not config keys.
 section: integrations
 tags:
   - integrations
   - github
   - observations
+  - polling
 status: stable
 ask_examples:
   - How do I connect GitHub?
   - Will the agent message me on every CI failure?
   - Can the agent reply to GitHub issues?
+  - Where do I add a GitHub repo to watch?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-24
+updated: 2026-05-28
 keywords:
   - github
   - issue
@@ -36,6 +39,7 @@ keywords:
   - security alert
   - delegated mode
   - gh cli
+  - repositories
 related:
   - features/integrations/git
   - concepts/observations
@@ -44,8 +48,15 @@ ui_anchors:
   - /connections/repositories
 config_keys:
   - githubPollIntervalSeconds
-  - gitRepos
-  - githubRepos
+api_endpoints:
+  - PATCH /api/integrations/github
+process_keys:
+  - github.pull_request.review_requested
+  - github.assigned
+  - github.security_alert
+  - github.workflow_run.failed
+context_files:
+  - state/today.md
 ---
 
 # GitHub
@@ -57,10 +68,14 @@ become DMs; everything else is recorded for the hourly check.
 ## What It Does
 
 - **Polls Notifications** every `githubPollIntervalSeconds` (default
-  600s) using ETag caching — 304s cost no rate-limit quota.
-- **Polls workflow_runs** per watched GitHub repository on the same
-  cadence, filtered by `status=failure`. Watched repos can come from a
-  local clone's GitHub `origin` or from an explicit `owner/repo` entry.
+  1800s / 30 min) using ETag caching — 304 responses cost no
+  rate-limit quota.
+- **Polls workflow_runs** per watched GitHub repository, filtered by
+  `status=failure`. Each repo's GitHub side comes from a unified
+  **Repository** row (a `owner/repo` remote, optionally paired with a
+  local clone — see [Setup](#setup)). Per-repo cadence overrides apply
+  to the workflow-runs side; the notifications poll always runs at the
+  global cadence.
 - **DMs the user** on the four high-priority triggers below; quieter
   signals are coalesced into the hourly check summary.
 
@@ -86,10 +101,10 @@ sees you triaging it in `state/today.md`, it stays silent and just logs.
 1. Install `gh`: `brew install gh` on macOS; see
    [cli.github.com](https://cli.github.com/) for other platforms.
 2. Authenticate: `gh auth login` (browser flow).
-3. Add `owner/repo` entries to **Connections → GitHub**, or add local
-   repository paths to **Connections → Git Repositories**. For local
-   paths, the poller derives `owner/name` from each repo's `origin`
-   remote — non-GitHub remotes are silently skipped.
+3. Register the repos to watch on **Connections → Repositories**. Each
+   row links an `owner/repo` GitHub remote, an optional local clone, or
+   both. If you link only a local clone, the poller derives `owner/name`
+   from its `origin` remote — non-GitHub remotes are silently skipped.
 4. Restart the daemon (the poll interval is captured at start time).
 
 The daemon does NOT need a personal access token in its keychain — it
@@ -97,27 +112,39 @@ re-uses whatever `gh` already has.
 
 ## Cold-start behavior
 
-The first time the daemon polls a watched repo, it records the latest
-failed workflow runs **without emitting any events**. This prevents a
-flood of DMs about historical CI failures the user has already triaged.
-New failures landing after that warm-up are surfaced normally.
+The first time the daemon polls a watched repo's **workflow runs**, it
+records the latest failures **without emitting any events**. This
+prevents a flood of DMs about historical CI failures you have already
+triaged. New failures landing after that warm-up are surfaced normally.
+
+The notifications side needs no warm-up: GitHub returns only unread
+items, so there is no historical backlog to suppress.
 
 ## Where in the Dashboard
 
-- **Connections → GitHub** shows status and the `gh auth login`
-  hint.
-- **Connections → GitHub** controls explicit `owner/repo` watched repos.
-  When this list is non-empty, notification processing is scoped to it.
-- **Connections → Git Repositories** controls local clone paths whose
-  GitHub remotes are watched for workflow_run failures.
+Everything lives on **Connections → Repositories**
+(`/connections/repositories`):
+
+- The GitHub integration card shows status, the `gh auth login` hint,
+  and the integration mode picker (see [Modes](#modes)).
+- Each repository row links an `owner/repo` GitHub remote and/or a
+  local clone. When at least one row has a GitHub remote, notification
+  processing is scoped to those repos.
+- Per-repo polling cadence, automation triggers, and daily git
+  management are configured on **My Life → Git** (`/git`), not here.
 
 ## Configuration
 
 | Setting | Default | Notes |
 |---|---|---|
-| `githubPollIntervalSeconds` | 600 (10 min) | Both poll cadences. Lower for faster review-request alerts at the cost of slightly more rate-limit budget. **Restart-required.** |
-| `gitRepos` | `[]` | Local repo paths to watch. |
-| `githubRepos` | `[]` | Direct remote repos in `owner/repo` form. Also scopes notification processing when non-empty. |
+| `githubPollIntervalSeconds` | 1800 (30 min) | Global poll cadence. Lower for faster review-request alerts at the cost of slightly more rate-limit budget. **Restart-required.** |
+
+Watched repos are no longer config keys. The old `gitRepos` /
+`githubRepos` settings were removed at the unified-repositories
+cutover — repos now live in the `repositories` table and are managed on
+**Connections → Repositories**. Per-repo polling cadence is set on
+**My Life → Git** and overrides the global interval for that repo's
+workflow-runs poll.
 
 ## When Something Goes Wrong
 
@@ -155,12 +182,15 @@ need a daemon-spawned poller's bookkeeping.
 - **disabled** — neither the poller nor the delegated worker runs;
   the integration is silent.
 
-Pick the mode at **Connections → GitHub**. Mode changes go through
-the standard `PATCH /api/integrations/github` flip-lock so the poller
-and the delegated worker never run simultaneously.
+Pick the mode from the GitHub card on **Connections → Repositories**.
+Mode changes go through the standard `PATCH /api/integrations/github`
+flip-lock so the poller and the delegated worker never run
+simultaneously.
 
 ## Related
 
 - [Git](git.md) — local repo file watcher (separate observer).
-- [Hourly Check](../policies/routines/hourly-check.md) — the consumer of
+- [Hourly Check](../routines/hourly-check.md) — the consumer of
   non-DM-priority observations.
+- [Delegated Mode](../../concepts/delegated-mode.md) — how the
+  `delegated` mode polls without a daemon poller.

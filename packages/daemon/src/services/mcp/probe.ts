@@ -161,6 +161,13 @@ async function probeStdio(
     // hidden-window helps avoid a flashing console for child binaries.
     detached: process.platform !== "win32",
     windowsHide: true,
+    // MCP stdio commands are overwhelmingly npx/uvx/pnpm launchers, which
+    // resolve to .cmd/.ps1 batch shims on Windows; those need a shell to
+    // launch (shell:false spawn of a bare `npx` ENOENTs). POSIX keeps
+    // shell:false — bare npx/node resolve via PATH+exec-bit there. Same
+    // win32-gated pattern as scripts/run-node.mjs / bin/aitne.mjs spawns;
+    // the taskkill /T parent-pid walk above reaps the added cmd.exe wrapper.
+    shell: process.platform === "win32",
   });
 
   let settled = false;

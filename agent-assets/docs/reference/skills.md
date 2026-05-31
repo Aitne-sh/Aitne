@@ -34,7 +34,20 @@ keywords:
   - wiki skill
   - notify skill
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
+ui_anchors:
+  - /knowledge?tab=skills
+process_keys:
+  - dashboard.docs_qa
+api_endpoints:
+  - /api/skills
+  - /api/skills/manifest/:processKey
+  - /api/browser-task
+  - /api/browser-history/offers/:slug/accept
+context_files:
+  - state/today.md
+  - plans/roadmap.md
+  - state/profile-questions.md
 related:
   - concepts/skills
   - features/integrations/browser-history
@@ -42,6 +55,11 @@ related:
 ---
 
 # Built-in Skills
+
+Aitne ships a fixed set of built-in skills the agent loads per session. Most
+are always available; a few are **conditional** — loaded only when a gating
+flag is set (`gmail-lifestyle`, `managed-tasks`) or only for a specific event
+type (`browser-task`, on owner DMs). The table below is the canonical roster.
 
 | Slug | Purpose |
 |---|---|
@@ -60,23 +78,26 @@ related:
 | `notify` | Send a notification through the paired messaging app and decide whether notifying is warranted. |
 | `notion` | Read, query, search, create, update, and archive Notion pages and databases. |
 | `observations` | Drain the pending-observations queue and inspect raw external-source change records. |
-| `project-doc` | Read / write per-project markdown files under `projects/<slug>.md`. |
+| `project-doc` | Read / write Git-backed and manual project context docs. Git-managed repos write to `knowledge/repos/<slug>/overview.md` plus per-day `journal/repos/<slug>/<date>.md`; manual non-git project pages live at `plans/projects/<slug>.md`. |
 | `reading` | Query reading history and highlights; owns the reading-taste profile via the `books` and `reading_highlights` tables. |
 | `roadmap` | Read / write `plans/roadmap.md` (cross-request write lock). |
 | `schedule` | Schedule future agent wake-ups and DMs via the daemon (writes `agent_schedule` and `recurring_schedules` rows). |
 | `scheduled-managed-task` | Surface and act on Managed Tasks that are due now. |
 | `today` | Read or write `state/today.md` — morning routines, hourly checks, DMs that need a today snapshot. |
 | `user-interview` | Manage the profile-interview queue at `state/profile-questions.md`; ask one question at a time. |
-| `user-profile` | Record user facts — identity, people, work, expertise, habits, goals — into the `user/*` slices. |
+| `user-profile` | Record user facts — identity, people, work, expertise, habits, goals — into the `identity/*` slices (`profile.md`, `people.md`, `work.md`, …). |
 | `wiki` | Build and maintain the personal wiki workspace — `!ingest` / `!compile` / `!ask` / `!lint` / `!trace` / `!connect`. |
+
+## How skills are sourced
 
 The source of truth is each skill's `SKILL.md` under
 `agent-assets/skills/<slug>/`. The `description` field in that file's
 frontmatter is what the dispatcher uses for runtime skill selection.
 
-A subset of these skills' sections (knowledge layout, routing
-tables, search recipes, etc.) is also refined at runtime through
-JSON **overlays** maintained by the skill-curation loop. The seed
-files in `agent-assets/skills/` are never rewritten — overlays are
-applied at session-init by the SkillsCompiler and live under
-`<dataDir>/overlays/<skill>/<section-id>.json`.
+## Runtime overlays
+
+A subset of these skills' sections (knowledge layout, routing tables, search
+recipes, etc.) is refined at runtime through JSON **overlays** maintained by
+the skill-curation loop. The seed files in `agent-assets/skills/` are never
+rewritten — overlays are applied at session-init by the `SkillsCompiler` and
+live under `<dataDir>/overlays/<skill>/<section-id>.json`.

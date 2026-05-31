@@ -16,7 +16,7 @@ summary: |
 section: install-and-run
 tags:
   - core
-  - guide
+  - guides
   - getting-started
   - install
   - setup
@@ -29,12 +29,12 @@ ask_examples:
   - How do I install the aitne npm package?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-15
+updated: 2026-05-28
 keywords:
   - install
   - first run
   - pnpm
-  - npm install aitne
+  - npm install -g @aitne-sh/aitne
   - aitne start
   - PA_DATA_DIR
   - node 22
@@ -67,31 +67,60 @@ through the setup wizard.
   CLI, or Gemini CLI) installed on `PATH`.
 - ~200 MB of disk for the daemon's local state.
 
-## Steps
+## Install
 
-1. `git clone <repo> personal_agent && cd personal_agent`
-2. `pnpm install`
-3. `pnpm start` — builds (if stale) and launches daemon + dashboard
-   in the background.
-4. Open `http://localhost:3000` and follow the setup wizard.
+Pick one path. Most people want the npm package; clone the repo only if
+you intend to develop Aitne itself.
+
+### Option A — npm package (recommended)
+
+```bash
+npm install -g @aitne-sh/aitne
+aitne start
+```
+
+`aitne start` launches the daemon and dashboard in the background. The
+package ships prebuilt, so there is no build step.
+
+### Option B — clone the repo (development)
+
+```bash
+git clone <repo> personal_agent && cd personal_agent
+pnpm install
+pnpm start
+```
+
+`pnpm start` builds first when the source is stale (mtime check against
+`.buildstamp`), then launches the daemon + dashboard detached. The
+`pnpm <cmd>` scripts are thin aliases that forward to
+`node bin/aitne.mjs <cmd>`.
+
+### Then, for both paths
+
+Open `http://localhost:3000` and follow the setup wizard.
 
 ## Verification
 
-- `pnpm status` shows two PIDs (daemon + dashboard) and a green health
-  pill.
-- `~/.personal-agent/` has been created with `data/personal_agent.db`,
-  `context/`, and the log directory.
+- `aitne status` (or `pnpm status` from a clone) shows two PIDs (daemon
+  + dashboard), uptime, connected backends, and a green health pill.
+- `~/.personal-agent/` has been created, containing
+  `data/personal_agent.db`, `context/`, and `logs/`.
 
 ## If It Fails
 
-- A port conflict — set `PA_API_PORT` (default 8321) or
-  `PA_DASHBOARD_PORT` (default 3000).
-- Build errors during `pnpm start`: run `pnpm clean && pnpm build`
-  for verbose output.
+- **Port conflict** — set `PA_API_PORT` (default `8321`) or
+  `PA_DASHBOARD_PORT` (default `3000`) before starting.
+- **Diagnose the install** — run `aitne doctor` (`pnpm doctor` from a
+  clone). It checks Node, ports, keychain, CLI binaries, and native
+  bindings, and exits non-zero on any hard failure.
+- **Build errors (clone only)** — rebuild verbosely with `pnpm build`.
+  If that still fails, `pnpm clean` removes `node_modules`,
+  `.buildstamp`, and Turbo's cache, after which you must re-run
+  `pnpm install` before building again.
 
 ## Related
 
-- [CLI Commands](../reference/cli-commands.md) — full `pa` command
+- [CLI Commands](../reference/cli-commands.md) — full `aitne` command
   list and environment overrides.
 - [Setup Wizard](setup-wizard.md) — what each wizard step does.
 - [Reinstall Cleanly](reinstall-cleanly.md) — wipe and start over.

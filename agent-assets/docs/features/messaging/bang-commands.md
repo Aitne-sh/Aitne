@@ -25,6 +25,7 @@ tags:
   - core
   - messaging
   - operations
+  - bang-commands
 status: stable
 ask_examples:
   - How do I pause the agent from my phone?
@@ -35,7 +36,7 @@ ask_examples:
   - How do I accept a research-cluster offer?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - bang command
   - "!stop"
@@ -55,6 +56,15 @@ related:
   - features/integrations/browser-history
 ui_anchors:
   - /settings/commands
+process_keys:
+  - routine.research_dispatch
+  - routine.research_wiki_summary
+  - wiki.ingest_url
+  - wiki.compile
+  - wiki.ask
+  - wiki.lint
+  - wiki.trace
+  - wiki.connect
 ---
 
 # Bang Commands
@@ -139,37 +149,47 @@ at a glance it came from the daemon, not the agent:
 [SYSTEM · !cost · last 7d]
 Total: $1.42 (37 sessions)
 
-- claude: $1.10 (29 sessions)
-- codex:  $0.32 ( 8 sessions)
-- gemini: $0.00 ( 0 sessions)
+By backend:
+- claude: $1.10 (29)
+- codex: $0.32 (8)
 ```
 
-`!help` lists each entry with the name on its own line and the
-description indented:
+Only backends with recorded spend appear; a quiet week shows
+`No agent runs recorded with a billed cost.`
+
+`!help` leads with a total count, then lists each entry alphabetically
+with the name on its own line and the description indented:
 
 ```
 [SYSTEM · !help]
+18 commands total
 
 Built-in:
 
+!ask
+  ask a question against the wiki (`@<workspace>` optional)
+
 !cost
-  Show last-7-day Claude / Codex / Gemini spend.
+  Agent spend over the past 7 days.
 
 !help
   Show every registered command.
 
 !report
-  Show recent agent failures.
+  Agent errors over the past 7 days.
 
 !start
-  Resume autonomous work after !stop.
+  Resume autonomous work paused by !stop.
 
 !stop
   Pause cron-driven autonomous work. In-flight runs are not aborted.
 ```
 
 The `Custom:` section appears below the built-ins when you have
-enabled user commands at `/settings/commands`.
+enabled user commands at `/settings/commands`. On a long list the reply
+is trimmed for mobile with a "open the dashboard to browse the full
+list" footer; the count line always survives so you can tell entries
+were hidden.
 
 ## How They Behave
 
@@ -186,11 +206,14 @@ enabled user commands at `/settings/commands`.
   *do* enqueue agent sessions and therefore *do* cost.
 - **While paused**, any DM (bang or not) replies with the paused
   notice; only commands that opt into `runsWhilePaused` continue to
-  run: `!start`, `!stop`, `!cost`, `!report`, `!help`, `!close`,
-  `!wiki` (status), `!checks`, and the read-only `!research` subcommands
-  (list / show / mute / unmute / rename / decline / conclude).
-  LLM-dispatching commands reply with a command-aware "unavailable while
-  paused" notice instead of executing.
+  run: `!stop`, `!start`, `!close`, `!cost` (and `!cost <backend>`),
+  `!report`, `!help`, `!checks`, `!wiki` (status), and `!wiki help`.
+  Every other command — including **all** `!research` subcommands and
+  the LLM-dispatching wiki commands (`!ingest`, `!compile`, `!ask`,
+  `!lint`, `!trace`, `!connect`) — replies with a command-aware
+  "unavailable while paused" notice instead of executing. Pause-gating
+  is per *command*, so `!research` is blocked as a whole even for its
+  read-only subcommands.
 - **Replies land where the command did** — same platform, same
   channel, same thread.
 

@@ -12,8 +12,10 @@ do not fan out per account — the dispatcher emits one row per workspace.
 
 Submit every returned page — for a whole window in **one** call — via the
 `mcp__aitne-observations__submit_observations` MCP tool when it is in your
-allowed tools (preferred — bypasses the SDK bash preflight). Build the
-tool input as `{"observations":[…]}` with one entry per page.
+allowed tools (preferred — the structured MCP transport carries
+Unicode-bearing titles that would deterministically trip `curl … -d '{…}'`
+on the SDK's bash preflight). Build the tool input as
+`{"observations":[…]}` with one entry per page.
 
 If the MCP tool is unavailable (non-Claude session backend), fall back to
 `POST http://localhost:8321/api/observations/batch` with the same envelope:

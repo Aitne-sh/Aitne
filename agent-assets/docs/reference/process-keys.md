@@ -41,7 +41,16 @@ keywords:
   - delegated_task
   - gmail_classify
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
+config_keys:
+  - monthlyReviewEnabled
+  - delegatedTaskHeavyEnabled
+  - hourlyCheckIntervalMinutes
+  - dayBoundaryHour
+api_endpoints:
+  - POST /api/browser-task
+ui_anchors:
+  - /settings/models
 related:
   - concepts/process-keys
   - concepts/backends-and-tiers
@@ -52,15 +61,27 @@ related:
 
 # ProcessKeys
 
+A **ProcessKey** identifies the kind of work being dispatched (an owner DM,
+the morning routine, an hourly check, …). The dispatcher passes a ProcessKey
+to the `BackendRouter`, which resolves it to a `{ main, fallback }` backend
+plus an execution tier — the dispatcher never picks a model directly.
+
+The **default tier** column maps to a model size, not a specific id:
+
+- `lite` → Haiku-class (cheap, fast, narrow)
+- `medium` → Sonnet-class (the default for most owner-facing and routine work)
+- `high` → Opus-class (opt-in only; see [Tier Locks](#tier-locks) and
+  [Delegated Task Hard Caps](#delegated-task-hard-caps))
+
 | ProcessKey | Trigger | Default tier | Configurable |
 |---|---|---|---|
 | `routine.morning_routine` | Daily at `dayBoundaryHour` (default 04:00). Parent envelope; LLM dispatch flows through the two stage keys below. | medium | yes |
-| `routine.morning_routine_today` | Stage A of the morning-routine pipeline — today.md synthesis, schedule fan-out, profile-question pick, user-editable checks. Stage A also populates roadmap.md from a daemon-prepared `<roadmap_skeleton>` block on the first-run branch (Phase 7 retired the heavy-tier `routine.morning_routine_initial`). | medium | yes |
-| `routine.morning_routine_journal` | Stage B of the morning-routine pipeline — authors `daily/<yesterday>.md` from the daemon-prepared journal skeleton. | lite | yes |
-| `routine.today_refresh` | Every 4h inside the active window — drift-refresh of `state/today.md` | medium | yes |
+| `routine.morning_routine_today` | Stage A of the morning-routine pipeline — `state/today.md` synthesis, schedule fan-out, profile-question pick, user-editable checks. Stage A also populates `plans/roadmap.md` from a daemon-prepared `<roadmap_skeleton>` block on the first-run branch (Phase 7 retired the heavy-tier `routine.morning_routine_initial`). | medium | yes |
+| `routine.morning_routine_journal` | Stage B of the morning-routine pipeline — authors `journal/daily/<yesterday>.md` from the daemon-prepared journal skeleton. | lite | yes |
+| `routine.today_refresh` | Calendar-drift-triggered (calendar change touching today's items; 5-min dedup, fires ~30s later) — drift-refresh of `state/today.md` | medium | yes |
 | `routine.evening_review` | Daily at 18:00 local (fixed) | medium | yes |
 | `routine.weekly_review` | Friday 18:00 local (fixed) | medium | yes |
-| `routine.monthly_review` | Monthly cadence (gated OFF by default — kill switch `monthlyReviewEnabled` in runtime settings) | medium | no |
+| `routine.monthly_review` | Monthly cadence (gated OFF by default — kill switch `monthlyReviewEnabled` in runtime settings). The routine itself is off by default, but its backend/tier binding is still configurable. | medium | yes |
 | `routine.hourly_check` | Every `hourlyCheckIntervalMinutes` (default 60) inside the active window | medium | yes |
 | `routine.hourly_check.triage` | Stage 2 triage gate of every hourly check | lite | yes |
 | `routine.fetch_window` | Pre-pass fetcher spawned before each main routine | lite | yes |

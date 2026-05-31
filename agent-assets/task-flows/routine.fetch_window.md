@@ -108,6 +108,6 @@ of the plan produced.
   loop over items in a shell `for`. Do NOT chain multiple curl
   invocations. Those shapes are blocked by the daemon's Bash hooks
   (one curl per Bash call, heredoc bodies are stripped from URL
-  validation). One window → one curl → one JSON body whose
+  validation). One window → one submit → one JSON body whose
   `observations[]` array carries every fetched item (up to 200; split
-  larger windows into multiple POSTs).
+  larger windows into multiple `submit_observations` / POST calls).

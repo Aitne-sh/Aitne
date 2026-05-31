@@ -23,6 +23,7 @@ import {
   type SpawnOptions,
   spawn,
 } from "node:child_process";
+import { createRequire } from "node:module";
 
 import type { SandboxPrimitive } from "../types.js";
 import { darwinTahoeOrLater } from "../lifecycle/platform.js";
@@ -292,9 +293,13 @@ function loadWindowsHelper(): WindowsHelper {
   }
   // The native binding is loaded via the package barrel `./loader.js`
   // which falls back gracefully when the .node addon is missing
-  // (fresh source checkout before `npm rebuild`).
+  // (fresh source checkout before `npm rebuild`). The daemon ships as
+  // ESM (`"type": "module"`, tsc `module: ES2022`), so `require` is not
+  // a module-scope global — build one via `createRequire` to reach the
+  // CommonJS loader. This branch only runs on win32.
+  const req = createRequire(import.meta.url);
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require("../../../../native/win-appcontainer/loader.js") as {
+  const mod = req("../../../../native/win-appcontainer/loader.js") as {
     loadHelper: () => WindowsHelper;
   };
   return mod.loadHelper();

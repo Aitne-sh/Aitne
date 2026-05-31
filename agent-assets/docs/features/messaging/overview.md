@@ -19,14 +19,17 @@ tags:
   - core
   - messaging
   - integrations
+  - pairing
+  - notifications
 status: stable
 ask_examples:
   - How do I pair my phone with the agent?
   - Which messaging apps does the agent support?
   - Why didn't I get a notification?
+  - Can I send the agent a voice note?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-04
+updated: 2026-05-28
 keywords:
   - messaging
   - dm
@@ -52,6 +55,14 @@ ui_anchors:
   - /connections/messaging
   - /settings/connections
   - /settings/commands
+  - /settings/schedule
+process_keys:
+  - message.dm
+  - message.mention
+config_keys:
+  - primaryPlatform
+  - quietHoursStart
+  - quietHoursEnd
 ---
 
 # Messaging Overview
@@ -64,25 +75,29 @@ so you can talk to the agent the same way you'd type.
 ## What It Does
 
 - **Reactive DMs**: the agent answers every direct message you send.
-- **@-mentions**: in Slack, @-mentioning the agent inside a shared
-  channel routes to `message.mention` and is answered the same way
-  as a DM. Telegram, Discord, and WhatsApp drop all non-DM traffic
-  (no group support); multi-user DMs (Slack `mpim`) are also
-  filtered out — Aitne is single-owner by design.
+- **@-mentions (Slack only)**: @-mentioning the agent inside a shared
+  channel routes to the `message.mention` ProcessKey and is answered
+  the same way as a DM. Telegram, Discord, and WhatsApp drop all
+  non-DM traffic (no group support).
 - **Outbound notifications**: routines and observations fire alerts
   back through the same channel.
 - **Voice attachments**: when the platform attaches audio (Telegram
   voice notes, WhatsApp voice messages, etc.), the daemon transcribes
   it locally with Whisper before handing the turn to the agent.
   Transcription runs entirely on your machine — no audio is shipped
-  to a cloud API. Configurable via the `PA_VOICE_TRANSCRIPTION_*`
-  env vars (model, language, duration cap).
+  to a cloud API. Tune it with the `PA_VOICE_TRANSCRIPTION_*` env
+  vars: `ENABLED`, `MODEL`, `LANGUAGE`, `PRIMARY_LANGUAGE`, and
+  `MAX_DURATION_SEC`.
 - **Magic-phrase pairing**: the operator types a one-time phrase to
   bind their account to the agent (anti-impersonation).
 
-Aitne is **single-owner** by design. Any DM that does not
-match a paired owner channel is dropped (defense in depth — the
-adapter and the dispatcher both check).
+## Single-Owner by Design
+
+Aitne serves exactly one owner. Any message that does not come from a
+paired owner channel is dropped — group chats, multi-user Slack DMs
+(`mpim`), and unrecognized senders never reach the agent. This is
+defense in depth: both the messaging adapter and the dispatcher check
+the owner channel independently.
 
 ## When It Runs / How It Is Triggered
 
@@ -107,14 +122,18 @@ adapter and the dispatcher both check).
 ## Configuration
 
 - Per-app: bot token / OAuth, owner channel, optional default channel.
-- Global: `primaryPlatform` (the fallback when multiple apps are paired).
+- Global: `primaryPlatform` (default `slack`) — the platform the agent
+  prefers for outbound notifications when more than one app is paired.
+- Outbound rate limits and quiet hours live on `/settings/schedule`
+  (see [Quiet Hours](../operations/quiet-hours.md)).
 
 ## When Something Goes Wrong
 
 - An **un-paired DM**: the agent ignores it. Pair the app from
-  `/connections/messaging` first.
+  `/connections/messaging` first (see
+  [Pairing & Magic Phrase](pairing-and-magic-phrase.md)).
 - A **notification you expected but did not get**: check quiet hours
-  on `/settings/schedule`.
+  and rate limits on `/settings/schedule`.
 
 ## Related
 

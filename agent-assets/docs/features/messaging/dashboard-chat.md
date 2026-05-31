@@ -26,17 +26,29 @@ ask_examples:
   - Why are my dashboard chat replies different from my Telegram replies?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-05-28
 keywords:
   - chat
   - dashboard
   - in-browser
+  - sse
+  - session
 related:
   - features/messaging/overview
   - concepts/backends-and-tiers
+  - concepts/process-keys
   - features/operations/activity-and-conversations
+process_keys:
+  - dashboard.chat
+config_keys:
+  - sessionTimeoutDashboardMinutes
+api_endpoints:
+  - POST /api/chat/messages
+  - GET /api/chat/stream
 ui_anchors:
   - /chat
+  - /conversations
+  - /settings/models
 ---
 
 # Dashboard Chat
@@ -48,46 +60,56 @@ conversational surface separate from any paired messaging app.
 
 ## What It Does
 
-- **Real-time** message stream over SSE.
+- **Real-time** message stream over SSE — the same conversational
+  experience as a paired DM, but in the browser.
 - **Tool progress** rendered inline (which tool, which file, which
   endpoint) so you can watch the agent work.
 - **Session history** persisted to SQLite (`scope='dashboard_chat'`)
-  and visible from Activity → Conversations.
+  and re-openable from Conversations.
 - **Independent backend binding** — `dashboard.chat` is its own
   ProcessKey, so the model used here can differ from the one your
-  Telegram DM uses.
+  Telegram (or Slack/Discord) DM uses.
 
-## When It Runs / How It Is Triggered
+## How It Is Triggered
 
-Whenever you press send. The page connects to `POST /api/chat/messages`
-to enqueue and `GET /api/chat/stream` to listen.
+Whenever you press send. The page POSTs to `POST /api/chat/messages`
+to enqueue your message, then listens on `GET /api/chat/stream` (SSE)
+for the streamed reply and inline tool calls. Every send and reply is
+persisted under the chat session.
 
-## What It Outputs
-
-- Inline tool calls and replies.
-- Persisted messages under the chat session.
+Like a DM, `dashboard.chat` is a **reactive** ProcessKey: it runs on
+demand when you send, never on a schedule. Its default tier is
+**medium** (Claude Sonnet 4.6 by default) — the same tier as
+`message.dm`.
 
 ## Where in the Dashboard
 
 - **Chat (`/chat`)** is the live surface.
-- **Conversations** lets you re-open a past session.
+- **Conversations (`/conversations`)** lists past sessions; open one to
+  re-read it.
 
 ## Configuration
 
-- **Settings → Models** lets you pick which backend `dashboard.chat`
-  binds to (default: same as `message.dm`, but operator-overridable).
-- **Settings → Models → Session Timeouts → Dashboard Timeout** is the
-  per-session wall-clock cap for `/chat`.
+- **Settings → Models** (`/settings/models`) lets you pick which backend
+  `dashboard.chat` binds to. It defaults to the same medium-tier preset
+  as `message.dm`, but you can override it independently — give `/chat`
+  a faster model for quick questions, or a heavier one for deep work.
+- **Settings → Models → Session Timeouts → Dashboard Timeout**
+  (`sessionTimeoutDashboardMinutes`, default **120** minutes) is the
+  per-session wall-clock cap for `/chat`. After it lapses, the next
+  message starts a fresh session.
 
 ## When Something Goes Wrong
 
-- A **stalled session** with no progress: check Activity for the
-  session row — it may be waiting for an SSE event the daemon
-  dropped.
-- A **chat that uses the wrong model**: check `/settings/models` —
-  `dashboard.chat`'s row is independent from `message.dm`'s.
+- **A stalled session with no progress** — check the session row under
+  Conversations; it may be waiting for an SSE event the daemon dropped.
+  Reloading `/chat` reconnects the stream.
+- **A chat that uses the wrong model** — check `/settings/models`.
+  `dashboard.chat`'s row is independent from `message.dm`'s, so an
+  override there is the usual cause.
 
 ## Related
 
 - [Messaging Overview](overview.md)
 - [Backends and Tiers](../../concepts/backends-and-tiers.md)
+- [Process Keys](../../concepts/process-keys.md)

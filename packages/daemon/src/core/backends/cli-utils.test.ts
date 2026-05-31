@@ -12,6 +12,8 @@ import {
   readFileIfExists,
   removeFileIfExists,
   runLineCommand,
+  buildCmdShimArgs,
+  resolveWin32Invocation,
 } from "./cli-utils.js";
 
 describe("parseJsonLine", () => {
@@ -661,5 +663,78 @@ describe("CliPathCache (§9.4)", () => {
     unlinkSync(cliPath);
     nowMs += 30_000; // only 30 s — within 60 s TTL
     expect(cache.get()).toBe(cliPath); // stale but within TTL
+  });
+});
+
+describe("buildCmdShimArgs (Windows cmd.exe escaping — process-spawn-1)", () => {
+  // These assert the exact escaped output, cross-checked byte-for-byte against
+  // the `cross-spawn` package (v7.0.6). The escaping is the security boundary:
+  // callers pass arbitrary LLM prompts as args, so cmd.exe metacharacters MUST
+  // be neutralized rather than left to a `shell: true` re-parse.
+
+  it("emits the cmd.exe /d /s /c wrapper shape", () => {
+    const out = buildCmdShimArgs("C:\\npm\\npm.cmd", ["hello"]);
+    expect(out.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    expect(out).toHaveLength(4);
+    expect(out[3].startsWith('"')).toBe(true);
+    expect(out[3].endsWith('"')).toBe(true);
+  });
+
+  it("neutralizes spaces and the & command separator (single-escape shim)", () => {
+    const out = buildCmdShimArgs("C:\\npm\\npm.cmd", ["a & b"]);
+    expect(out[3]).toBe('"C:\\npm\\npm.cmd ^"a^ ^&^ b^""');
+  });
+
+  it("neutralizes %VAR% environment expansion", () => {
+    const out = buildCmdShimArgs("C:\\npm\\npm.cmd", ["%PATH%"]);
+    expect(out[3]).toBe('"C:\\npm\\npm.cmd ^"^%PATH^%^""');
+  });
+
+  it("neutralizes an injection attempt — `&` is always caret-escaped", () => {
+    const out = buildCmdShimArgs("C:\\npm\\npm.cmd", ["x & calc.exe"]);
+    // The raw `&` must never appear without a preceding caret.
+    expect(/(^|[^^])&/.test(out[3])).toBe(false);
+    expect(out[3]).toBe('"C:\\npm\\npm.cmd ^"x^ ^&^ calc.exe^""');
+  });
+
+  it("double-escapes metachars for node_modules/.bin shims only", () => {
+    const binShim = buildCmdShimArgs(
+      "C:\\p\\node_modules\\.bin\\codex.cmd",
+      ["a & b"],
+    );
+    const globalShim = buildCmdShimArgs("C:\\npm\\codex.cmd", ["a & b"]);
+    // node_modules/.bin/*.cmd re-parses its own line → one extra ^ layer.
+    expect(binShim[3]).toContain("^^^&");
+    expect(globalShim[3]).not.toContain("^^^&");
+    expect(globalShim[3]).toContain("^&");
+  });
+});
+
+describe("resolveWin32Invocation (process-spawn-1 / process-spawn-7)", () => {
+  const comspec = process.env.ComSpec || "cmd.exe";
+
+  it("wraps a .cmd batch shim through cmd.exe with verbatim args", () => {
+    const r = resolveWin32Invocation("C:\\npm\\codex.cmd", ["turn"]);
+    expect(r).not.toBeNull();
+    expect(r?.command).toBe(comspec);
+    expect(r?.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+    expect(r?.windowsVerbatimArguments).toBe(true);
+  });
+
+  it("wraps a .bat batch shim through cmd.exe", () => {
+    const r = resolveWin32Invocation("C:\\tools\\thing.bat", []);
+    expect(r?.command).toBe(comspec);
+    expect(r?.windowsVerbatimArguments).toBe(true);
+  });
+
+  it("leaves an absolute .exe path unchanged (spawned directly)", () => {
+    // resolved === command → no rewrite; the OS argv quoting is safe for .exe.
+    expect(resolveWin32Invocation("C:\\node\\node.exe", ["-v"])).toBeNull();
+  });
+
+  it("returns null for an unresolvable bare name (natural ENOENT)", () => {
+    expect(
+      resolveWin32Invocation("definitely_not_a_real_binary_zzz", []),
+    ).toBeNull();
   });
 });

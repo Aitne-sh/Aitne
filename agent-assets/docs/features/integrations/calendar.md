@@ -11,15 +11,17 @@ category: features
 summary: |
   The calendar integration pulls your events into Aitne so the
   morning routine and schedule files can reason about your day.
-  The Connections → Calendar page also picks the
-  backend that handles approaching-event notifications and observed
-  calendar changes (Calendar Event Model) — that picker only applies
-  when the integration runs in direct mode.
+  The Connections → Calendar page also picks the backend that handles
+  observed calendar changes (the Calendar Event Model card, binding
+  calendar.change) — that picker only applies when the integration runs
+  in direct mode.
 section: integrations
 tags:
   - integrations
   - calendar
   - core
+  - observations
+  - polling
 status: stable
 ask_examples:
   - How do I connect my Google Calendar?
@@ -28,10 +30,10 @@ ask_examples:
   - What is the Calendar Event Model setting on the Connections page?
   - Why is the Calendar Event Model card missing when my calendar is delegated?
   - Will Aitne notice calendar changes while my calendar is delegated?
-  - Which model handles approaching-event reminders?
+  - Which model handles detected calendar changes?
 locale: en-US
 created: 2026-04-25
-updated: 2026-04-28
+updated: 2026-05-28
 keywords:
   - calendar
   - google calendar
@@ -47,17 +49,21 @@ keywords:
 related:
   - features/routines/morning-routine
   - features/memory-files/schedule
+  - features/operations/schedule-approaching
   - concepts/delegated-mode
   - concepts/process-keys
   - concepts/observations
 ui_anchors:
   - /connections/calendar
 api_endpoints:
-  - /api/calendar
+  - /api/calendar/calendars
+  - /api/calendar/events
+  - /api/calendar/freebusy
 config_keys:
   - calendarPollIntervalSeconds
 process_keys:
   - calendar.change
+  - schedule.approaching
 ---
 
 # Calendar
@@ -75,8 +81,10 @@ DM you ahead of meetings that matter.
   `state/today.md` and the day's schedule file.
 - **Reads** events on demand for reactive turns ("am I free at 3?").
 
-The agent can create events when the operator asks (a `notify`-tier
-action). It does not auto-schedule on its own.
+The agent can create, move, or delete events when the operator asks
+(`POST`/`PATCH`/`DELETE /api/calendar/events`, all Autonomous-tier — no
+approval prompt). It does not auto-schedule on its own; it acts only on
+an explicit request.
 
 ## When It Runs / How It Is Triggered
 
@@ -98,22 +106,24 @@ action). It does not auto-schedule on its own.
 ## Calendar Event Model
 
 The Calendar Event Model picker chooses the backend and model that
-runs when the agent reacts to a calendar event. It binds the
-`calendar.change` ProcessKey, which fires from the calendar poller in
-three situations:
+runs when the **daemon-side poller detects a calendar change**. It binds
+the `calendar.change` ProcessKey, which fires in two situations:
 
-- An event is about to start (the operator gets an approaching-event
-  reminder).
 - An event was added, moved, or deleted between polls (recorded as a
   change observation; the hourly check picks it up).
-- An event was created far in advance (long-horizon events nudge the
-  roadmap-refresh routine so `plans/roadmap.md` can build a preparation
-  timeline).
+- An event was created far in advance (long-horizon events more than 14
+  days out nudge the roadmap-refresh routine so `plans/roadmap.md` can
+  build a preparation timeline).
 
-Light tier is the default and almost always sufficient — these flows
-are classification and scheduling, not generation. The default backend
-is whichever you picked as your main backend during setup; you can
-override per-process here if you want a different mix.
+Approaching-event reminders are a separate flow: they fire on the
+`schedule.approaching` ProcessKey, not `calendar.change`, and are not
+configured by this card. See [Schedule Approaching](../operations/schedule-approaching.md).
+
+Light tier (Haiku 4.5 / gpt-5.4-mini) is the default and almost always
+sufficient — these flows are event classification at low cost, not
+generation. The default backend is whichever you picked as your main
+backend during setup; you can override per-process here if you want a
+different mix.
 
 The picker is **only meaningful when Google Calendar runs in direct
 mode.** In delegated mode the daemon hands off all Google Calendar
@@ -155,8 +165,9 @@ rather than an env-style setting; the underlying state lives in the
 
 ## Related
 
-- [Morning Routine](../policies/routines/morning-routine.md)
-- [daily/ files](../memory-files/schedule.md)
+- [Morning Routine](../routines/morning-routine.md)
+- [Schedule files](../memory-files/schedule.md)
+- [Schedule Approaching](../operations/schedule-approaching.md)
 - [Delegated Mode](../../concepts/delegated-mode.md)
-- [ProcessKeys](../../concepts/process-keys.md)
+- [Process Keys](../../concepts/process-keys.md)
 - [Observations](../../concepts/observations.md)

@@ -689,6 +689,25 @@ export function ensureDaemonApiCli(sessionDir: string): string {
   chmodSync(cliPath, 0o700);
   writeFileSync(curlShimPath, DAEMON_CURL_SHIM_SOURCE, { encoding: "utf-8", mode: 0o700 });
   chmodSync(curlShimPath, 0o700);
+  // POSIX: the shebang + 0o700 makes the extensionless scripts executable and
+  // PATH-resolvable. On Windows, CreateProcess/cmd only run files whose ext is
+  // in PATHEXT, so an extensionless shebang file is never executed: a bare
+  // `curl` would silently fall through to the real curl.exe (bypassing the
+  // daemon-API auth/header injection and safety hooks) and `pa-api` would be
+  // "command not found". Write sibling .cmd launchers so PATHEXT resolution
+  // finds these and shadows the real curl.exe; cmd propagates node's errorlevel
+  // as the exit code. (The chmod above is a harmless near-no-op on Windows.)
+  /* c8 ignore start -- win32-only PATHEXT shim; the POSIX test runner never enters this branch */
+  if (process.platform === "win32") {
+    const binDir = join(sessionDir, SESSION_DAEMON_API_BIN_DIR);
+    writeFileSync(join(binDir, "pa-api.cmd"), '@echo off\r\nnode "%~dp0pa-api" %*\r\n', {
+      encoding: "utf-8",
+    });
+    writeFileSync(join(binDir, "curl.cmd"), '@echo off\r\nnode "%~dp0curl" %*\r\n', {
+      encoding: "utf-8",
+    });
+  }
+  /* c8 ignore stop */
   return cliPath;
 }
 

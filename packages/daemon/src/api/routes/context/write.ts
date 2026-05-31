@@ -557,8 +557,13 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       // an existing one. Avoids the hack of targeting the last section's
       // body and injecting H2 headers inside it.
       if (mode === "append_to_file") {
-        const separator = fileContent.endsWith("\n") ? "" : "\n";
-        const updated = fileContent + separator + (newContent ?? "") + "\n";
+        // Preserve the existing file's line-ending convention: a CRLF-bodied
+        // vault file (Windows / Obsidian on Windows) must get CRLF separators
+        // and terminator, not LF, or the file ends up with mixed endings that
+        // round-trip dirty under git autocrlf. LF files (macOS/Linux) keep "\n".
+        const eol = /\r\n/.test(fileContent) ? "\r\n" : "\n";
+        const separator = fileContent.endsWith("\n") ? "" : eol;
+        const updated = fileContent + separator + (newContent ?? "") + eol;
         // Run the same content-validation chain as before — this is
         // call-site-specific (allowLegacyToday flag, previousRoadmapContent)
         // and intentionally lives on the HTTP route. The shared helper
@@ -675,11 +680,16 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       let removedCount: number | undefined;
       let trimmedCount: number | undefined;
 
+      // Preserve the existing file's line-ending convention (see append_to_file
+      // above): emit CRLF separators/terminators for a CRLF-bodied file so we
+      // don't produce mixed endings. LF files (macOS/Linux) keep "\n".
+      const eol = /\r\n/.test(fileContent) ? "\r\n" : "\n";
+
       switch (mode) {
         case "append": {
           // Ensure a single newline separator without destroying existing content
-          const separator = currentBody.endsWith("\n") ? "" : "\n";
-          let appendedBody = currentBody + separator + (newContent ?? "") + "\n";
+          const separator = currentBody.endsWith("\n") ? "" : eol;
+          let appendedBody = currentBody + separator + (newContent ?? "") + eol;
 
           // maxEntries: trim oldest bullet entries from the top
           if (maxEntries !== undefined) {
@@ -692,10 +702,10 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           break;
         }
         case "replace":
-          updated = before + (newContent ?? "") + "\n" + after;
+          updated = before + (newContent ?? "") + eol + after;
           break;
         case "clear":
-          updated = before + "\n" + after;
+          updated = before + eol + after;
           break;
         case "clear_before": {
           // Schema refinements validate format, but defense-in-depth for

@@ -16,7 +16,9 @@ section: getting-started
 tags:
   - core
   - getting-started
-  - overview
+  - routines
+  - messaging
+  - wiki
 status: stable
 ask_examples:
   - What can Aitne actually do?
@@ -33,16 +35,23 @@ keywords:
   - wiki
   - lifestyle
 created: 2026-04-27
-updated: 2026-05-15
+updated: 2026-05-28
 related:
   - getting-started/01-what-is-this
   - getting-started/02-first-steps
   - getting-started/04-first-day
   - concepts/routines
   - concepts/memory-model
+  - concepts/skills
   - features/messaging/overview
   - features/wiki/overview
   - features/wiki/commands
+ui_anchors:
+  - /chat
+  - /connections/messaging
+  - /knowledge
+  - /wiki
+  - /settings/self-learning
 ---
 
 # What This App Can Do
@@ -93,10 +102,10 @@ them — the agent reads what's there next time it runs.
 
 - [Memory Model](../concepts/memory-model.md) — the layout and the
   rules around it.
-- [user/profile.md](../features/memory-files/user-profile.md) — what
+- [identity/profile.md](../features/memory-files/user-profile.md) — what
   the agent knows about you.
-- [today.md](../features/memory-files/today.md) — today's plan.
-- [agent/journal.md](../features/memory-files/agent-journal.md) —
+- [state/today.md](../features/memory-files/today.md) — today's plan.
+- [journal/agent.md](../features/memory-files/agent-journal.md) —
   what the agent did and what it noticed.
 
 ## Build a personal wiki from what you DM
@@ -138,11 +147,14 @@ operations keep the agent from doing anything you don't want.
 
 ## Get sharper over time
 
-A background self-optimization loop watches how your knowledge layout
-drifts (new folders, schema tweaks, vocabulary changes) and refines
-specific skill sections to match. The original SKILL.md files are
-never rewritten — overlays are reversible. The loop runs as a daemon
-observer; you can review its proposals from the dashboard.
+A background skill-curation loop watches how your knowledge layout
+drifts (new folders, schema tweaks, vocabulary changes) and proposes
+JSON **overlays** that refine specific skill sections to match. The
+seed `SKILL.md` files are never rewritten — overlays are reversible.
+Review and approve proposals from **Settings → Self-learning**.
+
+- [Skills](../concepts/skills.md) — how skill curation, overlays, and
+  the self-learning review surface work.
 
 ## Related
 

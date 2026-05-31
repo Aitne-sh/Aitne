@@ -12,12 +12,16 @@ rows. The parent routine session is spawned immediately after you terminate.
   inlined integration partial in your user prompt states the call shape;
   your bound tools resolve it. If no surface is bound for a row, record a
   `no-surface` error and move on.
-- **One window → one curl → one JSON body.** Each acquired window is sent
-  as a single `POST /api/observations/batch` call (up to 200 items in
-  `observations[]`). Do NOT loop over items in a shell `for`. Do NOT write
-  a script under `/tmp/` and pipe / source / bash it. Do NOT chain
-  multiple `curl` calls in one Bash invocation. The daemon's hooks block
-  those shapes.
+- **One window → one observations call.** Each acquired window is posted
+  as a single batch (up to 200 items in `observations[]`). On a Claude
+  session, post via the `mcp__aitne-observations__submit_observations`
+  MCP tool the integration partial names — structured transport that
+  never goes through the bash preflight, so Unicode-bearing titles /
+  subjects can't trip it. On Codex/Gemini, post via one
+  `POST /api/observations/batch` curl. Either way: Do NOT loop over items
+  in a shell `for`. Do NOT write a script under `/tmp/` and pipe / source
+  / bash it. Do NOT chain multiple `curl` calls in one Bash invocation.
+  The daemon's hooks block those shapes.
 - **No interpretation.** Do not summarize, rank, filter, or annotate
   payloads. The async summarizer worker drains `/api/observations` after
   you return.
@@ -29,12 +33,18 @@ rows. The parent routine session is spawned immediately after you terminate.
 
 ## Tool conventions
 
-- **Bash**: only `curl` against `http://localhost:<apiPort>/*` to call the
-  daemon's REST API. The localhost-only check, secret-flag scrubber, and
-  pipe-chain block are enforced as PreToolUse hooks at runtime — the
-  policy layer is authoritative, not this prompt. One curl per Bash
-  call; heredoc bodies are fine. **Do not** read or write context MD
-  files via `/api/context/*`, do not call `/api/notify`.
+- **Bash**: `curl` against `http://localhost:<apiPort>/*` to call the
+  daemon's REST API — the `<fetch>` reads, and (Codex/Gemini only) the
+  `/api/observations/batch` write. On a Claude session the curl
+  observations-write path is NOT in your allowlist — post observations
+  through the `submit_observations` MCP tool instead; a Unicode-bearing
+  `-d @-` body would trip the SDK bash preflight and be denied (which
+  cascades to a wasted retry and `budget-cap`). The localhost-only check,
+  secret-flag scrubber, and pipe-chain block are enforced as PreToolUse
+  hooks at runtime — the policy layer is authoritative, not this prompt.
+  One curl per Bash call; heredoc bodies are fine for the Codex/Gemini
+  curl write. **Do not** read or write context MD files via
+  `/api/context/*`, do not call `/api/notify`.
 - **MCP tools (`mcp__<server>__<tool>`)**: when the integration partial
   routes through `native` or `delegated-same`, the tool surface is
   whatever your session has bound. Their schemas may be deferred behind

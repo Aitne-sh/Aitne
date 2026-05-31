@@ -82,7 +82,12 @@ export const SECRET_ABS_PATTERNS: ReadonlyArray<RegExp> = [
 ];
 
 export function isSecretPath(absPath: string): boolean {
-  return SECRET_ABS_PATTERNS.some((re) => re.test(absPath));
+  // SECRET_ABS_PATTERNS are POSIX-slash anchored, so a backslash-delimited
+  // Windows path (e.g. `C:\Users\me\.ssh\id_rsa`) would slip past them.
+  // Normalising separators is inert on macOS/Linux (legitimate secret-dir
+  // paths there contain no backslashes) and closes the Windows gap.
+  const p = absPath.replace(/\\/g, "/");
+  return SECRET_ABS_PATTERNS.some((re) => re.test(p));
 }
 
 export function isUnderForbidden(absPath: string): boolean {

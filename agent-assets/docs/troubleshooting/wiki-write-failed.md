@@ -17,6 +17,7 @@ tags:
   - troubleshooting
   - wiki
   - obsidian
+  - integrations
 status: stable
 ask_examples:
   - Why can't the wiki write to my Obsidian vault?
@@ -24,12 +25,18 @@ ask_examples:
   - How do I retry the write-strategy probe?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-12
+updated: 2026-05-28
 keywords:
   - wiki write failed
   - wiki API failure
-  - wiki write lock
+  - wiki write strategy
   - external vault write
+  - obsidian cli fallback
+api_endpoints:
+  - /api/wiki/:workspace/health
+ui_anchors:
+  - /settings/wiki
+  - /connections/knowledge
 related:
   - features/wiki/overview
   - guides/use-an-existing-obsidian-vault
@@ -40,8 +47,9 @@ related:
 ## What You See
 
 A wiki bang command (`!ingest`, `!compile`) reports a write failure in
-the daemon log, or the dashboard `/api/wiki/:ws/health` endpoint
-surfaces a non-`fs` strategy with `cliAvailable: false`.
+the daemon log, or the `GET /api/wiki/:workspace/health` endpoint
+(surfaced behind the dashboard's write-strategy badge) reports a
+non-`fs` strategy with `cliAvailable: false`.
 
 ## Quick Checklist
 
@@ -74,14 +82,23 @@ Requirements:
 
 If any of these is missing, the daemon surfaces a structured error:
 
-| Error code | Meaning |
-|---|---|
-| `EWIKI_CLI_UNAVAILABLE` | Aitne's `ObsidianService` is not configured. Open `Settings → Integrations → Obsidian` and complete the pairing. |
-| `EWIKI_CLI_NOT_RUNNING` | Obsidian is not running. Launch the app and retry. |
+| Error code | Meaning | Fix |
+|---|---|---|
+| `EWIKI_CLI_UNAVAILABLE` | Aitne's `ObsidianService` is not configured (the `obsidian` binary is not resolvable on `PATH`). | Open **Connections → Knowledge** and connect Obsidian via the Obsidian card, then confirm Obsidian 1.12+ is installed with the CLI enabled. |
+| `EWIKI_CLI_NOT_RUNNING` | The CLI is configured but the Obsidian app is not running, so it cannot reach the sandboxed vault. | Launch the Obsidian app and retry. |
 
 ## Force a Re-Probe
 
-If you've fixed the underlying issue (granted iCloud permission,
-mounted the disk read-write) but the cached strategy is still `cli`,
-flip the dropdown in **Settings → Wiki → Write strategy** back to
-`auto`. The next write probes again and persists the fresh outcome.
+The resolved strategy (`fs` or `cli`) is cached on the workspace row so
+later writes skip the probe. If you've fixed the underlying issue
+(granted iCloud permission, mounted the disk read-write) but the cached
+strategy is still `cli`, force a fresh probe:
+
+1. Open **Settings → Wiki** (`/settings/wiki`) and edit the external
+   workspace.
+2. Set the **Write strategy** field back to **Auto (probe on first
+   write)**. (This field only appears for external workspaces; internal
+   workspaces always write via the local filesystem.)
+3. Save. The next write probes again — trying direct `fs` first and
+   falling back to the CLI only on `EPERM` / `EACCES` / `EROFS` /
+   `EBUSY` — and persists the fresh outcome.

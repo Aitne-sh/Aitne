@@ -18,6 +18,9 @@ tags:
   - core
   - getting-started
   - setup
+  - integrations
+  - routines
+  - memory
 status: stable
 keywords:
   - first day
@@ -35,8 +38,21 @@ ask_examples:
   - How do I connect an app that isn't on the integrations list?
   - Can I teach the agent a multi-step morning task?
 locale: en-US
+ui_anchors:
+  - /knowledge?tab=upload
+  - /knowledge?tab=context-files
+  - /connections
+  - /connections/mcp
+  - /settings/routines
+  - /activity
+context_files:
+  - identity/profile.md
+  - state/today.md
+  - journal/agent.md
+api_endpoints:
+  - POST /api/knowledge/import
 created: 2026-04-25
-updated: 2026-04-27
+updated: 2026-05-28
 related:
   - getting-started/02-first-steps
   - getting-started/03-what-can-this-do
@@ -131,7 +147,7 @@ on its next turn. The journal entry the import session writes
 (`journal/agent.md`) lists everything that was deferred or flagged
 as a conflict.
 
-→ [user/profile.md](../features/memory-files/user-profile.md) ·
+→ [identity/profile.md](../features/memory-files/user-profile.md) ·
 [Memory Model](../concepts/memory-model.md)
 
 ---
@@ -253,14 +269,16 @@ Shortest path from zero to that:
    → Add custom routine**:
    - Slug: `morning-deep-prep`
    - Cron: `0 7 * * 1-5`
-   - Backend tier: `heavy`
-   - Max budget USD: `0.20`
+   - Backend tier: `high (opus)` — this is a heavy, multi-tool job
+   - Max budget (USD): `0.20` (a generous per-execute override; the
+     form default is `0.05`)
    - Description: paste the four numbered steps above verbatim.
 3. **Watch the next firing in Activity** and iterate. The vault file
    at `~/.personal-agent/context/policies/routines/custom/morning-deep-prep.md`
-   is a plain Markdown file — edit the `## Checks` section directly
-   to refine the wording or change the schedule. The watcher picks
-   up changes without a restart.
+   is a plain Markdown file: edit the `## Checks` body to refine the
+   step wording, or the `cron:` field in the YAML frontmatter to
+   change the schedule. The watcher picks up changes without a
+   restart.
 
 → [Custom Routines](../features/routines/custom-routines.md) ·
 [Add a Custom Routine](../guides/add-a-custom-routine.md)
@@ -298,4 +316,4 @@ By end of day one you should have:
 - [Add a Custom Routine](../guides/add-a-custom-routine.md)
 - [Delegated Mode](../concepts/delegated-mode.md)
 - [Skills and MCP](../concepts/skills.md)
-- [user/profile.md](../features/memory-files/user-profile.md)
+- [identity/profile.md](../features/memory-files/user-profile.md)

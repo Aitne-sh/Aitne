@@ -28,7 +28,7 @@ ask_examples:
   - How do I list registered backends?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - API
   - REST
@@ -37,9 +37,10 @@ keywords:
   - PA_API_PORT
   - bearer token
   - /api
+  - /api/context
   - /api/wiki
   - /api/browser-history
-  - /api/browser-automation
+  - /api/browser-task
 related:
   - reference/config
   - reference/disallowed-tools
@@ -49,11 +50,14 @@ related:
 
 # API Reference
 
-The daemon serves a single Hono app on `PA_API_PORT` (default
-`8321`). All endpoints are mounted under `/api/*`. **Source of truth:**
-`packages/daemon/src/api/server.ts` registers every route group, and
-each group lives in its own file under
-`packages/daemon/src/api/routes/`.
+The daemon serves a single Hono app on `127.0.0.1:PA_API_PORT` (default
+`8321`). Almost all endpoints are mounted under `/api/*`; the lone
+exception is the GitHub webhook receiver, mounted at root `/webhook/github`.
+**Source of truth:** `packages/daemon/src/api/server.ts` (`createApp`)
+registers most route groups, with two post-compose mounts in
+`packages/daemon/src/bootstrap/api.ts` (the docs corpus + docs-QA, wired
+only after the indexer handle exists). Each group lives in its own file
+or directory under `packages/daemon/src/api/routes/`.
 
 ## Auth
 
@@ -67,7 +71,7 @@ callers pass it as `Authorization: Bearer <token>`.
 
 | Group | Path | Source | Purpose |
 |---|---|---|---|
-| Context | `/api/context/*` | `context.ts` | The ONLY legal write path for context Markdown — the agent uses curl into this endpoint, never `Edit`/`Write`. |
+| Context | `/api/context/*` | `context/` | The ONLY legal write path for context Markdown — the agent uses curl into this endpoint, never `Edit`/`Write`. Canonical paths are class-prefixed: `/api/context/state/today`, `/api/context/plans/roadmap`, `/api/context/journal/agent` (legacy bare paths like `/api/context/today.md` still resolve via an in-process alias layer). |
 | Observations | `/api/observations/*` | `observations.ts` | Phase 9 pending / consume; also the in-turn POST target for native-mode integration connectors. |
 | FS | `/api/fs/*` | `fs.ts` | Sandboxed filesystem reads. |
 | Knowledge | `/api/knowledge/*` | `knowledge.ts` | Knowledge-file import / export. |
@@ -76,7 +80,7 @@ callers pass it as `Authorization: Bearer <token>`.
 
 | Group | Path | Source | Purpose |
 |---|---|---|---|
-| Agent | `/api/agent/*` | `agent.ts` | `run-now`, `regenerate`, `notify`, `schedule`, `schedule/dm`. |
+| Agent | `/api/agent/*` | `agent.ts` | `run-now` (accepts `requestedModel: sonnet\|opus`), `regenerate`, `notify`, `schedule`, `schedule/dm`. Note: `POST /api/escalate` is **removed** — it returns HTTP 410 Gone; trigger Opus explicitly via `POST /api/agent/run-now {requestedModel:'opus'}`. |
 | Recurring schedules | `/api/recurring-schedules/*` | `recurring-schedules.ts` | Recurring schedule CRUD. |
 | Schedule options | `/api/schedule/*` | `schedule-options.ts` | Schedule option helpers for the dashboard. |
 | Managed tasks | `/api/managed-tasks/*` | `managed-tasks.ts` | Long-running operator tasks. |
@@ -100,7 +104,7 @@ callers pass it as `Authorization: Bearer <token>`.
 | Apple Calendar | `/api/apple-calendar/*` | `apple-calendar.ts` | macOS Calendar.app bridge. |
 | Notion | `/api/notion/*` | `notion.ts` | Notion proxy. |
 | Obsidian | `/api/obsidian/*` | `obsidian.ts` | Obsidian vault proxy. |
-| Git | `/api/git/*` | `git.ts`, `git-accounts.ts`, `git-templates.ts` | Git accounts, templates, watcher state. |
+| Git | `/api/git/*`, `/api/git-accounts/*` | `git.ts`, `git-accounts.ts`, `git-templates.ts` | Read-only git proxy (`/api/git/{log,diff,show}`), repo templates (`/api/git/templates/*`), and git-account CRUD (`/api/git-accounts/*`). |
 | Repositories | `/api/repositories/*` | `repositories.ts` | Unified repository CRUD (replaces split Git/GitHub settings). |
 | GitHub | `/api/github/*`, `POST /webhook/github` | `github.ts` | GitHub proxy and webhook receiver (mounted under `/`, not `/api`). |
 | Integrations | `/api/integrations/*` | `integrations.ts`, `integrations-reconcile.ts` | Integration mode CRUD (`direct \| delegated \| native \| disabled`), live probe endpoint, mode reconciliation. |
@@ -113,9 +117,9 @@ callers pass it as `Authorization: Bearer <token>`.
 |---|---|---|---|
 | Browser history | `/api/browser-history/*` | `browser-history.ts` | Visit timeline, reload signals (`/reloads/today`, `/reloads/weekly`), research clusters CRUD. |
 | Browser history (managed) | `/api/browser-history-managed/*` | `browser-history-managed.ts` | Managed-Chromium history surfacing. |
-| Browser automation | `/api/browser-automation/*` | `browser-automation.ts` | Managed-Chromium session control (default-off, per-site opt-in). |
-| Browser automation sites | `/api/browser-automation/sites/*` | `browser-automation-sites.ts` | Per-site opt-in / experimental-danger ack. |
-| Browser automation purchase | `/api/browser-automation/purchase/*` | `browser-automation-purchase.ts` | B-4 purchase-confirmation flow (single-use `!~xxxxxxxx` token, screenshot-first consent, 5-min timeout). |
+| Browser task | `/api/browser-task`, `/api/browser-task/:id*` | `browser-task.ts` | Managed-Chromium browser-task surface — create a task (`POST /api/browser-task`), poll status, stream events, fetch screenshots, mid-task `clarify`, `cancel`. Mounted unconditionally (the runner is wired separately). |
+| Browser automation sites | `/api/browser-automation/sites/*` | `browser-automation-sites.ts` | Per-site opt-in / experimental-danger ack (`connect`, `status`, `finalize`, `reauth`, `disconnect`). |
+| Browser automation purchase / B-4 | `/api/browser-automation/purchase-tokens`, `/api/browser-automation/b4/*` | `browser-automation-purchase.ts` | B-4 purchase-confirmation flow (single-use `!~xxxxxxxx` token, screenshot-first consent, 5-min timeout). Default-off — master toggle `runtime_state.managed_chromium.b4_enabled` ships `false`. |
 
 ### Lifestyle
 
@@ -129,7 +133,7 @@ callers pass it as `Authorization: Bearer <token>`.
 
 | Group | Path | Source | Purpose |
 |---|---|---|---|
-| Docs | `/api/docs/*` | `docs.ts` | Docs corpus + QA pipeline. |
+| Docs | `/api/docs/*` | `docs.ts` | Docs corpus search + QA pipeline. Mounted in `bootstrap/api.ts` (not `server.ts`) once the indexer handle is ready. |
 | Wiki | `/api/wiki/*` | `wiki.ts` | Wiki workspaces, files, search (FTS5), reindex, estimate, compile preview. |
 | Attachments | `/api/attachments/*` | `attachments.ts` | DM attachment proxy. |
 
@@ -161,15 +165,22 @@ keys.
 
 ## Risk classification
 
-Every write endpoint carries a `RiskTier` from
-`packages/daemon/src/safety/risk-classifier.ts`:
+Every endpoint carries a `RiskTier` from
+`packages/daemon/src/safety/risk-classifier.ts`. The enum has three
+values (the former **notify** tier was abolished daemon-wide — Approve
+now covers everything that used to be Notify):
 
-- **read** — autonomous.
-- **notify** — agent can act after DMing the owner.
-- **approve** — requires a bearer token plus an explicit approval.
+- **autonomous** — safe to execute without any auth or notification.
+- **read_sensitive** — touches personal data (email, calendar, notes,
+  context files); gated by `X-Read-Token` or Bearer auth when
+  `enforceReadToken=true`.
+- **approve** — requires explicit user approval (Bearer token).
 
-The startup audit fails the boot if any registered route is unclassified
-(`auditRiskClassifications(app.routes)` in `server.ts`).
+At boot, `auditRiskClassifications(app.routes)` (called in `server.ts`)
+checks for routes with no explicit classification. It does **not** abort
+boot — unclassified routes fall back to the Approve default (so they
+require Bearer auth) and a warning is logged only when the unclassified
+set changes from the previous boot.
 
 ## Related
 

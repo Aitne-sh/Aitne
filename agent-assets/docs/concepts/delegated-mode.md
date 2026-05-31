@@ -36,7 +36,7 @@ ask_examples:
   - Why don't I see a SKILL.md for Gmail in my Codex session?
 locale: en-US
 created: 2026-04-26
-updated: 2026-05-17
+updated: 2026-05-28
 keywords:
   - delegated mode
   - direct mode
@@ -55,9 +55,16 @@ related:
   - features/integrations/mail
 ui_anchors:
   - /connections
+  - /connections/mail
+  - /connections/calendar
   - /settings/models
-config_keys:
-  - integrations
+api_endpoints:
+  - PATCH /api/integrations/:key
+  - POST /api/integrations/:key/exec
+  - POST /api/integrations/:key/probe
+  - POST /api/observations/batch
+context_files:
+  - policies/integrations.md
 ---
 
 # Delegated Mode (Integration Modes)
@@ -97,6 +104,12 @@ the main DM backend — `BackendRouter.setMainBackend` cascades unmatched
 `native` rows to `disabled`. From the agent's call-site view, `native`
 is indistinguishable from `delegated` same-backend (both are in-session
 MCP); the difference is who polls (no one, for `native`).
+
+> The four modes are `direct | delegated | native | disabled`
+> (`INTEGRATION_MODES` in `packages/shared/src/integrations.ts`).
+> `git` and `github` support only `direct | delegated | disabled` — no
+> native mode (they use read-only CLI connectors), and `browser_history`
+> is `direct | disabled` only.
 
 ## Why This Concept Exists
 
@@ -154,7 +167,10 @@ that case the daemon spawns the other backend per call.
   subprocess for each call. A `SKILL.delegated.<sessionBackend>.md`
   file is materialized into the session workdir.
 - **`integrations.md`** — daemon-rendered snapshot of every
-  integration's mode at `~/.personal-agent/integrations.md`. The agent
+  integration's mode. After the context-vault restructure it lives
+  inside the vault under the `policies` class at
+  `<contextDir>/policies/integrations.md` (the legacy
+  `~/.personal-agent/integrations.md` location was retired). The agent
   reads it to know which path to take.
 
 ## How to Choose
@@ -184,12 +200,35 @@ connector) cascade to `disabled` and the operator gets a DM.
 
 ## Concrete Examples
 
-| Setup | What happens on a Gmail search |
+What happens on a Gmail search, by setup:
+
+| Setup | Path |
 |---|---|
-| Gmail direct | Agent: `curl /api/mail/<acct>/messages?q=...` → daemon hits Gmail API with stored OAuth |
-| Gmail delegated to Codex × Codex DM (same-backend) | Agent: `mcp__codex_apps__gmail._search_emails(...)` → Codex's connector hits Gmail. No daemon involvement. No skill file. |
-| Gmail delegated to Codex × Claude DM (cross-backend) | Agent: `curl -X POST /api/integrations/gmail/exec -d '{"task":"Search Gmail for newer_than:1d, return id/subject/from/snippet/date for each message","outputSchema":{"type":"object","required":["messages"],"properties":{"messages":{"type":"array","items":{...}}}},"maxToolCalls":3,"cacheable":true}'` → daemon spawns Codex subprocess with `proxy.md` profile → task-mode planner picks `_search_emails` from the registered `capabilityTools` → returns structured `{messages:[…]}` conforming to `outputSchema` |
-| Gmail native on Codex DM | Agent: `mcp__codex_apps__gmail._search_emails(...)` (identical to delegated same-backend) → Codex's connector hits Gmail. No daemon involvement. Daemon poller is OFF; the routine pre-pass POSTs results to `/api/observations/batch`. |
+| Gmail **direct** | `curl /api/mail/<acct>/messages?q=...` → daemon hits Gmail API with stored OAuth |
+| Gmail **delegated** to Codex, Codex DM (same-backend) | Agent calls `mcp__codex_apps__gmail._search_emails(...)` → Codex's connector hits Gmail. No daemon involvement. No skill file. |
+| Gmail **delegated** to Codex, Claude DM (cross-backend) | Agent POSTs to `/api/integrations/gmail/exec` in task mode (see below) → daemon spawns a Codex subprocess → returns a structured result. |
+| Gmail **native** on Codex DM | Identical call to delegated same-backend (`mcp__codex_apps__gmail._search_emails(...)`). No daemon involvement. The daemon poller is OFF; the routine pre-pass POSTs results to `/api/observations/batch`. |
+
+The cross-backend row above issues a task-mode `/exec` call:
+
+```bash
+curl -X POST http://localhost:8321/api/integrations/gmail/exec \
+  -d '{
+    "task": "Search Gmail for newer_than:1d, return id/subject/from/snippet/date for each message",
+    "outputSchema": {
+      "type": "object",
+      "required": ["messages"],
+      "properties": { "messages": { "type": "array", "items": { } } }
+    },
+    "maxToolCalls": 3,
+    "cacheable": true
+  }'
+```
+
+The daemon spawns a Codex subprocess with the `proxy.md` profile, the
+task-mode planner picks `_search_emails` from the registered
+`capabilityTools`, runs it, and returns a structured `{messages:[…]}`
+conforming to `outputSchema`.
 
 ## How the Skill File Resolves
 
@@ -222,14 +261,14 @@ returns one of four values, picked by tie-break order
   `delegated` and `native` are gated on a **live probe** (§4.12.2)
   that confirms three things before the mode is written to
   `integrations.md`: the backend binary is resolvable, backend auth
-  is valid, and the connector reports every `requiredCapability` the
-  descriptor demands. Cached probe rows are invalidated on mode
+  is valid, and the connector reports every `requiredCapabilities`
+  entry the descriptor demands. Cached probe rows are invalidated on mode
   change. `POST /api/integrations/:key/probe` is the chokepoint.
 
 ## How `integrations.md` Reflects This
 
-`~/.personal-agent/integrations.md` is the operator-readable snapshot the
-agent consults at session-init. It is rendered as a Markdown table:
+`<contextDir>/policies/integrations.md` is the operator-readable snapshot
+the agent consults at session-init. It is rendered as a Markdown table:
 
 ```markdown
 ## Current state

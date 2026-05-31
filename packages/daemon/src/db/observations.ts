@@ -175,16 +175,33 @@ export function recordObservation(
   // (db/schema.ts:285) is what guarantees at most one matching row.
   const existing = db
     .prepare(
-      "SELECT id, payload FROM observations WHERE source = ? AND ref = ? AND consumed_at IS NULL",
+      "SELECT id, payload, actor, change_type FROM observations WHERE source = ? AND ref = ? AND consumed_at IS NULL",
     )
     .get(params.source, params.ref) as
-    | { id: number; payload: string | null }
+    | {
+        id: number;
+        payload: string | null;
+        actor: ObservationActor;
+        change_type: ObservationChangeType;
+      }
     | undefined;
 
   if (existing) {
     const existingPayload = parseStoredPayload(existing.payload);
     const existingHash = computeObservationHash(params.source, existingPayload);
-    if (existingHash === incomingHash) {
+    // Only coalesce when payload AND attribution both match. An
+    // attribution- (actor) or change_type-correcting re-record carries
+    // the same payload hash but differing columns; it must fall through
+    // to the UPSERT so `actor = excluded.actor` / `change_type =
+    // excluded.change_type` actually corrects the stored row. Otherwise
+    // a daemon write first recorded as actor='user'/'unknown' (before
+    // AgentWriteTracker/isMarked flipped it) would stay mis-attributed
+    // and hourly_check would count it as user activity.
+    if (
+      existingHash === incomingHash &&
+      existing.actor === actor &&
+      existing.change_type === params.changeType
+    ) {
       return {
         id: existing.id,
         action: "duplicate",

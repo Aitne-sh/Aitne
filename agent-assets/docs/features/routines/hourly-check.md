@@ -17,9 +17,14 @@ section: routines
 tags:
   - routines
   - autonomous
-  - light-tier
+  - observations
+  - polling
   - hourly-check
 status: stable
+ui_anchors:
+  - /settings/routines
+  - /settings/schedule
+  - /activity?tab=system
 ask_examples:
   - What does the hourly check do?
   - When does it run?
@@ -28,7 +33,7 @@ ask_examples:
   - How do I tune the gate's freshness window?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-22
+updated: 2026-05-28
 keywords:
   - hourly
   - observations
@@ -120,34 +125,42 @@ those counts reflect "now", not "an hour ago".
 
 ### Layer 3 — Decide stage
 
-`decideStage` reads the signals plus the per-tick context (time
-since last notification, quiet-hours window, heartbeat status,
-`hourlyCheckLowSignalPendingCeiling`) and returns one of:
+`decideStage` is a pure function over the signal snapshot plus the
+per-tick config (heartbeat status, `hourlyCheckStage2Enabled`,
+`hourlyCheckLowSignalPendingCeiling`). It returns one of three stages
+— `stage0_silent`, `stage2`, or `stage3`:
 
 | Stage | What happens |
 |---|---|
-| `skip_low_signal` | No-op; the next tick re-evaluates. |
-| `silent_log` | Append a tiny line to `state/today.md` without DMing. |
-| `triage` | When `hourlyCheckStage2Enabled = true`, run a lite-tier `routine.hourly_check.triage` call (~2K in / ~50 out) to decide `log_only` vs. `escalate` before paying for a Stage 3 session. |
-| `escalate` | Spawn the full medium-tier `routine.hourly_check` session. |
+| `stage0_silent` | No agent session. Consume the pending observations and append a single best-effort line to `state/today.md`'s `## Agent Log`. This is the verdict for both "no signals" and "low signal under the ceiling". |
+| `stage2` | Only reachable when `hourlyCheckStage2Enabled = true` (default `false`, so low-signal ticks fall through to `stage3`). Runs a lite-tier `routine.hourly_check.triage` call whose strict JSON output decides `log_only` (→ silent path) vs. `escalate` (→ `stage3`). |
+| `stage3` | Spawn the full medium-tier `routine.hourly_check` session — the visible agent run. Reached directly on high-novelty signals (VIP mail, calendar conflict, overdue agent plan, approaching schedule) or as the cautious default when Stage 2 is off. |
 
-Telemetry: `agent_actions.detail.cautious_escalate` marks ticks where
-Layer 2 signal was thin but Layer 3 escalated anyway.
+When a Layer 1 pre-pass fails (`harvest.failed`), the gate
+short-circuits to a cautious `stage3` with reason
+`cautious_escalate_prepass_failure` and tags the audit row
+`agent_actions.detail.cautious_escalate = true` — a failed fetch
+should never silently swallow a tick's worth of signals.
 
 ### Layer 4 — Dispatch
 
-When Layer 3 returns `silent_log`, the daemon runs
-`runSilentHourlyCheckPath` (pure DB write, no agent). When it
-returns `escalate`, `enqueueStage3HourlyCheck` puts a
+When Layer 3 returns `stage0_silent` (or Stage 2 returns
+`log_only`), the daemon runs `runSilentHourlyCheckPath` — a
+daemon-direct write, no agent. When it returns `stage3` (or Stage 2
+returns `escalate`), `enqueueStage3HourlyCheck` puts a
 `routine.hourly_check` event on the bus, which becomes the visible
 agent session.
 
 ## What It Outputs
 
-- Updates to `state/today.md` (always — even silent_log writes a thin line).
-- Notifications when warranted (Stage 3 dispatch).
-- Audit rows: `agent_actions.action_type = 'hourly_check.gate'`
-  carrying the harvest + signal + stage detail.
+- A best-effort line in `state/today.md`'s `## Agent Log` — even the
+  silent path appends one (skipped only if `today.md` is missing or
+  the write lock is held; the observations are still consumed either
+  way).
+- Notifications when warranted (only on a `stage3` agent session).
+- An audit row on every tick:
+  `agent_actions.action_type = 'hourly_check.gate'`, carrying the
+  harvest + signal + stage detail.
 
 ## Configuration
 
@@ -157,11 +170,11 @@ agent session.
 | `hourlyCheckIntervalMinutes` | `60` | trigger | Cron cadence. |
 | `hourlyCheckActiveStartHour` | `4` | trigger | Active window start. |
 | `hourlyCheckActiveEndHour` | `24` | trigger | End-exclusive; `24` ≡ midnight. |
-| `hourlyCheckMinObservations` | `1` | trigger | Floor before Layer 1 runs. |
-| `hourlyCheckPrePassFreshnessMinutes` | — | Layer 1 | Skip per-integration fetch if pre-pass ran more recently. |
-| `hourlyCheckStage2Enabled` | varies | Layer 3 | Adds the lite-tier triage call. |
-| `hourlyCheckHeartbeatHours` | — | Layer 3 | Force a tick even on a quiet day. |
-| `hourlyCheckLowSignalPendingCeiling` | — | Layer 3 | Ceiling above which a "low signal" run is forced to escalate. |
+| `hourlyCheckMinObservations` | `1` | trigger | Minimum pending observations before a non-silent stage dispatches; below this the tick records a `below_threshold` skip. |
+| `hourlyCheckPrePassFreshnessMinutes` | `30` | Layer 1 | Range `0`–`240`. Skip a per-integration fetch if its pre-pass ran more recently; `0` fetches every tick, `240` is cost-minimal. |
+| `hourlyCheckStage2Enabled` | `false` | Layer 3 | Adds the lite-tier triage call; while `false`, low-signal ticks route straight to `stage3`. |
+| `hourlyCheckHeartbeatHours` | `4` | Layer 3 | Range `1`–`48`. Force a non-silent stage at least this often, even on a quiet day. |
+| `hourlyCheckLowSignalPendingCeiling` | `0` | Layer 3 | Range `0`–`20`. At or below this pending count, a low-signal tick stays silent. `0` keeps the cautious default (any pending observation escalates). |
 
 (`hourlyCheckGateMode` was removed in HOURLY_CHECK_GATE_REDESIGN_PLAN
 Phase 4 — the gate has a single execution path now.)

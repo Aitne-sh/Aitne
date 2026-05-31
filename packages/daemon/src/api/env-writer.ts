@@ -360,6 +360,9 @@ function updateEnvFile(envPath: string, updates: Record<string, string>): void {
   // pre-place a symlink at our temp path even with O_NOFOLLOW (defense
   // in depth — O_NOFOLLOW alone would catch the symlink at open time).
   const tmpPath = `${envPath}.tmp.${process.pid}.${randomBytes(8).toString("hex")}`;
+  // O_NOFOLLOW is undefined on Windows; this is already safe because a bitwise
+  // OR coerces `undefined` to 0 (ToInt32(undefined) === 0) — macOS/Linux get
+  // the symlink-refusal flag, Windows contributes nothing.
   const flags =
     fsConstants.O_WRONLY
     | fsConstants.O_CREAT
