@@ -3,6 +3,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "sourceMap": false,
+    "declarationMap": false,
     "types": [
       "node",
       "better-sqlite3",
