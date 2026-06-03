@@ -64,7 +64,7 @@ The roadmap API validates two invariants on every PUT / PATCH:
    file. Duplicate ids return:
 
    ```json
-   {"error":"validation_error","message":"duplicate roadmap id rm-YYYYMMDD-abcdef","path":"plans/roadmap.md"}
+   {"ok":false,"errors":[{"code":"context.content_validation_failed"}],"error":"validation_error","message":"Duplicate roadmap entry id `rm-YYYYMMDD-abcdef` (first seen on line N).","path":"roadmap.md"}
    ```
 
    Recovery: re-GET `roadmap`, mint a fresh id **for the colliding
@@ -74,11 +74,12 @@ The roadmap API validates two invariants on every PUT / PATCH:
 
 2. **Transition guard.** If an entry id survives from previous → next
    content, every prior `completed …` row for that id must still
-   exist byte-for-byte. Removing or rewording a historical completed
-   row returns:
+   exist byte-for-byte. If a completed prep row that existed before is
+   gone — dropped or reworded, since a reword no longer matches
+   byte-for-byte — the write returns:
 
    ```json
-   {"error":"validation_error","message":"transition_guard: completed row for rm-… changed","path":"plans/roadmap.md"}
+   {"ok":false,"errors":[{"code":"context.content_validation_failed"}],"error":"validation_error","message":"Completed Preparation Timeline row for entry `rm-…` was dropped.","path":"roadmap.md"}
    ```
 
    This is intentional: completed prep rows are the audit trail for
@@ -87,10 +88,19 @@ The roadmap API validates two invariants on every PUT / PATCH:
 If an entry id disappears entirely between previous → next, removal
 is accepted only when:
 
-- The entry's retention window has elapsed (see §"Retention" in the
-  skill body), OR
+- The entry's retention window has elapsed (see the **retention**
+  reference loaded by the skill body), OR
 - The operator passes the `X-Operator-Bypass: 1` header (dashboard
   flows only; never set this from an agent curl).
+
+A removal before the retention window permits it returns:
+
+```json
+{"ok":false,"errors":[{"code":"context.content_validation_failed"}],"error":"validation_error","message":"Roadmap entry `rm-…` was removed before its retention window permits removal.","path":"roadmap.md"}
+```
+
+Do not blind-retry this — wait out the window or use the operator
+bypass from a dashboard flow.
 
 ## Body submission
 

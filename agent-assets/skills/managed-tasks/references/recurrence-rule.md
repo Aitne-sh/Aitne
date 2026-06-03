@@ -8,10 +8,12 @@ description: recurrenceRule grammar — hourly / daily / weekly / monthly. Engin
 
 The daemon's recurrence engine accepts four frequencies: `hourly`,
 `daily`, `weekly`, `monthly`. Each frequency requires its own set of
-fields and rejects fields that don't apply — the daemon's Zod
-refinements return a `schedule.frequency_field_mismatch` issue (with
-the offending field path) when the shape disagrees with the chosen
-frequency. Pre-validate to save a round-trip.
+fields and rejects fields that don't apply — the daemon rejects a
+mismatched shape with an HTTP 400 validation error naming the
+frequency/field conflict. The recurring-schedules endpoint (the
+`schedule` skill) surfaces it as a `schedule.frequency_field_mismatch`
+issue with a field path; the managed-tasks endpoint surfaces it as a
+`managed_tasks.validation_error`. Pre-validate to save a round-trip.
 
 Times are `HH:MM` 24-hour local; `timezone` is IANA (auto-fills from
 daemon config when omitted, but explicit is safer so a roaming laptop

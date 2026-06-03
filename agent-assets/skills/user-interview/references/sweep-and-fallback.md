@@ -79,7 +79,7 @@ Triggered when a `dm_session` task description starts with
 5B) where 3 days passed without a natural opportunity.
 
 ```
-1. Fire-time abort. GET agent/profile-questions.md and the row's
+1. Fire-time abort. GET state/profile-questions.md and the row's
    target_path. Call /api/profile-questions/slot-filled. If the slot is
    filled per the heuristic OR the matching Pending row is no longer
    `[ ]`:

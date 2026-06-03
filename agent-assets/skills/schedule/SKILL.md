@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: Load when scheduling a future agent wake-up, pre-composed DM, recurring task, or de-duping against existing pending schedules.
+description: Schedule future agent wake-ups, pre-composed DMs, or recurring tasks via /api/schedule. Use when registering a timed follow-up, a one-off reminder, or de-duping against pending schedules.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -33,8 +33,7 @@ user but compound into duplicate DMs/notifications at fire time.
 3. **Recurring check.** `GET /api/recurring-schedules?enabled=true` to
    confirm no recurring rule/Agent already covers this cadence (e.g. a
    daily 09:00 inbox triage, or the morning briefing). If covered, skip.
-   (Recurring *work* is created as an Agent via the `agent-create` skill;
-   recurring *DMs* via `POST /api/recurring-schedules` `taskType:dm_session`.)
+   (How recurring work/DMs are created — see "Recurring" below.)
 4. **`confirm_dedup_key` check (mandatory for `confirm:` sub-flow rows
    only).** When scheduling a `dm_session` row with
    `taskContext.sub_flow="confirm"`, run the dedup pre-check + shape
@@ -58,11 +57,7 @@ Y" — switch to the `management-policy` skill instead. It creates a
 `policies/management-captures/<slug>.md` that captures the WHY alongside the cadence
 (via `policies/routines/custom/<slug>.md`) so the rule survives a context
 reset. When the cadence is all that matters and there is no intent to
-record: recurring autonomous **work** → create a **recurring Agent** via
-the `agent-create` skill (`POST /api/agents`); recurring scheduled
-**DM / briefing** → `POST /api/recurring-schedules` with
-`taskType: "dm_session"`. (Creating a recurring `agent.task` row directly
-on `/api/recurring-schedules` is **410 Gone** — use an Agent.)
+record, create the recurring work/DM per the "Recurring" section below.
 
 ## DM vs Agent Task
 
@@ -77,7 +72,7 @@ on `/api/recurring-schedules` is **410 Gone** — use an Agent.)
 
 ## Writing a Good Prompt (for agent tasks)
 
-> **The wake-up agent has NO memory of why it was scheduled.** It receives only: `state/today.md`, a fresh 1-day calendar, `identity/profile.md` + `policies/management.md`, and the `prompt` + `taskContext` fields you provide. Nothing else. (`description` is just an optional list label — never the agent body.)
+> **The wake-up agent has NO memory of why it was scheduled.** A `scheduled.task` session is self-contained: it receives only `state/today.md` (which carries the day's schedule and state) plus the `prompt` + `taskContext` you provide — **NOT** `identity/profile.md` or `policies/management.md` (the `scheduled.task` injection policy opts those out). Nothing else. (`description` is just an optional list label — never the agent body.)
 
 Include all four elements in the `prompt`:
 
@@ -98,21 +93,9 @@ Structured metadata for IDs, URLs, and correlation. Put long identifiers here so
 { "scheduledBy": "morning_routine", "prUrl": "https://github.com/user/repo/pull/42" }
 ```
 
-**`importance` convention.** This controls whether `agent_schedule`
-rows become `plans/roadmap.md` `Scheduled:` entries:
+**`importance`** controls whether a row becomes a `plans/roadmap.md` `Scheduled:` entry. Default `transient` for `/api/schedule/dm`, `normal` for `/api/schedule`; use `strategic` only for roadmap-shaped long-prep reminders. Tier table + defaults in the reference below.
 
-| Tier | Roadmap behavior | Use |
-|---|---|---|
-| `transient` | Never in roadmap; surfaces in today.md only on the day it fires | Default for `/api/schedule/dm`; short pings like "call mom next Tuesday" |
-| `normal` | In roadmap only when scheduled more than 7 days out | Default for `/api/schedule`; ordinary user-facing follow-ups |
-| `strategic` | In roadmap regardless of horizon | Long-prep commitments such as ESTA / travel / deadline reminders |
-| `low` | Never in roadmap | Internal ticks already visible elsewhere, e.g. Agent Plan rows, recurring-schedule instances, morning retries |
-
-For direct DMs, omit `importance` for ordinary one-off pings. If the
-reminder is clearly tied to a long-prep commitment ("remind me in a
-month about ESTA for the LA trip"), either write/promote the roadmap
-item via the roadmap skill and let AAP schedule the reminder, or call
-`/api/schedule/dm` with `"importance":"strategic"`.
+{{> ref:importance }}
 
 ## Tier / Model selection
 
@@ -158,7 +141,7 @@ curl -s -X POST http://localhost:8321/api/schedule \
 | Field | Required | Description |
 |---|---|---|
 | `time` | Yes | ISO 8601 with timezone offset |
-| `taskType` | Yes | Free-form provenance label for the row (no allowlist on the single endpoint). Use `wake` for an agent wake-up — the convention this skill follows. The closed set `wake`/`dm_session`/`check`/`dm` is enforced only on `/api/schedule/batch`; e.g. the dashboard's manual "+ New task" sends `custom`. The label does not change firing — the scheduler runs every non-`dm`/`dm_session`/`browser_task` row as a generic `scheduled.task`. |
+| `taskType` | Yes | Free-form provenance label; use `wake` for agent wake-ups. The closed set `wake`/`dm_session`/`check`/`dm` is enforced only on `/api/schedule/batch`. The label doesn't change firing — every non-`dm`/`dm_session`/`browser_task` row runs as a generic `scheduled.task`. |
 | `prompt` | Yes | The agent's instruction at fire time — its ONLY context (the session has no memory). Self-contained: what + why + who + expected output. See format above. Max 8000 chars (~2000 tokens); move bulk reference material into a file the agent reads at fire time rather than inlining it. |
 | `description` | No | Optional short label shown in the schedule list (max 200 chars). NOT the agent body — that is `prompt`. Omit it and the list shows a `prompt` excerpt. |
 | `tier` | No | `lite` / `medium` / `high`. Omit to use the dispatcher's process-key default (medium for `scheduled.task`). See "Tier / Model selection" above. Mutually exclusive with `model`. |
@@ -179,11 +162,11 @@ Fields: `time` (ISO 8601), `prompt` (the agent instruction, ≤8000 chars, non-d
 ```bash
 curl -s "http://localhost:8321/api/schedule?status=pending"
 ```
-Param `status` (default `pending,running`): comma-separated `pending`, `running`, `completed`, `failed`.
+Param `status` (default `pending,running`): comma-separated `pending`, `running`, `completed`, `failed`, `skipped`. DELETE/cancel does not remove a row — it moves it to `status='skipped'`, so re-listing a cancelled item requires `status=skipped`.
 Param `roadmapEligible=true`: return only rows that may become
 roadmap `Scheduled:` entries (`transient` / `low` excluded, `normal`
 only beyond 7 days, `strategic` included).
-Response: `{ "items":[{ "id","scheduledFor","taskType","description","prompt","status","model","backendId","tier","taskContext","createdAt" }] }`. `prompt` / `tier` / `model` / `backendId` are `null` when no override is set. `model` is a registered id verbatim and travels with `backendId` when set — the row carries either the `(model, backendId)` pin or `tier`, never both. Legacy alias inputs (`sonnet` / `opus`) are normalized to `tier` at write time. `taskContext` is the parsed JSON (or `null`); filter with `jq` e.g. `'.items[] | select(.taskContext.confirm_dedup_key == "create_project:la-pm-masters")'`.
+Response: `{ "items":[{ "id","scheduledFor","taskType","description","prompt","status","model","backendId","tier","taskContext","createdAt" }] }`. `prompt` / `tier` / `model` / `backendId` are `null` when no override is set. `model` is a registered id verbatim and travels with `backendId` when set — the row carries either the `(model, backendId)` pin or `tier`, never both. Legacy alias inputs (`sonnet` / `opus`) are normalized to `tier` at write time. `taskContext` is the parsed JSON (always an object — `{}` when unset); filter with `jq` e.g. `'.items[] | select(.taskContext.confirm_dedup_key == "create_project:la-pm-masters")'`.
 
 ### DELETE /api/schedule/:id — Cancel a pending item
 ```bash

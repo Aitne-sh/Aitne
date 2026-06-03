@@ -33,23 +33,18 @@ their own destination policy — see the cluster-update flow below.
    topic / domain labels, not raw URLs. There is no path that exposes a
    full URL string; do not try to reconstruct one and feed it to
    WebFetch / Read.
-5. **`context/research/*` writes currently 403.** The cluster-journal /
+5. **`context/research/*` is writable.** The cluster-journal /
    assistance / wiki destinations below (`PUT`/`PATCH
    /api/context/research/<slug>.md`, `…-assistance-<date>.md`,
-   `…-wiki.md`) are the design-intended canonical paths, but `research/`
-   is **not** in the six-class vault write whitelist
-   (`CONTEXT_WRITE_PERMISSIONS`), so those writes return **HTTP 403
-   `context.write_forbidden`** today. `GET /api/context/research/<slug>.md`
-   reads are unaffected. Until the whitelist gains a `research/*` entry,
-   prefer the Obsidian / Notion destination for the wiki flow when
-   configured, and surface the 403 to the owner rather than reporting a
-   successful local-context write.
+   `…-wiki.md`) accept `PUT` and `PATCH` today (`DELETE` is intentionally
+   omitted — concluding a cluster preserves its journal).
 
 ## Endpoint reference
 
 All endpoints respond with JSON validated against
-`packages/shared/src/browser-history-schemas.ts`. The 13 routes below
-are the entire agent-facing surface.
+`packages/shared/src/browser-history-schemas.ts`. 12 of the 13 routes
+below are agent-facing; `GET /status` is operator/dashboard-only (Approve
+tier — see the note after the table).
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -67,19 +62,35 @@ are the entire agent-facing surface.
 | POST | `/api/browser-history/offers/<slug>/mute` | Permanently silence the cluster |
 | POST | `/api/browser-history/research-clusters/<slug>/wiki-written` | Stamp `wikiSummaryWrittenAt`. Call this from `routine.research_wiki_summary` AFTER a successful destination write — never on acceptance. |
 
+**`GET /status` is operator/dashboard-only (Approve tier, Bearer
+required).** An autonomous agent curl from a session workdir carries no
+`Authorization: Bearer` header and is rejected with **401** before the
+handler runs — so `/status` is NOT part of the agent-facing surface. Do
+not call it; treat detector capabilities/lifecycle as out of scope for
+the agent. (The `/offers/<slug>/accept` POST is ReadSensitive, not
+Approve — call it as plain curl; the shim auto-injects `x-read-token`,
+so do NOT add an auth header to it.)
+
 ### Common curl shape
 
 ```bash
-curl --silent --fail \
+curl --silent --show-error \
   http://127.0.0.1:8321/api/browser-history/research-clusters
 ```
+
+Use `--silent --show-error` (not `--fail`): the agent's `curl` runs
+through a session shim that rejects `--fail` / `-f` as an unsupported
+flag — the command hard-errors before any request (it does not merely
+suppress the body). `--show-error` still surfaces the routes' structured
+`{error: …}` JSON on a 4xx, so you can branch on 404 (`not_found`) vs
+400 (`invalid_slug` / `invalid_body`).
 
 For POSTs, pass a single-quoted JSON body so the daemon's hooks do not
 misclassify the payload as a shell command (the project convention from
 `_safety.md`):
 
 ```bash
-curl --silent --fail \
+curl --silent --show-error \
   -X POST \
   -H 'Content-Type: application/json' \
   -d '{"kind":"research_assist"}' \
@@ -178,13 +189,15 @@ write and enqueued this event.
    - Sources read (domain labels only, never URLs)
    - Open questions
    - Status (active / paused / concluded based on cluster status)
-4. Write the note to:
+4. Write the note to the best available destination, in priority order
+   (each is a fully working target — the local path is a real write, not
+   a 403-doomed fallback):
    - **Obsidian** if `/api/obsidian/*` is configured: PUT to
      `<vault>/inbox/<slug>-wiki-<YYYY-MM-DD>.md`.
    - **Notion** if `/api/notion/*` is configured: create a page under
      the configured "Aitne Inbox" parent.
-   - **Local context** otherwise:
-     `PUT /api/context/research/<slug>-wiki.md`.
+   - **Local context** (`PUT /api/context/research/<slug>-wiki.md`) as the
+     fallback when neither knowledge destination is configured.
 5. After a successful write — and only then — POST
    `/api/browser-history/research-clusters/<slug>/wiki-written` so the
    daemon advances `wikiSummaryWrittenAt`. This is what guards the next

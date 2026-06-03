@@ -112,7 +112,7 @@ and RFC-2822 reply chain shape are unchanged for non-Gmail accounts.
 
 POST each materialised Gmail thread fetched in a routine to
 `/api/observations`. The daemon computes `contentHash` server-side via
-`@personal-agent/shared/observations-hash.ts`; pass `payload` verbatim.
+`@aitne/shared/observations-hash`; pass `payload` verbatim.
 
 **Batch when you have more than one thread.** Use
 `POST /api/observations/batch` with up to 200 items in a single

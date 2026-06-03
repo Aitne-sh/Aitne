@@ -42,7 +42,7 @@ connector arguments carry concrete UUIDs.
 
 ```bash
 curl -s http://localhost:8321/api/notion/databases
-# → { "databases": { "<label>": { "id": "<uuid>", "title": "..." }, ... } }
+# → { "databases": [ { "label": "<label>", "id": "<uuid>" }, ... ] }
 ```
 
 This route is **not** part of the absolute deny set and is intentionally

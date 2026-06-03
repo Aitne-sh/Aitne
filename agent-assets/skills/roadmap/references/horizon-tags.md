@@ -3,6 +3,17 @@ kind: reference
 parent_skill: roadmap
 ---
 
+Horizon-tag grammar (validated by the context API):
+- `YYYY-MM` → month-granular
+- `YYYY-Qn` → calendar quarter
+- `YYYY spring|summer|autumn|winter`
+- `undated` → no horizon yet
+
+Worked examples:
+- `- [2026-05] LA trip candidate — Source: dm 2026-04-19 — Review: 2026-04-20 — ReviewCount: 0  <!-- id: rm-20260419-a3f1c2 -->`
+- `- [2026-Q3] US study prep — Source: dm 2026-04-19 — Review: 2026-05-17 — ReviewCount: 0  <!-- id: rm-20260419-b8e7d4 -->`
+- `- [undated] Eventually learn Spanish — Source: dm 2026-04-19 — Review: [noreview] — ReviewCount: 3  <!-- id: rm-20260419-0d4c9a -->`
+
 `Review:` is the date when Evening Review should re-evaluate whether the
 line is ready to become an Agent Action Plan entry. Date math uses the
 configured user timezone, not UTC midnight.

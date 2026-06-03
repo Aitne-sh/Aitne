@@ -27,38 +27,24 @@ the FTS query in three steps:
 
 1. **Extract the topic.** Strip interrogatives, particles, and meta
    phrases. Keep only the noun phrase or technical term.
-
-   | Input | Topic |
-   |---|---|
-   | "what is delegated mode?" | `delegated mode` |
-   | "什么是 delegated 模式？" | `delegated模式` |
-   | "tell me about ProcessKey" | `ProcessKey` |
-   | "ProcessKey 是什么？" | `ProcessKey` |
-   | "how does the morning routine work?" | `morning routine` |
-   | "早晨例行公事是怎么运作的？" | `早晨例行公事` |
-
 2. **Split at script boundaries.** If the topic mixes Latin and CJK
    without spaces, insert a space at every Latin↔CJK boundary. FTS5
    quotes each whitespace-separated token as a phrase before
    AND-joining; an unsplit `delegated模式` becomes one unmatchable
    trigram phrase.
-
-   | Input | Split |
-   |---|---|
-   | `delegated模式` | `delegated 模式` |
-   | `ProcessKey列表` | `ProcessKey 列表` |
-
 3. **Latin wins.** If the split topic contains both Latin and CJK
-   tokens, drop the CJK tokens. The corpus is English; CJK is the
-   operator's gloss, not the indexed term. Pure-CJK topics are passed
-   through unchanged (and may legitimately miss until bilingual aliases
-   land — see "When you cannot find an answer" below).
+   tokens, drop the CJK tokens — the corpus is English; CJK is the
+   operator's gloss, not the indexed term. Pure-CJK topics pass through
+   unchanged (and may legitimately miss until bilingual aliases land —
+   see "When you cannot find an answer" below).
 
-   | Input | Final query |
-   |---|---|
-   | `delegated 模式` | `delegated` |
-   | `ProcessKey 列表` | `ProcessKey` |
-   | `早晨例行公事` | `早晨例行公事` (passes through; may miss) |
+| Input | Final query |
+|---|---|
+| "what is delegated mode?" | `delegated` |
+| "什么是 delegated 模式？" | `delegated` |
+| "ProcessKey 是什么？" | `ProcessKey` |
+| "how does the morning routine work?" | `morning routine` |
+| "早晨例行公事是怎么运作的？" | `早晨例行公事` (passes through; may miss) |
 
 ## Endpoints
 
@@ -87,18 +73,20 @@ must not exceed 3. Quality rule, not a daemon-enforced cap.
 2. **Call 2 (optional).** If 0 hits and a Latin synonym is obvious,
    retry `term-search` with the synonym. Otherwise fall back to
    `search` with the same topic.
-3. **Call 3 (rare).** Broaden — strip qualifiers, or add `&category=`
-   / `&tag=` to narrow.
+3. **Call 3 (rare).** Broaden — strip qualifiers, or narrow with
+   `&category=` (both endpoints) or, on `search` only, `&tag=`.
 
 If three calls do not surface an answer, stop and tell the operator the
 docs do not cover their question.
 
 ## Search query syntax
 
-Treat `q` as an FTS5 query. Quote multi-word phrases (`"day plan"`)
-when you want them adjacent. Wildcards (`day*`) match prefixes. Boolean
-operators (`AND`, `OR`, `NOT`) work — but plain space-separated terms
-are usually enough. The bm25 weights already boost
+`q` is **not** a raw FTS5 query. The daemon tokenizes it on whitespace,
+wraps each token in quotes as a literal phrase, and AND-joins them, so
+every term is required. Wildcards (`day*`), booleans (`AND`/`OR`/`NOT`),
+and your own quotes are searched as literal text, not as operators —
+multi-word queries are already implicit-AND across all tokens. Just send
+space-separated terms. The bm25 weights already boost
 title/keywords/aliases over body, so a one-word query against a doc's
 `title` or `keywords` is typically the right first move.
 

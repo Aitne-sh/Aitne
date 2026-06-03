@@ -15,13 +15,16 @@ repositories layout (see
 `docs/design/appendices/unified-repositories.md` §4.5):
 
 - **Git-managed repositories** (any classification) write to
-  `git/<slug>/overview.md` plus per-day `git/<slug>/journal/<YYYY-MM-DD>.md`.
+  `knowledge/repos/<slug>/overview.md` plus per-day
+  `journal/repos/<slug>/<YYYY-MM-DD>.md`.
 - **Non-git project pages** (manual projects without a backing repo)
-  still live at `projects/<slug>.md` per the original layout.
+  still live at `plans/projects/<slug>.md` per the original layout.
 
 The pre-cutover paths `projects/<slug>.md` (for git-backed projects)
-and `git-repos/<slug>.md` are **retired** — every git-managed repo
-now lives under `git/<slug>/`. Classification (`project` vs `repo-only`)
+and `git-repos/<slug>.md` are **retired**; the `git/<slug>/` spelling is
+a deprecated alias the daemon still normalizes for one release. Every
+git-managed repo now lives under `knowledge/repos/<slug>/` (overview)
+plus `journal/repos/<slug>/` (daily journal). Classification (`project` vs `repo-only`)
 no longer changes the path; it controls which sections the overview
 carries (project keeps `## Lifecycle Phases`, repo-only stays light).
 
@@ -40,7 +43,7 @@ carries (project keeps `## Lifecycle Phases`, repo-only stays light).
 - Preserve user prose, manual notes, and existing headings. Compress
   old Git history instead of deleting meaningful context.
 
-## Overview file shape (`git/<slug>/overview.md`)
+## Overview file shape (`knowledge/repos/<slug>/overview.md`)
 
 - Frontmatter: `type: git-project`, `repository_id`, `slug`,
   `github_repo` (or null), `local_path`, `classification`, `category`,
@@ -53,7 +56,7 @@ carries (project keeps `## Lifecycle Phases`, repo-only stays light).
 - `## Open Threads` (manual prose; preserved verbatim)
 - `## Daily Activity Log` (rolling 30-day window)
 
-## Journal file shape (`git/<slug>/journal/<YYYY-MM-DD>.md`)
+## Journal file shape (`journal/repos/<slug>/<YYYY-MM-DD>.md`)
 
 - Frontmatter: `type: git-journal`, `repository_id`, `date`,
   `commit_count`, `pr_events`, `workflow_events`.

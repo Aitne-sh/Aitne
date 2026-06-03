@@ -18,6 +18,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { ALL_SKILLS, EVENT_SKILL_SETS } from "./core/skills-manifest.js";
+import { renderReferenceIncludes } from "./core/skills-compiler-skill-index.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../");
@@ -167,10 +168,15 @@ describe("managed-tasks — Register section (design §10.1)", () => {
 
   it("references the path validation invariants from §9.3 / §13.3", () => {
     // The output-path grammar lives in `references/output-path.md` and is
-    // inlined via `{{> ref:output-path }}`. After resolution the SKILL.md
-    // body carries the trailing-slash + `..` rejection invariants.
-    expect(text).toMatch(/<domain>\/<type-plural>\//);
-    expect(text).toMatch(/output-path/);
+    // inlined via `{{> ref:output-path }}`. Resolve the include so this
+    // assertion sees the post-materialisation body (2026-06 audit moved
+    // the grammar table out of the SKILL.md body into the reference).
+    const resolved = renderReferenceIncludes(
+      readSkill(SKILLS.managed),
+      resolve(REPO_ROOT, "agent-assets/skills", SKILLS.managed),
+    );
+    expect(resolved).toMatch(/<domain>\/<type-plural>\//);
+    expect(resolved).toMatch(/output-path/);
   });
 
   it("documents the recurrence-engine floor (daily/weekly/monthly only)", () => {
@@ -276,8 +282,14 @@ describe("managed-tasks — Run-once (§10.4 + §10.5)", () => {
     expect(text).toMatch(/POST\s+http:\/\/[^\s]+\/api\/managed-tasks\/mt_\d+\/run-now/);
   });
 
-  it("documents the 409 already_running back-off", () => {
-    expect(text).toMatch(/already_running/);
+  it("documents the 202 queued response (no in-flight guard — the route has no 409 already_running)", () => {
+    // 2026-06 skills audit: the route (managed-tasks.ts:875-968) has NO
+    // concurrency guard — it unconditionally enqueues and returns
+    // `202 {status:"queued", ...}`. The prior pinned `already_running`
+    // string asserted a 409 that the implementation never emits.
+    expect(text).toMatch(/202/);
+    expect(text).toMatch(/queued/);
+    expect(text).not.toMatch(/already_running/);
   });
 });
 

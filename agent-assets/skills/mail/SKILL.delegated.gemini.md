@@ -255,5 +255,6 @@ curl -sS "http://localhost:8321/api/agent/actions?kind=delegated_task.exec&since
 ```
 
 Summarise from the returned `actions` array — each row carries
-`detail.task` (the natural-language intent), cost, cache hit flag,
-and timestamp.
+`detail.taskHash` (a hash, NOT the task text — the verbatim intent is
+deliberately not persisted, so do not try to read intent prose from it),
+cost, cache hit flag, and timestamp.

@@ -7,8 +7,9 @@ description: YAML frontmatter required by /api/context/* validators on full-file
 # Required frontmatter — guarded files
 
 Full-file `PUT /api/context/<path>` for the following globs is rejected
-(`400 validation_error`) unless the body opens with the matching YAML
-frontmatter followed by at least one H1 heading.
+(`422 validation_error` — frontmatter shape is a 422, distinct from the
+400 returned for content-body validators) unless the body opens with the
+matching YAML frontmatter followed by at least one H1 heading.
 
 Use today's date (the value from `<current_agent_day date="…" />`) for
 `updated`. The daemon does not auto-fill `updated`; an outdated value
@@ -18,12 +19,12 @@ trips the Evening Review's stale-file detector.
 
 | File glob | `type` | `owner` | Required H1 |
 |---|---|---|---|
-| `projects/*.md` | `project` | `shared` | Yes |
-| `daily/*.md` | `daily` | `agent` | Yes |
-| `weekly/*.md` | `weekly` | `agent` | Yes |
-| `monthly/*.md` | `monthly` | `agent` | Yes |
-| `rules/*.md` | `rule` | `shared` | Yes |
-| `user/*.md` | `user` | `shared` | Yes |
+| `plans/projects/*.md` | `project` | `shared` | Yes |
+| `journal/daily/*.md` | `daily` | `agent` | Yes |
+| `journal/weekly/*.md` | `weekly` | `agent` | Yes |
+| `journal/monthly/*.md` | `monthly` | `agent` | Yes |
+| `policies/*.md` | `rule` | `shared` | Yes |
+| `identity/*.md` | `user` | `shared` | Yes |
 
 Every glob also requires `updated: YYYY-MM-DD`.
 
@@ -55,7 +56,7 @@ have their own validators (date-line regex, transition guard, append-
 only mode, policy schema). The frontmatter rules in this reference do
 not apply to them — see each owning skill for the specifics.
 
-## Common 400 envelope
+## Common 422 envelope
 
 ```json
 {

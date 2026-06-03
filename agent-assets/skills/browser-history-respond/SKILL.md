@@ -32,7 +32,7 @@ than missing an ambiguous reply.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/browser-history/offers/pending` | List open offers (slug, displayName, kind, offered_at, expires_at). Call FIRST. |
+| GET | `/api/browser-history/offers/pending` | List open offers (slug, displayName, kind, offeredAt, expiresAt). Call FIRST. |
 | POST | `/api/browser-history/offers/<slug>/accept` | Body `{kind: "research_assist" \| "wiki_summary"}` — dispatch the routine. |
 | POST | `/api/browser-history/offers/<slug>/decline` | Silence both options for this cluster for 14 days. |
 
@@ -66,6 +66,11 @@ referenced, or ask:
 > Did you mean **<topic A>** or **<topic B>**?
 
 ## Acknowledgement
+
+For accept, only send the success ack if the response has
+`enqueued:true`. If `enqueued:false` the dispatch did not fire (EventBus
+unwired during the boot window) — tell the owner to retry in a moment
+instead of claiming a result is coming.
 
 Send a one-line ack in the owner's `primaryLanguage` (examples English):
 

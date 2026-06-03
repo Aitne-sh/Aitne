@@ -101,8 +101,7 @@ should set `cacheable: true` so a repeat invocation within 60s returns
 ~5ms from the in-memory LRU. The cache key includes the integration
 state version, so flipping `deniedTools` or `delegatedBackend` purges
 entries automatically. Cache hits still write a `delegated_task.exec`
-audit row with `cost_usd=0` and `detail.cacheHit=true` — accounting
-stays correct.
+audit row with `cost_usd=0` and `detail.cacheHit=true`.
 
 Never set `cacheable: true` on:
 - destructive-confirm second calls (`allowDestructive: true`),
@@ -205,19 +204,12 @@ curl -s -X POST http://localhost:8321/api/integrations/gmail/exec \
 ## Default deny floor
 
 The setup wizard pre-populates `gmail.deniedTools` with the connector's
-destructive defaults (send / batch label mutate / etc.). `/exec`
-honors the deny list, and the response distinguishes two cases:
-
-- **Every connector tool is denied** → `403 denied_tool`. There is no
-  surface to plan against, so the daemon rejects the task up front
-  without spawning the subprocess.
-- **The connector still has usable tools but the specific tool a planned
-  task needs is denied (or no tool fits)** → `502 tool_unavailable`. The
-  subprocess plans, finds no permitted tool for the intent, and reports
-  the gap.
-
-In both cases, surface that to the user and ask whether to lift the
-relevant deny before retrying.
+destructive defaults. `/exec` honors the deny list, distinguishing two
+cases: if **every** connector tool is denied → `403 denied_tool` (no
+surface to plan against, rejected up front); if usable tools remain but
+the specific tool a planned task needs is denied (or no tool fits) →
+`502 tool_unavailable`. In both cases, surface that to the user and ask
+whether to lift the relevant deny before retrying.
 
 ## Decision rules
 
@@ -271,23 +263,19 @@ curl -s -X POST http://localhost:8321/api/notify \
   -d '{"message": "Sent reply to alice@example.com (Re: Proposal)"}'
 ```
 
-Do not call `/api/notify` for routine reads / drafts / searches. The
-default posture is autonomous; the user's `deniedTools` is the
-hard-stop, on-demand retrospective covers awareness, and `/api/notify`
-is the small hammer for "speak up if I'm about to do something
-unusual."
+Do not call `/api/notify` for routine reads / drafts / searches.
 
 ## Cost / retrospective
 
 Every `/exec` writes one row to `agent_actions` with
-`action_type='delegated_task.exec'` (token + USD breakdown, parent
-`event_id` / `processKey` attached automatically via session env
-vars). When the user asks what you did:
+`action_type='delegated_task.exec'` (token + USD breakdown). When the
+user asks what you did:
 
 ```bash
 curl -s "http://localhost:8321/api/agent/actions?kind=delegated_task.exec&since=2026-04-25T00:00:00Z&limit=50"
 ```
 
 Summarise from the returned `actions` array — each row carries
-`detail.task` (the natural-language intent), cost, cache hit flag, and
-timestamp.
+`detail.taskHash` (a hash, NOT the task text — the verbatim intent is
+deliberately not persisted, so do not try to read intent prose from it),
+cost, cache hit flag, and timestamp.

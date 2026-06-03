@@ -32,12 +32,13 @@ URL).
 ### GET /api/context/list/:dir
 
 ```bash
-curl -s http://localhost:8321/api/context/list/projects
+curl -s http://localhost:8321/api/context/list/plans/projects
 ```
 
 Response: `{ "files": [{ "name", "lastModified" }, …] }`. Use this to
-enumerate `projects/`, `weekly/`, `monthly/`, `user/`, `rules/`,
-`routines/`, `inbox/` before deciding a write target.
+enumerate `plans/projects/`, `journal/weekly/`, `journal/monthly/`,
+`identity/`, `policies/`, `policies/routines/`, `state/inbox/` before
+deciding a write target.
 
 ### GET /api/context/today/reconciliation
 
@@ -67,21 +68,19 @@ Add `X-Lock-Id: <lock-id>` when writing a locked file (`state/today.md`,
 
 Common rejections:
 
-- `400 {error:"validation_error", message, path}` — file-specific
-  validator failed (e.g. `state/today.md` line-1 date regex, `plans/roadmap.md`
-  transition guard, required frontmatter missing on `user/*.md` /
-  `rules/*.md` / `projects/*.md` / `daily/*.md` / `weekly/*.md` /
-  `monthly/*.md`).
+- `400 {error:"validation_error", message, path}` — a content-body
+  validator failed: `state/today.md` line-1 date regex (the message
+  echoes both the supplied date and the daemon's current agent-day) or
+  the `plans/roadmap.md` transition guard.
+- `422 {error:"validation_error", message, path}` — *frontmatter* shape
+  is missing/wrong on a globbed file (`identity/*.md`, `policies/*.md`,
+  `plans/projects/*.md`, `journal/daily/*.md`, `journal/weekly/*.md`,
+  `journal/monthly/*.md`). Frontmatter validation is a 422; the today.md
+  line-1 case above is a 400.
 - `409 {error:"morning_routine_lock_held"}` — the Morning Routine holds
   the `state/today.md` write lock; `409 {error:"roadmap_write_lock_held"}`
   — another session holds the `plans/roadmap.md` lock. Retry with
   backoff (30s × 3).
-- `400 {error:"validation_error", message, path}` — also covers the
-  `state/today.md` line-1 agent-day mismatch (the message echoes both the
-  supplied date and the daemon's current agent-day). The `422` status is
-  reserved for *frontmatter* validation on globbed files (`user/*.md`,
-  `rules/*.md`, `projects/*.md`, `daily/*.md`, `weekly/*.md`,
-  `monthly/*.md`), not for today.md line-1.
 
 `policies/management.md` is user-controlled policy: modify only when the
 user explicitly asks, and preserve every unrelated section.
@@ -136,7 +135,7 @@ for those.
 
 ### POST /api/context/archive-today
 
-Rotates `state/today.md` → `state/yesterday.md` (synthesized `daily/YYYY-MM-DD.md`
+Rotates `state/today.md` → `state/yesterday.md` (synthesized `journal/daily/YYYY-MM-DD.md`
 is now written by the Morning Routine, not this endpoint). Called by
 the Morning Routine during day rotation; other sessions should NOT
 invoke this directly.
@@ -145,8 +144,9 @@ invoke this directly.
 
 Restores the file from snapshot `id` (the daemon snapshots every PUT /
 PATCH / DELETE). Diagnostic / recovery surface; never part of a normal
-write path. The snapshot listing endpoint is `GET /api/context/health`
-adjacent and is dashboard-only — agents should not rely on it in flows.
+write path. Snapshot listing is dashboard-only via the Knowledge page;
+no agent route exists, so `restore-snapshot/:id` is the only
+agent-relevant snapshot op.
 
 ### POST /api/context/repair/stub
 

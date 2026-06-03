@@ -41,10 +41,9 @@ language-agnostic** — it applies whatever language the agent uses
 with the user.
 
 Anti-examples (non-exhaustive — the positive rule above is
-load-bearing, not this list): "Good morning!", "Evening check-in —",
-"Morning briefing —", "Summary:", "Done.", "Sent.", "OK.", "Here's
-your day:", "Heads-up —", "FYI:", "Quick update:". Near-synonyms of
-these in any language also fail the positive rule.
+load-bearing, not this list): "Good morning!", "Summary:", "Done.",
+"Heads-up —". Near-synonyms of these in any language also fail the
+positive rule.
 
 ### No internal mechanism names
 
@@ -56,9 +55,8 @@ user-visible text. Those go in Agent Log only.
 
 ### No filler timing commentary
 
-Forbidden — "Just a heads-up", "Still about N hours to go", "About N
-hours left", "FYI". If timing matters, the deadline / event time
-itself carries it.
+Forbidden — "Just a heads-up", "About N hours left", "FYI". If timing
+matters, the deadline / event time itself carries it.
 
 ### No table-of-contents readback
 
@@ -96,16 +94,16 @@ Notify when **all three** are true: (1) **actionable** or requires awareness, (2
 - **A pending Agent Plan row / scheduled DM is already set to fire
   for this item within the next 2 hours** — let the planned channel
   deliver; don't pre-empt it.
-- **Quiet hours (default 22:00-08:00, configurable)** unless `critical` — schedule for after instead
-- **Over the rate-limit caps (3/hour, 12/day; `critical` bypasses both)** — do NOT spam-retry. The endpoint does NOT signal this: `/api/notify` returns `200 {status:"sent"}` even when quiet-hours or the rate-limit silently drops the message, so a `"sent"` response is not proof of delivery. Self-throttle by checking `<today>` `## Agent Log` before firing; if you suspect suppression, log the skip rather than re-posting. If time-critical, upgrade priority at next opportunity
+- **Already delivered this item** — `/api/notify` sends immediately and a `200 {status:"sent"}` is proof of delivery, so do NOT re-post on a 200. Self-throttle via `<today>` `## Agent Log` before firing and log the skip rather than re-posting. (No endpoint quiet-hours or rate cap gates this for you — noise control is your job.)
 - **Routine file changes** or **agent internal state** — use Agent Log instead
 - **When in doubt — prefer silence**
 
 ## Priority
 
 **Default to `normal`.** Reserve `high` for 8h-delay-matters. Reserve
-`critical` for 3am-matters. Full per-level table, examples, and
-rate-limit caps are in the priority reference below.
+`critical` for 3am-matters. `priority` is metadata recorded in the
+notification log — it does not gate delivery on this endpoint. Full
+per-level table and examples are in the priority reference below.
 
 {{> ref:priority }}
 
@@ -120,5 +118,5 @@ curl -s -X POST http://localhost:8321/api/notify \
   -H 'Content-Type: application/json' \
   -d '{"message": "Design review starts in 15 minutes.", "priority": "normal"}'
 ```
-Fields: `message` (required, markdown), `priority` (optional: critical/high/normal/low), `platform` (optional, override target).
-Response: `{ "status": "sent", "notificationId": "..." }`. Risk tier: `Autonomous` — the agent decides when to notify; recorded in `notification_log` for the on-demand retrospective.
+Fields: `message` (required, markdown), `priority` (optional: critical/high/normal/low), `platform` (optional, override target) OR `platforms` (optional, array of targets) — mutually exclusive, not both.
+Response: `200 { "status": "sent", "notificationId": "...", "dispatchId": "..." }` = delivered to ≥1 channel; a total delivery failure returns HTTP 500 (not a silent 200-drop). Risk tier: `Autonomous` — the agent decides when to notify; recorded in `notification_log` for the on-demand retrospective.

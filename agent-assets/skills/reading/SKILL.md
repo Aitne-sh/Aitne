@@ -1,6 +1,6 @@
 ---
 name: reading
-description: Load when the user mentions a book or highlight, weekly/monthly reviews need reading progress, or routines need to refresh the reading-taste profile (`user/reading-taste.md`) and propose new book candidates. Owns the taste-profile schema and recommendation rules.
+description: Load when the user mentions a book or highlight, weekly/monthly reviews need reading progress, or routines need to refresh the reading-taste profile (`identity/reading-taste.md`) and propose new book candidates. Owns the taste-profile schema and recommendation rules.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -12,8 +12,7 @@ allowed-tools:
 
 The daemon stores books and reading highlights imported from Kindle
 (My Clippings.txt and the "Export Notebook" email pipeline) and manual
-entries. Data lives in `books` and `reading_highlights` tables. All
-display text in `reading-taste.md` must be English (project convention).
+entries. Data lives in `books` and `reading_highlights` tables.
 
 ## When to Use
 
@@ -93,30 +92,9 @@ curl -s "http://localhost:8321/api/books?limit=200&offset=200"
 | `limit` | number | 50 | Page size (1–200) |
 | `offset` | number | 0 | Rows to skip. Use with `limit` to paginate beyond the 200 cap |
 
-Response:
-```json
-{
-  "books": [
-    {
-      "id": 1,
-      "title": "Thinking, Fast and Slow",
-      "author": "Daniel Kahneman",
-      "source": "kindle",
-      "status": "reading",
-      "startedAt": null,
-      "completedAt": null,
-      "rating": null,
-      "notes": null,
-      "highlightCount": 47,
-      "createdAt": "2026-04-01T10:00:00Z"
-    }
-  ],
-  "total": 1,
-  "limit": 50,
-  "offset": 0,
-  "hasMore": false
-}
-```
+Response: `{ books: [...], total, limit, offset, hasMore }`. Each
+book carries `id`, `title`, `author`, `source`, `status`, `rating`,
+`highlightCount` (plus `startedAt`/`completedAt`/`notes`/`createdAt`).
 
 When iterating the entire library, keep calling with `offset += limit`
 until `hasMore === false`.
@@ -137,20 +115,8 @@ Reading statistics.
 curl -s "http://localhost:8321/api/books/summary?months=12"
 ```
 
-Response:
-```json
-{
-  "byStatus": [
-    { "status": "reading", "count": 3 },
-    { "status": "completed", "count": 12 }
-  ],
-  "monthlyCompleted": [
-    { "month": "2026-04", "count": 1 },
-    { "month": "2026-03", "count": 2 }
-  ],
-  "totalHighlights": 234
-}
-```
+Response: `{ byStatus: [{status, count}], monthlyCompleted:
+[{month, count}], totalHighlights }`.
 
 ### PATCH /api/books/:id
 
@@ -205,6 +171,6 @@ New highlights: 34
 
 ---
 
-## Reading Taste Profile (`user/reading-taste.md`)
+## Reading Taste Profile (`identity/reading-taste.md`)
 
 {{> ref:reading-taste }}

@@ -6,8 +6,8 @@
       "kind": "knowledge_layout",
       "anchor": "<!-- CURATION:knowledge_layout id=\"topic-files\" -->",
       "human_label": "Topic file layout",
-      "description": "Which user/* file owns which kind of fact",
-      "scope_paths": ["identity/profile.md", "user/*.md"]
+      "description": "Which identity/* file owns which kind of fact",
+      "scope_paths": ["identity/profile.md", "identity/*.md"]
     },
     {
       "id": "routing-table",
@@ -15,7 +15,7 @@
       "anchor": "<!-- CURATION:routing_table id=\"routing-table\" -->",
       "human_label": "When-to-update routing rules",
       "description": "Trigger phrases mapped to destination file, section, and write mode",
-      "scope_paths": ["user/*.md"]
+      "scope_paths": ["identity/*.md"]
     },
     {
       "id": "learned-context-format",

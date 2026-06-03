@@ -41,6 +41,7 @@ Response:
     {
       "id": 1,
       "providerMsgId": "18f...",
+      "accountId": "...",
       "attachmentId": "ANGj...",
       "filename": "receipt.pdf",
       "mimeType": "application/pdf",
@@ -54,6 +55,9 @@ Response:
   "total": 1
 }
 ```
+
+`accountId` identifies the source mail account; `POST /receipts/:id/download`
+uses it to resolve the provider.
 
 ## GET /api/receipts/summary
 

@@ -2,7 +2,7 @@
   "kind": "knowledge_layout",
   "files": [
     {
-      "path": "projects/*.md",
+      "path": "plans/projects/*.md",
       "purpose": "Per-project context document for Git-backed projects",
       "sections": [
         { "heading": "## Overview", "contains": "one-paragraph description of the project and its current state" },
@@ -14,7 +14,7 @@
       ]
     },
     {
-      "path": "git/*/overview.md",
+      "path": "knowledge/repos/*/overview.md",
       "purpose": "Per-repository overview for every git-managed repo (replaces the retired git-repos/*.md layout)",
       "sections": [
         { "heading": "## Summary", "contains": "one-paragraph description of the repo and its current state" },

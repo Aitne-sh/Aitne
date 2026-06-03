@@ -2,7 +2,7 @@
   "kind": "frontmatter_schema",
   "file_types": [
     {
-      "glob": "projects/*.md",
+      "glob": "plans/projects/*.md",
       "required": [
         { "key": "type", "type": "enum", "example": "project" },
         { "key": "owner", "type": "string", "example": "shared" },
@@ -19,7 +19,7 @@
       ]
     },
     {
-      "glob": "user/*.md",
+      "glob": "identity/*.md",
       "required": [
         { "key": "type", "type": "enum", "example": "user" },
         { "key": "owner", "type": "string", "example": "shared" },
@@ -28,7 +28,7 @@
       "conventional": []
     },
     {
-      "glob": "rules/*.md",
+      "glob": "policies/*.md",
       "required": [
         { "key": "type", "type": "enum", "example": "rule" },
         { "key": "owner", "type": "string", "example": "shared" },

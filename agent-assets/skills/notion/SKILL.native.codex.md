@@ -36,7 +36,7 @@ the `<integration-routing-table>` block in the session preamble.
 
 ```bash
 curl -s http://localhost:8321/api/notion/databases
-# → { "databases": { "<label>": { "id": "<uuid>", "title": "..." }, ... } }
+# → { "databases": [ { "label": "<label>", "id": "<uuid>" }, ... ] }
 ```
 
 Resolve label → UUID before any Notion call so the connector arguments

@@ -241,7 +241,7 @@ session's integration state.
 When the hourly_check native flow's Step 0b fetches imminent-window
 events, POST each materialised event to `/api/observations` so
 subsequent runs can dedup. The daemon computes `contentHash`
-server-side via `@personal-agent/shared/observations-hash.ts` — pass
+server-side via `@aitne/shared/observations-hash` — pass
 the raw `payload`.
 
 **Batch when you have more than one event.** Use
@@ -284,7 +284,7 @@ schedule surface (scheduling is daemon-internal, not an integration).
 
 ## Skills Management — direct, unchanged
 
-User-authored skills: `~/.personal-agent/skills/{slug}/SKILL.md`.
+User-authored skills: `<contextDir>/policies/skills/{slug}/SKILL.md`.
 Built-in skills are read-only (403). Native-mode gating does not apply.
 
 ```bash

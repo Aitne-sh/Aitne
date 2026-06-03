@@ -10,7 +10,7 @@ description: Tone / style / voice / language preferences are agent directives �
 are NOT profile content** — they are agent directives, not user facts.
 Route them to the `character` runtime-config field via `PATCH
 /api/config/character` (see `docs/design/15-character.md`), never to
-`identity/profile.md` or any `user/*.md`.
+`identity/profile.md` or any `identity/*.md`.
 
 ## Triggers
 
@@ -78,6 +78,6 @@ uniformly — no separate injection per backend.
 ## What does NOT belong here
 
 Facts about the user — identity, role, expertise, hobbies, people,
-goals — go to `identity/profile.md` or `user/<topic>.md`, not to
+goals — go to `identity/profile.md` or `identity/<topic>.md`, not to
 `character`. The split is: `character` says *how* the agent speaks;
-`user/*` says *who the user is*.
+`identity/*` says *who the user is*.

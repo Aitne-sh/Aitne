@@ -68,8 +68,17 @@ curl -s "http://localhost:8321/api/travel-bookings/upcoming?limit=10"
 
 ## PATCH /api/travel-bookings/:id
 
+Accepts `{"status": "..."}` and/or `{"destination": "..."}`. Valid
+status values are `upcoming`, `completed`, `cancelled`.
+
 ```bash
+# Update status
 curl -s -X PATCH "http://localhost:8321/api/travel-bookings/1" \
   -H "Content-Type: application/json" \
   -d '{"status": "completed"}'
+
+# Correct a parsed destination
+curl -s -X PATCH "http://localhost:8321/api/travel-bookings/1" \
+  -H "Content-Type: application/json" \
+  -d '{"destination": "San Francisco"}'
 ```

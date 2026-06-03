@@ -9,7 +9,7 @@ allowed-tools:
 
 You run under process key `wiki.ask`.
 
-Read `<wiki_command>` for the user's `question`. Search and read relevant `20_wiki/` notes first; read `10_raw/` only when the wiki notes need source verification.
+Read `<wiki_command>` for the user's `question`. Search and read relevant `20_wiki/` notes first (see wiki-vault-rules for `/search` and `/index`); read `10_raw/` only when the wiki notes need source verification.
 
 Write the answer to:
 

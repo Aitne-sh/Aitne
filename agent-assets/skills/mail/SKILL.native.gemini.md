@@ -119,7 +119,7 @@ for non-Gmail accounts.
 
 POST each materialised Gmail message fetched in a routine to
 `/api/observations`. The daemon computes `contentHash` server-side via
-the shared util in `@personal-agent/shared/observations-hash.ts`; pass
+the shared util in `@aitne/shared/observations-hash`; pass
 `payload` verbatim.
 
 **Batch when you have more than one message.** Use

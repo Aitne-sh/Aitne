@@ -28,7 +28,10 @@ recurring DM with no autonomous work, use `dm_session` (above), not an Agent.
 ## Before creating — dedup (mandatory)
 
 1. `GET /api/agents` — does an enabled Agent already do this on this cadence? If
-   so, do not create a duplicate (edit it via the dashboard / `PATCH /api/agents/:slug`).
+   so, do not create a duplicate. To edit one: `PATCH /api/agents/:slug` only
+   toggles `enabled` (field edits return `400 user_agent_edit_via_file`); to
+   change a user Agent's prompt/schedule/backend, edit its `agent.md`
+   (`PATCH /api/context/policies/agents/<slug>/agent.md`) or the dashboard editor.
 2. `GET /api/recurring-schedules?enabled=true` — confirm no existing recurring
    row already covers the cadence.
 
@@ -54,8 +57,12 @@ curl -s -X POST http://localhost:8321/api/agents \
 ```
 
 Fields:
-- **`slug`** — kebab-case, unique, immutable after creation (the `/agents/<slug>` URL).
-- **`name`**, **`description`** — human labels shown in the dashboard.
+- **`slug`** — kebab-case, must start with a lowercase letter (`^[a-z][a-z0-9-]*`),
+  unique, immutable after creation (the `/agents/<slug>` URL). A leading digit or
+  hyphen is rejected as `invalid_definition` on field `slug`.
+- **`name`**, **`description`** — required human labels shown in the dashboard; an
+  empty/omitted `description` is rejected as `invalid_definition` on field
+  `description`.
 - **`schedule.kind`** — `"recurring"` (structured, preferred) or `"cron"` (raw
   expression). A `one_shot`/`event` schedule is rejected with
   `one_shot_not_supported` (use `/schedule` for one-time work). Note:
@@ -77,9 +84,11 @@ Fields:
   in the resolved timezone (`min hour day-of-month month day-of-week`). Examples:
   `0 9 * * *` (daily 09:00), `0 8 * * 1` (Mondays 08:00), `0 * * * *` (hourly at
   :00), `0 */2 * * *` (every 2 hours), `0 18 1 * *` (1st of each month 18:00).
-  Only cron shapes that map to a recurrence are accepted: minute a single value;
-  hour a single value or `*` / `*/N`. Sub-hourly steps (`*/30`) and hour
-  ranges/lists are NOT representable — pick one explicit cadence.
+  A syntactically-valid cron is accepted at create (`201`, valid row) even if it
+  cannot be mapped to a recurrence — but a non-mappable shape (sub-hourly steps
+  like `*/30`, hour ranges/lists like `9-17`) is never paired and silently never
+  fires. Only shapes that map are actually run: minute a single value; hour a
+  single value or `*` / `*/N`. Pick one explicit, mappable cadence.
 - **`schedule.timezone`** — IANA zone; omit to inherit the daemon default.
 - **`backend`** — optional. `tier` is `lite`/`medium`/`high` (cost/capability knob;
   the standalone control that works). `process_key` defaults to `agent.task`;

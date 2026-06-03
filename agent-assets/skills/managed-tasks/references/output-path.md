@@ -8,8 +8,10 @@ description: output_path grammar — `<domain>/<type-plural>/` only, trailing sl
 
 The `output_path` field on `/api/managed-tasks` is the L2 directory
 under the primary context vault where the recurring fetch will write
-entity files. The daemon enforces the format with a CHECK constraint
-at INSERT / UPDATE time.
+entity files. The full grammar (domain/type enum, two segments, no
+`..`) is enforced by a Zod `.refine` PRE-insert, so a bad value is
+rejected with **HTTP 400**. The SQL CHECK constraint only guarantees
+the trailing slash (`output_path LIKE '%/'`).
 
 ## Format
 
@@ -28,9 +30,24 @@ at INSERT / UPDATE time.
 | `<type-plural>` | `meetings`, `trips`, `receipts`, `projects`, `books`, `notes` |
 
 Not every domain × type combination is meaningful in practice — pick
-the pair whose semantic prior best fits the fetch's data shape (see
-the §"Decide output path" table in the Register section of the skill
-body for the typical mapping).
+the pair whose semantic prior best fits the fetch's data shape.
+
+## Data shape → path mapping
+
+When no existing entity path is found for the source (see Register
+Step 4a), pick the `(domain, type)` pair whose semantic prior best
+fits the probe sample:
+
+| Probe sample shape | Likely `<domain>/<type-plural>/` |
+|---|---|
+| Recording with attendees + duration | `work/meetings/` |
+| PDF / image with monetary amount | `finance/receipts/` |
+| Travel itinerary / booking | `travel/trips/` |
+| Long-form note / article | `<domain>/notes/` (pick by content topic) |
+| Book metadata / progress | `learning/books/` |
+
+If the data shape is genuinely ambiguous (zero rows), omit the field
+(`output_path: null`) — the first scheduled run populates it.
 
 ## Examples
 
@@ -61,15 +78,14 @@ re-register.
 To clear an existing `output_path` back to "first run decides", send
 `{"output_path": null}` in the PATCH.
 
-## 422 envelope on rejection
+## Rejection
 
-```json
-{
-  "error": "validation_error",
-  "message": "output_path 'work/meetings' is missing the trailing slash",
-  "field": "output_path"
-}
-```
-
-Surface the daemon's `message` verbatim — it names the exact rule
-that failed. Do not retry the same value.
+A bad `output_path` fails Zod and the route returns **HTTP 400** with
+the generic `managed_tasks.validation_error` issue — there is no
+top-level `field` and no per-`output_path` `message`. The raw
+ZodError lives under `legacyFields.details`, but it is a serialized
+ZodError object (`{name:"ZodError", message:"<stringified issues>"}`),
+NOT an array — there is no `details[].path` to read. The offending
+field (`output_path`) is named in `body.summary` and the issue `hint`;
+the raw issues are inside the stringified `details.message`. Surface
+`body.summary` or the issue `hint`. Do not retry the same value.

@@ -10,12 +10,12 @@
       "scope_paths": [
         "state/today.md",
         "plans/roadmap.md",
-        "projects/*.md",
-        "weekly/*.md",
-        "monthly/*.md",
-        "rules/*.md",
-        "user/*.md",
-        "agent/*.md"
+        "plans/projects/*.md",
+        "journal/weekly/*.md",
+        "journal/monthly/*.md",
+        "policies/*.md",
+        "identity/*.md",
+        "journal/agent.md"
       ]
     },
     {
@@ -25,12 +25,12 @@
       "human_label": "Required frontmatter for guarded files",
       "description": "Per file-glob: required + conventional frontmatter keys",
       "scope_paths": [
-        "projects/*.md",
-        "user/*.md",
-        "rules/*.md",
-        "weekly/*.md",
-        "monthly/*.md",
-        "daily/*.md"
+        "plans/projects/*.md",
+        "identity/*.md",
+        "policies/*.md",
+        "journal/weekly/*.md",
+        "journal/monthly/*.md",
+        "journal/daily/*.md"
       ]
     }
   ]

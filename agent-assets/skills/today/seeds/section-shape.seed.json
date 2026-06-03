@@ -3,14 +3,14 @@
   "files": [
     {
       "path": "state/today.md",
-      "purpose": "today's plan, schedule, agent log, and handoff to tomorrow",
+      "purpose": "today's schedule, tasks, agent plan, log, and handoff to tomorrow",
       "sections": [
-        { "heading": "## Plan", "contains": "the day's intent in plain prose" },
-        { "heading": "## Schedule", "contains": "time-blocked events for today" },
-        { "heading": "## Tasks", "contains": "open task entries with status checkbox" },
+        { "heading": "## User Schedule", "contains": "time-blocked events for today" },
+        { "heading": "## User Tasks", "contains": "open task entries the user will do, with status checkbox" },
+        { "heading": "## Agent Plan", "contains": "scheduled actions Claude Code will take to help, each backed by a schedule entry" },
         { "heading": "## Agent Notes", "contains": "look-aheads, day-time observations, latent profile questions" },
-        { "heading": "## Handoff", "contains": "context for tomorrow's morning routine" },
-        { "heading": "## Done", "contains": "tasks the user marked complete" }
+        { "heading": "## Agent Log", "contains": "running log of every non-trivial agent action" },
+        { "heading": "## Handoff", "contains": "context carried over to tomorrow's morning routine" }
       ]
     }
   ]

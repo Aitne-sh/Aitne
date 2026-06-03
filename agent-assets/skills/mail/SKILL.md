@@ -99,16 +99,10 @@ includes dormant and unhealthy rows that every operation will reject.
 ### Send vs draft
 - **Prefer drafts.** Create via `POST /mail/:acct/drafts`. The user sends
   from the provider's web UI.
-- Direct send (`POST /mail/:acct/messages/send`) succeeds autonomously —
-  the daemon does not DM the owner before sending. (The user's
-  `deniedTools` list applies to **delegated-mode connector tools** —
-  e.g. Codex's `send_email` — and is enforced at the
-  `/api/integrations/:key/exec` task-mode chokepoint via the per-task
-  allowed-tools envelope. In direct mode, the `/api/mail/*` route
-  handler has no equivalent deny check today, so a send call is what
-  it appears to be: a send.) When you judge the user would want to
-  know about a send immediately (e.g. a reply to a stranger), call
-  `POST /api/notify` yourself.
+- Direct send (`POST /mail/:acct/messages/send`) is autonomous — no owner
+  DM, no deny gate (see api.md for the `deniedTools`-scope nuance). When
+  you judge the user would want to know about a send immediately (e.g. a
+  reply to a stranger), call `POST /api/notify` yourself.
 - Never include `bcc` unless the user explicitly asks for it.
 
 ### Replies — RFC-2822 headers are the source of truth
@@ -118,7 +112,9 @@ all four kinds.
 
 1. Fetch the thread metadata: `GET /api/mail/:acct/threads/:threadId?body=none`
    (returns `messages[]` in chronological order without raw HTML bodies).
-2. From the last message, pull `rfc822MsgId` and `references`.
+2. From the last message, pull `rfc822MsgId` (thread message objects carry
+   no `references` field — you SUPPLY `references` in the reply block below,
+   you do not read it off the message).
 3. Build the `reply` block:
    ```json
    {
@@ -198,13 +194,9 @@ curl -s "http://localhost:8321/api/mail/ACCT/messages/MSG/body?format=raw&chunk=
   deny list. The daemon does not DM the owner before the call. Single
   ops only; if you're about to trash 3+ messages at once, stop and ask
   the user — the agent's own judgment is the gate, not the daemon.
-- **Delegated mode**: this skill body is loaded only when `gmail.mode ===
-  "direct"`. When Gmail is delegated, the materializer picks
-  `SKILL.delegated.<sessionBackend>.md` (cross-backend) or skips the
-  skill entirely (same-backend, native MCP). If you somehow reach
-  `/api/mail/*` from this body while Gmail is delegated, the route
-  returns `410 integration_delegated` — re-read `integrations.md` and
-  use `POST /api/integrations/gmail/exec` (task mode) instead.
+- **Delegated / native mode**: see §0 for routing. A `/api/mail/*` call
+  that hits a delegated/native gate returns `410` (`integration_delegated`
+  / `integration_native`) — re-read `integrations.md` and dispatch per §0.
 
 ## 3. Provider capability matrix
 

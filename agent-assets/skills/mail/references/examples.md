@@ -21,7 +21,8 @@ curl -s "http://localhost:8321/api/mail/search?q=from:alice+proposal&limit=5"
 
 # 2. Fetch the thread.
 curl -s "http://localhost:8321/api/mail/acct-1/threads/THREAD_ID"
-# → last message has rfc822MsgId, references[], providerMsgId.
+# → last message has rfc822MsgId, providerMsgId (no references[] on the
+#   message — you SUPPLY references in the reply block below).
 
 # 3. Create a draft threaded to it. Drafts are Autonomous tier.
 curl -sX POST "http://localhost:8321/api/mail/acct-1/drafts" \

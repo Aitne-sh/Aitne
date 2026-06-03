@@ -6,7 +6,7 @@ parent_skill: reading
 This file captures what the user reads and *why* — topics they return to,
 how they think, values that keep surfacing in their highlights, and a
 rolling list of candidate books. It is dictionary-like (same layer as
-other `user/*.md` files) and is consumed on-demand — never injected
+other `identity/*.md` files) and is consumed on-demand — never injected
 into every session. Do not notify the user about taste updates.
 
 ### When to refresh
@@ -26,7 +26,7 @@ The file carries a dedicated frontmatter line `Highlights at last sweep: N`
 holding the `totalHighlights` value from `GET /api/books/summary` at the
 time of the last successful write. To decide whether to refresh:
 
-1. `GET /api/context/user/reading-taste` — if 404, treat as
+1. `GET /api/context/identity/reading-taste` — if 404, treat as
    `N = 0` and proceed (first sweep).
 2. `GET /api/books/summary` — read `totalHighlights` as `M`.
 3. If `M - N < 10`, skip the sweep (log one bullet under agent-journal
@@ -62,7 +62,7 @@ The refresh-trigger check (previous section) uses `totalHighlights` from
 
 ### Required file schema
 
-First refresh writes the whole file via `PUT /api/context/user/reading-taste`.
+First refresh writes the whole file via `PUT /api/context/identity/reading-taste`.
 Subsequent refreshes use `PATCH` per section (but the metadata lines must
 be updated via a full-file `PUT`). Required structure:
 
@@ -126,7 +126,7 @@ updated: YYYY-MM-DD
 Replace a single section (snake_case the heading):
 
 ```bash
-curl -s -X PATCH http://localhost:8321/api/context/user/reading-taste \
+curl -s -X PATCH http://localhost:8321/api/context/identity/reading-taste \
   -H 'Content-Type: application/json' \
   -d '{"section": "topics_of_interest", "mode": "replace", "content": "- cognitive biases\n- systems design"}'
 ```
@@ -134,7 +134,7 @@ curl -s -X PATCH http://localhost:8321/api/context/user/reading-taste \
 Replace the full file (first time, or after a major reset):
 
 ```bash
-curl -s -X PUT http://localhost:8321/api/context/user/reading-taste \
+curl -s -X PUT http://localhost:8321/api/context/identity/reading-taste \
   -H 'Content-Type: application/json' \
   -d '{"content": "---\ntype: user\nowner: shared\nupdated: 2026-04-21\n---\n# Reading Taste\n> Last updated: 2026-04-16 09:00\n> Sampled: 87 highlights across 8 books (window: last 12 weeks)\n> Highlights at last sweep: 245\n\n## Topics of Interest\n- ...\n..."}'
 ```

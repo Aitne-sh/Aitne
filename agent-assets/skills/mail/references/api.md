@@ -84,7 +84,12 @@ curl -s "http://localhost:8321/api/mail/ACCT/drafts"
 curl -s "http://localhost:8321/api/mail/ACCT/drafts/DRAFT_ID"
 curl -sX POST   "http://localhost:8321/api/mail/ACCT/drafts" -d '{...}'
 curl -sX PATCH  "http://localhost:8321/api/mail/ACCT/drafts/DRAFT_ID" -d '{...}'
-# PATCH response: { status, id, warnings? }
+# PATCH response: { status, id, previousId?, warnings? }
+# - `previousId` is an optional field in the shape, but NO current provider
+#   ever populates it: Gmail and Outlook/Graph updates are atomic (id
+#   preserved, previousId unset) and IMAP draft-update is unimplemented
+#   (PATCH /drafts/:id on an IMAP account returns 501 not_implemented — see
+#   providers.md). Treat the returned `id` as stable.
 # - On Outlook, `warnings: ["reply_threading_immutable_after_create"]` if
 #   `reply` was supplied — reply headers are fixed at createDraft time.
 curl -sX DELETE "http://localhost:8321/api/mail/ACCT/drafts/DRAFT_ID"

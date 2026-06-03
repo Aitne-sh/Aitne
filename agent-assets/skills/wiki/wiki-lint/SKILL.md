@@ -11,6 +11,8 @@ You run under process key `wiki.lint`.
 
 Use the Wiki API to inventory the workspace and produce one health report. Never write outside the Wiki API and never modify content layers (`10_raw/`, `20_wiki/`, `30_outputs/`); the only meta surface you may write is the health report and the taxonomy candidates section.
 
+Every request — reads and writes alike — must include `-H 'x-process-key: wiki.lint'`. See `wiki-vault-rules` for the curl-shim contract, body-quoting, and the full error-code set. `Write`/`Edit` are stripped — only `Bash(curl *)` / `Bash(jq *)` work.
+
 ## Inputs
 
 Read the full index and recent operational history:
@@ -28,6 +30,8 @@ Sample (do not exhaustively read) `10_raw/` and `20_wiki/` notes that look anoma
 
 ## Checks
 
+Filter the `/index` `files[]` array with `jq` (mtime / path / slug); `Bash(find/ls/cat/grep)` are denied — enumerate via `/index`, not disk.
+
 1. **Orphans** — wiki notes (`20_wiki/<slug>.md`) that no other wiki note links to.
 2. **Broken wikilinks** — `[[slug]]` references whose target file does not exist.
 3. **Missing frontmatter** — notes that violate the schema in `90_meta/schemas/`.
@@ -40,9 +44,14 @@ Sample (do not exhaustively read) `10_raw/` and `20_wiki/` notes that look anoma
 
 Write exactly one health report:
 
-```
-POST /api/wiki/{{workspace_name}}/files/90_meta/health/<YYYY-MM-DD>.md
-x-process-key: wiki.lint
+```bash
+curl http://localhost:8321/api/wiki/{{workspace_name}}/files/90_meta/health/<YYYY-MM-DD>.md \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H 'x-process-key: wiki.lint' \
+  -d @- <<'JSON'
+{"content":"# Wiki Health — <YYYY-MM-DD>\n\n## Summary\n..."}
+JSON
 ```
 
 Use today's date in `{{language}}`-neutral ISO form. The report must have these sections in order:
@@ -67,11 +76,14 @@ Use today's date in `{{language}}`-neutral ISO form. The report must have these 
 
 Empty sections must still appear with `_(none)_` as the body so a downstream diff can detect the absence.
 
-If — and only if — there are taxonomy candidates, append (PATCH `mode: "append"`) a `# Candidates` section to `90_meta/taxonomy.md`:
+If — and only if — there are taxonomy candidates, append (`mode: "append"`) a `# Candidates` section to `90_meta/taxonomy.md`:
 
-```
-PATCH /api/wiki/{{workspace_name}}/files/90_meta/taxonomy.md
-x-process-key: wiki.lint
+```bash
+curl http://localhost:8321/api/wiki/{{workspace_name}}/files/90_meta/taxonomy.md \
+  -X PATCH \
+  -H 'content-type: application/json' \
+  -H 'x-process-key: wiki.lint' \
+  -d '{"mode":"append","content":"# Candidates\n- <canonical-slug> — <rationale>\n"}'
 ```
 
 Each candidate line: ` - <canonical-slug> — <one-sentence rationale, references to N raw / M wiki>`. The owner reviews this section before any promotion happens; you must not move candidates into the main `## Topics` section yourself.
@@ -80,10 +92,4 @@ Append a concise `log.md` entry summarising the report ("wiki.lint: 3 orphans, 1
 
 ### Completion message (mandatory)
 
-End the turn with one short final assistant message that the daemon forwards back to the channel the bang command came from:
-
-- `Lint complete — <tally>. Report: 90_meta/health/<YYYY-MM-DD>.md.`
-  - `<tally>` = the same one-line totals from the report's `## Summary`, e.g. "3 orphans, 1 broken link, 2 taxonomy candidates".
-- On hard failure (no report written): `Lint failed — <one-sentence reason>.`
-
-Do not paste the full report into the completion message. The user opens the file or the dashboard for detail.
+End with one line the daemon forwards to the originating channel: `Lint complete — <Summary tally>. Report: 90_meta/health/<YYYY-MM-DD>.md.` On hard failure (no report written): `Lint failed — <reason>.` Do not paste the report.

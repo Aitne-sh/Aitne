@@ -26,7 +26,7 @@ Therefore:
 | Method | Path | Purpose |
 |---|---|---|
 | `GET`   | `/api/wiki/{{workspace_name}}/index` | List every file in the workspace with `path`/`mtime`/`sizeBytes`. Primary enumeration tool. |
-| `GET`   | `/api/wiki/{{workspace_name}}/search?q=<query>` | Body-substring search for duplicate detection. |
+| `GET`   | `/api/wiki/{{workspace_name}}/search?q=<query>` | Duplicate detection. Defaults to FTS5 token matching; append `&kind=grep` for literal substring matches. |
 | `GET`   | `/api/wiki/{{workspace_name}}/files/<path>` | Read raw notes, existing wiki notes, taxonomy, log. |
 | `POST`  | `/api/wiki/{{workspace_name}}/files/20_wiki/<slug>.md` | Create a new wiki note. |
 | `POST`  | `/api/wiki/{{workspace_name}}/files/20_wiki/<slug>.md` | Rewrite an existing wiki note — re-POST to the same path overwrites in place (a `.snapshots/` backup is taken first). |
@@ -93,7 +93,7 @@ Inside `<<'JSON'` (single-quoted marker) the body is verbatim — only JSON's ow
 ## Anti-patterns (silent denials — never claim success after these)
 
 - `Write` / `Edit` tools — **stripped from the session allow-list** for every `wiki.*` process key. The SDK denies them silently under `dontAsk` ("Permission to use Write has been denied …"). There is no path-rewrite that makes them work; use the Wiki API via curl. The agent that hit "Write denied → reported failure" is the canonical failure mode this section exists to prevent.
-- `Bash(find ...)`, `Bash(ls ...)`, `Bash(cat ...)`, `Bash(grep ...)`, `Bash(wc ...)`, and every other shell utility — silently denied. Only `Bash(curl *)` and `Bash(jq *)` are on the allow-list. Enumerate via `GET /api/wiki/<ws>/index`, not from disk.
+- `Bash(find ...)`, `Bash(ls ...)`, `Bash(cat ...)`, `Bash(grep ...)`, `Bash(wc ...)`, and every other shell utility — silently denied. Only `Bash(curl *)` and `Bash(jq *)` are on the allow-list (`jq` runs standalone or as `curl … | jq`). Enumerate via `GET /api/wiki/<ws>/index`, not from disk.
 - `echo '{...}' | curl ...`, `cat <<JSON | curl ... -d @- JSON`, `bash -c "curl ..."`, `( curl ... )`, `var=... curl ...`, `curl ... ; curl ...` — Bash command does not start with `curl`; silently denied. The reverse — `curl ... -d @- <<'JSON' … JSON` on the same line — DOES start with `curl` and IS allowed (the heredoc redirects into curl's stdin).
 - `curl ... -d @/some/path` — `@<filepath>` is blocked by the security hook and the shim. The only acceptable `@…` value is the literal stdin marker `@-`.
 - `curl http://example.com/...` (non-loopback) — only `http://localhost:8321/api/*` is permitted.
@@ -104,10 +104,11 @@ Inside `<<'JSON'` (single-quoted marker) the body is verbatim — only JSON's ow
 
 | Status | Body code | Cause | Recovery |
 |---|---|---|---|
-| 400 | `invalid_body` | JSON body did not parse / `content` not a string | Switch to the heredoc shape if you were inline-escaping a multi-KB body. |
+| 400 | `invalid_json_body` | JSON body did not parse (checked first, before Zod) | Switch to the heredoc shape if you were inline-escaping a multi-KB body. |
+| 400 | `invalid_body` | Body parsed but `content` is not a string (Zod rejection) | Ensure `content` is a JSON string. |
 | 400 | `invalid_path` / `invalid_layer` | Slug shape or layer prefix rejected | Path must be exactly `20_wiki/<slug>.md`. Slug matches `^[a-z0-9][a-z0-9-]*$`. |
 | 403 | `missing_process_key` | Header missing | Add `-H 'x-process-key: wiki.compile'`. |
-| 403 | `wiki_write_denied` | Trying to write outside `20_wiki/` (or the `_index.md` / `log.md` exceptions) under `wiki.compile` | Fix the target path. Use `wiki-graduate` for inbox-to-wiki promotion (same process key, different source layer). |
+| 403 | `wiki_write_denied` | A non-`wiki.compile` key targeting the `20_wiki` layer. `_index.md` is a normal `20_wiki` file; `log.md` is its own append-only layer (PATCH-only). | Fix the target path. Use `wiki-graduate` for inbox-to-wiki promotion (same process key, different source layer). |
 | 409 | `append_only` | POST to an existing `10_raw/` file or `log.md` (those two layers are create-only). Does NOT apply to `20_wiki/<slug>.md` — re-POSTing there overwrites in place. | For `log.md` use `PATCH mode: "append"`. `10_raw/` files cannot be overwritten by design. |
 | 413 | — | Body exceeds 512 KB | Split the note or trim verbatim extracts. |
 | 5xx | — | Daemon error | Append a failure line to `log.md`, classify the run as partial, do not retry inside the same turn. |

@@ -24,14 +24,12 @@ B-4 purchase tokens, or workflow approvals — those live under
 1. **Localhost only.** `http://127.0.0.1:8321/api/browser-task/*`.
 2. **POST, ack, end the turn. NEVER poll for completion.** After a
    successful POST, reply once ("Started — I'll report back when it's
-   done.") and stop. Do not GET `/:id` in a loop waiting for `completed`,
-   do not "wait and check", do not re-issue. Ending your turn has zero
-   effect on the detached task — it keeps running and the daemon DMs the
-   user the result (`✅ Browser task — report`) or, on any
-   failure/cancel/timeout, `🟦 Browser task <id> ended: <state>`. A
-   status GET is allowed ONLY as a single read answering an explicit user
-   question (see "On-demand status"). Polling re-processes the whole DM
-   history every loop and burns your per-turn budget for nothing.
+   done.") and stop. Do not GET `/:id` in a loop, "wait and check", or
+   re-issue. Ending your turn has zero effect on the detached task — it
+   keeps running and the daemon DMs the user the result (`✅ Browser task
+   — report`) or, on any failure/cancel/timeout, `🟦 Browser task <id>
+   ended: <state>`. The only allowed GET is a single on-demand status read
+   answering an explicit user question (see "On-demand status").
 3. **Never echo the `!~xxxxxxxx` final-confirm token.** The daemon DMs it
    directly when the sub-agent trips the final-confirm gate. The user
    types it back themselves; the runner consumes the reply. Do not read,
@@ -73,26 +71,27 @@ Body:
   dropped both on 2026-05-27 (open navigation). Legacy callers passing
   them are silently ignored, not rejected.
 - `scheduleAt` (ISO 8601) — defer to later; respects quiet hours.
-  Response is `{ status:"scheduled", scheduledFor, scheduleRowId }`.
+  Response is `202` with `{ taskId, status:"scheduled", scheduledFor,
+  scheduleRowId }` (`scheduledFor` is epoch-ms; `taskId` is the same
+  pre-generated id you use for status GETs).
 - `requireFinalConfirm` (default `true`) — keep `true` unless the user
   explicitly asks to skip the gate for a reversible flow.
 
-Immediate response carries `taskId`, `status`, and `queueState`. **Then
-acknowledge once and end the turn.** If `queueState.waitingForSlot ===
-true`, the global cap is full — say so once ("queued behind N task(s);
-I'll start it when a slot opens") and still end the turn. The daemon DMs
-the user when it promotes, and again when it finishes.
+Immediate response carries `taskId`, `status`, and `queueState`; then ack
+once and stop (Hard rule 2). If `queueState.waitingForSlot === true`, the
+global cap is full — say so once ("queued behind N task(s); I'll start it
+when a slot opens"). The daemon DMs the user on promote and on finish.
 
 ## Relaying a clarification — `awaiting_user`
 
-The sub-agent may DM the user a question + screenshot via the originating
-channel. **The daemon authors that DM; you do not, and you do not poll for
-it to appear.** You act only when the user comes back with an answer:
+The daemon DMs the user a question + screenshot via the originating
+channel (you do not author it, and per Hard rule 2 you do not poll for it
+to appear). You act only when the user comes back with an answer:
 
 1. `GET /api/browser-task?state=awaiting_user` — find the parked task.
    Usually one; if several, match topic or ask which.
 2. `GET /api/browser-task/<taskId>` — read the open `clarifications` row
-   (`resolved:0`) for `clarificationId`.
+   (`resolved:false`) for `clarificationId`.
 3. `POST /api/browser-task/<taskId>/clarify` with `{clarificationId,
    answer}` (user reply verbatim), then ack briefly and end the turn —
    the runner resumes on its own.
@@ -116,20 +115,16 @@ If (and only if) the user explicitly asks how a task is going, do a
 user names), then `GET /api/browser-task/<taskId>` and report `state`, the
 last `actionLog` entry, and `queueState` if pending. States:
 
-- `pending` — queued (see `queueState`); `running` — sub-agent acting.
-- `awaiting_user` — relay via the `/clarify` round-trip above.
-- `final_confirm` — gated on a `!~xxxxxxxx` token. The daemon DMs the
-  screenshot + token and consumes the user's reply **before you see it**.
-  Do nothing; if the user pings you, point them at that DM.
+- `pending` — queued; read `queueState` for position. `running` — acting.
+- `awaiting_user` / `final_confirm` — relay rules are Hard rule 3 + the
+  clarify section; here just report the state.
 - `completed` — the daemon already DMed the full `✅ Browser task —
   report`. Don't re-post; if asked "what did it find?", quote the
   `report` field verbatim (don't paraphrase).
 - `failed` / `timeout` / `cancelled` / `abandoned` — terminal; the daemon
   already DMed `🟦 Browser task <id> ended: <state>`. `outcome_detail`
-  carries the reason (`queue_timeout`, `daemon_restarted`,
-  `backend_unavailable`, `tool_loop_detected`, `ask_user_without_yield`,
-  `blocked_request_spike`, `budget_exceeded`, `max_turns_exceeded`,
-  `runner_unavailable`, …).
+  carries the reason (e.g. `queue_timeout`, `budget_exceeded`,
+  `tool_loop_detected`) — quote it verbatim.
 
 ## Force-stop — "stop" / "cancel" / "abort" / "止めて"
 

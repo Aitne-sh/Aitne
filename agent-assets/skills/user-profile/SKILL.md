@@ -1,6 +1,6 @@
 ---
 name: user-profile
-description: Record user facts — identity, people, work, expertise, habits, goals, tendencies. Top-level → user/profile.md; detail → user/<topic>.md. Tone/style/voice/language are NOT facts — route to PATCH /api/config/character. Same turn as reply. Skip duplicates. Never notify.
+description: Record user facts — identity, people, work, expertise, habits, goals, tendencies. Top-level → identity/profile.md; detail → identity/<topic>.md. Tone/style/voice/language are NOT facts — route to PATCH /api/config/character. Same turn as reply. Skip dupes. Never notify.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -8,11 +8,11 @@ allowed-tools:
 
 # User Profile Update Guide
 
-Output language: `identity/profile.md` and `user/*.md` are Policy B — see `<output_language_policy>`. Template H2 headers stay English skeleton; the facts under them are in `<settings primary_language>`. Preserve user-customized headers verbatim.
+Output language: `identity/profile.md` and `identity/*.md` are Policy B — see `<output_language_policy>`. Template H2 headers stay English skeleton; the facts under them are in `<settings primary_language>`. Preserve user-customized headers verbatim.
 
 `identity/profile.md` stores the user's identity, preferences, and learned behavioral patterns. It is injected into every agent session via `<user>` tags — keep it concise (target: under ~600 tokens total).
 
-Detailed, dictionary-like background belongs under `user/*.md`. Read `identity/_index.md` first, then fetch only the topic file you need.
+Detailed, dictionary-like background belongs under `identity/*.md`. Read `identity/_index.md` first, then fetch only the topic file you need.
 
 ## When to Update
 
@@ -37,34 +37,24 @@ Detailed, dictionary-like background belongs under `user/*.md`. Read `identity/_
 - "user has been unusually curt over the last week" — a pattern inferred across multiple turns with no single user statement. Written to `profile.md ## Learned Context` by Evening Review Step 3a only; the DM handler and sweep do not write inferred patterns.
 - "my sister just had a baby" → `identity/people.md ## Family`. If the section doesn't exist yet (fresh topic file with only the H1), the PATCH returns `section_not_found` — retry with `mode: "append_to_file"` and include `"\n## Family\n- <bullet>"` in `content`. The next write to that section succeeds normally.
 
-The decision rule (profile.md vs `user/<topic>.md` tie-breakers, `section_not_found` → `append_to_file` first-write fallback, and the read-before-write `curl` recipe) is documented in full in this skill — see §"Section ownership", §"File schema", and §"Worked example" below.
+The decision rule (profile.md vs `identity/<topic>.md` tie-breakers, `section_not_found` → `append_to_file` first-write fallback, and the read-before-write `curl` recipe) is documented in full in this skill — see §"Section ownership", §"File schema", and §"Worked example" below.
 
 ## Section ownership
 
-| Section | Update trigger | Who writes |
-|---|---|---|
-| Identity | Explicit statement | DM handler, sweep |
-| Work Pattern | Explicit statement | DM handler, sweep |
-| Platforms | Explicit statement | Setup, explicit change |
-| Expertise | Explicit statement (summary) | DM handler, sweep |
-| Notification Preferences | Explicit statement | DM handler, sweep |
-| Learned Context | Stated preferences (DM) + Raw Signals graduation (evening) | DM handler, sweep, Evening Review 3a |
-| Raw Signals | Behavioral detection | SignalDetector only |
-| `user/<topic>.md` (people / work / expertise / personal / goals) | Any detail-heavy fact per the capture decision rule in the DM task-flow | DM handler, `routine.user_profile_sweep` |
+Per-section trigger → destination → writer is in the auto-curated **When-to-update routing** block below. Writer notes layered on top:
 
-"DM handler" above covers both `message.received.dm` and `message.received.dm_first`. "Sweep" is `routine.user_profile_sweep` (fires 03:50 and 17:50 local; see its task-flow). Evening Review Step 3a is an additional writer to Learned Context only, synthesizing entries from Raw Signals graduation.
+- "DM handler" covers both `message.received.dm` and `message.received.dm_first`. "Sweep" is `routine.user_profile_sweep` (fires 03:50 and 17:50 local; see its task-flow). Evening Review Step 3a is an additional writer to Learned Context only, synthesizing entries from Raw Signals graduation.
+- **Do not write to Raw Signals from other events — that section is `SignalDetector`'s alone.**
 
-**Do not write to Raw Signals from other events — that section is `SignalDetector`'s alone.**
+## identity/profile.md vs identity/<topic>
 
-## user/profile.md vs user/
+**identity/profile.md** — injected every session: Identity, Work Pattern, Platforms, Expertise summary, Notification Preferences, Learned Context.
 
-**user/profile.md** — injected every session: Identity, Work Pattern, Platforms, Expertise summary, Notification Preferences, Learned Context.
-
-**user/*.md** — dictionary-like (`people` | `work` | `expertise` | `goals` | `personal`), too detailed for every session. Read `_index.md` first → fetch only the relevant topic.
+**identity/*.md** — dictionary-like (`people` | `work` | `expertise` | `goals` | `personal`), too detailed for every session. Read `identity/_index.md` first → fetch only the relevant topic. Per-topic ownership is in the auto-curated **Knowledge map** block below.
 
 ## File schema
 
-All `user/*.md` files must keep YAML frontmatter with `type: user`,
+All `identity/*.md` files must keep YAML frontmatter with `type: user`,
 `owner: shared`, and `updated: YYYY-MM-DD`, followed by an H1. When using
 section-level PATCH, preserve the existing frontmatter. When doing a
 full-file PUT, update `updated` to today's date.
@@ -106,7 +96,7 @@ If the user says "I don't want work notifications on weekends", paraphrase into 
 preferences are NOT profile content.** Route them to the `character`
 runtime-config field via `PATCH /api/config/character` (narrow
 endpoint, 1000-char cap, read-before-write). Never write tone /
-style preferences into `identity/profile.md` or any `user/*.md`.
+style preferences into `identity/profile.md` or any `identity/*.md`.
 
 Full recipe — triggers, merge rules, endpoint note, cap-handling, and
 where the value ends up — is in the character-preferences reference
@@ -120,7 +110,7 @@ See _safety.md "Common Patterns" for the general rule. Section name in PATCH is 
 
 ### Worked example
 
-User: `"I want to read 20 books this year."` → GET user/profile.md (or topic file), merge new bullet into the right section. For a top-level goal summary bullet:
+User: `"I want to read 20 books this year."` → GET identity/profile.md (or topic file), merge new bullet into the right section. For a top-level goal summary bullet:
 ```bash
 curl -s -X PATCH http://localhost:8321/api/context/identity/profile \
   -H 'Content-Type: application/json' \
@@ -130,7 +120,7 @@ For a full-section replace, GET first, merge with existing bullets, then PATCH w
 
 **WRONG** (erases existing bullets): `curl -s -X PATCH ... -d '{"section": "learned_context", "mode": "replace", "content": "- [2026-04-23] Reading goal: ..."}'` when the section already held other bullets.
 
-For writes to `user/<topic>.md` (people / work / expertise / personal / goals), the same decision rule applies — §"Routing edge cases" above documents the `section_not_found` → `append_to_file` first-write fallback (with a worked `curl` example against `identity/people.md`). The read-before-write rule applies identically when merging into an existing `user/<topic>.md` section.
+For writes to `identity/<topic>.md` (people / work / expertise / personal / goals), the same decision rule applies — §"Routing edge cases" above documents the `section_not_found` → `append_to_file` first-write fallback (with a worked `curl` example against `identity/people.md`). The read-before-write rule applies identically when merging into an existing `identity/<topic>.md` section.
 
 ## Learned Context entry format
 
@@ -150,7 +140,7 @@ Review can prune entries older than 30 days:
 - **Silent updates.** Never notify the user about profile changes.
 - **Keep concise.** 2–5 bullets per section max. Consolidate similar bullets.
 - **No duplicates.** Scan before adding. Prefer refining an existing bullet.
-- **Total budget ~600 tokens** for user/profile.md. Consolidate aggressively.
+- **Total budget ~600 tokens** for identity/profile.md. Consolidate aggressively.
 - **Don't write verbatim user messages.** Paraphrase into stable preference statements.
 
 ## Initial Setup
@@ -166,7 +156,7 @@ Populate `identity/profile.md` (Identity, Work Pattern, Platforms, Expertise sum
 The generic GET / PATCH surface (modes, fields, error envelopes) is
 documented in the **context** skill `references/api.md`. user-profile
 writes target the two paths `/api/context/identity/profile` (the injected
-summary file) and `/api/context/user/:topic` (one of `people` /
+summary file) and `/api/context/identity/:topic` (one of `people` /
 `work` / `expertise` / `personal` / `goals`).
 
 Two user-profile-specific notes layered on top of the generic surface:

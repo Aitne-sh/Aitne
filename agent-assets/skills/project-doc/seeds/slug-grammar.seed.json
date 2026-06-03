@@ -3,12 +3,12 @@
   "notes": [
     {
       "topic": "Slug format",
-      "rule": "Project and repo slugs are kebab-case, lowercase letters with hyphens between words.",
-      "example": "plans/projects/cost-explorer.md, git/personal-agent/overview.md"
+      "rule": "Project and repo slugs are lowercase; deriveSlug sanitizes to [a-z0-9._-], so digits, dots, underscores, and hyphens all survive (e.g. v1.2.3).",
+      "example": "plans/projects/cost-explorer.md, knowledge/repos/personal-agent/overview.md"
     },
     {
       "topic": "Slug length",
-      "rule": "Slugs are 32 characters or fewer, including the hyphens but excluding the .md suffix.",
+      "rule": "Slugs are 60 characters or fewer (SLUG_MAX), including the hyphens but excluding the .md suffix.",
       "example": "plans/projects/personal-agent-skills.md is at the upper bound"
     },
     {

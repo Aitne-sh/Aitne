@@ -123,35 +123,18 @@ a paraphrase. The user is the one who can fix auth / quota / install.
 
 ### Step 4a — Decide `output_path` (LLM judgment)
 
-From the probe sample, infer the primary L2 directory the recurring
-fetch will write into. Bias toward existing matches:
+Infer the primary L2 directory the recurring fetch will write into:
 
-1. If the entity-mirror already holds entities with `sources.<app>.*`
-   under one `<domain>/<type-plural>/`, reuse that path:
-   ```bash
-   curl -s "http://localhost:8321/api/entities?source=<app>&limit=5" | jq .
-   ```
-   Each item's `path` (`<domain>/<type-plural>/<slug>.md`) reveals
-   where that source already lives. If 1+ rows agree on
-   `<domain>/<type>`, that path wins.
-2. Otherwise, pick the `(domain, type)` pair whose semantic prior
-   best fits the data shape:
+1. Reuse an existing path if the source already lives somewhere —
+   `curl -s "http://localhost:8321/api/entities?source=<app>&limit=5" | jq -r '.items[].path'`;
+   if 1+ rows agree on `<domain>/<type-plural>`, that path wins.
+2. Else pick by the probe sample's data shape (mapping table in the
+   reference below).
+3. Else omit the field (`output_path: null`) — the first scheduled run
+   back-fills it.
 
-   | Probe sample shape | Likely `<domain>/<type-plural>/` |
-   |---|---|
-   | Recording with attendees + duration | `work/meetings/` |
-   | PDF / image with monetary amount | `finance/receipts/` |
-   | Travel itinerary / booking | `travel/trips/` |
-   | Long-form note / article | `<domain>/notes/` (pick by content topic) |
-   | Book metadata / progress | `learning/books/` |
-
-3. If the data shape is genuinely ambiguous (zero rows), set
-   `output_path: null` — the first scheduled run will populate it
-   from real data.
-
-The full `output_path` grammar (allowed domain / type values,
-trailing-slash rule, `..` rejection, 422 envelope) is in the
-reference below.
+The full grammar (allowed domain / type values, trailing-slash rule,
+`..` rejection, 400 rejection shape, data-shape mapping) is below.
 
 {{> ref:output-path }}
 
@@ -206,15 +189,10 @@ cadence)` collides at the uniqueness check and returns `409
 duplicate` with the existing `mt_id` — DM the user pointing at it
 instead of registering twice.
 
-**Server-side transaction (atomic)**: the daemon allocates the next
-`mt_<n>` from `managed_task_seq`, INSERTs `recurring_schedules` and
-`managed_tasks` linked by FK, and writes one `agent_actions` row
-(`action_type='management_task.created'`). On any DB failure the
-transaction rolls back and you get a 5xx — surface the body verbatim.
-
-**File render**: post-transaction the daemon re-renders
-`policies/management.md` from DB (locked, snapshotted into
-`md_file_snapshots`). You do NOT touch the file.
+**Server-side**: the daemon runs the atomic tx (allocate `mt_<n>`,
+INSERT the FK-linked `recurring_schedules` + `managed_tasks`, audit),
+re-renders `policies/management.md`, and snapshots it — you do not
+touch the file. On a DB failure you get a 5xx; surface the body.
 
 ### Step 7 — Confirm to user
 
@@ -305,10 +283,8 @@ rename has its own dedicated route
 disambiguator already routes app-change requests to "stop + re-register"
 for safety.
 
-Server-side transaction: UPDATE `recurring_schedules` (if
-`recurrenceRule` changed) → UPDATE `managed_tasks` → re-render
-`policies/management.md` → INSERT one `agent_actions` row
-(`action_type='management_task.modified', detail={changed, from, to}`).
+**Server-side**: the daemon runs the atomic tx + re-renders the file
++ audits — you do not touch the file.
 
 `mt_id`, `last_run_at`, `last_result`, and `consecutive_failures`
 are preserved across PATCH — history is continuous. A cadence change
@@ -374,16 +350,13 @@ so they can make an informed call.
 curl -sS -X DELETE http://localhost:8321/api/managed-tasks/mt_42
 ```
 
-Server-side transaction (atomic): snapshot the row's full state into
-`agent_actions.detail` → DELETE `managed_tasks` (cascades to
-`recurring_schedules` via FK) → cancel pending `agent_schedule`
-rows → re-render `policies/management.md` → INSERT one `agent_actions`
-row (`action_type='management_task.deleted'`).
+**Server-side**: the daemon runs the atomic tx (snapshot the row,
+DELETE `managed_tasks` cascading to `recurring_schedules`, cancel
+pending fires, audit) + re-renders the file — you do not touch it.
 
-The pre-delete row snapshot in `agent_actions`
-(`detail.original_row`) plus the file snapshot in
-`md_file_snapshots` is the recovery surface — surface it in
-audit / debug contexts only, never in the user-facing DM.
+The pre-delete row snapshot (`agent_actions.detail.original_row`)
+plus the `md_file_snapshots` row is the recovery surface — for
+audit / debug only, never the user-facing DM.
 
 ### Step 4 — Confirm to user
 
@@ -407,11 +380,11 @@ modifying the schedule:
 curl -sS -X POST http://localhost:8321/api/managed-tasks/mt_42/run-now
 ```
 
-The route is implemented at `packages/daemon/src/api/routes/managed-tasks.ts:875`.
-The dispatcher enqueues a one-shot fire that runs the same task-flow
-as a scheduled fire would; the next regular firing is unaffected.
-`409 already_running` means a previous fire is still in flight — do
-not loop.
+Success is `202 {status:"queued", mt_id, scheduled_row_id}` — the
+route enqueues a one-shot `agent_schedule` row that runs the same
+task-flow as a scheduled fire; the next regular firing is unaffected.
+There is no in-flight guard, so the fire always enqueues — do not
+fire it in a loop yourself.
 
 Confirm to user with one DM after the fire enqueues:
 
@@ -422,10 +395,10 @@ Confirm to user with one DM after the fire enqueues:
 
 ## Error envelope
 
-The standard daemon error shape applies to every `/api/managed-tasks`
-call. Verbs (POST / PATCH / DELETE / run-now), codes
-(`validation_error`, `duplicate`, `cap_reached`, `invalid_id`,
-`not_found`, `already_running`, `internal_error`), and the
+Every error is the daemon envelope
+(`{ok:false, summary, errors:[…], retryable, error?}`). Verbs (POST /
+PATCH / DELETE / run-now), codes (`validation_error`, `duplicate`,
+`cap_reached`, `invalid_id`, `not_found`, `internal_error`), and the
 Idempotency-Key contract are in the errors reference below.
 
 {{> ref:errors }}
@@ -434,26 +407,20 @@ Idempotency-Key contract are in the errors reference below.
 
 ## What this skill does NOT do
 
-- Does NOT hardcode connector tool names — all tool selection is
-  LLM-judged.
-- Does NOT PUT `policies/management.md` directly — the daemon owns the
-  write. The only legal write is the `/api/managed-tasks` chokepoint.
-- Does NOT INSERT `recurring_schedules` directly. POST
-  `/api/managed-tasks` keeps the FK pair consistent.
-- Does NOT pause / disable a task — there is no soft-pause; stop +
-  re-register if the user wants a hiatus.
-- Does NOT mutate `app` through PATCH — that is a different
-  commitment, stop + re-register.
-- Does NOT touch §A (SoT bindings) — use `PUT /api/sot-bindings`.
-  Does NOT touch §C (Active Policies) — owned by `management-policy`.
+- Does NOT PUT `policies/management.md` (or INSERT `recurring_schedules`)
+  directly — the only legal write is the `/api/managed-tasks` chokepoint;
+  the daemon owns the file write and the FK pair.
+- Does NOT mutate `app` through PATCH — a different connector is a
+  different commitment; stop + re-register.
 - Does NOT silently re-register on retry — use `Idempotency-Key`
   per-DM; conflicts surface the existing `mt_id`.
-- Does NOT register a task that has no probe-passing connector.
-  Probe failure is a hard stop.
-- Does NOT delete entity files produced by past runs on stop.
-- Does NOT regenerate `state/activity/<source>.md`. The reconciler does.
+- Does NOT register a task with no probe-passing connector — probe
+  failure is a hard stop.
+- Does NOT delete entity files produced by past runs on stop — those
+  stay where written; the DELETE only removes the row + its recurring
+  schedule.
 - Does NOT bulk-stop without per-row confirmation. "Stop all gmail
-  tasks" is a series of DM round-trips, one per row.
+  tasks" is one DM round-trip per row.
 
 ## API surface
 

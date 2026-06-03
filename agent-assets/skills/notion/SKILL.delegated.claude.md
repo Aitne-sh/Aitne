@@ -29,7 +29,7 @@ delegated mode:
 
 ```bash
 curl -s http://localhost:8321/api/notion/databases
-# → { databases: { "<label>": { "id": "<uuid>", "title": "..." }, ... } }
+# → { databases: [ { "label": "<label>", "id": "<uuid>" }, ... ] }
 ```
 
 Resolve label → UUID here BEFORE the `/exec` call so your `task`

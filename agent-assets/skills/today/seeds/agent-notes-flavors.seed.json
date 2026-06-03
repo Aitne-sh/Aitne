@@ -11,7 +11,7 @@
     },
     {
       "topic": "Latent profile question",
-      "rule": "Latent profile questions are open questions the agent wants to ask the user when context allows, marked with the suffix `(asked HH:MM)` once asked."
+      "rule": "Latent profile questions are open questions to ask the user when context allows. The parenthetical is the state: `(latent)` while waiting, `(asked HH:MM)` once woven into a reply."
     }
   ]
 }

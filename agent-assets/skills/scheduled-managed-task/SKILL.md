@@ -215,9 +215,12 @@ If the entity file does not previously exist, PATCH returns
 `404 context.path_not_found` — today's API requires a PUT with full
 content to create it first (the `<domain>/<type-plural>/*` write path
 is whitelisted for both PUT and PATCH; only the file-existence rule
-forces the PUT-first ordering). The creating PUT must include a
-complete frontmatter block — `type`, `domain`, `slug`, `title`,
-`created`, `sources` — or the daemon returns 422 against `EntitySchema`.
+forces the PUT-first ordering). There is **no API-side entity
+validation**: the creating PUT succeeds even with incomplete
+frontmatter, but always write a complete block — `type`, `domain`,
+`slug`, `title`, `created`, `sources` — because the entity-mirror
+watcher parses loosely and silently skips rows it can't read, leaving
+the §7.6 dedup lookup blind.
 
 ### Step 5b — Update the row
 
@@ -269,19 +272,16 @@ an em-dash; the user can also set the path explicitly via the
 
 ### Step 6 — Three-strikes notify
 
-The design (§10.4 step 6) places the 3-strikes notify on the daemon
-side: the `/run-result` route should auto-enqueue a `POST /api/notify`
-when the post-update `consecutive_failures` crosses the threshold,
-keeping the agent out of the user-paging loop and centralizing the
-threshold (`managementFailureNotifyThreshold`, default 3).
+The daemon emits **no** 3-strikes notify: `updateManagedTaskRunResult`
+is a bare UPDATE and the `/run-result` route only records the run and
+re-renders — it never calls `sendNotification`. (The similarly-named
+`failureNotifyThreshold` param is metrics-only — a dashboard
+"failing_now" gauge — not a daemon-side notify mechanism.)
 
-**Implementation status:** the daemon does NOT currently emit this
-notify — `/api/managed-tasks/:id/run-result` records the run and
-re-renders the file but stops there. Until the daemon closes the
-gap, **this skill is the safety net**: after Step 5b's failure-path
-PATCH, if the post-update `consecutive_failures` you computed is ≥ 3
-AND was < 3 before this run (i.e. the *crossing*, not every
-subsequent failure), call:
+**This skill is the sole notifier** — the safety net for failing
+managed tasks. After Step 5b's failure-path PATCH, if the post-update
+`consecutive_failures` you computed is ≥ 3 AND was < 3 before this run
+(i.e. the *crossing*, not every subsequent failure), call:
 
 ```bash
 curl -sS -X POST http://localhost:8321/api/notify \
@@ -309,16 +309,15 @@ is **empty final text**: bookkeeping is invisible by design. The user
 sees the change reflected in `state/activity/<source>.md` (auto-built) and
 `<domain>/_index.md`, not in a chat ping per fire.
 
-Exceptions:
+Exceptions (final text stays empty in all cases — these only govern
+whether a `/api/notify` fires):
 
 - The `notify` skill's awareness gate fired *during* this run — e.g.
   the new datum is a meeting starting in 15 min. Then call
-  `/api/notify` and keep the final text empty (a follow-up "Sent"
-  line is duplicate noise per `scheduled.task.md`).
-- `last_result='failed: ...'` with `consecutive_failures < 3` — final
-  text empty; the activity view records it; the user is not paged.
-- `last_result='failed: ...'` at the threshold crossing — Step 6 fired
-  the `/api/notify`; final text empty.
+  `/api/notify` (a follow-up "Sent" line is duplicate noise per
+  `scheduled.task.md`).
+- A failure: notify only on the Step 6 threshold crossing; below it,
+  the activity view records the failure and the user is not paged.
 
 NEVER write a `## Agent Plan` row for a managed-task run — managed
 tasks are not the same as Agent Plan rows. The Agent Plan loop close
@@ -332,13 +331,15 @@ A scheduled fire that crashes mid-run leaves the row's
 `last_run_at` un-updated. The next slot picks up the same `since`
 window and re-fetches the same data — the entity-mirror's
 `(source_key, external_id)` lookup makes this a **merge**, not a
-duplicate. The PATCH body is content-additive: a section appended
-twice with the same content is harmless because Step 5a's
-`frontmatterMerge` is deep, and the section-append mode is
-"add this block as-is" (the daemon de-duplicates exact-string-match
-sections with the same heading on append). For sources without a
-stable `external_id`, use Step 4.2's date+title window — at the cost
-of occasional dedup misses, never duplicates by construction.
+duplicate at the file level, and Step 5a's `frontmatterMerge` is deep,
+so re-writing the same frontmatter is idempotent. **Body
+section-appends are NOT de-duplicated** — `mode:"append"` concatenates
+unconditionally, so re-appending the same block on a replay WILL
+duplicate it. Guard against that: on a re-run, `GET` the section first
+and skip any block already present (or carry the structured fields in
+frontmatter, which merges). For sources without a stable `external_id`,
+use Step 4.2's date+title window — at the cost of occasional dedup
+misses, never duplicates by construction.
 
 ## Caps
 
@@ -352,20 +353,16 @@ appended `## <App> Notes` body, not as a separate DM.
 
 | HTTP | `error` | What to do |
 |---|---|---|
-| 400 (`/api/managed-tasks/:id/run-result`) | `invalid_id` / `validation_error` | Body shape drift — re-check field names exactly match `last_run_at` / `last_result` / `consecutive_failures` |
+| 400 (`/api/managed-tasks/:id` or `:id/run-result`) | `invalid_id` / `validation_error` | All managed-task body validation is 400 (never 422). Re-check field names exactly match `last_run_at` / `last_result` / `consecutive_failures`; for the user-facing PATCH, drop the offending field (typically `output_path`) and retry once with the rest |
 | 404 (`/api/context/<domain>/<type-plural>/...`) | `context.path_not_found` | The entity file does not exist yet — PATCH cannot create it. Create it first with a PUT carrying full content + complete frontmatter (§Step 5a), then the merge succeeds. (Entity-domain write paths ARE whitelisted for PUT/PATCH; the prior 403 claim is obsolete.) |
 | 404 (`/api/managed-tasks/:id`) | `not_found` | Row was stopped mid-run. End the session quietly. |
-| 422 (`/api/context/...`) | `validation_error` | Frontmatter incomplete or malformed; populate all required fields and retry once |
-| 422 (`/api/managed-tasks/:id`) | `validation_error` | Path / body shape rejected; drop the offending field (typically `output_path`) and retry once with the rest |
 | 5xx | `internal_error` | Record `last_result='failed: <body.message>'` via Step 5b's failure form and end the session |
 
 ## What this skill does NOT do
 
-- Does NOT post `/api/notify` for routine successes (silent by design).
-- Does NOT post `/api/notify` for routine failures (final text empty).
-  The exception is the 3-strikes crossing — see Step 6: until the
-  daemon owns the threshold notify, the agent emits one DM at the
-  3rd consecutive failure, then stays silent until success or stop.
+- Does NOT post `/api/notify` for routine successes or failures
+  (silent by design). The sole exception is the 3-strikes crossing —
+  see Step 6.
 - Does NOT touch the §B row's `app` or `cadence` — those are
   user-mutable only via the `managed-tasks` skill `## Modify` flow.
 - Does NOT INSERT `agent_schedule` rows. The cron scheduler does.

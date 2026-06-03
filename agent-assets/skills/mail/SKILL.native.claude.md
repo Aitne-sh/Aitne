@@ -102,7 +102,7 @@ When you fetch Gmail data during a routine (e.g. `routine.hourly_check`'s
 Step 0a), POST each materialised thread to the daemon's
 `/api/observations` endpoint so subsequent runs can dedup. The daemon
 computes `contentHash` server-side via
-`@personal-agent/shared/observations-hash.ts` — pass the raw `payload`
+`@aitne/shared/observations-hash` — pass the raw `payload`
 verbatim; do **not** compute the hash yourself (LLM-side hashes drift
 between runs and from the delegated-sync-worker's hash, breaking
 `delegated → native` flip dedup).
@@ -159,9 +159,10 @@ window (§11.3.1) with HTTP 409; on 409 stop and re-read
 
 ## Cost / audit
 
-Every native MCP call lands one `agent_actions` row of type `mcp_call`
-with `provider="claude"`, the tool name, `inputTokens` /
-`outputTokens`, and the parent `event_id` / `processKey` attached. The
-cost dashboard's `nativeAttribution` column (§14.4) joins those rows
-to the integration registry by `toolNamespace` prefix so the operator
-can see the spend shift after a flip.
+Every native MCP call is logged to the `mcp_tool_calls` table
+(`server_id`, `tool_name`, `event_type`, `session_id`, `ok` / `error`,
+`called_at`, `duration_ms`) — NOT to `agent_actions`, and with no
+per-call token or provider columns. The operator's cost view attributes
+native spend by server / namespace from those rows so it can see the
+shift after a flip. You do not query this yourself — just call the
+connector and POST observations.

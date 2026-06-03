@@ -69,8 +69,8 @@ curl -s "http://localhost:8321/api/context/list/policies"
 ```
 
 If the listing and `_index.md` rows disagree, **prefer the listing**
-and trust the next reconcile pass to refresh the index. Do **not**
-hand-PATCH `_index.md` to fix the drift — that just creates more churn.
+and trust the next reconcile pass to refresh the index (`_index.md` is
+reconciler-owned — see body intro).
 
 ### Step 2 — Detect similarity
 
@@ -156,9 +156,8 @@ the active policies first and ask.
    frontmatter `enabled: false`, PUT back. The reload hook flips the
    cron job off automatically.
 
-The policy-index reconciler picks the change up on the FS event and
-re-renders both `_index.md` and the management.md section within
-~10 s. Do not PATCH them manually.
+The policy-index reconciler re-renders both `_index.md` and the
+management.md section within ~10 s (reconciler-owned — see body intro).
 
 If step 2 fails after step 1 succeeded, **attempt to roll back step 1**
 (`status` back to `active`). If the rollback itself fails, report the
@@ -190,8 +189,6 @@ is intentionally not whitelisted (see MANAGEMENT-POLICY-CAPTURE-PLAN
 - Does NOT create rows in the `recurring_schedules` DB table — defer to
   `policies/routines/custom/` for cron, which gives the user a visible MD file
   to edit.
-- Does NOT migrate existing custom routines into policy files
-  retroactively. Migration is a separate one-time operation.
 
 ## Cross-skill pointers
 
@@ -223,11 +220,13 @@ skill targets these paths:
 - `DELETE /api/context/policies/routines/custom/<slug>` (remove only)
 
 `policies/management-captures/_index.md` and the `## Active Policies` section in
-`policies/management.md` are written by the daemon's policy-index
-reconciler — they are NOT in the agent's write surface for this skill.
+`policies/management.md` are reconciler-owned (see body intro) — NOT in
+the agent's write surface for this skill.
 
-Frontmatter validation enforces `kind: policy`, `owner: agent`, and
-the slug rules in Step 4. Malformed writes return 422 with the failing
+Frontmatter validation enforces `type: rule`, `kind: policy`,
+`owner: agent`, `status`, `created_at` (YYYY-MM-DD), `origin`,
+`updated` (ISO), an H1, and the slug rules in Step 4 — see 5.3 for the
+full required set. Malformed writes return 422 with the failing
 field — surface that text to the user verbatim rather than retrying
 blindly.
 

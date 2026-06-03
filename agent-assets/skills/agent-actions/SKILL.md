@@ -1,6 +1,6 @@
 ---
 name: agent-actions
-description: Load when the running session needs to write structured metadata into its own `agent_actions` row so daemon-side consumers (morning-routine AgentJournalAppender, anomaly surfacing, audit log) read structured data instead of parsing prose.
+description: Load near the end of a morning-routine / dispatcher session to record dayType, anomalies, inbox stats, and files-touched into your own `agent_actions` row, so daemon-side consumers (morning-routine journal appender, audit log) read structured data instead of parsing prose.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -41,7 +41,8 @@ header attachment for you — you do not type them. The endpoint returns
 if no in-flight row matches your session — typically because the row
 has already settled to a terminal `result`, or because the dispatcher
 spawned the session without the pre-insert step that the morning
-routine's pipeline orchestrator owns. Surface as anomaly and continue.
+routine's pipeline orchestrator owns. Record it in this endpoint's
+`anomalies` field (when accessible) or DM the operator, then continue.
 
 ## Metadata shape
 
@@ -51,12 +52,12 @@ The morning-routine Stage A is the primary caller. Its expected shape:
 
 | Field | Type | Purpose |
 |---|---|---|
-| `dayType` | `"weekday" \| "weekend" \| "focus" \| "off"` | The day-type Stage A derived. ⑥ AgentJournalAppender writes this into agent/journal.md's header line. |
-| `anomalies` | `string[]` | Free-form anomalies you encountered (e.g. "AgentPlan cardinality mismatch: today.md has 6 rows, batch had 5"). ⑥ surfaces these in agent/journal.md and `pnpm audit` filters on them. |
-| `filesTouched` | `string[]` | Paths your turn wrote to (e.g. `context/today.md`, `context/roadmap.md`). |
+| `dayType` | `"weekday" \| "weekend" \| "focus" \| "off"` | The day-type Stage A derived. ⑥ AgentJournalAppender writes this into journal/agent.md's header line. |
+| `anomalies` | `string[]` | Free-form anomalies you encountered (e.g. "AgentPlan cardinality mismatch: today.md has 6 rows, batch had 5"). ⑥ surfaces these in journal/agent.md. |
+| `filesTouched` | `string[]` | Paths your turn wrote to (e.g. `state/today.md`, `plans/roadmap.md`). |
 | `inboxStats` | `{triaged, movedToScratch, dmConfirmsSent, secretsSkipped}` | Inbox triage counts from Step 4. All keys integers >= 0. `secretsSkipped` is collected but NOT rendered by ⑥; surface secret-skip events through `anomalies` as well so they reach the audit trail. |
 | `morningChecks` | `string[]` | Short labels for every Step 8 `policies/routines/morning.md` extension check executed (e.g. `"water bottle filled"`). ⑥ joins these with `, ` into the `Checks from routines/morning.md:` bullet. Empty array → renders as `(none)`. |
-| `scheduleBatchSize` | `number` | Cardinality you observed when posting to `/api/schedule/batch`. Mirrors what was POSTed so ⑥ can detect cardinality mismatches against today.md. |
+| `scheduleBatchSize` | `number` | Cardinality you observed when posting to `/api/schedule/batch`. Informational metadata mirroring what was POSTed. |
 
 The endpoint accepts any well-formed JSON object — these are the keys
 the morning-routine pipeline consumes. Skills can extend the shape
@@ -71,7 +72,7 @@ curl -s -X PATCH http://localhost:8321/api/agent-actions/self \
     "metadata": {
       "dayType": "weekday",
       "anomalies": [],
-      "filesTouched": ["context/today.md", "context/roadmap.md"],
+      "filesTouched": ["state/today.md", "plans/roadmap.md"],
       "inboxStats": { "triaged": 4, "movedToScratch": 4, "dmConfirmsSent": 1, "secretsSkipped": 0 },
       "morningChecks": ["water bottle filled", "calendar synced"],
       "scheduleBatchSize": 5
@@ -86,37 +87,20 @@ Success (200):
 
 ## Errors
 
-Every error response uses the **agent-consumable envelope**:
+Failures return an agent-consumable envelope (`ok:false`) carrying a
+`code`, a `hint`, and a `skillAnchor` back into this skill. The two
+session-state codes below are `retryable:false` — do NOT re-fire; record
+the failure in this endpoint's `anomalies` field (when accessible) or DM
+the operator, then continue. A malformed-body code is retryable — fix the
+body and resend.
 
-```jsonc
-{
-  "ok": false,
-  "summary": "Request rejected: agent_actions.session_identity_missing on headers.x-pa-event-correlation-id.",
-  "errors": [
-    {
-      "rowIndex": null,
-      "code": "agent_actions.session_identity_missing",
-      "field": "headers.x-pa-event-correlation-id",
-      "received": "<missing>",
-      "expected": "x-pa-event-correlation-id and x-process-key headers identifying the running session",
-      "hint": "The pa-api shim auto-injects these from PA_EVENT_CORRELATION_ID and PA_PROCESS_KEY when running inside a dispatcher-spawned session.",
-      "skillAnchor": "agent-actions#self-write-auth",
-      "severity": "error"
-    }
-  ],
-  "retryable": false
-}
-```
+Two codes reflect session state you must reason about:
 
-### Codes the endpoint can emit
+| Code | When |
+|---|---|
+| `agent_actions.session_identity_missing` | `x-pa-event-correlation-id` or `x-process-key` header is absent / empty — the session is misconfigured. The shim normally attaches both from env. |
+| `agent_actions.session_row_not_found` | No in-flight row matches `(event_id, action_type)` — either the row already settled to a terminal result and your PATCH arrived late, or the dispatcher spawned the session without the orchestrator-side pre-insert. |
 
-| Code | When | Fix |
-|---|---|---|
-| `agent_actions.session_identity_missing` | `x-pa-event-correlation-id` or `x-process-key` header is absent / empty. | Running inside a dispatcher-spawned session the pa-api shim attaches both headers from env. If you see this, the session is misconfigured — surface it as an anomaly via `<safety_violation>` and stop. Not retryable in the same turn. |
-| `agent_actions.session_row_not_found` | No in-flight `agent_actions` row matches `(event_id, action_type)`. | Either the row has already settled to a terminal result (success/failed/partial) and your PATCH arrived late, or the dispatcher spawned this session without the orchestrator-side pre-insert that the morning-routine pipeline relies on. Either way, the PATCH cannot land — surface as anomaly and continue. Not retryable. |
-| `agent_actions.body_not_object` | Request body is not a JSON object. | POST `{"metadata":{…}}`. |
-| `agent_actions.metadata_field_invalid` | `metadata` slot is missing, not an object, an array, or carries non-JSON-serialisable values (functions, Symbols, BigInts). | Pass a plain JSON object literal. Arrays go inside named keys (e.g. `anomalies:[…]`). |
-
-`retryable:false` means the agent should NOT retry the same call; it
-should surface the failure as a structured anomaly (via this endpoint's
-`anomalies` field when accessible) or DM the operator.
+A malformed body fails with `agent_actions.body_not_object` (send
+PATCH `{"metadata":{…}}`) or `agent_actions.metadata_field_invalid`
+(pass a plain JSON object; arrays go inside named keys).

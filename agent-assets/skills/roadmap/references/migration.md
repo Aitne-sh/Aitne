@@ -7,15 +7,15 @@ description: Section auto-ensure recipe for legacy roadmaps missing ## Long-term
 # Section auto-ensure — legacy `plans/roadmap.md` files
 
 Roadmaps created before the `## Long-term Plans` section was
-introduced may be missing that header. A direct
-`PATCH section=long_term_plans` against such a file returns
+introduced may be missing that header. A PATCH targeting the
+`Long-term Plans` section against such a file returns
 `400 section_not_found`. This reference is the one-time recovery
 recipe DM handlers and the evening sweeper run before their first
-write to `long_term_plans`.
+write to the `Long-term Plans` section.
 
 ## When to run
 
-Run this **only** if you are about to PATCH `long_term_plans` and the
+Run this **only** if you are about to PATCH the `Long-term Plans` section and the
 file's body is unknown to you. Full-file PUT writers
 (`routine.roadmap_refresh`) always emit the full section schema, so
 they never trigger `section_not_found` and never need this recipe.
@@ -35,11 +35,13 @@ curl -s -X PATCH http://localhost:8321/api/context/plans/roadmap \
   -H 'X-Lock-Id: <roadmap_write_lock_id>' \
   -d '{"section": "quarterly_focus", "mode": "append", "content": "\n## Long-term Plans\n"}'
 
-# 4. Then PATCH long_term_plans normally
+# 4. Then PATCH the Long-term Plans section normally (note: section value
+#    "long-term plans" normalizes to match the "## Long-term Plans" header;
+#    the underscore form "long_term_plans" does NOT match)
 curl -s -X PATCH http://localhost:8321/api/context/plans/roadmap \
   -H 'Content-Type: application/json' \
   -H 'X-Lock-Id: <roadmap_write_lock_id>' \
-  -d '{"section": "long_term_plans", "mode": "append", "content": "- [undated] …"}'
+  -d '{"section": "long-term plans", "mode": "append", "content": "- [undated] …"}'
 ```
 
 ## Don'ts

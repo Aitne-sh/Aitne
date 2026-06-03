@@ -1,6 +1,6 @@
 ---
 name: wiki-connect
-description: Load for wiki.connect. Bridges two domains by surfacing shared terms, references, and structural analogies; writes a cited connection report to 30_outputs/.
+description: Bridge two wiki domains on /connect A B — surface shared terms, common references, and structural analogies, then write a cited connection report to 30_outputs/. Runs under process key wiki.connect.
 allowed-tools:
   - Bash(curl *)
 ---
@@ -10,6 +10,16 @@ allowed-tools:
 You run under process key `wiki.connect`.
 
 Read `<wiki_command>` for the two topics — fields `topic_a` and `topic_b`. Your job is to find genuine bridges between the two domains using only what the wiki contains. Speculative analogies are out of scope; if there is no real overlap, say so plainly.
+
+## Endpoints
+
+Every request includes `-H 'x-process-key: wiki.connect'`. Body shapes:
+
+| Method | Path | Body |
+|---|---|---|
+| `GET`   | `/api/wiki/{{workspace_name}}/search?q=<topic>` | — |
+| `POST`  | `/api/wiki/{{workspace_name}}/files/30_outputs/<file>.md` | `{"content":"<report-md>"}` |
+| `PATCH` | `/api/wiki/{{workspace_name}}/files/log.md` | `{"mode":"append","content":"<line>\n"}` |
 
 ## Method
 
@@ -30,10 +40,17 @@ Read `<wiki_command>` for the two topics — fields `topic_a` and `topic_b`. You
 
 Write exactly one report:
 
+```bash
+curl http://localhost:8321/api/wiki/{{workspace_name}}/files/30_outputs/<YYYY-MM-DD>-connect-<slug>.md \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H 'x-process-key: wiki.connect' \
+  -d @- <<'JSON'
+{"content":"<report-md>"}
+JSON
 ```
-POST /api/wiki/{{workspace_name}}/files/30_outputs/<YYYY-MM-DD>-connect-<slug>.md
-x-process-key: wiki.connect
-```
+
+The body is `{"content":"<report-md>"}` — `wikiFilePostSchema` requires the `content` field. An empty body returns `400 invalid_json_body`; valid JSON missing `content` returns `400 invalid_body`. Always send the `content` field.
 
 - `<YYYY-MM-DD>` is today's date.
 - `<slug>` is `<slug-a>--<slug-b>` using the canonical slugs from `90_meta/taxonomy.md` when available, kebab-cased and joined by a double hyphen.
@@ -59,7 +76,17 @@ Report shape:
 - proposed wiki slug, one-sentence rationale, suggested anchor notes
 ```
 
-If no genuine bridges exist, write the report anyway with empty sections marked `_(none)_` and a `## Summary` that names that clearly — a "no connection" finding is still useful to the owner. Append a one-line `log.md` entry referencing the output filename and both topics.
+If no genuine bridges exist, write the report anyway with empty sections marked `_(none)_` and a `## Summary` that names that clearly — a "no connection" finding is still useful to the owner.
+
+Then append a one-line `log.md` entry referencing the output filename and both topics. `log.md` is append-only — POST to an existing `log.md` returns `409 'Use PATCH to append log.md'`. Use PATCH:
+
+```bash
+curl http://localhost:8321/api/wiki/{{workspace_name}}/files/log.md \
+  -X PATCH \
+  -H 'content-type: application/json' \
+  -H 'x-process-key: wiki.connect' \
+  -d '{"mode":"append","content":"[<ISO>] wiki.connect: <topic_a> ↔ <topic_b> → 30_outputs/<file>.md\n"}'
+```
 
 ### Completion message (mandatory)
 

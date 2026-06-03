@@ -1699,23 +1699,25 @@ describe("per-skill body line-range pin (P1)", () => {
   type Pin = { designTarget: number; regressionCeiling: number };
   const PINS: Record<string, Pin> = {
     // Already at or under design target — strict ceiling.
-    context: { designTarget: 120, regressionCeiling: 144 },
-    roadmap: { designTarget: 180, regressionCeiling: 216 },
-    notion: { designTarget: 70, regressionCeiling: 95 },
-    attach: { designTarget: 80, regressionCeiling: 110 },
+    // 2026-06 skills audit: ceilings ratcheted to max(measured × 1.05, designTarget)
+    // after the per-skill verbosity trims + reference extractions landed.
+    context: { designTarget: 120, regressionCeiling: 120 },
+    roadmap: { designTarget: 180, regressionCeiling: 207 },
+    notion: { designTarget: 70, regressionCeiling: 94 },
+    attach: { designTarget: 80, regressionCeiling: 90 },
     // Operational-procedure-heavy skills — regression-guard ceiling
     // set above current size. Per-skill phases (§§ in
     // skills-improvement.md) drive the design target.
-    today: { designTarget: 120, regressionCeiling: 225 },              // §2  — Agent Plan lifecycle extracted; further trim pending
-    "user-profile": { designTarget: 100, regressionCeiling: 210 },     // §3  — character-preferences ref exists; body still hosts schema
-    "user-interview": { designTarget: 180, regressionCeiling: 290 },   // §15 — Op-morning/Op-briefing refs exist
-    notify: { designTarget: 80, regressionCeiling: 135 },              // §4  — priority ref exists
-    schedule: { designTarget: 150, regressionCeiling: 246 },           // §5  — batch/errors/recurrence refs + R4 confirm-subflow extracted; +scheduling-split (recurring work→Agent vs dm_session) prose
-    "external-services": { designTarget: 80, regressionCeiling: 135 }, // §6  — 6 service refs exist
-    mail: { designTarget: 180, regressionCeiling: 250 },               // §7  — api/errors/examples/providers/query-grammar refs exist
-    "gmail-lifestyle": { designTarget: 180, regressionCeiling: 235 },  // §9  — merged skill (travel + receipts) with 2 refs
+    today: { designTarget: 120, regressionCeiling: 164 },              // §2  — day-type/section tables extracted to references/today-skeleton.md
+    "user-profile": { designTarget: 100, regressionCeiling: 198 },     // §3  — character-preferences ref exists; legacy user/→identity/ canonicalized
+    "user-interview": { designTarget: 180, regressionCeiling: 216 },   // §15 — Op 2/4 extracted to references/op-dm-handler.md
+    notify: { designTarget: 80, regressionCeiling: 130 },              // §4  — priority ref exists; rate-limit dupes collapsed
+    schedule: { designTarget: 150, regressionCeiling: 237 },           // §5  — batch/errors/recurrence refs + importance table extracted to references/importance.md
+    "external-services": { designTarget: 80, regressionCeiling: 132 }, // §6  — 6 service refs + delegated exec-errors extracted
+    mail: { designTarget: 180, regressionCeiling: 239 },               // §7  — api/errors/examples/providers/query-grammar refs exist; routing dupes trimmed
+    "gmail-lifestyle": { designTarget: 180, regressionCeiling: 180 },  // §9  — merged skill (travel + receipts) with 2 refs
     "management-policy": { designTarget: 120, regressionCeiling: 245 }, // §13 — policy-workflow ref exists
-    "managed-tasks": { designTarget: 250, regressionCeiling: 485 },    // §14 — errors/output-path/recurrence refs exist; bulk is Register/Modify/Stop procedure
+    "managed-tasks": { designTarget: 250, regressionCeiling: 459 },    // §14 — errors/output-path/recurrence refs exist; per-section tx prose collapsed
   };
 
   test.each(Object.entries(PINS))(

@@ -1,6 +1,6 @@
 ---
 name: observations
-description: Load when a session needs to drain the pending-observations queue or inspect raw external-source state (Obsidian edits, new git commits, Notion updates) and optionally mark entries consumed.
+description: Drain the pending-observations queue and inspect raw external-source state (Obsidian edits, new git commits, Notion updates), marking processed entries consumed. Use during hourly check or morning routine review.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -60,20 +60,7 @@ The daemon pre-summarizes every observation with a per-source LLM call (lite tie
 
 ### Legacy fetch-on-doubt (used when `summary_status !== 'done'`)
 
-Before fetching, ask: **"If I fetch this, will my next action actually differ from what I'd do now?"** No → don't fetch. Yes → fetch. Fetching for "verification" wastes tokens; fetching to resolve ambiguity is what these endpoints exist for.
-
-| Situation | Action | Why |
-|---|---|---|
-| Preview contains TODO, deadline, or concrete task reference | **Act on preview** | You have what you need |
-| Preview is truncated on a relevant section | **Fetch full** | Missing load-bearing content |
-| Preview is empty or says `(file read failed)` | **Fetch full** | Preview is broken, not empty |
-| Change type is `deleted` | **Log only — no fetch** | Nothing to read |
-| Journal/diary entry with no task markers visible | **Skip entirely** | Usually no action needed |
-| Active project file with ambiguous preview | **Fetch full** | Active project justifies cost |
-| Clear commit message + small/routine diff | **Act on preview** | Common refactors, renames |
-| Generic commit message ("update","fix","wip") + multi-file | **Fetch full diff** | Vague message requires actual change |
-
-**Availability:** Obsidian → 503 when app not running (fall back to preview); Git → 400 for repos not in `PA_GIT_REPOS`; Notion → empty for unconfigured DBs.
+When the summarizer hasn't run (`summary_status !== 'done'`) or its summary aged out (`summaryStale === true`), fall back to the fetch-on-doubt heuristic table: {{> ref:fetch-fallback }}
 
 ---
 
@@ -105,7 +92,7 @@ Params: `pending` (bool, default true), `actor` (user/agent/system/unknown), `li
 
 The `source` filter is a prefix match: `source=obsidian` returns rows from both the primary management vault (`obsidian:primary`) and the external note vault (`obsidian:external`). Narrow to one side with the namespaced form when the distinction matters — typically `obsidian:primary` refers to the agent's own files and most user-actionable edits come from `obsidian:external`.
 
-Response: `{ "observations": [{ "id", "source", "ref", "changeType", "actor", "observedAt", "payload", "consumedAt?", "consumedBy?", "summaryText?", "noveltyScore?", "summaryStatus?", "summaryAt?", "summaryStale" }], "limit", "offset", "pending" }`
+Response: `{ "observations": [{ "id", "source", "ref", "changeType", "actor", "observedAt", "payload", "consumedAt?", "consumedBy?", "summaryText?", "noveltyScore?", "summaryStatus?", "summaryAt?", "summaryBackend?", "summaryStale" }], "limit", "offset", "pending" }`
 
 `summaryText` / `noveltyScore` are populated asynchronously by the per-observation summarizer (cost-reduction-structural §A). When `summaryStatus !== 'done'` the row may have been skipped (deny-list, agent-actor) or the summarizer hasn't caught up yet — fall back to the legacy fetch-on-doubt rules in that case. `summaryStale === true` flags summaries older than 6 h relative to `observedAt`; treat them the same way as a missing summary.
 
@@ -228,15 +215,13 @@ you to.**
 
 #### Common mistakes — do not retry these, they will keep failing
 
+The live `issues[]` array names any other malformed field; these are the highest-frequency ones.
+
 | Wrong call | Why it fails | Correct shape |
 |---|---|---|
-| `POST /api/observations -d 'limit=30'` | Body is a query string. POST records, GET fetches. | `GET /api/observations?limit=30&pending=true` |
 | `POST /api/observations/14/consume` | Per-id path returns 405 `use_bulk_endpoint`. | `POST /api/observations/consume -d '{"ids":[14],"correlationId":"..."}'` |
-| `GET /api/observations/consume` | Consume is POST-only; GET returns 405. | `POST /api/observations/consume -d '{"ids":[...],"correlationId":"..."}'` |
-| `PATCH /api/observations` | No PATCH route — auth middleware returns 401. | `POST /api/observations/consume` (or `POST /api/observations` for new rows). |
 | `-d '{"ids":[14],"correlation_id":"..."}'` | snake_case. Field must be camelCase. | `-d '{"ids":[14],"correlationId":"..."}'` |
 | `-d '{"ids":["14"],"correlationId":"..."}'` | Stringified ids. Use integers. | `-d '{"ids":[14],"correlationId":"..."}'` |
-| `-d '{"ids":[14],"correlationId":"<event_correlation_id>"}'` | Pasted the angle-bracket placeholder. | Paste the actual id, e.g. `"hourly-2026-04-23T15:00:00Z-7af3"`. |
 
 ### GET /api/observations/stats
 

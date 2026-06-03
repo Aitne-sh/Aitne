@@ -1,12 +1,12 @@
 ---
 kind: reference
 name: skills-crud
-description: Dashboard-shaped CRUD for user-authored skills under ~/.personal-agent/skills/. Built-in skills are read-only (403).
+description: Dashboard-shaped CRUD for user-authored skills under <contextDir>/policies/skills/. Built-in skills are read-only (403).
 ---
 
 ## Skills Management
 
-User-authored skills: `~/.personal-agent/skills/{slug}/SKILL.md`. Built-in skills are read-only (403). Slug: lowercase kebab-case `[a-z0-9][a-z0-9-]*`, 1–64 chars.
+User-authored skills: `<contextDir>/policies/skills/{slug}/SKILL.md`. Built-in skills are read-only (403). Slug: lowercase kebab-case `[a-z0-9][a-z0-9-]*`, 1–64 chars.
 
 ```bash
 curl -s http://localhost:8321/api/skills                                            # list all
@@ -22,6 +22,6 @@ Always `GET /api/skills` before creating (check name collisions). **Omit frontma
 
 The description is the **only** routing signal the SDK uses to pick a
 skill — keep it under 280 chars and make the trigger surface
-distinct from every other skill in the manifest. Slug grammar is
-strict: `[a-z0-9][a-z0-9-]*[a-z0-9]` or `[a-z0-9]` (single char),
-1-64 chars total. PUT rejects collisions with built-in slugs.
+distinct from every other skill in the manifest. Slug grammar:
+`^[a-z0-9][a-z0-9-]*$` (1-64 chars; a trailing hyphen is allowed,
+no alphanumeric terminal required). PUT rejects collisions with built-in slugs.

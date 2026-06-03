@@ -1,6 +1,6 @@
 ---
 name: wiki-trace
-description: Load for wiki.trace. Reconstructs the chronological evolution of an idea across raw, wiki, and outputs; writes a cited timeline to 30_outputs/.
+description: Reconstructs the chronological evolution of an idea across the wiki's raw/wiki/outputs layers and writes a cited timeline to 30_outputs/. Use for wiki.trace / /trace <topic>.
 allowed-tools:
   - Bash(curl *)
 ---
@@ -17,7 +17,7 @@ Read `<wiki_command>` for the user's `topic` (free-form). Your job is to reconst
    ```
    GET /api/wiki/{{workspace_name}}/search?q=<topic>
    ```
-   Then drill into matches by reading their bodies. Cover `10_raw/`, `20_wiki/`, and `30_outputs/`.
+   Each hit already carries `mtime` + `snippet` — use those for the first-pass chronological sort, then only GET bodies for the phases that need evidence detail. Cover `10_raw/`, `20_wiki/`, and `30_outputs/`.
 2. Order findings chronologically. Prefer dates that the content asserts (raw `retrieved` timestamps, source publish dates, output filenames `<YYYY-MM-DD>-…`). When only file `mtime` is available, mark the entry as "discovered on" rather than "happened on".
 3. Group into **phases** — a phase is a span where the dominant framing, vocabulary, or open question stays roughly stable. Two to five phases is the usual shape; one phase is fine for a topic the wiki only mentions briefly.
 4. For each phase, surface:
@@ -31,8 +31,13 @@ Read `<wiki_command>` for the user's `topic` (free-form). Your job is to reconst
 Write exactly one timeline report to:
 
 ```
-POST /api/wiki/{{workspace_name}}/files/30_outputs/<YYYY-MM-DD>-trace-<slug>.md
-x-process-key: wiki.trace
+curl http://localhost:8321/api/wiki/{{workspace_name}}/files/30_outputs/<YYYY-MM-DD>-trace-<slug>.md \
+  -X POST \
+  -H 'content-type: application/json' \
+  -H 'x-process-key: wiki.trace' \
+  -d @- <<'JSON'
+{"content":"<report markdown>"}
+JSON
 ```
 
 - `<YYYY-MM-DD>` is today's date.
@@ -58,7 +63,7 @@ Report shape:
 - bullet list of questions the wiki cannot yet answer
 ```
 
-If the wiki has fewer than two distinct sources on the topic, say so directly in `## Summary` and keep the report short — do not pad it with speculation. Append a one-line `log.md` entry referencing the output filename and the topic.
+If the wiki has fewer than two distinct sources on the topic, say so directly in `## Summary` and keep the report short — do not pad it with speculation. The daemon appends the `log.md` entry automatically on a successful write.
 
 ### Completion message (mandatory)
 

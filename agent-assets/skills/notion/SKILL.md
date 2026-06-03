@@ -14,11 +14,10 @@ Base URL: `http://localhost:8321`. All calls via `curl -s` with
 `Content-Type: application/json` on POST/PATCH/PUT. URL-encode spaces in paths.
 
 Full CRUD over Notion pages plus workspace search. Reads and writes are
-Autonomous; writes are still serialized per-process and pre-marked
-`notion:<pageId>` for write attribution. The daemon does not DM the
-owner before a write — the user's `deniedTools` setting is the gate.
-Call `POST /api/notify` yourself when you judge the user would
-want immediate awareness.
+Autonomous; writes are serialized per-process and pre-marked
+`notion:<pageId>` for attribution. The daemon does not DM the owner before
+a write — the `deniedTools` setting is the gate. Call `POST /api/notify`
+yourself when you judge the user would want immediate awareness.
 
 **Parent shorthand**: `parent` accepts a label string (`"tasks"`),
 `{ database: "tasks" }`, `{ data_source_id }`, `{ database_id }`, or
@@ -34,8 +33,10 @@ curl -s "http://localhost:8321/api/notion/search?q=launch+plan"             # se
 curl -s http://localhost:8321/api/notion/pages/abc123...                    # retrieve page
 ```
 
-Pagination: `page_size` (1–100, default 20) + `start_cursor` from response's
-`next_cursor`. Check `has_more` to know if more pages exist.
+Query also accepts `sorts` (URL-encoded JSON) alongside `filter`, and
+`in_trash=true` to query trashed rows. Pagination: `page_size` (1–100,
+default 20) + `start_cursor` from response's `next_cursor`; check
+`has_more` to know if more pages exist.
 
 ## Create a page (write — Autonomous)
 
@@ -55,12 +56,13 @@ curl -s -X PATCH http://localhost:8321/api/notion/pages/abc123... \
 
 ## Update page content (write — Autonomous)
 
-**Concurrency warning**: Notion v5 has no etags. If another client edits
-between GET and PATCH, `oldStr` may fail silently. For high-risk edits,
-prefer `mode=replace_all`.
+**Concurrency**: Notion v5 has no etags — if another client edits between
+GET and PATCH, `oldStr` may fail silently; for high-risk edits prefer
+`mode=replace_all`.
 
 Modes: `append`, `replace_all`, `update` (find-and-replace via
-`updates: [{oldStr, newStr}]`).
+`updates: [{oldStr, newStr}]`), `replace_range` (in-place swap of a line
+range; requires `content` + `contentRange`, optional `allowDeleting`).
 
 ```bash
 curl -s -X PATCH http://localhost:8321/api/notion/pages/abc123.../content \
@@ -80,9 +82,7 @@ Moves to trash (~30 days). Restore via `PATCH` with `{ "in_trash": false }`.
 
 - During `routine.hourly_check` this skill is **read-only** — no creates,
   property updates, content patches, or archives.
-- No bulk operations without user confirmation. If you're about to update
-  3+ pages at once, stop and ask the user first.
-- Writes are Autonomous; the daemon does not DM the owner. Single ops
-  only — the agent's own judgment is the gate, not the daemon. The
-  message-discipline contract for any `POST /api/notify` call you issue
-  here is in the `notify` skill — do not invent ad-hoc phrasing rules.
+- No bulk operations without user confirmation: about to touch 3+ pages,
+  stop and ask first. Single ops only.
+- For any `POST /api/notify` call you issue, the message-discipline
+  contract lives in the `notify` skill — do not invent ad-hoc phrasing.

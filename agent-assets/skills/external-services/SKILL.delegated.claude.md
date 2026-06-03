@@ -128,7 +128,7 @@ curl -s -X POST http://localhost:8321/api/integrations/google_calendar/exec \
 `needsConfirmation` plan, or skip the dance for self-only events you
 already greenlit.)
 
-`outputSchema` is **required** (4 KB cap). Defaults: `maxToolCalls=7`,
+`outputSchema` is **required** (4 KB cap). Defaults: `maxToolCalls=8`,
 `maxBudgetUsd=0.05`, `timeoutMs=60000`. Bump up to 15 / 0.50 / 300000
 for genuinely larger intents.
 
@@ -176,32 +176,7 @@ freshness matters, and never on a destructive-confirm second call.
   know about, call `POST /api/notify` with a one-line summary. The
   daemon does NOT auto-notify — it's an explicit choice.
 
-### Error envelope
-
-`/exec` extends the direct-mode envelope with delegated-mode fields.
-Discriminator: `body.mode === "delegated"`.
-
-| HTTP | `error` | retry? | What to do |
-|---|---|---|---|
-| 400 | `validation_error` / `schema_too_large` | no | Fix the request body. |
-| 409 | `mode_mismatch` | no | Calendar isn't delegated, OR your DM backend matches `delegatedBackend`. Re-read `integrations.md` and stop. |
-| 409 | `precondition` | no | Mode/backend flipped during the queue wait. Re-check state and re-plan. |
-| 429 | `task_quota_exhausted` | no | Daily cap reached; wait or surface. |
-| 502 | `parse_error` / `schema_violation` | no (daemon already retried once) | Consider a simpler schema. |
-| 502 | `tool_unavailable` | no | No connector tool fits the intent. Surface the gap. |
-| 502 | `tool_failed` | maybe | Connector tool returned an error. Surface `body.message` verbatim; retry only if clearly transient. |
-| 502 | `auth_error` | no | Connector signed out. Tell the user to re-authenticate it. |
-| 502 | `policy_violation` | no | Subprocess attempted a tool outside the per-task allowlist (anti-injection). |
-| 502 | `loop_aborted` | no | `maxToolCalls` exceeded. Bump the cap or simplify. |
-| 502 | `budget_exhausted` | no | `maxBudgetUsd` exceeded. Caller can raise the cap. |
-| 502 | `post_write_format_failure` | no | Write succeeded; formatting failed. Side effect is real — surface with the partial trace. |
-| 503 | `delegated_proxy_busy` | yes | Daemon queue saturated. Backoff a few seconds, try once. |
-| 503 | `task_mode_disabled` | no | Operator turned the kill switch off. Stop. |
-| 504 | `timeout` | yes (1×) | Wall-clock fired. Retry once if intent was simple. |
-| 500 | `subprocess_crashed` | no | Unhandled exception inside the subprocess. Surface and stop. |
-
-Always preserve `body.message` verbatim when reporting to the user — it
-carries the connector's own language.
+{{> ref:exec-errors }}
 <!-- /service:calendar -->
 
 ---
@@ -286,72 +261,10 @@ existing rows (dedup). → Full guide: load the `agent-create` or `schedule` ski
 
 ---
 
-## One-Shot Scheduling
+## Scheduling & Skills CRUD
 
-Schedule a future DM or agent task. Use `<current_time>` to resolve relative times into absolute ISO 8601 with offset.
-
-### DM vs Agent Task
-
-| Criterion | `/api/schedule/dm` (free) | `/api/schedule` (~$0.03) |
-|---|---|---|
-| Message text knowable now? | Yes | No — needs lookup/decision at execution |
-| Needs API data at execution? | No | Yes |
-| Multi-step action? | No | Yes |
-| Conditional on state that may change? | No | Yes |
-
-**Default to DM** — every agent wake-up costs money and context.
-
-### Context-loss warning
-
-> The wake-up agent has NO memory of why it was scheduled — the `description` field is its only context.
-
-Include: **What** (verb + object), **Why** (trigger/reason), **Who/What** (names, IDs, URLs), **Expected output** (what success looks like).
-
-Bad: `"Meeting prep"` — which meeting? when? what to prepare? The wake-up agent will skip ambiguous descriptions.
-
-### POST /api/schedule/dm — Pre-composed DM
-```bash
-curl -s -X POST http://localhost:8321/api/schedule/dm \
-  -H 'Content-Type: application/json' \
-  -d '{"time": "2026-04-06T16:00:00-04:00", "message": "Reminder: Design review in 30 min.", "platform": "slack"}'
-```
-
-### POST /api/schedule — Agent task
-```bash
-curl -s -X POST http://localhost:8321/api/schedule \
-  -H 'Content-Type: application/json' \
-  -d '{"time": "2026-04-06T16:00:00-04:00", "taskType": "wake", "prompt": "Check PR #42 status and notify user.", "description": "PR #42 status check", "tier": "medium", "taskContext": {"scheduledBy": "dm_conversation"}}'
-```
-Fields: `time` (required), `taskType` (`wake`), `prompt` (required — the agent instruction, ≤8000 chars), `description` (optional label, ≤200 chars), `tier` (`lite`/`medium`/`high`) **or** `model` (registered id like `claude-opus-4-8`, legacy alias `sonnet`/`opus`, or composite `<backendId>/<modelId>`) — mutually exclusive, `taskContext` (optional metadata). See the `schedule` skill body for the full surface and `/api/schedule/options` for the live model list.
-
-### Manage pending items
-```bash
-curl -s "http://localhost:8321/api/schedule?status=pending"                         # list
-curl -s -X PATCH http://localhost:8321/api/schedule/42 \
-  -H 'Content-Type: application/json' -d '{"time": "2026-04-06T17:00:00-04:00"}'   # edit
-curl -s -X DELETE http://localhost:8321/api/schedule/42                              # cancel
-```
-Editable: `time`, `description`, `message` (dm only), `tier` (or `model`, mutually exclusive — pass `null` to clear), `taskContext`. Only `pending` items.
-
-### Time discipline
-- Absolute ISO 8601 with offset required — no relative times.
-- Do not schedule during quiet hours (default 22:00–08:00, configurable) unless critical.
-- Maximum 5 wake-ups per execution.
-
----
-
-## Skills Management
-
-User-authored skills: `~/.personal-agent/skills/{slug}/SKILL.md`. Built-in skills are read-only (403). Slug: lowercase kebab-case `[a-z0-9][a-z0-9-]*`, 1–64 chars.
-
-```bash
-curl -s http://localhost:8321/api/skills                                            # list all
-curl -s http://localhost:8321/api/skills/todo-digest                                # read one
-curl -s -X POST http://localhost:8321/api/skills \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "todo-digest", "description": "Summarize today.md", "content": "# TODO Digest\n...", "allowedTools": ["Bash(curl *)", "Read"]}'
-curl -s -X PUT http://localhost:8321/api/skills/todo-digest \
-  -H 'Content-Type: application/json' -d '{"description": "New description"}'      # update
-curl -s -X DELETE http://localhost:8321/api/skills/todo-digest                      # delete
-```
-Always `GET /api/skills` before creating (check name collisions). **Omit frontmatter** from `content` — the API injects it.
+One-shot DMs / agent wake-ups (`/api/schedule`, `/api/schedule/dm`) and
+user-authored Skills CRUD (`/api/skills`) work identically to direct
+mode — they are never proxied. Load the `schedule` skill for scheduling
+and the `agent-create` skill for recurring work; this variant does not
+mirror those surfaces.

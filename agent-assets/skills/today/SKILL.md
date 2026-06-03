@@ -8,29 +8,7 @@ allowed-tools:
 
 # today.md Guide
 
-Output language: today.md is Policy B — see `<output_language_policy>`. The skeleton lines listed below stay English verbatim; bullets and narrative under each H2 are in `<settings primary_language>`.
-
-**Skeleton (do NOT translate — exact-regex-validated on PUT):**
-
-1. **Line 1** — `# YYYY-MM-DD (day-of-week)` H1 date line. The weekday
-   inside `(...)` is free-form and may be localized; the rest is fixed.
-2. **Line 2** — `> Day type: …` blockquote (full pattern below). Field
-   labels (`Day type`, `Work focus`, `Study focus`, `Personal focus`),
-   values (`Weekday`/`Weekend`, `on`/`off`), pipe separators (` | `),
-   and the leading `> ` are **all English ASCII, fixed casing, fixed
-   spacing**. This is parsed by every downstream event handler.
-3. **The six H2 headers** — `## User Schedule`, `## User Tasks`,
-   `## Agent Plan`, `## Agent Notes`, `## Agent Log`, `## Handoff` —
-   in this order.
-
-A `PUT /api/context/state/today` whose line 1 or line 2 fails the exact regex
-is rejected with 400 and the daemon does NOT write the file. Translating
-any keyword on line 2 (the field labels, the `Weekday`/`Weekend` value,
-or `on`/`off`) into the user's primary language is the most common
-failure mode — keep it English even when the rest of today.md is being
-written in another language. The `<output_language_policy>` skeleton
-precedence rule already covers this; this paragraph just makes the
-consequence explicit.
+Output language: today.md is Policy B — see `<output_language_policy>`. The skeleton (line 1, line 2, the six H2 headers) stays English verbatim — line 1 and line 2 are exact-regex-validated on PUT; bullets and narrative under each H2 are in `<settings primary_language>`. §Line 1 and §Header line carry the exact patterns and the consequence of translating a line-2 keyword.
 
 today.md has a **day-type header line** (second line) and **six required sections**.
 
@@ -78,52 +56,27 @@ Line 2 encodes today's filter policy (field order is fixed — downstream parser
 > Day type: {Weekday|Weekend} | Work focus: {on|off} | Study focus: {on|off} | Personal focus: {on|off}
 ```
 
-Derivation (Morning Routine at 04:00):
-1. Day-of-week from `<current_time>`. Weekday = Mon–Fri, Weekend = Sat–Sun (unless user/profile.md overrides).
-2. Read `identity/profile.md` → ## Notification Preferences. Apply matching policy.
-3. No explicit policy → default: weekday = all on, weekend = work off, study on, personal on.
+The field labels (`Day type`, `Work focus`, `Study focus`, `Personal
+focus`), the values (`Weekday`/`Weekend`, `on`/`off`), the ` | `
+separators, and the leading `> ` are all English ASCII, fixed casing,
+fixed spacing — exact-regex-validated. **Translating any line-2 keyword
+into the primary language is the most common write failure: PUT is
+rejected 400 and the file is not written.** Keep line 2 English even
+when the rest of today.md is in another language.
 
-Category → focus-dimension mapping:
+Derivation, focus-dimension mapping, and downstream focus-filter usage —
+needed only when the Morning Routine writes line 2 — are in the
+**today-skeleton** reference.
 
-| Category tag | Controlled by |
-|---|---|
-| `[work]` | Work focus |
-| `[study]` | Study focus |
-| `[personal]`, `[home]` | Personal focus |
+## Sections and entry formats
 
-How downstream events use it:
-- Morning Routine suppresses items with focus `off` at generation time
-- scheduled.task re-checks at fire time: if focus is off, skip + close as `skipped (focus off)`
-- DM handler skips follow-ups on rows whose focus is off
-- Hourly check drops observations whose focus is off
-- schedule.approaching suppresses notifications for off categories
+The per-section update matrix (when/mode/who-writes) and the
+per-section entry-format table (User Schedule / User Tasks / Agent Plan
+/ Agent Log row shapes, category tags, trigger tags, mandatory-HH:MM
+fallback rules) are reference-grade detail the Morning Routine needs to
+write the full skeleton. They live in the **today-skeleton** reference.
 
-## Sections and when to update
-
-| Section | When to update | Mode | Who writes |
-|---|---|---|---|
-| `user_schedule` | Morning from calendar; refresh after sync | PUT (Morning) / PATCH replace | Morning primary |
-| `user_tasks` | Status changes, new tasks, hourly observations | PATCH append (new) / replace (flip) | Morning + event-driven |
-| `agent_plan` | Morning lays out actions; hourly adds new; scheduled.task flips `[x]` | PATCH append / replace (flip) | Morning + hourly + scheduled.task |
-| `agent_notes` | Look-ahead + day-time events | PATCH append | Morning (look-ahead) + event-driven |
-| `agent_log` | Every non-trivial agent action | PATCH append | All events |
-| `handoff` | Evening Review finalizes carry-overs | PATCH replace | Evening Review only |
-
-## Entry formats
-
-| Section | Format | Example |
-|---|---|---|
-| `user_schedule` | `- HH:MM[–HH:MM] <title> [category]` | `- 14:00–15:00 Design review [work]` |
-| `user_tasks` | `- [ ] HH:MM <description> [category]` | `- [ ] 11:00 Finalize Q2 draft [work]` |
-| `agent_plan` | `- [ ] HH:MM <action> [category] →<trigger>` | `- [ ] 08:55 DM reminder: standup [work] →DM` |
-| `agent_notes` | see flavors below | |
-| `agent_log` | `- HH:MM <action description>` | `- 13:50 [cal] Design review — reminder sent` |
-
-**Category tags**: `[work]`, `[study]`, `[personal]`, `[home]` — mandatory on Agent Plan rows (not decorative).
-
-**Trigger tags** (Agent Plan only): `→DM`, `→notify`, `→check-in`, `→wake`
-
-**HH:MM is mandatory** on User Tasks and Agent Plan rows. If no natural time: (1) deadline → 2h before, (2) calendar-adjacent → 15 min before, (3) otherwise → working-hours midpoint.
+{{> ref:today-skeleton }}
 
 ## User Tasks vs Agent Plan
 
@@ -173,7 +126,7 @@ reference only if your event type is in its applicability list.
 ## schedule.approaching → Agent Notes + Agent Log
 
 The firing flow gates timing — `schedule.approaching` only fires at
-`minutesUntil <= 15` (`packages/daemon/src/observers/calendar-poller.ts:125`),
+`minutesUntil <= 15` (`packages/daemon/src/observers/imminent-event-scheduler.ts:281`),
 so the LLM never sees this format-using event with a wider lookahead.
 No additional gate is restated here.
 
@@ -191,19 +144,7 @@ PUT today.md must contain the H1 date line, day-type header quote, and all six s
 
 ## today.md API
 
-The generic GET / PUT / PATCH / DELETE surface — modes, fields, error
-envelopes, body-submission shape — is documented in the **context**
-skill `references/api.md`. today.md-specific rules layered on top:
-
-- **Lock.** `state/today.md` is locked by the Morning Routine. Include
-  `X-Lock-Id: <today_write_lock_id>` on every PUT / PATCH when the
-  tag is in your context; other sessions get `409
-  morning_routine_lock_held` while the lock is held.
-- **Skeleton validators.** PUT is rejected (400) if line 1 fails the
-  H1 date regex or line 2 fails the day-type quote regex (see §"Line 1
-  — which date?" and §"Header line — day-type filter" above). PUT is
-  also rejected (400) if line 1's date disagrees with the daemon's current
-  agent-day — the error echoes both values.
+The generic GET / PUT / PATCH / DELETE shape lives in the **context** skill `references/api.md`. today.md adds only the Morning Routine lock (§Morning Routine lock) and the line-1/line-2 skeleton validators (§Line 1, §Header line) detailed above.
 
 ## Knowledge map — section shape (auto-curated)
 

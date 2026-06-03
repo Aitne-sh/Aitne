@@ -1,20 +1,24 @@
 ---
 kind: reference
 name: priority
-description: Notification priority levels — critical / high / normal / low — with quiet-hours behavior and per-level examples.
+description: Notification priority levels — critical / high / normal / low — as metadata you set, with per-level usage examples.
 ---
 
 # Notification priority levels
 
-Pick the lowest priority that still preserves the user-visible
-behavior the message needs. **Default to `normal`.**
+`priority` is a metadata field you set on the `/api/notify` call. It
+travels into `notification_log` and helps the user (and the
+retrospective) gauge how urgent each message was. It does NOT gate
+delivery on this endpoint — `/api/notify` sends immediately regardless
+of level. Pick the lowest priority that still honestly describes the
+message. **Default to `normal`.**
 
-| Priority | Quiet-hours | Use for |
-|---|---|---|
-| `critical` | Bypasses | Security alerts (credential leak, account lockout), data-loss risk (about to overwrite without backup, irreversible deletion in flight), system errors blocking the user from working. Wakes the user. |
-| `high` | Bypasses | Hard deadlines firing in the next 8 hours, urgent inbound messages from people the user has flagged as priority, "meeting starting now". User wants to see this even during quiet hours but not at 3 am. |
-| `normal` | Respects (dropped during quiet hours) | Regular reminders (`15 min until standup`), digest-style summaries, single-recipient FYIs the user opted into. **Default.** |
-| `low` | Respects (dropped during quiet hours) | Background updates, observational FYIs the user did not explicitly ask for, optional context. Often better as an Agent Log entry instead of a notification at all. |
+| Priority | Use for |
+|---|---|
+| `critical` | Security alerts (credential leak, account lockout), data-loss risk (about to overwrite without backup, irreversible deletion in flight), system errors blocking the user from working. The "wake the user at 3 am" tier. |
+| `high` | Hard deadlines firing in the next 8 hours, urgent inbound messages from people the user has flagged as priority, "meeting starting now". Important but not 3 am. |
+| `normal` | Regular reminders (`15 min until standup`), digest-style summaries, single-recipient FYIs the user opted into. **Default.** |
+| `low` | Background updates, observational FYIs the user did not explicitly ask for, optional context. Often better as an Agent Log entry instead of a notification at all. |
 
 ## Examples by level
 
@@ -47,19 +51,18 @@ If the next morning would still be soon enough, it is not `high`.
 If the user did not opt in to receiving this category of update, do not
 send `low`. Drop it to an Agent Log entry instead.
 
-## Rate-limit defaults
+## Delivery semantics
 
-3/hour, 12/day across all priorities (`critical` bypasses both caps).
-The agent CANNOT query `notification_log` directly (Approve-tier). Use
-`<today>` `## Agent Log` as the authoritative dedup source (look for
-`notify sent` / `DM sent` lines).
+`/api/notify` delivers immediately — there is no quiet-hours gate, no
+per-priority suppression, and no rate cap on this endpoint. A `200
+{status:"sent"}` means the message was delivered to at least one
+channel; a total delivery failure THROWS and surfaces as HTTP 500 (not
+a silent 200-drop). So `"sent"` IS proof of delivery — do NOT re-post
+the same item on a 200.
 
-`/api/notify` does NOT report rate-limit or quiet-hours suppression
-back to you — it returns `200 {status:"sent"}` even when the message is
-silently dropped inside the delivery layer. A `"sent"` response is
-therefore not proof the user saw it. Do NOT re-post the same item
-hoping for delivery; self-throttle by scanning `<today>` `## Agent Log`
-first and log `notify skipped (rate_limited)` when you choose to hold.
-If the message is time-critical and the next opportunity arises,
-upgrade to `high` (or `critical` if the situation has escalated)
-rather than re-sending at the same level.
+Noise control is YOUR job, not the endpoint's. The agent CANNOT query
+`notification_log` directly (Approve-tier), so use `<today>` `## Agent
+Log` as the authoritative dedup source (look for `notify sent` / `DM
+sent` lines) and self-throttle before firing. Don't re-send the same
+item at the same level; if the situation has genuinely escalated, raise
+the priority metadata to reflect that.

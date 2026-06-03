@@ -1122,13 +1122,15 @@ describe("today skill formats", () => {
     expect(skillContent).toContain("event_title starts at HH:MM");
     expect(skillContent).toContain("- HH:MM [cal] event_title");
     // Earlier revisions pinned "60 min" here. The firing flow
-    // (`calendar-poller.ts:125`) gates at `minutesUntil <= 15`, so the
-    // 60-min gate restated in this skill was both stale and redundant
-    // with the firing flow's own gate. The format documentation now
-    // points back to the firing flow rather than restating a window —
+    // (`imminent-event-scheduler.ts:281`) gates at `minutesUntil <= 15`,
+    // so the 60-min gate restated in this skill was both stale and
+    // redundant with the firing flow's own gate. The format documentation
+    // now points back to the firing flow rather than restating a window —
     // this assertion guards against the stale figure being reintroduced.
+    // (2026-06 audit: corrected the citation from the unrelated
+    // calendar-poller.ts:125 to the actual emit site.)
     expect(skillContent).not.toContain("60 min");
-    expect(skillContent).toContain("calendar-poller.ts:125");
+    expect(skillContent).toContain("imminent-event-scheduler.ts:281");
   });
 
   it("documents the Agent Plan lifecycle", () => {
@@ -1776,7 +1778,14 @@ describe("reading skill roadmap contract", () => {
 });
 
 describe("schedule skill importance contract", () => {
-  const skillContent = readFileSync(SCHEDULE_SKILL_PATH, "utf-8");
+  // 2026-06 audit: the importance-tier table moved into
+  // `references/importance.md` (progressive disclosure). Resolve the
+  // `{{> ref:importance }}` include so these assertions see the
+  // post-materialisation body, mirroring the today/roadmap suites above.
+  const skillContent = renderReferenceIncludes(
+    readFileSync(SCHEDULE_SKILL_PATH, "utf-8"),
+    join(REPO_ROOT, "agent-assets/skills/schedule"),
+  );
 
   it("documents the four schedule importance tiers", () => {
     for (const tier of ["transient", "normal", "strategic", "low"]) {

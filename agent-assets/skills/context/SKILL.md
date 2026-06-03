@@ -1,6 +1,6 @@
 ---
 name: context
-description: Load when reading or writing project notes, weekly/monthly summaries, or agent/journal.md. Owns GET/PATCH for context files except today.md and roadmap.md, which use their dedicated skills.
+description: Load when reading or writing project notes, weekly/monthly summaries, or journal/agent.md. Owns GET/PATCH for context files except today.md and roadmap.md, which use their dedicated skills.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -28,23 +28,23 @@ vault**, not this primary store.
 |---|---|---|---|
 | `state/today.md` | Today's schedule, tasks, agent log, handoff | See `today` skill | Yes (Morning Routine) |
 | `plans/roadmap.md` | Long-horizon agent action plan + Long-term Plans | See `roadmap` skill | Yes (Roadmap Refresh) |
-| `projects/*.md` | Project state summaries | Any event on material state change | No |
-| `weekly/YYYY-Www.md` | Weekly review snapshots | Friday Weekly Review only (PUT) | No |
-| `monthly/YYYY-MM.md` | Monthly review snapshots | Month-end Monthly Review only (PUT) | No |
-| `rules/*.md` | User-controlled policy files | Explicit user request only | No |
+| `plans/projects/*.md` | Project state summaries | Any event on material state change | No |
+| `journal/weekly/YYYY-Www.md` | Weekly review snapshots | Friday Weekly Review only (PUT) | No |
+| `journal/monthly/YYYY-MM.md` | Monthly review snapshots | Month-end Monthly Review only (PUT) | No |
+| `policies/*.md` | User-controlled policy files | Explicit user request only | No |
 | `policies/management-captures/<slug>.md` | Durable management policies captured from DM | `management-policy` skill — **do not write from here** | No |
 | `policies/management-captures/_index.md` | Readable index of active policies | `management-policy` skill — **do not write from here** | No |
-| `routines/*.md` | Per-cadence check rulebooks | Explicit user request only | No |
+| `policies/routines/*.md` | Per-cadence check rulebooks | Explicit user request only | No |
 | `identity/profile.md` | User identity and preferences | `user-profile` skill — **do not write from here** | No |
-| `user/*.md` | Detailed user dictionary | `user-profile` skill — **do not write from here** | No |
+| `identity/*.md` | Detailed user dictionary | `user-profile` skill — **do not write from here** | No |
 
 Morning Routine scans roadmap daily and processes matching Preparation
 Timeline rows into `state/today.md` — see the `roadmap` skill for the full
 entry taxonomy and the morning routine task-flow for the scanning rules.
 
-## projects/*.md
+## plans/projects/*.md
 
-Update on status changes, milestones reached/delayed, or active set changes. Use `GET /api/context/list/projects` to discover files. The source of truth is always the individual `projects/<slug>.md` notes; `_active.base` is only the Obsidian Bases view config, not a narrative summary note.
+Update on status changes, milestones reached/delayed, or active set changes. Use `GET /api/context/list/plans/projects` to discover files. The source of truth is always the individual `plans/projects/<slug>.md` notes; `_active.base` is only the Obsidian Bases view config, not a narrative summary note.
 
 The canonical frontmatter schema is documented in `plans/projects/_index.md`
 (seeded from `agent-assets/templates/plans/projects/_index.md`). The API
@@ -56,26 +56,16 @@ validates only `type: project`, `owner: shared`, `updated`, and an H1
 
 ## Project DM-intent detection
 
-DM-driven project state writes are dispatched from
-`message.received.dm.md` / `message.received.dm_first.md` Step 4 via
-the `_partials/dm-intent.project.md` task-flow partial — that partial
-carries the decision tree (existing-vs-new match, decline-marker
-pre-check, no-match confirm sub-flow scheduling, reply branches,
-cross-path cancellation, slug grammar, tie-breakers).
+DM-driven project writes are dispatched by
+`_partials/dm-intent.project.md` (the decision tree — match, decline
+markers, confirm sub-flow, slug grammar, tie-breakers — lives there).
+**This skill is the writer:** it executes the `plans/projects/*.md`
+PUT / PATCH / archive per the API Reference below.
 
-**This skill is the writer.** `projects/<slug>.md` PUT / PATCH / archive
-goes through `/api/context/projects/*` per the API Reference below. The
-partial dispatches; this skill executes the writes.
+## Snapshot files — weekly / monthly / policies / routines
 
-Cross-references previously in this section ("Reply branches",
-"Cross-path cancellation", "Decline-marker reversal", "Tie-breakers",
-"Slug grammar") now live alongside their decision-tree steps inside
-the partial.
-
-## Snapshot files — weekly / monthly / rules / routines
-
-Weekly and monthly review snapshots, the user-controlled `rules/*.md`
-policy files, the built-in `routines/<cadence>.md` rulebooks, custom
+Weekly and monthly review snapshots, the user-controlled `policies/*.md`
+policy files, the built-in `policies/routines/<cadence>.md` rulebooks, custom
 routines under `policies/routines/custom/`, and the agent-private
 `journal/agent.md` all have stable per-file conventions (writer event,
 verb, frontmatter, retention) documented in the snapshot-files
@@ -88,11 +78,12 @@ DM handlers and Hourly Checks should generally not write these files
 
 ## Required frontmatter for guarded files
 
-Full-file writes to `user/*.md`, `rules/*.md`, `projects/*.md`,
-`daily/*.md`, `weekly/*.md`, and `monthly/*.md` must open with the
-matching YAML frontmatter (`type`, `owner`, `updated`) followed by at
-least one H1 heading. Per-glob values and the common rejection
-envelope are in the required-frontmatter reference below.
+Full-file writes to `identity/*.md`, `policies/*.md`,
+`plans/projects/*.md`, `journal/daily/*.md`, `journal/weekly/*.md`, and
+`journal/monthly/*.md` must open with the matching YAML frontmatter
+(`type`, `owner`, `updated`) followed by at least one H1 heading.
+Per-glob values and the common rejection envelope are in the
+required-frontmatter reference below.
 
 {{> ref:required-frontmatter }}
 

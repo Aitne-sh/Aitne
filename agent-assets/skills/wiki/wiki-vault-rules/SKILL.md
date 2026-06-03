@@ -135,6 +135,8 @@ curl http://localhost:8321/api/wiki/{{workspace_name}}/index \
 The shim emits `PA_API_ERROR {...}` to stderr on every non-2xx. React on `status` + `bodyPreview.error`:
 
 - `403 missing_process_key` → add `-H 'x-process-key: ...'`.
+- `403 read_denied` → your process key isn't a `wiki.*` or DM-read key (the shim should attach the right key).
+- `403 human_only_layer` → `00_inbox/` is human-only, never a write target.
 - `403 raw_write_denied` / `wiki_write_denied` / `meta_write_denied` / `output_write_denied` / `log_write_denied` → your process key isn't authorized for that layer; fix the target path, not the header.
 - `400 invalid_path` / `invalid_layer` → fix the slug shape or layer prefix.
 - `400 invalid_body` → JSON shape wrong (e.g. `content` must be a string; PATCH `content` must be non-empty).

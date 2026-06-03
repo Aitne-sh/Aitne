@@ -12,7 +12,7 @@ composes; it is one of the few naturally-occurring opportunities to
 slip in a question without surfacing a cold standalone DM.
 
 ```
-1. GET agent/profile-questions.md ## In Progress.
+1. GET state/profile-questions.md ## In Progress.
 2. If no entry has state=latent, skip.
 2.5 Slot-filled pre-check (MANDATORY). Same recipe as Operation 2
    step 2.5: GET /api/profile-questions/slot-filled. If

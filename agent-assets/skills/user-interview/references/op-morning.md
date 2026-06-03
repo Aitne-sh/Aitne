@@ -12,7 +12,7 @@ briefings, and hourly checks do not run this operation — they use
 Operation 2 / 3 / 4 instead.
 
 ```
-1. GET agent/profile-questions.md.
+1. GET state/profile-questions.md.
 2. Skip the entire step if any of:
      - ## In Progress is non-empty.
      - ## Pending is empty.

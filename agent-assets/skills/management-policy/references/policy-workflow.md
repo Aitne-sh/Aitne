@@ -76,11 +76,10 @@ reconciler can resolve them.
 
 ## 5.4 _(no manual step required)_
 
-`policies/management-captures/_index.md` is auto-maintained by the daemon's
-policy-index reconciler — it re-renders within ~10 s of step 5.3's
-write. Same for the `## Active Policies` section in
-`policies/management.md`. **Do not PATCH or PUT either path manually**;
-doing so just races the reconciler and creates snapshot churn.
+Both `policies/management-captures/_index.md` and the `## Active Policies`
+section in `policies/management.md` are reconciler-owned and re-render
+within ~10 s of step 5.3's write (see SKILL.md body intro — no manual
+PATCH/PUT).
 
 If you need to confirm the index is up to date before replying to the
 user, GET `policies/management-captures/_index` after a short wait. The
