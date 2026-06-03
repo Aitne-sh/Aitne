@@ -30,7 +30,7 @@ Aitne is a daemon on your laptop, connected to your calendar, mail (Gmail / Outl
 
 - **04:00 — Morning routine.** Aitne reads everything that landed overnight (mail, GitHub activity, calendar changes, vault updates) and writes `today.md` — sample below.
 - **Morning — Brief.** The plan lands in your DMs as a short summary.
-- **Through the day — Nudges.** Meeting reminders with travel time, hourly background checks for the things you care about (eval results, PR review requests, new mail). DMs only when there's something worth your attention.
+- **Through the day — Nudges.** Meeting reminders, hourly background checks for the things you care about (eval results, PR review requests, new mail). DMs only when there's something worth your attention.
 - **Evening — Review.** Aitne writes a daily journal: what got done, what slipped, one observation about the week.
 
 You steer it through natural-language DMs ("skip morning routine on Sundays", "ping me when the overnight job finishes") and bang commands (`!cost`, `!ask`, `!ingest`).
@@ -226,10 +226,10 @@ The router fails over to a configured fallback automatically on `BackendQuotaErr
 |---|---|
 | **Messaging** | Slack (Socket Mode), Telegram, Discord, WhatsApp (Baileys), Web dashboard |
 | **Mail** | Gmail, Outlook, Yahoo, iCloud — unified API, classifier, local FTS5 search, IMAP IDLE |
-| **Calendar** | Google Calendar, Outlook Calendar, iCloud (CalDAV), Google Maps for travel time |
+| **Calendar** | Google Calendar, Outlook Calendar, iCloud (CalDAV) — free/busy slot-finding across accounts |
 | **Knowledge** | Obsidian (CLI + vault watch), Notion (REST), custom MCP servers |
 | **Code** | Local Git, GitHub (Octokit + webhooks) |
-| **Lifestyle** | Auto-extracted receipts · travel bookings · Kindle highlights · voice transcription (Whisper, opt-in) |
+| **Lifestyle** | Auto-extracted receipts · travel bookings · Kindle highlights · browser-history research clusters · voice transcription (Whisper, opt-in) |
 
 Each integration runs in one of four modes:
 
@@ -250,7 +250,7 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 <summary><b>Time, calendar, travel</b></summary>
 
 - Auto-generate `today.md` every morning with your real schedule
-- 15-min approach reminders for every event, with travel time pre-computed via Google Maps
+- 15-min approach reminders for every event
 - Find a 30-min slot across multiple calendars — Aitne checks freebusy and replies with options
 - Auto-extract flight, hotel, train confirmations from email into a structured travel timeline
 </details>
@@ -263,6 +263,24 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 - Auto-classify, label, archive, and draft replies in your style
 - Forwarded receipts auto-extract into a structured receipts table
 - IMAP IDLE for near-real-time delivery; PDF/image attachments are extracted and indexed
+</details>
+
+<details open>
+<summary><b>Agents you can define and schedule</b></summary>
+
+- Every routine is a first-class **Agent** — an identity with a YAML config + Markdown brief, editable at `:8322/agents`
+- The built-in routines (morning routine, evening review, hourly check, …) ship as **System** agents — can't be deleted, but can be stopped with a warning
+- Define your own recurring **work** agents (daily / weekly / monthly) — from the dashboard form or just by DMing the agent ("summarize my open PRs every Monday at 9")
+- Pin a backend, model, and tier per agent; see per-agent cost, success rate, and run history; fire any agent on demand
+- One-shot wake-ups ("remind me at 3pm"), pre-composed scheduled DMs, and recurring briefings — all quiet-hours-aware
+</details>
+
+<details>
+<summary><b>Browser automation (managed Chromium)</b></summary>
+
+- DM an open-ended browser task ("check my order status", "fill out this form") — a scoped sub-agent drives a managed Chromium session turn-by-turn, asking you to clarify mid-task and DMing back results + screenshots
+- Egress guards stay on: RFC1918 / loopback / cloud-metadata IP blocking, a form-submit payment-path blocker, and single-owner scoping
+- Purchase confirmation (the B-4 flow — DM-delivered single-use token + screenshot-first consent) is **experimental and default-off**; it requires explicit per-site dashboard opt-in
 </details>
 
 <details>
@@ -295,6 +313,7 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 - "I prefer concise replies — no preamble" — updates the agent's `character` field
 - "Email me a summary every Friday at 5pm" — creates a recurring schedule
 - "Switch to Codex for code reviews" — flips the per-process backend mapping
+- Bang commands for instant control: `!stop` / `!start` (pause/resume autonomous work), `!close` (reset the DM session), `!cost`, `!report`, `!help` — and define your own `!commands` at `:8322/settings/commands`
 - Every change is journaled to `agent_actions` — audit anything via `aitne audit`
 </details>
 
@@ -358,7 +377,7 @@ Plus: localhost-only API, webhook HMAC verification, no automated financial tran
 | `maxConcurrentSessions` (autonomous) | 3 | Hard semaphore |
 | `maxReactiveSessions` (DMs) | 2 | Hard semaphore |
 | `executeTimeoutMinutes` | 60 | Per-execute watchdog |
-| `autonomousDailyCostCapUsd` | `null` | Priority-based skipping: `hourly_check` at 100%, `evening_review` at 150%, `morning_routine` at 200%. Reactive DMs are not gated. |
+| `autonomousDailyCostCapUsd` | `null` | Priority-based skipping: `hourly_check` at 100%, `roadmap_refresh` at 120%, `evening_review` at 150%, `morning_routine` at 200%. Reactive DMs are not gated. |
 | `autonomousMonthlyCostCapUsd` | `null` | Alert + warn surface |
 | Per-ProcessKey `maxBudgetUsd` | per-row | Hard cap per execute |
 
@@ -367,6 +386,17 @@ Typical day for an active user: **~$0.50** (morning routine + briefing + 2× hou
 ---
 
 ## Operating Aitne
+
+### Dashboard
+
+The dashboard at `:8322` is a full local app, not just a settings panel:
+
+- **`/chat`** — talk to any backend/model right in the browser, with per-session overrides
+- **`/agents`** — define, schedule, and inspect your agents (above)
+- **`/schedule`** + **`/activity`** — upcoming runs and the full conversation/action history
+- **`/analytics`** + **`/health`** — cost/usage trends and integration-mode health
+- **`/connections/*`** — wire up calendar, mail, repositories, messaging, MCP, routines
+- **`/settings/*`** — `models`, `backends`, `schedule`, `routines`, `processes`, `messaging`, `commands` (custom bang commands), `management`, and the experimental browser-history surfaces
 
 ### Lifecycle
 
@@ -395,7 +425,7 @@ Typical day for an active user: **~$0.50** (morning routine + briefing + 2× hou
 
 ### Configuration
 
-`.env` is **bootstrap-only** (`PA_DATA_DIR`, `PA_API_PORT`, `PA_DASHBOARD_PORT`, `PA_LOG_LEVEL`). Everything else — ~100 runtime keys covering schedule, notifications, models, character, mail, voice, delegated mode — is editable from the dashboard at `:8322`, or via natural-language DMs to the agent.
+`.env` is **bootstrap-only** (`PA_DATA_DIR`, `PA_API_PORT`, `PA_DASHBOARD_PORT`, `PA_LOG_LEVEL`). Everything else — ~130 runtime keys covering schedule, notifications, models, character, mail, voice, delegated mode — is editable from the dashboard at `:8322`, or via natural-language DMs to the agent.
 
 ---
 
