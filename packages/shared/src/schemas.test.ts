@@ -38,6 +38,26 @@ describe("contextPatchSchema", () => {
     expect(contextPatchSchema.safeParse({ section: "## Log", mode: "clear" }).success).toBe(true);
   });
 
+  it("accepts frontmatterMerge with a non-empty frontmatter object and no section", () => {
+    expect(contextPatchSchema.safeParse({
+      mode: "frontmatterMerge",
+      frontmatter: { sources: { notion: { external_id: "n1" } }, last_synced_at: "z" },
+    }).success).toBe(true);
+  });
+
+  it("rejects frontmatterMerge without frontmatter (or with an empty object)", () => {
+    expect(contextPatchSchema.safeParse({ mode: "frontmatterMerge" }).success).toBe(false);
+    expect(contextPatchSchema.safeParse({
+      mode: "frontmatterMerge", frontmatter: {},
+    }).success).toBe(false);
+  });
+
+  it("rejects frontmatter on non-frontmatterMerge modes", () => {
+    expect(contextPatchSchema.safeParse({
+      section: "## Log", mode: "append", content: "x", frontmatter: { a: 1 },
+    }).success).toBe(false);
+  });
+
   it("accepts clear_before mode with cutoff", () => {
     expect(contextPatchSchema.safeParse({
       section: "raw_signals",
@@ -201,47 +221,56 @@ describe("notifyRequestSchema", () => {
 });
 
 describe("scheduleRequestSchema", () => {
-  it("requires description of at least 20 characters", () => {
-    const valid = {
-      time: "2026-04-15T10:00:00Z",
-      taskType: "wake",
-      description: "Check pending observations and update context files",
-    };
-    expect(scheduleRequestSchema.safeParse(valid).success).toBe(true);
+  const base = { time: "2026-04-15T10:00:00Z", taskType: "wake" };
 
-    const short = { ...valid, description: "short" };
-    expect(scheduleRequestSchema.safeParse(short).success).toBe(false);
+  it("requires a non-empty prompt — the agent's only instruction", () => {
+    expect(
+      scheduleRequestSchema.safeParse({ ...base, prompt: "Check pending observations." })
+        .success,
+    ).toBe(true);
+    // Missing prompt is rejected (the description→body fallback was retired).
+    expect(scheduleRequestSchema.safeParse({ ...base }).success).toBe(false);
+    // Empty prompt is rejected.
+    expect(scheduleRequestSchema.safeParse({ ...base, prompt: "" }).success).toBe(false);
+  });
+
+  it("treats description as an optional short label with no lower bound", () => {
+    // Omitted is fine.
+    expect(
+      scheduleRequestSchema.safeParse({ ...base, prompt: "Do the thing." }).success,
+    ).toBe(true);
+    // Present and short is fine — no minimum length on the label.
+    expect(
+      scheduleRequestSchema.safeParse({ ...base, prompt: "Do the thing.", description: "x" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects a description longer than the 200-char label cap", () => {
+    const result = scheduleRequestSchema.safeParse({
+      ...base,
+      prompt: "Do the thing.",
+      description: "x".repeat(201),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a prompt longer than the 8000-char cap", () => {
+    const result = scheduleRequestSchema.safeParse({
+      ...base,
+      prompt: "x".repeat(8001),
+    });
+    expect(result.success).toBe(false);
   });
 
   it("accepts optional model and taskContext", () => {
     const result = scheduleRequestSchema.safeParse({
-      time: "2026-04-15T10:00:00Z",
-      taskType: "wake",
-      description: "Check pending observations and update context files",
+      ...base,
+      prompt: "Check pending observations and update context files",
       model: "opus",
       taskContext: { key: "value" },
     });
     expect(result.success).toBe(true);
-  });
-
-  it("accepts an optional prompt override of at least 20 characters", () => {
-    const result = scheduleRequestSchema.safeParse({
-      time: "2026-04-15T10:00:00Z",
-      taskType: "wake",
-      description: "Check pending observations and update context files",
-      prompt: "Detailed agent instruction body for the wake-up run",
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects a prompt override shorter than 20 characters", () => {
-    const result = scheduleRequestSchema.safeParse({
-      time: "2026-04-15T10:00:00Z",
-      taskType: "wake",
-      description: "Check pending observations and update context files",
-      prompt: "too short",
-    });
-    expect(result.success).toBe(false);
   });
 });
 
@@ -273,20 +302,30 @@ describe("scheduleUpdateRequestSchema", () => {
     expect(scheduleUpdateRequestSchema.safeParse({ time: "2026-04-15T10:00:00Z" }).success).toBe(true);
   });
 
-  it("accepts a prompt override string of at least 20 characters", () => {
+  it("accepts a non-empty prompt string", () => {
     const result = scheduleUpdateRequestSchema.safeParse({
       prompt: "Detailed agent instruction body for the wake-up run",
     });
     expect(result.success).toBe(true);
   });
 
-  it("accepts prompt: null as the explicit clear sentinel", () => {
+  it("rejects prompt: null — the body cannot be cleared (no description fallback)", () => {
     const result = scheduleUpdateRequestSchema.safeParse({ prompt: null });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
-  it("rejects a prompt override shorter than 20 characters", () => {
-    const result = scheduleUpdateRequestSchema.safeParse({ prompt: "short" });
+  it("rejects an empty prompt string (use null to clear)", () => {
+    const result = scheduleUpdateRequestSchema.safeParse({ prompt: "" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a prompt longer than the 8000-char cap", () => {
+    const result = scheduleUpdateRequestSchema.safeParse({ prompt: "x".repeat(8001) });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a description longer than the 200-char label cap", () => {
+    const result = scheduleUpdateRequestSchema.safeParse({ description: "x".repeat(201) });
     expect(result.success).toBe(false);
   });
 

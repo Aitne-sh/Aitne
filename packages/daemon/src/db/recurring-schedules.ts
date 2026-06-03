@@ -117,6 +117,10 @@ export function createRecurringSchedule(
      *  Schema CHECK enforces the BackendId enum at write time. */
     backendId?: string;
     taskContext?: Record<string, unknown>;
+    /** Initial enabled state. Defaults to `true` (existing callers' behaviour).
+     *  The Agent loader passes the §6.4-resolved value so a disabled Agent's
+     *  recurring row is created disabled (and fires nothing). */
+    enabled?: boolean;
   },
 ): RecurringScheduleDTO {
   // Reject task types that can't safely recur (browser_task) as recurring
@@ -142,11 +146,15 @@ export function createRecurringSchedule(
   const persistedTier = params.tier ?? null;
   const persistedBackendId = params.backendId ?? null;
   const persistedPrompt = params.prompt ?? null;
+  // Default to enabled so every existing caller (the /api/recurring-schedules
+  // route, scheduled-DM, repository runs) is unchanged; the Agent loader passes
+  // an explicit §6.4-resolved value so a disabled Agent's row is created off.
+  const persistedEnabled = params.enabled ?? true;
 
   const result = db.prepare(`
     INSERT INTO recurring_schedules
       (task_type, task_description, task_prompt, task_context, model, tier_override, backend_id, recurrence_rule, enabled, next_run_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     params.taskType,
     params.description,
@@ -156,6 +164,7 @@ export function createRecurringSchedule(
     persistedTier,
     persistedBackendId,
     JSON.stringify(rule),
+    persistedEnabled ? 1 : 0,
     nextRunAt,
   );
 
@@ -163,8 +172,10 @@ export function createRecurringSchedule(
     "SELECT * FROM recurring_schedules WHERE id = ?",
   ).get(result.lastInsertRowid) as RecurringScheduleRow;
 
-  // Generate the first agent_schedule row
-  if (nextOccurrence) {
+  // Generate the first agent_schedule row. Skip when the row is created
+  // disabled — the reconciler gates materialisation on `enabled = 1`, so a
+  // disabled row must not eagerly fire once before its first reconcile pass.
+  if (nextOccurrence && persistedEnabled) {
     generateNextScheduleRow(
       db,
       row.id,
@@ -233,6 +244,13 @@ export function updateRecurringSchedule(
     taskContext?: Record<string, unknown>;
     enabled?: boolean;
   },
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §11.3.2 — when an Agent-owned rule edit
+   * supersedes a pending materialisation, the loader's recurring-schedule
+   * adapter passes `"agent_definition_changed"` so the cancelled row records
+   * `task_context.skipReason`. Dashboard / API edits omit it (no tag).
+   */
+  cancelReason?: string,
 ): RecurringScheduleDTO | null {
   const existing = db.prepare(
     "SELECT * FROM recurring_schedules WHERE id = ?",
@@ -300,17 +318,20 @@ export function updateRecurringSchedule(
   ).run(...values);
 
   // If recurrence rule changed or re-enabled, recompute next_run_at
-  // and cancel the old pending agent_schedule row
+  // and cancel the old pending agent_schedule row. AGENT_DEFINITIONS_DESIGN.md
+  // §11.3.2: a pending materialisation derived from the *old* rule is
+  // superseded; cancelling it (status='skipped') + recomputing next_run_at is
+  // the re-materialisation. `running` rows are deliberately left alone (the
+  // WHERE clause filters to `pending` only). `cancelReason`, when supplied by
+  // an Agent-driven edit, tags the skipped row's `task_context.skipReason` so
+  // the cause is attributable.
   if (params.recurrenceRule !== undefined || params.enabled !== undefined) {
     const row = db.prepare(
       "SELECT * FROM recurring_schedules WHERE id = ?",
     ).get(id) as RecurringScheduleRow;
 
     if (row.enabled) {
-      // Cancel any existing pending row for this recurring schedule
-      db.prepare(
-        "UPDATE agent_schedule SET status = 'skipped' WHERE recurring_schedule_id = ? AND status = 'pending'",
-      ).run(id);
+      cancelPendingScheduleRows(db, id, cancelReason);
 
       const rule = JSON.parse(row.recurrence_rule) as RecurrenceRule;
       const nextOccurrence = computeNextOccurrence(rule, new Date());
@@ -337,9 +358,7 @@ export function updateRecurringSchedule(
       }
     } else {
       // Disabled — cancel pending rows and clear next_run_at
-      db.prepare(
-        "UPDATE agent_schedule SET status = 'skipped' WHERE recurring_schedule_id = ? AND status = 'pending'",
-      ).run(id);
+      cancelPendingScheduleRows(db, id, cancelReason);
       db.prepare(
         "UPDATE recurring_schedules SET next_run_at = NULL WHERE id = ?",
       ).run(id);
@@ -380,6 +399,32 @@ export function deleteRecurringSchedule(
 // ── Reconciliation ───────────────────────────────────────────────────
 
 /**
+ * Cancel every still-`pending` agent_schedule row backing a recurring
+ * schedule (status → `skipped`). When `reason` is supplied it is recorded on
+ * each cancelled row's `task_context.skipReason` (AGENT_DEFINITIONS_DESIGN.md
+ * §11.3.2 — attributes an Agent-definition-driven re-materialisation).
+ * `running` rows are never touched (the WHERE filters to `pending`).
+ */
+function cancelPendingScheduleRows(
+  db: Database.Database,
+  recurringId: number,
+  reason?: string,
+): void {
+  if (reason) {
+    db.prepare(
+      `UPDATE agent_schedule
+          SET status = 'skipped',
+              task_context = json_set(COALESCE(task_context, '{}'), '$.skipReason', ?)
+        WHERE recurring_schedule_id = ? AND status = 'pending'`,
+    ).run(reason, recurringId);
+    return;
+  }
+  db.prepare(
+    "UPDATE agent_schedule SET status = 'skipped' WHERE recurring_schedule_id = ? AND status = 'pending'",
+  ).run(recurringId);
+}
+
+/**
  * Generate a single agent_schedule row for a recurring schedule.
  */
 function generateNextScheduleRow(
@@ -397,12 +442,31 @@ function generateNextScheduleRow(
 ): void {
   const scheduledFor = formatSqliteDatetime(nextOccurrence);
 
+  // AGENT_DEFINITIONS_DESIGN.md §7.2 — stamp the owning Agent's slug into the
+  // materialised row's `task_context` so the dispatcher's agent_id resolution
+  // (§8.1 step 1) attributes the execution without a join. Built-in routines
+  // own no recurring row, so this is the user-Agent path only; a recurring row
+  // with no paired Agent (a raw `/api/recurring-schedules` row) leaves the key
+  // unset. The `agents` table is always present (created by `applySchema`).
+  const owner = db
+    .prepare<[number], { id: string }>(
+      "SELECT id FROM agents WHERE recurring_schedule_id = ? LIMIT 1",
+    )
+    .get(recurringId);
+
   // Recurring materialization is an internal tick — the parent
   // `recurring_schedules` row already represents the user-facing
   // commitment, so mark each generated agent_schedule as `low` to keep
   // it out of roadmap's `Scheduled:` entries (the recurring cadence
   // itself is visible via `routine.roadmap_refresh` reading recurring
   // schedules separately, not via this mechanical materialization).
+  const context: Record<string, unknown> = {
+    ...taskContext,
+    recurringScheduleId: recurringId,
+    importance: "low",
+  };
+  if (owner) context.agent_id = owner.id;
+
   const result = db.prepare(`
     INSERT INTO agent_schedule
       (scheduled_for, task_type, task_description, task_prompt, task_context, model, tier_override, backend_id, status, recurring_schedule_id)
@@ -411,12 +475,11 @@ function generateNextScheduleRow(
     scheduledFor,
     taskType,
     description,
-    prompt,
-    JSON.stringify({
-      ...taskContext,
-      recurringScheduleId: recurringId,
-      importance: "low",
-    }),
+    // The dispatcher reads task_prompt directly (no description fallback), so
+    // materialized rows must always carry it: use the rule's prompt override
+    // when set, else fall back to its description body.
+    prompt ?? description,
+    JSON.stringify(context),
     model,
     tier,
     backendId,

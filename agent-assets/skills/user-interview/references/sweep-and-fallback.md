@@ -30,10 +30,18 @@ B. LATENT FALLBACK PROMOTION.
        state=scheduled. Register POST /api/schedule with:
          {time: tomorrow @ 14:00 local (or quiet_hours_end + 2h),
           taskType: "dm_session",
+          prompt: "profile_interview:<id> — run Operation 6 (the
+                   scheduled.dm ## Profile interview sub-flow): fire-time
+                   slot-filled abort check, then compose one short natural
+                   DM around <ask-hint>.",
           description: "profile_interview:<id> — <ask-hint>",
           tier: "medium",
           taskContext: {scheduledBy: "user_profile_sweep_fallback",
                         queueId: "<id>", importance: "low"}}
+       NOTE: `prompt` is REQUIRED by POST /api/schedule (the wake-up
+       session has NO memory — the prompt is its only instruction).
+       `description` is the short list label whose `profile_interview:<id>`
+       prefix triggers Operation 6; keep both fields.
        Update the In Progress entry to
        `state=scheduled :: since=<unchanged> :: scheduled_at=<tomorrow 14:00>`.
        Remove the matching `Profile question (latent): <id>` line from

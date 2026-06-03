@@ -214,7 +214,10 @@ describe("getSkillsForEvent", () => {
     // surface loaded only for message.received.dm) → 27.
     // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 adds `browser-task`
     // (DM-driven entry to the open-ended browser sub-agent) → 28.
-    expect(skills).toHaveLength(28);
+    // Scheduling split adds `agent-create` (author a recurring Agent when the
+    // user asks for an ongoing cadence; `/schedule` is one-shot only) → 29.
+    expect(skills).toHaveLength(29);
+    expect(skills).toContain("agent-create");
     expect(skills).toContain("context");
     expect(skills).toContain("today");
     expect(skills).toContain("user-profile");
@@ -2173,6 +2176,10 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — DM-driven entry
       // point to the open-ended browser-task surface.
       "browser-task",
+      // NB: `agent-create` is conditionally loaded (recurring-work cadence +
+      // verb in the message) — the matrix passes no message text, so it is
+      // correctly dropped here. Its conditional gate is tested in
+      // skills-manifest.test.ts.
     ],
     expectedProfileHeading: "# Conversational Agent",
   },

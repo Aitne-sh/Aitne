@@ -86,6 +86,21 @@ export class AuditLogger implements IAuditLogger {
     this.hasSourceRefColumn = this.actionColumns.has("source_ref");
   }
 
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §8.1 — resolver that maps a live event to the
+   * owning Agent slug for the in-flight firing, so every `logAction` row the
+   * run produces is stamped with `agent_actions.agent_id` without threading the
+   * slug through each caller (morning orchestrator, scheduled tasks, DMs). The
+   * dispatcher wires `AgentExecutionTracker.currentAgentId(correlationId)` here
+   * after both exist; until then (and for events with no resolved Agent) the
+   * stamp stays NULL, preserving the legacy row shape.
+   */
+  private agentIdResolver: ((event: Event) => string | null) | null = null;
+
+  setAgentIdResolver(resolver: (event: Event) => string | null): void {
+    this.agentIdResolver = resolver;
+  }
+
   logAction(params: {
     event: Event;
     model: string;
@@ -229,6 +244,16 @@ export class AuditLogger implements IAuditLogger {
           0,
           typeof event.data.workspace === "string" ? event.data.workspace : null,
         );
+      }
+      // AGENT_DEFINITIONS_DESIGN.md §5.3 / §8.1 — stamp the owning Agent slug
+      // when the in-flight firing resolved to one. The `agent_id` column ships
+      // since migration 0007, so no column-existence guard is needed; an
+      // unresolved firing leaves it NULL (legacy row shape). The in_progress
+      // UPDATE path below carries it automatically (the generic column loop).
+      const resolvedAgentId = this.agentIdResolver?.(event) ?? null;
+      if (resolvedAgentId !== null) {
+        columns.splice(columns.length - 2, 0, "agent_id");
+        values.splice(values.length, 0, resolvedAgentId);
       }
       const detailPayload: Record<string, unknown> = {};
       // STAGE-C-DM-FRESHNESS-PLAN §Task 4 — persist DM freshness telemetry
@@ -457,18 +482,28 @@ export class AuditLogger implements IAuditLogger {
 
   logSkip(event: Event, reason: string, trigger: "reactive" | "autonomous"): void {
     try {
-      const insertResult = this.db
-        .prepare(
-          `INSERT INTO agent_actions
-         (event_id, action_type, trigger, result, error, started_at)
-         VALUES (?, ?, ?, 'skipped', ?, datetime('now'))`,
-        )
-        .run(
-          event.correlationId,
-          event.type,
-          trigger,
-          reason,
-        );
+      // AGENT_DEFINITIONS_DESIGN.md §8.1 — stamp the owning Agent when the
+      // in-flight firing resolved to one (e.g. a review routine skipped by the
+      // morning-pending gate), so the skip row is attributable. Pre-`begin`
+      // skips (setup-mode / cost-cap) resolve to NULL — no execution context
+      // exists yet — which is the legacy row shape.
+      const resolvedAgentId = this.agentIdResolver?.(event) ?? null;
+      const insertResult =
+        resolvedAgentId !== null
+          ? this.db
+              .prepare(
+                `INSERT INTO agent_actions
+               (event_id, action_type, trigger, result, error, agent_id, started_at)
+               VALUES (?, ?, ?, 'skipped', ?, ?, datetime('now'))`,
+              )
+              .run(event.correlationId, event.type, trigger, reason, resolvedAgentId)
+          : this.db
+              .prepare(
+                `INSERT INTO agent_actions
+               (event_id, action_type, trigger, result, error, started_at)
+               VALUES (?, ?, ?, 'skipped', ?, datetime('now'))`,
+              )
+              .run(event.correlationId, event.type, trigger, reason);
       this.emitInsertedRow(Number(insertResult.lastInsertRowid), event.type);
     } catch (err) {
       logger.error({ err, event: event.type }, "Failed to log skip");
@@ -647,6 +682,15 @@ export class AuditLogger implements IAuditLogger {
       if (this.hasBackendColumn && context?.backendId) {
         columns.splice(columns.length - 2, 0, "backend");
         values.splice(values.length, 0, context.backendId);
+      }
+      // AGENT_DEFINITIONS_DESIGN.md §8.1 — stamp the owning Agent when the
+      // in-flight firing resolved to one, so a FAILED routine's audit row is
+      // attributable to its Agent (the same resolver `logAction` uses). The
+      // in_progress UPSERT loop below carries it via the generic column path.
+      const resolvedAgentId = this.agentIdResolver?.(event) ?? null;
+      if (resolvedAgentId !== null) {
+        columns.splice(columns.length - 2, 0, "agent_id");
+        values.splice(values.length, 0, resolvedAgentId);
       }
       const detailPayload: Record<string, unknown> = {};
       if (context?.failureKind) detailPayload.failureKind = context.failureKind;

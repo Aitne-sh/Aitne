@@ -67,6 +67,34 @@ function parseTaskContextJson(raw: string | null): Record<string, unknown> {
   return {};
 }
 
+/**
+ * Split the two body-field Zod failures a single `/schedule` row (POST or
+ * PATCH) can produce into their registry codes. `prompt` is required +
+ * capped, so a missing/empty value maps to `schedule.prompt_required` and an
+ * over-cap value to `schedule.prompt_too_long`; `description` is an optional
+ * label, so only the over-cap case (`schedule.description_too_long`) is
+ * remapped. Any other issue passes through unchanged. Mirrors the per-row
+ * remap the `/schedule/batch` handler does for `taskDescription`/`taskPrompt`.
+ */
+function remapScheduleBodyIssue(issue: AgentErrorIssue): AgentErrorIssue {
+  const reason = issue.code.replace(/^schedule\./, "");
+  const overCap = reason.endsWith("_too_long") || reason.endsWith("_too_big");
+  if (issue.field === "prompt") {
+    return composeIssue(
+      overCap ? "schedule.prompt_too_long" : "schedule.prompt_required",
+      { field: issue.field, received: issue.received, rowIndex: issue.rowIndex },
+    );
+  }
+  if (issue.field === "description" && overCap) {
+    return composeIssue("schedule.description_too_long", {
+      field: issue.field,
+      received: issue.received,
+      rowIndex: issue.rowIndex,
+    });
+  }
+  return issue;
+}
+
 export function registerAgentScheduleRoutes(
   app: Hono,
   deps: ApiDependencies,
@@ -96,17 +124,21 @@ export function registerAgentScheduleRoutes(
       // `time` for ISO8601 parseability and future-bound — the
       // override here only covers the "field absent / wrong type"
       // path Zod produces.
+      // `description` and `prompt` are intentionally NOT in the flat
+      // fieldCodeMap: a flat entry collapses every Zod reason onto one code,
+      // but `prompt` (required + capped) and `description` (optional + capped)
+      // each have two distinct failure shapes that need different remediation
+      // hints. The `.map()` below splits them by the translated reason suffix
+      // (the same technique the /schedule/batch handler uses for its rows).
       const issues = translateZodError(parsed.error, {
         namespace: "schedule",
         fieldCodeMap: {
           time: "schedule.scheduled_for_invalid",
           taskType: "schedule.task_type_unknown",
-          description: "schedule.description_too_short",
-          prompt: "schedule.prompt_too_short",
           model: "schedule.model_unknown",
           tier: "schedule.tier_unknown",
         },
-      });
+      }).map((issue) => remapScheduleBodyIssue(issue));
       return respondWithAgentError(c, 400, issues);
     }
 
@@ -160,7 +192,9 @@ export function registerAgentScheduleRoutes(
     const enrichedTaskContext = enrichAgentPlanTaskContext(
       taskContext,
       parsedDate,
-      description,
+      // `description` is now an optional label; fall back to the (required)
+      // prompt so the today-plan matcher still has the row's real text.
+      description ?? prompt,
       deps,
     );
 
@@ -188,8 +222,12 @@ export function registerAgentScheduleRoutes(
       .run(
         scheduledForUtc,
         taskType,
-        description,
-        prompt ?? null,
+        // Optional label → store "" when omitted so task_description stays a
+        // non-null string (the GET/list readers and the dashboard type it as
+        // `string`; the list falls back to a prompt excerpt when it is empty).
+        description ?? "",
+        // Required instruction — always a string after schema validation.
+        prompt,
         JSON.stringify(enrichedTaskContext),
         // §4.3 persistence rule: at most one of (model, tier_override)
         // is non-NULL at rest. The resolver normalizes alias rows to
@@ -516,7 +554,10 @@ export function registerAgentScheduleRoutes(
         entry.scheduledForUtc,
         entry.row.taskType,
         entry.row.taskDescription,
-        entry.row.taskPrompt ?? null,
+        // The dispatcher reads task_prompt directly (no task_description
+        // fallback). A batch row's body is its taskDescription unless a
+        // taskPrompt override is supplied — so coalesce here, never NULL.
+        entry.row.taskPrompt ?? entry.row.taskDescription,
         JSON.stringify(enriched),
         entry.row.correlationId ?? null,
         // §4.3 — at most one of (model, tier_override) is non-NULL.
@@ -767,8 +808,6 @@ export function registerAgentScheduleRoutes(
         namespace: "schedule",
         fieldCodeMap: {
           time: "schedule.scheduled_for_invalid",
-          description: "schedule.description_too_short",
-          prompt: "schedule.prompt_too_short",
           model: "schedule.model_unknown",
           tier: "schedule.tier_unknown",
         },
@@ -780,7 +819,9 @@ export function registerAgentScheduleRoutes(
             rowIndex: null,
           });
         }
-        return issue;
+        // Same body-field split as POST: required/over-cap `prompt`,
+        // over-cap `description`.
+        return remapScheduleBodyIssue(issue);
       });
       return respondWithAgentError(c, 400, issues);
     }
@@ -868,9 +909,10 @@ export function registerAgentScheduleRoutes(
       values.push(parsed.data.message);
     }
 
-    // `prompt: null` is the explicit clear (revert to using task_description
-    // as the agent body). `prompt: <string>` sets an override. `undefined` =
-    // no change. The dm-type rejection is handled in the type-field block above.
+    // `prompt: <string>` sets the agent instruction body. `undefined` = no
+    // change. It cannot be cleared (the dispatcher reads task_prompt directly,
+    // with no task_description fallback). The dm-type rejection is handled in
+    // the type-field block above.
     if (parsed.data.prompt !== undefined) {
       updates.push("task_prompt = ?");
       values.push(parsed.data.prompt);

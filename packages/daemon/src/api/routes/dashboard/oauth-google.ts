@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import { randomUUID } from "node:crypto";
+import { loopbackOrigins, resolveDashboardPort } from "@aitne/shared";
 import type { ApiDependencies } from "../../server.js";
 import {
   getGoogleOAuthClientConfig,
@@ -31,7 +32,7 @@ export function registerOauthGoogleRoutes(app: Hono, deps: ApiDependencies): voi
   // The OAuth callback HTML uses `window.opener.postMessage(..., target)`
   // to notify the dashboard that auth succeeded. `target` was previously
   // derived from the Origin/Referer headers at start time with a
-  // `http://localhost:3000` fallback when neither was present. Both
+  // `http://localhost:<dashboard port>` fallback when neither was present. Both
   // headers are attacker-controlled in the request that *initiates* the
   // flow (the attacker's page can be `http://attacker.com`), so the
   // postMessage notification could be steered off the trusted dashboard.
@@ -41,17 +42,14 @@ export function registerOauthGoogleRoutes(app: Hono, deps: ApiDependencies): voi
   // and a future widening of the payload would leak silently. Defence is
   // a closed allowlist: only same-origin localhost variants on the
   // configured dashboard port are accepted; anything else rejects the
-  // OAuth start with 403.
-  const dashboardPort =
-    Number.parseInt(process.env.PA_DASHBOARD_PORT ?? "", 10) || 3000;
-  const allowedDashboardOrigins: ReadonlySet<string> = new Set([
-    `http://localhost:${dashboardPort}`,
-    `http://127.0.0.1:${dashboardPort}`,
-    // IPv6 loopback — some dev environments (Docker desktop with IPv6
-    // preference, certain Node IPv6-first configurations) emit origins
-    // in this form. URL.origin returns the bracketed literal.
-    `http://[::1]:${dashboardPort}`,
-  ]);
+  // OAuth start with 403. `loopbackOrigins` covers all three loopback
+  // forms — the `[::1]` variant matters because some IPv6-first
+  // environments (Docker Desktop with IPv6 preference, certain Node
+  // IPv6-first configs) emit it, and URL.origin returns the bracketed
+  // literal.
+  const allowedDashboardOrigins: ReadonlySet<string> = new Set(
+    loopbackOrigins(resolveDashboardPort()),
+  );
 
   function parseOriginSafely(value: string | undefined): string | null {
     if (!value) return null;

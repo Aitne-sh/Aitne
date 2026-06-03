@@ -91,8 +91,8 @@ reconciler's last-run record lives at `runtime_state` key
 
 | Failure at | Roll back |
 |---|---|
-| 5.2 | undo 5.1 (`DELETE` the dossier file you just created — only if you created it; do not delete a pre-existing dossier) |
-| 5.3 | undo 5.2 (PUT routines file back to `enabled: false` and the next reconcile clears the cron job; or `DELETE` if you created it new), then undo 5.1 as above |
+| 5.2 | undo 5.1 — the dossier path does **not** accept `DELETE` (`knowledge/dossiers/*` is PUT/PATCH only; a `DELETE` returns `403 context.write_forbidden`). If you created it new, PUT it to empty content / `status: removed`; an empty dossier is harmless (per 5.1). Leave a pre-existing dossier untouched. |
+| 5.3 | undo 5.2 (PUT routines file back to `enabled: false` and the next reconcile clears the cron job; or `DELETE` if you created it new — `policies/routines/custom/*` is DELETE-whitelisted), then undo 5.1 as above |
 | 5.4 | none required — there is no manual 5.4. If the reconciler does not pick the change up within ~30 s, surface the diagnostics record (`runtime_state` key above) to the user rather than rolling back. |
 
 If any rollback step itself fails, **report the partial state to the

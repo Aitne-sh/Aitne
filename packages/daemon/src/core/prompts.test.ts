@@ -1643,7 +1643,7 @@ describe("applyIntegrationModeFilter — Notion mode × session backend matrix o
   const SKILL_BODY = readFileSync(OBSERVATIONS_SKILL_PATH, "utf-8");
 
   const distinctive: Record<Branch, RegExp> = {
-    "direct": /curl -s "http:\/\/localhost:8321\/api\/notion\/query\?databaseId=xxx"/,
+    "direct": /curl -s "http:\/\/localhost:8321\/api\/notion\/query\?database=tasks"/,
     "delegated-same": /Use your session backend's native Notion MCP tool/,
     "delegated-cross": /POST http:\/\/localhost:8321\/api\/integrations\/notion\/exec/,
     "disabled": /Notion is disabled — there is no live source/,

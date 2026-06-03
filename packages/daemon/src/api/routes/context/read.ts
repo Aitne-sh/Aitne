@@ -38,7 +38,14 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
   // "daily", ...) — the latter are translated to the new dir before
   // listing. Legacy aliases are removed in the same minor-release
   // window as the §14.4 agent-asset prose sweep (PR-6).
-  app.get("/context/list/:dir", (c) => {
+  // `:dir{.+}` (not bare `:dir`) so the param captures slashes — after the
+  // context-vault restructure the canonical dir names are nested
+  // ("journal/daily", "knowledge/repos", "policies/routines", ...). A bare
+  // single-segment `:dir` matches `[^/]+`, so those requests fell through to
+  // Hono's default 404 and the dashboard file tree showed only the
+  // single-segment dirs (identity, policies). The handler's `allowedDirs`
+  // whitelist + `legacyDirAlias` map already expect the nested names.
+  app.get("/context/list/:dir{.+}", (c) => {
     const rawDir = c.req.param("dir");
     const legacyDirAlias: Record<string, string> = {
       user: "identity",

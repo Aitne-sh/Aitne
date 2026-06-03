@@ -70,8 +70,10 @@ skill body.
 ## Send / draft
 
 ```bash
-# Direct send — Autonomous; rejected with 403 when the user has denied
-# the send tool. Call /api/notify yourself if the user should know.
+# Direct send — Autonomous. Direct mode has NO deny-tool gate: this
+# route validates the body and sends unconditionally (no 403/denied_tool
+# path; `deniedTools` only applies to delegated-mode connector tools).
+# Call /api/notify yourself if the user should know.
 curl -sX POST "http://localhost:8321/api/mail/ACCT/messages/send" \
   -H "Content-Type: application/json" \
   -d '{"to": [...], "subject": "...", "textBody": "...", "reply"?: {...}}'

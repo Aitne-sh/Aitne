@@ -26,9 +26,10 @@ export interface ScheduleCreateInput {
   /** ISO8601, must be ≥ 1 minute in the future. */
   time: string;
   taskType: string;
-  description: string;
-  /** Optional override for the agent body. Min 20 chars when set. */
-  prompt?: string;
+  /** The agent's instruction at fire time. Required (≤ 8000 chars). */
+  prompt: string;
+  /** Optional short list label (≤ 200 chars). NOT the agent body. */
+  description?: string;
   /** Free-form model token (alias or registered id). Mutually exclusive with `tier`. */
   model?: string;
   tier?: ScheduleTier;
@@ -40,8 +41,9 @@ export interface ScheduleUpdateInput {
   /** ISO8601 — only valid for `dm` rows on the daemon side; for non-dm rows time is fixed. */
   time?: string;
   description?: string;
-  /** `string` sets the override; `null` clears it; omit for no change. */
-  prompt?: string | null;
+  /** Sets the agent instruction body; omit for no change. Cannot be cleared
+   *  to null (the dispatcher reads task_prompt directly, no fallback). */
+  prompt?: string;
   message?: string;
   /** Free-form model token; `null` clears any prior pin. */
   model?: string | null;

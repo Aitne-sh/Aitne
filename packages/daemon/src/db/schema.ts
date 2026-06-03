@@ -129,7 +129,17 @@ CREATE TABLE IF NOT EXISTS agent_actions (
     -- detail remains the daemon-write telemetry channel; metadata is
     -- the chokepointed agent-write side-channel so the two
     -- responsibilities do not collide.
-    metadata JSON DEFAULT '{}'
+    metadata JSON DEFAULT '{}',
+    -- AGENT_DEFINITIONS_DESIGN.md §5.3 — nullable Agent-identity stamp.
+    -- The dispatcher populates it when the executing context resolves to a
+    -- known Agent (§8.1); historical rows and any unresolved context stay
+    -- NULL. Intentionally carries NO foreign key: an FK would complicate the
+    -- agents-row cascade and would break the legacy NULL rows on a strict
+    -- enforcement pass (design drift note 2026-05-30). Declared LAST in the
+    -- CREATE body so fresh installs match the column order that migration
+    -- 0007-agent-identity's ALTER TABLE ... ADD COLUMN produces on
+    -- upgrading DBs.
+    agent_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_actions_date ON agent_actions(date(started_at));
 CREATE INDEX IF NOT EXISTS idx_agent_actions_backend_time
@@ -137,6 +147,17 @@ CREATE INDEX IF NOT EXISTS idx_agent_actions_backend_time
 CREATE INDEX IF NOT EXISTS idx_agent_actions_source
     ON agent_actions(source_kind, source_ref, started_at DESC)
     WHERE source_kind IS NOT NULL;
+-- NB: idx_agent_actions_agent (on the agent_id column) is intentionally NOT
+-- created here. agent_actions is a PRE-EXISTING table, so on an upgrader its
+-- CREATE TABLE IF NOT EXISTS above is a no-op and the agent_id column is absent
+-- until migration 0007-agent-identity runs. applySchema runs BEFORE
+-- runMigrations (bootstrap/db.ts), so a CREATE INDEX ... ON
+-- agent_actions(agent_id) here would throw "no such column: agent_id" at boot
+-- on every pre-0007 install. Per CLAUDE.md upgrade-safety checklist #2, an
+-- index referencing a migration-added column is created ONLY by the migration
+-- (gated behind indexExists), which runs after the ALTER. The migration also
+-- creates it on fresh installs (where the column ships in the CREATE body
+-- above), so the index always exists post-boot on both paths.
 
 -- recurring_schedules is created before agent_schedule so the FK reference
 -- in agent_schedule is syntactically valid. SQLite doesn't validate FK
@@ -235,6 +256,89 @@ CREATE TABLE IF NOT EXISTS agent_schedule (
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_pending
     ON agent_schedule(scheduled_for) WHERE status = 'pending';
+
+-- ── Agent Definitions (AGENT_DEFINITIONS_DESIGN.md §5.1 / §5.2) ──────────────
+--
+-- The Agent-as-identity layer. "agents" is the durable identity row for every
+-- built-in routine and user-authored recurring task; "agent_executions" is the
+-- per-firing rollup the dashboard renders. Both are purely additive (CREATE IF
+-- NOT EXISTS), so a fresh install lands on the target state directly. The
+-- paired migration 0007-agent-identity carries ONLY the agent_actions ALTER
+-- (§5.3) — these two tables need no migration body.
+--
+-- Timestamp columns (created_at / updated_at / enabled_overridden_at /
+-- started_at / ended_at) are epoch-millisecond INTEGERs, matching the
+-- repositories.* convention rather than the legacy CURRENT_TIMESTAMP ISO
+-- string. The loader / recorder / stores are the sole writers and always
+-- supply an explicit value, so enabled_overridden_at compares directly against
+-- an fs.stat mtimeMs in the loader's override resolution (§6.4) with no
+-- string-vs-number coercion.
+--
+-- agents.last_execution_id <-> agent_executions.agent_id is a deliberate
+-- circular FK. SQLite validates FK targets only at row-DML time (never at
+-- CREATE), so the create order below is irrelevant; at runtime the loader
+-- upserts the agents row (last_execution_id NULL — no FK check on NULL) before
+-- any execution references it, and the recorder only ever points
+-- last_execution_id at an id that already exists. ON DELETE CASCADE on
+-- agent_executions.agent_id + ON DELETE SET NULL on the two agents FKs keep
+-- deletes clean: deleting an agent drops its executions and nulls any inbound
+-- recurring/last-execution pointer.
+CREATE TABLE IF NOT EXISTS agents (
+    id TEXT PRIMARY KEY,                  -- slug; matches the YAML \`slug\` field and the /agents/<slug> URL
+    name TEXT NOT NULL,
+    description TEXT,
+    source TEXT NOT NULL
+        CHECK (source IN ('builtin', 'user')),
+    definition_path TEXT NOT NULL,        -- absolute path to agent.md (or the synthesised registry-fallback path)
+    definition_hash TEXT NOT NULL,        -- sha256 of file bytes; cheap change detector on every boot
+    enabled INTEGER NOT NULL DEFAULT 1
+        CHECK (enabled IN (0, 1)),
+    enabled_overridden_at INTEGER,        -- epoch ms of the last dashboard toggle; NULL = YAML wins (§6.4)
+    process_key TEXT,                     -- NULL for the no-LLM in-process passes (roadmap-maintenance, context-index-reconcile); non-null is cross-checked vs PROCESS_KEYS by the loader. Intentionally nullable — NO NOT NULL.
+    schedule_kind TEXT NOT NULL
+        CHECK (schedule_kind IN ('cron', 'one_shot', 'event')),
+    schedule_expression TEXT,             -- cron expr ({dayBoundaryHour} placeholder allowed) OR one_shot ISO timestamp OR event ref
+    schedule_timezone TEXT NOT NULL,      -- loader resolves the concrete zone (YAML schedule.timezone ?? config.timezone ?? system tz). NO baked default — a hardcoded zone would misfire routines for non-JP operators; NOT NULL fails-fast on a loader bug instead of silently storing the wrong zone.
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    stop_warning_json TEXT,               -- nullable for user Agents; mandatory for builtins (enforced upstream by the shared schema)
+    recurring_schedule_id INTEGER         -- FK to the backing recurring row for user Agents; NULL for builtins (cron lives in scheduler.ts)
+        REFERENCES recurring_schedules(id) ON DELETE SET NULL,
+    last_execution_id INTEGER             -- denormalised pointer kept in sync by the recorder; avoids a window-function scan on every dashboard render
+        REFERENCES agent_executions(id) ON DELETE SET NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',  -- version_counter (§6.3), last_error (§6.6), override_snapshot (§6.4.1), reserved future fields
+    created_at INTEGER NOT NULL,          -- epoch ms; store is the sole writer
+    updated_at INTEGER NOT NULL           -- epoch ms
+);
+CREATE INDEX IF NOT EXISTS idx_agents_source_enabled
+    ON agents(source, enabled);
+CREATE INDEX IF NOT EXISTS idx_agents_process_key
+    ON agents(process_key);
+
+CREATE TABLE IF NOT EXISTS agent_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    schedule_row_id INTEGER REFERENCES agent_schedule(id) ON DELETE SET NULL,
+    trigger TEXT NOT NULL
+        CHECK (trigger IN ('cron', 'manual', 'event', 'self')),
+    started_at INTEGER NOT NULL,          -- epoch ms (see the timestamp note above)
+    ended_at INTEGER,                     -- epoch ms; NULL while in-flight, set by completeExecution / sweepAbandoned
+    result TEXT
+        CHECK (result IS NULL OR result IN ('success', 'error', 'skipped', 'timeout')),
+    error_kind TEXT,                      -- 'quota' | 'tool' | 'criteria_fail' | 'timeout' | 'crash' | ...
+    error_message TEXT,
+    cost_usd REAL,
+    tokens_input INTEGER,
+    tokens_output INTEGER,
+    turns INTEGER,
+    success_criteria_json TEXT,           -- {"criterion_id": true|false, ...}; NULL until evaluated
+    output_summary TEXT,                  -- short human-readable line for the dashboard
+    metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_agent_time
+    ON agent_executions(agent_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_executions_result
+    ON agent_executions(result, started_at DESC)
+    WHERE result IS NOT NULL;
 
 -- ── Automation Triggers (docs/design/19-dashboard-ia-and-triggers.md) ────────
 --

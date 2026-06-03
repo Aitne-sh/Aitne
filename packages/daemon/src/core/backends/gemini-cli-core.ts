@@ -13,6 +13,7 @@ import {
   isPlausibleGeminiApiKey,
   matchRunAllowedToolPattern,
   type AgentResult,
+  type BackendId,
   type BackendModel,
   type BackendUsage,
   type ProcessKey,
@@ -73,9 +74,11 @@ import {
 } from "../path-compat.js";
 import { probeApiKeyServerSide } from "./api-key-probe.js";
 import {
-  buildAgentDayBoundaryHint,
-  extractGenericQuotaResetHint,
-} from "./quota-reset-hints.js";
+  assertCostWithinMaxBudget,
+  assertPromptCostWithinMaxBudget,
+  classifyCliFailure,
+} from "./cli-quota-guards.js";
+import { buildAgentDayBoundaryHint } from "./quota-reset-hints.js";
 import {
   auditStreamObservation,
   extractGeminiToolUseTarget,
@@ -85,7 +88,6 @@ import {
   logSilentApiErrors,
 } from "./silent-api-error-detector.js";
 import {
-  estimateTextInputTokens,
   findRegisteredModel,
   getModelsForBackend,
   latestLiteFor,
@@ -298,6 +300,10 @@ export class GeminiCliCore implements IAgentCore {
         eventCorrelationId: params.event.correlationId,
         wikiUrlFetchEnabled: params.wikiUrlFetchEnabled ?? false,
         ...(isMessageEvent(params.event) ? { messageText: params.event.content } : {}),
+        ...(params.extraSkills && params.extraSkills.length > 0
+          ? { extraSkills: params.extraSkills }
+          : {}),
+        ...(params.skillsReplace ? { skillsReplace: true } : {}),
       },
       streamCallbacks,
     );
@@ -656,6 +662,11 @@ export class GeminiCliCore implements IAgentCore {
        * non-DM message paths).
        */
       messageText?: string | null;
+      /** AGENT_DEFINITIONS_DESIGN.md §4.2 — the firing Agent's `tools.skills`,
+       *  forwarded to `createSessionWorkdir`. Undefined for non-Agent turns. */
+      extraSkills?: readonly string[];
+      /** AGENT_DEFINITIONS_DESIGN.md §4.2 — `tools.skills_replace`. */
+      skillsReplace?: boolean;
     },
     streamCallbacks?: StreamCallbacks,
   ): Promise<AgentResult> {
@@ -730,6 +741,12 @@ export class GeminiCliCore implements IAgentCore {
         ...((this.db ?? this.mcpContext?.db) ? { db: this.db ?? this.mcpContext?.db ?? null } : {}),
         ...(typeof params.messageText === "string" ? { messageText: params.messageText } : {}),
         ...(params.wikiWorkspaceName ? { wikiWorkspaceName: params.wikiWorkspaceName } : {}),
+        // AGENT_DEFINITIONS_DESIGN.md §4.2 — see ClaudeCodeCore. No-op for
+        // non-Agent executes.
+        ...(params.extraSkills && params.extraSkills.length > 0
+          ? { extraSkills: params.extraSkills }
+          : {}),
+        ...(params.skillsReplace ? { skillsReplace: true } : {}),
       },
     );
     const ownsSessionDir = !params.sessionDir;
@@ -2066,80 +2083,35 @@ ${fetchClause}`;
     }
   }
 
+  // Failure classification + budget enforcement share a skeleton with the
+  // Codex core; the logic lives in `cli-quota-guards.ts` (single source of
+  // truth) and each backend passes its own regexes / label. Gemini adds a
+  // pre-auth policy-deny branch via `classifyGeminiPolicyDeny`.
   private classifyFailure(message: string): BackendQuotaError | BackendDecisiveFailure {
-    if (isMaxBudgetMessage(message)) {
-      return new BackendQuotaError(this.backendId, "max_budget_usd", null, message);
-    }
-    if (/rate limit|quota|429/i.test(message)) {
-      // Best-effort reset-time extraction so the dashboard can surface
-      // "quota resets at HH:MM (TZ)". Google API quota errors often carry
-      // "Quota exceeded ... reset time YYYY-MM-DDTHH:MM:SSZ" or a
-      // retry-after offset; the helper falls through to null otherwise.
-      return new BackendQuotaError(
-        this.backendId,
-        "rate_limited",
-        extractGenericQuotaResetHint(message),
-        message,
-      );
-    }
-    // Policy-deny classification must run BEFORE the auth branch — the
-    // generated TOML's deny messages can legitimately contain words like
-    // "required" or "login" (e.g. a future "<X> login is not permitted in
-    // daemon mode" rule), and we don't want those to mis-tag as `auth`
-    // and trigger an auth-recovery flow when the real cause is the agent
-    // attempting a forbidden tool call. The match targets the wrap the
-    // Gemini CLI emits today for TOML deny hits — `Error executing tool
-    // …: Tool execution denied by policy. <denyMessage>`. Tight enough to
-    // avoid false positives on real auth/quota messages; not claimed to
-    // be exhaustive across other Gemini policy surfaces (sandbox kills,
-    // MCP allowlist, future hook variants), which can be added here as
-    // they're observed in the wild.
-    if (/tool execution denied|denied by policy/i.test(message)) {
-      return new BackendDecisiveFailure(
-        this.backendId,
-        "policy_denied",
-        new Error(message),
-      );
-    }
-    if (/authentication page|oauth|api key|login|required/i.test(message)) {
-      return new BackendDecisiveFailure(this.backendId, "auth", new Error(message));
-    }
-    if (/timed out|timeout/i.test(message)) {
-      return new BackendDecisiveFailure(this.backendId, "timeout", new Error(message));
-    }
-    return new BackendDecisiveFailure(
-      this.backendId,
-      "other_non_retryable",
-      new Error(message),
-    );
+    return classifyCliFailure({
+      backendId: this.backendId,
+      message,
+      // Google API quota surfaces as "rate limit" / "quota" / HTTP 429.
+      rateLimitPattern: /rate limit|quota|429/i,
+      authPattern: /authentication page|oauth|api key|login|required/i,
+      extraClassifier: classifyGeminiPolicyDeny,
+    });
   }
 
   private assertWithinMaxBudget(
     costUsd: number,
     maxBudgetUsd: number | undefined,
     modelId: string,
-    /**
-     * Mirrors `CodexCore.assertWithinMaxBudget` — Gemini also enforces the
-     * per-turn budget post-hoc (by the time we reject here Google has
-     * already consumed tokens), so attach the actual spend so the
-     * dispatcher's error path can write a `result='failed'` agent_actions
-     * row with `cost_usd` / `numTurns` / `durationMs` populated. Without
-     * this, budget-rejected Gemini runs silently drop their spend on the
-     * success-only audit path — the same dashboard gap the Codex fix
-     * closed. See `BackendQuotaSpend` for the full contract.
-     */
     spend?: Omit<import("../agent-core.js").BackendQuotaSpend, "modelId" | "costUsd">,
   ): void {
-    if (maxBudgetUsd === undefined || costUsd <= maxBudgetUsd) {
-      return;
-    }
-    throw new BackendQuotaError(
-      this.backendId,
-      "max_budget_usd",
-      null,
-      `Gemini CLI estimated cost $${costUsd.toFixed(4)} exceeded the per-turn budget limit $${maxBudgetUsd.toFixed(2)} for ${modelId}.`,
-      spend ? { ...spend, modelId, costUsd } : null,
-    );
+    assertCostWithinMaxBudget({
+      backendId: this.backendId,
+      label: "Gemini CLI",
+      costUsd,
+      maxBudgetUsd,
+      modelId,
+      spend,
+    });
   }
 
   private assertPromptWithinMaxBudget(
@@ -2147,30 +2119,14 @@ ${fetchClause}`;
     maxBudgetUsd: number | undefined,
     modelId: string,
   ): void {
-    if (maxBudgetUsd === undefined) {
-      return;
-    }
-    const estimatedUsage: BackendUsage = {
-      inputTokens: estimateTextInputTokens(prompt),
-      outputTokens: 0,
-      cacheCreationInputTokens: 0,
-      cacheReadInputTokens: 0,
-    };
-    const { costUsd } = this.priceFetcher.estimateUsageCost({
+    assertPromptCostWithinMaxBudget({
       backendId: this.backendId,
+      label: "Gemini CLI",
+      prompt,
+      maxBudgetUsd,
       modelId,
-      usage: estimatedUsage,
-      fallbackModel: findRegisteredModel(this.backendId, modelId),
+      priceFetcher: this.priceFetcher,
     });
-    if (costUsd <= maxBudgetUsd) {
-      return;
-    }
-    throw new BackendQuotaError(
-      this.backendId,
-      "max_budget_usd",
-      null,
-      `Gemini CLI estimated prompt cost $${costUsd.toFixed(4)} exceeded the per-turn budget limit $${maxBudgetUsd.toFixed(2)} for ${modelId}.`,
-    );
   }
 
   /**
@@ -3106,8 +3062,27 @@ ${fetchClause}`;
   }
 }
 
-function isMaxBudgetMessage(message: string): boolean {
-  return /max(?:imum)? budget|max_budget_usd|budget limit|per-turn budget/i.test(message);
+/**
+ * Gemini-specific pre-auth classifier for `classifyCliFailure`. Policy-deny
+ * classification must run BEFORE the auth branch — the generated TOML's deny
+ * messages can legitimately contain words like "required" or "login" (e.g. a
+ * future "<X> login is not permitted in daemon mode" rule), and we don't want
+ * those to mis-tag as `auth` and trigger an auth-recovery flow when the real
+ * cause is the agent attempting a forbidden tool call. The match targets the
+ * wrap the Gemini CLI emits today for TOML deny hits — `Error executing tool
+ * …: Tool execution denied by policy. <denyMessage>`. Tight enough to avoid
+ * false positives on real auth/quota messages; not claimed to be exhaustive
+ * across other Gemini policy surfaces (sandbox kills, MCP allowlist, future
+ * hook variants), which can be added here as they're observed in the wild.
+ */
+function classifyGeminiPolicyDeny(
+  message: string,
+  backendId: BackendId,
+): BackendDecisiveFailure | null {
+  if (/tool execution denied|denied by policy/i.test(message)) {
+    return new BackendDecisiveFailure(backendId, "policy_denied", new Error(message));
+  }
+  return null;
 }
 
 function normalizeGeminiUsage(stats: GeminiStats | null): BackendUsage {

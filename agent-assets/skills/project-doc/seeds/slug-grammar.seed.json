@@ -4,7 +4,7 @@
     {
       "topic": "Slug format",
       "rule": "Project and repo slugs are kebab-case, lowercase letters with hyphens between words.",
-      "example": "plans/projects/cost-explorer.md, git-repos/personal-agent.md"
+      "example": "plans/projects/cost-explorer.md, git/personal-agent/overview.md"
     },
     {
       "topic": "Slug length",

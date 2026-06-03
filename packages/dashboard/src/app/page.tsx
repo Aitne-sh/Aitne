@@ -184,7 +184,7 @@ export default function OverviewPage() {
               </p>
               {scheduleNext?.next && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Wake-up: {formatAbsoluteTime(scheduleNext.next.scheduled_for)}
+                  Scheduled: {formatAbsoluteTime(scheduleNext.next.scheduled_for)}
                 </p>
               )}
               <Button

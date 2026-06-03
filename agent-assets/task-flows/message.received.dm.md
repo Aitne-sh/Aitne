@@ -143,7 +143,12 @@ detection" §"Reply branches", carrying the user's reply shape (yes /
 counter-proposal / no) into that handler. Apply the same pattern to
 any other gate that opts into the confirm sub-flow in the future.
 
-**Scheduling.** Recurring ("every hour", "every morning at 9", "weekly", "25th of each month") → `POST /api/recurring-schedules`. One-shot ("tomorrow 3pm", "in 30 min") → `POST /api/schedule/dm` (pre-composed; default) or `POST /api/schedule` (wake-up that must look something up at fire time). Edit / cancel / list use the same endpoints. Load the schedule skill for the request shape, dedup pre-check, DM-vs-wake decision, and description contract. Use `<current_time>` for timezone resolution. Prefer `tier` over `model`; the two are mutually exclusive on a single row.
+**Scheduling.** Split by what fires:
+- **Recurring autonomous work** ("every hour check my PRs and act", "each morning fetch X and update Y") → create an **Agent** via the `agent-create` skill (`POST /api/agents`). These are durable, named, recurring work identities managed on `/agents`.
+- **Recurring scheduled DM / briefing** ("DM me a summary every morning at 9") → `POST /api/recurring-schedules` with `taskType: "dm_session"` (still the home for recurring DMs).
+- **One-shot** ("tomorrow 3pm", "in 30 min") → `POST /api/schedule/dm` (pre-composed; default) or `POST /api/schedule` (wake-up that must look something up at fire time).
+
+Load the `schedule` skill (one-shot + recurring-DM request shape, dedup, DM-vs-wake, description contract) or the `agent-create` skill (recurring work Agents). Use `<current_time>` for timezone resolution. Prefer `tier` over `model`; the two are mutually exclusive.
 
 Schedules go through this daemon — never through any cloud-hosted scheduled-agent feature your CLI may expose. Cloud routines cannot reach `localhost:8321`, so they cannot deliver via the user's chat platforms or use any integration registered here. Do not propose one as a tradeoff.
 

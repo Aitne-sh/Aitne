@@ -357,6 +357,17 @@ export function createBrowserHistoryRoutes(deps: ApiDependencies): Hono {
     if (!DATE_PATTERN.test(requested)) {
       return c.json({ error: "invalid_date" }, 400);
     }
+    // DATE_PATTERN only checks digit-shape, so a calendar-invalid value like
+    // "2026-13-99" passes it. Unlike the sibling date endpoints (shopping /
+    // reloads), this route does date arithmetic — buildPreMorningDigest →
+    // getAgentDayBoundsUtc → formatSqliteDatetime calls `new Date(NaN).toISOString()`,
+    // which throws RangeError and surfaces as a 500. Reject the inputs that would
+    // produce an Invalid Date here so the documented `400 invalid_date` contract
+    // holds. (Matches the `Number.isFinite(Date.parse(...))` guard idiom used in
+    // observations.ts / integrations-reconcile.ts.)
+    if (!Number.isFinite(Date.parse(`${requested}T12:00:00Z`))) {
+      return c.json({ error: "invalid_date" }, 400);
+    }
     const contextDir = getContextDir(deps.config, deps.db);
     const sidecar = readPreMorningDigestJsonForDate(contextDir, requested);
     if (sidecar && sidecar.date === requested) {

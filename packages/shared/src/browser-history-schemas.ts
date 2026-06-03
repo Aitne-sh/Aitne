@@ -272,7 +272,21 @@ export const browserHistoryDomainLabelSchema = z
   .regex(/^[a-z0-9.-]+$/);
 
 export const browserHistoryClusterDetailSchema = browserHistoryClusterListItemSchema.extend({
-  rootTaskId: z.number().int().nonnegative(),
+  // Chrome's `root_task_id`, read verbatim from Chromium and persisted to
+  // `browser_research_clusters.root_task_id` (INTEGER NOT NULL UNIQUE). Its
+  // real-world domain violated BOTH of the previous `.int().nonnegative()`
+  // bounds, throwing a ZodError → HTTP 500 on GET
+  // /api/browser-history/research-clusters/:slug:
+  //   (a) `-1` is Chromium's "no task" sentinel (default/uncategorized cluster,
+  //       slug `cluster--1`) → `.nonnegative()` rejected it (too_small);
+  //   (b) genuine 64-bit task ids (e.g. 13424117956570870) exceed
+  //       Number.MAX_SAFE_INTEGER → Zod's `.int()` safe-integer check rejected
+  //       them (too_big).
+  // It is an opaque, informational id (no consumer keys on it), so accept the
+  // full numeric domain. (Sub-2^53 precision was already lost upstream by
+  // better-sqlite3's default number reads; carrying it as a string would be the
+  // precision-correct option but is a wider wire change than the crash needs.)
+  rootTaskId: z.number(),
   topDomains: z.array(browserHistoryDomainLabelSchema).max(10),
   lastDmAt: z.number().int().nonnegative().nullable(),
   lastResearchOfferAt: z.number().int().nonnegative().nullable(),

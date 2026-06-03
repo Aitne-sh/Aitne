@@ -32,6 +32,7 @@ import {
   RELEASE_ASSETS_STATUS_KEY,
   computeInstructionAssetStatus,
   findBuiltinShadowedUserSkills,
+  listAllSkillSlugs,
   readInstructionAssetStamp,
   readInstructionStampManifest,
   readReleaseAssetStatus,
@@ -269,6 +270,28 @@ describe("release asset reconciliation", () => {
     write(workspaceDir, "agent-assets/skills/mail/SKILL.md", "---\nname: mail\n---\n# Mail\n");
 
     expect(findBuiltinShadowedUserSkills(join(dataDir, "skills"), workspaceDir)).toEqual(["travel"]);
+  });
+
+  it("listAllSkillSlugs unions built-in + user slugs (deduped) for the Agent loader's tools.skills check", () => {
+    const dataDir = join(tmp, "data-all");
+    const workspaceDir = join(tmp, "ws-all");
+    write(dataDir, "skills/travel/SKILL.md", "---\nname: travel\n---\n");
+    write(dataDir, "skills/custom-user/SKILL.md", "---\nname: custom-user\n---\n");
+    write(workspaceDir, "agent-assets/skills/travel/SKILL.md", "---\nname: travel\n---\n");
+    write(workspaceDir, "agent-assets/skills/mail/SKILL.md", "---\nname: mail\n---\n");
+
+    const all = listAllSkillSlugs(join(dataDir, "skills"), workspaceDir);
+    expect([...all].sort()).toEqual(["custom-user", "mail", "travel"]);
+    expect(all.has("mail")).toBe(true);
+    expect(all.has("nonexistent")).toBe(false);
+  });
+
+  it("listAllSkillSlugs returns an empty set when neither root exists", () => {
+    const userSkillsRoot = join(tmp, "data-empty-all", "skills");
+    const workspaceDir = join(tmp, "ws-empty-all");
+    mkdirSync(dirname(userSkillsRoot), { recursive: true });
+    mkdirSync(workspaceDir, { recursive: true });
+    expect(listAllSkillSlugs(userSkillsRoot, workspaceDir).size).toBe(0);
   });
 
   /* ── readInstructionStampManifest ──────────────────────────────────── */

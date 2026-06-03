@@ -156,9 +156,19 @@ Response:
 
 Update book status, rating, or notes.
 
+**Approve tier (Bearer required).** This is an operator/dashboard-gated
+write — an autonomous agent curl from a session workdir carries no
+`Authorization: Bearer` header and will be rejected with **401** before
+the handler runs. Do NOT call this autonomously and do NOT assume the
+update landed; book status/rating/notes corrections are made by the user
+via the dashboard. (Body shape, for reference: `status` enum
+`reading|completed|abandoned`, `rating` 1-5, `notes`.)
+
 ```bash
+# Operator/dashboard-only — requires Authorization: Bearer (Approve tier).
 curl -s -X PATCH "http://localhost:8321/api/books/1" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <operator-token>" \
   -d '{"status": "completed", "rating": 4}'
 ```
 

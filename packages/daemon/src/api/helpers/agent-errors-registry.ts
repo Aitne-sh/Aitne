@@ -82,10 +82,40 @@ export const AGENT_ERROR_REGISTRY = {
   "schedule.prompt_too_short": {
     expected: "string with >= 20 characters when set",
     hint:
-      "If you supply prompt as an override for description, it must also be >= 20 chars. Or omit it and the row falls back to description.",
+      "On /api/schedule/batch and recurring schedules a `prompt`/`taskPrompt` override must be >= 20 chars when set, or omit it so the row uses its description body. (On the single /api/schedule row `prompt` is the required instruction and only `schedule.prompt_required` applies.)",
     skillAnchor: "schedule#description-shape",
     docsUrl: "agent-assets/skills/schedule/references/errors.md#prompt_too_short",
     constraint: { type: "string", minLength: 20 },
+  },
+  "schedule.prompt_required": {
+    // POST /api/schedule + PATCH (empty prompt) — `prompt` is the wake-up
+    // agent's only instruction at fire time, so it is required. There is no
+    // description→body fallback for user/agent-created one-off rows; the
+    // dispatcher's `task_prompt ?? task_description` fallback is retained only
+    // for system-generated rows that legitimately carry just a body in
+    // `task_description`.
+    expected: "non-empty string (the agent's instruction)",
+    hint:
+      "prompt is the wake-up agent's ONLY instruction at fire time — it is required. Write the full instruction here (what to do + why + the expected output). The separate `description` is just the optional short label shown in the schedule list; it is no longer used as the agent body.",
+    skillAnchor: "schedule#description-shape",
+    docsUrl: "agent-assets/skills/schedule/references/errors.md#prompt_required",
+    constraint: { type: "string", minLength: 1, required: true },
+  },
+  "schedule.prompt_too_long": {
+    expected: "string with <= 8000 characters",
+    hint:
+      "prompt exceeds the 8000-character cap (~2000 tokens) — the bound is a cost/context guardrail, not a model limit. Tighten the instruction to the goal, the key context, and the expected output. Move bulk reference material into a file the agent reads at fire time (e.g. a context/plans path) instead of inlining it.",
+    skillAnchor: "schedule#description-shape",
+    docsUrl: "agent-assets/skills/schedule/references/errors.md#prompt_too_long",
+    constraint: { type: "string", maxLength: 8000 },
+  },
+  "schedule.description_too_long": {
+    expected: "string with <= 200 characters",
+    hint:
+      "description is the short label shown in the schedule list — keep it under 200 characters. It is NOT the agent body; put the full instruction in `prompt`. (Omit `description` entirely and the list falls back to a prompt excerpt.)",
+    skillAnchor: "schedule#description-shape",
+    docsUrl: "agent-assets/skills/schedule/references/errors.md#description_too_long",
+    constraint: { type: "string", maxLength: 200 },
   },
   "schedule.task_context_field_missing": {
     expected: "string with >= 30 characters explaining why this task is being scheduled",
@@ -398,7 +428,7 @@ export const AGENT_ERROR_REGISTRY = {
   "context.write_forbidden": {
     expected: "path inside the daemon's write whitelist",
     hint:
-      "This file is read-only from the agent side. The whitelist covers state/today, plans/roadmap, plans/projects/*, policies/management-captures/*, identity/*, journal/agent, state/profile-questions, journal/weekly/*, journal/monthly/*, knowledge/dossiers/*, knowledge/entities/<domain>/<type-plural>/* (e.g. knowledge/entities/work/meetings/<slug>), state/inbox/*, state/scratch/*, and policies/routines/custom/*. Legacy paths (today.md, roadmap.md, user/*, rules/*, agent/journal) are server-side aliased for one minor release but the canonical names above are the future contract. Files outside this set are owned by the daemon or operator — GET /api/context/list/plans/projects to find a writable parent, or NOTIFY the user.",
+      "This file is read-only from the agent side. The whitelist covers state/today, plans/roadmap, plans/projects/*, policies/management-captures/*, identity/*, journal/agent, state/profile-questions, journal/weekly/*, journal/monthly/*, knowledge/dossiers/*, knowledge/entities/<domain>/<type-plural>/* (e.g. knowledge/entities/work/meetings/<slug>), research/* (browser-history cluster journals), state/inbox/*, state/scratch/*, and policies/routines/custom/*. Legacy paths (today.md, roadmap.md, user/*, rules/*, agent/journal) are server-side aliased for one minor release but the canonical names above are the future contract. Files outside this set are owned by the daemon or operator — GET /api/context/list/plans/projects to find a writable parent, or NOTIFY the user.",
     skillAnchor: "context#write-whitelist",
     legacyErrorCode: "forbidden",
     retryable: false,
@@ -2159,6 +2189,19 @@ export const AGENT_ERROR_REGISTRY = {
       "Body failed Zod validation. `details` carries per-field paths. Required: `actionType` (string), `result` (string). Use `<resource>.<verb>` shape for actionType (e.g. `mail.archive`).",
     skillAnchor: "agent#action-log",
     legacyErrorCode: "validation_error",
+  },
+  // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7 — structural anti-spoofing.
+  // Emitted by POST /api/notify (agent.ts) when an agent-originated outbound
+  // message carries one of the reserved purchase-confirmation markers. Without
+  // this entry composeIssue() degraded to the "(unregistered code)" placeholder
+  // envelope, so an LLM caller got no actionable remediation.
+  "agent.outbound_purchase_template_refused": {
+    expected: "an outbound message free of reserved purchase-confirmation markers",
+    hint:
+      'Refused: this message carries a reserved purchase-confirmation marker ("🔐 Aitne purchase confirmation", "[purchase-verify:", or "Approved on …"). Those markers are emitted exclusively by the daemon\'s unforgeable purchase-system-message-sender (MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7); an agent-originated message claiming to be a purchase confirmation is structurally blocked as a spoof. Remove the reserved marker text from `message` and resend a normal notification — do not compose purchase confirmations yourself.',
+    skillAnchor: "agent#notify",
+    legacyErrorCode: "outbound_purchase_template_refused",
+    retryable: false,
   },
 
   // ── /api/profile-questions/* — slot-filled probe for the interview queue.

@@ -11,10 +11,30 @@ import {
 } from "../core/quiet-hours.js";
 import type { SignalDetector } from "../core/signal-detector.js";
 import type { MessageHub } from "./message-hub.js";
+import { MessageDeliveryError } from "./message-hub.js";
 import { recordProactiveForwardDeliveries } from "../core/channel-timeline.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("notification-manager");
+
+/**
+ * Log a delivery failure at the severity it deserves. A
+ * `MessageDeliveryError` means the message could not reach the user for an
+ * environmental reason — no proactive destination configured, or the
+ * configured one is momentarily unavailable (e.g. WhatsApp relay flap). That
+ * is a WARN-class condition, not a code fault: the failed `notification_log`
+ * row already records the miss for the dashboard, so emitting it at ERROR just
+ * floods the error stream (it was the single largest error category in the
+ * daemon log) and buries genuine faults. Anything else is unexpected — keep it
+ * at ERROR.
+ */
+function logDeliveryFailure(err: unknown, msg: string): void {
+  if (err instanceof MessageDeliveryError) {
+    logger.warn({ err }, msg);
+    return;
+  }
+  logger.error({ err }, msg);
+}
 const NOOP_REPLY_ACTIVITY: ReplyActivityHandle = {
   stop: async () => {},
 };
@@ -387,7 +407,7 @@ export class NotificationManager implements INotificationManager {
           status: "failed",
         });
       }
-      logger.error({ err }, "Failed to send notification");
+      logDeliveryFailure(err, "Failed to send notification");
       return false;
     }
   }
@@ -551,7 +571,7 @@ export class NotificationManager implements INotificationManager {
           status: "failed",
         });
       }
-      logger.error({ err }, "Failed to send notification");
+      logDeliveryFailure(err, "Failed to send notification");
     }
   }
 

@@ -15,16 +15,16 @@ describe("pathAncestors", () => {
   it("returns the chain from the top-level component down to the parent", () => {
     expect(
       pathAncestors(
-        "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app",
+        "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app",
       ),
     ).toEqual([
       "/Users",
-      "/Users/shuto",
-      "/Users/shuto/Library",
-      "/Users/shuto/Library/Caches",
-      "/Users/shuto/Library/Caches/ms-playwright",
-      "/Users/shuto/Library/Caches/ms-playwright/chromium-1223",
-      "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64",
+      "/Users/example",
+      "/Users/example/Library",
+      "/Users/example/Library/Caches",
+      "/Users/example/Library/Caches/ms-playwright",
+      "/Users/example/Library/Caches/ms-playwright/chromium-1223",
+      "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64",
     ]);
   });
 
@@ -34,14 +34,14 @@ describe("pathAncestors", () => {
   });
 
   it("ignores duplicate / trailing slashes", () => {
-    expect(pathAncestors("/Users//shuto///foo/")).toEqual([
+    expect(pathAncestors("/Users//example///foo/")).toEqual([
       "/Users",
-      "/Users/shuto",
+      "/Users/example",
     ]);
   });
 
   it("rejects non-absolute paths", () => {
-    expect(() => pathAncestors("Users/shuto")).toThrow(/absolute/);
+    expect(() => pathAncestors("Users/example")).toThrow(/absolute/);
     expect(() => pathAncestors("")).toThrow(/absolute/);
   });
 });
@@ -53,8 +53,8 @@ describe("escapeSandboxLiteral", () => {
   });
 
   it("leaves ordinary POSIX paths unchanged", () => {
-    expect(escapeSandboxLiteral("/Users/shuto/Library/Caches")).toBe(
-      "/Users/shuto/Library/Caches",
+    expect(escapeSandboxLiteral("/Users/example/Library/Caches")).toBe(
+      "/Users/example/Library/Caches",
     );
   });
 });
@@ -62,20 +62,20 @@ describe("escapeSandboxLiteral", () => {
 describe("renderAncestorMetadataLiterals", () => {
   it("emits deduped, sorted, indented (literal ...) lines", () => {
     const rendered = renderAncestorMetadataLiterals([
-      "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app",
-      "/Users/shuto/.personal-agent/chromium-automation-anon/abc-123",
+      "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app",
+      "/Users/example/.personal-agent/chromium-automation-anon/abc-123",
     ]);
     expect(rendered).toBe(
       [
         '  (literal "/Users")',
-        '  (literal "/Users/shuto")',
-        '  (literal "/Users/shuto/.personal-agent")',
-        '  (literal "/Users/shuto/.personal-agent/chromium-automation-anon")',
-        '  (literal "/Users/shuto/Library")',
-        '  (literal "/Users/shuto/Library/Caches")',
-        '  (literal "/Users/shuto/Library/Caches/ms-playwright")',
-        '  (literal "/Users/shuto/Library/Caches/ms-playwright/chromium-1223")',
-        '  (literal "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64")',
+        '  (literal "/Users/example")',
+        '  (literal "/Users/example/.personal-agent")',
+        '  (literal "/Users/example/.personal-agent/chromium-automation-anon")',
+        '  (literal "/Users/example/Library")',
+        '  (literal "/Users/example/Library/Caches")',
+        '  (literal "/Users/example/Library/Caches/ms-playwright")',
+        '  (literal "/Users/example/Library/Caches/ms-playwright/chromium-1223")',
+        '  (literal "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64")',
       ].join("\n"),
     );
   });
@@ -102,9 +102,9 @@ describe("installSandboxExecProfile", () => {
       const paDataDir = await mkdtemp(join(tmpdir(), "aitne-sandbox-install-"));
       try {
         const binaryPath =
-          "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+          "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
         const userDataDir =
-          "/Users/shuto/.personal-agent/chromium-automation-anon/abc-123";
+          "/Users/example/.personal-agent/chromium-automation-anon/abc-123";
         const outPath = await installSandboxExecProfile({
           paDataDir,
           binaryPath,
@@ -131,14 +131,14 @@ describe("installSandboxExecProfile", () => {
         );
         for (const ancestor of [
           "/Users",
-          "/Users/shuto",
-          "/Users/shuto/.personal-agent",
-          "/Users/shuto/.personal-agent/chromium-automation-anon",
-          "/Users/shuto/Library",
-          "/Users/shuto/Library/Caches",
-          "/Users/shuto/Library/Caches/ms-playwright",
-          "/Users/shuto/Library/Caches/ms-playwright/chromium-1223",
-          "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64",
+          "/Users/example",
+          "/Users/example/.personal-agent",
+          "/Users/example/.personal-agent/chromium-automation-anon",
+          "/Users/example/Library",
+          "/Users/example/Library/Caches",
+          "/Users/example/Library/Caches/ms-playwright",
+          "/Users/example/Library/Caches/ms-playwright/chromium-1223",
+          "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64",
         ]) {
           expect(rendered).toContain(`(literal "${ancestor}")`);
         }
@@ -148,7 +148,7 @@ describe("installSandboxExecProfile", () => {
         // the .app are reached via the bundle subpath).
         expect(rendered).toContain(`(literal "${binaryPath}")`);
         expect(rendered).toContain(
-          '(subpath "/Users/shuto/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app")',
+          '(subpath "/Users/example/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app")',
         );
         expect(rendered).toContain(`(subpath "${userDataDir}")`);
       } finally {

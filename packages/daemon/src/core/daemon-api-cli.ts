@@ -48,6 +48,11 @@ const EVENT_CORRELATION_ID_ENV = "${DAEMON_API_EVENT_CORRELATION_ID_ENV}";
 const ALLOWED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]);
 const ALLOWED_HEADERS = new Set([
   "content-type",
+  // The shim sets a sensible default Accept itself; honour an explicit one
+  // too so a request-format hint the agent adds out of habit
+  // (\`-H "Accept: application/json"\`) does not fail the whole call and
+  // burn a retry turn.
+  "accept",
   "x-lock-id",
   "x-session-id",
   // DELEGATED-MODE-V2-DESIGN.md §4.2.3 — delegated-mode pathway. The
@@ -325,6 +330,9 @@ const SESSION_ID_ENV = "${DAEMON_API_SESSION_ID_ENV}";
 const EVENT_CORRELATION_ID_ENV = "${DAEMON_API_EVENT_CORRELATION_ID_ENV}";
 const ALLOWED_HEADERS = new Set([
   "content-type",
+  // Honour an explicit Accept (the shim also sets a default) so the agent's
+  // habitual \`-H "Accept: application/json"\` does not fail and trigger a retry.
+  "accept",
   "x-lock-id",
   "x-session-id",
   "x-turn-token",

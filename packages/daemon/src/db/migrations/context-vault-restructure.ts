@@ -601,9 +601,13 @@ function isEmptyDirectory(abs: string): boolean {
   let children: string[];
   try {
     children = readdirSync(abs);
+    /* c8 ignore start — statSync already confirmed a readable directory, so
+       readdirSync only throws on a permission flip between the two calls,
+       not reproducible in a unit test. */
   } catch {
     return false;
   }
+  /* c8 ignore stop */
   for (const child of children) {
     const childAbs = join(abs, child);
     let childStats;
@@ -613,12 +617,12 @@ function isEmptyDirectory(abs: string): boolean {
       return false;
     }
     if (childStats.isFile()) return false;
-    if (childStats.isDirectory()) {
-      if (!isEmptyDirectory(childAbs)) return false;
-      continue;
-    }
-    // Symlink / socket / device — refuse to count it as "empty".
-    return false;
+    /* c8 ignore start — a non-file, non-directory child is a socket / fifo /
+       device node (statSync follows symlinks, so a symlink never lands here),
+       which a unit test cannot portably create. */
+    if (!childStats.isDirectory()) return false;
+    /* c8 ignore stop */
+    if (!isEmptyDirectory(childAbs)) return false;
   }
   return true;
 }
@@ -893,6 +897,10 @@ function planInternalWikiMoves(args: {
     if (!row.root_path.startsWith(legacyWikiBase)) continue;
     const tail = row.root_path.slice(legacyWikiBase.length);
     const newPath = join(newWikiBase, tail).replace(/[\\/]+$/, "");
+    // `newWikiBase` (<contextDir>/knowledge/wiki) can never equal
+    // `legacyWikiBase` (<dataDir>/wiki) for a real layout, so a legacy root
+    // never maps onto itself.
+    /* c8 ignore next */
     if (newPath === row.root_path) continue;
     moves.push({
       workspaceId: row.id,
@@ -1316,16 +1324,19 @@ function verifyMigrationCompleteness(args: {
     "projects/%",
     "git/%",
   ];
+  // `SELECT COUNT(*)` always yields exactly one row, so each `.get()`
+  // below is non-null — assert it directly rather than carrying a dead
+  // `row?.c ?? 0` defensive branch that no input can exercise.
   if (tableHas("md_file_snapshots")) {
     for (const pat of legacyPathLikePatterns) {
       const row = db
         .prepare<[string], { c: number }>(
           "SELECT COUNT(*) AS c FROM md_file_snapshots WHERE file_path LIKE ?",
         )
-        .get(pat);
-      if ((row?.c ?? 0) > 0) {
+        .get(pat)!;
+      if (row.c > 0) {
         throw new VerificationFailed(
-          `md_file_snapshots.file_path still has ${row!.c} rows matching legacy prefix ${pat}`,
+          `md_file_snapshots.file_path still has ${row.c} rows matching legacy prefix ${pat}`,
         );
       }
     }
@@ -1335,10 +1346,10 @@ function verifyMigrationCompleteness(args: {
       .prepare<[], { c: number }>(
         "SELECT COUNT(*) AS c FROM entities WHERE path IS NOT NULL AND path NOT LIKE 'knowledge/entities/%'",
       )
-      .get();
-    if ((stale?.c ?? 0) > 0) {
+      .get()!;
+    if (stale.c > 0) {
       throw new VerificationFailed(
-        `entities.path has ${stale!.c} rows not under knowledge/entities/`,
+        `entities.path has ${stale.c} rows not under knowledge/entities/`,
       );
     }
   }
@@ -1347,10 +1358,10 @@ function verifyMigrationCompleteness(args: {
       .prepare<[], { c: number }>(
         "SELECT COUNT(*) AS c FROM entity_source_keys WHERE path IS NOT NULL AND path NOT LIKE 'knowledge/entities/%'",
       )
-      .get();
-    if ((stale?.c ?? 0) > 0) {
+      .get()!;
+    if (stale.c > 0) {
       throw new VerificationFailed(
-        `entity_source_keys.path has ${stale!.c} rows not under knowledge/entities/`,
+        `entity_source_keys.path has ${stale.c} rows not under knowledge/entities/`,
       );
     }
   }
@@ -1359,10 +1370,10 @@ function verifyMigrationCompleteness(args: {
       .prepare<[], { c: number }>(
         "SELECT COUNT(*) AS c FROM managed_tasks WHERE output_path IS NOT NULL AND output_path NOT LIKE 'knowledge/entities/%' AND output_path != ''",
       )
-      .get();
-    if ((stale?.c ?? 0) > 0) {
+      .get()!;
+    if (stale.c > 0) {
       throw new VerificationFailed(
-        `managed_tasks.output_path has ${stale!.c} rows not under knowledge/entities/`,
+        `managed_tasks.output_path has ${stale.c} rows not under knowledge/entities/`,
       );
     }
   }
@@ -1489,9 +1500,13 @@ function captureUnmanifestedEntries(contextDir: string): UnmanifestedCapture[] {
           let content = "";
           try {
             content = readFileSync(childAbs, "utf-8");
+            /* c8 ignore start — readFileSync only throws on an unreadable
+               (permission-denied / special) file, not portably reproducible
+               in a tempdir unit test. */
           } catch {
             content = "(unreadable binary or permission denied)";
           }
+          /* c8 ignore stop */
           writeFileSync(
             target,
             `# Legacy unmanifested entry\n\n` +
@@ -1505,12 +1520,16 @@ function captureUnmanifestedEntries(contextDir: string): UnmanifestedCapture[] {
           from: `${legacy}/${child}`,
           to: `state/scratch/legacy-unmanifested-${dateStr}-${slug}.md`,
         });
+        /* c8 ignore start — the copy/write/rm of a stat-able entry only
+           throws on a mid-migration fs race (permission flip, disk full),
+           which a unit test cannot portably trigger. */
       } catch (err) {
         logger.warn(
           { err, legacy, child },
           "captureUnmanifestedEntries: failed to capture entry; leaving in place",
         );
       }
+      /* c8 ignore stop */
     }
   }
 
@@ -1559,7 +1578,14 @@ function removeEmptyLegacyDirs(contextDir: string): void {
           const childAbs = join(abs, child);
           try {
             if (readdirSync(childAbs).length === 0) {
-              rmSync(childAbs, { recursive: false, force: true });
+              // `recursive: true` so an empty `git/<slug>/` directory is
+              // actually removed — `rmSync` with `recursive: false` throws
+              // EISDIR on any directory (force only suppresses ENOENT), so
+              // without this the husk survived and the parent `git/` could
+              // never be swept. The `readdirSync().length === 0` guard above
+              // proves the directory is empty, so recursion cannot delete
+              // user data.
+              rmSync(childAbs, { recursive: true, force: true });
             }
           } catch {
             /* ignore */
@@ -1570,9 +1596,13 @@ function removeEmptyLegacyDirs(contextDir: string): void {
           if (readdirSync(abs).length === 0) {
             rmSync(abs, { recursive: true, force: true });
           }
+          /* c8 ignore start — `git/` is a real directory so readdirSync
+             cannot throw, and the rmSync only runs when proven empty, so
+             this defensive catch is unreachable in tests. */
         } catch {
           /* ignore */
         }
+        /* c8 ignore stop */
       }
     } catch {
       /* ignore — surfaces at verification */
@@ -1651,3 +1681,24 @@ export function assessVaultVersion(args: {
   }
   return { action: "throw-unknown-version", observedVersion: observed };
 }
+
+/**
+ * Internal helpers surfaced for the peer test only. These are pure-ish
+ * units (path translation, manifest expansion, the verification sweep,
+ * the unmanifested-capture safety net) whose individual branches are
+ * awkward to drive through the full `runContextVaultRestructure` orchestrator
+ * — exposing them lets the test exercise each branch directly. Runtime
+ * callers must continue to go through the exported entry points above.
+ */
+export const __testing = {
+  verifyMigrationCompleteness,
+  expandEntry,
+  isEmptyDirectory,
+  captureUnmanifestedEntries,
+  removeEmptyLegacyDirs,
+  translateSnapshotStem,
+  translateEntityPath,
+  planOutOfContextDirMoves,
+  planInternalWikiMoves,
+  VerificationFailed,
+};

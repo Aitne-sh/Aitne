@@ -270,6 +270,8 @@ export default defineConfig({
         "packages/daemon/src/api/routes/repositories.ts", // unified-repositories CRUD + run + triggers + management (HTTP route handlers; pure validation + slug logic lives in repositories-store + trigger-evaluator)
         "packages/daemon/src/api/routes/backends.ts",     // backend management routes
         "packages/daemon/src/core/management-md.ts",      // chokidar watcher + fs bootstrap I/O
+        "packages/daemon/src/core/agents/loader-watcher.ts", // chokidar watcher glue (AGENT_DEFINITIONS §6.2); reload logic lives in loader.ts (covered), watcher behaviour pinned by loader-watcher.test.ts — mirrors management-md.ts rationale
+        "packages/daemon/src/core/agents/loader-boot.ts", // boot wiring (AGENT_DEFINITIONS §6.1 Phase-7) — assembles the loader's snapshot/SSE/recurring ports + dirs over the real db/fs and starts the watcher; pure mapping (recurring-schedule-adapter) + the loader core are covered, this is the index.ts-style glue layer
         "packages/daemon/src/api/routes/voice.ts",        // Whisper install handler — spawns aitne restart + lazy-imports transformers, so the success path is inherently I/O
         "packages/daemon/src/core/system-reset.ts",       // pre-existing gap: runStep + clearAllSecrets defensive catches
         "packages/daemon/src/core/retention.ts",          // DB retention queries
@@ -621,6 +623,14 @@ export default defineConfig({
         // because the file mixes pure + I/O surface in a single TS module the
         // exclusion targets it as a whole rather than splitting into two files.
         "packages/daemon/src/services/browser-history/detectors/registry.ts",
+        // On-demand Playwright Chromium installer — `spawn(node, [cli.js,
+        // install, chromium])` + child stdout/stderr progress parsing +
+        // exit/error event handlers + `createRequire(...).resolve` cli
+        // probe. Pure status accessor + DEFAULT_STATUS are trivial; the
+        // file's substance is subprocess lifecycle that matches the sibling
+        // `chromium-launcher.ts` / `lifecycle/supervisor.ts` exclusion
+        // rationale (process-mock-blocked by ESM).
+        "packages/daemon/src/services/browser-history/lifecycle/chromium-install.ts",
         "packages/daemon/src/services/browser-history/lifecycle/chromium-launcher.ts",
         "packages/daemon/src/services/browser-history/lifecycle/platform.ts",
         "packages/daemon/src/services/browser-history/lifecycle/supervisor.ts",

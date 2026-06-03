@@ -133,9 +133,12 @@ Apply to `POST /api/schedule` and `POST /api/schedule/batch`.
 
 | Code | When | Fix |
 |---|---|---|
-| <a id="task_type_unknown"></a> `schedule.task_type_unknown` | `taskType` is not `wake` / `dm_session` / `check` / `dm`. | Pick the matching type. Use `/api/schedule/dm` for the precomposed-DM variant. |
-| <a id="description_too_short"></a> `schedule.description_too_short` | `description` / `taskDescription` < 20 chars. | Expand the description so the wake-up agent has enough context to act. |
-| <a id="prompt_too_short"></a> `schedule.prompt_too_short` | `prompt` / `taskPrompt` is set but < 20 chars. | Either remove it (description doubles as the body) or expand it. |
+| <a id="task_type_unknown"></a> `schedule.task_type_unknown` | **Batch only** (`/api/schedule/batch` rows): `taskType` is not one of the closed set `wake` / `dm_session` / `check` / `dm`. On the single `POST /api/schedule`, `taskType` is a free-form provenance label (no allowlist) — this code fires there only when `taskType` is missing or not a string. | Batch: pick one of the four. Single endpoint: send any non-empty string (`wake` is the convention for agent wake-ups). Use `/api/schedule/dm` for the precomposed-DM variant. |
+| <a id="prompt_required"></a> `schedule.prompt_required` | `POST /api/schedule` (or a PATCH that sets it) with `prompt` missing or empty. | `prompt` is the wake-up agent's only instruction — write the full instruction there. `description` is just the optional list label, no longer the agent body. |
+| <a id="prompt_too_long"></a> `schedule.prompt_too_long` | `prompt` / `taskPrompt` > 8000 chars. | Tighten the instruction (goal + key context + expected output); move bulk reference material into a file the agent reads at fire time instead of inlining it. |
+| <a id="description_too_long"></a> `schedule.description_too_long` | `description` > 200 chars. | The description is the short list label — keep it under 200 chars and put the full instruction in `prompt`. |
+| <a id="description_too_short"></a> `schedule.description_too_short` | `taskDescription` (batch) / recurring `description` < 20 chars. | Expand the body so the wake-up agent has enough context to act. (Does not apply to the single `/api/schedule` row, where `description` is an optional label.) |
+| <a id="prompt_too_short"></a> `schedule.prompt_too_short` | Batch `taskPrompt` / recurring `prompt` is set but < 20 chars. | Either remove it (the description body is used) or expand it. (The single `/api/schedule` row requires `prompt`; see `schedule.prompt_required`.) |
 
 ### taskContext required fields
 

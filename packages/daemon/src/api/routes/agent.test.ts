@@ -469,7 +469,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2026-12-01T10:00:00Z",
           taskType: "wake",
-          description: "Follow up on the pending pull request review and merge",
+          prompt: "Follow up on the pending pull request review and merge",
         }),
       });
 
@@ -505,7 +505,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: future,
           taskType: "wake",
-          description: "Hourly docker health check — alert if any container is in restart loop",
+          prompt: "Hourly docker health check — alert if any container is in restart loop",
           tier: "lite",
         }),
       });
@@ -543,7 +543,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: future,
           taskType: "wake",
-          description: "Legacy-shaped caller using taskContext.tier_override only",
+          prompt: "Legacy-shaped caller using taskContext.tier_override only",
           taskContext: { tier_override: "lite" },
         }),
       });
@@ -566,7 +566,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: future,
           taskType: "wake",
-          description: "Both knobs set — top-level tier must win to keep dispatch unambiguous",
+          prompt: "Both knobs set — top-level tier must win to keep dispatch unambiguous",
           tier: "high",
           taskContext: { tier_override: "lite" },
         }),
@@ -591,7 +591,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: future,
           taskType: "wake",
-          description: "Opus-grade multi-file PR review for the release branch handoff",
+          prompt: "Opus-grade multi-file PR review for the release branch handoff",
           tier: "high",
         }),
       });
@@ -622,7 +622,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: future,
           taskType: "wake",
-          description: "Check the ordinary follow-up status and notify if needed",
+          prompt: "Check the ordinary follow-up status and notify if needed",
         }),
       });
 
@@ -641,7 +641,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: future,
           taskType: "wake",
-          description: "Check the long-horizon follow-up status and notify if needed",
+          prompt: "Check the long-horizon follow-up status and notify if needed",
         }),
       });
 
@@ -659,7 +659,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: past,
           taskType: "wake",
-          description: "Follow up on the pending pull request review and merge",
+          prompt: "Follow up on the pending pull request review and merge",
         }),
       });
 
@@ -707,7 +707,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Send prep note to the user",
+            prompt: "Send prep note to the user",
           }),
         });
 
@@ -736,16 +736,15 @@ describe("Agent API routes", () => {
       }
     });
 
-    it("rejects invalid body (short description triggers zod validation)", async () => {
+    it("rejects invalid body (missing prompt triggers zod validation)", async () => {
       const app = createAgentRoutes({ db } as never);
 
       const res = await app.request("/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          time: "not-a-date",
+          time: "2099-12-01T10:00:00Z",
           taskType: "wake",
-          description: "too short",
         }),
       });
 
@@ -755,7 +754,7 @@ describe("Agent API routes", () => {
         errors: Array<{ code: string; field: string; hint: string }>;
       };
       expect(body.ok).toBe(false);
-      expect(body.errors.some((e) => e.code === "schedule.description_too_short")).toBe(true);
+      expect(body.errors.some((e) => e.code === "schedule.prompt_required")).toBe(true);
     });
 
     it("returns 400 with an agent-consumable envelope for an invalid body shape", async () => {
@@ -1000,7 +999,7 @@ describe("Agent API routes", () => {
       const res = await app.request("/schedule/1", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: "Updated task description that is long enough for validation" }),
+        body: JSON.stringify({ prompt: "Updated task description that is long enough for validation" }),
       });
 
       expect(res.status).toBe(200);
@@ -1026,7 +1025,7 @@ describe("Agent API routes", () => {
       const res = await app.request("/schedule/999", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: "Updated description that is at least twenty characters" }),
+        body: JSON.stringify({ prompt: "Updated description that is at least twenty characters" }),
       });
 
       expect(res.status).toBe(404);
@@ -1043,7 +1042,7 @@ describe("Agent API routes", () => {
       const res = await app.request("/schedule/1", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: "Updated description that is at least twenty characters" }),
+        body: JSON.stringify({ prompt: "Updated description that is at least twenty characters" }),
       });
 
       expect(res.status).toBe(409);
@@ -1721,7 +1720,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Send prep note to the user",
+            prompt: "Send prep note to the user",
             taskContext: {
               agentPlan: {
                 date: "2099-04-21",
@@ -1774,7 +1773,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Task to exercise the no-timezone config path",
+            prompt: "Task to exercise the no-timezone config path",
           }),
         });
         expect(res.status).toBe(200);
@@ -1793,7 +1792,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Send prep note to the user",
+          prompt: "Send prep note to the user",
         }),
       });
 
@@ -1821,7 +1820,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Send prep note to the user",
+            prompt: "Send prep note to the user",
           }),
         });
 
@@ -1857,7 +1856,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-22T09:00:00Z",
             taskType: "wake",
-            description: "Send prep note to the user",
+            prompt: "Send prep note to the user",
           }),
         });
 
@@ -1893,7 +1892,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T10:00:00Z",
             taskType: "wake",
-            description: "Different time task for today's follow-up",
+            prompt: "Different time task for today's follow-up",
           }),
         });
 
@@ -1930,7 +1929,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Completely different description that does not match",
+            prompt: "Completely different description that does not match",
           }),
         });
 
@@ -1969,7 +1968,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Unrelated description matches neither alpha nor beta",
+            prompt: "Unrelated description matches neither alpha nor beta",
           }),
         });
 
@@ -2008,7 +2007,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Task Beta description",
+            prompt: "Task Beta description",
             taskContext: { trigger: "notify" },
           }),
         });
@@ -2047,7 +2046,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Task Gamma check-in follow-up",
+            prompt: "Task Gamma check-in follow-up",
             taskContext: { trigger: "check-in" },
           }),
         });
@@ -2086,7 +2085,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Task Wake action for today's follow-up",
+            prompt: "Task Wake action for today's follow-up",
             taskContext: { trigger: "wake" },
           }),
         });
@@ -2125,7 +2124,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Task DM action for today's morning follow-up",
+            prompt: "Task DM action for today's morning follow-up",
             taskContext: { agentPlanTrigger: "DM" },
           }),
         });
@@ -2163,7 +2162,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Execute scheduled task",
+            prompt: "Execute scheduled task",
             taskContext: { trigger: "notify" },
           }),
         });
@@ -2203,7 +2202,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Study Task for today",
+            prompt: "Study Task for today",
             taskContext: { category: "study" },
           }),
         });
@@ -2242,7 +2241,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Personal Task action",
+            prompt: "Personal Task action",
             taskContext: { category: "personal" },
           }),
         });
@@ -2281,7 +2280,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Home Task action for today's chores",
+            prompt: "Home Task action for today's chores",
             taskContext: { category: "home" },
           }),
         });
@@ -2320,7 +2319,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Work Task action for today's morning",
+            prompt: "Work Task action for today's morning",
             taskContext: { agentPlanCategory: "work" },
           }),
         });
@@ -2348,7 +2347,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Task that explicitly pins opus model for high-quality work",
+          prompt: "Task that explicitly pins opus model for high-quality work",
           model: "opus",
         }),
       });
@@ -2377,7 +2376,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Task that explicitly pins claude-opus-4-8 for a one-off run",
+          prompt: "Task that explicitly pins claude-opus-4-8 for a one-off run",
           model: "claude-opus-4-8",
         }),
       });
@@ -2409,7 +2408,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Task that tries to set both tier and model at once",
+          prompt: "Task that tries to set both tier and model at once",
           model: "claude-opus-4-7",
           tier: "high",
         }),
@@ -2427,7 +2426,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Task that pins a non-existent model id",
+          prompt: "Task that pins a non-existent model id",
           model: "gpt-5.4-turbo",
         }),
       });
@@ -2451,7 +2450,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "2099-04-21T09:00:00Z",
           taskType: "wake",
-          description: "Task that pins a deprecated model id — should still persist",
+          prompt: "Task that pins a deprecated model id — should still persist",
           model: "claude-opus-4-6",
         }),
       });
@@ -2481,7 +2480,7 @@ describe("Agent API routes", () => {
         body: JSON.stringify({
           time: "totally-not-a-date-string",
           taskType: "wake",
-          description: "Description that is long enough to pass zod min length",
+          prompt: "Description that is long enough to pass zod min length",
         }),
       });
 
@@ -2510,7 +2509,7 @@ describe("Agent API routes", () => {
       const res = await app.request("/schedule/1", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: "Updated description that is at least twenty chars" }),
+        body: JSON.stringify({ prompt: "Updated description that is at least twenty chars" }),
       });
 
       expect(res.status).toBe(400);
@@ -2605,14 +2604,14 @@ describe("Agent API routes", () => {
       const res = await app.request("/schedule/1", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: "Updated description that is at least twenty chars" }),
+        body: JSON.stringify({ prompt: "Updated description that is at least twenty chars" }),
       });
 
       // The row's status is 'running' which means it's no longer pending
       expect(res.status).toBe(409);
     });
 
-    it("clears prompt when prompt: null is provided", async () => {
+    it("rejects prompt: null — the body cannot be cleared (no description fallback)", async () => {
       const app = createAgentRoutes({ db } as never);
 
       db.prepare(
@@ -2626,10 +2625,11 @@ describe("Agent API routes", () => {
         body: JSON.stringify({ prompt: null }),
       });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(400);
+      // The existing prompt is preserved — no change persisted.
       const row = db.prepare("SELECT task_prompt FROM agent_schedule WHERE id = 1")
         .get() as { task_prompt: string | null };
-      expect(row.task_prompt).toBeNull();
+      expect(row.task_prompt).toBe("existing-prompt");
     });
 
     it("updates message field on dm-type schedule", async () => {
@@ -2765,7 +2765,7 @@ describe("Agent API routes", () => {
           body: JSON.stringify({
             time: "2099-04-21T09:00:00Z",
             taskType: "wake",
-            description: "Execute scheduled task for today",
+            prompt: "Execute scheduled task for today",
             taskContext: { category: "study" },
           }),
         });
@@ -3548,7 +3548,7 @@ describe("Agent API routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           taskType: "wake",
-          description: "a".repeat(25),
+          prompt: "a".repeat(25),
         }),
       });
       expect(res.status).toBe(400);
@@ -3566,7 +3566,7 @@ describe("Agent API routes", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           time: new Date(Date.now() + 3600_000).toISOString(),
-          description: "a".repeat(25),
+          prompt: "a".repeat(25),
         }),
       });
       expect(res.status).toBe(400);
@@ -3661,7 +3661,7 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: "not-a-date",
               taskType: "wake",
-              description: "a".repeat(25),
+              prompt: "a".repeat(25),
             }),
           });
         },
@@ -3677,14 +3677,60 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: new Date(Date.now() - 120_000).toISOString(),
               taskType: "wake",
-              description: "a".repeat(25),
+              prompt: "a".repeat(25),
             }),
           });
         },
       },
       {
+        // The single `/schedule` row no longer floors `description` (it is an
+        // optional label and `prompt` is the required body). The 20-char floor
+        // survives on batch rows, so exercise it there.
         code: "schedule.description_too_short",
-        label: "POST /schedule with short description",
+        label: "POST /schedule/batch with short taskDescription",
+        request: async () => {
+          const app = createAgentRoutes({ db } as never);
+          const row = validBatchRow();
+          row.taskDescription = "tiny";
+          return app.request("/schedule/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: [row] }),
+          });
+        },
+      },
+      {
+        // `taskPrompt` keeps its 20-char floor on batch rows (it is an
+        // optional override there). The single-row `/schedule` prompt is
+        // required and only emits prompt_required / prompt_too_long.
+        code: "schedule.prompt_too_short",
+        label: "POST /schedule/batch with short taskPrompt",
+        request: async () => {
+          const app = createAgentRoutes({ db } as never);
+          const row = validBatchRow();
+          row.taskPrompt = "x";
+          return app.request("/schedule/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows: [row] }),
+          });
+        },
+      },
+      {
+        code: "schedule.prompt_required",
+        label: "POST /schedule with no prompt",
+        request: async () => {
+          const app = createAgentRoutes({ db } as never);
+          return app.request("/schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ time: futureIso(), taskType: "wake" }),
+          });
+        },
+      },
+      {
+        code: "schedule.prompt_too_long",
+        label: "POST /schedule with an over-cap prompt",
         request: async () => {
           const app = createAgentRoutes({ db } as never);
           return app.request("/schedule", {
@@ -3693,14 +3739,14 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: futureIso(),
               taskType: "wake",
-              description: "tiny",
+              prompt: "x".repeat(8001),
             }),
           });
         },
       },
       {
-        code: "schedule.prompt_too_short",
-        label: "POST /schedule with short prompt override",
+        code: "schedule.description_too_long",
+        label: "POST /schedule with an over-cap description label",
         request: async () => {
           const app = createAgentRoutes({ db } as never);
           return app.request("/schedule", {
@@ -3709,8 +3755,8 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: futureIso(),
               taskType: "wake",
-              description: "a".repeat(25),
-              prompt: "x",
+              prompt: "A valid instruction for the wake-up agent.",
+              description: "x".repeat(201),
             }),
           });
         },
@@ -3726,7 +3772,7 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: futureIso(),
               taskType: "wake",
-              description: "a".repeat(25),
+              prompt: "a".repeat(25),
               model: "haiku",
             }),
           });
@@ -3744,7 +3790,7 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: futureIso(),
               taskType: "wake",
-              description: "a".repeat(25),
+              prompt: "a".repeat(25),
               model: "claude-opus-4-7",
               tier: "high",
             }),
@@ -3762,7 +3808,7 @@ describe("Agent API routes", () => {
             body: JSON.stringify({
               time: futureIso(),
               taskType: "wake",
-              description: "a".repeat(25),
+              prompt: "a".repeat(25),
               tier: "ultra",
             }),
           });
@@ -3778,7 +3824,7 @@ describe("Agent API routes", () => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               time: futureIso(),
-              description: "a".repeat(25),
+              prompt: "a".repeat(25),
             }),
           });
         },

@@ -1749,7 +1749,7 @@ describe("Daemon API", () => {
         body: JSON.stringify({
           time: "2099-04-02T15:00:00Z",
           taskType: "wake",
-          description: "Check calendar events and send summary to user",
+          prompt: "Check calendar events and send summary to user",
         }),
       });
       expect(res.status).toBe(200);
@@ -1765,7 +1765,7 @@ describe("Daemon API", () => {
         body: JSON.stringify({
           time: "2099-04-05T07:00:00-04:00",
           taskType: "wake",
-          description: "Send morning briefing with today's schedule to user",
+          prompt: "Send morning briefing with today's schedule to user",
         }),
       });
       expect(res.status).toBe(200);
@@ -1786,7 +1786,7 @@ describe("Daemon API", () => {
         body: JSON.stringify({
           time: "next Tuesday",
           taskType: "wake",
-          description: "This task has an invalid time format that should be rejected",
+          prompt: "This task has an invalid time format that should be rejected",
         }),
       });
       expect(res.status).toBe(400);
@@ -2089,19 +2089,19 @@ describe("Daemon API", () => {
       );
     });
 
-    it("PATCH /schedule/:id sets and then clears the prompt override", async () => {
+    it("PATCH /schedule/:id changes the prompt body and rejects clearing it to null", async () => {
       const ins = db.prepare(
-        `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, status)
-         VALUES ('2099-05-01 10:00:00', 'wake', 'Description doubles as agent body', 'pending')`,
+        `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+         VALUES ('2099-05-01 10:00:00', 'wake', 'Short label', 'original instruction body', 'pending')`,
       ).run();
       const id = Number(ins.lastInsertRowid);
 
-      // Set the override.
+      // Change the instruction body.
       const setRes = await app.request(`/api/schedule/${id}`, {
         method: "PATCH",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
-          prompt: "Detailed override that takes precedence over description",
+          prompt: "Detailed instruction body the agent runs at fire time",
         }),
       });
       expect(setRes.status).toBe(200);
@@ -2109,20 +2109,23 @@ describe("Daemon API", () => {
         .prepare("SELECT task_prompt FROM agent_schedule WHERE id = ?")
         .get(id) as { task_prompt: string | null };
       expect(row.task_prompt).toBe(
-        "Detailed override that takes precedence over description",
+        "Detailed instruction body the agent runs at fire time",
       );
 
-      // Clear it via prompt: null — dispatcher should fall back to description.
+      // Clearing the body is rejected — the dispatcher reads task_prompt
+      // directly, with no task_description fallback. The body is preserved.
       const clearRes = await app.request(`/api/schedule/${id}`, {
         method: "PATCH",
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ prompt: null }),
       });
-      expect(clearRes.status).toBe(200);
+      expect(clearRes.status).toBe(400);
       row = db
         .prepare("SELECT task_prompt FROM agent_schedule WHERE id = ?")
         .get(id) as { task_prompt: string | null };
-      expect(row.task_prompt).toBeNull();
+      expect(row.task_prompt).toBe(
+        "Detailed instruction body the agent runs at fire time",
+      );
     });
 
     it("PATCH /schedule/:id rejects prompt on dm type", async () => {

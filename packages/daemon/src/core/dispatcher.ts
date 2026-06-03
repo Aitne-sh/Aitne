@@ -53,6 +53,9 @@ import type { RoadmapWriteLockManager } from "./roadmap-write-lock.js";
 import type { AgentWriteTracker } from "../safety/agent-write-tracker.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import type { VoiceTranscriber } from "../services/voice/transcriber.js";
+import type { AgentExecutionTracker } from "./agents/agent-execution-tracker.js";
+import type { AgentExecutionTrigger } from "../db/agent-executions-store.js";
+import type { AgentIdResolutionInput } from "./agents/agent-id-resolver.js";
 import {
   CUSTOM_BANG_COMMAND_SOURCE,
   getUserBangCommandById,
@@ -356,6 +359,17 @@ export class EventDispatcher {
   } | null = null;
 
   /**
+   * AGENT_DEFINITIONS_DESIGN.md §8 — per-firing execution recorder. Wired
+   * post-construction via {@link setAgentExecutionTracker} (the recorder +
+   * contextDir + SSE deps only exist after the event-pipeline factory runs).
+   * `null` in tests / pre-wire → no execution rows are written, preserving the
+   * legacy dispatch shape. The ResultProcessor reaches it through a call-time
+   * closure (see the constructor's `recordExecutionOutcome` dep) so it stays
+   * live even though the tracker is set after the processor is built.
+   */
+  private agentExecutionTracker: AgentExecutionTracker | null = null;
+
+  /**
    * Notify-dedup tracking — set of correlationIds for in-flight events
    * that have already invoked `POST /api/notify` from inside the agent
    * run. The `/api/notify` route calls `markEventNotified` (via api-deps)
@@ -501,6 +515,12 @@ export class EventDispatcher {
       notifiedEvents: this.notifiedEvents,
       isReactive: (event) => this.isReactive(event),
       hasMessageBackendMetadataColumns: this.hasMessageBackendMetadataColumns,
+      // AGENT_DEFINITIONS_DESIGN.md §8.2 — feed the terminal LLM-level outcome
+      // (cost / soft-error) to the execution tracker so the dispatch boundary
+      // settles the row with the accurate result. Call-time closure → live even
+      // though the tracker is wired after this processor is constructed.
+      recordExecutionOutcome: (event, outcome) =>
+        this.agentExecutionTracker?.recordOutcome(event.correlationId, outcome),
     });
     // docs/design/appendices/routine-data-acquisition.md Phase 4 / D1 — shared pre-pass
     // runner consumed by HourlyCheckCoordinator (D3), MorningRoutineRunner
@@ -904,6 +924,78 @@ export class EventDispatcher {
     broadcastEvent: (data: unknown) => void;
   } | null): void {
     this.eventBroadcaster = broadcaster;
+  }
+
+  /**
+   * Wire the per-firing execution tracker (AGENT_DEFINITIONS_DESIGN.md §8).
+   * Optional — when unset, no `agent_executions` rows are written and dispatch
+   * behaves exactly as before. Set once at boot from the event-pipeline factory.
+   */
+  setAgentExecutionTracker(tracker: AgentExecutionTracker): void {
+    this.agentExecutionTracker = tracker;
+  }
+
+  /**
+   * Open an execution row for an agent-resolvable firing (§8.1), called from
+   * `dispatchSafe` after the setup / cost gates pass so a skipped firing never
+   * records an execution. Reactive DMs resolve to no Agent (no routine / no
+   * schedule row / no `task_context.agent_id`) and are a near-free no-op.
+   */
+  private beginAgentExecution(event: Event): void {
+    if (this.agentExecutionTracker === null) return;
+    const taskContext = isScheduledEvent(event)
+      ? (event.taskContext as Record<string, unknown> | undefined)
+      : undefined;
+    const routineEvent = isRoutineEvent(event) ? (event as RoutineEvent) : null;
+    const phase = routineEvent
+      ? (routineEvent.data as { phase?: unknown } | undefined)?.phase
+      : undefined;
+    // §8.1 step 3: `task_context.routine` → built-in registry slug. A
+    // `RoutineEvent` carries the routine on the event; a built-in fired via
+    // `queue_wake` (only `morning-routine`) arrives as a `scheduled.task`
+    // whose routine lives in `task_context` — without this fallback that
+    // flagship daily firing would resolve to no Agent and record no rollup.
+    const taskContextRoutine =
+      typeof taskContext?.routine === "string" ? taskContext.routine : null;
+    const taskContextPhase =
+      typeof taskContext?.phase === "string" ? taskContext.phase : null;
+    const resolution: AgentIdResolutionInput = {
+      taskContextAgentId:
+        typeof taskContext?.agent_id === "string" ? taskContext.agent_id : null,
+      recurringScheduleId:
+        typeof taskContext?.recurringScheduleId === "number"
+          ? taskContext.recurringScheduleId
+          : null,
+      routine: routineEvent ? routineEvent.routine : taskContextRoutine,
+      routinePhase: routineEvent
+        ? typeof phase === "string"
+          ? phase
+          : null
+        : taskContextPhase,
+    };
+    const scheduleRowId =
+      isScheduledEvent(event) && event.scheduleId !== undefined
+        ? event.scheduleId
+        : null;
+    this.agentExecutionTracker.begin(event.correlationId, resolution, {
+      scheduleRowId,
+      trigger: this.resolveExecutionTrigger(event, taskContext),
+    });
+  }
+
+  /** Classify an execution's trigger for the rollup row (§5.2). */
+  private resolveExecutionTrigger(
+    event: Event,
+    taskContext: Record<string, unknown> | undefined,
+  ): AgentExecutionTrigger {
+    // run-now (§9.4) stamps `task_context.trigger='manual'` — honour it so the
+    // rollup records `manual`, not the `cron` the isScheduledEvent fallback
+    // would assign (the queued row IS a scheduled event). `triggeredBy` is a
+    // legacy alias kept for any dashboard-initiated flow that sets it.
+    if (taskContext?.trigger === "manual" || taskContext?.triggeredBy === "dashboard") return "manual";
+    if (taskContext?.trigger === "self") return "self";
+    if (isRoutineEvent(event) || isScheduledEvent(event)) return "cron";
+    return "event";
   }
 
   /**
@@ -1428,11 +1520,19 @@ export class EventDispatcher {
         }
       }
 
+      // AGENT_DEFINITIONS_DESIGN.md §8.1 — open the execution row after the
+      // setup / cost gates pass (a gated firing records no execution) and
+      // before dispatch runs. Resolves to no Agent (→ no-op) for reactive DMs.
+      this.beginAgentExecution(event);
+
       if (broadcastRoutine) {
         this.broadcastRoutineProgress("routine_started", broadcastRoutine);
         routineStartBroadcast = true;
       }
       await this.dispatch(event);
+      // Settle the execution on the success side (the ResultProcessor has
+      // already fed the terminal cost / isError via `recordOutcome`). Idempotent.
+      this.agentExecutionTracker?.completeFromDispatch(event.correlationId);
       const durationMs = Date.now() - startMs;
       logger.info({ eventType: event.type, source: event.source, durationMs }, "Event processing completed");
       if (broadcastRoutine) {
@@ -1447,12 +1547,21 @@ export class EventDispatcher {
         { err, eventType: event.type, source: event.source, durationMs },
         "Event processing failed",
       );
+      // Log the error row BEFORE settling the execution: the `agent_id`
+      // resolver reads the tracker's active-execution map, which
+      // `completeFromDispatch` consumes — so logError must run first to stamp
+      // this row with the owning Agent (AGENT_DEFINITIONS_DESIGN.md §8.1).
       this.audit.logError(
         event,
         err as Error,
         trigger,
         buildLogErrorContext(err, durationMs),
       );
+      // Settle the execution on the thrown-error side (§8.2). Idempotent — a
+      // no-op if the success path above already consumed the entry.
+      this.agentExecutionTracker?.completeFromDispatch(event.correlationId, {
+        thrown: err,
+      });
       // Only emit `routine_completed` if we previously emitted
       // `routine_started`; otherwise the dashboard would receive an
       // orphan completion for a routine that never started (e.g. error
@@ -1524,6 +1633,14 @@ export class EventDispatcher {
             "morning_routine_pending_for_today",
             "autonomous",
           );
+          // AGENT_DEFINITIONS_DESIGN.md §5.2 / §8 — settle the execution row
+          // opened by `beginAgentExecution` as a deliberate skip rather than
+          // letting `dispatchSafe`'s success path record a misleading empty
+          // `success` for a review that never ran.
+          this.agentExecutionTracker?.markSkipped(
+            event.correlationId,
+            "morning_routine_pending_for_today",
+          );
           return;
         }
       }
@@ -1545,6 +1662,11 @@ export class EventDispatcher {
             event,
             "skill_curation_unwired",
             "autonomous",
+          );
+          // §5.2 / §8 — settle as a skip (see the review-gate site above).
+          this.agentExecutionTracker?.markSkipped(
+            event.correlationId,
+            "skill_curation_unwired",
           );
           return;
         }

@@ -642,15 +642,19 @@ export class MorningRoutineRunner {
       if (existing) {
         return { inserted: false as const, existingId: existing.id };
       }
+      const retryInstruction = `Morning routine retry (attempt ${retryCount}/${MAX_RETRIES}). Generate today.md per the morning_routine flow.`;
       this.db
         .prepare(
           `INSERT INTO agent_schedule
-             (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-           VALUES (?, 'wake', ?, ?, ?, NULL, 'pending')`,
+             (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+           VALUES (?, 'wake', ?, ?, ?, ?, NULL, 'pending')`,
         )
         .run(
           scheduledFor,
-          `Morning routine retry (attempt ${retryCount}/${MAX_RETRIES}). Generate today.md per the morning_routine flow.`,
+          // task_description (list label) and task_prompt (agent instruction)
+          // are the same string for this system-generated row.
+          retryInstruction,
+          retryInstruction,
           taskContext,
           originalCorrelationId,
         );

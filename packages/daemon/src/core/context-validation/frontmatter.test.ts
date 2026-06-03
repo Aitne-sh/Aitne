@@ -138,6 +138,8 @@ describe("parseVaultFrontmatter", () => {
     expect(shouldParseVaultFrontmatter("random.md")).toBe(false);
     expect(shouldParseVaultFrontmatter("identity/_index.md")).toBe(false);
     expect(shouldParseVaultFrontmatter("identity/profile.txt")).toBe(false);
+    // Root-level navigation index is excluded too.
+    expect(shouldParseVaultFrontmatter("_index.md")).toBe(false);
   });
 });
 

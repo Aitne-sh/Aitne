@@ -54,7 +54,12 @@ The agent CANNOT query `notification_log` directly (Approve-tier). Use
 `<today>` `## Agent Log` as the authoritative dedup source (look for
 `notify sent` / `DM sent` lines).
 
-A 429 response is final for this attempt — do NOT retry. Log `notify
-skipped (rate_limited)` to Agent Log. If the message is time-critical
-and the next opportunity arises, upgrade to `high` (or `critical` if
-the situation has escalated) rather than re-sending at the same level.
+`/api/notify` does NOT report rate-limit or quiet-hours suppression
+back to you — it returns `200 {status:"sent"}` even when the message is
+silently dropped inside the delivery layer. A `"sent"` response is
+therefore not proof the user saw it. Do NOT re-post the same item
+hoping for delivery; self-throttle by scanning `<today>` `## Agent Log`
+first and log `notify skipped (rate_limited)` when you choose to hold.
+If the message is time-critical and the next opportunity arises,
+upgrade to `high` (or `critical` if the situation has escalated)
+rather than re-sending at the same level.

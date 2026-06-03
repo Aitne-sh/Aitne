@@ -197,11 +197,12 @@ is intentionally not whitelisted (see MANAGEMENT-POLICY-CAPTURE-PLAN
 
 - **Need a one-off wake-up?** Use `schedule` (`/api/schedule` or
   `/api/schedule/dm`) — no policy file needed.
-- **Need a recurring DB-driven task with no recorded `## Why`?** Use
-  `schedule`'s `/api/recurring-schedules` — supports hourly / daily /
-  weekly / monthly cadences. Default to `tier:"medium"`; pin a
-  specific model id (`claude-opus-4-8`, `gpt-5.4`, …) only when the
-  rule needs to outlive a `/settings/models` re-route.
+- **Need a recurring task with no recorded `## Why`?** Recurring autonomous
+  **work** → create an Agent via the `agent-create` skill (`POST /api/agents`);
+  recurring scheduled **DM / briefing** → `schedule`'s
+  `/api/recurring-schedules` with `taskType: "dm_session"`. Default to
+  `tier:"medium"`; pin a specific model id only when the rule needs to
+  outlive a `/settings/models` re-route.
 - **Tone / voice / language preference?** Belongs in `user-profile`
   (which routes to `PATCH /api/config/character`), NOT a policy file.
   Full recipe in `user-profile/references/character-preferences.md`.

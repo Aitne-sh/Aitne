@@ -1,11 +1,51 @@
 import { describe, expect, it } from "vitest";
 import {
+  browserHistoryClusterDetailSchema,
   browserHistoryLifecycleConfigSchema,
   cleanupInterestsReflectionRequestSchema,
   cleanupInterestsReflectionResponseSchema,
   refreshInterestsReflectionResponseSchema,
   weeklyInterestsSummaryResponseSchema,
 } from "./browser-history-schemas.js";
+
+describe("browserHistoryClusterDetailSchema.rootTaskId", () => {
+  const base = {
+    slug: "github-com",
+    displayName: "github.com",
+    startedAt: 1,
+    lastActivityAt: 2,
+    visitsTotal: 3,
+    meaningfulVisitsTotal: 2,
+    meaningfulForegroundSecTotal: 10,
+    distinctMeaningfulDomains: 1,
+    status: "active" as const,
+    agentSummaryRevision: 0,
+    topDomains: ["github.com"],
+    lastDmAt: null,
+    lastResearchOfferAt: null,
+    lastWikiOfferAt: null,
+    researchOfferAcceptedAt: null,
+    wikiSummaryWrittenAt: null,
+  };
+
+  // Regression: rootTaskId is Chromium's root_task_id, whose real domain
+  // violated the old `.int().nonnegative()` bounds and threw a ZodError → 500.
+  it("accepts the -1 'no task' sentinel (default/uncategorized cluster)", () => {
+    expect(
+      browserHistoryClusterDetailSchema.safeParse({ ...base, rootTaskId: -1 })
+        .success,
+    ).toBe(true);
+  });
+
+  it("accepts 64-bit task ids beyond Number.MAX_SAFE_INTEGER", () => {
+    expect(
+      browserHistoryClusterDetailSchema.safeParse({
+        ...base,
+        rootTaskId: 13424117956570870,
+      }).success,
+    ).toBe(true);
+  });
+});
 
 describe("browserHistoryLifecycleConfigSchema.superRefine", () => {
   it("accepts an empty per_browser map (default branch)", () => {

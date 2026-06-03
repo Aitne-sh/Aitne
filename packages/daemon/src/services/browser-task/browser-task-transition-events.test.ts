@@ -133,6 +133,21 @@ describe("createBrowserTaskTransitionEmitter", () => {
   });
 });
 
+describe("noopBrowserTaskTransitionEmitter.emit", () => {
+  it("is a no-op that never throws", () => {
+    expect(() =>
+      noopBrowserTaskTransitionEmitter.emit({
+        taskId: "t",
+        state: "pending",
+        transitionedAt: 0,
+        brief: "x",
+        outcomeDetail: null,
+        originatingChannel: null,
+      }),
+    ).not.toThrow();
+  });
+});
+
 describe("noopBrowserTaskTransitionEmitter.emitFromRow", () => {
   it("returns the payload shape without emitting anywhere", () => {
     const row = makeRow({ state: "awaiting_user" });

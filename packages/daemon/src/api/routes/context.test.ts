@@ -877,6 +877,55 @@ describe("Context API — optimistic concurrency", () => {
     });
   });
 
+  // Regression: after the context-vault restructure the dashboard file tree
+  // lists each authority class by its canonical, slash-containing dir name
+  // ("journal/daily", "knowledge/dossiers", "policies/routines", ...). The
+  // list-route param must capture slashes (`:dir{.+}`, not a bare
+  // single-segment `:dir`) or these requests fall through to Hono's default
+  // 404 — which silently hid every nested folder (incl. journal/daily) from
+  // the dashboard while single-segment dirs (identity, policies) still showed.
+  // The pre-existing routines test above only exercised the single-segment
+  // legacy alias, so it never caught this. See routes/context/read.ts.
+  describe("GET /context/list/:dir — nested (slash-containing) dir names", () => {
+    it("lists files under the journal/daily canonical path", async () => {
+      writeFileSync(
+        join(contextDir, "journal", "daily", "2026-06-01.md"),
+        "# 2026-06-01\n",
+        "utf-8",
+      );
+      const res = await app.request("/api/context/list/journal/daily");
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { files: { name: string }[] };
+      expect(data.files.map((f) => f.name)).toContain("2026-06-01.md");
+    });
+
+    it("lists nested dirs across classes (knowledge/dossiers, policies/routines, plans/projects)", async () => {
+      writeFileSync(join(contextDir, "knowledge", "dossiers", "acme.md"), "# acme\n", "utf-8");
+      writeFileSync(join(contextDir, "policies", "routines", "hourly.md"), "# h\n", "utf-8");
+      writeFileSync(join(contextDir, "plans", "projects", "launch.md"), "# launch\n", "utf-8");
+
+      const cases: ReadonlyArray<readonly [string, string]> = [
+        ["knowledge/dossiers", "acme.md"],
+        ["policies/routines", "hourly.md"],
+        ["plans/projects", "launch.md"],
+      ];
+      for (const [dir, file] of cases) {
+        const res = await app.request(`/api/context/list/${dir}`);
+        expect(res.status).toBe(200);
+        const data = (await res.json()) as { files: { name: string }[] };
+        expect(data.files.map((f) => f.name)).toContain(file);
+      }
+    });
+
+    it("still lists single-segment dirs (identity)", async () => {
+      writeFileSync(join(contextDir, "identity", "profile.md"), "# me\n", "utf-8");
+      const res = await app.request("/api/context/list/identity");
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { files: { name: string }[] };
+      expect(data.files.map((f) => f.name)).toContain("profile.md");
+    });
+  });
+
   describe("PUT /context/routines/custom/<slug> — first-write creates parent dir", () => {
     it("creates routines/custom/ and writes the new routine file", async () => {
       // Intentionally do NOT create routines/custom/ up-front — the API
@@ -1135,6 +1184,106 @@ describe("Context API — optimistic concurrency", () => {
       // Forbidden takes precedence over conflict — never leak file content
       // through a 409 for paths the user is not allowed to write.
       expect(res.status).toBe(403);
+    });
+
+    // Regression: the browser-history research/wiki flow (routine.research_*
+    // task-flows) PUT/PATCHes context/research/<slug>.md, but research/ was
+    // missing from CONTEXT_WRITE_PERMISSIONS, so every write 403'd. PUT/PATCH
+    // must now succeed (plain journal, no frontmatter requirement); DELETE
+    // stays forbidden (concluding a cluster preserves its journal).
+    it("allows PUT/PATCH on research/* (browser-history cluster journals) but not DELETE", async () => {
+      const filePath = join(contextDir, "research", "quantum-mechanics.md");
+
+      const put = await app.request("/api/context/research/quantum-mechanics", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: "# Quantum mechanics\n\nday 1\n" }),
+      });
+      expect(put.status).toBe(200);
+      expect(readFileSync(filePath, "utf-8")).toBe(
+        "# Quantum mechanics\n\nday 1\n",
+      );
+
+      const patch = await app.request(
+        "/api/context/research/quantum-mechanics",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "append_to_file", content: "\nday 2\n" }),
+        },
+      );
+      expect(patch.status).toBe(200);
+
+      const del = await app.request("/api/context/research/quantum-mechanics", {
+        method: "DELETE",
+      });
+      expect(del.status).toBe(403);
+    });
+
+    // frontmatterMerge mode (design 21 §10.4 step 4b): deep-merge nested
+    // entity `sources.<app>` links + last_synced_at without clobbering other
+    // apps' source ids or the body.
+    it("PATCH mode:frontmatterMerge deep-merges entity frontmatter, preserving the body", async () => {
+      const filePath = join(
+        contextDir,
+        "knowledge",
+        "entities",
+        "work",
+        "meetings",
+        "standup.md",
+      );
+      const initial =
+        "---\ntype: meeting\nsources:\n  gmail:\n    external_id: g1\n---\n# Standup\n\nnotes\n";
+      const put = await app.request(
+        "/api/context/knowledge/entities/work/meetings/standup",
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: initial }),
+        },
+      );
+      expect(put.status).toBe(200);
+
+      const patch = await app.request(
+        "/api/context/knowledge/entities/work/meetings/standup",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "frontmatterMerge",
+            frontmatter: {
+              sources: { notion: { external_id: "n1" } },
+              last_synced_at: "2026-06-02T12:00:00Z",
+            },
+          }),
+        },
+      );
+      expect(patch.status).toBe(200);
+      expect((await patch.json()) as { status: string }).toEqual({
+        status: "merged",
+      });
+
+      const written = readFileSync(filePath, "utf-8");
+      // Body preserved verbatim.
+      expect(written.endsWith("# Standup\n\nnotes\n")).toBe(true);
+      // Both source apps present + the scalar added; gmail not clobbered.
+      expect(written).toMatch(/gmail:\s*\n\s*external_id: g1/);
+      expect(written).toMatch(/notion:\s*\n\s*external_id: n1/);
+      // js-yaml quotes the timestamp-looking string so it round-trips as a
+      // string (not a parsed Date) — accept quoted or bare.
+      expect(written).toMatch(/last_synced_at: '?2026-06-02T12:00:00Z'?/);
+    });
+
+    it("PATCH mode:frontmatterMerge requires a frontmatter object (400)", async () => {
+      const res = await app.request(
+        "/api/context/knowledge/entities/work/meetings/standup",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "frontmatterMerge" }),
+        },
+      );
+      expect(res.status).toBe(400);
     });
   });
 

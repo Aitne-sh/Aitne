@@ -653,7 +653,10 @@ function ClarificationCard({
 
 function ClarificationRow({ row }: { row: BrowserTaskClarificationRow }) {
   const isOpen = !row.resolved;
-  const remainingMs = row.deadlineAt - Date.now();
+  // Snapshot "now" at mount via a lazy useState initializer — the React Compiler
+  // purity rule (react-hooks/purity) rejects a bare Date.now() during render.
+  const [now] = useState(() => Date.now());
+  const remainingMs = row.deadlineAt - now;
   const deadlineLabel = remainingMs > 0
     ? `${formatDuration(remainingMs)} remaining`
     : `${formatDuration(-remainingMs)} past deadline`;

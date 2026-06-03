@@ -141,6 +141,15 @@ describe("fs.logic — isSecretPath / isUnderForbidden", () => {
     expect(isUnderForbidden("/Users/alice")).toBe(false);
   });
 
+  it("isUnderForbidden exempts tmpdir subtrees that sit under a forbidden root", () => {
+    // `/var/folders/...` matches the `/var` forbidden prefix but is the
+    // macOS tmpdir — the exemption must win.
+    expect(isUnderForbidden("/var/folders/ab/cd/T/scratch")).toBe(false);
+    expect(isUnderForbidden("/private/var/folders/ab/cd/T/scratch")).toBe(
+      false,
+    );
+  });
+
   it("FORBIDDEN_PREFIXES contains the expected platform roots", () => {
     // Defensive sanity check — if the list shrinks accidentally, the
     // picker would suddenly expose `/etc` etc.

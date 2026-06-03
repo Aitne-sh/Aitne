@@ -99,6 +99,22 @@ describe("Git API routes", () => {
       // Only 2 commits exist; the cap just means it doesn't error
       expect(data.commits).toHaveLength(2);
     });
+
+    it("falls back to the default count when count is non-numeric or below 1", async () => {
+      // parseInt("nope") → NaN → !Number.isFinite → the `: 5` fallback branch.
+      const nan = await app.request(
+        `/git/log?repo=${encodeURIComponent(repoDir)}&count=nope`,
+      );
+      expect(nan.status).toBe(200);
+      expect(((await nan.json()) as { commits: unknown[] }).commits).toHaveLength(
+        2,
+      );
+      // count=0 fails the `>= 1` guard → same fallback.
+      const zero = await app.request(
+        `/git/log?repo=${encodeURIComponent(repoDir)}&count=0`,
+      );
+      expect(zero.status).toBe(200);
+    });
   });
 
   describe("GET /git/diff", () => {

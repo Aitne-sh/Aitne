@@ -1079,7 +1079,9 @@ export interface ScheduleRow {
   scheduled_for: string;
   task_type: string;
   task_description: string;
-  /** null = no prompt override; description doubles as the agent body. */
+  /** The agent instruction. For one-off rows this is the required body and
+   *  `task_description` is just an optional label. null only on legacy /
+   *  system rows that still rely on the description→body dispatch fallback. */
   task_prompt: string | null;
   model: string | null;
   status: string;

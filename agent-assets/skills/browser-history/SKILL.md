@@ -33,6 +33,17 @@ their own destination policy — see the cluster-update flow below.
    topic / domain labels, not raw URLs. There is no path that exposes a
    full URL string; do not try to reconstruct one and feed it to
    WebFetch / Read.
+5. **`context/research/*` writes currently 403.** The cluster-journal /
+   assistance / wiki destinations below (`PUT`/`PATCH
+   /api/context/research/<slug>.md`, `…-assistance-<date>.md`,
+   `…-wiki.md`) are the design-intended canonical paths, but `research/`
+   is **not** in the six-class vault write whitelist
+   (`CONTEXT_WRITE_PERMISSIONS`), so those writes return **HTTP 403
+   `context.write_forbidden`** today. `GET /api/context/research/<slug>.md`
+   reads are unaffected. Until the whitelist gains a `research/*` entry,
+   prefer the Obsidian / Notion destination for the wiki flow when
+   configured, and surface the 403 to the owner rather than reporting a
+   successful local-context write.
 
 ## Endpoint reference
 

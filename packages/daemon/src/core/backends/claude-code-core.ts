@@ -228,6 +228,19 @@ export class ClaudeCodeCore implements IAgentCore {
   readonly backendId = "claude" as const;
   private static readonly RETRY_DELAY_MS = 5 * 60 * 1000;
   private static readonly MAX_RETRIES = 1;
+  // Network-connectivity failures reach us two ways: as a Node error carrying
+  // a `.code` (ENOTFOUND, ECONNREFUSED, …) OR — when the Claude Agent SDK's
+  // transport hits the failure mid-stream — as a thrown `Error` whose *message*
+  // embeds the cause, e.g. `Claude Code returned an error result: API Error:
+  // Unable to connect to API (ENOTFOUND)`. The message form has no `.code`, so
+  // shape-matching the text is the only signal. Both are transient: a momentary
+  // offline blip (wifi reconnect, DNS hiccup) should recover on the next
+  // attempt rather than fail decisively as `other_non_retryable` (no retry, no
+  // fallback, and a user-notification cascade we can't even deliver while
+  // offline). Keep this aligned with the `.code` allowlist in
+  // `isRetryableExecutionError`.
+  private static readonly NETWORK_ERROR_MESSAGE_PATTERN =
+    /network error|fetch failed|socket hang up|connection reset|connection refused|network is unreachable|unable to connect to api|getaddrinfo|timed out|\b(?:ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EAI_AGAIN|EPIPE|ECONNABORTED)\b/i;
 
   // Lazily re-resolved with a 60 s TTL so CLI install/uninstall is
   // detected without a daemon restart (roadmap §9.4). Constructor does an
@@ -581,6 +594,13 @@ export class ClaudeCodeCore implements IAgentCore {
         ...(this.mcpContext?.db ? { db: this.mcpContext.db } : {}),
         ...(isMessageEvent(event) ? { messageText: event.content } : {}),
         ...(wikiWorkspaceName ? { wikiWorkspaceName } : {}),
+        // AGENT_DEFINITIONS_DESIGN.md §4.2 — fold the firing Agent's
+        // `tools.skills` onto the process-key bundle. No-op for non-Agent
+        // executes (the dispatcher leaves these unset).
+        ...(params.extraSkills && params.extraSkills.length > 0
+          ? { extraSkills: params.extraSkills }
+          : {}),
+        ...(params.skillsReplace ? { skillsReplace: true } : {}),
       },
     );
     const isOwnedTempDir = !sessionDir;
@@ -918,7 +938,7 @@ export class ClaudeCodeCore implements IAgentCore {
       return true;
     }
 
-    return /network error|fetch failed|socket hang up|connection reset|timed out/i.test(
+    return ClaudeCodeCore.NETWORK_ERROR_MESSAGE_PATTERN.test(
       this.getErrorMessage(error),
     );
   }

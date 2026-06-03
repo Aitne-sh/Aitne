@@ -43,7 +43,7 @@ curl -s -X POST http://localhost:8321/api/apple-calendar/events \
   -H 'Content-Type: application/json' \
   -d '{"summary": "Team meeting", "start": "2026-04-26T14:00:00+09:00", "end": "2026-04-26T15:00:00+09:00"}'
 ```
-Optional: `description`, `location`. **[Apple only]** `attendees`, `reminders`, `recurrence`, `visibility` from the Google shape are accepted by the Zod schema but are silently dropped — iCloud invitations and reminder defaults belong to the user's Apple ID and the agent should not author them. If a user asks for those, tell them and stop.
+Optional: `description`, `location`. **[Apple only]** `attendees`, `reminders`, `recurrence`, `visibility` from the Google shape are **rejected** — the Apple schema is `.strict()`, so including any of them fails the whole request with `400 validation_error` and no event is created (the same applies to PATCH). iCloud invitations and reminder defaults belong to the user's Apple ID and the agent should not author them. If a user asks for those, tell them and stop — do not include the fields in the request.
 
 ### Update event (write — Autonomous)
 ```bash

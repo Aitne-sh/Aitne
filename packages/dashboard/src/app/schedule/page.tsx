@@ -19,7 +19,7 @@ import { formatShortModelName, modelBadgeVariant } from "@/lib/backend-ui";
 import { Clock, AlarmClock, Plus } from "lucide-react";
 import { CreateScheduleSheet } from "@/components/schedule/create-schedule-sheet";
 import { ScheduleDetailSheet } from "@/components/schedule/schedule-detail-sheet";
-import { RecurringSchedulesTable } from "@/components/schedule/recurring-schedules-table";
+import { ScheduledDmsTable } from "@/components/schedule/scheduled-dms-table";
 import type { ScheduleRow } from "@/lib/api-types";
 
 const STATUS_COLORS: Record<string, "blue" | "amber" | "green" | "gray" | "red"> = {
@@ -42,7 +42,7 @@ const STATUSES = ["all", "pending", "running", "completed", "skipped", "failed"]
 const TYPES = ["all", "wake", "dm", "morning_routine", "evening_review", "custom"];
 
 export default function SchedulePage() {
-  const [tab, setTab] = useState<"upcoming" | "recurring">("upcoming");
+  const [tab, setTab] = useState<"upcoming" | "dms">("upcoming");
   const [statusFilter, setStatusFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [selectedRow, setSelectedRow] = useState<ScheduleRow | null>(null);
@@ -78,14 +78,13 @@ export default function SchedulePage() {
         title="Schedule"
         description={
           <>
-            Upcoming and past agent wake-ups, plus recurring schedules. Each
-            <em> upcoming </em> row is one materialized invocation — built-in
-            routines (<code>morning_routine</code>, <code>evening_review</code>),
-            self-registered wake-ups (<code>wake</code>), scheduled DMs
-            (<code>dm</code>), or one-off <code>custom</code> tasks. Status
-            transitions <code>pending → running → completed / skipped / failed</code>;
-            <em>skipped</em> means the scheduler aborted before launching. Click
-            a row to inspect or edit.
+            The scheduling queue plus recurring DM rules. <strong>Upcoming</strong>
+            is every materialized invocation about to run or recently run — wakes
+            (<code>wake</code>), DMs (<code>dm</code>), one-off
+            <code> custom</code> tasks, and routine / recurring-DM instances.
+            <strong> Scheduled DMs</strong> lists the recurring DM rules (e.g. the
+            morning briefing) you can retime or turn off. Recurring <em>work</em>
+            runs as an Agent on the Agents page.
           </>
         }
         actions={
@@ -128,10 +127,10 @@ export default function SchedulePage() {
         </Card>
       )}
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "upcoming" | "recurring")}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "upcoming" | "dms")}>
         <TabsList>
           <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
-          <TabsTrigger value="recurring">Recurring</TabsTrigger>
+          <TabsTrigger value="dms">Scheduled DMs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="upcoming" className="mt-4 space-y-4">
@@ -203,8 +202,12 @@ export default function SchedulePage() {
                       </td>
                       <td className="max-w-md px-3 py-2 text-sm text-foreground">
                         <div className="flex items-start gap-2">
-                          <span className="line-clamp-2 flex-1">{s.task_description}</span>
-                          {s.task_prompt ? (
+                          <span className="line-clamp-2 flex-1">
+                            {s.task_description || s.task_prompt || "—"}
+                          </span>
+                          {s.task_prompt &&
+                          s.task_description &&
+                          s.task_prompt !== s.task_description ? (
                             <Tooltip>
                               <TooltipTrigger>
                                 <Badge variant="purple" className="shrink-0">prompt</Badge>
@@ -265,8 +268,8 @@ export default function SchedulePage() {
           </QueryResult>
         </TabsContent>
 
-        <TabsContent value="recurring" className="mt-4 space-y-4">
-          <RecurringSchedulesTable />
+        <TabsContent value="dms" className="mt-4 space-y-4">
+          <ScheduledDmsTable />
         </TabsContent>
       </Tabs>
 

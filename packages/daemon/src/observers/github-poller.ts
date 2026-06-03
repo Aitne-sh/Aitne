@@ -385,12 +385,33 @@ export class GitHubPoller implements Observer {
         { scope, consecutiveFailures: this.consecutiveFailures, skipRemaining: this.skipRemaining },
         "GitHub rate limited — backing off",
       );
+    } else if (GitHubPoller.isNetworkPollError(message)) {
+      // Connectivity failures (offline laptop, DNS hiccup, TCP reset) are
+      // environmental, not faults — the poller already absorbs them with the
+      // exponential backoff above, so they belong at WARN alongside the auth /
+      // rate-limit branches. Logging them at ERROR floods the error stream
+      // every time wifi drops or the machine sleeps (it was the github
+      // poller's dominant error-log line). Matches the `gh` CLI's "error
+      // connecting to ..." message and the Go net/transport errors `gh api`
+      // surfaces.
+      logger.warn(
+        { scope, consecutiveFailures: this.consecutiveFailures, skipRemaining: this.skipRemaining },
+        "GitHub poll failed (network) — likely offline; backing off.",
+      );
     } else {
       logger.error(
         { scope, err, consecutiveFailures: this.consecutiveFailures, skipRemaining: this.skipRemaining },
         "GitHub poll failed — backing off",
       );
     }
+  }
+
+  private static readonly NETWORK_POLL_ERROR_PATTERN =
+    /connecting to|check your internet|dial tcp|read tcp|write tcp|i\/o timeout|no such host|network is unreachable|connection refused|connection reset|tls handshake|timeout/i;
+
+  /** Visible for testing — see the WARN branch in `handlePollError`. */
+  static isNetworkPollError(message: string): boolean {
+    return GitHubPoller.NETWORK_POLL_ERROR_PATTERN.test(message);
   }
 
   private async pollNotifications(): Promise<void> {

@@ -87,9 +87,10 @@ triggers self-recovery and inflates the agent-actions audit.
 ## Lock retry rules
 
 The Morning Routine holds the `state/today.md` write lock. Other sessions
-get `409 today_write_lock_held` on PUT / PATCH while the lock is held.
+get `409 morning_routine_lock_held` on PUT / PATCH while the lock is held.
 
-- Detect by the response body `{"error":"lock_held"}` or by the
+- Detect by the response body `{"error":"morning_routine_lock_held"}`
+  (with `errors[0].code: "context.morning_routine_lock_held"`) or by the
   status code 409 alone.
 - Retry policy: 30 s back-off, max 3 attempts. If the third attempt
   also returns 409, log `loop-closeout deferred (lock_held)` to Agent

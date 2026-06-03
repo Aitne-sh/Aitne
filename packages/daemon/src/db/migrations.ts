@@ -404,6 +404,64 @@ export const MIGRATIONS: readonly Migration[] = [
       ).run();
     },
   },
+  {
+    id: "0007-agent-identity",
+    description:
+      "AGENT_DEFINITIONS_DESIGN.md §5 (v0.1.8→next) — introduce the Agent-as-"
+      + "identity layer. The two new tables (`agents`, `agent_executions`) are "
+      + "CREATE IF NOT EXISTS in schema.ts, so a fresh install lands on the "
+      + "target state with no DDL here. This migration carries ONLY the "
+      + "non-additive part: ALTER `agent_actions` to add the nullable "
+      + "`agent_id` stamp column (§5.3) + its `idx_agent_actions_agent` index. "
+      + "The column also ships in the schema.ts CREATE body (fresh installs get "
+      + "it there), but the INDEX is created ONLY here — never in applySchema — "
+      + "because applySchema runs before this migration and a CREATE INDEX on "
+      + "agent_actions(agent_id) would throw on a pre-0007 upgrader whose table "
+      + "predates the column (upgrade-safety checklist #2). So on a fresh DB the "
+      + "ALTER is skipped (columnExists true) while the index branch still runs "
+      + "(indexExists false → created); on an upgrader both branches run. Both "
+      + "are gated so a re-boot is a no-op; the runner records the id either way. "
+      + "`agent_id` carries no foreign key — historical rows stay NULL and an FK "
+      + "would complicate the agents-row cascade.",
+    up(db) {
+      // Empty-DB safety: if applySchema never ran (e.g. a bare :memory: DB in
+      // a unit test), the table is absent. columnExists returns false for a
+      // missing table, so the guard below would attempt the ALTER and throw.
+      // Short-circuit on the table's absence — the runner still records the
+      // id so a later boot does not re-evaluate.
+      if (!tableExists(db, "agent_actions")) return;
+      if (!columnExists(db, "agent_actions", "agent_id")) {
+        db.exec("ALTER TABLE agent_actions ADD COLUMN agent_id TEXT");
+      }
+      if (!indexExists(db, "idx_agent_actions_agent")) {
+        db.exec(
+          `CREATE INDEX idx_agent_actions_agent
+             ON agent_actions(agent_id, started_at DESC)`,
+        );
+      }
+    },
+  },
+  {
+    id: "0008-agent-schedule-backfill-task-prompt",
+    description:
+      "schedule prompt-required rework (v0.1.8→next) — the dispatcher now reads "
+      + "`agent_schedule.task_prompt` as the agent body directly; the legacy "
+      + "`task_prompt ?? task_description` fallback was removed. Every insert "
+      + "site (user/agent POST + the system schedulers + recurring "
+      + "materialization) now sets task_prompt, but rows created by a prior "
+      + "version may have task_prompt NULL and relied on the fallback. Backfill "
+      + "those from task_description so a still-pending pre-upgrade row keeps "
+      + "dispatching a non-empty instruction. Idempotent: only NULL prompts are "
+      + "touched, so a fresh DB (rows already carry task_prompt, or table empty) "
+      + "and a re-boot are both no-ops.",
+    up(db) {
+      // Empty-DB safety: a bare :memory: test DB may not have run applySchema.
+      if (!tableExists(db, "agent_schedule")) return;
+      db.exec(
+        "UPDATE agent_schedule SET task_prompt = task_description WHERE task_prompt IS NULL",
+      );
+    },
+  },
 ];
 
 export interface MigrationRunResult {

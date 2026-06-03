@@ -57,8 +57,16 @@ docs/prompt-reduction/
 docs/audit/
 docs/migration-report.md
 DESIGN.md
-/*_DESIGN.md
 /phase*-findings.md
+# Root-level internal-doc suffix globs — design/plan/audit/limitation notes
+# (local-only, never published). Supersede the explicit per-file entries below;
+# future docs matching these suffixes are auto-ignored without editing this file.
+/*_DESIGN.md
+/*_PLAN.md
+/*_AUDIT.md
+/*_LIMITATIONS.md
+/*_STRATEGY.md
+/*_RESEARCH.md
 PRODUCT_OVERVIEW.md
 coverage-gaps.md
 INTEGRATION_NATIVE_MODE_DESIGN.md

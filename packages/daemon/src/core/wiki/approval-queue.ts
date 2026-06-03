@@ -77,9 +77,14 @@ export function enqueueWikiApproval(
       `INSERT INTO agent_schedule
          (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, status)
        VALUES
-         (CURRENT_TIMESTAMP, 'approval', ?, NULL, json(?), ?, 'pending')`,
+         (CURRENT_TIMESTAMP, 'approval', ?, ?, json(?), ?, 'pending')`,
     )
     .run(
+      taskDescription,
+      // On approval, cost-approvals flips task_type to 'approved_task' and
+      // re-dispatches WITHOUT touching task_prompt — and the dispatcher reads
+      // task_prompt directly (no task_description fallback). So carry the body
+      // in task_prompt now, never NULL.
       taskDescription,
       JSON.stringify(taskContext),
       input.sourceEvent.correlationId,

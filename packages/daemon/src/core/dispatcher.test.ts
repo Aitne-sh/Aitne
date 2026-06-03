@@ -19,6 +19,10 @@ import {
 } from "@aitne/shared";
 import { applySchema } from "../db/schema.js";
 import { createRepository } from "../db/repositories-store.js";
+import { upsertAgent } from "../db/agents-store.js";
+import { AuditLogger } from "../safety/audit.js";
+import { AgentExecutionRecorder } from "./agent-execution-recorder.js";
+import { AgentExecutionTracker } from "./agents/agent-execution-tracker.js";
 import { EventBus } from "./event-bus.js";
 import { BackendQuotaError, BackendDecisiveFailure } from "./agent-core.js";
 import { BackendRouterHandledError } from "./backends/backend-router.js";
@@ -7844,6 +7848,220 @@ describe("EventDispatcher", () => {
       await fireDashboardDmThroughRunLoop(dispatcher);
 
       expect(signoutDmCount()).toBe(0);
+    });
+  });
+
+  // ── Agent execution recording (AGENT_DEFINITIONS_DESIGN.md §8) ──
+  describe("Agent execution recording (Phase 7)", () => {
+    function wireTracker(config: AgentConfig) {
+      const audit = new AuditLogger(db);
+      const recorder = new AgentExecutionRecorder({
+        db,
+        dayBoundaryHour: config.dayBoundaryHour,
+        timezone: "UTC",
+      });
+      const tracker = new AgentExecutionTracker({
+        db,
+        recorder,
+        contextDir: join(config.dataDir, "context"),
+        emitSse: () => {},
+        loadCriteria: () => [],
+      });
+      audit.setAgentIdResolver((event) =>
+        tracker.currentAgentId(event.correlationId),
+      );
+      const dispatcher = new EventDispatcher(
+        eventBus,
+        mockAgentCore,
+        mockContextBuilder,
+        mockGetTaskFlow,
+        mockNotificationMgr,
+        mockSessionMgr,
+        mockMessageRecorder,
+        audit,
+        db,
+        config,
+      );
+      dispatcher.setAgentExecutionTracker(tracker);
+      return dispatcher;
+    }
+
+    function routineEvent(routine: string): RoutineEvent {
+      return {
+        ...createEvent({
+          type: `routine.${routine}`,
+          source: "scheduler",
+          priority: EventPriority.NORMAL,
+        }),
+        routine,
+      } as RoutineEvent;
+    }
+
+    it("creates an agent_executions row + stamps agent_actions for a built-in routine firing", async () => {
+      upsertAgent(db, {
+        slug: "evening-review",
+        name: "Evening review",
+        source: "builtin",
+        definitionPath: "/agents/evening-review/agent.md",
+        definitionHash: "h",
+        enabled: true,
+        scheduleKind: "cron",
+        scheduleExpression: "0 18 * * *",
+        scheduleTimezone: "UTC",
+      });
+      const dispatcher = wireTracker(makeConfig({ timezone: "UTC" }));
+
+      await dispatcher.processInline(routineEvent("evening_review"));
+
+      const exec = db
+        .prepare("SELECT agent_id, result, cost_usd FROM agent_executions")
+        .get() as { agent_id: string; result: string; cost_usd: number };
+      expect(exec.agent_id).toBe("evening-review");
+      expect(exec.result).toBe("success");
+      expect(exec.cost_usd).toBeCloseTo(0.01);
+      // The owning Agent now points at this execution.
+      const agentRow = db
+        .prepare("SELECT last_execution_id FROM agents WHERE id = 'evening-review'")
+        .get() as { last_execution_id: number };
+      expect(agentRow.last_execution_id).toBeGreaterThan(0);
+      // At least the turn's audit row carries the agent_id stamp.
+      const stamped = db
+        .prepare("SELECT COUNT(*) AS n FROM agent_actions WHERE agent_id = 'evening-review'")
+        .get() as { n: number };
+      expect(stamped.n).toBeGreaterThanOrEqual(1);
+    });
+
+    it("records result='skipped' for a review routine blocked by the morning-pending gate", async () => {
+      // Drop the beforeEach morning-routine success seed so the pre-routine
+      // gate trips and the review is skipped without running.
+      db.prepare(
+        "DELETE FROM agent_actions WHERE action_type = 'routine.morning_routine'",
+      ).run();
+      upsertAgent(db, {
+        slug: "evening-review",
+        name: "Evening review",
+        source: "builtin",
+        definitionPath: "/agents/evening-review/agent.md",
+        definitionHash: "h",
+        enabled: true,
+        scheduleKind: "cron",
+        scheduleExpression: "0 18 * * *",
+        scheduleTimezone: "UTC",
+      });
+      const dispatcher = wireTracker(makeConfig({ timezone: "UTC" }));
+
+      await dispatcher.processInline(routineEvent("evening_review"));
+
+      const exec = db
+        .prepare("SELECT agent_id, result, cost_usd FROM agent_executions")
+        .get() as { agent_id: string; result: string; cost_usd: number | null };
+      expect(exec.agent_id).toBe("evening-review");
+      expect(exec.result).toBe("skipped");
+      expect(exec.cost_usd).toBeNull();
+      // The skip audit row is attributed to the Agent too (logSkip stamping).
+      const skipRow = db
+        .prepare(
+          "SELECT agent_id FROM agent_actions WHERE action_type = 'routine.evening_review' AND result = 'skipped'",
+        )
+        .get() as { agent_id: string | null } | undefined;
+      expect(skipRow?.agent_id).toBe("evening-review");
+    });
+
+    it("records no execution for a routine that resolves to no Agent", async () => {
+      // evening-review Agent is NOT seeded → resolveAgentId returns null.
+      const dispatcher = wireTracker(makeConfig({ timezone: "UTC" }));
+
+      await dispatcher.processInline(routineEvent("evening_review"));
+
+      const n = db
+        .prepare("SELECT COUNT(*) AS n FROM agent_executions")
+        .get() as { n: number };
+      expect(n.n).toBe(0);
+    });
+
+    it("attributes the morning-routine wake (scheduled.task carrying task_context.routine, no agent_id) via §8.1 step 3", async () => {
+      // The flagship daily routine fires via queue_wake → a `scheduled.task`
+      // whose task_context carries `routine: "morning_routine"` but NO
+      // `agent_id`. Without §8.1 step 3 for scheduled events it resolved to no
+      // Agent and recorded no rollup; the resolver must now map the routine →
+      // the built-in slug so the most important built-in is attributed.
+      upsertAgent(db, {
+        slug: "morning-routine",
+        name: "Morning Routine",
+        source: "builtin",
+        definitionPath: "/agents/morning-routine/agent.md",
+        definitionHash: "h",
+        enabled: true,
+        scheduleKind: "cron",
+        scheduleExpression: "0 4 * * *",
+        scheduleTimezone: "UTC",
+      });
+      const dispatcher = wireTracker(makeConfig({ timezone: "UTC" }));
+
+      // A running wake row mirroring a ScheduleWatcher pickup (handleMorningRoutineRetry
+      // marks it completed by scheduleId).
+      db.prepare(
+        `INSERT INTO agent_schedule
+          (scheduled_for, task_type, task_description, task_context, model, status)
+         VALUES (datetime('now'), 'wake', 'Morning routine.',
+                 '{"routine":"morning_routine","source":"cron"}', NULL, 'running')`,
+      ).run();
+      const scheduleId = (db.prepare("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
+
+      const wakeEvent = {
+        ...createEvent({ type: "scheduled.task", source: "wake", priority: EventPriority.NORMAL }),
+        task: "Morning routine.",
+        taskContext: { routine: "morning_routine", source: "cron" },
+        scheduleId,
+      } as AgentTaskEvent;
+
+      await dispatcher.processInline(wakeEvent);
+
+      const exec = db
+        .prepare("SELECT agent_id FROM agent_executions")
+        .get() as { agent_id: string } | undefined;
+      expect(exec?.agent_id).toBe("morning-routine");
+      const agentRow = db
+        .prepare("SELECT last_execution_id FROM agents WHERE id = 'morning-routine'")
+        .get() as { last_execution_id: number | null };
+      expect(agentRow.last_execution_id).not.toBeNull();
+    });
+
+    it("records trigger='manual' for a run-now firing (task_context.trigger='manual'), not 'cron'", async () => {
+      // run-now (§9.4) enqueues a scheduled.task carrying agent_id + trigger:
+      // 'manual'. The rollup must record `manual`, not the `cron` the
+      // isScheduledEvent fallback would otherwise assign.
+      upsertAgent(db, {
+        slug: "weekly-review",
+        name: "Weekly review",
+        source: "builtin",
+        definitionPath: "/agents/weekly-review/agent.md",
+        definitionHash: "h",
+        enabled: true,
+        scheduleKind: "cron",
+        scheduleExpression: "0 19 * * 5",
+        scheduleTimezone: "UTC",
+      });
+      const dispatcher = wireTracker(makeConfig({ timezone: "UTC" }));
+
+      const runNowEvent = {
+        ...createEvent({ type: "scheduled.task", source: "weekly_review", priority: EventPriority.NORMAL }),
+        task: "Weekly review (manual).",
+        taskContext: {
+          agent_id: "weekly-review",
+          trigger: "manual",
+          processKey: "routine.weekly_review",
+          routine: "weekly_review",
+        },
+      } as AgentTaskEvent;
+
+      await dispatcher.processInline(runNowEvent);
+
+      const exec = db
+        .prepare("SELECT agent_id, trigger FROM agent_executions")
+        .get() as { agent_id: string; trigger: string };
+      expect(exec.agent_id).toBe("weekly-review");
+      expect(exec.trigger).toBe("manual");
     });
   });
 });

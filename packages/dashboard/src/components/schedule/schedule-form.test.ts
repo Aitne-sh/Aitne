@@ -10,20 +10,35 @@ import {
   validateScheduleForm,
   type ScheduleFormState,
 } from "./schedule-form";
-import { dtoToFormState } from "./recurring-schedules-table";
+import { dtoToFormState } from "./scheduled-dms-table";
+import type { RecurringScheduleDTO } from "@/lib/api-types";
 
 const baseValidPrompt =
   "Run a quick check on overnight mail and surface anything urgent.";
 
 describe("validateScheduleForm", () => {
-  it("rejects a description shorter than 20 characters", () => {
+  it("requires a prompt for a one-off task (description is just an optional label)", () => {
     const result = validateScheduleForm({
       ...EMPTY_FORM_STATE,
       frequency: "once",
       oneOffDateTime: "2099-01-01T09:00",
-      description: "too short",
+      description: "short label",
+      prompt: "",
     });
-    expect(result?.description).toBeDefined();
+    expect(result?.prompt).toBeDefined();
+    // A short label is fine — there is no lower bound on the one-off description.
+    expect(result?.description).toBeUndefined();
+  });
+
+  it("accepts a one-off with a prompt and no description", () => {
+    const result = validateScheduleForm({
+      ...EMPTY_FORM_STATE,
+      frequency: "once",
+      oneOffDateTime: "2099-01-01T09:00",
+      description: "",
+      prompt: baseValidPrompt,
+    });
+    expect(result).toBeNull();
   });
 
   it("rejects a one-off in the past", () => {
@@ -31,7 +46,7 @@ describe("validateScheduleForm", () => {
       ...EMPTY_FORM_STATE,
       frequency: "once",
       oneOffDateTime: "2000-01-01T09:00",
-      description: baseValidPrompt,
+      prompt: baseValidPrompt,
     });
     expect(result?.oneOffDateTime).toBeDefined();
   });
@@ -377,29 +392,31 @@ describe("toSubmitPayload", () => {
     expect(payload.body.description).toBe(baseValidPrompt);
   });
 
-  it("omits prompt entirely when the field is empty", () => {
+  it("one-off always sends prompt (the body) and omits description when empty", () => {
     const payload = toSubmitPayload({
       ...EMPTY_FORM_STATE,
       frequency: "once",
       oneOffDateTime: "2099-12-31T23:59",
-      description: baseValidPrompt,
-      prompt: "",
+      description: "",
+      prompt: baseValidPrompt,
     });
     if (payload.kind !== "once") throw new Error("unreachable");
-    expect(payload.body).not.toHaveProperty("prompt");
+    expect(payload.body.prompt).toBe(baseValidPrompt);
+    expect(payload.body).not.toHaveProperty("description");
   });
 
-  it("includes a trimmed prompt override when the field is set", () => {
-    const overrideBody = "Detailed agent instruction body here";
+  it("one-off sends a trimmed prompt and a trimmed description label", () => {
+    const promptBody = "Detailed agent instruction body here";
     const payload = toSubmitPayload({
       ...EMPTY_FORM_STATE,
       frequency: "once",
       oneOffDateTime: "2099-12-31T23:59",
-      description: baseValidPrompt,
-      prompt: `   ${overrideBody}   `,
+      description: "   PR review label   ",
+      prompt: `   ${promptBody}   `,
     });
     if (payload.kind !== "once") throw new Error("unreachable");
-    expect(payload.body.prompt).toBe(overrideBody);
+    expect(payload.body.prompt).toBe(promptBody);
+    expect(payload.body.description).toBe("PR review label");
   });
 
   it("threads the prompt override through the recurring shape too", () => {
@@ -449,119 +466,38 @@ describe("monthlyHasOverflowDay", () => {
   });
 });
 
-describe("dtoToFormState", () => {
-  // Pure DTO → form-state mapping. Lives in the table module but exercised
-  // here so it stays in sync with the schema. The daemon normalises
-  // legacy aliases server-side; the dashboard receives concrete model ids
-  // or empty strings — never `"sonnet"`/`"opus"` — but the round-trip is
-  // intentionally lossy-tolerant so a stray legacy row from before the
-  // migration still renders.
-
-  it("maps a daily rule with no pin to the default form state", () => {
-    const state = dtoToFormState({
+describe("dtoToFormState (Scheduled DMs edit form)", () => {
+  // The Scheduled DMs edit sheet seeds its form from a recurring dm_session DTO.
+  // The morning briefing is daily; the round-trip must preserve the cadence so
+  // an edit that only changes the time doesn't silently drop the rule shape.
+  function dmDto(over: Partial<RecurringScheduleDTO> = {}): RecurringScheduleDTO {
+    return {
       id: 1,
-      taskType: "custom",
-      description: "Run a daily 06:00 check on overnight mail and DM the owner.",
+      taskType: "dm_session",
+      description: "Morning briefing — daily summary delivered as a DM at 07:00.",
       prompt: null,
-      recurrenceRule: { frequency: "daily", time: "06:00" },
+      recurrenceRule: { frequency: "daily", time: "07:00" },
       model: null,
       enabled: true,
-      nextRunAt: "2026-05-19T21:00:00Z",
-      recurrenceLabel: "Daily at 06:00",
-      taskContext: {},
-      createdAt: "2026-05-18T00:00:00Z",
-      updatedAt: "2026-05-18T00:00:00Z",
-    });
+      nextRunAt: "2026-06-02T22:00:00Z",
+      recurrenceLabel: "Daily at 07:00",
+      taskContext: { sub_flow: "morning_briefing", pin_to_quiet_hours_end: true },
+      createdAt: "2026-06-01T00:00:00Z",
+      updatedAt: "2026-06-01T00:00:00Z",
+      ...over,
+    };
+  }
+
+  it("maps a daily dm_session row to a cron form state", () => {
+    const state = dtoToFormState(dmDto());
     expect(state.frequency).toBe("daily");
-    expect(state.recurringTime).toBe("06:00");
+    expect(state.recurringTime).toBe("07:00");
     expect(state.model).toBe("");
-    expect(state.daysOfWeek).toEqual([]);
-    expect(state.daysOfMonth).toEqual([]);
-    expect(state.onMissingDay).toBe("");
   });
 
-  it("carries hourly recurrence fields into the form state", () => {
-    const state = dtoToFormState({
-      id: 2,
-      taskType: "custom",
-      description: "Hourly observation harvest at :30 every two hours.",
-      prompt: null,
-      recurrenceRule: {
-        frequency: "hourly",
-        intervalHours: 2,
-        minuteOfHour: 30,
-      },
-      model: "claude-opus-4-7",
-      enabled: true,
-      nextRunAt: null,
-      recurrenceLabel: "Every 2 hours at :30",
-      taskContext: {},
-      createdAt: "2026-05-18T00:00:00Z",
-      updatedAt: "2026-05-18T00:00:00Z",
-    });
-    expect(state.frequency).toBe("hourly");
-    expect(state.intervalHours).toBe(2);
-    expect(state.minuteOfHour).toBe(30);
-    expect(state.model).toBe("claude-opus-4-7");
-    // `recurringTime` falls back to "00:00" so the time input is non-empty
-    // if the operator flips frequency away from hourly.
-    expect(state.recurringTime).toBe("00:00");
-  });
-
-  it("carries onMissingDay into the form state for monthly rules", () => {
-    const state = dtoToFormState({
-      id: 3,
-      taskType: "custom",
-      description: "Last-day-of-month billing reconciliation at 21:00.",
-      prompt: null,
-      recurrenceRule: {
-        frequency: "monthly",
-        time: "21:00",
-        daysOfMonth: [31],
-        onMissingDay: "lastDayOfMonth",
-      },
-      model: null,
-      enabled: true,
-      nextRunAt: null,
-      recurrenceLabel: "Monthly on the 31st at 21:00 (falls back to last day)",
-      taskContext: {},
-      createdAt: "2026-05-18T00:00:00Z",
-      updatedAt: "2026-05-18T00:00:00Z",
-    });
-    expect(state.frequency).toBe("monthly");
-    expect(state.daysOfMonth).toEqual([31]);
-    expect(state.onMissingDay).toBe("lastDayOfMonth");
-  });
-
-  it("round-trips through toSubmitPayload preserving the rule shape", () => {
-    // Guards against future divergence between the recurring DTO's
-    // representation and the form's payload builder. If the form drops
-    // a field on round-trip the daemon would silently lose it on a
-    // PATCH that only intended to change `description`.
-    const state = dtoToFormState({
-      id: 4,
-      taskType: "custom",
-      description: "Mon/Wed/Fri morning routine kick-off at 07:30.",
-      prompt: null,
-      recurrenceRule: {
-        frequency: "weekly",
-        time: "07:30",
-        daysOfWeek: [1, 3, 5],
-      },
-      model: "",
-      enabled: true,
-      nextRunAt: null,
-      recurrenceLabel: "Weekly Mon/Wed/Fri at 07:30",
-      taskContext: {},
-      createdAt: "2026-05-18T00:00:00Z",
-      updatedAt: "2026-05-18T00:00:00Z",
-    });
-    const payload = toSubmitPayload(state);
-    if (payload.kind !== "recurring") throw new Error("unreachable");
-    expect(payload.body.recurrenceRule).toEqual({
-      frequency: "weekly",
-      time: "07:30",
-      daysOfWeek: [1, 3, 5],
-    });
+  it("round-trips through toSubmitPayload preserving the daily rule", () => {
+    const payload = toSubmitPayload(dtoToFormState(dmDto()));
+    if (payload.kind !== "recurring") throw new Error("expected recurring");
+    expect(payload.body.recurrenceRule).toEqual({ frequency: "daily", time: "07:00" });
   });
 });

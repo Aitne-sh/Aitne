@@ -16,7 +16,7 @@ other endpoint is in the allow-list.
 **Daemon URL is not optional.** Every call must go to
 `http://localhost:8321/api/docs/...`. The session's `curl` wrapper
 rejects any other host/port silently (stdout stays empty), so a request
-to `localhost:3000` or a path with no host returns nothing and reads as
+to `localhost:8322` or a path with no host returns nothing and reads as
 "0 results" — exactly the failure mode that masquerades as "the docs
 don't cover this".
 

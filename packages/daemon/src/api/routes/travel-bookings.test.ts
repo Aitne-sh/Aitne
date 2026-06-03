@@ -108,6 +108,54 @@ describe("travel-bookings routes", () => {
       // Includes upcoming ones with future dates or null dates
       expect(data.bookings.every((b: { status: string }) => b.status === "upcoming")).toBe(true);
     });
+
+    it("maps every row field for upcoming bookings (null start_date always qualifies)", async () => {
+      // A null-start_date upcoming row matches `start_date IS NULL`
+      // regardless of the wall clock, so the row-mapping body is always
+      // exercised — avoiding a date-dependent flake.
+      db.prepare(
+        `INSERT INTO travel_bookings (type, provider, destination, start_date, end_date,
+           confirmation_number, amount, currency, status, provider_msg_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        "hotel",
+        "Hilton",
+        "Kyoto",
+        null,
+        null,
+        "NULLDATE1",
+        50000,
+        "JPY",
+        "upcoming",
+        "msg-nulldate",
+      );
+
+      const app = createTravelBookingRoutes(makeDeps(db));
+      const res = await app.request("/travel-bookings/upcoming");
+      const data = (await res.json()) as {
+        bookings: Array<Record<string, unknown>>;
+        total: number;
+      };
+
+      expect(res.status).toBe(200);
+      const mapped = data.bookings.find(
+        (b) => b.confirmationNumber === "NULLDATE1",
+      );
+      expect(mapped).toMatchObject({
+        type: "hotel",
+        provider: "Hilton",
+        destination: "Kyoto",
+        startDate: null,
+        endDate: null,
+        confirmationNumber: "NULLDATE1",
+        amount: 50000,
+        currency: "JPY",
+        status: "upcoming",
+        providerMsgId: "msg-nulldate",
+      });
+      expect(typeof mapped?.id).toBe("number");
+      expect(data.total).toBeGreaterThanOrEqual(1);
+    });
   });
 
   describe("PATCH /travel-bookings/:id", () => {

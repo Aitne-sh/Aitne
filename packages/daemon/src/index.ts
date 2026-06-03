@@ -112,6 +112,7 @@ import {
   createServiceReloaders,
 } from "./bootstrap/services.js";
 import { initDatabase } from "./bootstrap/db.js";
+import { bootstrapAgents } from "./core/agents/loader-boot.js";
 import { createObservers } from "./bootstrap/observers.js";
 import { startApiServer } from "./bootstrap/api.js";
 import { createEventPipeline } from "./bootstrap/event-pipeline.js";
@@ -1167,6 +1168,16 @@ async function startup(): Promise<void> {
     browserTaskDeadlineTimer,
   } = eventPipeline;
 
+  // ── 10.5 Agent Definitions load (AGENT_DEFINITIONS_DESIGN.md §6.1 / §7.1) ──
+  // Runs AFTER `runMigrations` (inside `initDatabase`) and BEFORE
+  // `scheduler.start()`: scans the built-in + user `agent.md` roots into the
+  // `agents` table, builds the live enabled cache the scheduler's per-built-in
+  // gate consults, and starts the user-root watcher for live dashboard edits.
+  // Crash-proof by contract — a bad YAML never aborts boot.
+  const { enabledCache: agentEnabledCache, watcher: agentsWatcher } =
+    bootstrapAgents({ db, config, eventBroadcaster });
+  scheduler.setAgentEnabledCache(agentEnabledCache);
+
   // ── 11. Hono HTTP Server ──
   // Enable webhook fallback: when GitHub webhook is configured at boot,
   // upgrade the existing GitWatcher to webhook mode. (The runtime
@@ -1207,6 +1218,7 @@ async function startup(): Promise<void> {
     dispatcher,
     sessionManager,
     scheduler,
+    agentEnabledCache,
     customRoutineScheduler,
     healthMonitor,
     heartbeat,
@@ -1637,6 +1649,11 @@ async function startup(): Promise<void> {
     if (docsIndexer) {
       await docsIndexer.stop().catch((err) => {
         logger.warn({ err }, "docs indexer stop failed");
+      });
+    }
+    if (agentsWatcher) {
+      await agentsWatcher.stop().catch((err) => {
+        logger.warn({ err }, "agent definitions watcher stop failed");
       });
     }
     await observerManager.stopAll();

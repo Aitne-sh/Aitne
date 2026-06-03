@@ -44,6 +44,7 @@ import {
   safePath,
 } from "./path-resolve.js";
 import { performContextFileWrite } from "./write-step.js";
+import { mergeFrontmatter } from "./frontmatter-merge.js";
 import type { ContextRouteContext } from "./index.js";
 
 const logger = createLogger("context-api");
@@ -499,7 +500,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       ]);
     }
 
-    const { section, mode, content: newContent, cutoff, maxEntries } = parsed.data;
+    const { section, mode, content: newContent, cutoff, maxEntries, frontmatter } = parsed.data;
 
     // Append-only enforcement — see `permissions.ts:CREATE_ONLY_PUT` /
     // `APPEND_ONLY_PATCH_MODES`. The PUT-side gate at line ~267 rejects
@@ -650,6 +651,88 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
         }
         logger.info({ path, method: "PATCH", mode }, "Content appended to file");
         return c.json({ status: "appended" });
+      }
+
+      // ── frontmatterMerge: deep-merge a partial frontmatter object ──
+      // (docs/design/21-management-registry-and-entities.md §10.4 step 4b —
+      // entity sources.<app>.<id> linkage + last_synced_at). The schema
+      // guarantees `frontmatter` is a non-empty object for this mode and no
+      // section is needed; the body is preserved verbatim. Runs the same
+      // content-validation + atomic-write chain as the other modes.
+      if (mode === "frontmatterMerge") {
+        const merged = mergeFrontmatter(fileContent, frontmatter!);
+        if (!merged.ok) {
+          return respondWithAgentError(c, 400, [
+            composeIssue("context.content_validation_failed", {
+              field: "frontmatter",
+              received: merged.message,
+            }),
+          ]);
+        }
+        const prepared = prepareContextContentForWrite(target, merged.content, {
+          timezone: config.timezone || undefined,
+          disableRoadmapValidation: roadmapValidationOff,
+          previousRoadmapContent: fileContent,
+          today: localDateStr(new Date(), config.timezone || undefined),
+          defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
+          allowLegacyToday: path === "state/today" && isLegacyTodayContent(fileContent),
+          expectedAgentDay,
+        });
+        if (!prepared.ok) {
+          return respondWithAgentError(c, prepared.status, [
+            composeIssue("context.content_validation_failed", {
+              field: prepared.path ?? "content",
+              received: prepared.message,
+            }),
+          ], {
+            legacyFields: {
+              message: prepared.message,
+              path: prepared.path,
+            },
+          });
+        }
+        const writeResult = performContextFileWrite(
+          {
+            saveSnapshot,
+            ...(writeTracker ? { writeTracker } : {}),
+            onIndexableContextChange: deps.onIndexableContextChange ?? undefined,
+          },
+          {
+            absolutePath: fullPath,
+            relativePath: `${path}${target.ext}`,
+            snapshotKey: path,
+            mode: "put",
+            content: prepared.content,
+            trigger: "api_patch",
+            forceSnapshot: false,
+            sessionId: sessionId ?? null,
+            validateDailySkeleton: false,
+          },
+        );
+        if (!writeResult.ok) {
+          /* c8 ignore next 6 — defensive guard for unreachable branches */
+          return respondWithAgentError(c, 500, [
+            composeIssue("context.write_failed", {
+              field: "path",
+              received: path,
+            }),
+          ]);
+        }
+        if (shouldRefreshPromptContext(path, "PATCH")) {
+          notifyPromptContextChanged(deps, path, `context_patch:${path}`, {
+            path,
+            method: "PATCH",
+            mode,
+            section,
+            content: newContent,
+            previousContent: fileContent,
+          });
+        }
+        if (path.startsWith("policies/routines/custom/")) {
+          deps.onCustomRoutinesChanged?.();
+        }
+        logger.info({ path, method: "PATCH", mode }, "Frontmatter merged");
+        return c.json({ status: "merged" });
       }
 
       // ── Section-based modes: require section lookup ──

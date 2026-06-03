@@ -19,7 +19,7 @@ describe("classifyVisit", () => {
   });
 
   it("classifies file:// as localhost", () => {
-    expect(classifyVisit(input("file:", "", "/Users/shuto/notes.md"))).toBe(
+    expect(classifyVisit(input("file:", "", "/Users/example/notes.md"))).toBe(
       "localhost",
     );
   });

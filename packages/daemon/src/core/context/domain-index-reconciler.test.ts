@@ -244,6 +244,10 @@ describe("path helpers", () => {
     ).toBe(false);
     // Wrong basename.
     expect(isDomainIndexPath("knowledge/entities/work/main.md")).toBe(false);
+    // Right depth, wrong first segment.
+    expect(isDomainIndexPath("plans/entities/work/_index.md")).toBe(false);
+    // Right depth + root, wrong second segment.
+    expect(isDomainIndexPath("knowledge/dossiers/work/_index.md")).toBe(false);
   });
 
   it("entityDirToDomain validates both segments", () => {

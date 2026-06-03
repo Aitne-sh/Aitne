@@ -109,6 +109,32 @@ describe("parseGhIncludeResponse", () => {
   });
 });
 
+describe("GitHubPoller.isNetworkPollError", () => {
+  it("classifies connectivity failures (gh CLI + Go net/transport shapes) as network", () => {
+    for (const msg of [
+      "gh api notifications failed: error connecting to api.github.com\ncheck your internet connection",
+      'Get "https://api.github.com/notifications": read tcp 192.168.4.21:55000->140.82.112.6:443: connection reset by peer',
+      "dial tcp: lookup api.github.com: no such host",
+      "net/http: request canceled (Client.Timeout exceeded)",
+      "remote error: tls handshake failure",
+      "connect: network is unreachable",
+    ]) {
+      expect(GitHubPoller.isNetworkPollError(msg)).toBe(true);
+    }
+  });
+
+  it("leaves non-connectivity failures for the ERROR branch", () => {
+    // A bare non-zero exit with no connectivity signal stays an error so real
+    // faults are not silently downgraded to WARN.
+    expect(GitHubPoller.isNetworkPollError("gh api notifications failed: exit 1")).toBe(
+      false,
+    );
+    expect(GitHubPoller.isNetworkPollError("unexpected JSON token at position 4")).toBe(
+      false,
+    );
+  });
+});
+
 describe("isObservationFresh", () => {
   let db: Database.Database;
 

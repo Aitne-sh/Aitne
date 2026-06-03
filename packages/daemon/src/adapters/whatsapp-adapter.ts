@@ -1,3 +1,4 @@
+import { lookup as nodeDnsLookup } from "node:dns/promises";
 import {
   mkdirSync,
   unlinkSync,
@@ -59,14 +60,53 @@ const WA_VERSION_TTL_MS = 12 * 60 * 60 * 1000;
  * Reconnect tunables. Initial 1 s, double per attempt, cap at 60 s, plus a
  * small jitter so multiple processes restarting simultaneously do not
  * thunder-herd WhatsApp's relay servers. After RECONNECT_MAX_ATTEMPTS
- * consecutive failures we surface an error state and stop retrying — hammering
- * a relay that keeps closing us is the fast path to an IP-level ban.
+ * consecutive failures the *fast* phase ends. What happens next depends on
+ * why we closed (see {@link TRANSIENT_NETWORK_STATUS_CODES}):
+ *
+ *   - a transport/network close (the laptop lost WiFi, suspended, or switched
+ *     networks) drops into the sustained connectivity watch below, which never
+ *     gives up and recovers on its own once the network returns;
+ *   - any other close (WhatsApp rejected us at the app layer — bad version,
+ *     bad session, throttle) surfaces an error and stops, because hammering a
+ *     relay that keeps closing us is the fast path to an IP-level ban.
  */
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_BACKOFF_FACTOR = 2;
 const RECONNECT_JITTER_MS = 500;
 const RECONNECT_MAX_ATTEMPTS = 10;
+
+/**
+ * Sustained-watch tunables. Once the fast phase exhausts on a *network-class*
+ * close we keep watching for connectivity indefinitely on this long, fixed
+ * cadence rather than giving up — a laptop carried out of WiFi range,
+ * suspended, or moved between networks routinely stays offline far longer than
+ * the ~5 min fast window, and must still recover without a manual reset. The
+ * watch probes connectivity with a cheap DNS lookup (see
+ * {@link WhatsAppAdapter.isNetworkReachable}) and only opens a socket to
+ * WhatsApp once the network is back, so an offline laptop poses zero ban risk
+ * and near-zero cost.
+ */
+const RECONNECT_SUSTAINED_DELAY_MS = 30_000;
+const RECONNECT_SUSTAINED_JITTER_MS = 5_000;
+const WA_REACHABILITY_PROBE_HOST = "web.whatsapp.com";
+
+/**
+ * Disconnect codes (and the no-code case) that mean the *transport* failed,
+ * not that WhatsApp's app layer rejected us. These are safe to retry
+ * indefinitely under the sustained watch — they are the "carried the laptop
+ * out of range / sleep-wake / network switch" symptoms.
+ *
+ *   408 — DisconnectReason.connectionLost / timedOut (the ping window elapsed
+ *         silently; this is the status the dashboard shows for a moved laptop)
+ *   428 — DisconnectReason.connectionClosed (transport closed under us)
+ *   503 — DisconnectReason.unavailableService (WhatsApp temporarily unreachable)
+ *
+ * A close carrying no Boom statusCode at all is a raw socket error
+ * (ENOTFOUND / ECONNRESET / EHOSTUNREACH / EAI_AGAIN) — also transport, also
+ * network — so we treat the null case as network-class too.
+ */
+const TRANSIENT_NETWORK_STATUS_CODES: ReadonlySet<number> = new Set([408, 428, 503]);
 
 /**
  * Disconnect codes that mean the user must take action — re-pair, fix a
@@ -314,6 +354,29 @@ export class WhatsAppAdapter implements MessageAdapter {
   private latestQr: WhatsAppQrSnapshot | null = null;
   private lastError: string | null = null;
   private reconnectAttempts = 0;
+  /**
+   * Whether the most recent unsolicited close was a transport/network failure
+   * (see {@link TRANSIENT_NETWORK_STATUS_CODES}) rather than an app-layer
+   * rejection. Read by {@link scheduleReconnect} to decide, once the fast
+   * phase exhausts, whether to enter the never-give-up sustained watch
+   * (network) or surface an error and stop (app-layer).
+   */
+  private lastCloseWasNetwork = false;
+  /**
+   * True while a reconnect is scheduled OR an attempt (including the sustained
+   * watch's async connectivity probe) is in flight, and we have NOT
+   * permanently given up. Lets the status accessors report "connecting"
+   * during the brief timer-less window of a sustained probe instead of
+   * flashing a red error. Cleared on open / give-up / logout / stop.
+   */
+  private reconnecting = false;
+  /**
+   * Connectivity probe used by the sustained watch. Injectable so tests can
+   * drive the offline / back-online transitions without real DNS; production
+   * resolves a WhatsApp host through the OS resolver.
+   */
+  private dnsLookup: (hostname: string) => Promise<unknown> = (hostname) =>
+    nodeDnsLookup(hostname);
   private cachedWAVersion: number[] | null = null;
   private cachedWAVersionAt = 0;
 
@@ -348,10 +411,11 @@ export class WhatsAppAdapter implements MessageAdapter {
    *     transitioning). `disabled` covers the pre-connect window during
    *     {@link start}'s awaits.
    *   - `logged_out` → terminal, surface the error.
-   *   - `disconnected` → if a reconnect timer is pending, recovery is in
-   *     flight; otherwise we've either hit `RECONNECT_MAX_ATTEMPTS` or the
-   *     adapter is between attempts with no scheduled retry, both of which
-   *     are real, user-actionable failures.
+   *   - `disconnected` → recovery is in flight when a reconnect timer is
+   *     pending OR a sustained-watch attempt is mid-probe ({@link reconnecting}
+   *     covers the brief timer-less DNS window). Only when neither holds have
+   *     we permanently given up (app-layer rejection past the fast cap) — a
+   *     real, user-actionable failure.
    */
   getStatusError(): string | null {
     switch (this.connectionState) {
@@ -363,7 +427,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       case "logged_out":
         return this.lastError ?? "WhatsApp logged out";
       case "disconnected":
-        if (this.reconnectTimer !== null) return null;
+        if (this.reconnectTimer !== null || this.reconnecting) return null;
         return this.lastError ?? "WhatsApp disconnected";
       /* v8 ignore next 2 — default branch unreachable with correctly typed connectionState */
       default:
@@ -387,8 +451,10 @@ export class WhatsAppAdapter implements MessageAdapter {
         // rendered red on /health polled during that window.
         return { runtimeState: "connecting", error: null };
       case "disconnected":
-        // getStatusError returned null → reconnect timer is pending, so this
-        // is a transient gap, not a failure. Treat as connecting.
+        // getStatusError returned null → a reconnect timer is pending or the
+        // sustained watch is mid-probe, so this is a transient gap (including
+        // a moved/offline laptop being watched for), not a failure. Treat as
+        // connecting.
         return { runtimeState: "connecting", error: null };
       /* v8 ignore next 2 — default branch unreachable with correctly typed connectionState */
       default:
@@ -418,6 +484,8 @@ export class WhatsAppAdapter implements MessageAdapter {
     this.shuttingDown = false;
     this.lastError = null;
     this.reconnectAttempts = 0;
+    this.reconnecting = false;
+    this.lastCloseWasNetwork = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -508,6 +576,8 @@ export class WhatsAppAdapter implements MessageAdapter {
       this.presenceInterval = null;
     }
     this.reconnectAttempts = 0;
+    this.reconnecting = false;
+    this.lastCloseWasNetwork = false;
     this.sentMessageIds.clear();
     this.clearQrSnapshot();
     this.clearQrFile();
@@ -1018,6 +1088,8 @@ export class WhatsAppAdapter implements MessageAdapter {
       this.connectionState = "ok";
       this.lastError = null;
       this.reconnectAttempts = 0;
+      this.reconnecting = false;
+      this.lastCloseWasNetwork = false;
       this.clearQrSnapshot();
       this.clearQrFile();
       logger.info("whatsapp connected");
@@ -1061,6 +1133,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       /* v8 ignore next 1 — statusCode is always a number when isLoggedOut=true */
       this.lastError = `WhatsApp logged out (status ${statusCode ?? "unknown"}) — re-pair required`;
       this.reconnectAttempts = 0;
+      this.reconnecting = false;
       logger.error({ statusCode }, "whatsapp connection closed: logged out");
       if (this.onLoggedOut) {
         try {
@@ -1075,8 +1148,15 @@ export class WhatsAppAdapter implements MessageAdapter {
     if (this.shuttingDown) {
       this.connectionState = "disabled";
       this.reconnectAttempts = 0;
+      this.reconnecting = false;
       return;
     }
+
+    // Classify the close: a transport/network failure (or a raw socket error
+    // with no Boom code) is safe to retry indefinitely under the sustained
+    // watch; anything else is an app-layer rejection that keeps the hard cap.
+    this.lastCloseWasNetwork =
+      statusCode === null || TRANSIENT_NETWORK_STATUS_CODES.has(statusCode);
 
     // Version-rejection codes mean WhatsApp doesn't accept the client version
     // we advertised. Drop the cache so the next connect re-fetches a fresh
@@ -1104,25 +1184,36 @@ export class WhatsAppAdapter implements MessageAdapter {
   }
 
   /**
-   * Schedule the next reconnect attempt with full-jitter exponential backoff.
+   * Schedule the next reconnect attempt.
    *
-   * - Delay: `min(initial * factor^attempt, max) + random(0, jitter)`
-   * - Cap: after {@link RECONNECT_MAX_ATTEMPTS} consecutive failures the loop
-   *   stops and the adapter sits in `disconnected` until something external
-   *   (e.g. the dashboard's "Refresh QR" button → `requestQR()`) restarts it.
+   * Two phases:
    *
-   * Why a hard cap: when WhatsApp is blocking us (bad version, throttled IP,
-   * regional outage) every retry burns CPU and risks escalating the block.
-   * Better to surface the error and let the user decide whether to wait it
-   * out or rotate IP / re-pair.
+   *  1. **Fast phase** (`reconnectAttempts < RECONNECT_MAX_ATTEMPTS`) —
+   *     full-jitter exponential backoff, `min(initial * factor^attempt, max) +
+   *     random(0, jitter)`. Recovers quick blips in seconds.
+   *  2. **Sustained watch** (fast phase exhausted, last close was
+   *     network-class) — a fixed long cadence; {@link runReconnectAttempt}
+   *     gates each attempt on a connectivity probe so we only open a socket to
+   *     WhatsApp once the network is back. Never gives up; the attempt counter
+   *     is pinned at the cap to avoid unbounded growth across a long offline
+   *     window. This is what lets a laptop carried out of WiFi range recover
+   *     on its own instead of wedging in an error state.
+   *
+   * If the fast phase exhausts on a *non*-network close (WhatsApp rejecting us
+   * at the app layer — bad version, bad session, throttle) we stop and surface
+   * an error: hammering a relay that keeps closing us is the fast path to an
+   * IP-level block and needs operator action (re-pair / wait it out).
    */
   private scheduleReconnect(): void {
     if (this.reconnectTimer || this.shuttingDown) return;
     if (this.connectionState === "logged_out") return;
 
-    if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+    const exhaustedFastPhase = this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS;
+
+    if (exhaustedFastPhase && !this.lastCloseWasNetwork) {
       const previousError = this.lastError ?? "unknown error";
       this.lastError = `WhatsApp reconnect gave up after ${RECONNECT_MAX_ATTEMPTS} attempts (${previousError})`;
+      this.reconnecting = false;
       logger.error(
         { attempts: this.reconnectAttempts, lastError: previousError },
         "whatsapp reconnect: max attempts exceeded",
@@ -1130,35 +1221,102 @@ export class WhatsAppAdapter implements MessageAdapter {
       return;
     }
 
-    const exponential = Math.min(
-      RECONNECT_INITIAL_DELAY_MS * RECONNECT_BACKOFF_FACTOR ** this.reconnectAttempts,
-      RECONNECT_MAX_DELAY_MS,
-    );
-    const jitter = Math.floor(Math.random() * RECONNECT_JITTER_MS);
-    const delayMs = exponential + jitter;
+    let delayMs: number;
+    if (exhaustedFastPhase) {
+      // Sustained network watch — fixed cadence, counter left pinned at the
+      // cap so we stay in this branch without growing reconnectAttempts.
+      delayMs =
+        RECONNECT_SUSTAINED_DELAY_MS
+        + Math.floor(Math.random() * RECONNECT_SUSTAINED_JITTER_MS);
+    } else {
+      const exponential = Math.min(
+        RECONNECT_INITIAL_DELAY_MS * RECONNECT_BACKOFF_FACTOR ** this.reconnectAttempts,
+        RECONNECT_MAX_DELAY_MS,
+      );
+      delayMs = exponential + Math.floor(Math.random() * RECONNECT_JITTER_MS);
+      this.reconnectAttempts += 1;
+    }
 
-    this.reconnectAttempts += 1;
+    this.reconnecting = true;
     logger.info(
-      { attempt: this.reconnectAttempts, delayMs },
+      { attempt: this.reconnectAttempts, delayMs, sustained: exhaustedFastPhase },
       "whatsapp reconnect scheduled",
     );
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.shuttingDown || this.connectionState === "logged_out") {
+        this.reconnecting = false;
         return;
       }
-      void this.connect().catch((err) => {
-        // connect() throws synchronously on a misconfigured adapter; the
-        // close-event path can't recover that, so we have to feed the loop
-        // ourselves. Errors here are already counted in reconnectAttempts.
-        logger.error({ err }, "whatsapp reconnect attempt threw");
-        this.connectionState = "disconnected";
-        this.lastError = err instanceof Error ? err.message : String(err);
-        this.scheduleReconnect();
-      });
+      void this.runReconnectAttempt(exhaustedFastPhase);
     }, delayMs);
     this.reconnectTimer.unref?.();
+  }
+
+  /**
+   * Carry out one reconnect attempt. In the sustained watch we first probe
+   * connectivity: if we're still offline, keep watching without poking
+   * WhatsApp (zero ban risk, near-zero cost); once the network is back we
+   * reset to a fresh fast phase and reconnect.
+   *
+   * Why reset the counter on reachability (not just on a clean `open`): when
+   * the network returns, the first reconnect frequently replays WhatsApp's
+   * handshake steps — `restartRequired` (515) and version negotiation — which
+   * close with a *non*-network status and need a few retries to clear. With
+   * the counter still pinned at the cap, that normal 515 would hit
+   * `exhausted && !network` in {@link scheduleReconnect} and falsely give up.
+   * A fresh fast phase gives those handshake closes their proper retry budget
+   * (a clean `open` doesn't fire before a 515, so we can't rely on it here).
+   */
+  private async runReconnectAttempt(sustained: boolean): Promise<void> {
+    if (sustained) {
+      const reachable = await this.isNetworkReachable();
+      // shuttingDown / logged_out may have flipped during the async probe.
+      if (this.shuttingDown || this.connectionState === "logged_out") {
+        this.reconnecting = false;
+        return;
+      }
+      if (!reachable) {
+        logger.debug("whatsapp reconnect: network unreachable, continuing sustained watch");
+        this.scheduleReconnect();
+        return;
+      }
+      logger.info("whatsapp reconnect: network reachable, reconnecting");
+      this.reconnectAttempts = 0;
+    }
+
+    try {
+      await this.connect();
+    } catch (err) {
+      // connect() only throws on a misconfigured adapter (deps/auth not
+      // initialized) — never on a network failure, which always arrives via
+      // the close *event*. So a thrown connect is a local, non-network error:
+      // mark it as such so a persistent failure gives up at the cap instead of
+      // looping forever in the sustained watch (it would otherwise inherit a
+      // stale lastCloseWasNetwork=true from the close that started the watch).
+      logger.error({ err }, "whatsapp reconnect attempt threw");
+      this.connectionState = "disconnected";
+      this.lastError = err instanceof Error ? err.message : String(err);
+      this.lastCloseWasNetwork = false;
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Cheap connectivity probe for the sustained watch: resolve a WhatsApp host
+   * through the OS resolver. We deliberately do NOT open a socket to the relay
+   * here — a DNS lookup is enough to tell "the laptop has a working network
+   * path again" without poking WhatsApp's servers while we may be throttled or
+   * offline. Fails fast (EAI_AGAIN / ENOTFOUND) when there is no network.
+   */
+  private async isNetworkReachable(): Promise<boolean> {
+    try {
+      await this.dnsLookup(WA_REACHABILITY_PROBE_HOST);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private handleMessagesUpsert(payload: unknown): void {

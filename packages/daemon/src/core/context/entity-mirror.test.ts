@@ -382,6 +382,22 @@ describe("filesystem walk + boot reconciler", () => {
     ]);
   });
 
+  it("skips non-type-plural dirs and non-entity files under the real L2 root", () => {
+    // Directory under a domain whose name is not a known type-plural →
+    // the `!L2_TYPE_PLURALS.has(...)` branch.
+    writeEntity("knowledge/entities/work/notaplural/x.md", "skip me");
+    // Non-md file under a valid type-plural dir → the `endsWith(".md")` branch.
+    writeEntity("knowledge/entities/work/meetings/note.txt", "skip me");
+    // `_`-prefixed md (e.g. _index.md) under a valid type-plural dir →
+    // the `startsWith("_")` branch.
+    writeEntity("knowledge/entities/work/meetings/_index.md", "skip me");
+    // The one legitimate entity survives.
+    writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);
+    expect(enumerateEntityFiles(contextDir)).toEqual([
+      "knowledge/entities/work/meetings/foo.md",
+    ]);
+  });
+
   it("ignores sub-directories nested under <domain>/<plural>/", () => {
     mkdirSync(join(contextDir, "knowledge", "entities", "work", "meetings", "nested-dir"), { recursive: true });
     writeEntity("knowledge/entities/work/meetings/foo.md", SAMPLE_ENTITY);

@@ -63,9 +63,9 @@ line 1 is exactly `# 2026-04-28 (Tuesday)`. Do **not** advance the date
 because the routine is "preparing tomorrow"; the morning routine always
 prepares the agent-day in progress, not the next one.
 
-`PUT /api/context/state/today` returns 422 if line 1 disagrees with the
-daemon's current agent-day; the error message echoes both values so a
-mistake is recoverable in the same session.
+`PUT /api/context/state/today` returns 400 (`error:"validation_error"`) if
+line 1 disagrees with the daemon's current agent-day; the error message
+echoes both values so a mistake is recoverable in the same session.
 
 today.md has **no YAML frontmatter** — the H1 must be the first byte of
 the file.
@@ -198,11 +198,11 @@ skill `references/api.md`. today.md-specific rules layered on top:
 - **Lock.** `state/today.md` is locked by the Morning Routine. Include
   `X-Lock-Id: <today_write_lock_id>` on every PUT / PATCH when the
   tag is in your context; other sessions get `409
-  today_write_lock_held` while the lock is held.
+  morning_routine_lock_held` while the lock is held.
 - **Skeleton validators.** PUT is rejected (400) if line 1 fails the
   H1 date regex or line 2 fails the day-type quote regex (see §"Line 1
   — which date?" and §"Header line — day-type filter" above). PUT is
-  rejected (422) if line 1's date disagrees with the daemon's current
+  also rejected (400) if line 1's date disagrees with the daemon's current
   agent-day — the error echoes both values.
 
 ## Knowledge map — section shape (auto-curated)

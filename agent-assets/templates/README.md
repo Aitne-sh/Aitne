@@ -92,5 +92,8 @@ See `docs/design/06-memory.md` and `docs/design/12-configuration.md` for the
 fresh-install flow and vault layout. The `policies/management.md` template
 follows the structured `schema_version: 3` registry specified in
 `docs/design/21-management-registry-and-entities.md` (A. SoT bindings,
-B. Managed tasks, C. Active-Policies stub) — the v2 "Default Schedules"
-section has been retired (§21 §8.10); do not reintroduce it.
+B. Managed tasks, C. Active-Policies stub). `Default Schedules` is not a
+static template section: the daemon's default-schedules reconciler appends
+a read-only `## Default Schedules` mirror of `recurring_schedules` at
+runtime (§21 §8.10), so it is intentionally absent from this seed — do
+not add it here.

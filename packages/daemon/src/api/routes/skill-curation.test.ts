@@ -148,7 +148,7 @@ describe("GET /skill-curation/skills", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/skills");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.skills.find((s: any) => s.slug === "user-profile")).toBeDefined();
   });
 });
@@ -164,7 +164,7 @@ describe("GET /skill-curation/skills/:slug", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/skills/user-profile");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.sections).toHaveLength(1);
     expect(body.sections[0].id).toBe("topic-files");
     expect(body.sections[0].applied_overlay).toBeNull();
@@ -176,7 +176,7 @@ describe("GET /skill-curation/skills/:slug/sections/:section_id", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/skills/user-profile/sections/topic-files");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.kind).toBe("knowledge_layout");
     expect(body.payload.files[0].path).toBe("user/profile.md");
     expect(body.origin).toBe("seed");
@@ -194,7 +194,7 @@ describe("GET /skill-curation/skills/:slug/sections/:section_id/history", () => 
     const app = makeApp();
     const res = await app.request("/skill-curation/skills/user-profile/sections/topic-files/history");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.history).toEqual([]);
   });
 });
@@ -205,7 +205,7 @@ describe("GET /skill-curation/signals", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/signals?skill=user-profile");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.signals).toHaveLength(1);
     expect(body.signals[0].signal_type).toBe("structure_diff");
   });
@@ -224,7 +224,7 @@ describe("POST /skill-curation/runs (gating + token mint)", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/runs", { method: "POST", body: JSON.stringify({ target_skills: ["user-profile"] }) });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.runId).toMatch(/^skcur-/);
     expect(typeof body.runToken).toBe("string");
     expect(body.runToken.split(".")).toHaveLength(3);
@@ -254,7 +254,7 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({ runId, signal_ids: [] }),
@@ -271,7 +271,7 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
     mkdirSync(join(dataDir, "context", "user"), { recursive: true });
     writeFileSync(join(dataDir, "context", "user", "profile.md"), "## Identity\n## Work Pattern\n");
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -290,10 +290,10 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
       headers: { "x-optimizer-token": runToken },
     });
     if (res.status !== 200) {
-      const debug = await res.json();
+      const debug = (await res.json()) as any;
       throw new Error(`expected 200, got ${res.status}: ${JSON.stringify(debug)}`);
     }
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.proposalId).toBeGreaterThan(0);
     expect(body.status).toBe("applied");
     expect(body.overlayPath).toMatch(/topic-files\.json$/);
@@ -318,7 +318,7 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
     mkdirSync(join(dataDir, "context", "user"), { recursive: true });
     writeFileSync(join(dataDir, "context", "user", "profile.md"), "## Identity\n");
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -337,7 +337,7 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("smoke_failed");
 
     // The failed proposal MUST be persisted for inspection.
@@ -353,7 +353,7 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
     mkdirSync(join(dataDir, "context", "user"), { recursive: true });
     writeFileSync(join(dataDir, "context", "user", "profile.md"), "## Identity\n## Work Pattern\n");
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals/dryrun", {
       method: "POST",
       body: JSON.stringify({
@@ -372,7 +372,7 @@ describe("POST /skill-curation/proposals (chokepoint — atomic apply)", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.dryRun).toBe(true);
     // No row, no signal consumption, no overlay write.
     const rows = db.prepare(`SELECT 1 FROM skill_curation_proposals WHERE run_id = ?`).all(runId);
@@ -387,7 +387,7 @@ describe("POST /skill-curation/runs/:id/finalize", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // Pretend two proposals already landed (one applied, one smoke_failed).
     db.prepare(
       `INSERT INTO skill_curation_proposals
@@ -416,7 +416,7 @@ describe("POST /skill-curation/runs/:id/finalize", () => {
       body: "{}",
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.proposals_total).toBe(2);
     expect(body.counts).toEqual({ applied: 1, smoke_failed: 1 });
 
@@ -456,7 +456,7 @@ describe("GET /skill-curation/skills/:slug/sections/:section_id — section not 
     const app = makeApp();
     const res = await app.request("/skill-curation/skills/user-profile/sections/nonexistent-section");
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("section_not_declared");
   });
 });
@@ -466,7 +466,7 @@ describe("GET /skill-curation/skills/:slug/sections/:section_id/history — sect
     const app = makeApp();
     const res = await app.request("/skill-curation/skills/user-profile/sections/nonexistent-section/history");
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("section_not_declared");
   });
 });
@@ -478,7 +478,7 @@ describe("GET /skill-curation/signals — all signals + since filter", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/signals");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.signals.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -491,13 +491,13 @@ describe("GET /skill-curation/signals — all signals + since filter", () => {
     const futureIso = new Date(after + 60_000).toISOString();
     const res = await app.request(`/skill-curation/signals?since=${encodeURIComponent(futureIso)}`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.signals).toHaveLength(0);
     // Since = before signals, expect ≥1 result
     const pastIso = new Date(before - 1_000).toISOString();
     const res2 = await app.request(`/skill-curation/signals?since=${encodeURIComponent(pastIso)}`);
     expect(res2.status).toBe(200);
-    const body2 = await res2.json();
+    const body2 = (await res2.json()) as any;
     expect(body2.signals.length).toBeGreaterThanOrEqual(1);
   });
 });
@@ -507,7 +507,7 @@ describe("GET /skill-curation/knowledge-map", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/knowledge-map");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(Array.isArray(body.files)).toBe(true);
   });
 
@@ -519,7 +519,7 @@ describe("GET /skill-curation/knowledge-map", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/knowledge-map?scope=user");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(Array.isArray(body.files)).toBe(true);
     // All returned files should be under user/
     for (const f of body.files) {
@@ -533,7 +533,7 @@ describe("GET /skill-curation/proposals/:id", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/proposals/not-a-number");
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("bad_id");
   });
 
@@ -541,7 +541,7 @@ describe("GET /skill-curation/proposals/:id", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/proposals/99999");
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("not_found");
   });
 
@@ -549,7 +549,7 @@ describe("GET /skill-curation/proposals/:id", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     mkdirSync(join(dataDir, "context", "user"), { recursive: true });
     writeFileSync(join(dataDir, "context", "user", "profile.md"), "## Identity\n## Work Pattern\n");
     const sig = recordSignal(db, { skill_slug: "user-profile", signal_type: "structure_diff", payload: { sub_kind: "heading_add" } });
@@ -571,10 +571,10 @@ describe("GET /skill-curation/proposals/:id", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(propRes.status).toBe(200);
-    const { proposalId } = await propRes.json();
+    const { proposalId } = (await propRes.json()) as { proposalId: string };
     const res = await app.request(`/skill-curation/proposals/${proposalId}`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.id).toBe(proposalId);
     expect(body.skill_slug).toBe("user-profile");
     expect(body.section_id).toBe("topic-files");
@@ -596,7 +596,7 @@ describe("POST /skill-curation/runs/manual", () => {
       body: "{}",
     });
     expect(res.status).toBe(403);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("curation_disabled");
   });
 
@@ -609,7 +609,7 @@ describe("POST /skill-curation/runs/manual", () => {
       body: "{}",
     });
     expect(res.status).toBe(503);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("event_bus_unavailable");
   });
 
@@ -631,7 +631,7 @@ describe("POST /skill-curation/runs/manual", () => {
       body: "{}",
     });
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("run_in_flight");
     expect(body.runId).toBe("skcur-inflight-test");
   });
@@ -649,7 +649,7 @@ describe("POST /skill-curation/runs/manual", () => {
       body: "{}",
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.ok).toBe(true);
     expect(fakeEvents.length).toBe(1);
     const evt = fakeEvents[0] as { type: string; routine: string };
@@ -663,7 +663,7 @@ describe("POST /skill-curation/proposals — rate_limit_exceeded", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // Insert 20 proposals for this run
     for (let i = 0; i < 20; i++) {
       db.prepare(
@@ -690,7 +690,7 @@ describe("POST /skill-curation/proposals — rate_limit_exceeded", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(429);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("rate_limit_exceeded");
     expect(body.count).toBe(20);
     expect(body.cap).toBe(20);
@@ -702,7 +702,7 @@ describe("POST /skill-curation/proposals — skill_has_no_curation", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const reqBody = JSON.stringify({
       runId,
       skill_slug: "no-curation-skill",
@@ -717,11 +717,11 @@ describe("POST /skill-curation/proposals — skill_has_no_curation", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(404);
-    expect((await res.json()).error).toBe("skill_has_no_curation");
+    expect(((await res.json()) as any).error).toBe("skill_has_no_curation");
 
     // Also dryrun
     const runRes2 = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId: runId2, runToken: runToken2 } = await runRes2.json();
+    const { runId: runId2, runToken: runToken2 } = (await runRes2.json()) as { runId: string; runToken: string };
     const reqBody2 = JSON.stringify({
       runId: runId2,
       skill_slug: "no-curation-skill",
@@ -736,7 +736,7 @@ describe("POST /skill-curation/proposals — skill_has_no_curation", () => {
       headers: { "x-optimizer-token": runToken2 },
     });
     expect(res2.status).toBe(404);
-    expect((await res2.json()).error).toBe("skill_has_no_curation");
+    expect(((await res2.json()) as any).error).toBe("skill_has_no_curation");
   });
 });
 
@@ -745,7 +745,7 @@ describe("POST /skill-curation/proposals — section_not_declared", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -759,7 +759,7 @@ describe("POST /skill-curation/proposals — section_not_declared", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("section_not_declared");
   });
 });
@@ -769,7 +769,7 @@ describe("POST /skill-curation/proposals — kind_mismatch", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // user-profile/topic-files is knowledge_layout; submit routing_table instead
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
@@ -784,7 +784,7 @@ describe("POST /skill-curation/proposals — kind_mismatch", () => {
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("kind_mismatch");
     expect(body.expected).toBe("knowledge_layout");
     expect(body.got).toBe("routing_table");
@@ -796,7 +796,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (knowledge_layou
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // prevPayload from emptyPayloadFor has 1 file (_empty.md); cap = max(5, ceil(1*0.5)) = 5
     // Submit 7 NEW files (different from _empty.md) to exceed additions cap
     const res = await app.request("/skill-curation/proposals", {
@@ -819,7 +819,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (knowledge_layou
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("diff_caps_exceeded");
   });
 });
@@ -829,7 +829,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (routing_table)"
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // prevPayload seed has 1 rule (trigger_pattern="placeholder seed"); cap = 5 additions
     // Submit 7 rules with distinct trigger_patterns
     const res = await app.request("/skill-curation/proposals", {
@@ -853,7 +853,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (routing_table)"
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("diff_caps_exceeded");
   });
 });
@@ -863,7 +863,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (search_recipes)
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // prevPayload seed has 1 recipe (question_shape="placeholder seed"); cap = 5
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
@@ -884,7 +884,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (search_recipes)
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("diff_caps_exceeded");
   });
 });
@@ -894,7 +894,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (convention_note
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // prevPayload seed has 1 note (topic="placeholder"); cap = 5
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
@@ -915,7 +915,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (convention_note
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("diff_caps_exceeded");
   });
 });
@@ -925,7 +925,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (frontmatter_sch
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // prevPayload seed has 1 file_type (glob="_empty.md"); cap = 5
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
@@ -947,7 +947,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (frontmatter_sch
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("diff_caps_exceeded");
   });
 });
@@ -957,7 +957,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (cross_reference
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // prevPayload seed has 1 ref (from_path="_empty.md"); cap = 5
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
@@ -979,7 +979,7 @@ describe("POST /skill-curation/proposals — diff_caps_exceeded (cross_reference
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("diff_caps_exceeded");
   });
 });
@@ -989,7 +989,7 @@ describe("POST /skill-curation/proposals — render_budget_exceeded (convention_
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     // convention_notes budget = 1.5 × 1024 = 1536 bytes.
     // prevPayload from seed has 1 note (topic="placeholder"); cap = max(5, ceil(0.5)) = 5 additions.
     // Submit 4 new notes + keep "placeholder" = 4 additions, 0 removals (≤ cap=5 additions).
@@ -1021,7 +1021,7 @@ describe("POST /skill-curation/proposals — render_budget_exceeded (convention_
       headers: { "x-optimizer-token": runToken },
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("render_budget_exceeded");
     expect(typeof body.bytes).toBe("number");
     expect(body.bytes).toBeGreaterThan(1536);
@@ -1033,7 +1033,7 @@ describe("GET /settings/skill-curation", () => {
     const app = makeApp();
     const res = await app.request("/settings/skill-curation");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body).toHaveProperty("config");
     expect(body).toHaveProperty("eligible_skills");
     expect(body).toHaveProperty("recent_runs");
@@ -1049,7 +1049,7 @@ describe("GET /settings/skill-curation", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     mkdirSync(join(dataDir, "context", "user"), { recursive: true });
     writeFileSync(join(dataDir, "context", "user", "profile.md"), "## Identity\n## Work Pattern\n");
     const sig = recordSignal(db, { skill_slug: "user-profile", signal_type: "structure_diff", payload: { sub_kind: "heading_add" } });
@@ -1072,7 +1072,7 @@ describe("GET /settings/skill-curation", () => {
     });
     const res = await app.request("/settings/skill-curation");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     const run = body.recent_runs.find((r: { id: string }) => r.id === runId);
     expect(run).toBeDefined();
     expect(run.counts).toBeDefined();
@@ -1088,7 +1088,7 @@ describe("PATCH /settings/skill-curation", () => {
       body: JSON.stringify({ enabled: true }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.config.enabled).toBe(true);
   });
 
@@ -1100,7 +1100,7 @@ describe("PATCH /settings/skill-curation", () => {
       body: JSON.stringify({ enabled: "not-a-boolean" }),
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("invalid_config");
   });
 
@@ -1151,7 +1151,7 @@ describe("GET /skill-curation/proposals — list", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/proposals");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(Array.isArray(body.proposals)).toBe(true);
   });
 
@@ -1159,7 +1159,7 @@ describe("GET /skill-curation/proposals — list", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId } = await runRes.json();
+    const { runId } = (await runRes.json()) as { runId: string };
     // Insert proposals with different statuses
     db.prepare(
       `INSERT INTO skill_curation_proposals
@@ -1184,7 +1184,7 @@ describe("GET /skill-curation/proposals — list", () => {
 
     const res = await app.request("/skill-curation/proposals?status=applied");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.proposals.every((p: { status: string }) => p.status === "applied")).toBe(true);
   });
 });
@@ -1194,7 +1194,7 @@ describe("GET /skill-curation/runs — list", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/runs");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(Array.isArray(body.runs)).toBe(true);
   });
 
@@ -1202,10 +1202,10 @@ describe("GET /skill-curation/runs — list", () => {
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId } = await runRes.json();
+    const { runId } = (await runRes.json()) as { runId: string };
     const res = await app.request("/skill-curation/runs");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     const run = body.runs.find((r: { id: string }) => r.id === runId);
     expect(run).toBeDefined();
     expect(run.status).toBe("running");
@@ -1218,7 +1218,7 @@ describe("GET /skill-curation/orphans", () => {
     const app = makeApp();
     const res = await app.request("/skill-curation/orphans");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.orphans).toHaveLength(0);
     expect(typeof body.scanned).toBe("number");
   });
@@ -1233,7 +1233,7 @@ describe("POST /skill-curation/orphans/discard", () => {
       body: JSON.stringify({ slug: "only-slug-no-section" }),
     });
     expect(res.status).toBe(422);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("invalid_body");
   });
 
@@ -1245,7 +1245,7 @@ describe("POST /skill-curation/orphans/discard", () => {
       body: JSON.stringify({ slug: "nonexistent-orphan", section_id: "nonexistent-section" }),
     });
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("discard_failed");
   });
 
@@ -1272,7 +1272,7 @@ describe("POST /skill-curation/orphans/discard", () => {
     // Verify it's detected as an orphan first
     const orphansRes = await app.request("/skill-curation/orphans");
     expect(orphansRes.status).toBe(200);
-    const orphansBody = await orphansRes.json();
+    const orphansBody = (await orphansRes.json()) as any;
     const orphan = orphansBody.orphans.find(
       (o: { slug: string; section_id: string }) => o.slug === "orphan-skill" && o.section_id === "orphan-section",
     );
@@ -1284,7 +1284,7 @@ describe("POST /skill-curation/orphans/discard", () => {
       body: JSON.stringify({ slug: "orphan-skill", section_id: "orphan-section" }),
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.ok).toBe(true);
     expect(body.discarded).toMatch(/orphan-section\.json$/);
   });
@@ -1295,7 +1295,7 @@ describe("safeParse catch coverage — bad prev_payload_json in history", () => 
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId } = await runRes.json();
+    const { runId } = (await runRes.json()) as { runId: string };
     // Insert a row with invalid prev_payload_json
     db.prepare(
       `INSERT INTO skill_curation_proposals
@@ -1309,7 +1309,7 @@ describe("safeParse catch coverage — bad prev_payload_json in history", () => 
     ).run(runId, Date.now());
     const res = await app.request("/skill-curation/skills/user-profile/sections/topic-files/history");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.history).toHaveLength(1);
     // safeParse returns null for invalid JSON
     expect(body.history[0].prev_payload).toBeNull();
@@ -1330,7 +1330,7 @@ describe("isCurationEnabled exception path — bad config JSON in runtime_state"
       body: "{}",
     });
     expect(res.status).toBe(403);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.error).toBe("curation_disabled");
   });
 });
@@ -1345,7 +1345,7 @@ describe("readCurationConfig exception path — bad config JSON returns default"
     const app = makeApp();
     const res = await app.request("/settings/skill-curation");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     // Should get default config back
     expect(body.config.enabled).toBe(DEFAULT_SKILL_CURATION_CONFIG.enabled);
     expect(body.config.cadence).toBe(DEFAULT_SKILL_CURATION_CONFIG.cadence);
@@ -1390,7 +1390,7 @@ describe("readJsonBody parse-failure (400) — one hit per mutation endpoint", (
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request(`/skill-curation/runs/${runId}/finalize`, {
       method: "POST",
       headers: {
@@ -1406,7 +1406,7 @@ describe("readJsonBody parse-failure (400) — one hit per mutation endpoint", (
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       headers: {
@@ -1422,7 +1422,7 @@ describe("readJsonBody parse-failure (400) — one hit per mutation endpoint", (
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals/dryrun", {
       method: "POST",
       headers: {
@@ -1479,7 +1479,7 @@ describe("PATCH /settings/skill-curation — onScheduleConfigChanged throws (war
       body: JSON.stringify({ cadence: "daily" }), // cadence change triggers hook
     });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.config.cadence).toBe("daily");
   });
 });
@@ -1498,7 +1498,7 @@ describe("emptyPayloadFor — knowledge_layout case (user-profile, no seed)", ()
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -1522,7 +1522,7 @@ describe("emptyPayloadFor — search_recipes case (notes-skill/recipes, no seed)
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -1545,7 +1545,7 @@ describe("emptyPayloadFor — convention_notes case (notes-skill/notes, no seed)
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -1568,7 +1568,7 @@ describe("emptyPayloadFor — frontmatter_schema case (work-skill/schema, no see
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -1591,7 +1591,7 @@ describe("emptyPayloadFor — cross_references case (work-skill/xrefs, no seed)"
     setEnabled(true);
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
     const res = await app.request("/skill-curation/proposals", {
       method: "POST",
       body: JSON.stringify({
@@ -1635,7 +1635,7 @@ describe("collectSiblingPayloads lines 745-746 — multi-section skill with mixe
     });
     const app = makeApp();
     const runRes = await app.request("/skill-curation/runs", { method: "POST", body: "{}" });
-    const { runId, runToken } = await runRes.json();
+    const { runId, runToken } = (await runRes.json()) as { runId: string; runToken: string };
 
     // 1 additional rule from emptyPayloadFor("routing_table")'s 1-rule placeholder.
     // additions=1 ≤ cap=5 → passes diff_caps.

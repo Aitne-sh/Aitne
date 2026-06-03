@@ -343,6 +343,8 @@ export {
   recurringScheduleUpdateSchema,
   triggerCreateSchema,
   triggerUpdateSchema,
+  SCHEDULE_PROMPT_MAX_CHARS,
+  SCHEDULE_DESCRIPTION_MAX_CHARS,
 } from "./schemas.js";
 export type {
   NotifyRequest,
@@ -369,6 +371,31 @@ export {
   validateAgentDisplayName,
   formatAgentOutboundLabel,
 } from "./agent-identity.js";
+
+// Agent Definitions — declarative `agent.md` frontmatter contract
+// (AGENT_DEFINITIONS_DESIGN.md §4.3). Single typed source of truth imported by
+// the daemon loader/registry/stores, the `/api/agents` routes, and the
+// dashboard editor.
+export {
+  AGENT_KINDS,
+  AGENT_TIERS,
+  SCHEDULE_KINDS,
+  AGENT_SLUG_PATTERN,
+  stopWarningSchema,
+  successCriterionSchema,
+  agentScheduleSchema,
+  agentDefinitionSchema,
+  OVERRIDE_EDIT_PATHS,
+} from "./agent-definitions.js";
+export type {
+  AgentKind,
+  AgentTier,
+  ScheduleKind,
+  StopWarning,
+  SuccessCriterion,
+  AgentDefinition,
+  OverrideEditPath,
+} from "./agent-definitions.js";
 
 // Log entry types (shared between daemon buffer and dashboard)
 export type { LogEntry, SystemLogsResponse } from "./log-entry.js";
@@ -623,3 +650,14 @@ export {
   DECISION_LANGUAGE_MESSAGE,
   EMBEDDED_MARKER_MESSAGE,
 } from "./skill-curation/decision-language.js";
+
+// Network ports — single source of truth for default API/dashboard ports.
+// Mirror for the launcher (pre-build .mjs) lives in scripts/lib/ports.mjs;
+// kept in lockstep by packages/shared/src/ports.test.ts.
+export {
+  DEFAULT_API_PORT,
+  DEFAULT_DASHBOARD_PORT,
+  resolveApiPort,
+  resolveDashboardPort,
+  loopbackOrigins,
+} from "./ports.js";

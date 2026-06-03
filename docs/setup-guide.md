@@ -37,7 +37,7 @@ npm install -g @aitne-sh/aitne@latest
 aitne start
 ```
 
-`aitne start` builds if stale, launches the daemon on `:8321` and the dashboard on `:3000`, and opens a browser to the 9-step setup wizard. Verify with:
+`aitne start` builds if stale, launches the daemon on `:8321` and the dashboard on `:8322`, and opens a browser to the 9-step setup wizard. Verify with:
 
 ```bash
 aitne status   # PIDs, uptime, connected platforms, today's spend
@@ -68,7 +68,7 @@ pnpm start        # background mode (same flow as `aitne start`)
 | `PA_LOG_LEVEL` | `info` | `trace` / `debug` / `info` / `warn` / `error` / `fatal` / `silent` |
 | `PA_ENFORCE_READ_TOKEN` | `true` | Set to `false` for soft enforcement of the `X-Read-Token` header (log warning but allow) |
 
-Everything else — ~100 runtime keys covering schedule, notifications, model bindings, character, mail providers, voice transcription, delegated mode — is editable from the dashboard at `:3000`, or via natural-language DMs to the agent. Bot tokens and OAuth credentials always live in the OS keychain via `PlatformSecretStore`, never in environment variables.
+Everything else — ~100 runtime keys covering schedule, notifications, model bindings, character, mail providers, voice transcription, delegated mode — is editable from the dashboard at `:8322`, or via natural-language DMs to the agent. Bot tokens and OAuth credentials always live in the OS keychain via `PlatformSecretStore`, never in environment variables.
 
 If you previously had secrets in `.env`, the daemon migrates them into the keychain on first launch and `chmod 0600`s the file.
 
@@ -226,7 +226,7 @@ Open each link and click **Enable**. Verify the correct project is selected in t
 
 #### Step 5 — Upload and authorize in the dashboard
 
-1. Open `http://localhost:3000/setup` (or the Google Calendar card on the overview).
+1. Open `http://localhost:8322/setup` (or the Google Calendar card on the overview).
 2. Click **Upload credentials JSON** and select the downloaded file.
 3. Click **Authorize with Google** — sign in with the Google account you added as a test user.
 4. If a "Google hasn't verified this app" warning appears, click **Continue**.

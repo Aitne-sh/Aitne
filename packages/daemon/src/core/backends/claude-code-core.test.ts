@@ -1262,7 +1262,10 @@ describe("ClaudeCodeCore", () => {
         tool_use_id: "test-id",
       });
 
-      expect(result.continue).toBe(true);
+      // A validated single localhost curl is granted explicitly so the SDK's
+      // dontAsk allowedTools matcher (which rejects heredoc bodies) is not the
+      // final arbiter — see the single-pure-curl allow gate in bashCurlHook.
+      expect(result.hookSpecificOutput?.permissionDecision).toBe("allow");
     });
 
     it("blocks curl to external URLs", async () => {
@@ -1533,7 +1536,8 @@ describe("ClaudeCodeCore", () => {
             + " -X PUT -H 'Content-Type: application/json'"
             + " -d '{\"markdown\":\"See https://github.com/foo/bar for details\"}'",
         );
-        expect(result.continue).toBe(true);
+        // Single localhost curl (body URL is quoted data) → granted via allow.
+        expect(result.hookSpecificOutput?.permissionDecision).toBe("allow");
       });
 
       it("allows curl with body URL inside double quotes", async () => {
@@ -1543,8 +1547,8 @@ describe("ClaudeCodeCore", () => {
         );
         // Even though the inner string mentions another localhost URL,
         // it sits inside a double-quoted token and is not counted as a
-        // positional URL target.
-        expect(result.continue).toBe(true);
+        // positional URL target → single localhost curl, granted via allow.
+        expect(result.hookSpecificOutput?.permissionDecision).toBe("allow");
       });
 
       it("allows non-curl commands without applying the chained-curl rule", async () => {
@@ -2117,8 +2121,38 @@ describe("ClaudeCodeCore", () => {
       expect((core as any).isRetryableExecutionError(new Error("socket hang up"))).toBe(true);
     });
 
+    it("returns true for SDK message-form connectivity errors (no .code)", () => {
+      // The Claude Agent SDK throws these from readMessages() as a plain Error
+      // whose message embeds the cause — there is no `.code` to match on.
+      expect(
+        (core as any).isRetryableExecutionError(
+          new Error(
+            "Claude Code returned an error result: API Error: Unable to connect to API (ENOTFOUND)",
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        (core as any).isRetryableExecutionError(
+          new Error(
+            "Claude Code returned an error result: API Error: Unable to connect to API (ECONNREFUSED)",
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        (core as any).isRetryableExecutionError(
+          new Error("getaddrinfo EAI_AGAIN api.anthropic.com"),
+        ),
+      ).toBe(true);
+    });
+
     it("returns false for normal errors", () => {
       expect((core as any).isRetryableExecutionError(new Error("bad request"))).toBe(false);
+      // A non-connectivity error result must stay non-retryable.
+      expect(
+        (core as any).isRetryableExecutionError(
+          new Error("Claude Code returned an error result: tool not found"),
+        ),
+      ).toBe(false);
     });
   });
 

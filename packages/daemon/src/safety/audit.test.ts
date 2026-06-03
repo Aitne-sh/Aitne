@@ -1799,4 +1799,115 @@ describe("AuditLogger", () => {
       expect(rows[1].result).toBe("failed");
     });
   });
+
+  describe("agent_id stamping (AGENT_DEFINITIONS §8.1)", () => {
+    function logOnce(audit: AuditLogger, correlationId?: string): void {
+      const event = createEvent({
+        type: "routine.morning_routine",
+        source: "scheduler",
+        priority: EventPriority.NORMAL,
+        ...(correlationId ? { correlationId } : {}),
+      });
+      audit.logAction({
+        event,
+        model: "claude-sonnet-4-6",
+        costUsd: 0.01,
+        usage: {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelUsage: {},
+        durationMs: 200,
+        numTurns: 1,
+        trigger: "autonomous",
+        backend: "claude",
+      });
+    }
+
+    function readAgentId(): string | null {
+      const row = db
+        .prepare("SELECT agent_id FROM agent_actions ORDER BY id DESC LIMIT 1")
+        .get() as { agent_id: string | null };
+      return row.agent_id;
+    }
+
+    it("leaves agent_id NULL when no resolver is wired", () => {
+      const audit = new AuditLogger(db);
+      logOnce(audit);
+      expect(readAgentId()).toBeNull();
+    });
+
+    it("stamps agent_id from the resolver", () => {
+      const audit = new AuditLogger(db);
+      audit.setAgentIdResolver(() => "morning-routine");
+      logOnce(audit);
+      expect(readAgentId()).toBe("morning-routine");
+    });
+
+    it("leaves agent_id NULL when the resolver returns null", () => {
+      const audit = new AuditLogger(db);
+      audit.setAgentIdResolver(() => null);
+      logOnce(audit);
+      expect(readAgentId()).toBeNull();
+    });
+
+    it("stamps agent_id on a logSkip row when the resolver resolves one", () => {
+      const audit = new AuditLogger(db);
+      audit.setAgentIdResolver(() => "evening-review");
+      const event = createEvent({
+        type: "routine.evening_review",
+        source: "scheduler",
+        priority: EventPriority.NORMAL,
+      });
+      audit.logSkip(event, "morning_routine_pending_for_today", "autonomous");
+      expect(readAgentId()).toBe("evening-review");
+    });
+
+    it("leaves agent_id NULL on a logSkip row when no Agent resolves", () => {
+      const audit = new AuditLogger(db);
+      audit.setAgentIdResolver(() => null);
+      const event = createEvent({
+        type: "routine.evening_review",
+        source: "scheduler",
+        priority: EventPriority.NORMAL,
+      });
+      audit.logSkip(event, "no_observations", "autonomous");
+      expect(readAgentId()).toBeNull();
+    });
+
+    it("stamps agent_id on a logError row when the resolver resolves one", () => {
+      const audit = new AuditLogger(db);
+      audit.setAgentIdResolver(() => "morning-routine");
+      const event = createEvent({
+        type: "routine.morning_routine",
+        source: "scheduler",
+        priority: EventPriority.NORMAL,
+      });
+      audit.logError(event, new Error("stage A threw"), "autonomous");
+      expect(readAgentId()).toBe("morning-routine");
+    });
+
+    it("carries agent_id through the in_progress UPSERT settle path", () => {
+      const audit = new AuditLogger(db);
+      audit.setAgentIdResolver(() => "morning-routine");
+      const correlationId = "corr-upsert-agent";
+      const inProgressId = audit.insertInProgressRow({
+        correlationId,
+        actionType: "routine.morning_routine",
+        trigger: "autonomous",
+      });
+      expect(inProgressId).toBeGreaterThan(0);
+      logOnce(audit, correlationId);
+      const rows = db
+        .prepare(
+          "SELECT id, agent_id FROM agent_actions WHERE event_id = ?",
+        )
+        .all(correlationId) as { id: number; agent_id: string | null }[];
+      expect(rows).toHaveLength(1);
+      expect(rows[0].id).toBe(inProgressId);
+      expect(rows[0].agent_id).toBe("morning-routine");
+    });
+  });
 });

@@ -56,6 +56,15 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
   // Custom routines support DELETE so the agent can retire a routine
   // when the user asks via DM.
   "policies/routines/custom/*": ["PUT", "PATCH", "DELETE"],
+  // User Agent definitions (AGENT_DEFINITIONS_DESIGN.md §9.5 / §3.3). The
+  // dashboard's "+ New Agent" scaffold and the YAML editor write user Agents
+  // to `policies/agents/<slug>/agent.md` through the context-vault chokepoint;
+  // DELETE retires one. Built-in Agents never live here — they ship under
+  // `agent-assets/agents/` and their overrides live in the DB, so this path
+  // only ever owns user-authored definitions. `{slug}/{file}` matches the
+  // two-segment `policies/agents/<slug>/agent` form `normalizeContextPath`
+  // produces (the `.md` extension is stripped before the whitelist check).
+  "policies/agents/{slug}/{file}": ["PUT", "PATCH", "DELETE"],
 
   // journal/ — append-only narrative. `journal/agent.md` is
   // `CREATE_ONLY_PUT` and only accepts append-style PATCH.
@@ -75,6 +84,17 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
   "knowledge/repos/legacy-registry/*": ["PUT", "PATCH"],
   "knowledge/entities/{domain}/_index": ["PUT", "PATCH"],
   "knowledge/entities/{domain}/{typePlural}/{slug}": ["PUT", "PATCH"],
+
+  // research/ — browser-history research-cluster journals
+  // (BROWSER_HISTORY_INTEGRATION_PLAN). The routine.research_dispatch /
+  // research_wiki_summary / research_cluster_update task-flows persist the
+  // per-cluster journal via PUT/PATCH /api/context/research/<slug>.md (plus
+  // `<slug>-assistance-<date>.md` and `<slug>-wiki.md`). These are flat,
+  // single-segment files under research/. DELETE is intentionally omitted —
+  // concluding a cluster *preserves* its journal (commands-research.ts), so
+  // there is no agent-driven delete path. Without this entry every research
+  // write returned 403 context.write_forbidden, silently breaking the flow.
+  "research/*": ["PUT", "PATCH"],
 };
 
 /**

@@ -275,8 +275,8 @@ const API_RISK: Record<string, RiskTier> = {
   // downstream and is independent of the API auth tier:
   //   1. Host-header loopback gate + sec-fetch-site / origin checks
   //      in `evaluateLoopbackBrowserGate` — CSRF protection survives
-  //      at Autonomous (only same-origin POSTs from localhost:3000
-  //      reach the handler).
+  //      at Autonomous (only same-origin POSTs from the dashboard's
+  //      loopback origin reach the handler).
   //   2. `x-pa-channel-ref` attestation against `listPrimaryChannels()`
   //      inside the POST handler — a request whose channel is out of
   //      the primary set is silently downgraded with a
@@ -341,6 +341,30 @@ const API_RISK: Record<string, RiskTier> = {
   // the dashboard-issued bearer (which agents don't have). Output is
   // redacted via secret-redaction before serialization.
   "GET /api/agent/actions": RiskTier.Autonomous,
+
+  // ── Agent Definitions (AGENT_DEFINITIONS_DESIGN.md §9.7) ──
+  // Reads + run-now are Autonomous: the list/detail/executions surface is
+  // structural metadata about the agent's own scheduled identities (no PII
+  // beyond what /api/schedule already exposes), and run-now enqueues a single
+  // `agent_schedule` row the agent could already create via the schedule skill
+  // (system-Agent run-now additionally DMs the owner in-handler — the §9.7
+  // Notify convention, since the RiskTier enum has no Notify value). PATCH /
+  // DELETE are Approve: they change `enabled` state / config overrides / delete
+  // user Agents, and the stop-warning ack is the explicit consent surface, so
+  // the dashboard's bearer token is required. `{*}` matches the `:slug`
+  // segment; the executions + run-now patterns carry an extra trailing literal.
+  // POST /api/agents (create) is Autonomous: it is the agent-facing replacement
+  // for the now-410 `POST /api/recurring-schedules` (also Autonomous) — the
+  // `agent-create` skill teaches the DM agent to create a recurring Agent for an
+  // ongoing cadence, the same recurring-task capability it already had. The
+  // loader rejects a one_shot/event definition; planCreate validates the rest.
+  "GET /api/agents": RiskTier.Autonomous,
+  "POST /api/agents": RiskTier.Autonomous,
+  "GET /api/agents/{*}": RiskTier.Autonomous,
+  "GET /api/agents/{*}/executions": RiskTier.Autonomous,
+  "POST /api/agents/{*}/run-now": RiskTier.Autonomous,
+  "PATCH /api/agents/{*}": RiskTier.Approve,
+  "DELETE /api/agents/{*}": RiskTier.Approve,
 
   // ── Wiki Builder (WIKI_BUILDER_DESIGN.md Phase 1) ──
   // Dashboard workspace settings stay owner-only. Agent-callable file,

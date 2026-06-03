@@ -31,9 +31,10 @@ user but compound into duplicate DMs/notifications at fire time.
    PATCH the existing item if it needs updating — never register a
    parallel second one).
 3. **Recurring check.** `GET /api/recurring-schedules?enabled=true` to
-   confirm no recurring rule already covers this cadence (e.g. a daily
-   09:00 inbox triage). If covered, skip — the recurring instance will
-   regenerate on its own.
+   confirm no recurring rule/Agent already covers this cadence (e.g. a
+   daily 09:00 inbox triage, or the morning briefing). If covered, skip.
+   (Recurring *work* is created as an Agent via the `agent-create` skill;
+   recurring *DMs* via `POST /api/recurring-schedules` `taskType:dm_session`.)
 4. **`confirm_dedup_key` check (mandatory for `confirm:` sub-flow rows
    only).** When scheduling a `dm_session` row with
    `taskContext.sub_flow="confirm"`, run the dedup pre-check + shape
@@ -56,9 +57,12 @@ balance to a finance dossier", "from now on whenever X happens, do
 Y" — switch to the `management-policy` skill instead. It creates a
 `policies/management-captures/<slug>.md` that captures the WHY alongside the cadence
 (via `policies/routines/custom/<slug>.md`) so the rule survives a context
-reset. Plain recurring schedules via `/api/recurring-schedules` are
-still right when the cadence is all that matters and there is no need
-to record intent.
+reset. When the cadence is all that matters and there is no intent to
+record: recurring autonomous **work** → create a **recurring Agent** via
+the `agent-create` skill (`POST /api/agents`); recurring scheduled
+**DM / briefing** → `POST /api/recurring-schedules` with
+`taskType: "dm_session"`. (Creating a recurring `agent.task` row directly
+on `/api/recurring-schedules` is **410 Gone** — use an Agent.)
 
 ## DM vs Agent Task
 
@@ -71,11 +75,11 @@ to record intent.
 
 **Default to DM** when possible. Every agent wake-up costs money and context.
 
-## Writing a Good Description (for agent tasks)
+## Writing a Good Prompt (for agent tasks)
 
-> **The wake-up agent has NO memory of why it was scheduled.** It receives only: `state/today.md`, a fresh 1-day calendar, `identity/profile.md` + `policies/management.md`, and the `description` + `taskContext` fields you provide. Nothing else.
+> **The wake-up agent has NO memory of why it was scheduled.** It receives only: `state/today.md`, a fresh 1-day calendar, `identity/profile.md` + `policies/management.md`, and the `prompt` + `taskContext` fields you provide. Nothing else. (`description` is just an optional list label — never the agent body.)
 
-Include all four elements:
+Include all four elements in the `prompt`:
 
 | Element | What it answers |
 |---|---|
@@ -89,7 +93,7 @@ Include all four elements:
 **Bad:** `"Meeting prep"` — which meeting? when? what to prepare?
 
 ## Using `taskContext`
-Structured metadata for IDs, URLs, and correlation. Put long identifiers here so `description` stays under ~2 sentences:
+Structured metadata for IDs, URLs, and correlation. Put long identifiers here so the `prompt` stays focused:
 ```json
 { "scheduledBy": "morning_routine", "prUrl": "https://github.com/user/repo/pull/42" }
 ```
@@ -149,14 +153,14 @@ Response: `{ "status":"scheduled", "scheduleId":"123", "scheduledFor":"..." }`. 
 ```bash
 curl -s -X POST http://localhost:8321/api/schedule \
   -H 'Content-Type: application/json' \
-  -d '{"time":"2026-04-06T16:00:00-04:00","taskType":"wake","description":"Hourly docker health check: run `docker ps --format` and DM if any container is in restart loop.","tier":"lite","taskContext":{"scheduledBy":"docker_monitor"}}'
+  -d '{"time":"2026-04-06T16:00:00-04:00","taskType":"wake","prompt":"Hourly docker health check: run `docker ps --format` and DM if any container is in restart loop.","description":"Docker health check","tier":"lite","taskContext":{"scheduledBy":"docker_monitor"}}'
 ```
 | Field | Required | Description |
 |---|---|---|
 | `time` | Yes | ISO 8601 with timezone offset |
-| `taskType` | Yes | `wake` for scheduled tasks |
-| `description` | Yes | Self-contained (min 20 chars). See format above. Doubles as the agent body unless `prompt` overrides it. |
-| `prompt` | No | Optional override for the agent body (min 20 chars when set). When set, the dispatcher injects this — not `description` — into the task-flow template. Use when you want a short list-friendly `description` plus a longer, separate instruction for the agent. |
+| `taskType` | Yes | Free-form provenance label for the row (no allowlist on the single endpoint). Use `wake` for an agent wake-up — the convention this skill follows. The closed set `wake`/`dm_session`/`check`/`dm` is enforced only on `/api/schedule/batch`; e.g. the dashboard's manual "+ New task" sends `custom`. The label does not change firing — the scheduler runs every non-`dm`/`dm_session`/`browser_task` row as a generic `scheduled.task`. |
+| `prompt` | Yes | The agent's instruction at fire time — its ONLY context (the session has no memory). Self-contained: what + why + who + expected output. See format above. Max 8000 chars (~2000 tokens); move bulk reference material into a file the agent reads at fire time rather than inlining it. |
+| `description` | No | Optional short label shown in the schedule list (max 200 chars). NOT the agent body — that is `prompt`. Omit it and the list shows a `prompt` excerpt. |
 | `tier` | No | `lite` / `medium` / `high`. Omit to use the dispatcher's process-key default (medium for `scheduled.task`). See "Tier / Model selection" above. Mutually exclusive with `model`. |
 | `model` | No | Registered model id (`claude-opus-4-8`, `gpt-5.4`, …), legacy alias (`sonnet` / `opus`, auto-rewritten to `tier`), or composite `<backendId>/<modelId>`. See "Tier / Model selection" above. Mutually exclusive with `tier`. |
 | `taskContext` | No | Structured metadata object |
@@ -169,7 +173,7 @@ curl -s -X PATCH http://localhost:8321/api/schedule/42 \
   -H 'Content-Type: application/json' \
   -d '{"time":"2026-04-06T17:00:00-04:00"}'
 ```
-Fields: `time` (ISO 8601), `description` (min 20 chars, non-dm only), `prompt` (min 20 chars OR `null` to clear; non-dm only), `message` (dm only), `tier` (`lite`/`medium`/`high` OR `null` to clear), `model` (registered id / alias / composite OR `null` to clear), `taskContext`. At least one required. Only `pending` items editable. `description`/`message` mutually exclusive; `prompt`/`message` mutually exclusive. Tier ↔ model swap form is in the model-selection reference above. Response: `{ "status":"updated", "id":42, "warnings":[] }` / 404 / 409 — surface `warnings[]` (e.g. `schedule.model_deprecated`) to the next turn.
+Fields: `time` (ISO 8601), `prompt` (the agent instruction, ≤8000 chars, non-dm only, OR `null` to clear on a legacy row), `description` (optional label ≤200 chars, non-dm only), `message` (dm only), `tier` (`lite`/`medium`/`high` OR `null` to clear), `model` (registered id / alias / composite OR `null` to clear), `taskContext`. At least one required. Only `pending` items editable. `description`/`message` mutually exclusive; `prompt`/`message` mutually exclusive. Tier ↔ model swap form is in the model-selection reference above. Response: `{ "status":"updated", "id":42, "warnings":[] }` / 404 / 409 — surface `warnings[]` (e.g. `schedule.model_deprecated`) to the next turn.
 
 ### GET /api/schedule — List scheduled items
 ```bash
@@ -210,24 +214,28 @@ model, batch) are in the errors reference below.
 
 ---
 
-## Recurring Schedules
+## Recurring: work → Agent; DM → dm_session
 
-For tasks that repeat on a fixed pattern. The daemon auto-regenerates
-the next one-shot occurrence after each execution. **Hourly / daily /
-weekly / monthly** cadences are supported; the recurring reference
-below documents the full shape, the hourly + monthly missing-day
-recipes, pause-vs-delete trade-off, and PATCH / GET / DELETE surface.
+`/schedule` registers **one-shot** wake-ups and DMs. For repeating tasks:
 
-{{> ref:recurring }}
+- **Recurring autonomous work** (daily inbox triage, weekly review, hourly
+  health check) is a **recurring Agent** — a durable, named identity with
+  metrics on `/agents`. Create it with the **`agent-create` skill**
+  (`POST /api/agents`). Creating a recurring `agent.task` row directly on
+  `POST /api/recurring-schedules` is **410 Gone** — use an Agent.
+- **Recurring scheduled DM / briefing** ("DM me a summary every morning")
+  stays on `POST /api/recurring-schedules` with `taskType: "dm_session"`
+  (its fire time can track quiet-hours; PATCH/DELETE edit it). The morning
+  briefing is one of these.
 
-### recurrenceRule grammar — engine vs consumer
+`GET /api/recurring-schedules` stays read-only for the dedup pre-check.
 
-The full engine grammar (mapping table, frequency-vs-field matrix,
-cadence-string-must-match-recurrenceRule discipline) is shared with
-the `managed-tasks` skill. The reference is byte-identical across
-both skills — pinned by `skills-manifest.test.ts` so they cannot
-drift. Schedule callers may use any of the four frequencies the
-engine accepts; the `managed-tasks` consumer chooses to refuse
-sub-daily for app-fetch correctness and that constraint lives there.
+### recurrenceRule grammar — the shared recurrence engine
+
+The recurrence engine grammar (mapping table, frequency-vs-field matrix,
+cadence-string discipline) is shared with the `managed-tasks` skill and
+the `dm_session` recurring rule above. The reference is byte-identical
+across both skills —
+pinned by `skills-manifest.test.ts` so they cannot drift.
 
 {{> ref:recurrence-rule }}

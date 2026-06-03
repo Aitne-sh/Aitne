@@ -25,14 +25,21 @@ Response shape (one row per booking):
 {
   "bookings": [
     {
-      "kind": "flight" | "hotel" | "rail" | "other",
-      "depart_at": "ISO8601 with tz",
-      "return_at": "ISO8601 with tz | null",
+      "id": "<int>",
+      "type": "flight" | "hotel" | "restaurant" | "train" | "bus" | "other",
+      "provider": "<string>",
       "destination": "city / airport / property name",
-      "confirmation_number": "<string>",
-      "source": "gmail" | "manual" | "ical"
+      "startDate": "ISO8601 | YYYY-MM-DD | null",
+      "endDate": "ISO8601 | YYYY-MM-DD | null",
+      "confirmationNumber": "<string | null>",
+      "amount": "<number | null>",
+      "currency": "<string | null>",
+      "status": "upcoming",
+      "providerMsgId": "<string | null>",
+      "createdAt": "ISO8601"
     }
-  ]
+  ],
+  "total": "<int>"
 }
 ```
 
@@ -43,7 +50,7 @@ A booking matches a roadmap event entry when **either**:
 - The booking's `destination` substring-matches the event entry's
   `Destination:` field (case-insensitive, after stripping common
   prefixes / suffixes — "Paris" matches "Paris, FR" and "Paris CDG").
-- The booking's `depart_at` date falls within the event entry's
+- The booking's `startDate` date falls within the event entry's
   `YYYY-MM-DD ~ MM-DD` header range (inclusive on both ends).
 
 When a match is found:
@@ -54,7 +61,7 @@ When a match is found:
    <YYYY-MM-DD> confirmation #<conf>`), preserving the original
    `[tag]` and date.
 3. Append a line to the entry's `**Agent Notes:**` block:
-   `- Booking confirmed (<kind>) — #<confirmation_number>`.
+   `- Booking confirmed (<type>) — #<confirmationNumber>`.
 
 ## When no match exists
 

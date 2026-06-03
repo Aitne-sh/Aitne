@@ -3,6 +3,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  SCHEDULE_PROMPT_MAX_CHARS,
+  SCHEDULE_DESCRIPTION_MAX_CHARS,
+} from "@aitne/shared";
 import type { RecurrenceRule } from "@/lib/api-types";
 import { ModelPicker } from "./model-picker";
 import { cn } from "@/lib/utils";
@@ -50,10 +54,13 @@ export interface ScheduleFormState {
    */
   model: string;
   description: string;
-  /** Optional prompt override. When empty, description doubles as the agent
-   *  body — preserving the long-standing schedule semantics. When set, the
-   *  daemon stores it in agent_schedule.task_prompt and the dispatcher uses
-   *  it as the `task` slot in the task-flow template. */
+  /**
+   * Agent instruction body. The semantics depend on `frequency`:
+   *  - one-off (`once`): `prompt` is REQUIRED — it is the agent's only
+   *    instruction at fire time; `description` is an optional short label.
+   *  - recurring scheduled DM: `prompt` is an OPTIONAL override and
+   *    `description` doubles as the body (the long-standing DM semantics).
+   * Stored in `agent_schedule.task_prompt` and used as the `task` slot. */
   prompt: string;
 }
 
@@ -122,15 +129,32 @@ export function validateScheduleForm(
   state: ScheduleFormState,
 ): ScheduleFormErrors | null {
   const errs: ScheduleFormErrors = {};
-  if (state.description.trim().length < 20) {
-    errs.description =
-      "Description must be at least 20 characters — when no prompt override is set, this text is the agent's only context.";
-  }
-  // Prompt is optional. Daemon enforces ≥20 chars when set; mirror that here
-  // so the user gets feedback before submit.
-  if (state.prompt.trim().length > 0 && state.prompt.trim().length < 20) {
-    errs.prompt =
-      "Prompt override must be at least 20 characters, or leave empty to use the description as the agent body.";
+  const description = state.description.trim();
+  const prompt = state.prompt.trim();
+  if (state.frequency === "once") {
+    // One-off task: `prompt` is the agent's only instruction (required, no
+    // lower bound beyond non-empty, capped); `description` is an optional
+    // short list label. Mirrors `scheduleRequestSchema`.
+    if (prompt.length === 0) {
+      errs.prompt =
+        "Prompt is required — it is the agent's only instruction at fire time.";
+    } else if (prompt.length > SCHEDULE_PROMPT_MAX_CHARS) {
+      errs.prompt = `Prompt must be at most ${SCHEDULE_PROMPT_MAX_CHARS} characters.`;
+    }
+    if (description.length > SCHEDULE_DESCRIPTION_MAX_CHARS) {
+      errs.description = `Description (the list label) must be at most ${SCHEDULE_DESCRIPTION_MAX_CHARS} characters.`;
+    }
+  } else {
+    // Recurring scheduled DM: `description` is the body (≥20 chars); `prompt`
+    // is an optional override (≥20 chars when set). Unchanged semantics.
+    if (description.length < 20) {
+      errs.description =
+        "Description must be at least 20 characters — when no prompt override is set, this text is the agent's only context.";
+    }
+    if (prompt.length > 0 && prompt.length < 20) {
+      errs.prompt =
+        "Prompt override must be at least 20 characters, or leave empty to use the description as the agent body.";
+    }
   }
   if (state.frequency === "once") {
     if (!state.oneOffDateTime) {
@@ -215,8 +239,10 @@ export function toSubmitPayload(state: ScheduleFormState): {
   body: {
     time: string;
     taskType: string;
-    description: string;
-    prompt?: string;
+    // One-off: `prompt` is the required instruction; `description` is an
+    // optional label (omitted from the wire when empty).
+    prompt: string;
+    description?: string;
     model?: string;
     taskContext?: Record<string, unknown>;
   };
@@ -234,6 +260,15 @@ export function toSubmitPayload(state: ScheduleFormState): {
   const description = state.description.trim();
   const promptTrimmed = state.prompt.trim();
   const promptOverride = promptTrimmed.length > 0 ? promptTrimmed : undefined;
+  // `task_type` provenance label. POST /api/schedule accepts a free-form
+  // taskType (no allowlist) and the daemon scheduler fires every
+  // non-(dm/dm_session/browser_task) row as a generic `scheduled.task`, so
+  // this value is purely a label. We use "custom" rather than the agent
+  // convention "wake" so dashboard-created one-offs are distinguishable in the
+  // /schedule list's type filter + badge (app/schedule/page.tsx `TYPES`).
+  // On the recurring branch this field is inert: the dashboard only EDITs
+  // recurring DMs (PATCH, which omits taskType) — it never creates them, so
+  // "custom" is never sent to the dm_session-only /recurring-schedules create.
   const taskType = "custom";
   const modelOverride = modelFragment(state);
   if (state.frequency === "once") {
@@ -242,8 +277,10 @@ export function toSubmitPayload(state: ScheduleFormState): {
       body: {
         time: new Date(state.oneOffDateTime).toISOString(),
         taskType,
-        description,
-        ...(promptOverride ? { prompt: promptOverride } : {}),
+        // Required instruction (validated non-empty before submit).
+        prompt: promptTrimmed,
+        // Optional label — only sent when the user supplied one.
+        ...(description ? { description } : {}),
         ...modelOverride,
         taskContext: { source: "dashboard_manual" },
       },
@@ -292,6 +329,12 @@ export function ScheduleForm({
   });
 
   const showMissingDaySelect = monthlyHasOverflowDay(state);
+  // One-off rows treat `prompt` as the required agent instruction and
+  // `description` as an optional label; recurring scheduled DMs keep the
+  // legacy "description is the body, prompt is an optional override" shape.
+  const isOnce = state.frequency === "once";
+  const descriptionLen = state.description.trim().length;
+  const promptLen = state.prompt.trim().length;
 
   return (
     <div className="space-y-4">
@@ -559,23 +602,30 @@ export function ScheduleForm({
           className="mb-1 block text-xs font-medium text-muted-foreground"
           htmlFor="schedule-description"
         >
-          Description
+          Description{" "}
+          {isOnce ? (
+            <span className="text-muted-foreground/70">(optional label)</span>
+          ) : null}
         </label>
         <textarea
           id="schedule-description"
           value={state.description}
           onChange={(e) => set("description", e.target.value)}
-          rows={4}
+          rows={isOnce ? 2 : 4}
           className="w-full rounded-md border border-input bg-background p-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           placeholder={
-            "Short summary shown in the schedule list. When no prompt override is set, this is also what the agent reads."
+            isOnce
+              ? "Optional short label shown in the schedule list. The agent reads the Prompt below, not this."
+              : "Short summary shown in the schedule list. When no prompt override is set, this is also what the agent reads."
           }
         />
         {errors?.description ? (
           <p className="mt-1 text-xs text-red-600">{errors.description}</p>
         ) : (
           <p className="mt-1 text-xs text-muted-foreground">
-            {state.description.trim().length} / 20 characters minimum.
+            {isOnce
+              ? `${descriptionLen} / ${SCHEDULE_DESCRIPTION_MAX_CHARS} characters max. Optional.`
+              : `${descriptionLen} / 20 characters minimum.`}
           </p>
         )}
       </div>
@@ -585,25 +635,36 @@ export function ScheduleForm({
           className="mb-1 block text-xs font-medium text-muted-foreground"
           htmlFor="schedule-prompt"
         >
-          Prompt <span className="text-muted-foreground/70">(optional override)</span>
+          Prompt{" "}
+          {isOnce ? (
+            <span className="text-muted-foreground/70">(required — the agent&rsquo;s instruction)</span>
+          ) : (
+            <span className="text-muted-foreground/70">(optional override)</span>
+          )}
         </label>
         <textarea
           id="schedule-prompt"
           value={state.prompt}
           onChange={(e) => set("prompt", e.target.value)}
-          rows={6}
+          rows={isOnce ? 8 : 6}
           className="w-full rounded-md border border-input bg-background p-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           placeholder={
-            "Leave empty to use the description above as the agent body. Fill in to give the agent a fuller, separate instruction."
+            isOnce
+              ? "The full instruction the agent runs at fire time — what to do, why, and the expected output. It starts with no memory, so this is its only context."
+              : "Leave empty to use the description above as the agent body. Fill in to give the agent a fuller, separate instruction."
           }
         />
         {errors?.prompt ? (
           <p className="mt-1 text-xs text-red-600">{errors.prompt}</p>
+        ) : isOnce ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {promptLen} / {SCHEDULE_PROMPT_MAX_CHARS} characters. Required.
+          </p>
         ) : (
           <p className="mt-1 text-xs text-muted-foreground">
-            {state.prompt.trim().length === 0
+            {promptLen === 0
               ? "Empty — description will be used as the agent body."
-              : `${state.prompt.trim().length} / 20 characters minimum (when set).`}
+              : `${promptLen} / 20 characters minimum (when set).`}
           </p>
         )}
       </div>

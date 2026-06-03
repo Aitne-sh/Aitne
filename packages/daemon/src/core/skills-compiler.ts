@@ -22,6 +22,7 @@ import {
 } from "@aitne/shared";
 
 import {
+  composeSkillSet,
   getProfileForEvent,
   getProfileForProcess,
   resolveSkillManifest,
@@ -152,6 +153,21 @@ interface SessionPromptBundleParams {
    * routine and scheduled events that have no user-typed text.
    */
   messageText?: string | null;
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §4.2 — an Agent definition's `tools.skills`.
+   * Composed onto the process-key default bundle via `composeSkillSet`
+   * (union, or replace when `skillsReplace` is set). Empty / undefined is a
+   * no-op, so non-Agent materialisation sites are unaffected. The dispatcher
+   * resolves this from the firing Agent's effective definition and threads it
+   * through `AgentExecuteParams.extraSkills`.
+   *
+   * Ignored when a bang-command `override.skillSlugs` is present — that
+   * surface already replaces the manifest verbatim and never co-occurs with
+   * an Agent firing.
+   */
+  extraSkills?: readonly string[];
+  /** AGENT_DEFINITIONS_DESIGN.md §4.2 — `tools.skills_replace`. See `extraSkills`. */
+  skillsReplace?: boolean;
 }
 
 /**
@@ -338,11 +354,22 @@ export class SkillsCompiler {
     // means "no skills." `null` keeps manifest behavior — the override is a
     // partial replacement so a future caller can pass just `profileBody`
     // without affecting skill selection.
-    const skills =
+    const baseSkills =
       params.override?.skillSlugs !== null
       && params.override?.skillSlugs !== undefined
         ? [...params.override.skillSlugs]
         : manifestSkills;
+    // AGENT_DEFINITIONS_DESIGN.md §4.2 — fold the firing Agent's `tools.skills`
+    // onto the resolved bundle (union, or replace when `skillsReplace`). A
+    // no-op when `extraSkills` is empty/absent, so every non-Agent site keeps
+    // its prior set verbatim. Applied AFTER the bang-command override so the
+    // two surfaces never silently fight; in practice they never co-occur (an
+    // Agent firing carries no `override`).
+    const skills = composeSkillSet(
+      baseSkills,
+      params.extraSkills,
+      params.skillsReplace ?? false,
+    );
     const profileBodyOverride = params.override?.profileBody ?? null;
     // Always materialize the `mail` skill when the manifest asks for it —
     // even if the current account list is empty. The skill is inert when

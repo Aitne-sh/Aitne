@@ -55,7 +55,7 @@ curl -H "Authorization: Bearer $PA_API_TOKEN" \
 
 **Symptom**: `aitne start` exits immediately, or `pnpm dev` errors out.
 
-1. Check port conflict: `lsof -i :8321` (daemon) and `lsof -i :3000` (dashboard).
+1. Check port conflict: `lsof -i :8321` (daemon) and `lsof -i :8322` (dashboard).
 2. Check Node version: `node --version` (must be ≥ 22).
 3. Check build: `pnpm build` (from-source installs) — fix any TypeScript errors.
 4. Check logs: `aitne logs` or `cat ~/.personal-agent/logs/daemon.log`.

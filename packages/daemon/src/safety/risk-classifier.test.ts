@@ -359,6 +359,37 @@ describe("auditRiskClassifications — boot-time enforcement", () => {
   });
 });
 
+describe("classifyRisk — Agent Definitions (AGENT_DEFINITIONS_DESIGN.md §9.7)", () => {
+  it("classifies reads + run-now as Autonomous", () => {
+    expect(classifyRisk("GET", "/api/agents")).toBe(RiskTier.Autonomous);
+    expect(classifyRisk("GET", "/api/agents/morning-routine")).toBe(RiskTier.Autonomous);
+    expect(classifyRisk("GET", "/api/agents/morning-routine/executions")).toBe(
+      RiskTier.Autonomous,
+    );
+    expect(classifyRisk("POST", "/api/agents/morning-routine/run-now")).toBe(
+      RiskTier.Autonomous,
+    );
+  });
+
+  it("classifies PATCH + DELETE as Approve (config / enabled changes need the bearer)", () => {
+    expect(classifyRisk("PATCH", "/api/agents/morning-routine")).toBe(RiskTier.Approve);
+    expect(classifyRisk("DELETE", "/api/agents/my-task")).toBe(RiskTier.Approve);
+  });
+
+  it("leaves no agent route on the default-Approve fallback (boot-audit clean)", () => {
+    expect(
+      auditRiskClassifications([
+        { method: "GET", path: "/api/agents" },
+        { method: "GET", path: "/api/agents/:slug" },
+        { method: "GET", path: "/api/agents/:slug/executions" },
+        { method: "POST", path: "/api/agents/:slug/run-now" },
+        { method: "PATCH", path: "/api/agents/:slug" },
+        { method: "DELETE", path: "/api/agents/:slug" },
+      ]),
+    ).toEqual([]);
+  });
+});
+
 describe("classifyRisk — Docs QA endpoints (DOCS_QA_B7_DESIGN.md D6)", () => {
   it("POST /api/docs/qa/messages is Approve (dashboard-Bearer-gated input)", () => {
     expect(classifyRisk("POST", "/api/docs/qa/messages")).toBe(RiskTier.Approve);

@@ -6,8 +6,8 @@
       "kind": "knowledge_layout",
       "anchor": "<!-- CURATION:knowledge_layout id=\"project-shape\" -->",
       "human_label": "Project / git-repo file shape",
-      "description": "Required sections in projects/*.md and git-repos/*.md, and what each section holds",
-      "scope_paths": ["projects/*.md", "git-repos/*.md"]
+      "description": "Required sections in git/<slug>/overview.md (git-managed repos) and projects/*.md (non-git manual projects), and what each section holds",
+      "scope_paths": ["projects/*.md", "git/*/overview.md"]
     },
     {
       "id": "slug-grammar",
@@ -15,7 +15,7 @@
       "anchor": "<!-- CURATION:convention_notes id=\"slug-grammar\" -->",
       "human_label": "Project slug grammar",
       "description": "Slug format, length cap, reserved stems",
-      "scope_paths": ["projects/*.md", "git-repos/*.md"]
+      "scope_paths": ["projects/*.md", "git/*/overview.md"]
     }
   ]
 }

@@ -323,6 +323,14 @@ export function createSessionWorkdir(
     /** Inbound DM message text for the *ForDm trigger-phrase fallback.
      *  Undefined / null for routine and scheduled events. */
     messageText?: string | null;
+    /** AGENT_DEFINITIONS_DESIGN.md §4.2 — the firing Agent's `tools.skills`,
+     *  composed onto the process-key bundle by `materializeSessionBundle`
+     *  (union, or replace when `skillsReplace`). Empty/undefined is a no-op.
+     *  This disposable path is the ONLY one that carries the override —
+     *  every Agent firing runs in a fresh temp dir created here. */
+    extraSkills?: readonly string[];
+    /** AGENT_DEFINITIONS_DESIGN.md §4.2 — `tools.skills_replace`. */
+    skillsReplace?: boolean;
   },
 ): string {
   const sessionId = randomUUID().slice(0, 8);
@@ -350,6 +358,10 @@ export function createSessionWorkdir(
       ...(options?.contextDir ? { contextDir: options.contextDir } : {}),
       ...(options?.db !== undefined ? { db: options.db } : {}),
       ...(options?.messageText !== undefined ? { messageText: options.messageText } : {}),
+      ...(options?.extraSkills && options.extraSkills.length > 0
+        ? { extraSkills: options.extraSkills }
+        : {}),
+      ...(options?.skillsReplace ? { skillsReplace: true } : {}),
     });
     writeInstructionAssetStamp(
       sessionDir,
@@ -461,6 +473,11 @@ function resolveManifestDriftAgainstStamp(
     ...(options?.messageText !== undefined ? { messageText: options.messageText } : {}),
   };
   const hasManifestOpts = Object.keys(manifestOpts).length > 0;
+  // Agent `tools.skills` overrides are NOT composed here: they only ever ride
+  // the disposable `createSessionWorkdir` path (one fresh temp dir per Agent
+  // firing, never re-checked for drift). The persistent `ensureSessionWorkdir`
+  // path — DMs / resumable Opus sessions — is never an Agent firing, so its
+  // stamp never carries an extra-skill set and the live resolve below matches.
   const liveSlugs = options?.processKey
     ? resolveSkillManifestForProcess(
         options.processKey,
@@ -526,6 +543,12 @@ export function ensureSessionWorkdir(
     db?: DatabaseNs.Database | null;
     /** docs/design/appendices/skills-improvement.md §9-§11 + §14 — see createSessionWorkdir options. */
     messageText?: string | null;
+    // NOTE: no `extraSkills` here. An Agent's `tools.skills` override only
+    // rides the disposable `createSessionWorkdir` path (Agent firings run in a
+    // fresh temp dir). The persistent path this function serves — DMs and
+    // resumable sessions — is never an Agent firing, so wiring the override
+    // here would be dead code plus a latent fallback-asymmetry trap
+    // (`prepareSessionDir` re-materialisation does not carry it).
   },
 ): string {
   const sessionDir = join(dataDir, "agent-sessions", String(dbSessionId));

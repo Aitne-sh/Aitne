@@ -41,6 +41,15 @@ export function shouldValidateContextFileFrontmatter(
   relativePath: string,
 ): boolean {
   if (!relativePath.endsWith(".md")) return false;
+  // Agent definitions (`policies/agents/<slug>/agent.md`) carry the nested
+  // `agentDefinitionSchema` frontmatter, NOT the context-vault rule frontmatter
+  // (type/owner/updated). They are shape-validated at the write boundary by
+  // `validateAgentDefinitionMarkdown` and semantically by the agent loader, so
+  // the generic validator must not flag their (correctly) absent `type`.
+  // Excluding the whole subtree also stops the Vault Health scan
+  // (context-health.ts) from false-flagging every agent.md.
+  // AGENT_DEFINITIONS_DESIGN.md §3.3 / §9.5.
+  if (relativePath.startsWith("policies/agents/")) return false;
   return (
     relativePath.startsWith("identity/") ||
     relativePath.startsWith("policies/") ||

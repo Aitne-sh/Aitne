@@ -4,11 +4,10 @@
 
 This task-flow is the **daemon-internal** hourly cron — a built-in
 observation review the dispatcher fires every hour. It is NOT the
-user-facing hourly recurring schedule path. Operators who want to
-register a custom hourly task should POST to
-`/api/recurring-schedules` with `recurrenceRule.frequency:"hourly"`
-(see the `schedule` skill's `references/recurring.md`); those rows
-fire `scheduled.task` / `scheduled.dm` events instead.
+user-facing recurring path. An operator who wants a custom recurring
+task creates a recurring **Agent** (`POST /api/agents`, e.g. an hourly
+cron `0 * * * *`); those fire `scheduled.task` / `scheduled.dm` events
+instead.
 
 The "Vault policy files" block appended to this prompt includes
 `policies/routines/hourly.md` — your canonical check list for this cadence.

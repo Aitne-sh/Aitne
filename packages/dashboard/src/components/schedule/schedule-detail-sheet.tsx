@@ -11,6 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
+import {
+  SCHEDULE_PROMPT_MAX_CHARS,
+  SCHEDULE_DESCRIPTION_MAX_CHARS,
+} from "@aitne/shared";
 import type { ScheduleRow, ScheduleWarningIssue } from "@/lib/api-types";
 import {
   formatAbsoluteTime,
@@ -123,13 +127,21 @@ function ScheduleDetailContent({
         return;
       }
     } else {
-      if (draftDescription.trim().length < 20) {
-        setError("Description must be at least 20 characters.");
+      // One-off rows: `description` is an optional label (capped, no floor);
+      // `prompt` is the agent body and cannot be emptied (the dispatcher reads
+      // task_prompt directly — there is no task_description fallback).
+      if (draftDescription.trim().length > SCHEDULE_DESCRIPTION_MAX_CHARS) {
+        setError(
+          `Description (the list label) must be at most ${SCHEDULE_DESCRIPTION_MAX_CHARS} characters.`,
+        );
         return;
       }
-      const promptTrimmed = draftPrompt.trim();
-      if (promptTrimmed.length > 0 && promptTrimmed.length < 20) {
-        setError("Prompt override must be at least 20 characters, or leave empty to use the description.");
+      if (draftPrompt.trim().length === 0) {
+        setError("Prompt cannot be empty — it is the agent's instruction.");
+        return;
+      }
+      if (draftPrompt.trim().length > SCHEDULE_PROMPT_MAX_CHARS) {
+        setError(`Prompt must be at most ${SCHEDULE_PROMPT_MAX_CHARS} characters.`);
         return;
       }
     }
@@ -153,13 +165,13 @@ function ScheduleDetailContent({
       else body.description = draftDescription;
     }
     if (!isDmRow) {
-      // Compare trimmed prompts: an existing override of "  foo  " and a
-      // draft of "foo" are equivalent and shouldn't trigger a write. Empty
-      // draft when an override exists → null (clear the override).
+      // Compare trimmed prompts: an existing body of "  foo  " and a draft of
+      // "foo" are equivalent and shouldn't trigger a write. The prompt is the
+      // body and is validated non-empty above, so it's never cleared to null.
       const promptTrimmed = draftPrompt.trim();
-      const existingPrompt = row.task_prompt ?? "";
-      if (promptTrimmed !== existingPrompt.trim()) {
-        body.prompt = promptTrimmed.length === 0 ? null : promptTrimmed;
+      const existingPrompt = (row.task_prompt ?? "").trim();
+      if (promptTrimmed !== existingPrompt) {
+        body.prompt = promptTrimmed;
       }
     }
     // Model PATCH directives — per §4.3a PATCH contract: empty string +
@@ -261,17 +273,21 @@ function ScheduleDetailContent({
             rows={isDmRow ? 8 : 4}
             className="w-full rounded-md border border-input bg-background p-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
-        ) : (
+        ) : row.task_description ? (
           <pre className="whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs text-foreground">
             {row.task_description}
           </pre>
+        ) : (
+          <p className="rounded-md bg-muted p-2 text-xs italic text-muted-foreground">
+            No label — see the Prompt below for the agent instruction.
+          </p>
         )}
       </section>
 
       {!isDmRow ? (
         <section>
           <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Prompt <span className="normal-case tracking-normal text-muted-foreground/70">(optional override)</span>
+            Prompt <span className="normal-case tracking-normal text-muted-foreground/70">(the agent&rsquo;s instruction)</span>
           </h3>
           {editing ? (
             <>
@@ -280,21 +296,22 @@ function ScheduleDetailContent({
                 onChange={(e) => setDraftPrompt(e.target.value)}
                 rows={8}
                 className="w-full rounded-md border border-input bg-background p-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Leave empty to use the description above as the agent body."
+                placeholder="The agent's instruction at fire time — what to do, why, and the expected output."
               />
               <p className="mt-1 text-xs text-muted-foreground">
                 {draftPrompt.trim().length === 0
-                  ? "Empty — description will be used as the agent body."
-                  : `${draftPrompt.trim().length} / 20 characters minimum (when set).`}
+                  ? "Required — the agent's instruction at fire time."
+                  : `${draftPrompt.trim().length} / ${SCHEDULE_PROMPT_MAX_CHARS} characters max.`}
               </p>
             </>
-          ) : row.task_prompt ? (
+          ) : row.task_prompt && row.task_prompt !== row.task_description ? (
             <pre className="whitespace-pre-wrap break-words rounded-md bg-muted p-2 text-xs text-foreground">
               {row.task_prompt}
             </pre>
           ) : (
             <p className="rounded-md bg-muted p-2 text-xs italic text-muted-foreground">
-              No override — description above is used as the agent body.
+              Same as the description above — this row uses one instruction as
+              both its label and its agent body.
             </p>
           )}
         </section>

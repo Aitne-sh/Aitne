@@ -72,7 +72,7 @@ without redoing the whole flow.
 ## Prerequisites
 
 - The daemon is launched (`aitne start` or `pnpm start`).
-- The dashboard is reachable at `http://localhost:3000`.
+- The dashboard is reachable at `http://localhost:8322`.
 
 ## The steps at a glance
 

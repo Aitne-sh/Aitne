@@ -1,6 +1,10 @@
 import { parseCustomRoutineSpec } from "../custom-routine-scheduler.js";
 import { validateContextFileFrontmatter } from "../context-frontmatter.js";
 import {
+  isAgentDefinitionPath,
+  validateAgentDefinitionMarkdown,
+} from "../agents/validate-agent-md.js";
+import {
   normalizeRoadmapForWrite,
   validateRoadmap,
   validateRoadmapTransition,
@@ -131,6 +135,18 @@ export function validateContextContent(
   }
 
   const relativePath = `${target.base}${target.ext}`;
+
+  // policies/agents/<slug>/agent.md — user Agent definitions are written
+  // through this same chokepoint (AGENT_DEFINITIONS_DESIGN.md §3.3). Their
+  // frontmatter is the nested `agentDefinitionSchema`, not the context-vault
+  // rule schema, so validate the agent-definition shape here (400 with the
+  // offending fields) instead of falling through to the generic frontmatter
+  // validator — which would wrongly demand `type`/`owner`/`updated`.
+  if (isAgentDefinitionPath(relativePath)) {
+    const message = validateAgentDefinitionMarkdown(relativePath, content);
+    return message ? { message, status: 400 } : null;
+  }
+
   if (!options?.skipFrontmatterValidation) {
     const frontmatterError = validateContextFileFrontmatter(content, relativePath);
     if (frontmatterError) {

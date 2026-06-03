@@ -415,14 +415,18 @@ export function prepareRetemplateRun(
     targets,
   } satisfies Record<string, unknown>;
 
+  const retemplateLabel = `Re-conform ${targets.length} ${options.kind === "project" ? "project" : "git-repo"} document(s) to the current ${templateFileName(options.kind)} template.`;
   const insert = options.db.prepare(
     `INSERT INTO agent_schedule
-       (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-     VALUES (?, 'git.project.retemplate', ?, ?, ?, NULL, 'pending')`,
+       (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+     VALUES (?, 'git.project.retemplate', ?, ?, ?, ?, NULL, 'pending')`,
   );
   const result = insert.run(
     formatSqliteDatetime(now),
-    `Re-conform ${targets.length} ${options.kind === "project" ? "project" : "git-repo"} document(s) to the current ${templateFileName(options.kind)} template.`,
+    // task_description (label) === task_prompt (agent body); routing is via
+    // task_context.processKey = "git.project.retemplate".
+    retemplateLabel,
+    retemplateLabel,
     JSON.stringify(taskContext),
     correlationId,
   );

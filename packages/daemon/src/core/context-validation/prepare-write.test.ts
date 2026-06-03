@@ -27,6 +27,37 @@ const USER_PROFILE_TARGET: ResolvedContextTarget = {
   base: "identity/profile",
   ext: ".md",
 };
+// policies/agents/<slug>/agent.md — the path-resolve layer strips the `.md`
+// before this layer sees it, so `base` ends in `/agent`.
+const AGENT_TARGET: ResolvedContextTarget = {
+  base: "policies/agents/say-hi/agent",
+  ext: ".md",
+};
+
+function validAgentMarkdown(slug = "say-hi"): string {
+  return [
+    "---",
+    `slug: ${slug}`,
+    "name: Say Hi",
+    "description: A friendly greeting agent.",
+    "kind: user",
+    "schedule:",
+    "  kind: cron",
+    '  expression: "0 9 * * *"',
+    "backend:",
+    "  process_key: agent.task",
+    "limits:",
+    "  max_turns: 5",
+    "  max_budget_usd: 0.1",
+    "  timeout_minutes: 5",
+    "---",
+    "",
+    "# Say Hi",
+    "",
+    "Send a friendly greeting.",
+    "",
+  ].join("\n");
+}
 
 function validTodayContent(date = "2026-04-22"): string {
   return [
@@ -185,6 +216,19 @@ describe("validateContextContent", () => {
     ).toBeNull();
   });
 
+  it("accepts a valid policies/agents/<slug>/agent.md (regression: not the type/owner schema)", () => {
+    // Pre-fix this returned 422 `… frontmatter requires \`type\`.` because the
+    // generic context-vault validator fired on the policies/ prefix.
+    expect(validateContextContent(AGENT_TARGET, validAgentMarkdown())).toBeNull();
+  });
+
+  it("returns 400 with agent-definition field issues for a malformed agent.md", () => {
+    const bad = validAgentMarkdown().replace("name: Say Hi\n", "");
+    const err = validateContextContent(AGENT_TARGET, bad);
+    expect(err?.status).toBe(400);
+    expect(err?.message).toContain("agent definition invalid");
+  });
+
   it("dispatches .base files to the YAML syntax check", () => {
     expect(
       validateContextContent(PROJECT_BASE_TARGET, "filters:\n  active: true\n"),
@@ -199,6 +243,14 @@ describe("prepareContextContentForWrite", () => {
   it("passes valid non-roadmap content through verbatim", () => {
     const content = validTodayContent();
     expect(prepareContextContentForWrite(TODAY_TARGET, content)).toEqual({
+      ok: true,
+      content,
+    });
+  });
+
+  it("passes a valid agent.md through the full pipeline", () => {
+    const content = validAgentMarkdown();
+    expect(prepareContextContentForWrite(AGENT_TARGET, content)).toEqual({
       ok: true,
       content,
     });

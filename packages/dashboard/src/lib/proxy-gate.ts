@@ -43,7 +43,7 @@ const ALLOWED_LOOPBACK_HOSTNAMES = new Set([
 
 export interface ProxyGateInput {
   method: string;
-  /** The dashboard's expected origin, e.g. `http://localhost:3000`. */
+  /** The dashboard's expected origin, e.g. `http://localhost:8322`. */
   expectedOrigin: string;
   /** Value of the `Origin` request header, or null if absent. */
   origin: string | null;
@@ -61,7 +61,7 @@ export type GateDecision =
  * Parse a Host header value (`hostname[:port]`) and return the bare
  * hostname, lowercased and with IPv6 brackets stripped.
  *
- * Why `URL`: handles bracketed IPv6 (`[::1]:3000`) correctly, where a
+ * Why `URL`: handles bracketed IPv6 (`[::1]:8322`) correctly, where a
  * naive `split(":")` would tokenize on the embedded colons.
  *
  * Why strip brackets: WHATWG `URL.hostname` returns `[::1]` for an

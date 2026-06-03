@@ -693,6 +693,12 @@ export class OpencodeCore implements IAgentCore {
         // have no DB rows AND no trigger phrase.
         ...(this.mcpContext?.db ? { db: this.mcpContext.db } : {}),
         ...(isMessageEvent(params.event) ? { messageText: params.event.content } : {}),
+        // AGENT_DEFINITIONS_DESIGN.md §4.2 — see ClaudeCodeCore. No-op for
+        // non-Agent executes (`OpencodeTurnParams` extends AgentExecuteParams).
+        ...(params.extraSkills && params.extraSkills.length > 0
+          ? { extraSkills: params.extraSkills }
+          : {}),
+        ...(params.skillsReplace ? { skillsReplace: true } : {}),
       },
     );
     const ownsSessionDir = !params.sessionDir;

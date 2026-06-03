@@ -431,6 +431,22 @@ describe("browser history API routes", () => {
       expect(res.status).toBe(400);
     });
 
+    it("rejects shape-valid but calendar-invalid dates with 400 (no 500)", async () => {
+      // Regression: "2026-13-99" passes DATE_PATTERN's digit-shape check but
+      // makes new Date(...) Invalid → formatSqliteDatetime threw RangeError →
+      // 500. Must return the documented 400 invalid_date instead.
+      const app = makeApp(db);
+      for (const bad of ["2026-13-99", "2026-00-10"]) {
+        const res = await app.request(
+          `/api/browser-history/pre-morning-digest/${bad}`,
+        );
+        expect(res.status).toBe(400);
+        expect((await res.json()) as { error: string }).toEqual({
+          error: "invalid_date",
+        });
+      }
+    });
+
     it("rebuilds fresh when no sidecar exists and returns the typed shape", async () => {
       // No sidecar on disk under `/tmp/pa-test/context` (not pre-created).
       // The endpoint should fall through to the live build and return

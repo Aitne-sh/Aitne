@@ -63,6 +63,7 @@ import {
 import { readIntegrations } from "../db/integrations-store.js";
 import { bootstrapManagedTaskSeq } from "../db/managed-tasks-store.js";
 import { sweepNonTerminalRowsForBootRecovery } from "../db/browser-task-store.js";
+import { sweepAbandoned as sweepAbandonedAgentExecutionRows } from "../db/agent-executions-store.js";
 import { setWikiWorkspaceTokenResolver } from "../core/skills-compiler-tree.js";
 import {
   listWikiWorkspaces,
@@ -398,6 +399,14 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
   // line and a per-row reconciliation tool can fan DMs separately.
   surfaceBrowserTaskBootRecovery(db);
 
+  // AGENT_DEFINITIONS_DESIGN.md §7.4 — agent-execution crash janitor. Flip
+  // every still-in-flight `agent_executions` row (result IS NULL) whose
+  // `started_at` predates this boot to `error / crash`. The dispatcher only
+  // opens execution rows at runtime (well after `initDatabase`), so any
+  // non-terminal row here is genuinely abandoned by a previous crashed run.
+  // Mirrors `surfaceBrowserTaskBootRecovery` above.
+  sweepAbandonedAgentExecutions(db);
+
   closeOrphanedDashboardChatSessions(db);
 
   // Chat attachment store — constructed early so adapter reload functions
@@ -710,6 +719,40 @@ export function surfaceBrowserTaskBootRecovery(db: Database.Database): number {
     "browser-task boot recovery — non-terminal rows flipped to failed(daemon_restarted)",
   );
   return affected.length;
+}
+
+/**
+ * AGENT_DEFINITIONS_DESIGN.md §7.4 — boot-time agent-execution crash janitor.
+ * Force-closes every `agent_executions` row left non-terminal (`result IS
+ * NULL`) by a crashed prior run, stamping `result='error', error_kind='crash'`.
+ * Idempotent (a second boot finds nothing non-terminal). Best-effort: a sweep
+ * failure (e.g. a hand-crafted partial DB missing the table) logs and returns 0
+ * so boot proceeds. Exported so a peer test can exercise both branches.
+ */
+export function sweepAbandonedAgentExecutions(
+  db: Database.Database,
+  bootTime: number = Date.now(),
+): number {
+  let result: { count: number; ids: number[] };
+  try {
+    result = sweepAbandonedAgentExecutionRows(db, bootTime);
+  } catch (err) {
+    /* c8 ignore start -- the schema script creates the table; defence-in-depth
+     * against a hand-crafted partial DB. */
+    logger.warn(
+      { err },
+      "sweepAbandonedAgentExecutions: sweep failed — agent_executions table likely missing; skipping",
+    );
+    return 0;
+    /* c8 ignore stop */
+  }
+  if (result.count > 0) {
+    logger.warn(
+      { count: result.count, ids: result.ids },
+      "agent-execution boot recovery — non-terminal rows flipped to error(crash)",
+    );
+  }
+  return result.count;
 }
 
 export function applyDelegatedTaskModeDefaultCorrection(

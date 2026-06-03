@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import {
+  CONTEXT_VAULT_MIGRATION_ENTRY,
   MIGRATIONS,
   columnExists,
   indexExists,
@@ -11,6 +12,7 @@ import {
   tableExists,
   type Migration,
 } from "./migrations.js";
+import { applySchema } from "./schema.js";
 
 function openDb(): Database.Database {
   return new Database(":memory:");
@@ -76,6 +78,13 @@ describe("runMigrations", () => {
     const second = runMigrations(db, [migration]);
     expect(second.applied).toEqual([]);
     expect(upCalls).toBe(1);
+  });
+
+  it("CONTEXT_VAULT_MIGRATION_ENTRY.up throws when no MigrationContext is supplied", () => {
+    const db = openDb();
+    expect(() => CONTEXT_VAULT_MIGRATION_ENTRY.up(db)).toThrow(
+      /requires MigrationContext/,
+    );
   });
 
   it("applies multiple migrations in array order", () => {
@@ -885,6 +894,225 @@ describe("0006-message-dm-budget-bump", () => {
     const second = runMigrations(db, [migration!]);
     expect(second.applied).toEqual([]);
     expect(budgetOf(db, "message.dm")).toBe(5.0);
+  });
+});
+
+// AGENT_DEFINITIONS_DESIGN.md §5 — peer test for the `0007-agent-identity`
+// migration. The two new tables (agents / agent_executions) are created by
+// applySchema, so the migration body carries ONLY the agent_actions ALTER +
+// index. Same CLAUDE.md non-negotiable #4 contract: fresh DB (applySchema) →
+// no-op + id recorded; no-table DB → no-op + id recorded; pre-migration-shape
+// DB (agent_actions sans agent_id) → ALTER + index applied + id recorded;
+// re-run → no second apply.
+describe("0007-agent-identity", () => {
+  const migration = MIGRATIONS.find((m) => m.id === "0007-agent-identity");
+
+  // Minimal pre-migration shape: agent_actions as it stood BEFORE this
+  // migration — no agent_id column, no idx_agent_actions_agent index.
+  function seedLegacyAgentActions(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE agent_actions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action_type TEXT NOT NULL,
+        result TEXT,
+        detail JSON,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP
+      );
+      INSERT INTO agent_actions (action_type, result, started_at)
+        VALUES ('legacy.action', 'success', '2026-05-01 00:00:00');
+    `);
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("on a fresh DB: ALTER is skipped (column from CREATE body) but the index branch creates the index", () => {
+    const db = openDb();
+    applySchema(db);
+    // applySchema creates the two new tables + the agent_id column (CREATE
+    // body) — but NOT the idx_agent_actions_agent index. That index is
+    // migration-owned: creating it in applySchema would throw on a pre-0007
+    // upgrader whose agent_actions predates the column, since applySchema runs
+    // before runMigrations (see schema.ts note + upgrade-safety.test.ts).
+    expect(tableExists(db, "agents")).toBe(true);
+    expect(tableExists(db, "agent_executions")).toBe(true);
+    expect(columnExists(db, "agent_actions", "agent_id")).toBe(true);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(false);
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0007-agent-identity"]);
+    // Column was already present (ALTER skipped); the index branch ran.
+    expect(columnExists(db, "agent_actions", "agent_id")).toBe(true);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(true);
+  });
+
+  it("is a no-op when agent_actions does not exist (bare DB)", () => {
+    // The runner's own "production MIGRATIONS list" test runs against a bare
+    // :memory: DB with no agent_actions; the body must short-circuit on the
+    // missing table rather than throwing on the ALTER (columnExists returns
+    // false for a missing table). The id is still recorded.
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0007-agent-identity"]);
+    expect(tableExists(db, "agent_actions")).toBe(false);
+    const recorded = db
+      .prepare<[], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0007-agent-identity");
+    expect(recorded).toEqual({ id: "0007-agent-identity" });
+  });
+
+  it("adds the agent_id column + index on a pre-migration-shape DB and preserves rows", () => {
+    const db = openDb();
+    seedLegacyAgentActions(db);
+    expect(columnExists(db, "agent_actions", "agent_id")).toBe(false);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(false);
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0007-agent-identity"]);
+    expect(columnExists(db, "agent_actions", "agent_id")).toBe(true);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(true);
+
+    // Legacy row preserved with a NULL agent_id stamp.
+    const legacy = db
+      .prepare<[], { action_type: string; agent_id: string | null }>(
+        "SELECT action_type, agent_id FROM agent_actions ORDER BY id",
+      )
+      .all();
+    expect(legacy).toEqual([{ action_type: "legacy.action", agent_id: null }]);
+
+    // New rows can now carry the stamp.
+    db.prepare(
+      "INSERT INTO agent_actions (action_type, agent_id) VALUES (?, ?)",
+    ).run("agent.action", "morning-routine");
+    const stamped = db
+      .prepare<[string], { n: number }>(
+        "SELECT COUNT(*) AS n FROM agent_actions WHERE agent_id = ?",
+      )
+      .get("morning-routine");
+    expect(stamped).toEqual({ n: 1 });
+  });
+
+  it("adds only the missing half when the column exists but the index does not", () => {
+    // Defensive: an install whose agent_id column landed via a hand-rolled
+    // ALTER but never got the index. The body must create the index without
+    // re-ALTERing (which SQLite would reject as a duplicate column).
+    const db = openDb();
+    seedLegacyAgentActions(db);
+    db.exec("ALTER TABLE agent_actions ADD COLUMN agent_id TEXT");
+    expect(columnExists(db, "agent_actions", "agent_id")).toBe(true);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(false);
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0007-agent-identity"]);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(true);
+  });
+
+  it("is idempotent — re-running does not re-apply", () => {
+    const db = openDb();
+    seedLegacyAgentActions(db);
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    // Column + index still present after the no-op second run.
+    expect(columnExists(db, "agent_actions", "agent_id")).toBe(true);
+    expect(indexExists(db, "idx_agent_actions_agent")).toBe(true);
+  });
+});
+
+// schedule prompt-required rework — peer test for the
+// `0008-agent-schedule-backfill-task-prompt` migration. CLAUDE.md
+// non-negotiable #4: fresh DB (applySchema) → no-op + id recorded; no-table
+// DB → no-op + id recorded; pre-migration-shape DB (a pending row with NULL
+// task_prompt) → backfilled from task_description + id recorded; re-run → no
+// second apply.
+describe("0008-agent-schedule-backfill-task-prompt", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0008-agent-schedule-backfill-task-prompt",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB (applySchema) — empty table, id recorded", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0008-agent-schedule-backfill-task-prompt",
+    ]);
+    const recorded = db
+      .prepare<[], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0008-agent-schedule-backfill-task-prompt");
+    expect(recorded).toEqual({
+      id: "0008-agent-schedule-backfill-task-prompt",
+    });
+  });
+
+  it("is a no-op when agent_schedule does not exist (bare DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0008-agent-schedule-backfill-task-prompt",
+    ]);
+    expect(tableExists(db, "agent_schedule")).toBe(false);
+  });
+
+  it("backfills task_prompt from task_description for NULL-prompt rows; leaves set prompts alone", () => {
+    const db = openDb();
+    applySchema(db);
+    // A legacy pending row that relied on the dispatcher's old fallback
+    // (task_prompt NULL, task_description carries the body)…
+    db.prepare(
+      `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+       VALUES ('2099-01-01 09:00:00', 'wake', 'Legacy body in description', NULL, 'pending')`,
+    ).run();
+    // …and a row that already carries a distinct task_prompt (must be untouched).
+    db.prepare(
+      `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+       VALUES ('2099-01-02 09:00:00', 'wake', 'Short label', 'A full instruction', 'pending')`,
+    ).run();
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0008-agent-schedule-backfill-task-prompt",
+    ]);
+
+    const rows = db
+      .prepare<[], { task_description: string; task_prompt: string | null }>(
+        "SELECT task_description, task_prompt FROM agent_schedule ORDER BY scheduled_for",
+      )
+      .all();
+    expect(rows).toEqual([
+      // NULL prompt backfilled from description.
+      { task_description: "Legacy body in description", task_prompt: "Legacy body in description" },
+      // Pre-set prompt preserved verbatim.
+      { task_description: "Short label", task_prompt: "A full instruction" },
+    ]);
+  });
+
+  it("is idempotent — re-running does not re-apply and does not re-touch rows", () => {
+    const db = openDb();
+    applySchema(db);
+    db.prepare(
+      `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+       VALUES ('2099-01-01 09:00:00', 'wake', 'Legacy body', NULL, 'pending')`,
+    ).run();
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    const row = db
+      .prepare<[], { task_prompt: string | null }>(
+        "SELECT task_prompt FROM agent_schedule LIMIT 1",
+      )
+      .get();
+    expect(row).toEqual({ task_prompt: "Legacy body" });
   });
 });
 

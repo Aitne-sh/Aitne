@@ -78,6 +78,7 @@ import type {
   ISessionManager,
   MessageReplyTarget,
 } from "./dispatcher-types.js";
+import type { AgentExecutionOutcome } from "./agents/agent-execution-tracker.js";
 import { createLogger } from "../logging.js";
 import {
   assertOutboundAllowedForAgent,
@@ -118,6 +119,13 @@ export interface ResultProcessorDeps {
    * upgradable.
    */
   hasMessageBackendMetadataColumns: boolean;
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §8.2 — feed the terminal LLM-level outcome
+   * (cost / soft-error) to the execution tracker so the dispatch boundary
+   * settles the `agent_executions` row with the accurate result. Optional so
+   * existing dispatcher unit tests construct the processor without it.
+   */
+  recordExecutionOutcome?: (event: Event, outcome: AgentExecutionOutcome) => void;
 }
 
 export class ResultProcessor {
@@ -129,6 +137,10 @@ export class ResultProcessor {
   private readonly notifiedEvents: Set<string>;
   private readonly isReactive: (event: Event) => boolean;
   private readonly hasMessageBackendMetadataColumns: boolean;
+  private readonly recordExecutionOutcome?: (
+    event: Event,
+    outcome: AgentExecutionOutcome,
+  ) => void;
 
   constructor(deps: ResultProcessorDeps) {
     this.db = deps.db;
@@ -139,6 +151,7 @@ export class ResultProcessor {
     this.notifiedEvents = deps.notifiedEvents;
     this.isReactive = deps.isReactive;
     this.hasMessageBackendMetadataColumns = deps.hasMessageBackendMetadataColumns;
+    this.recordExecutionOutcome = deps.recordExecutionOutcome;
   }
 
   async processResult(
@@ -323,6 +336,18 @@ export class ResultProcessor {
       advisorCallCount: result.advisorCallCount,
       ...(options.dmFreshness ? { dmFreshness: options.dmFreshness } : {}),
       ...(options.dailyWrite ? { dailyWrite: options.dailyWrite } : {}),
+    });
+    // AGENT_DEFINITIONS_DESIGN.md §8.2 — record the terminal LLM-level outcome
+    // for the execution rollup. The dispatch boundary (dispatchSafe) later
+    // settles the row using this; a firing that never reaches here is settled
+    // as success (no thrown) or swept as crash by the boot janitor.
+    this.recordExecutionOutcome?.(event, {
+      isError: result.isError,
+      costUsd: result.costUsd,
+      tokensIn: result.usage.inputTokens,
+      tokensOut: result.usage.outputTokens,
+      turns: result.numTurns,
+      outputSummary: result.output.trim().slice(0, 500) || null,
     });
     // Observer-event observability: log whether an external-change
     // event actually produced a context-file update. Makes it obvious

@@ -23,7 +23,6 @@ import {
   describeMutationError,
 } from "./schedule-warnings";
 import { useCreateSchedule } from "@/lib/hooks/use-schedule-mutations";
-import { useCreateRecurringSchedule } from "@/lib/hooks/use-recurring-schedules";
 import type { ScheduleWarningIssue } from "@/lib/api-types";
 
 export function CreateScheduleSheet({ trigger }: { trigger: React.ReactNode }) {
@@ -37,8 +36,7 @@ export function CreateScheduleSheet({ trigger }: { trigger: React.ReactNode }) {
   const [savedWithWarnings, setSavedWithWarnings] = useState(false);
 
   const createOnce = useCreateSchedule();
-  const createRecurring = useCreateRecurringSchedule();
-  const submitting = createOnce.isPending || createRecurring.isPending;
+  const submitting = createOnce.isPending;
 
   const reset = () => {
     setState(EMPTY_FORM_STATE);
@@ -67,11 +65,14 @@ export function CreateScheduleSheet({ trigger }: { trigger: React.ReactNode }) {
     setServerIssues([]);
     setWarnings([]);
     const payload = toSubmitPayload(state);
+    // The create sheet is one-shot only — recurring tasks are Agents (the form
+    // is rendered with `hideFrequency`, so the payload is always a one-shot row).
+    if (payload.kind !== "once") {
+      setSubmitError("Recurring tasks are now Agents — create them on the Agents page.");
+      return;
+    }
     try {
-      const response =
-        payload.kind === "once"
-          ? await createOnce.mutateAsync(payload.body)
-          : await createRecurring.mutateAsync(payload.body);
+      const response = await createOnce.mutateAsync(payload.body);
       const responseWarnings = response.warnings ?? [];
       if (responseWarnings.length > 0) {
         // Hold the sheet open so the user sees the §5.0.5 advisories.
@@ -112,6 +113,7 @@ export function CreateScheduleSheet({ trigger }: { trigger: React.ReactNode }) {
           state={state}
           onChange={setState}
           errors={errors}
+          hideFrequency
           onEdit={() => {
             if (errors) setErrors(null);
             if (submitError) setSubmitError(null);

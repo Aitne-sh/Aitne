@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import { ensureBuild, log } from "./run-node.mjs";
 import { openBrowser, waitForHttpReady } from "./browser.mjs";
+import { resolveDashboardPort } from "./lib/ports.mjs";
 
 const IS_WINDOWS = process.platform === "win32";
 const requireFromScript = createRequire(import.meta.url);
@@ -57,7 +58,7 @@ function nextSpawnArgs(dashboardDir, nextBin, userArgs) {
  * 5. Ctrl+C stops both
  */
 
-const DASHBOARD_PORT = parseInt(process.env.PA_DASHBOARD_PORT || "3000", 10);
+const DASHBOARD_PORT = resolveDashboardPort();
 const noOpen = process.argv.slice(2).includes("--no-open");
 const children = [];
 let shuttingDown = false;

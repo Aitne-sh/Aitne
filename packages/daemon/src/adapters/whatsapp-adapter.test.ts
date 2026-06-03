@@ -53,6 +53,9 @@ type AdapterInternals = {
   cachedWAVersionAt: number;
   reconnectAttempts: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  lastCloseWasNetwork: boolean;
+  reconnecting: boolean;
+  dnsLookup: (hostname: string) => Promise<unknown>;
   connectionState: string;
   loggedOutCode: number | null;
   lastError: string | null;
@@ -60,6 +63,9 @@ type AdapterInternals = {
   resolveWAVersion: () => Promise<number[] | undefined>;
   invalidateWAVersionCache: () => void;
   scheduleReconnect: () => void;
+  runReconnectAttempt: (sustained: boolean) => Promise<void>;
+  isNetworkReachable: () => Promise<boolean>;
+  connect: () => Promise<void>;
   handleConnectionUpdate: (update: unknown, sock: unknown) => Promise<void>;
   closeSocket: () => void;
   sock: unknown;
@@ -1198,6 +1204,189 @@ describe("WhatsAppAdapter — reconnect backoff", () => {
     internals.scheduleReconnect();
     expect(setTimeoutSpy.mock.calls.length).toBe(before);
     expect(internals.reconnectTimer).toBeNull();
+  });
+});
+
+describe("WhatsAppAdapter — sustained network watch", () => {
+  function makeCloseUpdate(statusCode: number | null) {
+    return {
+      connection: "close" as const,
+      lastDisconnect: { error: { output: { statusCode }, data: { statusCode } } },
+    };
+  }
+
+  it("classifies transport closes (408/428/503) as network and app-layer closes (405/500) as not", async () => {
+    const cases: ReadonlyArray<readonly [number, boolean]> = [
+      [408, true],
+      [428, true],
+      [503, true],
+      [405, false],
+      [500, false],
+    ];
+    vi.useFakeTimers();
+    for (const [status, expected] of cases) {
+      const adapter = createAdapter();
+      const internals = asInternals(adapter);
+      internals.loggedOutCode = 401;
+      internals.sock = {};
+
+      await internals.handleConnectionUpdate(makeCloseUpdate(status), internals.sock);
+
+      expect(internals.lastCloseWasNetwork).toBe(expected);
+      if (internals.reconnectTimer) {
+        clearTimeout(internals.reconnectTimer);
+        internals.reconnectTimer = null;
+      }
+    }
+  });
+
+  it("treats a close carrying no statusCode as network-class", async () => {
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.loggedOutCode = 401;
+    internals.sock = {};
+
+    vi.useFakeTimers();
+    await internals.handleConnectionUpdate(
+      { connection: "close", lastDisconnect: { error: new Error("socket hang up") } },
+      internals.sock,
+    );
+
+    expect(internals.lastCloseWasNetwork).toBe(true);
+    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+  });
+
+  it("enters the sustained watch instead of giving up on a network close past the fast cap", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10; // == RECONNECT_MAX_ATTEMPTS
+    internals.lastCloseWasNetwork = true;
+
+    internals.scheduleReconnect();
+
+    // Sustained cadence (30s, jitter pinned to 0), NOT the permanent give-up.
+    expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(30_000);
+    expect(internals.reconnectTimer).not.toBeNull();
+    expect(internals.reconnecting).toBe(true);
+    expect(internals.lastError ?? "").not.toMatch(/gave up/);
+    // Counter pinned at the cap rather than growing across the offline window.
+    expect(internals.reconnectAttempts).toBe(10);
+    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+  });
+
+  it("still gives up on a non-network close past the fast cap", () => {
+    vi.useFakeTimers();
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10;
+    internals.lastCloseWasNetwork = false;
+    internals.lastError = "WhatsApp rejected client version (status 515)";
+
+    internals.scheduleReconnect();
+
+    expect(internals.reconnectTimer).toBeNull();
+    expect(internals.reconnecting).toBe(false);
+    expect(internals.lastError).toMatch(/gave up after 10 attempts/);
+  });
+
+  it("keeps watching without opening a socket while still offline", async () => {
+    vi.useFakeTimers();
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10;
+    internals.lastCloseWasNetwork = true;
+    internals.connectionState = "disconnected";
+    internals.dnsLookup = vi.fn().mockRejectedValue(new Error("EAI_AGAIN"));
+    const connectSpy = vi.spyOn(internals, "connect").mockResolvedValue();
+
+    await internals.runReconnectAttempt(true);
+
+    expect(connectSpy).not.toHaveBeenCalled();
+    // Re-armed for another probe rather than wedging in an error state.
+    expect(internals.reconnectTimer).not.toBeNull();
+    expect(internals.reconnecting).toBe(true);
+    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+  });
+
+  it("reconnects with a fresh fast phase once the network returns", async () => {
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10;
+    internals.lastCloseWasNetwork = true;
+    internals.connectionState = "disconnected";
+    internals.dnsLookup = vi.fn().mockResolvedValue({ address: "1.2.3.4", family: 4 });
+    const connectSpy = vi.spyOn(internals, "connect").mockResolvedValue();
+
+    await internals.runReconnectAttempt(true);
+
+    expect(connectSpy).toHaveBeenCalledTimes(1);
+    expect(internals.reconnectAttempts).toBe(0); // fresh fast phase for the next blip
+  });
+
+  it("re-marks a thrown connect as non-network so a persistent failure gives up at the cap", async () => {
+    // A thrown connect() is a local misconfiguration, never a network signal
+    // (network failures arrive via the close event). Without re-marking, the
+    // watch would inherit lastCloseWasNetwork=true and loop forever.
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.lastCloseWasNetwork = true; // inherited from the close that opened the watch
+    internals.connectionState = "disconnected";
+    internals.dnsLookup = vi.fn().mockResolvedValue({ address: "1.2.3.4", family: 4 });
+    vi.spyOn(internals, "connect").mockRejectedValue(new Error("deps not initialized"));
+
+    vi.useFakeTimers();
+    await internals.runReconnectAttempt(true);
+
+    expect(internals.lastCloseWasNetwork).toBe(false);
+    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+  });
+
+  it("abandons the sustained attempt if shut down during the connectivity probe", async () => {
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10;
+    internals.lastCloseWasNetwork = true;
+    internals.reconnecting = true;
+    internals.dnsLookup = vi.fn().mockImplementation(async () => {
+      internals.shuttingDown = true; // flips mid-probe (e.g. adapter stop())
+      return { address: "1.2.3.4", family: 4 };
+    });
+    const connectSpy = vi.spyOn(internals, "connect").mockResolvedValue();
+
+    await internals.runReconnectAttempt(true);
+
+    expect(connectSpy).not.toHaveBeenCalled();
+    expect(internals.reconnecting).toBe(false);
+    expect(internals.reconnectTimer).toBeNull();
+  });
+
+  it("isNetworkReachable resolves true on lookup success and false on failure", async () => {
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+
+    internals.dnsLookup = vi.fn().mockResolvedValue({ address: "1.2.3.4", family: 4 });
+    await expect(internals.isNetworkReachable()).resolves.toBe(true);
+
+    internals.dnsLookup = vi.fn().mockRejectedValue(new Error("ENOTFOUND"));
+    await expect(internals.isNetworkReachable()).resolves.toBe(false);
+  });
+
+  it("surfaces the sustained watch as connecting even with the timer momentarily null", () => {
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.connectionState = "disconnected";
+    internals.lastError = "WhatsApp connection closed (status 408)";
+    internals.reconnectTimer = null;
+    internals.reconnecting = true; // brief mid-probe window of the sustained watch
+    expect(adapter.getStatusError()).toBeNull();
+    expect(adapter.getNotificationRuntimeStatus()).toEqual({
+      runtimeState: "connecting",
+      error: null,
+    });
   });
 });
 

@@ -97,7 +97,7 @@ Notify when **all three** are true: (1) **actionable** or requires awareness, (2
   for this item within the next 2 hours** — let the planned channel
   deliver; don't pre-empt it.
 - **Quiet hours (default 22:00-08:00, configurable)** unless `critical` — schedule for after instead
-- **Rate-limited (429)** — do NOT retry; log skip to Agent Log. If time-critical, upgrade priority at next opportunity
+- **Over the rate-limit caps (3/hour, 12/day; `critical` bypasses both)** — do NOT spam-retry. The endpoint does NOT signal this: `/api/notify` returns `200 {status:"sent"}` even when quiet-hours or the rate-limit silently drops the message, so a `"sent"` response is not proof of delivery. Self-throttle by checking `<today>` `## Agent Log` before firing; if you suspect suppression, log the skip rather than re-posting. If time-critical, upgrade priority at next opportunity
 - **Routine file changes** or **agent internal state** — use Agent Log instead
 - **When in doubt — prefer silence**
 

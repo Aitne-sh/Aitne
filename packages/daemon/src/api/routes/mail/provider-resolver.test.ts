@@ -62,7 +62,6 @@ function makeAccount(
   overrides: Partial<MailAccount> & { id: string },
 ): MailAccount {
   return {
-    id: overrides.id,
     kind: "icloud",
     email: `${overrides.id}@example.test`,
     authStatus: "healthy",
@@ -108,7 +107,7 @@ describe("notImplementedResponse", () => {
     );
     const res = await app.request("/probe");
     expect(res.status).toBe(501);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     // Legacy shape preserved for existing route tests.
     expect(body.message).toBe("updateDraft not supported on imap");
     // Envelope carries the standard issue list under `errors`.
@@ -123,7 +122,7 @@ describe("notImplementedResponse", () => {
       notImplementedResponse(c, "createDraft", "yahoo"),
     );
     const res = await app.request("/probe");
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.errors[0].hint).toMatch(/createDraft not supported on yahoo/);
   });
 });
@@ -134,7 +133,7 @@ describe("providerError", () => {
     const app = buildAppFromHandler((c) => providerError(c, err, "get-msg"));
     const res = await app.request("/probe");
     expect(res.status).toBe(404);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.message).toBe("not there");
     expect(body.errors[0].code).toBe("mail.account_not_found");
     expect(body.errors[0].field).toBe("get-msg");
@@ -163,7 +162,7 @@ describe("providerError", () => {
     const app = buildAppFromHandler((c) => providerError(c, err, "createDraft"));
     const res = await app.request("/probe");
     expect(res.status).toBe(501);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.errors[0].code).toBe("mail.not_implemented");
     expect(body.errors[0].hint).toMatch(/Stop retrying/);
   });
@@ -173,7 +172,7 @@ describe("providerError", () => {
     const app = buildAppFromHandler((c) => providerError(c, err, "list"));
     const res = await app.request("/probe");
     expect(res.status).toBe(502);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.errors[0].code).toBe("mail.provider_auth_error");
     expect(body.message).toBe("token expired");
   });
@@ -183,7 +182,7 @@ describe("providerError", () => {
     const app = buildAppFromHandler((c) => providerError(c, err, "list"));
     const res = await app.request("/probe");
     expect(res.status).toBe(502);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.errors[0].code).toBe("mail.provider_auth_error");
   });
 
@@ -193,7 +192,7 @@ describe("providerError", () => {
     );
     const res = await app.request("/probe");
     expect(res.status).toBe(500);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.errors[0].code).toBe("mail.upstream_error");
     expect(body.errors[0].hint).toMatch(/Mail provider list failed/);
     expect(body.message).toBe("boom");
@@ -207,7 +206,7 @@ describe("providerError", () => {
     );
     const res = await app.request("/probe");
     expect(res.status).toBe(500);
-    const body = await res.json();
+    const body = (await res.json()) as any;
     expect(body.message).toBe("raw-string");
   });
 
@@ -510,7 +509,7 @@ describe("createProviderResolver", () => {
       );
       const res = await app.request("/x");
       expect(res.status).toBe(410);
-      const body = await res.json();
+      const body = (await res.json()) as any;
       expect(body).toEqual({
         error: "integration_delegated",
         message: "gated",
@@ -533,7 +532,7 @@ describe("createProviderResolver", () => {
         }),
       );
       const res = await app.request("/x");
-      const body = await res.json();
+      const body = (await res.json()) as any;
       expect(body.mode).toBe("delegated");
       expect(body.integration).toBeNull();
       expect(body.backend).toBeNull();
@@ -554,7 +553,7 @@ describe("createProviderResolver", () => {
       );
       const res = await app.request("/x");
       expect(res.status).toBe(400);
-      const body = await res.json();
+      const body = (await res.json()) as any;
       expect(body).toEqual({
         error: "provider_not_enabled",
         message: "scope-gated",

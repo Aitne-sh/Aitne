@@ -129,7 +129,7 @@ function EditRecurringSheetContent({
     if (validation) return;
     const payload = toSubmitPayload(state);
     if (payload.kind !== "recurring") {
-      setError("Cannot convert a recurring schedule to a one-off — delete and recreate.");
+      setError("Cannot convert a scheduled DM to a one-off — delete and recreate.");
       return;
     }
     try {
@@ -147,6 +147,14 @@ function EditRecurringSheetContent({
           : trimmedModel !== initialModel
             ? { model: trimmedModel }
             : {};
+      // Only drop `pin_to_quiet_hours_end` when the user actually changed the
+      // TIME. quiet-hours-sync retimes `recurrenceRule.time`, so an explicit
+      // time edit must unpin (else the next quiet-hours change overwrites the
+      // chosen time — the correctness the conversational "change time" flow
+      // applies). A description / model / days-only edit must NOT unpin, so the
+      // briefing keeps tracking quiet-hours. `sub_flow` is preserved either way.
+      const timeChanged =
+        payload.body.recurrenceRule.time !== dto.recurrenceRule.time;
       const response = await update.mutateAsync({
         id: dto.id,
         description: payload.body.description,
@@ -155,6 +163,9 @@ function EditRecurringSheetContent({
         // leaving a stale prompt in place).
         prompt: payload.body.prompt ?? null,
         recurrenceRule: payload.body.recurrenceRule,
+        ...(timeChanged
+          ? { taskContext: { ...dto.taskContext, pin_to_quiet_hours_end: false } }
+          : {}),
         ...modelDirective,
       });
       const responseWarnings = response.warnings ?? [];
@@ -174,7 +185,7 @@ function EditRecurringSheetContent({
   return (
     <SheetContent className="flex flex-col gap-4 overflow-y-auto">
       <SheetHeader className="pr-8">
-        <SheetTitle>Edit recurring schedule #{dto.id}</SheetTitle>
+        <SheetTitle>Edit scheduled DM #{dto.id}</SheetTitle>
       </SheetHeader>
       <ScheduleForm
         state={state}
@@ -229,7 +240,15 @@ function EditRecurringSheetContent({
   );
 }
 
-export function RecurringSchedulesTable() {
+/**
+ * Scheduling split — `/schedule` is the home for NON-Agent scheduled items.
+ * This table shows recurring scheduled **DMs** (`task_type: 'dm_session'` — the
+ * morning briefing and any user-created recurring DM). Recurring *work* agents
+ * (`agent.task`) live on the `/agents` page, so they are filtered out here. The
+ * daemon gates `/api/recurring-schedules` PATCH/DELETE to `dm_session`, so the
+ * toggle / edit / delete below only ever touch these non-Agent rows.
+ */
+export function ScheduledDmsTable() {
   const { data, isLoading, isError, error, refetch } = useRecurringSchedules();
   const update = useUpdateRecurringSchedule();
   const remove = useDeleteRecurringSchedule();
@@ -247,7 +266,7 @@ export function RecurringSchedulesTable() {
 
   const handleDelete = async (dto: RecurringScheduleDTO) => {
     setActionError(null);
-    if (!confirm(`Delete recurring schedule "${dto.description.slice(0, 40)}..."?`)) return;
+    if (!confirm(`Delete scheduled DM "${dto.description.slice(0, 40)}..."?`)) return;
     try {
       await remove.mutateAsync(dto.id);
     } catch (e) {
@@ -255,7 +274,8 @@ export function RecurringSchedulesTable() {
     }
   };
 
-  const items = data?.items ?? [];
+  // Non-Agent only: recurring DMs live here; recurring work Agents are on /agents.
+  const items = (data?.items ?? []).filter((it) => it.taskType === "dm_session");
 
   return (
     <>
@@ -270,12 +290,12 @@ export function RecurringSchedulesTable() {
         {items.length === 0 ? (
           <EmptyState
             icon={CalendarRange}
-            title="No recurring schedules"
-            description="Create one with the Schedule button — pick hourly, daily, weekly (with weekdays), or monthly cadence."
+            title="No scheduled DMs"
+            description="Recurring DMs (e.g. the morning briefing) appear here. The agent creates them on request; recurring work runs as an Agent on the Agents page."
           />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-left" aria-label="Recurring schedules">
+            <table className="w-full text-left" aria-label="Scheduled DMs">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
                   <th className="px-3 py-2 text-xs font-medium text-muted-foreground">Cadence</th>
@@ -293,7 +313,9 @@ export function RecurringSchedulesTable() {
                     <td className="max-w-md px-3 py-2 text-sm">
                       <div className="flex items-start gap-2">
                         <span className="line-clamp-2 flex-1">{it.description}</span>
-                        {it.prompt ? (
+                        {it.prompt &&
+                        it.description &&
+                        it.prompt !== it.description ? (
                           <Tooltip>
                             <TooltipTrigger>
                               <Badge variant="purple" className="shrink-0">prompt</Badge>
@@ -342,7 +364,7 @@ export function RecurringSchedulesTable() {
                           size="sm"
                           variant="outline"
                           onClick={() => setEditing(it)}
-                          aria-label="Edit recurring schedule"
+                          aria-label="Edit scheduled DM"
                         >
                           <Edit2 className="h-3.5 w-3.5" />
                         </Button>
@@ -351,7 +373,7 @@ export function RecurringSchedulesTable() {
                           variant="outline"
                           onClick={() => handleDelete(it)}
                           disabled={remove.isPending}
-                          aria-label="Delete recurring schedule"
+                          aria-label="Delete scheduled DM"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

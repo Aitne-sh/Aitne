@@ -146,6 +146,9 @@ import { validateBuiltinSkillSourceTree } from "../core/skills-compiler-variants
 
 // Audit / safety / messaging
 import { AuditLogger } from "../safety/audit.js";
+import { AgentExecutionRecorder } from "../core/agent-execution-recorder.js";
+import { AgentExecutionTracker } from "../core/agents/agent-execution-tracker.js";
+import { loadAgentSuccessCriteria } from "../core/agents/definition-criteria.js";
 import type { AgentWriteTracker } from "../safety/agent-write-tracker.js";
 import { NotificationManager } from "../adapters/notification-manager.js";
 import type { MessageHub } from "../adapters/message-hub.js";
@@ -553,6 +556,33 @@ export async function createEventPipeline(
     onRowInserted: (row) => eventBroadcaster.broadcastEvent(row),
   });
 
+  // ── Agent execution recorder + tracker (AGENT_DEFINITIONS_DESIGN.md §8) ─
+  // The recorder owns the `agent_executions` row lifecycle + the agent-day
+  // `{date}` label; the tracker owns the per-firing begin/complete keyed by
+  // event correlationId, success-criteria evaluation, and the SSE feed. Both
+  // are wired into the dispatcher (+ the audit `agent_id` resolver) below.
+  const agentExecutionRecorder = new AgentExecutionRecorder({
+    db,
+    timezone: config.timezone || undefined,
+    dayBoundaryHour: config.dayBoundaryHour,
+  });
+  const agentExecutionTracker = new AgentExecutionTracker({
+    db,
+    recorder: agentExecutionRecorder,
+    contextDir: getContextDir(config, db),
+    emitSse: (event, payload) =>
+      eventBroadcaster.broadcastEvent({
+        kind: event,
+        ...(payload as Record<string, unknown>),
+      }),
+    loadCriteria: loadAgentSuccessCriteria,
+  });
+  // Stamp `agent_actions.agent_id` for every row produced by the in-flight
+  // firing — the tracker holds the resolved slug for the run's correlationId.
+  auditLogger.setAgentIdResolver((event) =>
+    agentExecutionTracker.currentAgentId(event.correlationId),
+  );
+
   // ── DM workdir re-materialization (shared by mail scope + mode flips) ─
   const rematerializeActiveDmWorkdirs = (
     reason: string,
@@ -674,6 +704,7 @@ export async function createEventPipeline(
   );
   dispatcher.setAttachmentStore(attachmentStore);
   dispatcher.setEventBroadcaster(eventBroadcaster);
+  dispatcher.setAgentExecutionTracker(agentExecutionTracker);
 
   // Voice transcription. See docs/design/appendices/voice-transcription.md.
   // Env vars stay live for advanced operators; `enabled` falls back to the

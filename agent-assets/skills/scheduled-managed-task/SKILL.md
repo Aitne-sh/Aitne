@@ -175,39 +175,49 @@ runs. The (`section`, `mode`, `content`, `cutoff`, `maxEntries`)
 shape is the contract today — see `contextPatchSchema` in
 `packages/shared/src/schemas.ts`.
 
-**Source-id capture (write the `external_id` into the body lines):**
-the entity-mirror watcher (P5) reparses the file's frontmatter on
-change, so the dedup contract in §7.6 hinges on the upstream id
-landing in **frontmatter**, not just the body. Until the entity-mirror
-reconciler ships AND the context API gains a `frontmatter*` patch
-mode for `<domain>/<type-plural>/*` files, do this:
+**Source-id capture — deep-merge into frontmatter (`mode:"frontmatterMerge"`):**
+the §7.6 dedup contract hinges on the upstream id landing in **frontmatter**
+(`sources.<app>.external_id`) — the canonical signal the entity-mirror watcher
+reparses and `GET /api/entities?source=…&external_id=…` queries — not just the
+body. The context PATCH route exposes `mode:"frontmatterMerge"` for exactly this
+(design 21 §10.4 step 4b): it deep-merges a partial frontmatter object into the
+file's existing YAML (nested objects merge key-by-key; scalars/arrays replace),
+so a new `<app>` source is linked without clobbering other apps' ids, other
+frontmatter keys, or the body:
 
-1. Always include `- external_id: <id>` on its own line in the
-   appended `## <App> Notes` body so a future reconciler-rebuild can
-   recover the binding from prose.
-2. Track the binding in the §B "Recently changed" path — the
-   `agent_actions.management_task.run_recorded` row's `detail` is
-   structured and survives even when the file body doesn't reflect
-   the binding cleanly.
+```bash
+curl -sS -X PATCH "http://localhost:8321/api/context/work/meetings/2026-12-04-foo-1on1" \
+  -H 'Content-Type: application/json' \
+  -d @- <<'JSON'
+{
+  "mode": "frontmatterMerge",
+  "frontmatter": {
+    "sources": { "zoom": { "external_id": "zm_xyz789" } },
+    "last_synced_at": "2026-12-04T09:00:00Z"
+  }
+}
+JSON
+```
 
-> **Implementation gap to flag** (Phase 5 / extended Phase 3): the
-> context PATCH route does not currently:
->   - allow writes under `<domain>/<type-plural>/*` (no entry in
->     `CONTEXT_WRITE_PERMISSIONS`), so this PATCH returns `403
->     forbidden` until the whitelist is widened, and
->   - expose a `frontmatterMerge` mode for deep-merging
->     `frontmatter.sources.<app>`.
-> Both are required by design 21 §10.4 step 4b and must land before
-> this Step 5a goes from "designed" to "operational". Until then,
-> Step 5b's audit row is the durable trace of the run — surface that
-> in the activity-view rather than relying on the entity body.
+`frontmatterMerge` requires a non-empty `frontmatter` object and takes no
+`section` (it never touches the body). Append the human-readable
+`## <App> Notes` section in a separate `mode:"append"` / `"append_to_file"`
+PATCH. Also keep Step 5b's audit row as the durable structured trace of the run.
 
-If the entity file does not previously exist, today's API requires a
-PUT with full content (the `<domain>/<type-plural>/*` write path is
-gated by the same whitelist note above). When the gap closes, the
-first PATCH must include a complete frontmatter block — `type`,
-`domain`, `slug`, `title`, `created`, `sources` — or the daemon
-returns 422 against `EntitySchema`.
+> **Write path:** the bare `<domain>/<type-plural>/<slug>` path is alias-rewritten
+> to `knowledge/entities/<domain>/<type-plural>/<slug>` by `context-vault-aliases.ts`,
+> which **is** whitelisted in `CONTEXT_WRITE_PERMISSIONS` for `PUT`/`PATCH`
+> (autonomous tier), so both the frontmatterMerge and the body-append PATCH
+> succeed on an existing entity file. (Recognised domains: `work`, `travel`,
+> `finance`, `personal`, `health`, `learning`.)
+
+If the entity file does not previously exist, PATCH returns
+`404 context.path_not_found` — today's API requires a PUT with full
+content to create it first (the `<domain>/<type-plural>/*` write path
+is whitelisted for both PUT and PATCH; only the file-existence rule
+forces the PUT-first ordering). The creating PUT must include a
+complete frontmatter block — `type`, `domain`, `slug`, `title`,
+`created`, `sources` — or the daemon returns 422 against `EntitySchema`.
 
 ### Step 5b — Update the row
 
@@ -343,7 +353,7 @@ appended `## <App> Notes` body, not as a separate DM.
 | HTTP | `error` | What to do |
 |---|---|---|
 | 400 (`/api/managed-tasks/:id/run-result`) | `invalid_id` / `validation_error` | Body shape drift — re-check field names exactly match `last_run_at` / `last_result` / `consecutive_failures` |
-| 403 (`/api/context/<domain>/<type-plural>/...`) | `forbidden` | Entity-domain write paths are not yet whitelisted (Phase 5 gap, §Step 5a). Skip the entity merge for this run, still record run-result, and surface a one-line warning in `last_result`. |
+| 404 (`/api/context/<domain>/<type-plural>/...`) | `context.path_not_found` | The entity file does not exist yet — PATCH cannot create it. Create it first with a PUT carrying full content + complete frontmatter (§Step 5a), then the merge succeeds. (Entity-domain write paths ARE whitelisted for PUT/PATCH; the prior 403 claim is obsolete.) |
 | 404 (`/api/managed-tasks/:id`) | `not_found` | Row was stopped mid-run. End the session quietly. |
 | 422 (`/api/context/...`) | `validation_error` | Frontmatter incomplete or malformed; populate all required fields and retry once |
 | 422 (`/api/managed-tasks/:id`) | `validation_error` | Path / body shape rejected; drop the offending field (typically `output_path`) and retry once with the rest |
@@ -379,7 +389,7 @@ appended `## <App> Notes` body, not as a separate DM.
 | `GET /api/entities?source=` | Step 4 bias hint (list-by-source-key) |
 | `GET /api/entities?domain=&type=&date=&q=` | Step 4.2 (tier-2 fuzzy) |
 | `GET /api/entities/by-path?path=` | Step 4 (verify before merging) |
-| `PATCH /api/context/<domain>/<type-plural>/<slug>` | Step 5a (gated by entity-domain write whitelist — Phase 5 gap) |
+| `PATCH /api/context/<domain>/<type-plural>/<slug>` | Step 5a (whitelisted PUT/PATCH; PATCH requires the file to exist — PUT-create first if 404) |
 | `PATCH /api/managed-tasks/:id/run-result` | Step 5b (internal — last_run_at / last_result / consecutive_failures) |
 | `PATCH /api/managed-tasks/:id` | Step 5b output-path back-fill only |
 | `POST /api/notify` | Step 6 (only on the 3-failures-in-a-row crossing edge) |

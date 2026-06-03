@@ -26,7 +26,7 @@ aitne start
 
 ## A day with Aitne
 
-Aitne is a daemon on your laptop, connected to your calendar, mail (Gmail / Outlook / iCloud / Yahoo), GitHub, Obsidian, and Notion. You talk to it through DMs in Slack / Telegram / Discord / WhatsApp — or through a local dashboard at `:3000`.
+Aitne is a daemon on your laptop, connected to your calendar, mail (Gmail / Outlook / iCloud / Yahoo), GitHub, Obsidian, and Notion. You talk to it through DMs in Slack / Telegram / Discord / WhatsApp — or through a local dashboard at `:8322`.
 
 - **04:00 — Morning routine.** Aitne reads everything that landed overnight (mail, GitHub activity, calendar changes, vault updates) and writes `today.md` — sample below.
 - **Morning — Brief.** The plan lands in your DMs as a short summary.
@@ -130,7 +130,7 @@ npm install -g @aitne-sh/aitne@latest
 aitne start
 ```
 
-The daemon listens on `:8321`, the dashboard on `:3000`. After `aitne start`, your browser opens to the setup wizard.
+The daemon listens on `:8321`, the dashboard on `:8322`. After `aitne start`, your browser opens to the setup wizard.
 
 You also need at least one AI backend installed and one API key. The documented operating mode is **provider API keys** — paste them into the wizard (they land in the OS keychain, never `.env`):
 
@@ -207,7 +207,7 @@ A pre-pass `routine.fetch_window` session runs before each routine, fanning out 
 
 ## Backends
 
-Aitne abstracts four AI runtimes behind one `IAgentCore` interface. Every kind of work has a `ProcessKey` mapped to a tier (`lite` / `medium` / `high`) and a backend; for Claude those tiers map to **Haiku 4.5 / Sonnet 4.6 / Opus 4.8**. The high tier is opt-in — no install-time surface defaults to it; pin it per row from `:3000/settings/models`.
+Aitne abstracts four AI runtimes behind one `IAgentCore` interface. Every kind of work has a `ProcessKey` mapped to a tier (`lite` / `medium` / `high`) and a backend; for Claude those tiers map to **Haiku 4.5 / Sonnet 4.6 / Opus 4.8**. The high tier is opt-in — no install-time surface defaults to it; pin it per row from `:8322/settings/models`.
 
 | Backend | Implementation | Resume | Strengths |
 |---|---|---|---|
@@ -216,7 +216,7 @@ Aitne abstracts four AI runtimes behind one `IAgentCore` interface. Every kind o
 | **Gemini CLI** | Google Gemini CLI subprocess + JSONL stream | ✓ | Free-tier headroom, large-context summarization |
 | **OpenCode** | `opencode-ai` HTTP server + SDK client | ✓ | Multi-provider — routes to any `opencode auth login` provider |
 
-The router fails over to a configured fallback automatically on `BackendQuotaError` or decisive failure, re-materializing the fallback's instruction file and skill directories into the session workdir. Per-process tier defaults and routing are editable at `:3000/settings/models`.
+The router fails over to a configured fallback automatically on `BackendQuotaError` or decisive failure, re-materializing the fallback's instruction file and skill directories into the session workdir. Per-process tier defaults and routing are editable at `:8322/settings/models`.
 
 ---
 
@@ -395,7 +395,7 @@ Typical day for an active user: **~$0.50** (morning routine + briefing + 2× hou
 
 ### Configuration
 
-`.env` is **bootstrap-only** (`PA_DATA_DIR`, `PA_API_PORT`, `PA_DASHBOARD_PORT`, `PA_LOG_LEVEL`). Everything else — ~100 runtime keys covering schedule, notifications, models, character, mail, voice, delegated mode — is editable from the dashboard at `:3000`, or via natural-language DMs to the agent.
+`.env` is **bootstrap-only** (`PA_DATA_DIR`, `PA_API_PORT`, `PA_DASHBOARD_PORT`, `PA_LOG_LEVEL`). Everything else — ~100 runtime keys covering schedule, notifications, models, character, mail, voice, delegated mode — is editable from the dashboard at `:8322`, or via natural-language DMs to the agent.
 
 ---
 

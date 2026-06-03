@@ -64,6 +64,33 @@ describe("recurring-schedules DB", () => {
       expect(scheduleRow!.recurring_schedule_id).toBe(dto.id);
     });
 
+    it("creates a disabled row when `enabled: false` and does NOT eagerly materialize a firing row", () => {
+      // §6.4 mirror: a dashboard-disabled (or YAML enabled:false) Agent's
+      // recurring row must be created disabled, and must not fire once before
+      // its first reconcile pass (the reconciler gates on `enabled = 1`).
+      const dto = createRecurringSchedule(db, {
+        taskType: "agent.task",
+        description: "Disabled at creation",
+        recurrenceRule: makeRule(),
+        enabled: false,
+      });
+
+      expect(dto.enabled).toBe(false);
+      const count = db
+        .prepare("SELECT COUNT(*) AS n FROM agent_schedule WHERE recurring_schedule_id = ?")
+        .get(dto.id) as { n: number };
+      expect(count.n).toBe(0);
+    });
+
+    it("defaults to enabled when `enabled` is omitted (existing callers unchanged)", () => {
+      const dto = createRecurringSchedule(db, {
+        taskType: "agent.task",
+        description: "Default enabled",
+        recurrenceRule: makeRule(),
+      });
+      expect(dto.enabled).toBe(true);
+    });
+
     it("rejects `browser_task` as a recurring task type (preGeneratedTaskId reuse would no-op every fire after the first)", () => {
       expect(() =>
         createRecurringSchedule(db, {
@@ -248,18 +275,24 @@ describe("recurring-schedules DB", () => {
       expect(scheduleRow.backend_id).toBeNull();
     });
 
-    it("persists prompt as NULL when caller does not supply one (preserves description-as-body behavior)", () => {
+    it("rule stores no prompt, but materializes task_prompt from the description body", () => {
       const dto = createRecurringSchedule(db, {
         taskType: "wake",
         description: "Description doubles as the agent body when no prompt is set",
         recurrenceRule: makeRule(),
       });
+      // The recurring rule itself carries no prompt override…
       expect(dto.prompt).toBeNull();
 
+      // …but the materialized agent_schedule row carries the body in
+      // task_prompt (prompt ?? description), because the dispatcher no longer
+      // falls back to task_description.
       const scheduleRow = db
         .prepare("SELECT task_prompt FROM agent_schedule WHERE recurring_schedule_id = ?")
         .get(dto.id) as { task_prompt: string | null };
-      expect(scheduleRow.task_prompt).toBeNull();
+      expect(scheduleRow.task_prompt).toBe(
+        "Description doubles as the agent body when no prompt is set",
+      );
     });
   });
 
@@ -1152,5 +1185,97 @@ describe("recurring-schedules DB", () => {
         JSON.parse = origParse;
       }
     });
+  });
+});
+
+describe("recurring-schedules — Agent identity stamping (§7.2)", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  /** Upsert an Agent row paired to a recurring schedule. */
+  function pairAgent(slug: string, recurringScheduleId: number): void {
+    db.prepare(
+      `INSERT INTO agents (
+         id, name, source, definition_path, definition_hash, enabled,
+         schedule_kind, schedule_expression, schedule_timezone,
+         recurring_schedule_id, created_at, updated_at
+       ) VALUES (?, ?, 'user', ?, ?, 1, 'cron', '0 9 * * *', 'UTC', ?, 0, 0)`,
+    ).run(slug, slug, `/agents/${slug}/agent.md`, `hash-${slug}`, recurringScheduleId);
+  }
+
+  function pendingContext(recurringId: number): Record<string, unknown> {
+    const row = db
+      .prepare(
+        "SELECT task_context FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1",
+      )
+      .get(recurringId) as { task_context: string } | undefined;
+    return JSON.parse(row?.task_context ?? "{}");
+  }
+
+  it("stamps task_context.agent_id when an Agent owns the recurring row", () => {
+    const dto = createRecurringSchedule(db, {
+      taskType: "agent.task",
+      description: "Daily digest",
+      recurrenceRule: makeRule(),
+    });
+    pairAgent("daily-digest", dto.id);
+
+    // A rule change re-materialises the pending row through generateNextScheduleRow.
+    updateRecurringSchedule(db, dto.id, {
+      recurrenceRule: makeRule({ time: "10:00" }),
+    });
+
+    expect(pendingContext(dto.id).agent_id).toBe("daily-digest");
+  });
+
+  it("leaves agent_id unset for a raw recurring row with no paired Agent", () => {
+    const dto = createRecurringSchedule(db, {
+      taskType: "agent.task",
+      description: "Unowned recurring task",
+      recurrenceRule: makeRule(),
+    });
+    expect("agent_id" in pendingContext(dto.id)).toBe(false);
+  });
+
+  it("re-materialises a pending row but leaves a running row untouched on rule change (§11.3.2)", () => {
+    const dto = createRecurringSchedule(db, {
+      taskType: "agent.task",
+      description: "Cron edit",
+      recurrenceRule: makeRule(),
+    });
+    // Simulate the materialised occurrence having been claimed for execution.
+    db.prepare(
+      "UPDATE agent_schedule SET status = 'running' WHERE recurring_schedule_id = ?",
+    ).run(dto.id);
+
+    updateRecurringSchedule(
+      db,
+      dto.id,
+      { recurrenceRule: makeRule({ time: "10:00" }) },
+      "agent_definition_changed",
+    );
+
+    const running = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'running'",
+      )
+      .get(dto.id) as { n: number };
+    const pending = db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+      )
+      .get(dto.id) as { n: number };
+    // Running row stays running; a fresh pending row is materialised.
+    expect(running.n).toBe(1);
+    expect(pending.n).toBe(1);
   });
 });

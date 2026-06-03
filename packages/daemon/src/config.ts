@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import {
   DEFAULT_AGENT_DISPLAY_NAME,
+  DEFAULT_API_PORT,
   normalizeAgentDisplayName,
 } from "@aitne/shared";
 import {
@@ -48,7 +49,7 @@ function envOrDefault(key: string, defaultValue: string): string {
 const bootstrapConfigSchema = z.object({
   dataDir: z.string().default("~/.personal-agent"),
   workspaceDir: z.string().default("."),
-  apiPort: z.number().int().positive().default(8321),
+  apiPort: z.number().int().positive().default(DEFAULT_API_PORT),
 });
 
 export type BootstrapConfig = z.infer<typeof bootstrapConfigSchema>;
@@ -117,7 +118,7 @@ export function loadBootstrapConfig(): BootstrapConfig {
   const config = bootstrapConfigSchema.parse({
     dataDir: envOrDefault("DATA_DIR", "~/.personal-agent"),
     workspaceDir: envOrDefault("WORKSPACE_DIR", "."),
-    apiPort: parseNumberOrDefault(env("API_PORT"), 8321),
+    apiPort: parseNumberOrDefault(env("API_PORT"), DEFAULT_API_PORT),
   });
 
   return {

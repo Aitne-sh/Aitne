@@ -140,6 +140,30 @@ function detectOnMissingDayUnusedWarnings(
   ];
 }
 
+/**
+ * Scheduling split — `recurring_schedules` is now the home ONLY for recurring
+ * scheduled DMs (`task_type = 'dm_session'`, e.g. the morning briefing — whose
+ * fire time is dynamically retimed by `quiet-hours-sync.ts` and so does not fit
+ * the fixed-cron Agent model). Recurring `agent.task` (LLM work) is created and
+ * managed as an Agent via `/api/agents` (the `agent-create` skill). Every
+ * non-`dm_session` mutation here is therefore 410 Gone with a pointer.
+ */
+function recurringAgentTaskGone(action: "create" | "update" | "delete"): {
+  error: string;
+  hint: string;
+} {
+  const pointer =
+    action === "create"
+      ? "Create a recurring work Agent with POST /api/agents (the agent-create skill)."
+      : action === "update"
+        ? "Manage the owning Agent via PATCH /api/agents/:slug (or its agent.md)."
+        : "Remove the owning Agent via DELETE /api/agents/:slug.";
+  return {
+    error: "recurring_agent_task_moved_to_agents",
+    hint: `recurring_schedules now serves dm_session (scheduled DMs) only; recurring agent.task work moved to the /agents layer. ${pointer}`,
+  };
+}
+
 export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
   const app = new Hono();
   const { db, config } = deps;
@@ -200,6 +224,12 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
     }
 
     const { taskType, description, prompt, recurrenceRule, model, tier, taskContext } = parsed.data;
+
+    // Split gate — only recurring scheduled DMs live here now; everything else
+    // (recurring agent.task LLM work) is created as an Agent via POST /api/agents.
+    if (taskType !== "dm_session") {
+      return c.json(recurringAgentTaskGone("create"), 410);
+    }
 
     // Phase D — resolve `(model, tier)` against the live registry
     // BEFORE writing. The resolver enforces §4.3's mutual-exclusion
@@ -299,6 +329,21 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
           received: c.req.param("id") ?? "<missing>",
         }),
       ]);
+    }
+
+    // Split gate — only dm_session rows are editable here; an agent.task row is
+    // Agent-owned and managed via /api/agents.
+    const target = getRecurringSchedule(db, id);
+    if (!target) {
+      return respondWithAgentError(c, 404, [
+        composeIssue("schedule.recurring_not_found", {
+          field: "id",
+          received: c.req.param("id") ?? "<unknown>",
+        }),
+      ]);
+    }
+    if (target.taskType !== "dm_session") {
+      return c.json(recurringAgentTaskGone("update"), 410);
     }
 
     const parsedBody = await readJsonBody(c);
@@ -414,6 +459,13 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
           received: c.req.param("id") ?? "<missing>",
         }),
       ]);
+    }
+
+    // Split gate — only dm_session rows are deletable here; agent.task rows are
+    // Agent-owned (DELETE /api/agents/:slug).
+    const target = getRecurringSchedule(db, id);
+    if (target && target.taskType !== "dm_session") {
+      return c.json(recurringAgentTaskGone("delete"), 410);
     }
 
     const deleted = deleteRecurringSchedule(db, id);

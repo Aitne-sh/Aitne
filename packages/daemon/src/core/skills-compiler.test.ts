@@ -2500,3 +2500,78 @@ describe("CLI <skill-index> matches on-disk slug set (U13)", () => {
     },
   );
 });
+
+// AGENT_DEFINITIONS_DESIGN.md §4.2 — `extraSkills` (a firing Agent's
+// `tools.skills`) is composed onto the process-key manifest and reaches disk.
+// Closes the last link the dispatcher (extraSkills → execute) and the pure
+// `composeSkillSet` unit tests don't cover: the actual on-disk materialisation.
+describe("materializeSessionBundle — Agent extraSkills override", () => {
+  let workspace: string;
+  let sessionDir: string;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), "pa-extra-skills-"));
+    sessionDir = mkdtempSync(join(tmpdir(), "pa-extra-skills-session-"));
+    const profilesRoot = join(workspace, "agent-assets", "agent-profiles");
+    mkdirSync(profilesRoot, { recursive: true });
+    writeFileSync(join(profilesRoot, "_safety.md"), "## Safety\n- Do no harm.", "utf-8");
+    writeFileSync(
+      join(profilesRoot, "conversational.md"),
+      "# conversational\n\n## Tone\n\nBe friendly.\n",
+      "utf-8",
+    );
+    // A skill that is NOT in any process-key manifest — only an Agent's
+    // `tools.skills` can pull it in. If it lands on disk, the override worked.
+    const extraSkill = join(workspace, "agent-assets", "skills", "synthetic-extra");
+    mkdirSync(extraSkill, { recursive: true });
+    writeFileSync(
+      join(extraSkill, "SKILL.md"),
+      "---\nname: synthetic-extra\ndescription: synthetic extra skill for the override test\n---\n\n# Synthetic Extra\n",
+      "utf-8",
+    );
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(sessionDir, { recursive: true, force: true });
+  });
+
+  const extraSkillMd = (): string =>
+    join(sessionDir, ".claude", "skills", "synthetic-extra", "SKILL.md");
+
+  it("materializes a skill that the process-key manifest never lists", () => {
+    const compiler = new SkillsCompiler(workspace);
+    const deployed = compiler.materializeSessionBundle({
+      backendId: "claude",
+      sessionDir,
+      eventType: "message.received",
+      extraSkills: ["synthetic-extra"],
+    });
+    expect(existsSync(extraSkillMd())).toBe(true);
+    expect(deployed.skills).toContain("synthetic-extra");
+  });
+
+  it("is a no-op when extraSkills is omitted (manifest-only behaviour preserved)", () => {
+    const compiler = new SkillsCompiler(workspace);
+    const deployed = compiler.materializeSessionBundle({
+      backendId: "claude",
+      sessionDir,
+      eventType: "message.received",
+    });
+    expect(existsSync(extraSkillMd())).toBe(false);
+    expect(deployed.skills).not.toContain("synthetic-extra");
+  });
+
+  it("skillsReplace: true drops the manifest bundle, keeping only the extra slug", () => {
+    const compiler = new SkillsCompiler(workspace);
+    const deployed = compiler.materializeSessionBundle({
+      backendId: "claude",
+      sessionDir,
+      eventType: "message.received",
+      extraSkills: ["synthetic-extra"],
+      skillsReplace: true,
+    });
+    expect(deployed.skills).toEqual(["synthetic-extra"]);
+    expect(existsSync(extraSkillMd())).toBe(true);
+  });
+});

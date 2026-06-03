@@ -64,7 +64,11 @@ import {
   runLineCommand,
 } from "./cli-utils.js";
 import { probeApiKeyServerSide } from "./api-key-probe.js";
-import { extractGenericQuotaResetHint } from "./quota-reset-hints.js";
+import {
+  assertCostWithinMaxBudget,
+  assertPromptCostWithinMaxBudget,
+  classifyCliFailure,
+} from "./cli-quota-guards.js";
 import {
   auditStreamObservation,
   extractCodexShellCall,
@@ -74,7 +78,6 @@ import {
   logSilentApiErrors,
 } from "./silent-api-error-detector.js";
 import {
-  estimateTextInputTokens,
   findRegisteredModel,
   getModelsForBackend,
   latestLiteFor,
@@ -309,6 +312,10 @@ export class CodexCore implements IAgentCore {
         eventCorrelationId: params.event.correlationId,
         webSearchEnabled: params.webSearchEnabled ?? false,
         ...(isMessageEvent(params.event) ? { messageText: params.event.content } : {}),
+        ...(params.extraSkills && params.extraSkills.length > 0
+          ? { extraSkills: params.extraSkills }
+          : {}),
+        ...(params.skillsReplace ? { skillsReplace: true } : {}),
       },
       streamCallbacks,
     );
@@ -586,6 +593,11 @@ export class CodexCore implements IAgentCore {
        * dispatches.
        */
       messageText?: string | null;
+      /** AGENT_DEFINITIONS_DESIGN.md §4.2 — the firing Agent's `tools.skills`,
+       *  forwarded to `createSessionWorkdir`. Undefined for non-Agent turns. */
+      extraSkills?: readonly string[];
+      /** AGENT_DEFINITIONS_DESIGN.md §4.2 — `tools.skills_replace`. */
+      skillsReplace?: boolean;
     },
     streamCallbacks?: StreamCallbacks,
   ): Promise<AgentResult> {
@@ -633,6 +645,12 @@ export class CodexCore implements IAgentCore {
         ...(this.mcpContext?.db ? { db: this.mcpContext.db } : {}),
         ...(typeof params.messageText === "string" ? { messageText: params.messageText } : {}),
         ...(params.wikiWorkspaceName ? { wikiWorkspaceName: params.wikiWorkspaceName } : {}),
+        // AGENT_DEFINITIONS_DESIGN.md §4.2 — see ClaudeCodeCore. No-op for
+        // non-Agent executes.
+        ...(params.extraSkills && params.extraSkills.length > 0
+          ? { extraSkills: params.extraSkills }
+          : {}),
+        ...(params.skillsReplace ? { skillsReplace: true } : {}),
       },
     );
     const ownsSessionDir = !params.sessionDir;
@@ -1199,60 +1217,34 @@ export class CodexCore implements IAgentCore {
     );
   }
 
+  // Failure classification + budget enforcement share a skeleton with the
+  // Gemini CLI core; the logic lives in `cli-quota-guards.ts` (single source
+  // of truth) and each backend passes its own regexes / label. See that
+  // module for the full ordering rationale.
   private classifyFailure(message: string): BackendQuotaError | BackendDecisiveFailure {
-    if (isMaxBudgetMessage(message)) {
-      return new BackendQuotaError(this.backendId, "max_budget_usd", null, message);
-    }
-    if (/rate limit|usage limit|quota/i.test(message)) {
-      // Best-effort reset-time extraction so the dashboard can surface
-      // "quota resets at HH:MM (TZ)" instead of a bare "rate_limited" tag.
-      // OpenAI rate-limit messages typically carry "try again in Xm" or
-      // an ISO retry-after; the helper falls through to null when neither
-      // pattern matches, preserving the original behaviour.
-      return new BackendQuotaError(
-        this.backendId,
-        "rate_limited",
-        extractGenericQuotaResetHint(message),
-        message,
-      );
-    }
-    if (/unauthorized|forbidden|api key|login/i.test(message)) {
-      return new BackendDecisiveFailure(this.backendId, "auth", new Error(message));
-    }
-    if (/timed out|timeout/i.test(message)) {
-      return new BackendDecisiveFailure(this.backendId, "timeout", new Error(message));
-    }
-    return new BackendDecisiveFailure(
-      this.backendId,
-      "other_non_retryable",
-      new Error(message),
-    );
+    return classifyCliFailure({
+      backendId: this.backendId,
+      message,
+      // OpenAI surfaces quota exhaustion as "rate limit" / "usage limit" / "quota".
+      rateLimitPattern: /rate limit|usage limit|quota/i,
+      authPattern: /unauthorized|forbidden|api key|login/i,
+    });
   }
 
   private assertWithinMaxBudget(
     costUsd: number,
     maxBudgetUsd: number | undefined,
     modelId: string,
-    /**
-     * Spend metadata for the just-completed turn. Codex enforces
-     * `max_budget_usd` post-hoc — by the time we reject here OpenAI has
-     * already consumed tokens — so we hand the actual usage to the
-     * BackendQuotaError so the dispatcher's error path can write a
-     * `result='failed'` agent_actions row with `cost_usd` populated.
-     * Without this the dashboard silently misses budget-rejected spend.
-     */
     spend?: Omit<import("../agent-core.js").BackendQuotaSpend, "modelId" | "costUsd">,
   ): void {
-    if (maxBudgetUsd === undefined || costUsd <= maxBudgetUsd) {
-      return;
-    }
-    throw new BackendQuotaError(
-      this.backendId,
-      "max_budget_usd",
-      null,
-      `Codex estimated cost $${costUsd.toFixed(4)} exceeded the per-turn budget limit $${maxBudgetUsd.toFixed(2)} for ${modelId}.`,
-      spend ? { ...spend, modelId, costUsd } : null,
-    );
+    assertCostWithinMaxBudget({
+      backendId: this.backendId,
+      label: "Codex",
+      costUsd,
+      maxBudgetUsd,
+      modelId,
+      spend,
+    });
   }
 
   private assertPromptWithinMaxBudget(
@@ -1260,30 +1252,14 @@ export class CodexCore implements IAgentCore {
     maxBudgetUsd: number | undefined,
     modelId: string,
   ): void {
-    if (maxBudgetUsd === undefined) {
-      return;
-    }
-    const estimatedUsage: BackendUsage = {
-      inputTokens: estimateTextInputTokens(prompt),
-      outputTokens: 0,
-      cacheCreationInputTokens: 0,
-      cacheReadInputTokens: 0,
-    };
-    const { costUsd } = this.priceFetcher.estimateUsageCost({
+    assertPromptCostWithinMaxBudget({
       backendId: this.backendId,
+      label: "Codex",
+      prompt,
+      maxBudgetUsd,
       modelId,
-      usage: estimatedUsage,
-      fallbackModel: findRegisteredModel(this.backendId, modelId),
+      priceFetcher: this.priceFetcher,
     });
-    if (costUsd <= maxBudgetUsd) {
-      return;
-    }
-    throw new BackendQuotaError(
-      this.backendId,
-      "max_budget_usd",
-      null,
-      `Codex estimated prompt cost $${costUsd.toFixed(4)} exceeded the per-turn budget limit $${maxBudgetUsd.toFixed(2)} for ${modelId}.`,
-    );
   }
 
   /**
@@ -2263,10 +2239,6 @@ function collectItemOutput(bag: Record<string, unknown>): string | null {
     }
   }
   return null;
-}
-
-function isMaxBudgetMessage(message: string): boolean {
-  return /max(?:imum)? budget|max_budget_usd|budget limit|per-turn budget/i.test(message);
 }
 
 /**

@@ -423,8 +423,8 @@ export function queueMissingGitProjectInits(
   );
   const insert = options.db.prepare(
     `INSERT INTO agent_schedule
-       (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-     VALUES (?, 'git.project.init', ?, ?, ?, NULL, 'pending')`,
+       (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+     VALUES (?, 'git.project.init', ?, ?, ?, ?, NULL, 'pending')`,
   );
 
   for (const repo of options.repos) {
@@ -451,9 +451,13 @@ export function queueMissingGitProjectInits(
       processKey: "git.project.init",
       ...buildBaseTaskContext(repo, now),
     };
+    const initLabel = `Initialize git project documentation for ${repo.slug}.`;
     insert.run(
       formatSqliteDatetime(now),
-      `Initialize git project documentation for ${repo.slug}.`,
+      // task_description (label) === task_prompt (agent body); the real
+      // routing is task_context.processKey = "git.project.init".
+      initLabel,
+      initLabel,
       JSON.stringify(taskContext),
       randomUUID(),
     );
@@ -531,13 +535,17 @@ export function queueGitProjectUpdate(
     ...buildBaseTaskContext(options.repo, now),
     events: [eventSummary],
   };
+  const updateLabel = `Update git project documentation for ${options.repo.slug}.`;
   options.db.prepare(
     `INSERT INTO agent_schedule
-       (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-     VALUES (?, 'git.project.update', ?, ?, ?, NULL, 'pending')`,
+       (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+     VALUES (?, 'git.project.update', ?, ?, ?, ?, NULL, 'pending')`,
   ).run(
     formatSqliteDatetime(now),
-    `Update git project documentation for ${options.repo.slug}.`,
+    // task_description (label) === task_prompt (agent body); routing is via
+    // task_context.processKey = "git.project.update".
+    updateLabel,
+    updateLabel,
     JSON.stringify(taskContext),
     randomUUID(),
   );

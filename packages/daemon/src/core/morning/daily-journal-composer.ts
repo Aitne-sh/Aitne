@@ -548,7 +548,7 @@ function mapToPartialReason(
     // Body-level reasons would have been returned as `ok: false` above
     // — these cases are unreachable but the switch is exhaustive for
     // future maintainers.
-    /* c8 ignore next 4 */
+    /* c8 ignore next 5 */
     case "stage_b_null":
     case "empty_output":
     case "body_tag_missing":

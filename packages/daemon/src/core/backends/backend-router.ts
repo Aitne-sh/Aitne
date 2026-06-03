@@ -204,6 +204,12 @@ export interface RouterExecuteParams {
    *  Forwarded verbatim on both main and fallback execute paths so the
    *  URL-fetch widening survives a Claude → Codex fallback. */
   wikiUrlFetchEnabled?: boolean;
+  /** AGENT_DEFINITIONS_DESIGN.md §4.2 — see `AgentExecuteParams.extraSkills`.
+   *  Forwarded verbatim on both main and fallback execute paths so the
+   *  firing Agent's added skills survive a Claude → Codex fallback. */
+  extraSkills?: readonly string[];
+  /** AGENT_DEFINITIONS_DESIGN.md §4.2 — see `AgentExecuteParams.skillsReplace`. */
+  skillsReplace?: boolean;
 }
 
 export interface RouterResumeParams {
@@ -403,6 +409,10 @@ export class BackendRouter implements IAgentRouter {
           ...(params.wikiUrlFetchEnabled
             ? { wikiUrlFetchEnabled: true }
             : {}),
+          ...(params.extraSkills && params.extraSkills.length > 0
+            ? { extraSkills: params.extraSkills }
+            : {}),
+          ...(params.skillsReplace ? { skillsReplace: true } : {}),
         },
         streamCallbacks,
       );
@@ -658,6 +668,10 @@ export class BackendRouter implements IAgentRouter {
           ...(params.wikiUrlFetchEnabled
             ? { wikiUrlFetchEnabled: true }
             : {}),
+          ...(params.extraSkills && params.extraSkills.length > 0
+            ? { extraSkills: params.extraSkills }
+            : {}),
+          ...(params.skillsReplace ? { skillsReplace: true } : {}),
         },
         streamCallbacks,
       );

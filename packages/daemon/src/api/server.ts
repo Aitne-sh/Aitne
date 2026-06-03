@@ -21,6 +21,7 @@ import {
 import { createHealthRoutes } from "./routes/health.js";
 import { createContextRoutes } from "./routes/context/index.js";
 import { createAgentRoutes } from "./routes/agent.js";
+import { createAgentDefinitionRoutes } from "./routes/agents/index.js";
 import { createDashboardRoutes } from "./routes/dashboard/index.js";
 import { createNotionRoutes } from "./routes/notion.js";
 import { createGitHubRoutes } from "./routes/github.js";
@@ -106,6 +107,7 @@ import type { SecretBroker } from "../secrets/secret-broker.js";
 import type { DelegatedBackendInvoker } from "../services/delegated-backend-invoker.js";
 import type { DelegatedSyncStatus } from "../observers/delegated-sync-worker.js";
 import { isRuntimeAvailableBackendId } from "@aitne/shared";
+import { loopbackOrigins, resolveDashboardPort } from "@aitne/shared";
 import type { IntegrationKey, IntegrationState } from "@aitne/shared";
 import { queryChatBinding } from "./chat-binding-query.js";
 import {
@@ -474,6 +476,15 @@ export interface ApiDependencies {
    * lazily builds a stand-in only when this is unset.
    */
   gitAccountRegistry?: import("../services/git-account-registry.js").GitAccountRegistry;
+  /**
+   * Agent Definitions enabled-cache (AGENT_DEFINITIONS_DESIGN.md §6.4 / §9.5).
+   * The same {@link AgentEnabledCache} instance the loader builds at boot and
+   * the scheduler's per-built-in cron gate consults. `PATCH /api/agents/:slug`
+   * and `DELETE /api/agents/:slug` call `.invalidate()` after an `enabled`
+   * change so the next cron firing re-reads the new state without a restart.
+   * Optional so test harnesses / headless installs can omit it.
+   */
+  agentEnabledCache?: import("../core/agents/loader.js").AgentEnabledCache;
 }
 
 export interface TelegramBotInfoResponse {
@@ -656,11 +667,7 @@ interface LoopbackBrowserGateInput {
 }
 
 function buildAllowedDaemonOrigins(apiPort: number): Set<string> {
-  return new Set([
-    `http://localhost:${apiPort}`,
-    `http://127.0.0.1:${apiPort}`,
-    `http://[::1]:${apiPort}`,
-  ]);
+  return new Set(loopbackOrigins(apiPort));
 }
 
 function evaluateLoopbackBrowserGate(
@@ -768,7 +775,12 @@ export function createApp(deps: ApiDependencies): Hono {
     await next();
   });
 
-  app.use("*", cors({ origin: "http://localhost:3000" }));
+  // CORS for direct browser → daemon requests. The dashboard normally proxies
+  // server-side (no CORS), but this keeps the daemon reachable from the
+  // dashboard's own loopback origin on whatever port it runs (PA_DASHBOARD_PORT
+  // default = DEFAULT_DASHBOARD_PORT). Previously hardcoded to localhost:3000,
+  // which silently broke whenever the dashboard ran on any other port.
+  app.use("*", cors({ origin: loopbackOrigins(resolveDashboardPort()) }));
   app.use("*", honoLogger());
 
   // Risk-based auth middleware — Approve-tier endpoints require Bearer token;
@@ -909,6 +921,7 @@ export function createApp(deps: ApiDependencies): Hono {
   const healthRoutes = createHealthRoutes(deps);
   const contextRoutes = createContextRoutes(deps);
   const agentRoutes = createAgentRoutes(deps);
+  const agentDefinitionRoutes = createAgentDefinitionRoutes(deps);
   const dashboardRoutes = createDashboardRoutes(deps);
   const notionRoutes = createNotionRoutes({
     notionService: deps.services.notion,
@@ -1006,6 +1019,7 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", healthRoutes);
   app.route("/api", contextRoutes);
   app.route("/api", agentRoutes);
+  app.route("/api", agentDefinitionRoutes);
   app.route("/api", dashboardRoutes);
   app.route("/api", notionRoutes);
   app.route("/api", metricsRoutes);

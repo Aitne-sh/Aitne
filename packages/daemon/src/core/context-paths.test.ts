@@ -17,6 +17,9 @@ import {
   policyPath,
   agentScratchPath,
   inboxPath,
+  activityViewPath,
+  entityPath,
+  entityDomainIndexPath,
   fullPath,
   isKnownUserAreaFile,
 } from "./context-paths.js";
@@ -133,6 +136,16 @@ describe("context-paths (six-class layout)", () => {
     );
     expect(inboxPath("2026-04-17", "note")).toBe(
       "state/inbox/2026-04-17-note.md",
+    );
+  });
+
+  it("derives activity-view and knowledge-entity paths", () => {
+    expect(activityViewPath("gmail")).toBe("state/activity/gmail.md");
+    expect(entityPath("work", "meetings", "kickoff")).toBe(
+      "knowledge/entities/work/meetings/kickoff.md",
+    );
+    expect(entityDomainIndexPath("work")).toBe(
+      "knowledge/entities/work/_index.md",
     );
   });
 

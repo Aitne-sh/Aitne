@@ -38,7 +38,7 @@ Exit code:
     await checkSecretStore(ctx),
     await checkBackendCli(),
     await checkProcessProbe(),
-    await checkBrowserOpener(),
+    await checkBrowserOpener(ctx.DASHBOARD_PORT),
     await checkDataDirWritable(ctx.DATA_DIR),
     await checkBetterSqlite3(ctx.PROJECT_ROOT),
     await checkAgentAssets(ctx.PROJECT_ROOT),
@@ -127,8 +127,8 @@ async function checkPort(label, port, pidFile, getRunningPid) {
     label,
     detail: `${port} in use by another process`,
     hint: label.startsWith("Daemon")
-      ? `Set PA_API_PORT to an open port (e.g. PA_API_PORT=8322 aitne start), or stop the conflicting process.`
-      : `Set PA_DASHBOARD_PORT to an open port (e.g. PA_DASHBOARD_PORT=3001 aitne start), or stop the conflicting process.`,
+      ? `Set PA_API_PORT to an open port (e.g. PA_API_PORT=8331 aitne start), or stop the conflicting process.`
+      : `Set PA_DASHBOARD_PORT to an open port (e.g. PA_DASHBOARD_PORT=8333 aitne start), or stop the conflicting process.`,
   };
 }
 
@@ -259,7 +259,7 @@ async function checkProcessProbe() {
  * Warn-only: nothing in the daemon depends on this; users can navigate to
  * the dashboard URL by hand if missing.
  */
-async function checkBrowserOpener() {
+async function checkBrowserOpener(dashboardPort) {
   const platform = process.platform;
   const tool =
     platform === "darwin" ? "open"
@@ -274,7 +274,7 @@ async function checkBrowserOpener() {
     detail: `${tool} not on PATH`,
     hint:
       platform === "linux"
-        ? "apt install xdg-utils  · or open http://localhost:3000 manually after `aitne start`."
+        ? `apt install xdg-utils  · or open http://localhost:${dashboardPort} manually after \`aitne start\`.`
         : "Auto-open is a convenience; the dashboard URL works in any browser.",
   };
 }

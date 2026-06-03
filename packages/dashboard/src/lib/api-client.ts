@@ -127,9 +127,24 @@ class ApiClient {
 
   async delete<T>(
     path: string,
-    options?: { headers?: Record<string, string> },
+    options?: { headers?: Record<string, string>; body?: unknown },
   ): Promise<T> {
-    const init = buildFetchInit({ method: "DELETE" }, options?.headers);
+    // A JSON body is optional on DELETE — most callers omit it. The agents
+    // hard-delete path sends `{ keep_history: false }`; the Next proxy
+    // forwards the body verbatim for non-GET/HEAD methods.
+    const hasBody = options?.body !== undefined;
+    const init = buildFetchInit(
+      {
+        method: "DELETE",
+        ...(hasBody
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(options!.body),
+            }
+          : {}),
+      },
+      options?.headers,
+    );
     const res = await fetch(`/api${path}`, init);
     if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
     return res.json();

@@ -12,7 +12,7 @@ aliases:
 category: guides
 summary: |
   Install Aitne via the npm package (or clone the repo for development),
-  start the daemon and dashboard, and open the dashboard at :3000.
+  start the daemon and dashboard, and open the dashboard at :8322.
 section: install-and-run
 tags:
   - core
@@ -97,7 +97,7 @@ pnpm start
 
 ### Then, for both paths
 
-Open `http://localhost:3000` and follow the setup wizard.
+Open `http://localhost:8322` and follow the setup wizard.
 
 ## Verification
 
@@ -109,7 +109,7 @@ Open `http://localhost:3000` and follow the setup wizard.
 ## If It Fails
 
 - **Port conflict** — set `PA_API_PORT` (default `8321`) or
-  `PA_DASHBOARD_PORT` (default `3000`) before starting.
+  `PA_DASHBOARD_PORT` (default `8322`) before starting.
 - **Diagnose the install** — run `aitne doctor` (`pnpm doctor` from a
   clone). It checks Node, ports, keychain, CLI binaries, and native
   bindings, and exits non-zero on any hard failure.

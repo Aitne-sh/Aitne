@@ -40,6 +40,18 @@ describe("shouldValidateContextFileFrontmatter", () => {
     expect(shouldValidateContextFileFrontmatter("roadmap.md")).toBe(false);
     expect(shouldValidateContextFileFrontmatter("plans/projects/_active.base")).toBe(false);
   });
+
+  it("excludes policies/agents/<slug>/agent.md (agent-definition schema, not rule schema)", () => {
+    // Agent definitions carry agentDefinitionSchema frontmatter (no type/owner/
+    // updated). They must be skipped by the generic validator so neither the
+    // write chokepoint nor the Vault Health scan demands `type`. Regression for
+    // `policies/agents/<slug>/agent.md frontmatter requires \`type\`.`
+    expect(
+      shouldValidateContextFileFrontmatter("policies/agents/say-hi/agent.md"),
+    ).toBe(false);
+    // sibling policies/ files still validate
+    expect(shouldValidateContextFileFrontmatter("policies/agents-list.md")).toBe(true);
+  });
 });
 
 describe("validateContextFileFrontmatter", () => {
@@ -90,6 +102,20 @@ describe("validateContextFileFrontmatter", () => {
 
   it("skips paths outside the guarded prefixes", () => {
     expect(validateContextFileFrontmatter("# Today\n", "today.md")).toBeNull();
+  });
+
+  it("skips agent definitions even though they have no type/owner/updated", () => {
+    const agentMd = [
+      "---",
+      "slug: say-hi",
+      "name: Say Hi",
+      "kind: user",
+      "---",
+      "# Say Hi",
+    ].join("\n");
+    expect(
+      validateContextFileFrontmatter(agentMd, "policies/agents/say-hi/agent.md"),
+    ).toBeNull();
   });
 
   it("rejects files without opening frontmatter", () => {
@@ -656,6 +682,17 @@ describe("expectedFrontmatterForPath", () => {
     expect(expectedFrontmatterForPath("settings/foo.md")).toBeNull();
     expect(expectedFrontmatterForPath("random.md")).toBeNull();
     expect(expectedFrontmatterForPath("today.md")).toBeNull();
+  });
+
+  it("treats the policies sub-index files as shared-owned index frontmatter", () => {
+    expect(expectedFrontmatterForPath("policies/routines/_index.md")).toEqual({
+      type: "index",
+      owners: ["shared"],
+    });
+    expect(expectedFrontmatterForPath("policies/skills/_index.md")).toEqual({
+      type: "index",
+      owners: ["shared"],
+    });
   });
 });
 

@@ -16,7 +16,7 @@ on this kind — do NOT retry; tell the user and fall back.
 | Thread read (`GET /threads/:id`) | yes | yes | partial (client-walked; `status: "partial"` possible) |
 | Draft read (`GET /drafts`, `GET /drafts/:id`) | yes | yes | yes |
 | Draft write (`POST`/`PATCH`/`DELETE /drafts`, `POST /drafts/:id/send`) | yes | yes | no — **501** — direct `/messages/send` only |
-| Attachment download (via `/receipts/:id/file`) | yes | no — 501 | no — 501 |
+| Attachment download (via `POST /api/receipts/:id/download`) | yes | no — 501 | no — 501 |
 
 **IMAP drafts** (Yahoo / iCloud): every draft *write* returns 501. To
 queue outbound mail for a non-Gmail IMAP user, send directly via

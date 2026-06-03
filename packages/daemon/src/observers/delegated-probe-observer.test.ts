@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import {
-  type AuthCheckResult,
-  type AuthMethod,
   type BackendId,
   type BackendModel,
   type IntegrationKey,
@@ -14,6 +12,10 @@ import {
   type IAgentCore,
   type DelegatedToolInvokeParams,
   type DelegatedToolResult,
+  type DelegatedTaskInvokeParams,
+  type DelegatedTaskResultRaw,
+  type AuthCheckResult,
+  type AuthMethod,
   type AgentExecuteParams,
   type AgentResumeParams,
 } from "../core/agent-core.js";
@@ -85,6 +87,9 @@ class StubCore implements IAgentCore {
   }
   runDelegatedTool(_params: DelegatedToolInvokeParams): Promise<DelegatedToolResult> {
     throw new DelegatedToolUnsupportedError(this.backendId, "stub");
+  }
+  runDelegatedTask(_params: DelegatedTaskInvokeParams): Promise<DelegatedTaskResultRaw> {
+    throw new Error("runDelegatedTask not implemented in stub");
   }
 }
 

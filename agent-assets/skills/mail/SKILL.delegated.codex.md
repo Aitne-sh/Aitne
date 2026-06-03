@@ -85,7 +85,7 @@ Response shape on success:
 `outputSchema` is **required** — the subprocess emits exactly one JSON
 object as its final message and the daemon validates it. Schemas
 larger than 4 KB are rejected (`schema_too_large`). Caps default to
-`maxToolCalls=7`, `maxBudgetUsd=0.05`, `timeoutMs=60000` — bump them
+`maxToolCalls=8`, `maxBudgetUsd=0.05`, `timeoutMs=60000` — bump them
 via the request body up to the hard caps (15 / 0.50 / 300000) when a
 task genuinely needs more.
 
@@ -193,9 +193,12 @@ curl -sS -X POST http://localhost:8321/api/integrations/gmail/exec \
 ## Default deny floor
 
 The setup wizard pre-populates `gmail.deniedTools` with the connector's
-destructive defaults. `/exec` honors the deny list: a task that
-requires a denied tool surfaces as `tool_unavailable` — surface that
-to the user and ask whether to lift the deny before retrying.
+destructive defaults. `/exec` honors the deny list, distinguishing two
+cases: if **every** connector tool is denied → `403 denied_tool` (no
+surface to plan against, rejected up front); if usable tools remain but
+the specific tool a planned task needs is denied (or no tool fits) →
+`502 tool_unavailable`. In both cases, surface that to the user and ask
+whether to lift the relevant deny before retrying.
 
 ## Decision rules
 
@@ -218,6 +221,7 @@ Discriminator: `body.mode === "delegated"`.
 | 400 | `validation_error` / `schema_too_large` | no | Fix the request body. |
 | 409 | `mode_mismatch` | no | Gmail isn't delegated, OR your DM backend matches `delegatedBackend`. Re-read `integrations.md` and stop. |
 | 409 | `precondition` | no | Mode/backend was flipped during queue wait. Re-read `integrations.md` and re-plan. |
+| 403 | `denied_tool` | no | Every tool in the connector is denied — no surface to plan against. Surface to the user and ask whether to lift the deny. |
 | 429 | `task_quota_exhausted` | no | Daily cap reached; wait or surface. |
 | 502 | `parse_error` / `schema_violation` | no (daemon already retried once) | Consider a simpler schema. |
 | 502 | `tool_unavailable` | no | No connector tool fits. Surface the gap. |

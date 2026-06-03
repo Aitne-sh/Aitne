@@ -200,8 +200,8 @@ Hard limits:
 ### POST /api/observations/consume
 
 Marks one or more observations consumed. **Bulk-only** — there is no
-per-id endpoint (`POST /api/observations/<id>/consume` returns 404).
-Always use this shape, even for a single id.
+per-id endpoint (`POST /api/observations/<id>/consume` returns 405
+`use_bulk_endpoint`). Always use this shape, even for a single id.
 
 Copy the `correlationId` value verbatim from the
 `<event_correlation_id>…</event_correlation_id>` tag in your turn
@@ -240,7 +240,9 @@ you to.**
 
 ### GET /api/observations/stats
 
-`curl -s http://localhost:8321/api/observations/stats` → `{ "total", "pending", "bySource": {...}, "byActor": {...} }`
+`curl -s http://localhost:8321/api/observations/stats` → `{ "totalPending", "oldestPendingObservedAt", "bySource": [{ "source", "pendingCount", "oldestObservedAt" }], "summaryStatusCounts": {...}, "noveltyDistribution": [...] }`
+
+`totalPending` is the single count of unconsumed observations (no separate `total` / `pending` keys). `bySource` is an **array** of per-source rows, not a map. There is no `byActor`. `summaryStatusCounts` / `noveltyDistribution` are summarizer-health telemetry.
 
 ---
 
@@ -277,7 +279,10 @@ current state.
 
 <!-- mode:direct:notion -->
 ```bash
-curl -s "http://localhost:8321/api/notion/query?databaseId=xxx"
+# ?database= takes a database LABEL (default "tasks"), not a UUID.
+# An unrecognized label returns 404 notion.database_not_found with the
+# list of valid labels; an absent param silently uses "tasks".
+curl -s "http://localhost:8321/api/notion/query?database=tasks"
 ```
 <!-- /mode:direct:notion -->
 <!-- mode:delegated-same:notion -->
@@ -341,8 +346,9 @@ names and the canonical search / fetch call shapes. Resolve
 `<databaseId>` first via the un-gated config dump
 (`curl -s http://localhost:8321/api/notion/databases`) and pass the
 UUID to the connector's data-source / search tool. Do NOT call
-`/api/notion/*` (410) or `/api/integrations/notion/exec` (also 410
-in native mode).
+`/api/notion/*` (410) or `/api/integrations/notion/exec` (returns 409
+`mode_mismatch` in native mode — the `/exec` path is not route-gated,
+so it is the handler, not the 410 gate, that rejects it).
 <!-- /mode:native:notion -->
 <!-- mode:disabled:notion -->
 Notion is disabled — there is no live source. Treat the observation

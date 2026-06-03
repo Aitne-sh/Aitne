@@ -11,11 +11,16 @@ allowed-tools:
 > **Refusal directive — read first.** Notion is in `native` mode bound
 > to Gemini. Do **NOT** call any of:
 >
-> - `POST /api/integrations/notion/exec` (returns `410` with
->   `X-Integration-Mode: native`)
-> - `POST /api/integrations/notion/reconcile` (410)
+> - `POST /api/integrations/notion/exec` (returns `409 mode_mismatch`
+>   in native mode — this route is NOT route-gated and carries no
+>   `X-Integration-Mode` header; `/exec` only succeeds in `delegated`
+>   mode)
+> - `POST /api/integrations/notion/reconcile` (not route-gated either;
+>   an LLM-issued notion reconcile returns `400 validation_error` on the
+>   window-key allowlist, which is calendar-only)
 > - `/api/notion/query`, `/api/notion/search`, `/api/notion/pages`,
->   `/api/notion/pages/<id>/content` (each route-prefix 410)
+>   `/api/notion/pages/<id>/content` (each route-prefix returns `410`
+>   with `X-Integration-Mode: native` — these ARE route-gated)
 >
 > Reach Notion through the in-session Notion connector your harness
 > exposes (typically a user-installed Notion MCP server registered

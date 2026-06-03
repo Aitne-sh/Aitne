@@ -14,6 +14,7 @@ import {
   pruneWeeklyInterestsJournalBullets,
 } from "./dispatcher-scheduled-tasks.js";
 import { writeIntegrations } from "../db/integrations-store.js";
+import { upsertAgent } from "../db/agents-store.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import { ResultProcessor } from "./dispatcher-result-processor.js";
 import { DispatcherErrorRouter } from "./dispatcher-error-handling.js";
@@ -957,6 +958,57 @@ describe("ScheduledTaskRunner.executeScheduledTask — refresh_architecture clam
     expect(call.allowedToolsOverride).toBeUndefined();
   });
 
+  // AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1 fix — a scheduled-row event may
+  // carry requestedBackendId WITHOUT requestedModelId (engine-only Agent
+  // pin). The dispatcher must forward the backend to resolveBinding (the
+  // routing chokepoint, whose backend-only branch then fills the model from
+  // tier/default) so the engine pick takes effect; before the fix the
+  // `typeof requestedModelId === "string"` co-guard dropped the pin. The
+  // resolved binding flows to execute via `preResolvedBinding`, so the
+  // routing correctness lives in the resolveBinding call args.
+  it("forwards a standalone requestedBackendId (engine-only pin) to resolveBinding", async () => {
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubRouter(router);
+    await runner.executeScheduledTask({
+      type: "scheduled.task",
+      source: "wake",
+      priority: 2,
+      timestamp: new Date(),
+      data: {},
+      correlationId: "corr-engine-only",
+      task: "Engine-only codex pin",
+      requestedBackendId: "codex",
+      taskContext: { processKey: "agent.task" },
+    } as unknown as Parameters<typeof runner.executeScheduledTask>[0]);
+
+    const bindingOpts = (router.resolveBinding as ReturnType<typeof vi.fn>).mock.calls[0]![1] as {
+      requestedBackendId?: string;
+      requestedModelId?: string;
+    };
+    expect(bindingOpts.requestedBackendId).toBe("codex");
+    expect(bindingOpts.requestedModelId).toBeUndefined();
+  });
+
+  it("does NOT forward a backend override when the event carries neither backend nor model", async () => {
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubRouter(router);
+    await runner.executeScheduledTask({
+      type: "scheduled.task",
+      source: "wake",
+      priority: 2,
+      timestamp: new Date(),
+      data: {},
+      correlationId: "corr-no-override",
+      task: "Plain wake",
+      taskContext: { processKey: "agent.task" },
+    } as unknown as Parameters<typeof runner.executeScheduledTask>[0]);
+
+    const bindingOpts = (router.resolveBinding as ReturnType<typeof vi.fn>).mock.calls[0]![1] as {
+      requestedBackendId?: string;
+    };
+    expect(bindingOpts.requestedBackendId).toBeUndefined();
+  });
+
   it("never widens the envelope with Write/Edit/Bash(git*) at the call site", async () => {
     const { runner, router } = makeRunner({ db, dataDir });
     stubRouter(router);
@@ -1645,6 +1697,174 @@ describe("appendToWeeklyInterestsJournalSection", () => {
     // Ancient bullet dropped, recent kept.
     expect(out.some((l) => l.includes("ancient"))).toBe(false);
     expect(out.some((l) => l.includes("recent"))).toBe(true);
+  });
+});
+
+// AGENT_DEFINITIONS_DESIGN.md §4.2 — a custom Agent's `tools.skills` reaches
+// the materialiser. `executeScheduledTask` resolves the firing Agent's
+// effective definition and threads `extraSkills` / `skillsReplace` into
+// `agentRouter.execute`; the core then composes them onto the process-key
+// bundle. These tests assert the dispatch-side wiring (the compose semantics
+// have their own unit suite in skills-manifest.test.ts).
+describe("ScheduledTaskRunner — Agent tools.skills override", () => {
+  let db: Database.Database;
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-st-"));
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  /** Write a minimal valid user `agent.md`, register the row, return the slug. */
+  function seedAgent(
+    slug: string,
+    skills: string[],
+    opts?: { skillsReplace?: boolean },
+  ): string {
+    const agentDir = join(dataDir, "agents", slug);
+    mkdirSync(agentDir, { recursive: true });
+    const definitionPath = join(agentDir, "agent.md");
+    const replaceLine =
+      opts?.skillsReplace === true ? "\n  skills_replace: true" : "";
+    writeFileSync(
+      definitionPath,
+      `---
+slug: ${slug}
+name: MD Skill Agent
+description: Test agent that adds skills via tools.skills.
+kind: user
+schedule:
+  kind: cron
+  expression: "0 9 * * *"
+backend:
+  process_key: agent.task
+limits:
+  max_turns: 5
+  max_budget_usd: 0.25
+  timeout_minutes: 10
+tools:
+  allowed: [Read]
+  skills: [${skills.join(", ")}]${replaceLine}
+---
+
+Send the owner a short markdown status.
+`,
+      "utf-8",
+    );
+    upsertAgent(db, {
+      slug,
+      name: "MD Skill Agent",
+      source: "user",
+      definitionPath,
+      definitionHash: "test-hash",
+      enabled: true,
+      processKey: "agent.task",
+      scheduleKind: "cron",
+      scheduleExpression: "0 9 * * *",
+      scheduleTimezone: "UTC",
+    });
+    return slug;
+  }
+
+  function agentTaskEvent(taskContext: Record<string, unknown>): unknown {
+    return {
+      type: "scheduled.task",
+      source: "scheduler",
+      correlationId: "evt-agent-skills",
+      priority: 0,
+      timestamp: new Date(),
+      data: {},
+      task: "Custom agent run",
+      taskContext: { processKey: "agent.task", ...taskContext },
+    };
+  }
+
+  function stubExecute(router: IAgentRouter): void {
+    (router.resolveBinding as ReturnType<typeof vi.fn>).mockReturnValue({
+      main: { backendId: "claude", modelId: "model", maxTurns: 1 },
+    });
+    (router.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      output: "",
+      isError: false,
+      durationMs: 10,
+      numTurns: 1,
+      sessionId: null,
+      model: "model",
+      backendId: "claude",
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      modelUsage: {},
+      costSource: "backend",
+      contextUpdated: false,
+      advisorCallCount: 0,
+      stopReason: null,
+    });
+  }
+
+  it("threads the firing Agent's tools.skills into execute as extraSkills (union)", async () => {
+    const slug = seedAgent("md-skill-agent", ["notify", "mail"]);
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+    await runner.executeScheduledTask(
+      agentTaskEvent({ agent_id: slug }) as Parameters<
+        typeof runner.executeScheduledTask
+      >[0],
+    );
+    const params = (router.execute as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { extraSkills?: readonly string[]; skillsReplace?: boolean };
+    expect(params.extraSkills).toEqual(["notify", "mail"]);
+    expect(params.skillsReplace).toBe(false);
+  });
+
+  it("forwards skills_replace: true so the Agent's list supplants the bundle", async () => {
+    const slug = seedAgent("md-replace-agent", ["notify"], {
+      skillsReplace: true,
+    });
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+    await runner.executeScheduledTask(
+      agentTaskEvent({ agent_id: slug }) as Parameters<
+        typeof runner.executeScheduledTask
+      >[0],
+    );
+    const params = (router.execute as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { extraSkills?: readonly string[]; skillsReplace?: boolean };
+    expect(params.extraSkills).toEqual(["notify"]);
+    expect(params.skillsReplace).toBe(true);
+  });
+
+  it("leaves extraSkills unset for a firing with no resolvable Agent", async () => {
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+    await runner.executeScheduledTask(
+      // No agent_id and no agents row → resolveAgentId returns null.
+      agentTaskEvent({}) as Parameters<typeof runner.executeScheduledTask>[0],
+    );
+    const params = (router.execute as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { extraSkills?: readonly string[]; skillsReplace?: boolean };
+    expect(params.extraSkills).toBeUndefined();
+    expect(params.skillsReplace).toBeUndefined();
+  });
+
+  it("leaves extraSkills unset when the Agent declares no tools.skills", async () => {
+    const slug = seedAgent("md-empty-agent", []);
+    const { runner, router } = makeRunner({ db, dataDir });
+    stubExecute(router);
+    await runner.executeScheduledTask(
+      agentTaskEvent({ agent_id: slug }) as Parameters<
+        typeof runner.executeScheduledTask
+      >[0],
+    );
+    const params = (router.execute as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { extraSkills?: readonly string[] };
+    expect(params.extraSkills).toBeUndefined();
   });
 });
 

@@ -170,6 +170,13 @@ export interface BootstrapApiDeps {
   readonly dispatcher: EventDispatcher;
   readonly sessionManager: SessionManager;
   readonly scheduler: AgentScheduler;
+  /**
+   * Agent Definitions enabled-cache built by `bootstrapAgents` (§10.5) — the
+   * same instance the scheduler's per-built-in cron gate consults. Threaded
+   * into `ApiDependencies` so `PATCH`/`DELETE /api/agents/:slug` can invalidate
+   * it on an `enabled` change. Optional so partial test harnesses can omit it.
+   */
+  readonly agentEnabledCache?: import("../core/agents/loader.js").AgentEnabledCache;
   readonly customRoutineScheduler: CustomRoutineScheduler;
   readonly healthMonitor: HealthMonitor;
   readonly heartbeat: Heartbeat;
@@ -384,6 +391,7 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     managementMdWriteLockManager,
     dispatcher,
     scheduler,
+    agentEnabledCache,
     customRoutineScheduler,
     healthMonitor,
     heartbeat,
@@ -747,6 +755,7 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
       dispatcher.validateAttachmentTurnToken(token),
     whatsappControls,
     messagingControls,
+    ...(agentEnabledCache ? { agentEnabledCache } : {}),
   };
 }
 

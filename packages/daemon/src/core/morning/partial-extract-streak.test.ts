@@ -254,4 +254,38 @@ describe("maybeEmitPartialExtractStreakDm", () => {
     });
     expect(result.dmSent).toBe(true);
   });
+
+  it("renders 'unknown' when a partial row carries no partialReason", async () => {
+    // `ok: "partial"` with the reason field omitted → json_extract yields
+    // null → the `?? "unknown"` fallback in both the reasons map and the
+    // DM renderer.
+    seedRow({ eventId: "e3", dailyWrite: { ok: "partial" }, minutesAgo: 10 });
+    seedRow({ eventId: "e2", dailyWrite: { ok: "partial" }, minutesAgo: 24 * 60 });
+    seedRow({ eventId: "e1", dailyWrite: { ok: "partial" }, minutesAgo: 48 * 60 });
+
+    const result = await maybeEmitPartialExtractStreakDm({
+      db,
+      correlationId: "c",
+      notifier: makeNotifier(),
+    });
+    expect(result.dmSent).toBe(true);
+    expect(calls[0].message).toMatch(/unknown × 3/);
+  });
+
+  it("treats a SELECT failure (missing table) as no streak", async () => {
+    // A DB without the schema applied throws on the agent_actions query;
+    // the catch returns [] so the routine degrades to 'no streak'.
+    const bareDb = new Database(":memory:");
+    try {
+      const result = await maybeEmitPartialExtractStreakDm({
+        db: bareDb,
+        correlationId: "c",
+        notifier: makeNotifier(),
+      });
+      expect(result.streakDetected).toBe(false);
+      expect(calls.length).toBe(0);
+    } finally {
+      bareDb.close();
+    }
+  });
 });

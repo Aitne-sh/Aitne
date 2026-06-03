@@ -179,6 +179,17 @@ describe("egress-denylist", () => {
       expect(list.length).toBe(0);
     });
 
+    it("drops null/undefined entries, over-long entries, consecutive dots, and non-bare no-wildcard hosts", () => {
+      const list = compileUserHostnameDenylist([
+        null as unknown as string, // raw ?? "" branch
+        undefined as unknown as string,
+        `${"a".repeat(254)}.com`, // length > 253
+        "foo..bar.com", // consecutive dots (has alphanumerics, so survives the no-alnum check)
+        "localhost", // no wildcard, but not a valid bare hostname (single label)
+      ]);
+      expect(list.length).toBe(0);
+    });
+
     it("mixed list — bare + sugar + glob coexist", () => {
       const list = compileUserHostnameDenylist([
         "paypal.com",

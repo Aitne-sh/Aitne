@@ -18,12 +18,15 @@ Every endpoint returns the standard daemon error shape:
 ```
 
 `body.message` is intended for the user — preserve it verbatim. The
-daemon does NOT emit `cron_too_tight` (the recurrence schema only
-accepts daily / weekly / monthly, so sub-daily asks never reach the
-POST — refuse them client-side per the recurrence-rule reference) or
-`cadence_partial` (the recurrence rule is one structured field, so
-there is no partial-cadence shape to reject). A future schema gain
-would surface those codes for the first time; surface verbatim.
+daemon does NOT emit `cron_too_tight`. Note: the recurrence schema
+DOES accept `hourly` (the engine supports `hourly`/`daily`/`weekly`/
+`monthly`), so a sub-daily POST is NOT rejected server-side — it
+succeeds (201). The daily-or-coarser floor for managed tasks is a
+**client-side** refusal only: YOU must refuse sub-daily cadences per
+the recurrence-rule reference (`§ Consumer-specific refusal`) before
+POSTing — do not expect the server to 400 an `hourly` rule. The daemon
+also does not emit `cadence_partial` (the recurrence rule is one
+structured field, so there is no partial-cadence shape to reject).
 
 ## POST /api/managed-tasks
 

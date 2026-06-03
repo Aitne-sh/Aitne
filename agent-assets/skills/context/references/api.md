@@ -39,7 +39,7 @@ Response: `{ "files": [{ "name", "lastModified" }, …] }`. Use this to
 enumerate `projects/`, `weekly/`, `monthly/`, `user/`, `rules/`,
 `routines/`, `inbox/` before deciding a write target.
 
-### GET /api/context/state/today/reconciliation
+### GET /api/context/today/reconciliation
 
 Returns the Morning Routine's reconciliation report for `state/today.md`
 (which mail/calendar/Notion sources contributed what to User Tasks /
@@ -72,11 +72,16 @@ Common rejections:
   transition guard, required frontmatter missing on `user/*.md` /
   `rules/*.md` / `projects/*.md` / `daily/*.md` / `weekly/*.md` /
   `monthly/*.md`).
-- `409 {error:"lock_held"}` — another session holds the file's write
-  lock. Retry with backoff (30s × 3).
-- `422` — file-specific schema mismatch (e.g. `state/today.md` line-1
-  agent-day mismatch — the error echoes both the supplied date and
-  the daemon's current agent-day).
+- `409 {error:"morning_routine_lock_held"}` — the Morning Routine holds
+  the `state/today.md` write lock; `409 {error:"roadmap_write_lock_held"}`
+  — another session holds the `plans/roadmap.md` lock. Retry with
+  backoff (30s × 3).
+- `400 {error:"validation_error", message, path}` — also covers the
+  `state/today.md` line-1 agent-day mismatch (the message echoes both the
+  supplied date and the daemon's current agent-day). The `422` status is
+  reserved for *frontmatter* validation on globbed files (`user/*.md`,
+  `rules/*.md`, `projects/*.md`, `daily/*.md`, `weekly/*.md`,
+  `monthly/*.md`), not for today.md line-1.
 
 `policies/management.md` is user-controlled policy: modify only when the
 user explicitly asks, and preserve every unrelated section.
@@ -91,11 +96,12 @@ curl -s -X PATCH http://localhost:8321/api/context/state/today \
 
 | Field | Type | Description |
 |---|---|---|
-| `section` | string | snake_case of the heading (e.g. `learned_context`, `agent_log`, `log`). **Omit for `append_to_file`**; required for every other mode. |
-| `mode` | `append` \| `replace` \| `clear` \| `clear_before` \| `append_to_file` | Default `append`. |
-| `content` | string | Ignored for `clear` / `clear_before`. |
+| `section` | string | snake_case of the heading (e.g. `learned_context`, `agent_log`, `log`). **Omit for `append_to_file` and `frontmatterMerge`**; required for every other mode. |
+| `mode` | `append` \| `replace` \| `clear` \| `clear_before` \| `append_to_file` \| `frontmatterMerge` | Default `append`. |
+| `content` | string | Ignored for `clear` / `clear_before` / `frontmatterMerge`. |
 | `cutoff` | string | **Required when `mode: "clear_before"`.** SQLite format `YYYY-MM-DD HH:MM:SS` (zero-padded). Removes bullet rows whose `- [YYYY-MM-DD HH:MM:SS]` timestamp is ≤ cutoff. |
 | `maxEntries` | number | Optional for `mode: "append"`. After appending, trim oldest bullet entries from the top of the section body so at most `maxEntries` bullets remain. Non-bullet lines are preserved. SignalDetector uses cap = 20. |
+| `frontmatter` | object | **Required when `mode: "frontmatterMerge"`** (and only valid then). Non-empty partial frontmatter object, deep-merged into the file's YAML frontmatter. |
 
 Mode semantics:
 
@@ -104,13 +110,18 @@ Mode semantics:
 - `clear` — drop the section body, keep the heading.
 - `clear_before` — rolling-log trim, drops bullets with timestamps ≤ `cutoff`. Non-bullet lines preserved. Race-safe consumption shape for `Raw Signals` and similar logs.
 - `append_to_file` — omit `section`, append `content` to the end of the file. The intended first-write path when a section header does not exist yet: include the header inside `content` (`"\n## Section\n- bullet\n"`). Also the only write shape for files with no canonical section schema (`journal/agent.md`).
+- `frontmatterMerge` — omit `section`; deep-merge the `frontmatter` object into the file's existing YAML frontmatter (nested objects merge key-by-key; scalars/arrays replace), preserving the body verbatim. The chokepoint-safe way to link entity `sources.<app>.<id>` + set `last_synced_at` without a read-modify-write of the whole file (design 21 §10.4).
 
 Common rejections (informational responses worth knowing):
 
 - `400 {error:"section_not_found", section, availableSections:[…]}` — the section name did not match. `availableSections` lists every snake_cased heading the file actually has; pick the closest match and retry. Do NOT retry the same `section` value.
 - `400 {error:"validation_error", message, path}` — content failed the file-specific validator.
 - `400 {error:"cutoff_required", message}` — `clear_before` was called without a valid `cutoff`.
-- `409 {error:"lock_held"}` — file's write lock is held by another session.
+- `409 {error:"morning_routine_lock_held"}` (PATCH/PUT on `state/today`) or
+  `409 {error:"roadmap_write_lock_held"}` (PATCH/PUT on `plans/roadmap`) —
+  the file's write lock is held by another session. (The generic
+  `lock_held` code is only emitted by `POST /api/context/lock/morning-routine`
+  on contended acquisition, never by a PATCH/PUT.)
 
 ### DELETE /api/context/:path
 
@@ -118,7 +129,8 @@ Removes the file (snapshot first). The daemon only allows DELETE on a
 small set of paths — notably `policies/routines/custom/<slug>` (after the user
 asks to retire a custom routine). Most files are NOT delete-eligible
 (e.g. `state/today.md`, `plans/roadmap.md`, `identity/profile.md`); the daemon returns
-`400 {error:"path_not_deletable"}` for those.
+`403 {error:"forbidden"}` (with `errors[0].code: "context.write_forbidden"`)
+for those.
 
 ## Lifecycle
 
@@ -158,7 +170,7 @@ the lock to be held by the calling session, and the daemon emits an
 
 The dispatcher auto-acquires this lock for `routine.morning_routine`
 and surfaces the id via `<today_write_lock_id>` in the prompt context.
-Other sessions get `409 today_write_lock_held` on PUT / PATCH while
+Other sessions get `409 morning_routine_lock_held` on PUT / PATCH while
 the lock is held — back off 30 s and retry up to 3 times.
 
 ### Roadmap lock

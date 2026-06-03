@@ -51,7 +51,7 @@ function selectRow(db: Database.Database, id: number): AgentScheduleRow {
 }
 
 const FUTURE_ISO = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-const LONG_DESCRIPTION = "A description carrying enough context for the future session to act";
+const LONG_PROMPT = "An instruction carrying enough context for the future session to act";
 
 const BATCH_TASK_CONTEXT = {
   background:
@@ -82,7 +82,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: "persist registered model id pin check on the row",
+          prompt: "persist registered model id pin check on the row",
           model: "claude-opus-4-8",
         }),
       });
@@ -109,7 +109,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: LONG_DESCRIPTION,
+          prompt: LONG_PROMPT,
           model: "sonnet",
         }),
       });
@@ -129,7 +129,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: LONG_DESCRIPTION,
+          prompt: LONG_PROMPT,
           model: "opus",
         }),
       });
@@ -149,7 +149,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: LONG_DESCRIPTION,
+          prompt: LONG_PROMPT,
           tier: "lite",
         }),
       });
@@ -169,7 +169,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: LONG_DESCRIPTION,
+          prompt: LONG_PROMPT,
           model: "gpt-5.4-turbo",
         }),
       });
@@ -200,7 +200,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: LONG_DESCRIPTION,
+          prompt: LONG_PROMPT,
           model: "claude-opus-4-7",
           tier: "high",
         }),
@@ -218,7 +218,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: LONG_DESCRIPTION,
+          prompt: LONG_PROMPT,
           model: "claude-opus-4-6",
         }),
       });
@@ -242,7 +242,7 @@ describe("agent-schedule routes", () => {
         body: JSON.stringify({
           time: FUTURE_ISO,
           taskType: "wake",
-          description: "no override row should default to process-key at dispatch",
+          prompt: "no override row should default to process-key at dispatch",
         }),
       });
 
@@ -252,6 +252,72 @@ describe("agent-schedule routes", () => {
       expect(row.model).toBeNull();
       expect(row.tier_override).toBeNull();
       expect(row.backend_id).toBeNull();
+    });
+
+    it("a missing prompt is rejected with schedule.prompt_required", async () => {
+      const res = await app.request("/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ time: FUTURE_ISO, taskType: "wake" }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as {
+        errors: Array<{ code: string; field: string }>;
+      };
+      expect(data.errors[0].code).toBe("schedule.prompt_required");
+      expect(data.errors[0].field).toBe("prompt");
+    });
+
+    it("an over-cap prompt is rejected with schedule.prompt_too_long", async () => {
+      const res = await app.request("/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          time: FUTURE_ISO,
+          taskType: "wake",
+          prompt: "x".repeat(8001),
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as { errors: Array<{ code: string }> };
+      expect(data.errors[0].code).toBe("schedule.prompt_too_long");
+    });
+
+    it("an over-cap description is rejected with schedule.description_too_long", async () => {
+      const res = await app.request("/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          time: FUTURE_ISO,
+          taskType: "wake",
+          prompt: LONG_PROMPT,
+          description: "x".repeat(201),
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as { errors: Array<{ code: string }> };
+      expect(data.errors[0].code).toBe("schedule.description_too_long");
+    });
+
+    it("stores an empty task_description when only a prompt is supplied", async () => {
+      const res = await app.request("/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          time: FUTURE_ISO,
+          taskType: "wake",
+          prompt: LONG_PROMPT,
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as { scheduleId: string };
+      const row = selectRow(db, Number(data.scheduleId));
+      expect(row.task_prompt).toBe(LONG_PROMPT);
+      expect(row.task_description).toBe("");
     });
   });
 
@@ -282,6 +348,55 @@ describe("agent-schedule routes", () => {
       expect(row.model).toBe("claude-opus-4-7");
       expect(row.backend_id).toBe("claude");
       expect(row.tier_override).toBeNull();
+    });
+
+    it("a row with no taskPrompt persists task_prompt = taskDescription (dispatcher reads task_prompt; no fallback)", async () => {
+      // Regression: the morning routine schedules batch rows with only a
+      // taskDescription. Since the dispatcher dropped the
+      // `task_prompt ?? task_description` fallback, the batch insert must
+      // coalesce the body into task_prompt — never leave it NULL.
+      const res = await app.request("/schedule/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: [
+            {
+              scheduledFor: FUTURE_ISO,
+              taskType: "wake",
+              taskDescription: "batch row body carried into task_prompt",
+              taskContext: BATCH_TASK_CONTEXT,
+            },
+          ],
+        }),
+      });
+      expect(res.status).toBe(201);
+      const data = (await res.json()) as { ids: number[] };
+      const row = selectRow(db, data.ids[0]);
+      expect(row.task_prompt).toBe("batch row body carried into task_prompt");
+      expect(row.task_description).toBe("batch row body carried into task_prompt");
+    });
+
+    it("a row WITH a taskPrompt override persists that prompt verbatim", async () => {
+      const res = await app.request("/schedule/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: [
+            {
+              scheduledFor: FUTURE_ISO,
+              taskType: "wake",
+              taskDescription: "short batch row list label",
+              taskPrompt: "the fuller batch agent instruction body",
+              taskContext: BATCH_TASK_CONTEXT,
+            },
+          ],
+        }),
+      });
+      expect(res.status).toBe(201);
+      const data = (await res.json()) as { ids: number[] };
+      const row = selectRow(db, data.ids[0]);
+      expect(row.task_prompt).toBe("the fuller batch agent instruction body");
+      expect(row.task_description).toBe("short batch row list label");
     });
 
     it("alias 'sonnet' on a batch row rewrites to tier_override='medium'", async () => {
@@ -492,33 +607,56 @@ describe("agent-schedule routes", () => {
       expect(data.errors[0].code).toBe("schedule.model_unknown");
     });
 
-    it("PATCH with description shorter than 20 chars returns schedule.description_too_short (Fix 1)", async () => {
+    it("PATCH with a short description is accepted (description is now an optional label, no floor)", async () => {
       const id = seedPendingWakeRow();
       const res = await app.request(`/schedule/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ description: "too short" }),
+        body: JSON.stringify({ description: "tiny" }),
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("PATCH with a description over the 200-char cap returns schedule.description_too_long", async () => {
+      const id = seedPendingWakeRow();
+      const res = await app.request(`/schedule/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: "x".repeat(201) }),
       });
 
       expect(res.status).toBe(400);
       const data = (await res.json()) as {
         errors: Array<{ code: string; field: string }>;
       };
-      expect(data.errors[0].code).toBe("schedule.description_too_short");
+      expect(data.errors[0].code).toBe("schedule.description_too_long");
       expect(data.errors[0].field).toBe("description");
     });
 
-    it("PATCH with prompt shorter than 20 chars returns schedule.prompt_too_short (Fix 1)", async () => {
+    it("PATCH with an empty prompt returns schedule.prompt_required", async () => {
       const id = seedPendingWakeRow();
       const res = await app.request(`/schedule/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: "short" }),
+        body: JSON.stringify({ prompt: "" }),
       });
 
       expect(res.status).toBe(400);
       const data = (await res.json()) as { errors: Array<{ code: string }> };
-      expect(data.errors[0].code).toBe("schedule.prompt_too_short");
+      expect(data.errors[0].code).toBe("schedule.prompt_required");
+    });
+
+    it("PATCH with a prompt over the 8000-char cap returns schedule.prompt_too_long", async () => {
+      const id = seedPendingWakeRow();
+      const res = await app.request(`/schedule/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "x".repeat(8001) }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as { errors: Array<{ code: string }> };
+      expect(data.errors[0].code).toBe("schedule.prompt_too_long");
     });
 
     it("PATCH with unknown tier returns schedule.tier_unknown (Fix 1)", async () => {

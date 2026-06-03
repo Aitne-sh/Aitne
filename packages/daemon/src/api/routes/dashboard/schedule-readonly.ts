@@ -10,13 +10,30 @@ export function registerScheduleReadonlyRoutes(app: Hono, deps: ApiDependencies)
   app.get("/schedule/next", (c) => {
     const row = db
       .prepare(
-        `SELECT id, scheduled_for, task_type, task_description
+        `SELECT id, scheduled_for, task_type, task_description, task_prompt
          FROM agent_schedule
          WHERE status = 'pending' AND scheduled_for > datetime('now')
          ORDER BY scheduled_for ASC LIMIT 1`,
       )
-      .get() as { id: number; scheduled_for: string; task_type: string; task_description: string } | undefined;
-    return c.json({ next: row ?? null });
+      .get() as
+      | {
+          id: number;
+          scheduled_for: string;
+          task_type: string;
+          task_description: string;
+          task_prompt: string | null;
+        }
+      | undefined;
+    if (!row) return c.json({ next: null });
+    // One-off rows make `task_description` an optional label, so it can be
+    // empty. Coalesce to a prompt excerpt so the dashboard's "Next Up" card
+    // always shows meaningful text. `task_prompt` is not surfaced raw.
+    const { task_prompt, ...rest } = row;
+    const label =
+      rest.task_description && rest.task_description.trim().length > 0
+        ? rest.task_description
+        : (task_prompt ?? "").slice(0, 200);
+    return c.json({ next: { ...rest, task_description: label } });
   });
 
   /** GET /schedule/list — all scheduled tasks (paginated) */

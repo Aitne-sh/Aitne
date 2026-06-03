@@ -358,15 +358,19 @@ export function enqueueArchitectureRefresh(
     category: repo.category,
     correlationId,
   } satisfies Record<string, unknown>;
+  const archLabel = `Refresh architecture analysis for ${repo.slug}.`;
   const result = db
     .prepare(
       `INSERT INTO agent_schedule
-         (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-       VALUES (?, 'git.project.refresh_architecture', ?, ?, ?, NULL, 'pending')`,
+         (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+       VALUES (?, 'git.project.refresh_architecture', ?, ?, ?, ?, NULL, 'pending')`,
     )
     .run(
       formatSqliteDatetime(now),
-      `Refresh architecture analysis for ${repo.slug}.`,
+      // task_description (label) === task_prompt (agent body); routing is via
+      // task_context.processKey = "git.project.refresh_architecture".
+      archLabel,
+      archLabel,
       JSON.stringify(taskContext),
       correlationId,
     );

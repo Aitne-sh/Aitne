@@ -86,7 +86,10 @@ describe("enqueueWikiApproval", () => {
       };
     expect(row.task_type).toBe("approval");
     expect(row.task_description).toBe(result.taskDescription);
-    expect(row.task_prompt).toBeNull();
+    // The body is carried in task_prompt too (the dispatcher reads it
+    // directly after approval flips the row to 'approved_task'; there is no
+    // task_description fallback).
+    expect(row.task_prompt).toBe(result.taskDescription);
     expect(row.correlation_id).toBe("corr-123");
     expect(row.status).toBe("pending");
   });

@@ -1,5 +1,23 @@
 import { z } from "zod";
 
+/**
+ * Upper bound for a scheduled task's `prompt` — the agent instruction the
+ * wake-up session runs at fire time. 8000 chars ≈ 2000 tokens: this matches
+ * the de-facto "instruction field" cap (e.g. OpenAI's GPT-builder
+ * instructions) — generous enough for a multi-step instruction with context
+ * and examples, while bounding cost/context against an accidental paste of a
+ * whole document. The session has a large context window, so this is a
+ * cost/UX guardrail, not a model limit.
+ */
+export const SCHEDULE_PROMPT_MAX_CHARS = 8000;
+
+/**
+ * Upper bound for a scheduled task's `description` — the short label shown in
+ * the schedule list. It is NOT the agent body (that is `prompt`); kept tight
+ * so list rows stay legible.
+ */
+export const SCHEDULE_DESCRIPTION_MAX_CHARS = 200;
+
 const notificationPlatformSchema = z.enum([
   "slack",
   "telegram",
@@ -31,8 +49,24 @@ export const contextPatchSchema = z.object({
    * targeting a section.
    */
   section: z.string().optional(),
-  mode: z.enum(["append", "replace", "clear", "clear_before", "append_to_file"]),
+  mode: z.enum([
+    "append",
+    "replace",
+    "clear",
+    "clear_before",
+    "append_to_file",
+    "frontmatterMerge",
+  ]),
   content: z.string().optional(),
+  /**
+   * For `frontmatterMerge` mode: a partial frontmatter object deep-merged into
+   * the file's existing YAML frontmatter (plain objects merge recursively;
+   * scalars/arrays replace), preserving the body. Drives the entity
+   * `sources.<app>.<id>` + `last_synced_at` linkage in
+   * docs/design/21-management-registry-and-entities.md §10.4. Required for —
+   * and only valid with — `mode:"frontmatterMerge"`.
+   */
+  frontmatter: z.record(z.string(), z.unknown()).optional(),
   /**
    * For clear_before mode: remove entries whose `- [YYYY-MM-DD HH:MM:SS]`
    * timestamp is ≤ this value. Entries without a parseable timestamp or
@@ -47,8 +81,24 @@ export const contextPatchSchema = z.object({
    */
   maxEntries: z.number().int().positive().optional(),
 }).refine(
-  (data) => data.mode === "append_to_file" || (data.section !== undefined && data.section.length > 0),
-  { message: "section is required for all modes except append_to_file" },
+  (data) =>
+    data.mode === "append_to_file"
+    || data.mode === "frontmatterMerge"
+    || (data.section !== undefined && data.section.length > 0),
+  { message: "section is required for all modes except append_to_file and frontmatterMerge" },
+).refine(
+  // `frontmatter` is required for — and only valid with — frontmatterMerge,
+  // and must be a non-empty object (an empty merge is a no-op the caller
+  // almost certainly did not intend; surface it as a 400 instead).
+  (data) =>
+    data.mode === "frontmatterMerge"
+      ? data.frontmatter !== undefined && Object.keys(data.frontmatter).length > 0
+      : data.frontmatter === undefined,
+  {
+    message:
+      "frontmatter (a non-empty object) is required for mode 'frontmatterMerge' and not allowed for other modes",
+    path: ["frontmatter"],
+  },
 ).refine(
   (data) => data.mode === "append" || data.maxEntries === undefined,
   { message: "maxEntries is only valid with mode 'append'" },
@@ -89,21 +139,29 @@ export const notifyRequestSchema = z.object({
 export const scheduleRequestSchema = z.object({
   time: z.string(), // ISO8601
   taskType: z.string(),
-  description: z
-    .string()
-    .min(
-      20,
-      "Description must be at least 20 characters. The wake-up agent has NO memory — the description is its only context.",
-    ),
-  // Optional override for the actual task body the agent receives. When set,
-  // takes precedence over `description` as the `task` slot in the task-flow
-  // template. When omitted, `description` doubles as both the user-facing
-  // label and the agent body (preserves the long-standing skill API).
+  // The instruction the wake-up agent runs at fire time. REQUIRED — the
+  // session starts with NO memory, so the prompt is its only context. (The
+  // old `description`→body fallback was retired in favour of an explicit,
+  // always-present instruction; `description` is now an optional list label.)
+  // No lower bound beyond non-empty: the agent is trusted to write as terse
+  // or as detailed an instruction as the task warrants.
   prompt: z
     .string()
     .min(
-      20,
-      "Prompt must be at least 20 characters. The wake-up agent has NO memory — the prompt is its only context.",
+      1,
+      "Prompt is required — the wake-up agent has NO memory, so the prompt is its only instruction.",
+    )
+    .max(
+      SCHEDULE_PROMPT_MAX_CHARS,
+      `Prompt must be at most ${SCHEDULE_PROMPT_MAX_CHARS} characters (~2000 tokens). Tighten the instruction; move bulk reference material into a file the agent reads at fire time instead of inlining it.`,
+    ),
+  // Optional short label shown in the schedule list. NOT the agent body
+  // (that is `prompt`). Omit it and the list falls back to a prompt excerpt.
+  description: z
+    .string()
+    .max(
+      SCHEDULE_DESCRIPTION_MAX_CHARS,
+      `Description is the short list label — at most ${SCHEDULE_DESCRIPTION_MAX_CHARS} characters. Put the full instruction in 'prompt', not here.`,
     )
     .optional(),
   // Free-form model token. Accepts:
@@ -215,24 +273,25 @@ export const scheduleBatchRequestSchema = z.object({
 
 export const scheduleUpdateRequestSchema = z.object({
   time: z.string().optional(),
+  // Short list label. Optional, no lower bound; pass an empty string to clear
+  // it. NOT the agent body — that is `prompt`.
   description: z
     .string()
-    .min(
-      20,
-      "Description must be at least 20 characters. The wake-up agent has NO memory — the description is its only context.",
+    .max(
+      SCHEDULE_DESCRIPTION_MAX_CHARS,
+      `Description is the short list label — at most ${SCHEDULE_DESCRIPTION_MAX_CHARS} characters.`,
     )
     .optional(),
-  // Pass `null` to clear an override and fall back to `description`.
+  // Change the agent instruction. `undefined` = no change. Cannot be cleared
+  // to null/empty: the dispatcher reads task_prompt directly as the body (no
+  // task_description fallback), so a row must always carry a non-empty prompt.
   prompt: z
-    .union([
-      z
-        .string()
-        .min(
-          20,
-          "Prompt must be at least 20 characters. The wake-up agent has NO memory — the prompt is its only context.",
-        ),
-      z.null(),
-    ])
+    .string()
+    .min(1, "Prompt cannot be empty.")
+    .max(
+      SCHEDULE_PROMPT_MAX_CHARS,
+      `Prompt must be at most ${SCHEDULE_PROMPT_MAX_CHARS} characters.`,
+    )
     .optional(),
   message: z.string().min(1).optional(), // for dm type only
   // PATCH form of `scheduleRequestSchema.model`. Pass a free-form token

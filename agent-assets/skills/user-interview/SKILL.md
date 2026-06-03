@@ -266,9 +266,12 @@ curl -s -X PATCH http://localhost:8321/api/context/state/profile-questions \
   -d '{"section": "in_progress", "mode": "replace", "content": "- name :: state=latent"}'
 
 # Fallback DM scheduling (Operation 5B only)
+# `prompt` is REQUIRED (the wake-up session has NO memory — it is the only
+# instruction). `description` stays as the short label whose
+# `profile_interview:<id>` prefix triggers the Operation 6 sub-flow.
 curl -s -X POST http://localhost:8321/api/schedule \
   -H 'Content-Type: application/json' \
-  -d '{"time":"<ISO>","taskType":"dm_session","description":"profile_interview:<id> — <hint>","tier":"medium","taskContext":{"scheduledBy":"user_profile_sweep_fallback","queueId":"<id>","importance":"low"}}'
+  -d '{"time":"<ISO>","taskType":"dm_session","prompt":"profile_interview:<id> — run the scheduled.dm ## Profile interview sub-flow (Operation 6): fire-time slot-filled abort check, then compose one short natural DM around <hint>.","description":"profile_interview:<id> — <hint>","tier":"medium","taskContext":{"scheduledBy":"user_profile_sweep_fallback","queueId":"<id>","importance":"low"}}'
 ```
 
 The PATCH `section` argument is snake_case of the heading: `pending`,

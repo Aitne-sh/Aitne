@@ -285,18 +285,22 @@ function isCanonicalSixClassPath(input: string): boolean {
 /**
  * Diagnostic helper — returns every alias entry whose `fromPrefix` would
  * shadow another. Used by a peer test to assert the static table stays
- * in longest-prefix-first order.
+ * in longest-prefix-first order. The `aliases` parameter defaults to the
+ * production table; tests pass a deliberately mis-ordered list to exercise
+ * the shadow-detection branch.
  */
-export function findShadowingAliases(): Array<{
+export function findShadowingAliases(
+  aliases: ReadonlyArray<VaultPathAlias> = VAULT_PATH_ALIASES,
+): Array<{
   earlier: VaultPathAlias;
   shadowed: VaultPathAlias;
 }> {
   const shadows: Array<{ earlier: VaultPathAlias; shadowed: VaultPathAlias }> =
     [];
-  for (let i = 0; i < VAULT_PATH_ALIASES.length; i++) {
-    const earlier = VAULT_PATH_ALIASES[i]!;
-    for (let j = i + 1; j < VAULT_PATH_ALIASES.length; j++) {
-      const later = VAULT_PATH_ALIASES[j]!;
+  for (let i = 0; i < aliases.length; i++) {
+    const earlier = aliases[i]!;
+    for (let j = i + 1; j < aliases.length; j++) {
+      const later = aliases[j]!;
       if (earlier.exactOnly || later.exactOnly) continue;
       if (later.fromPrefix.startsWith(earlier.fromPrefix)) {
         shadows.push({ earlier, shadowed: later });

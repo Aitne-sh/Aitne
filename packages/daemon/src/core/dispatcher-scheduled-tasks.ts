@@ -108,6 +108,9 @@ import type { RoutineFetchWindowRunner } from "./routine-fetch-window-runner.js"
 import { routineWindowKeyFromEvent } from "./routine-fetch-window-runner.js";
 import { routineHasWindows } from "./routine-windows.js";
 import { morningRoutineRanToday } from "../bootstrap/schedule-helpers.js";
+import { resolveAgentId } from "./agents/agent-id-resolver.js";
+import { loadEffectiveDefinition } from "./agents/effective-definition.js";
+import { getAgent } from "../db/agents-store.js";
 import { releaseWikiCompileLock } from "./wiki/compile-lock.js";
 import {
   parseGithubRepoSlug,
@@ -498,13 +501,21 @@ export class ScheduledTaskRunner {
       ?? (event.requestedModel
         ? (event.requestedModel === "sonnet" ? "medium" as const : "high" as const)
         : undefined);
+    // Forward the backend pin carried by the scheduled-row event. A
+    // `requestedModelId` companion is honored when present (exact model
+    // pin) but is NOT required: a standalone `requestedBackendId`
+    // (engine-only Agent pin) routes to that backend via resolveBinding's
+    // backend-only branch, which fills the model from `requestedTier` / the
+    // backend default. Before 2026-06-01 the `typeof requestedModelId ===
+    // "string"` co-guard silently dropped engine-only pins
+    // (AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1).
     const internalBackendOverride =
-      event.requestedBackendId
-      && isBackendId(event.requestedBackendId)
-      && typeof event.requestedModelId === "string"
+      event.requestedBackendId && isBackendId(event.requestedBackendId)
         ? {
             requestedBackendId: event.requestedBackendId,
-            requestedModelId: event.requestedModelId,
+            ...(typeof event.requestedModelId === "string"
+              ? { requestedModelId: event.requestedModelId }
+              : {}),
           }
         : {};
     const binding = this.agentRouter.resolveBinding(event, {
@@ -604,13 +615,21 @@ export class ScheduledTaskRunner {
       ?? (event.requestedModel
         ? (event.requestedModel === "sonnet" ? "medium" as const : "high" as const)
         : undefined);
+    // Forward the backend pin carried by the scheduled-row event. A
+    // `requestedModelId` companion is honored when present (exact model
+    // pin) but is NOT required: a standalone `requestedBackendId`
+    // (engine-only Agent pin) routes to that backend via resolveBinding's
+    // backend-only branch, which fills the model from `requestedTier` / the
+    // backend default. Before 2026-06-01 the `typeof requestedModelId ===
+    // "string"` co-guard silently dropped engine-only pins
+    // (AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1).
     const internalBackendOverride =
-      event.requestedBackendId
-      && isBackendId(event.requestedBackendId)
-      && typeof event.requestedModelId === "string"
+      event.requestedBackendId && isBackendId(event.requestedBackendId)
         ? {
             requestedBackendId: event.requestedBackendId,
-            requestedModelId: event.requestedModelId,
+            ...(typeof event.requestedModelId === "string"
+              ? { requestedModelId: event.requestedModelId }
+              : {}),
           }
         : {};
     const binding = this.agentRouter.resolveBinding(event, {
@@ -647,6 +666,11 @@ export class ScheduledTaskRunner {
       this.markScheduledTaskCompleted(event);
       return;
     }
+    // AGENT_DEFINITIONS_DESIGN.md §4.2 — fold the firing Agent's
+    // `tools.skills` onto the process-key skill bundle. `undefined` for every
+    // non-Agent firing (managed task, git project doc, automation trigger) and
+    // for Agents declaring no extra skills, so the common path is unchanged.
+    const agentSkillOverride = this.resolveAgentSkillOverride(taskCtx);
     const result = await this.errorRouter.executeWithRetry(
       () =>
         this.agentRouter.execute({
@@ -660,10 +684,65 @@ export class ScheduledTaskRunner {
           ...(refreshArchitectureOverride
             ? { allowedToolsOverride: refreshArchitectureOverride }
             : {}),
+          ...(agentSkillOverride
+            ? {
+                extraSkills: agentSkillOverride.extraSkills,
+                skillsReplace: agentSkillOverride.skillsReplace,
+              }
+            : {}),
         }),
       event,
     );
     await this.resultProcessor.processResult(result, event);
+  }
+
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §4.2 — resolve the firing Agent's
+   * `tools.skills` override for a `scheduled.task` firing.
+   *
+   * Returns `undefined` for every firing that is NOT a user Agent run, and for
+   * Agents that declare no extra skills, so the common dispatch path stays a
+   * pure no-op. Only firings carrying a stamped `task_context.agent_id` (§7.2)
+   * or a `recurring_schedule_id` that joins an Agent row resolve a slug —
+   * built-in routines (which manage skills via the process-key manifest, not
+   * `tools.skills`) and legacy/managed/automation tasks fall through to
+   * `null`. The effective definition is re-read from the Agent's `agent.md` on
+   * disk, so a live `tools.skills` edit takes effect on the next firing.
+   */
+  private resolveAgentSkillOverride(
+    taskCtx: AgentTaskEvent["taskContext"],
+  ): { extraSkills: readonly string[]; skillsReplace: boolean } | undefined {
+    const ctx =
+      taskCtx && typeof taskCtx === "object"
+        ? (taskCtx as Record<string, unknown>)
+        : {};
+    const agentId = resolveAgentId(this.db, {
+      taskContextAgentId:
+        typeof ctx.agent_id === "string" ? ctx.agent_id : null,
+      recurringScheduleId:
+        typeof ctx.recurringScheduleId === "number"
+          ? ctx.recurringScheduleId
+          : null,
+    });
+    if (!agentId) return undefined;
+    const dto = getAgent(this.db, agentId);
+    if (!dto) return undefined;
+    const { definition } = loadEffectiveDefinition(dto, {
+      readFile: (path) => {
+        try {
+          return existsSync(path) ? readFileSync(path, "utf-8") : null;
+        } catch {
+          return null;
+        }
+      },
+      dayBoundaryHour: this.config.dayBoundaryHour ?? 4,
+    });
+    const skills = definition?.tools.skills ?? [];
+    if (skills.length === 0) return undefined;
+    return {
+      extraSkills: skills,
+      skillsReplace: definition?.tools.skills_replace ?? false,
+    };
   }
 
   /**

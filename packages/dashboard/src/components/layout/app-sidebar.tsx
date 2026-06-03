@@ -10,6 +10,7 @@ import {
   History,
   BarChart3,
   Clock,
+  Bot,
   Brain,
   Settings,
   PanelLeftClose,
@@ -210,7 +211,8 @@ export function AppSidebar() {
             <SidebarBadge className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">{newEventCount}</SidebarBadge>
           ) : undefined,
         },
-        { label: "Wake-ups", href: "/schedule", icon: Clock },
+        { label: "Agents", href: "/agents", icon: Bot },
+        { label: "Schedule", href: "/schedule", icon: Clock },
         {
           label: "Browser Tasks",
           href: "/browser-tasks",

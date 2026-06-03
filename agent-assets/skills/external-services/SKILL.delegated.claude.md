@@ -257,10 +257,10 @@ skill and the `/api/context/*` endpoints instead.
 
 ```bash
 curl -s http://localhost:8321/api/github/repos                              # list watched repos
-curl -s "http://localhost:8321/api/github/pulls?state=open"                  # list PRs
+curl -s "http://localhost:8321/api/github/pulls?owner=user&repo=repo&state=open" # list PRs
 curl -s -X POST http://localhost:8321/api/github/pulls/comment \
   -H 'Content-Type: application/json' \
-  -d '{"owner": "user", "repo": "repo", "pullNumber": 42, "body": "LGTM"}' # comment — Autonomous
+  -d '{"owner": "user", "repo": "repo", "pull_number": 42, "comment": "LGTM"}' # comment — Autonomous
 ```
 <!-- /service:github -->
 
@@ -276,23 +276,13 @@ update, archive).
 
 ---
 
-## Recurring Schedules
+## Recurring tasks
 
-CRUD for repeating agent tasks. Timezone auto-filled from daemon config.
-
-```bash
-curl -s -X POST http://localhost:8321/api/recurring-schedules \
-  -H 'Content-Type: application/json' \
-  -d '{"taskType": "wake", "description": "Morning inbox triage.", "recurrenceRule": {"frequency": "daily", "time": "09:00"}}'
-curl -s "http://localhost:8321/api/recurring-schedules?enabled=true"         # list
-curl -s -X PATCH http://localhost:8321/api/recurring-schedules/1 \
-  -H 'Content-Type: application/json' \
-  -d '{"recurrenceRule": {"frequency": "weekly", "time": "10:00", "daysOfWeek": [1,3,5]}}'
-curl -s -X PATCH http://localhost:8321/api/recurring-schedules/1 \
-  -H 'Content-Type: application/json' -d '{"enabled": false}'              # disable
-curl -s -X DELETE http://localhost:8321/api/recurring-schedules/1           # delete
-```
-`recurrenceRule`: `frequency` (daily/weekly/monthly), `time` (HH:MM), `daysOfWeek` (0=Sun..6=Sat, weekly), `daysOfMonth` (1-31, monthly). → Full guide: load `schedule` skill.
+Recurring autonomous **work** (fetch / check / act on a cadence) is an **Agent** —
+create one with the `agent-create` skill (`POST /api/agents`), managed on `/agents`.
+Recurring scheduled **DMs / briefings** stay on `POST /api/recurring-schedules`
+with `taskType: "dm_session"`. `GET /api/recurring-schedules?enabled=true` lists
+existing rows (dedup). → Full guide: load the `agent-create` or `schedule` skill.
 
 ---
 
@@ -330,9 +320,9 @@ curl -s -X POST http://localhost:8321/api/schedule/dm \
 ```bash
 curl -s -X POST http://localhost:8321/api/schedule \
   -H 'Content-Type: application/json' \
-  -d '{"time": "2026-04-06T16:00:00-04:00", "taskType": "wake", "description": "Check PR #42 status and notify user.", "tier": "medium", "taskContext": {"scheduledBy": "dm_conversation"}}'
+  -d '{"time": "2026-04-06T16:00:00-04:00", "taskType": "wake", "prompt": "Check PR #42 status and notify user.", "description": "PR #42 status check", "tier": "medium", "taskContext": {"scheduledBy": "dm_conversation"}}'
 ```
-Fields: `time` (required), `taskType` (`wake`), `description` (required, min 20 chars), `tier` (`lite`/`medium`/`high`) **or** `model` (registered id like `claude-opus-4-8`, legacy alias `sonnet`/`opus`, or composite `<backendId>/<modelId>`) — mutually exclusive, `taskContext` (optional metadata). See the `schedule` skill body for the full surface and `/api/schedule/options` for the live model list.
+Fields: `time` (required), `taskType` (`wake`), `prompt` (required — the agent instruction, ≤8000 chars), `description` (optional label, ≤200 chars), `tier` (`lite`/`medium`/`high`) **or** `model` (registered id like `claude-opus-4-8`, legacy alias `sonnet`/`opus`, or composite `<backendId>/<modelId>`) — mutually exclusive, `taskContext` (optional metadata). See the `schedule` skill body for the full surface and `/api/schedule/options` for the live model list.
 
 ### Manage pending items
 ```bash

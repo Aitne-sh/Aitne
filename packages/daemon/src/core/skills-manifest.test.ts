@@ -16,6 +16,8 @@ import Database from "better-sqlite3";
 import {
   EVENT_SKILL_SETS,
   ALL_SKILLS,
+  agentCreateActiveForDm,
+  composeSkillSet,
   eveningRulebookIsActive,
   gmailLifestyleActive,
   gmailLifestyleActiveForDm,
@@ -1175,7 +1177,11 @@ describe("resolveSkillManifest wrapper", () => {
     // The wrapper is per-event opt-in — every other event still resolves
     // to the static array. Spot-check a busy DM manifest so a future
     // accidental widening of the predicate is caught here.
-    const direct = EVENT_SKILL_SETS["message.received"];
+    // `agent-create` is message-conditional (recurring-work cadence in the DM
+    // text); with no `messageText` it is dropped, so exclude it from the
+    // pass-through baseline. The other conditional skills (gmail-lifestyle /
+    // managed-tasks) are db-conservative-included, so they stay.
+    const direct = EVENT_SKILL_SETS["message.received"].filter((s) => s !== "agent-create");
     expect(resolveSkillManifest("message.received")).toEqual(direct);
     expect(
       resolveSkillManifest("message.received", { contextDir: ctxRoot }),
@@ -1515,6 +1521,45 @@ describe("managedTasksActiveForDm trigger phrases", () => {
   });
 });
 
+describe("agentCreateActiveForDm trigger phrases (recurring work → Agent)", () => {
+  test.each([
+    ["every morning triage my inbox and act on it", true],
+    ["check my open PRs every hour and ping me", true],
+    ["set up a recurring inbox review", true],
+    ["weekly review of my project metrics", true],
+    ["every day run my finance app and log the balance", true],
+    ["automate my standup notes", true],
+    ["create an agent that watches the deploy channel", true],
+  ])("loads agent-create for recurring-work DM: %s", (text, expected) => {
+    expect(agentCreateActiveForDm(text)).toBe(expected);
+  });
+
+  test.each([
+    "DM me a summary every morning", // recurring DM → dm_session, not an Agent
+    "remind me tomorrow at 3pm", // one-shot
+    "every day I drink coffee", // cadence, no work verb
+    "check my notes", // work verb, no cadence
+    "", // empty
+  ])("does NOT load agent-create: %s", (text) => {
+    expect(agentCreateActiveForDm(text)).toBe(false);
+  });
+
+  test("null / undefined message text drops the skill", () => {
+    expect(agentCreateActiveForDm(null)).toBe(false);
+    expect(agentCreateActiveForDm(undefined)).toBe(false);
+  });
+
+  test("resolveSkillManifest drops agent-create from a DM with no cadence, keeps it with one", () => {
+    expect(resolveSkillManifest("message.received.dm", { messageText: "hi there" }))
+      .not.toContain("agent-create");
+    expect(
+      resolveSkillManifest("message.received.dm", {
+        messageText: "every morning triage my inbox and act",
+      }),
+    ).toContain("agent-create");
+  });
+});
+
 describe("resolveSkillManifest — conditional gmail-lifestyle / managed-tasks gating", () => {
   let db: Database.Database;
 
@@ -1665,7 +1710,7 @@ describe("per-skill body line-range pin (P1)", () => {
     "user-profile": { designTarget: 100, regressionCeiling: 210 },     // §3  — character-preferences ref exists; body still hosts schema
     "user-interview": { designTarget: 180, regressionCeiling: 290 },   // §15 — Op-morning/Op-briefing refs exist
     notify: { designTarget: 80, regressionCeiling: 135 },              // §4  — priority ref exists
-    schedule: { designTarget: 150, regressionCeiling: 240 },           // §5  — batch/recurring/errors/recurrence refs + R4 confirm-subflow extracted
+    schedule: { designTarget: 150, regressionCeiling: 246 },           // §5  — batch/errors/recurrence refs + R4 confirm-subflow extracted; +scheduling-split (recurring work→Agent vs dm_session) prose
     "external-services": { designTarget: 80, regressionCeiling: 135 }, // §6  — 6 service refs exist
     mail: { designTarget: 180, regressionCeiling: 250 },               // §7  — api/errors/examples/providers/query-grammar refs exist
     "gmail-lifestyle": { designTarget: 180, regressionCeiling: 235 },  // §9  — merged skill (travel + receipts) with 2 refs
@@ -1825,11 +1870,17 @@ describe("DM manifest body byte budget (P4)", () => {
   // skill body is the smallest concrete artefact that closes the
   // long-standing DM-driven browser-ops gap (the legacy
   // `browser-history-managed` skill was never in message.received.dm).
-  // The aspirational 80 KB design target stands; per-skill phases in
-  // skills-improvement.md continue to step the ceiling back down as
-  // bodies trim. Do NOT raise this ceiling further without a similar
-  // justification — adding cost to the DM manifest is regression risk.
-  const REGRESSION_CEILING_BYTES = 138 * 1024;
+  // Scheduling split — bumped 138 KB → 147 KB to admit the new
+  // `agent-create` SKILL.md (~5.5 KB) that teaches the DM agent to author
+  // a detailed recurring Agent (`POST /api/agents`). `/schedule` is now
+  // one-shot only, so this skill is the sole DM-path surface for recurring
+  // work; the body must carry the "Agent has no memory" detailed-prompt
+  // guidance, which is the core value. The aspirational 80 KB design
+  // target stands; per-skill phases in skills-improvement.md continue to
+  // step the ceiling back down as bodies trim. Do NOT raise this ceiling
+  // further without a similar justification — adding cost to the DM
+  // manifest is regression risk.
+  const REGRESSION_CEILING_BYTES = 147 * 1024;
 
   test("message.received.dm total SKILL.md bytes ≤ regression ceiling", () => {
     const slugs = EVENT_SKILL_SETS["message.received.dm"];
@@ -2039,5 +2090,83 @@ describe("managed-tasks description anchor (T1)", () => {
     for (const verb of ["register", "modify", "stop", "run"]) {
       expect(desc, `verb "${verb}" missing`).toContain(verb);
     }
+  });
+});
+
+// AGENT_DEFINITIONS_DESIGN.md §4.2 — `composeSkillSet` folds an Agent's
+// `tools.skills` onto the process-key default bundle at materialisation time.
+describe("composeSkillSet", () => {
+  const base = ["context", "today", "schedule"];
+
+  test("empty / undefined / null extra is a pure no-op (returns a copy of base)", () => {
+    expect(composeSkillSet(base, undefined, false)).toEqual(base);
+    expect(composeSkillSet(base, null, false)).toEqual(base);
+    expect(composeSkillSet(base, [], false)).toEqual(base);
+    // Returns a fresh array, not the same reference (callers may mutate).
+    const out = composeSkillSet(base, undefined, false);
+    expect(out).not.toBe(base);
+  });
+
+  test("empty extra is a no-op EVEN when replace is true (never strips the bundle)", () => {
+    // An Agent that sets skills_replace with no skills must not lose context/notify.
+    expect(composeSkillSet(base, [], true)).toEqual(base);
+    expect(composeSkillSet(base, undefined, true)).toEqual(base);
+  });
+
+  test("union (replace=false): base first, then extras not already present", () => {
+    expect(composeSkillSet(base, ["notify", "mail"], false)).toEqual([
+      "context",
+      "today",
+      "schedule",
+      "notify",
+      "mail",
+    ]);
+  });
+
+  test("union dedups a slug already in the base bundle", () => {
+    expect(composeSkillSet(base, ["today", "notify"], false)).toEqual([
+      "context",
+      "today",
+      "schedule",
+      "notify",
+    ]);
+  });
+
+  test("union dedups repeated slugs within extra", () => {
+    expect(composeSkillSet(base, ["notify", "notify", "mail"], false)).toEqual([
+      "context",
+      "today",
+      "schedule",
+      "notify",
+      "mail",
+    ]);
+  });
+
+  test("replace=true uses extra as the strict subset, ignoring base", () => {
+    expect(composeSkillSet(base, ["notify", "mail"], true)).toEqual([
+      "notify",
+      "mail",
+    ]);
+  });
+
+  test("replace=true still dedups within extra", () => {
+    expect(composeSkillSet(base, ["notify", "notify"], true)).toEqual(["notify"]);
+  });
+
+  test("does not mutate the base array", () => {
+    const frozen = Object.freeze(["context", "today"]) as readonly string[];
+    expect(() => composeSkillSet(frozen, ["notify"], false)).not.toThrow();
+    expect(frozen).toEqual(["context", "today"]);
+  });
+
+  test("unknown slugs are preserved (filtering is the materialiser's job)", () => {
+    // The compiler skips a slug whose SKILL.md is absent; composeSkillSet keeps
+    // the slug so the stamp/drift snapshot and the index agree on the request.
+    expect(composeSkillSet(base, ["ghost-skill"], false)).toEqual([
+      "context",
+      "today",
+      "schedule",
+      "ghost-skill",
+    ]);
   });
 });

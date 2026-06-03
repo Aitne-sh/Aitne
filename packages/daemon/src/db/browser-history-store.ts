@@ -237,7 +237,7 @@ export function incrementReloadSignals(
   tx(increments);
 }
 
-const CLUSTER_UPSERT_SQL = `
+const CLUSTER_INSERT_SQL = `
   INSERT INTO browser_research_clusters (
     slug, root_task_id, display_name, started_at, last_activity_at,
     visits_total, meaningful_visits_total, meaningful_foreground_sec_total,
@@ -247,22 +247,34 @@ const CLUSTER_UPSERT_SQL = `
     @visitsTotal, @meaningfulVisitsTotal, @meaningfulForegroundSecTotal,
     @distinctMeaningfulDomains, @status, 0
   )
-  ON CONFLICT (slug) DO UPDATE SET
-    last_activity_at = excluded.last_activity_at,
-    visits_total = excluded.visits_total,
-    meaningful_visits_total = excluded.meaningful_visits_total,
-    meaningful_foreground_sec_total = excluded.meaningful_foreground_sec_total,
-    distinct_meaningful_domains = excluded.distinct_meaningful_domains,
+`;
+
+// The cluster's stable identity is `root_task_id`, not `slug`. The slug is a
+// label composed from the cluster's currently-dominant domain + search term
+// (deriveClusterSlug), so as more visits accumulate for the same root task the
+// dominant term can shift and the next ingest tick derives a *different* slug.
+// The old `ON CONFLICT (slug)` upsert then missed the conflict and the INSERT
+// collided with the row's existing `root_task_id` UNIQUE constraint, throwing
+// SqliteError and aborting the whole ingest transaction (no clusters written
+// that tick). We update by root_task_id and leave the persisted slug untouched
+// so browser_pending_offers rows — which reference clusters by slug — stay
+// joined.
+const CLUSTER_UPDATE_BY_ROOT_SQL = `
+  UPDATE browser_research_clusters SET
+    last_activity_at = @lastActivityAt,
+    visits_total = @visitsTotal,
+    meaningful_visits_total = @meaningfulVisitsTotal,
+    meaningful_foreground_sec_total = @meaningfulForegroundSecTotal,
+    distinct_meaningful_domains = @distinctMeaningfulDomains,
     display_name = CASE
-      WHEN browser_research_clusters.agent_summary_revision = 0
-        THEN excluded.display_name
-      ELSE browser_research_clusters.display_name
+      WHEN agent_summary_revision = 0 THEN @displayName
+      ELSE display_name
     END,
     status = CASE
-      WHEN browser_research_clusters.status IN ('muted', 'concluded')
-        THEN browser_research_clusters.status
-      ELSE excluded.status
+      WHEN status IN ('muted', 'concluded') THEN status
+      ELSE @status
     END
+  WHERE root_task_id = @rootTaskId
 `;
 
 const DORMANT_AFTER_MS = 10 * 24 * 60 * 60 * 1000;
@@ -282,14 +294,25 @@ export function upsertResearchClusters(
   nowMs: number = Date.now(),
 ): void {
   if (clusters.length === 0) return;
-  const stmt = db.prepare(CLUSTER_UPSERT_SQL);
+  const insertStmt = db.prepare(CLUSTER_INSERT_SQL);
+  const updateStmt = db.prepare(CLUSTER_UPDATE_BY_ROOT_SQL);
+  const existingForRoot = db.prepare(
+    "SELECT slug FROM browser_research_clusters WHERE root_task_id = ?",
+  );
+  const slugHeldByOtherRoot = db.prepare(
+    "SELECT 1 FROM browser_research_clusters WHERE slug = ? AND root_task_id <> ?",
+  );
   const tx = db.transaction((rows: readonly ExtractedCluster[]) => {
     for (const cluster of rows) {
-      stmt.run({
-        slug: cluster.slug,
-        rootTaskId: cluster.aggregate.rootTaskId,
+      const rootTaskId = cluster.aggregate.rootTaskId;
+      // Fields shared by both paths. `started_at` and `slug` are INSERT-only
+      // (started_at is set once and preserved across ticks; slug is keyed on
+      // separately below), so they are excluded here and added to the INSERT
+      // params — keeping each statement's bound object to exactly its `@`
+      // placeholders.
+      const shared = {
+        rootTaskId,
         displayName: cluster.displayName,
-        startedAt: cluster.aggregate.startedAt,
         lastActivityAt: cluster.aggregate.lastActivityAt,
         visitsTotal: cluster.aggregate.visitsTotal,
         meaningfulVisitsTotal: cluster.aggregate.meaningfulVisitsTotal,
@@ -301,6 +324,23 @@ export function upsertResearchClusters(
           cluster.qualifies,
           nowMs,
         ),
+      };
+      if (existingForRoot.get(rootTaskId)) {
+        updateStmt.run(shared);
+        continue;
+      }
+      // New root task. Guard the slug PRIMARY KEY against a value already held
+      // by a different root_task_id: two roots can derive the same base slug in
+      // separate ingest ticks, where the in-run usedSlugs disambiguator
+      // (cluster-extractor) cannot see previously-persisted rows.
+      let slug = cluster.slug;
+      if (slugHeldByOtherRoot.get(slug, rootTaskId)) {
+        slug = `${slug}-${rootTaskId}`;
+      }
+      insertStmt.run({
+        ...shared,
+        startedAt: cluster.aggregate.startedAt,
+        slug,
       });
     }
   });

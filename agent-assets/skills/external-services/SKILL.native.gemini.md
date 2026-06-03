@@ -170,10 +170,10 @@ curl -s -X DELETE http://localhost:8321/api/obsidian/notes/Projects/Old
 
 ```bash
 curl -s http://localhost:8321/api/github/repos
-curl -s "http://localhost:8321/api/github/pulls?state=open"
+curl -s "http://localhost:8321/api/github/pulls?owner=user&repo=repo&state=open"
 curl -s -X POST http://localhost:8321/api/github/pulls/comment \
   -H 'Content-Type: application/json' \
-  -d '{"owner": "user", "repo": "repo", "pullNumber": 42, "body": "LGTM"}'
+  -d '{"owner": "user", "repo": "repo", "pull_number": 42, "comment": "LGTM"}'
 ```
 <!-- /service:github -->
 

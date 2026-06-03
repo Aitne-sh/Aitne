@@ -182,6 +182,15 @@ describe("aliasVaultPath", () => {
     it("non-domain top-level dir is not aliased", () => {
       expect(aliasVaultPath("garage/foo.md").aliased).toBe(false);
     });
+    it("domain index/entity without a .md suffix keeps the bare stem", () => {
+      // Exercises the `: ""` (no-suffix) branch of both regex matchers.
+      expect(aliasVaultPath("work/_index").canonicalPath).toBe(
+        "knowledge/entities/work/_index",
+      );
+      expect(aliasVaultPath("work/meetings/foo").canonicalPath).toBe(
+        "knowledge/entities/work/meetings/foo",
+      );
+    });
   });
 
   describe("legacy activity views", () => {
@@ -269,5 +278,23 @@ describe("findShadowingAliases", () => {
   });
   it("the table is non-empty", () => {
     expect(VAULT_PATH_ALIASES.length).toBeGreaterThan(0);
+  });
+  it("flags a mis-ordered table where a shorter prefix precedes a longer one", () => {
+    const earlier = { fromPrefix: "rules/", toPrefix: "policies/" };
+    const shadowed = {
+      fromPrefix: "rules/policies/",
+      toPrefix: "policies/management-captures/",
+    };
+    const unrelated = { fromPrefix: "inbox/", toPrefix: "state/inbox/" };
+    const exact = {
+      fromPrefix: "agent/journal",
+      toPrefix: "journal/agent",
+      exactOnly: true,
+    };
+    // `rules/policies/` starts with `rules/`, so the shorter prefix shadows
+    // it. The `exactOnly` entry is skipped by the guard above the push.
+    expect(findShadowingAliases([earlier, shadowed, unrelated, exact])).toEqual([
+      { earlier, shadowed },
+    ]);
   });
 });

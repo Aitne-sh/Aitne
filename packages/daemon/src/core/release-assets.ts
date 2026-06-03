@@ -653,6 +653,23 @@ export function findBuiltinShadowedUserSkills(
   return builtinSkills.filter((slug) => userSkills.has(slug));
 }
 
+/**
+ * Union of every known skill slug — built-in (`<workspaceDir>/agent-assets/
+ * skills`) and user (`userSkillsRoot`, derived via `resolveUserSkillsRoot`).
+ * The Agent loader's `tools.skills` cross-check (AGENT_DEFINITIONS_DESIGN.md
+ * §4.3 step 5) consults this so a user Agent referencing an unknown skill is
+ * warned at load. Returns a `ReadonlySet` matching the loader's
+ * `listSkillSlugs` port shape; either root may be absent (→ empty contribution).
+ */
+export function listAllSkillSlugs(
+  userSkillsRoot: string,
+  workspaceDir: string,
+): ReadonlySet<string> {
+  const all = new Set<string>(listSkillSlugs(join(workspaceDir, "agent-assets", "skills")));
+  for (const slug of listSkillSlugs(userSkillsRoot)) all.add(slug);
+  return all;
+}
+
 export function recordSkillAssetStatus(
   db: Database.Database,
   userSkillsRoot: string,

@@ -322,15 +322,18 @@ export function createBrowserTaskRoutes(deps: ApiDependencies): Hono {
         requireFinalConfirm: input.requireFinalConfirm ?? true,
       };
       const correlationId = randomUUID();
+      const browserDirective = input.description.slice(0, 200);
       const insertResult = deps.db
         .prepare(
           `INSERT INTO agent_schedule
-             (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-           VALUES (?, 'browser_task', ?, ?, ?, NULL, 'pending')`,
+             (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+           VALUES (?, 'browser_task', ?, ?, ?, ?, NULL, 'pending')`,
         )
         .run(
           formatSqliteDatetime(new Date(scheduledAtMs)),
-          input.description.slice(0, 200),
+          // The user's directive is both the list label and the agent body.
+          browserDirective,
+          browserDirective,
           JSON.stringify(scheduleContext),
           correlationId,
         );

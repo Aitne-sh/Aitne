@@ -832,7 +832,9 @@ describe("Dashboard API", () => {
         method: "POST",
         headers: {
           ...authHeaders(),
-          Origin: "http://localhost:3000",
+          // Trusted origin = the dashboard's default loopback origin
+          // (DEFAULT_DASHBOARD_PORT). Anything else → 403 (see next test).
+          Origin: "http://localhost:8322",
         },
       });
 
@@ -1592,6 +1594,61 @@ describe("Dashboard API", () => {
       expect(res.status).toBe(200);
       const data = (await res.json()) as Record<string, any>;
       expect(data.next).toBeNull();
+    });
+
+    it("falls back to a prompt excerpt when task_description is empty", async () => {
+      // One-off rows make `task_description` an optional label, so it can be
+      // an empty string; the route coalesces to a prompt excerpt for the
+      // dashboard "Next Up" card. `task_prompt` itself is never surfaced raw.
+      db.prepare(
+        `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+         VALUES (datetime('now', '+1 hour'), 'wake', '', 'Review the open release PR and merge once CI is green', 'pending')`,
+      ).run();
+
+      const res = await app.request("/api/schedule/next", {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as Record<string, any>;
+      expect(data.next.task_description).toBe(
+        "Review the open release PR and merge once CI is green",
+      );
+      // The raw prompt column is not leaked alongside the coalesced label.
+      expect(data.next.task_prompt).toBeUndefined();
+    });
+
+    it("falls back to a prompt excerpt when task_description is whitespace-only", async () => {
+      // A non-empty-but-blank description (truthy string, trim length 0) must
+      // still trip the prompt-excerpt fallback rather than render as blank.
+      db.prepare(
+        `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+         VALUES (datetime('now', '+1 hour'), 'wake', '   ', 'Send the weekly digest to the team channel', 'pending')`,
+      ).run();
+
+      const res = await app.request("/api/schedule/next", {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as Record<string, any>;
+      expect(data.next.task_description).toBe(
+        "Send the weekly digest to the team channel",
+      );
+    });
+
+    it("coalesces to an empty label when both task_description and task_prompt are empty", async () => {
+      // Defensive: a row with neither a label nor a prompt (e.g. a malformed
+      // legacy insert) yields an empty string, never a JSON null/undefined.
+      db.prepare(
+        `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status)
+         VALUES (datetime('now', '+1 hour'), 'wake', '', NULL, 'pending')`,
+      ).run();
+
+      const res = await app.request("/api/schedule/next", {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as Record<string, any>;
+      expect(data.next.task_description).toBe("");
     });
   });
 

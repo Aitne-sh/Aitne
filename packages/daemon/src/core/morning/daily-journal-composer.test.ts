@@ -236,6 +236,11 @@ describe("extractJournalSections", () => {
     expect(result).toContain("I quoted the close tag");
     expect(result).toContain("Some more prose.");
   });
+
+  it("returns null when a close tag exists but no open tag precedes it", () => {
+    const output = ["Some prose.", "</aitne:daily-journal-body>"].join("\n");
+    expect(extractLastTaggedBlock(output, "aitne:daily-journal-body")).toBeNull();
+  });
 });
 
 // ── Pure composer ────────────────────────────────────────────────────
@@ -320,6 +325,24 @@ describe("composeDailyJournal", () => {
       body: "# 2026-05-22 (Friday)",
       frontmatter: {
         projects: ["", "  ", "real"],
+        people: [],
+        tags: [],
+      },
+      agentLastSyncedAtIso: "2026-05-23T19:01:12.345Z",
+    });
+    expect(composed).toContain("\nprojects:\n  - real\n");
+  });
+
+  it("coerces non-string array entries to '' and drops them", () => {
+    // A malformed frontmatter array carrying a non-string (e.g. a number
+    // the LLM emitted unquoted) exercises the `: ""` typeof guard.
+    const composed = composeDailyJournal({
+      skeleton: baseSkeleton,
+      calendarEvents: 0,
+      messagesHandled: 0,
+      body: "# 2026-05-22 (Friday)",
+      frontmatter: {
+        projects: [123 as unknown as string, null as unknown as string, "real"],
         people: [],
         tags: [],
       },
@@ -675,6 +698,21 @@ describe("DailyJournalComposer.compose", () => {
     expect(written).toContain("Body line");
     expect(written).toContain("Revision body");
     expect(written).toContain("## Agent revision — 2026-05-23T19:01:12.345Z");
+  });
+
+  it("falls back to wall-clock time when deps.now is not provided", async () => {
+    const { deps } = makeDeps();
+    const { now: _omit, ...depsNoNow } = deps;
+    const composer = new DailyJournalComposer(depsNoNow);
+    const result = await composer.compose(makeArgs());
+    expect(result).toMatchObject({ ok: "complete" });
+    const written = readFileSync(
+      join(tmpDir, "journal", "daily", "2026-05-22.md"),
+      "utf-8",
+    );
+    // The `agent_last_synced_at`/`updated` timestamps now come from the
+    // real clock; assert the frontmatter still serialised a valid ISO date.
+    expect(written).toMatch(/updated: \d{4}-\d{2}-\d{2}/);
   });
 });
 

@@ -14,11 +14,14 @@
       ]
     },
     {
-      "path": "git-repos/*.md",
-      "purpose": "Per-repository context for non-project watched repositories",
+      "path": "git/*/overview.md",
+      "purpose": "Per-repository overview for every git-managed repo (replaces the retired git-repos/*.md layout)",
       "sections": [
-        { "heading": "## Activity", "contains": "summarised recent activity for the watched repo" },
-        { "heading": "## Recent Pushes", "contains": "list of push events with dates and short summaries" }
+        { "heading": "## Summary", "contains": "one-paragraph description of the repo and its current state" },
+        { "heading": "## Architecture", "contains": "structural notes on the repo's layout and components" },
+        { "heading": "## Notable Changes", "contains": "human-readable notes on important commits or decisions" },
+        { "heading": "## Open Threads", "contains": "manual prose; follow-ups and pending questions, preserved verbatim" },
+        { "heading": "## Daily Activity Log", "contains": "rolling 30-day window of summarised activity" }
       ]
     }
   ]

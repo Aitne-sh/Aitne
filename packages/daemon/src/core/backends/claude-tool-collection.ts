@@ -88,6 +88,39 @@ function extractCurlSegment(scan: string): string {
     : tail;
 }
 
+/**
+ * Collect the top-level (argv, not body) http(s) URL tokens from a
+ * heredoc-stripped command. A token counts as a target URL when it is a
+ * bare `http(s)://…` token OR a token whose ENTIRE content between matching
+ * quotes is such a URL. URLs that appear inside a larger quoted token
+ * (a JSON `-d` body, an `-H` header value) are intentionally not counted —
+ * the surrounding token carries non-URL characters, so neither pattern
+ * matches.
+ *
+ * Caller invariant: `tokenizable` is the output of `stripBashHeredocs` over
+ * the line-continuation-joined command, so heredoc bodies (stdin payload,
+ * never argv) and continuation-line smuggling cannot contribute a token. The
+ * curl hook's multi-URL block check is the sole caller; the single-pure-curl
+ * allow gate reuses its `topLevelUrls` result rather than recomputing.
+ */
+function collectTopLevelHttpUrls(tokenizable: string): string[] {
+  const tokenRe = /'[^']*'|"[^"]*"|[^'"\s]+/g;
+  const urls: string[] = [];
+  let tokenMatch: RegExpExecArray | null;
+  while ((tokenMatch = tokenRe.exec(tokenizable)) !== null) {
+    const token = tokenMatch[0];
+    if (/^https?:\/\//.test(token)) {
+      urls.push(token);
+      continue;
+    }
+    const quoted = /^(['"])(https?:\/\/[^'"\s]+)\1$/.exec(token);
+    if (quoted) {
+      urls.push(quoted[2]);
+    }
+  }
+  return urls;
+}
+
 function realpathLenient(absPath: string): string {
   const segments: string[] = [];
   let current = absPath;
@@ -452,6 +485,29 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       | { command?: string }
       | undefined;
     const cmd = toolInput?.command ?? "";
+    // Collapse shell line-continuations (`\<NL>`) into a single logical line
+    // BEFORE deriving any analysis view. Two reasons, both load-bearing:
+    //
+    //   1. Faithful firewall. `stripBashHeredocs` greedily erases from the
+    //      FIRST newline through the heredoc's closing delimiter. On a
+    //      multi-line `curl … \<NL> -o /etc/passwd <<'D' … D` the dangerous
+    //      flag sits on a continuation line ahead of the heredoc and would
+    //      vanish from `scan` / `curlScan` / `tokenizable` — so the `-o` /
+    //      `--proxy` / `-d @file` / multi-URL checks below would all skip it.
+    //      Joining first puts every flag back on the curl line where the
+    //      scanners see it. (Latent pre-join hole; only masked because the
+    //      SDK denied multi-line heredoc curls outright. The allow gate at
+    //      the foot of this block now grants those, so the firewall MUST see
+    //      the real command.)
+    //   2. Enables the high-value retry fix. The multi-KB `today.md` PUT /
+    //      `schedule/batch` POST bodies the agent writes use exactly the
+    //      continued-then-heredoc shape; joining lets a clean one reach the
+    //      allow gate instead of being refused.
+    //
+    // `\<NL>` → space: the shell deletes it outright, but a space only ever
+    // SPLITS tokens, which is strictly safer for substring/token scanners —
+    // it can never merge a hidden metacharacter or URL away.
+    const joinedCmd = cmd.replace(/\\\r?\n/g, " ");
     // Three views of the command, each used by a different class of check:
     //
     // - `cmd` (raw)         — the initial `\bcurl\b` keyword presence test.
@@ -478,8 +534,8 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
     // routinely contains the source URL ("Source: https://news.example.com/…").
     // Before this layered design the URL extractor scanned `cmd`, found
     // the body URL, and falsely blocked with "Multiple URL targets".
-    const scan = stripBashStringContent(cmd);
-    const tokenizable = stripBashHeredocs(cmd);
+    const scan = stripBashStringContent(joinedCmd);
+    const tokenizable = stripBashHeredocs(joinedCmd);
     // Scope short-flag presence checks (`-c`, `-w`, `-D`, `-x`, `-L`,
     // `-T`, …) to just the curl invocation. Without this scoping, pipeline
     // tail commands that share a short-flag letter with curl trip false
@@ -559,24 +615,7 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
       //    shell argv — without that strip, the routine wiki.ingest_url
       //    shape of "store an article body that mentions other URLs"
       //    would trip this multi-URL rule on the body URL.
-      const topLevelTokenRe = /'[^']*'|"[^"]*"|[^'"\s]+/g;
-      const topLevelUrls: string[] = [];
-      let tokenMatch: RegExpExecArray | null;
-      while ((tokenMatch = topLevelTokenRe.exec(tokenizable)) !== null) {
-        const token = tokenMatch[0];
-        if (/^https?:\/\//.test(token)) {
-          topLevelUrls.push(token);
-          continue;
-        }
-        // Fully-quoted URL token: the WHOLE content between matching
-        // single or double quotes must be the URL — anything else
-        // (JSON body, header value) starts with non-URL characters
-        // after the quote.
-        const quoted = /^(['"])(https?:\/\/[^'"\s]+)\1$/.exec(token);
-        if (quoted) {
-          topLevelUrls.push(quoted[2]);
-        }
-      }
+      const topLevelUrls = collectTopLevelHttpUrls(tokenizable);
       if (topLevelUrls.length > 1) {
         return {
           decision: "block" as const,
@@ -864,6 +903,74 @@ export function buildSecurityHooks(deps: SecurityHooksDeps, allowMode = false) {
         return {
           decision: "block" as const,
           reason: "curl -L / --location not allowed — would follow redirects off localhost",
+        };
+      }
+      // ── All curl firewall checks passed → grant permission explicitly. ──
+      //
+      // Why this is necessary (not just `{ continue: true }`): the SDK's
+      // `permissionMode: "dontAsk"` falls back to `allowedTools` prefix
+      // matching, and `Bash(curl *)` does NOT match a heredoc-bodied curl
+      // (`curl … -d @- <<'JSON' … JSON`) — the SDK command parser treats the
+      // heredoc redirect as un-prefixable and silently denies it. That shape
+      // is the DOCUMENTED way to send multi-KB context / observation bodies
+      // (agent-assets/skills/context/references/api.md; the curl shim's
+      // `-d @-` stdin path in daemon-api-cli.ts). The mismatch denied ~98%
+      // of heredoc curls in production, triggering multi-turn inline-retry
+      // storms and partial routine runs (fetch_window calendar posts, today
+      // PATCHes, observation batches). Returning `{ continue: true }` here
+      // means the carefully-built curl firewall above validates the command
+      // but then defers the verdict to a matcher that rejects the very shape
+      // the system tells the agent to use. This hook IS the curl authority
+      // (loopback-only host/port, single request, no file read/write, no
+      // connection override, no redirect-follow), so it grants permission.
+      //
+      // SAFETY — only a SINGLE, PURE curl is granted. The firewall above
+      // validates the curl invocation's flags/target, but does NOT bound a
+      // *second* command (`curl localhost/api/x && rm -rf ~`), a shell
+      // redirect (`curl localhost/api/x > /etc/passwd`), a pipe-to-shell
+      // (`curl … | sh`), or a command/variable expansion
+      // (`curl … -H "X: $(whoami)"`, `… $TOKEN`). The three checks below cap
+      // the grant to a lone curl; anything else falls through to
+      // `{ continue: true }` and stays under allowedTools + the absolute-block
+      // hook + the authoritative `disallowedTools` deny rules exactly as
+      // today. The `<<` heredoc is the one permitted redirect — its body is
+      // stdin payload, never argv, and is already validated above.
+      //
+      // All three views (`scan`, `curlScan`, `topLevelUrls`) are derived from
+      // the line-continuation-JOINED command (see the join at the top of this
+      // hook), so a metacharacter / flag / second URL smuggled onto a
+      // continuation line ahead of the heredoc cannot hide from these checks.
+      const heredocCarved = scan.replace(
+        /<<-?\s*(?:'[^']*'|"[^"]*"|\w+)/g,
+        " ",
+      );
+      // `scan` (single-quoted strings + heredoc bodies collapsed, heredoc op
+      // carved out) must carry no shell control character: `| ; & \` < > $`
+      // cover pipes, sequencing, background / and-lists, command substitution
+      // (backtick / `$(`), redirects, and variable / command expansion (`$`).
+      const hasShellMeta = /[|;&`<>$]/.test(heredocCarved);
+      // No command may trail the curl segment — `extractCurlSegment` stops at
+      // the first unquoted `| ; newline && ||`, so anything non-blank after it
+      // (e.g. a command on the line following a heredoc's closing delimiter)
+      // means the invocation is not a lone curl.
+      const curlStart = scan.search(/\bcurl\b/);
+      const trailing = scan.slice(curlStart + curlScan.length).trim();
+      // `topLevelUrls.length === 1` and every URL being localhost:apiPort are
+      // already guaranteed by the block returns above (length 0 / >1 and any
+      // non-localhost target each `block`); re-asserting the count keeps the
+      // grant condition self-evident at the call site.
+      const isSinglePureCurl =
+        topLevelUrls.length === 1 && !hasShellMeta && trailing.length === 0;
+      if (isSinglePureCurl) {
+        return {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse" as const,
+            permissionDecision: "allow" as const,
+            permissionDecisionReason:
+              "Single loopback daemon-API curl validated by bashCurlHook "
+              + "(localhost host/port, one request, no file I/O, redirect, "
+              + "or shell expansion).",
+          },
         };
       }
     }

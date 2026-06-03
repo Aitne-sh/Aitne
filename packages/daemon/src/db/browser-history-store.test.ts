@@ -222,6 +222,57 @@ describe("browser-history-store P2 helpers", () => {
         .get("quantum-mechanics") as { status: string };
       expect(row.status).toBe("dormant");
     });
+
+    it("updates by root_task_id when the derived slug drifts (no UNIQUE crash)", () => {
+      // First tick: dominant term yields slug "quantum-mechanics".
+      upsertResearchClusters(db, [cluster()], nowMs);
+      // Next tick for the SAME root task: the dominant domain/term shifted, so
+      // the extractor derives a different slug. The stable identity is
+      // root_task_id — this must update in place, not throw on the root_task_id
+      // UNIQUE constraint.
+      expect(() =>
+        upsertResearchClusters(
+          db,
+          [
+            {
+              ...cluster({ meaningfulVisitsTotal: 99 }),
+              slug: "stack-overflow-rust",
+              displayName: "Stack Overflow Rust",
+            },
+          ],
+          nowMs,
+        ),
+      ).not.toThrow();
+      const rows = db
+        .prepare(
+          "SELECT slug, meaningful_visits_total AS n FROM browser_research_clusters WHERE root_task_id = ?",
+        )
+        .all(11) as { slug: string; n: number }[];
+      // Exactly one row, the persisted slug preserved (so pending offers keyed
+      // on the old slug stay joined), counters updated.
+      expect(rows).toHaveLength(1);
+      expect(rows[0].slug).toBe("quantum-mechanics");
+      expect(rows[0].n).toBe(99);
+    });
+
+    it("disambiguates the slug PK when two roots derive the same slug across ticks", () => {
+      upsertResearchClusters(db, [cluster({ rootTaskId: 11 })], nowMs);
+      // A different root task derives the same base slug in a later tick — the
+      // in-run usedSlugs set can't see the persisted row, so the store must
+      // disambiguate to avoid the slug PRIMARY KEY collision.
+      expect(() =>
+        upsertResearchClusters(db, [cluster({ rootTaskId: 22 })], nowMs),
+      ).not.toThrow();
+      const slugs = db
+        .prepare(
+          "SELECT slug FROM browser_research_clusters ORDER BY root_task_id",
+        )
+        .all() as { slug: string }[];
+      expect(slugs.map((r) => r.slug)).toEqual([
+        "quantum-mechanics",
+        "quantum-mechanics-22",
+      ]);
+    });
   });
 
   describe("replaceShoppingSessions", () => {

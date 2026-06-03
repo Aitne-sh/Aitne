@@ -132,7 +132,7 @@ project?"* → user replies "yeah" → route through the context skill's
 "Project DM-intent detection" §"Reply branches" with branch=
 affirmative.
 
-**Scheduling.** Recurring ("every hour", "every morning at 9", "weekly", "25th of each month") → `POST /api/recurring-schedules`. One-shot ("tomorrow 3pm", "in 30 min") → `POST /api/schedule/dm` (pre-composed; default) or `POST /api/schedule` (wake-up). Edit / cancel / list use the same endpoints. Load the schedule skill for the request shape, dedup pre-check, and description contract. Use `<current_time>` for timezone resolution. Prefer `tier` over `model`; the two are mutually exclusive on a single row.
+**Scheduling.** Recurring autonomous **work** ("every hour check X and act") → create an **Agent** via the `agent-create` skill (`POST /api/agents`). Recurring scheduled **DM / briefing** ("DM me every morning at 9") → `POST /api/recurring-schedules` (`taskType: "dm_session"`). One-shot ("tomorrow 3pm", "in 30 min") → `POST /api/schedule/dm` (pre-composed; default) or `POST /api/schedule` (wake-up). Load the `schedule` skill (one-shot + recurring-DM) or `agent-create` (recurring work Agents). Use `<current_time>` for timezone resolution. Prefer `tier` over `model`; the two are mutually exclusive.
 
 Schedules go through this daemon — never through any cloud-hosted scheduled-agent feature your CLI may expose. Cloud routines cannot reach `localhost:8321`, so they cannot deliver via the user's chat platforms or use any integration registered here.
 

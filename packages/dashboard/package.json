@@ -30,9 +30,9 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start --port 3000",
+    "start": "next start",
     "lint": "eslint .",
     "clean": "node ../../scripts/rm-paths.mjs .next out tsconfig.tsbuildinfo"
   },
@@ -55,6 +55,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
+    "js-yaml": "^4.1.0",
     "lucide-react": "^0.468.0",
     "next": "^16.2.6",
     "next-themes": "^0.4.6",
@@ -68,6 +69,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4.2.2",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

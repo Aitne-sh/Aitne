@@ -48,7 +48,7 @@ The daemon:
    tool against the per-task allowed-tools envelope, validates the
    final JSON against your `outputSchema`, returns it.
 
-`outputSchema` is **required** (4 KB cap). Defaults: `maxToolCalls=7`,
+`outputSchema` is **required** (4 KB cap). Defaults: `maxToolCalls=8`,
 `maxBudgetUsd=0.05`, `timeoutMs=60000`. Bump up to 15 / 0.50 / 300000
 for genuinely larger intents.
 

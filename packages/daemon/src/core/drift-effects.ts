@@ -505,13 +505,18 @@ function enqueueTodayRefresh(
   // post-morning flush; the prefix encodes which.
   const correlationId
     = `drift:${params.integration}:${params.windowKey}:${params.requestedAt}`;
+  const driftInstruction =
+    "Refresh today.md User Schedule after calendar drift.";
   db.prepare(
     `INSERT INTO agent_schedule
-       (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-     VALUES (?, 'wake', ?, ?, ?, NULL, 'pending')`,
+       (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+     VALUES (?, 'wake', ?, ?, ?, ?, NULL, 'pending')`,
   ).run(
     formatSqliteDatetime(params.scheduledFor),
-    "Refresh today.md User Schedule after calendar drift.",
+    // task_description (label) doubles as task_prompt (agent instruction);
+    // routing is via task_context.routine = "today_refresh".
+    driftInstruction,
+    driftInstruction,
     JSON.stringify({
       routine: "today_refresh",
       source: "integration_drift",

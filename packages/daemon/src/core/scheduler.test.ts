@@ -12,6 +12,7 @@ import {
 import { EventBus } from "./event-bus.js";
 import {
   formatSqliteDatetime,
+  nowInTimezone,
   type AgentTaskEvent,
   type RoutineEvent,
 } from "@aitne/shared";
@@ -372,6 +373,49 @@ describe("AgentScheduler", () => {
     expect(event.requestedModel).toBeUndefined();
   });
 
+  // AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1 fix (2026-06-01) — an
+  // engine-only Agent pin stores backend_id with NO model. The watcher
+  // must emit `requestedBackendId` ALONE so resolveBinding's backend-only
+  // branch resolves the model from the row's tier / the backend default.
+  // Before the fix this row fell through to no-override and the engine
+  // selection was silently lost.
+  it("emits requestedBackendId alone when backend_id is set without a model (engine-only pin)", async () => {
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, backend_id, status) VALUES (datetime('now', '-1 minutes'), 'wake', 'engine-only codex pin', 'codex', 'pending')",
+    ).run();
+
+    setup.config.schedulePollIntervalSeconds = 0.1;
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, setup.config);
+    scheduler2.start();
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    const event = await setup.eventBus.get() as AgentTaskEvent;
+    expect(event.type).toBe("scheduled.task");
+    expect(event.requestedBackendId).toBe("codex");
+    // No model column → no exact-model pin; resolveBinding fills it from tier/default.
+    expect(event.requestedModelId).toBeUndefined();
+    expect(event.requestedModel).toBeUndefined();
+  });
+
+  it("emits requestedBackendId alone on scheduled.dm for an engine-only pin", async () => {
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, backend_id, status) VALUES (datetime('now', '-1 minutes'), 'dm_session', 'engine-only dm pin', '{\"sub_flow\":\"morning_briefing\"}', 'codex', 'pending')",
+    ).run();
+
+    setup.config.schedulePollIntervalSeconds = 0.1;
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, setup.config);
+    scheduler2.start();
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    const event = await setup.eventBus.get() as AgentTaskEvent;
+    expect(event.type).toBe("scheduled.dm");
+    expect(event.requestedBackendId).toBe("codex");
+    expect(event.requestedModelId).toBeUndefined();
+    expect(event.requestedModel).toBeUndefined();
+  });
+
   it("falls through to no-override when model is a registered-id but backend_id is NULL (legacy row)", async () => {
     // Legacy rows pre-Phase-A had a full id in `model` and no
     // backend_id companion. §9 of the redesign documents these as
@@ -489,13 +533,14 @@ describe("AgentScheduler", () => {
     expect(event.task).toBe("detailed agent instruction body");
   });
 
-  it("falls back to task_description when task_prompt is NULL", async () => {
-    // Default behavior preserved for skill-created and system-generated rows
-    // that never populate task_prompt.
+  it("uses task_prompt as the agent body, NOT task_description (no fallback)", async () => {
+    // The dispatcher reads task_prompt directly; task_description is only a
+    // list label. Every insert site sets task_prompt (and a backfill migration
+    // filled legacy rows), so the old `?? task_description` fallback is gone.
     setup.db.prepare(
       `INSERT INTO agent_schedule
-         (scheduled_for, task_type, task_description, status)
-       VALUES (datetime('now', '-1 minutes'), 'wake', 'description-only task', 'pending')`,
+         (scheduled_for, task_type, task_description, task_prompt, status)
+       VALUES (datetime('now', '-1 minutes'), 'wake', 'short label', 'the agent instruction body', 'pending')`,
     ).run();
 
     setup.config.schedulePollIntervalSeconds = 0.1;
@@ -506,7 +551,7 @@ describe("AgentScheduler", () => {
 
     const event = await setup.eventBus.get() as AgentTaskEvent;
     expect(event.type).toBe("scheduled.task");
-    expect(event.task).toBe("description-only task");
+    expect(event.task).toBe("the agent instruction body");
   });
 
   it("dispatches task_type='dm_session' as a scheduled.dm event", async () => {
@@ -514,7 +559,7 @@ describe("AgentScheduler", () => {
     // session. The row's task_type drives the event type, which in
     // turn is the routing axis for profile + skill set selection.
     setup.db.prepare(
-      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_context, status) VALUES (datetime('now', '-1 minutes'), 'dm_session', 'morning briefing — daily summary', '{\"sub_flow\":\"morning_briefing\",\"pin_to_quiet_hours_end\":true}', 'pending')",
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, task_context, status) VALUES (datetime('now', '-1 minutes'), 'dm_session', 'morning briefing — daily summary', 'morning briefing — daily summary', '{\"sub_flow\":\"morning_briefing\",\"pin_to_quiet_hours_end\":true}', 'pending')",
     ).run();
 
     setup.config.schedulePollIntervalSeconds = 0.1;
@@ -586,13 +631,28 @@ describe("AgentScheduler", () => {
   });
 
   it("defers task_type='browser_task' when current time falls inside quiet hours", async () => {
-    // Set a 23-hour quiet-hours window that covers every wall-clock
-    // minute except 23:00-23:01. Whatever time the test runs, the
-    // window is in quiet hours. The branch should re-schedule the row
-    // forward to the end of the window and revert `status` to `pending`.
+    // A quiet-hours window can cover at most 1439 of a day's 1440 minutes
+    // — equal start/end is the "disabled" idiom (see quiet-hours.ts) — so
+    // any STATIC window leaves a one-minute gap that flakes whenever the
+    // suite happens to run inside it. (The previous "00:00"–"23:00" window
+    // left the whole 23:00–23:59 hour uncovered and failed nightly.)
+    // Derive the window from the current wall-clock minute instead: open it
+    // exactly at "now" and close it two hours later. Wall-clock time only
+    // moves forward between here and the scheduler's `new Date()` read, so
+    // the dispatch instant is guaranteed inside the window, while the
+    // unavoidable gap sits ~22 h away. `timezone: ""` makes both this
+    // computation and the scheduler use system-local time identically.
+    const local = nowInTimezone(undefined);
+    const nowMinutes = local.hours * 60 + local.minutes;
+    const fmtHhMm = (mins: number) => {
+      const norm = ((mins % 1440) + 1440) % 1440;
+      const hh = String(Math.floor(norm / 60)).padStart(2, "0");
+      const mm = String(norm % 60).padStart(2, "0");
+      return `${hh}:${mm}`;
+    };
     const cfg = { ...setup.config } as AgentConfig;
-    (cfg as { quietHoursStart: string }).quietHoursStart = "00:00";
-    (cfg as { quietHoursEnd: string }).quietHoursEnd = "23:00";
+    (cfg as { quietHoursStart: string }).quietHoursStart = fmtHhMm(nowMinutes);
+    (cfg as { quietHoursEnd: string }).quietHoursEnd = fmtHhMm(nowMinutes + 120);
     (cfg as { browserTaskRespectQuietHours: boolean }).browserTaskRespectQuietHours = true;
     cfg.schedulePollIntervalSeconds = 0.1;
 
@@ -713,7 +773,7 @@ describe("AgentScheduler", () => {
     // Insert with a past-relative time so it gets picked up immediately
     const pastUtc = formatSqliteDatetime(new Date(Date.now() - 60_000));
     setup.db.prepare(
-      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, status) VALUES (?, 'wake', 'tz test', 'pending')",
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, status) VALUES (?, 'wake', 'tz test', 'tz test', 'pending')",
     ).run(pastUtc);
 
     setup.config.schedulePollIntervalSeconds = 0.1;

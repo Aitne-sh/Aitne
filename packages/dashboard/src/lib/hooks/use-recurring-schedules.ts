@@ -13,7 +13,12 @@ import type { ScheduleTier } from "@/lib/hooks/use-schedule-mutations";
 const KEY = ["recurring-schedules"] as const;
 
 export interface RecurringScheduleCreateInput {
-  taskType: string;
+  /**
+   * Recurring schedules are `dm_session`-only — the daemon 410s any other
+   * taskType (recurring `agent.task` work moved to POST /api/agents). Pinned
+   * to the literal so a caller can't construct a body the API would reject.
+   */
+  taskType: "dm_session";
   description: string;
   /** Optional override for the agent body. Min 20 chars when set. */
   prompt?: string;

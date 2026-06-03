@@ -233,6 +233,9 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // DB has zero rows AND the message text carries no `mt_<n>` /
     // "managed task" / "recurring fetch" anchor.
     "managed-tasks",
+    // Scheduling split — author a recurring Agent when the user asks for an
+    // ongoing cadence (`/schedule` is one-shot only).
+    "agent-create",
   ],
   "message.received.dm_first": [
     "context",
@@ -248,6 +251,8 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "roadmap",
     "management-policy",
     "managed-tasks",
+    // Scheduling split — recurring tasks are Agents (see `message.received`).
+    "agent-create",
     // DM handler decides whether the inbound topic is a natural moment
     // to weave a latent profile question into the reply, and ticks the
     // queue when the user answers a previously-asked one. See
@@ -278,6 +283,8 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "management-policy",
     "managed-tasks",
     "user-interview",
+    // Scheduling split — recurring tasks are Agents (see `message.received`).
+    "agent-create",
     // BROWSER_HISTORY_INTEGRATION_PLAN §10.1 (seventh-pass) — narrow
     // accept-surface for natural-language reply to a research offer
     // DM. The skill body documents the intent-mapping rules
@@ -565,6 +572,10 @@ export const ALL_SKILLS = [
   // `browser-history-managed` skill that fronted the frozen workflow
   // registry was retired alongside the route + routines in Phase 6.
   "browser-task",
+  // Scheduling split — `/schedule` is one-shot only; recurring tasks are
+  // Agents. This skill teaches the DM agent to author a detailed recurring
+  // Agent (`POST /api/agents`) when the user asks for an ongoing cadence.
+  "agent-create",
 ];
 
 const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
@@ -813,6 +824,34 @@ export function managedTasksActiveForDm(
 }
 
 /**
+ * Scheduling split — predicate for the `agent-create` skill (teaches the DM
+ * agent to author a recurring **work** Agent via `POST /api/agents`). Loaded
+ * only when the inbound DM looks like a recurring-autonomous-work request:
+ * a recurring cadence AND an autonomous-work verb (so a recurring *DM*
+ * — "DM me every morning", which belongs on `dm_session` — and a one-shot
+ * "remind me tomorrow" both miss). A direct "automate" / "recurring agent"
+ * phrasing fires on its own. Message-only (the skill has no runtime DB state);
+ * a DM with no message text (test default) drops the skill.
+ */
+const AGENT_CREATE_CADENCE_RE =
+  /\b(every\s+(day|morning|evening|night|hour|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|each\s+(day|morning|week|month)|daily|weekly|monthly|hourly|recurring|recurrence|from now on|on a schedule|regularly|periodically)\b/i;
+const AGENT_CREATE_WORK_RE =
+  /\b(triage|check|review|monitor|fetch|pull|scan|audit|sync|compile|summari[sz]e|update|maintain|run|process|organi[sz]e|generate|analy[sz]e|watch|track)\b/i;
+const AGENT_CREATE_DIRECT_RE =
+  /\b(recurring agent|automate|automatically|set up an agent|create an agent|spawn an agent)\b/i;
+
+export function agentCreateActiveForDm(
+  messageText: string | null | undefined,
+): boolean {
+  if (!messageText) return false;
+  if (AGENT_CREATE_DIRECT_RE.test(messageText)) return true;
+  return (
+    AGENT_CREATE_CADENCE_RE.test(messageText) &&
+    AGENT_CREATE_WORK_RE.test(messageText)
+  );
+}
+
+/**
  * `evening-review-slimdown.md` §2.1 — context-aware manifest resolver.
  *
  * Wraps the static `EVENT_SKILL_SETS` lookup with per-event predicates that
@@ -880,6 +919,12 @@ export function resolveSkillManifest(
     ) {
       result = result.filter((slug) => slug !== "managed-tasks");
     }
+    if (
+      result.includes("agent-create") &&
+      !agentCreateActiveForDm(opts?.messageText ?? null)
+    ) {
+      result = result.filter((slug) => slug !== "agent-create");
+    }
   } else if (routineEventsWithGmailLifestyle.has(eventType)) {
     if (
       result.includes("gmail-lifestyle") &&
@@ -930,4 +975,48 @@ export function getProfileForProcess(processKey: ProcessKey): string {
 
 export function getSkillsForProcess(processKey: ProcessKey): string[] {
   return getSkillsForEvent(PROCESS_TO_EVENT_TYPE[processKey] ?? processKey);
+}
+
+/**
+ * Compose an Agent definition's `tools.skills` (AGENT_DEFINITIONS_DESIGN.md
+ * §4.2 / `packages/shared/src/agent-definitions.ts` `skills_replace`) with the
+ * process-key default skill bundle. The schema comment promised "the loader
+ * composes the effective set"; this is that composition, applied at session
+ * materialisation (`materializeSessionBundle`) where the skill set is actually
+ * resolved.
+ *
+ * Semantics:
+ *   - `replace === false` (default): union — the default bundle PLUS every
+ *     extra slug not already present. Base order first (so the manifest's
+ *     intentional ordering is preserved), then appended extras.
+ *   - `replace === true`: the extra list is a strict subset that fully
+ *     supplants the default bundle.
+ *   - empty / absent `extra`: pure no-op — returns a copy of `base` unchanged,
+ *     INCLUDING when `replace` is true. An Agent that sets `skills_replace`
+ *     with no `skills` is treated as "no override" rather than "strip every
+ *     skill", because stripping `context` / `notify` from the bundle would
+ *     break the run; callers that want an empty set pass it explicitly and
+ *     the dispatcher gates the override on a non-empty list anyway.
+ *
+ * Output is always deduped (a slug appearing in both base and extra, or twice
+ * in extra, lands once). Unknown slugs are NOT filtered here — the
+ * materialiser skips any slug whose `SKILL.md` is absent on disk, and the
+ * Agent loader already emits an "unknown skill" warning at parse time — so
+ * keeping them keeps the stamp/drift snapshot and this list in agreement.
+ */
+export function composeSkillSet(
+  base: readonly string[],
+  extra: readonly string[] | undefined | null,
+  replace: boolean,
+): string[] {
+  if (!extra || extra.length === 0) return [...base];
+  const source = replace ? extra : [...base, ...extra];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const slug of source) {
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+  }
+  return out;
 }

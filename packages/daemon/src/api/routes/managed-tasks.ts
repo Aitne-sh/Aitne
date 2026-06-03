@@ -913,16 +913,20 @@ export function createManagedTasksRoutes(deps: ManagedTasksRoutesDeps): Hono {
     let scheduledRowId: number;
     try {
       const result = db.transaction(() => {
+        const adhocLabel = `[${id}] ad-hoc — ${existing.intent}`;
         const insert = db
           .prepare(
             `INSERT INTO agent_schedule
-                (scheduled_for, task_type, task_description, task_context,
+                (scheduled_for, task_type, task_description, task_prompt, task_context,
                  status, recurring_schedule_id, correlation_id)
-              VALUES (datetime('now'), ?, ?, ?, 'pending', ?, ?)`,
+              VALUES (datetime('now'), ?, ?, ?, ?, 'pending', ?, ?)`,
           )
           .run(
             RUN_NOW_TASK_TYPE,
-            `[${id}] ad-hoc — ${existing.intent}`,
+            // task_description (label) === task_prompt (agent body); the real
+            // task is resolved from task_context.mt_id at fire time.
+            adhocLabel,
+            adhocLabel,
             JSON.stringify({
               mt_id: id,
               app: existing.app,

@@ -23,6 +23,8 @@ import { discardStalePendingSchedules } from "./schedule-maintenance.js";
 import { createLogger } from "../logging.js";
 import type { MessageDelivery } from "../adapters/message-hub.js";
 import { reconcileRecurringSchedules } from "../db/recurring-schedules.js";
+import { recordAgentFiringBlocked } from "./agents/firing-blocked.js";
+import type { AgentEnabledCache } from "./agents/loader.js";
 import {
   getStalledMorningRoutineWake,
   readMorningRoutineStallThresholdMinutes,
@@ -200,12 +202,15 @@ interface ScheduleRow {
    *  dispatcher hands it to `resolveBinding` ahead of the legacy
    *  model-derived tier. See `schema.ts` table comment. */
   tier_override: string | null;
-  /** SCHEDULE_API_REDESIGN_PLAN §4.3a — captured backend pin that
-   *  companions `model`. Non-NULL only when the operator pinned a
-   *  registered full model id (e.g. 'claude-opus-4-8'). The dispatcher's
-   *  override block guards on BOTH `requestedBackendId` AND
-   *  `requestedModelId` together; without this companion, a stored
-   *  full-id `model` value is silently dropped at dispatch. */
+  /** SCHEDULE_API_REDESIGN_PLAN §4.3a — captured backend (engine) pin.
+   *  Two valid shapes: (a) companioned by a registered full model id in
+   *  `model` (e.g. 'claude-opus-4-8') → the dispatcher emits both and the
+   *  override pins an exact model; (b) standalone (`model` NULL) → the
+   *  dispatcher emits `requestedBackendId` alone and resolveBinding's
+   *  backend-only branch resolves the model from the row's tier / the
+   *  backend default. Engine-only Agent pins ("run this on codex") use
+   *  shape (b); before 2026-06-01 a standalone backend_id was silently
+   *  dropped at dispatch (AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1). */
   backend_id: string | null;
   status: string;
   recurring_schedule_id: number | null;
@@ -292,6 +297,13 @@ export class AgentScheduler {
    */
   private autonomousGate: (() => null | string) = () => null;
   private lastGateBlockLoggedAt = 0;
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §7.1 — per-built-in enabled gate. Wired from
+   * the Phase-7 boot path via {@link setAgentEnabledCache}; until then (and in
+   * tests that construct a bare scheduler) it is `null` and the gate is a
+   * no-op, so disabling is opt-in and never accidentally stops a routine.
+   */
+  private agentEnabledCache: AgentEnabledCache | null = null;
   /**
    * Single source of truth for the ScheduleWatcher's between-poll wake
    * signaling, unifying what was previously a (pollAbort: AbortController
@@ -398,6 +410,42 @@ export class AgentScheduler {
    */
   setAutonomousGate(fn: () => null | string): void {
     this.autonomousGate = fn;
+  }
+
+  /**
+   * Wire the live built-in enabled cache (AGENT_DEFINITIONS_DESIGN.md §7.1).
+   * The loader watcher + the `PATCH /api/agents/:slug` handler call
+   * `cache.invalidate()` so the next firing re-queries the DB.
+   */
+  setAgentEnabledCache(cache: AgentEnabledCache): void {
+    this.agentEnabledCache = cache;
+  }
+
+  /**
+   * Per-built-in enabled gate (§7.1), checked BEFORE `autonomousGate()` in
+   * every built-in routine's cron callback. Returns `true` to proceed; on a
+   * disabled Agent returns `false` and records a throttled `agent.firing_blocked`
+   * audit row (one per agent-day, then `detail.suppressed_count++` — §12.3). It
+   * is placed AFTER each callback's runtime gates (monthly last-day, hourly
+   * interval, skill-curation cadence) so a per-minute hourly tick that is not a
+   * real firing never inflates the suppressed count. A `null` cache (unwired /
+   * tests) always proceeds.
+   */
+  private isAgentEnabledForFiring(slug: string, cronLabel: string): boolean {
+    if (this.agentEnabledCache === null) return true;
+    if (this.agentEnabledCache.isEnabled(slug)) return true;
+    try {
+      const agentDay = getAgentDayDateStr(
+        this.config.timezone || undefined,
+        this.config.dayBoundaryHour,
+        new Date(),
+      );
+      recordAgentFiringBlocked(this.db, { slug, agentDay, reason: "disabled" });
+    } catch (err) {
+      logger.warn({ err, slug, cron: cronLabel }, "Failed to record agent.firing_blocked");
+    }
+    logger.debug({ slug, cron: cronLabel }, "Agent disabled — routine firing blocked");
+    return false;
   }
 
   /** Log gate blocks at most once every 5 minutes to avoid spam. */
@@ -622,6 +670,7 @@ export class AgentScheduler {
     const morningJob = cron.schedule(
       `0 ${this.config.dayBoundaryHour} * * *`,
       () => {
+        if (!this.isAgentEnabledForFiring("morning-routine", "morning_routine")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "morning_routine" });
@@ -647,6 +696,7 @@ export class AgentScheduler {
     const eveningJob = cron.schedule(
       "0 18 * * *",
       () => {
+        if (!this.isAgentEnabledForFiring("evening-review", "evening_review")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "evening_review" });
@@ -666,6 +716,7 @@ export class AgentScheduler {
     const sweepMorningJob = cron.schedule(
       buildUserProfileSweepMorningCronExpr(this.config.dayBoundaryHour),
       () => {
+        if (!this.isAgentEnabledForFiring("user-profile-sweep-morning", "user_profile_sweep_morning")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "user_profile_sweep_morning" });
@@ -684,6 +735,7 @@ export class AgentScheduler {
     const sweepEveningJob = cron.schedule(
       USER_PROFILE_SWEEP_EVENING_CRON_EXPR,
       () => {
+        if (!this.isAgentEnabledForFiring("user-profile-sweep-evening", "user_profile_sweep_evening")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "user_profile_sweep_evening" });
@@ -708,6 +760,7 @@ export class AgentScheduler {
     const roadmapMaintenanceJob = cron.schedule(
       ROADMAP_MAINTENANCE_CRON_EXPR,
       () => {
+        if (!this.isAgentEnabledForFiring("roadmap-maintenance", "roadmap_maintenance")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "roadmap_maintenance" });
@@ -728,6 +781,7 @@ export class AgentScheduler {
     const weeklyJob = cron.schedule(
       "0 19 * * 5",
       () => {
+        if (!this.isAgentEnabledForFiring("weekly-review", "weekly_review")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "weekly_review" });
@@ -760,6 +814,7 @@ export class AgentScheduler {
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowLocal = nowInTimezone(tz, tomorrow);
         if (tomorrowLocal.day === 1) {
+          if (!this.isAgentEnabledForFiring("monthly-review", "monthly_review")) return;
           const gateReason = this.autonomousGate();
           if (gateReason !== null) {
             this.logGateBlock(gateReason, { cron: "monthly_review" });
@@ -782,6 +837,7 @@ export class AgentScheduler {
     const reconcilerJob = cron.schedule(
       reconcilerCron,
       () => {
+        if (!this.isAgentEnabledForFiring("context-index-reconcile", "context_index_reconcile")) return;
         const gateReason = this.autonomousGate();
         if (gateReason !== null) {
           this.logGateBlock(gateReason, { cron: "context_index_reconcile" });
@@ -869,6 +925,9 @@ export class AgentScheduler {
           ) {
             return;
           }
+          // Per-built-in enabled gate, AFTER the interval gate so a
+          // per-minute non-firing tick never inflates the suppressed count.
+          if (!this.isAgentEnabledForFiring("hourly-check", "hourly_check")) return;
           // triggerHourlyCheck has its own setup gate, but short-circuit
           // here to avoid the in-progress flag toggling for no reason.
           const gateReason = this.autonomousGate();
@@ -925,6 +984,7 @@ export class AgentScheduler {
             logger.debug({ cadence }, "skill_curation cadence interval not elapsed yet");
             return;
           }
+          if (!this.isAgentEnabledForFiring("skill-curation", "skill_curation")) return;
           const gateReason = this.autonomousGate();
           if (gateReason !== null) {
             this.logGateBlock(gateReason, { cron: "skill_curation" });
@@ -1063,15 +1123,20 @@ export class AgentScheduler {
         return { inserted: false as const, existingId: existing.id };
       }
 
+      const morningInstruction =
+        "Morning routine. Generate today.md and register the day schedule.";
       this.db
         .prepare(
           `INSERT INTO agent_schedule
-             (scheduled_for, task_type, task_description, task_context, correlation_id, model, status)
-           VALUES (?, 'wake', ?, ?, ?, NULL, 'pending')`,
+             (scheduled_for, task_type, task_description, task_prompt, task_context, correlation_id, model, status)
+           VALUES (?, 'wake', ?, ?, ?, ?, NULL, 'pending')`,
         )
         .run(
           scheduledFor,
-          "Morning routine. Generate today.md and register the day schedule.",
+          // task_description (list label) doubles as task_prompt (agent
+          // instruction) for this system-generated row.
+          morningInstruction,
+          morningInstruction,
           taskContext,
           wakeEvent.correlationId,
         );
@@ -1185,9 +1250,11 @@ export class AgentScheduler {
                 });
                 const event = {
                   ...base,
-                  // task_prompt overrides task_description as the agent body
-                  // when set; falls back to the description otherwise.
-                  task: row.task_prompt ?? row.task_description,
+                  // task_prompt is the agent body. Every insert site sets it
+                  // (and a backfill migration filled legacy rows), so the old
+                  // `?? task_description` fallback is gone; `?? ""` is only a
+                  // null-type guard that never fires in practice.
+                  task: row.task_prompt ?? "",
                   taskContext: JSON.parse(row.task_context ?? "{}"),
                   correlationId: row.correlation_id ?? base.correlationId,
                   scheduleId: row.id,
@@ -1199,22 +1266,30 @@ export class AgentScheduler {
                   ...(isProcessTier(row.tier_override)
                     ? { requestedTier: row.tier_override }
                     : {}),
-                  // `agent_schedule.model` is operator-supplied. Three
-                // resolution branches (SCHEDULE_API_REDESIGN_PLAN §4.3a):
+                  // `agent_schedule.model` is operator-supplied. Four
+                // resolution branches (SCHEDULE_API_REDESIGN_PLAN §4.3a;
+                // branch 3 added 2026-06-01 —
+                // AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1):
                 //   1. legacy alias 'sonnet' / 'opus' → `requestedModel`
                 //   2. registered model id paired with backend_id →
                 //      emit BOTH `requestedBackendId` and
                 //      `requestedModelId` so the dispatcher's override
-                //      block (which guards on both fields together)
-                //      actually fires. Without the backend companion the
-                //      pin is silently dropped.
-                //   3. model present but backend_id NULL (legacy rows or
+                //      block fires with an exact model pin.
+                //   3. backend_id WITHOUT a model → emit
+                //      `requestedBackendId` alone. resolveBinding's
+                //      backend-only branch resolves the model from the
+                //      row's tier / the backend default, so an engine-only
+                //      pin ("run this on codex") routes to that engine
+                //      instead of being silently dropped.
+                //   4. model present but backend_id NULL (legacy rows or
                 //      pure-tier rows) → fall through to no-override so
                 //      the row resolves via process-key defaults.
                 ...(row.model === "sonnet" || row.model === "opus"
                   ? { requestedModel: row.model as "sonnet" | "opus" }
                   : row.model && row.backend_id && isBackendId(row.backend_id)
                   ? { requestedBackendId: row.backend_id, requestedModelId: row.model }
+                  : row.backend_id && isBackendId(row.backend_id)
+                  ? { requestedBackendId: row.backend_id }
                   : {}),
                 } as ScheduledDmEvent;
 
@@ -1371,9 +1446,11 @@ export class AgentScheduler {
                   : undefined;
               const event = {
                 ...base,
-                // task_prompt overrides task_description as the agent body
-                // when set; falls back to the description otherwise.
-                task: row.task_prompt ?? row.task_description,
+                // task_prompt is the agent body. Every insert site sets it
+                // (and a backfill migration filled legacy rows), so the old
+                // `?? task_description` fallback is gone; `?? ""` is only a
+                // null-type guard that never fires in practice.
+                task: row.task_prompt ?? "",
                 taskContext: parsedTaskContext,
                 correlationId: row.correlation_id ?? base.correlationId,
                 scheduleId: row.id,
@@ -1389,13 +1466,17 @@ export class AgentScheduler {
                   : {}),
                 // `agent_schedule.model` is operator-supplied. See the
                 // scheduled.dm branch above (SCHEDULE_API_REDESIGN_PLAN
-                // §4.3a) for the three resolution branches. Same shape —
-                // a registered full model id requires the `backend_id`
-                // companion or it falls through to process-key defaults.
+                // §4.3a) for the four resolution branches. Same shape — a
+                // registered full model id pairs with `backend_id`; a
+                // standalone `backend_id` (no model) emits `requestedBackendId`
+                // alone (resolveBinding fills the model from tier / default);
+                // a model with no backend_id falls through to defaults.
                 ...(row.model === "sonnet" || row.model === "opus"
                   ? { requestedModel: row.model as "sonnet" | "opus" }
                   : row.model && row.backend_id && isBackendId(row.backend_id)
                   ? { requestedBackendId: row.backend_id, requestedModelId: row.model }
+                  : row.backend_id && isBackendId(row.backend_id)
+                  ? { requestedBackendId: row.backend_id }
                   : {}),
               } as AgentTaskEvent;
 

@@ -8,6 +8,15 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { ensureBuild } from "../scripts/run-node.mjs";
 import { fetchHttpOk, openBrowser } from "../scripts/browser.mjs";
+// Port defaults live in this plain-ESM module (NOT @aitne/shared, per the
+// pre-build constraint noted below). scripts/lib/ ships in the published
+// `files` list, so this import works in global installs too.
+import {
+  DEFAULT_API_PORT,
+  DEFAULT_DASHBOARD_PORT,
+  resolveApiPort,
+  resolveDashboardPort,
+} from "../scripts/lib/ports.mjs";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -55,8 +64,8 @@ const DAEMON_PID_FILE = path.join(PIDS_DIR, "daemon.pid");
 const DASHBOARD_PID_FILE = path.join(PIDS_DIR, "dashboard.pid");
 const DAEMON_LOG_FILE = path.join(DATA_DIR, "logs", "daemon.log");
 const DASHBOARD_LOG_FILE = path.join(DATA_DIR, "logs", "dashboard.log");
-const DAEMON_PORT = parseInt(process.env.PA_API_PORT || "8321", 10);
-const DASHBOARD_PORT = parseInt(process.env.PA_DASHBOARD_PORT || "3000", 10);
+const DAEMON_PORT = resolveApiPort();
+const DASHBOARD_PORT = resolveDashboardPort();
 
 const VERSION = JSON.parse(
   fs.readFileSync(path.join(PROJECT_ROOT, "package.json"), "utf8"),
@@ -1004,8 +1013,8 @@ Options:
 
 Environment:
   PA_DATA_DIR                       Data directory (default: ~/.personal-agent)
-  PA_API_PORT                       Daemon port (default: 8321)
-  PA_DASHBOARD_PORT                 Dashboard port (default: 3000)
+  PA_API_PORT                       Daemon port (default: ${DEFAULT_API_PORT})
+  PA_DASHBOARD_PORT                 Dashboard port (default: ${DEFAULT_DASHBOARD_PORT})
 
 Examples:
   aitne start                       Launch in background

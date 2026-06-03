@@ -52,6 +52,18 @@ function makeBashHookInput(command: string) {
   };
 }
 
+// A single, pure loopback daemon-API curl is granted EXPLICITLY by
+// `bashCurlHook` via `hookSpecificOutput.permissionDecision: "allow"`, rather
+// than deferring to `{ continue: true }`. The explicit grant is load-bearing:
+// the SDK's `dontAsk` mode falls back to `allowedTools` prefix matching, and
+// `Bash(curl *)` does NOT match a heredoc-bodied curl (`curl … -d @- <<'JSON'`)
+// — so without the grant those documented multi-KB POST bodies are silently
+// denied. See the allow-gate comment in claude-tool-collection.ts. Non-curl
+// commands (and impure/chained ones) still fall through to `{ continue: true }`.
+function expectCurlAllowed(r: any) {
+  expect(r.hookSpecificOutput?.permissionDecision).toBe("allow");
+}
+
 // ── Section 1: Template Injection ─────────────────
 
 describe("Security: Template Injection", () => {
@@ -143,14 +155,14 @@ describe("Security: curl URL Validation", () => {
     const r = await hookFn(
       makeBashHookInput("curl http://localhost:8321/api/health"),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows curl to 127.0.0.1:8321", async () => {
     const r = await hookFn(
       makeBashHookInput("curl http://127.0.0.1:8321/api/health"),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows curl POST to localhost:8321", async () => {
@@ -159,7 +171,7 @@ describe("Security: curl URL Validation", () => {
         'curl -X POST http://localhost:8321/api/notify -H "Content-Type: application/json" -d \'{"message":"test"}\'',
       ),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows non-curl bash commands", async () => {
@@ -226,7 +238,7 @@ describe("Security: curl URL Validation", () => {
     const r = await hookFn(
       makeBashHookInput("curl http://2130706433:8321/api/health"),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("blocks curl to 0.0.0.0 (not explicitly allowed)", async () => {
@@ -358,7 +370,7 @@ describe("Security: curl URL Validation", () => {
     const r = await hookFn(
       makeBashHookInput("curl -k http://localhost:8321/api/health"),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows curl with -X POST — not to be confused with -x (proxy)", async () => {
@@ -367,7 +379,7 @@ describe("Security: curl URL Validation", () => {
         'curl -X POST http://localhost:8321/api/notify -d \'{"msg":"hi"}\'',
       ),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   // ── Blocked: Variable expansion evasion ──
@@ -407,7 +419,7 @@ describe("Security: curl URL Validation", () => {
     const r = await customHookFn(
       makeBashHookInput("curl http://localhost:9000/api/health"),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("blocks curl to default port when custom port is configured", async () => {
@@ -437,7 +449,7 @@ describe("Security: curl Agent API Paths", () => {
         'curl -X POST http://localhost:8321/api/schedule -H "Content-Type: application/json" -d \'{"time":"2099-01-01T00:00:00+00:00","taskType":"wake","description":"test task description"}\'',
       ),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows curl to /api/schedule/dm (agent direct DM scheduling)", async () => {
@@ -446,7 +458,7 @@ describe("Security: curl Agent API Paths", () => {
         'curl -X POST http://localhost:8321/api/schedule/dm -H "Content-Type: application/json" -d \'{"time":"2099-01-01T00:00:00+00:00","message":"hi"}\'',
       ),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows curl to /api/notify", async () => {
@@ -455,7 +467,7 @@ describe("Security: curl Agent API Paths", () => {
         'curl -X POST http://localhost:8321/api/notify -H "Content-Type: application/json" -d \'{"message":"hi"}\'',
       ),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 
   it("allows curl to /api/context/today", async () => {
@@ -464,7 +476,7 @@ describe("Security: curl Agent API Paths", () => {
         "curl http://localhost:8321/api/context/today",
       ),
     );
-    expect(r.continue).toBe(true);
+    expectCurlAllowed(r);
   });
 });
 
