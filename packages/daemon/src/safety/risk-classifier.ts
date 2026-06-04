@@ -849,13 +849,22 @@ const API_RISK: Record<string, RiskTier> = {
   "GET /api/skill-curation/signals": RiskTier.Autonomous,
   "GET /api/skill-curation/knowledge-map": RiskTier.Autonomous,
   "GET /api/skill-curation/proposals/": RiskTier.Autonomous,
-  // Mutation endpoints are Autonomous — the optimizer agent's runToken
-  // (HMAC, one-time, scoped to a single run) is the auth surface, enforced
-  // inside the route. Per design §2.1 the chokepoint applies every passing
-  // proposal atomically; there are no per-proposal approve/reject/revert
-  // routes. The only roll-back path is the system-driven auto-revert
-  // (`auto-revert.ts`), which never crosses the HTTP boundary.
-  "POST /api/skill-curation/runs": RiskTier.Autonomous,
+  // Run minting (`POST /runs`, exact) is Approve. In production this surface
+  // is unused — the dispatcher's `materializeOptimizerWorkdir` mints the
+  // runId/runToken directly and never crosses the HTTP boundary (see the
+  // route handler comment). Leaving it Autonomous let any Bearer-less local
+  // caller (incl. a prompt-injected DM agent) mint a valid optimizer token
+  // once curation is opted in, then drive `/proposals` to self-author skill
+  // overlays — a least-privilege violation. Approve confines minting to the
+  // dashboard/operator; the legitimate optimizer reads its token from the
+  // workdir preamble, not this route.
+  "POST /api/skill-curation/runs": RiskTier.Approve,
+  // The proposal chokepoint and the per-run finalize stay Autonomous — both
+  // are gated by the optimizer's runToken (HMAC, scoped to a single run)
+  // enforced inside the route, and the legitimate optimizer agent reaches
+  // them via curl from its session workdir (no Bearer). Per design §2.1 the
+  // chokepoint applies every passing proposal atomically; the only roll-back
+  // path is the system-driven auto-revert (`auto-revert.ts`).
   "POST /api/skill-curation/proposals": RiskTier.Autonomous,
   "POST /api/skill-curation/runs/": RiskTier.Autonomous,
   // P22 §6.1 — settings + listing surfaces consumed by the dashboard.

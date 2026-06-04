@@ -268,6 +268,19 @@ describe("MCP API routes", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("DELETE /mcp/servers/:id/secrets/:key rejects unknown key names (symmetric with PUT)", async () => {
+    await req("POST", "/mcp/servers", {
+      id: "a",
+      name: "A",
+      transport: "stdio",
+      command: "x",
+      envKeys: ["KNOWN"],
+      backends: ["claude"],
+    });
+    const bad = await req("DELETE", "/mcp/servers/a/secrets/UNKNOWN");
+    expect(bad.status).toBe(400);
+  });
+
   it("404 responses for missing ids across every route", async () => {
     expect((await req("GET", "/mcp/servers/none")).status).toBe(404);
     expect((await req("PATCH", "/mcp/servers/none", { name: "x" })).status).toBe(404);

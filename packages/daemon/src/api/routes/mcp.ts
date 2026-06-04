@@ -498,6 +498,29 @@ export function createMcpRoutes(deps: McpRouteDependencies): Hono {
         composeIssue("mcp.not_found", { field: "id", received: id }),
       ]);
     }
+    // Validate keyName against the server's declared keys, mirroring the PUT
+    // handler. Without this guard DELETE accepted any raw `keyName` from the
+    // URL and removed the corresponding `mcp:<id>:<keyName>` blob — an
+    // asymmetry that let a caller target blobs the server never declared.
+    const keys = new Set([...server.envKeys, ...server.headerKeys]);
+    if (!keys.has(keyName)) {
+      return respondWithAgentError(
+        c,
+        400,
+        [
+          composeIssue("mcp.unknown_key", {
+            field: "keyName",
+            received: keyName,
+            expected: `one of ${[...keys].join(", ")}`,
+          }),
+        ],
+        {
+          legacyFields: {
+            message: `keyName must be declared in envKeys/headerKeys: ${keyName}`,
+          },
+        },
+      );
+    }
     await deleteAllMcpSecrets(blobStore, id, [keyName]);
     return c.json({ status: "deleted" });
   });

@@ -138,8 +138,12 @@ export function createGitRoutes(deps: GitRouteDependencies): Hono {
 
     // Use || (not ??) so explicit ?ref= (empty string) falls back to default
     const ref = c.req.query("ref") || "HEAD~1..HEAD";
-    // Sanitize ref — reject shell metacharacters and flag-like arguments
-    if (/[;&|`$]/.test(ref) || ref.startsWith("-")) {
+    // Sanitize ref — reject shell metacharacters and flag-like arguments.
+    // Also reject `:` — `git diff <rev>:<path>` is blob/tree syntax that reads
+    // arbitrary committed file content, beyond this endpoint's commit-diff
+    // purpose. No legitimate commit/range ref (`HEAD~1..HEAD`, `origin/main`)
+    // contains a colon. (execFile already prevents shell injection.)
+    if (/[;&|`$]/.test(ref) || ref.startsWith("-") || ref.includes(":")) {
       return respondWithAgentError(c, 400, [
         composeIssue("git.invalid_ref", {
           field: "ref",
@@ -180,7 +184,10 @@ export function createGitRoutes(deps: GitRouteDependencies): Hono {
     }
 
     const hash = c.req.query("hash") || "HEAD";
-    if (/[;&|`$]/.test(hash) || hash.startsWith("-")) {
+    // Reject `:` for the same reason as /git/diff — `git show <rev>:<path>`
+    // prints arbitrary committed file content, beyond this endpoint's
+    // commit-show purpose. A commit hash / ref never contains a colon.
+    if (/[;&|`$]/.test(hash) || hash.startsWith("-") || hash.includes(":")) {
       return respondWithAgentError(c, 400, [
         composeIssue("git.invalid_hash", {
           field: "hash",

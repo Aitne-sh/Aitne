@@ -259,9 +259,16 @@ function expandHomePreservingRelative(p: string): string {
 
 function serializeForEnv(value: unknown): string {
   if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+    // JSON.stringify already escapes \r / \n inside strings, so the
+    // serialized form is single-line and safe to write as one env value.
     return JSON.stringify(value);
   }
-  return String(value ?? "");
+  // Strip CR/LF from scalar values before they reach `updateEnvFile`. A raw
+  // newline in a string config value (e.g. a path or display name) would be
+  // written verbatim as `KEY=foo\nBAR=...`, and the injected `BAR=...` line
+  // would be parsed by dotenv as a separate variable on next load — silently
+  // corrupting `.env`. No legitimate bootstrap value contains a newline.
+  return String(value ?? "").replace(/[\r\n]+/g, " ");
 }
 
 export function getEnvFilePath(): string {

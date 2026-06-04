@@ -886,7 +886,11 @@ export function registerAgentScheduleRoutes(
           { legacyFields: { details: "Cannot parse time as a valid date" } },
         );
       }
-      // Reject past times for dm type (consistent with POST /schedule/dm)
+      // Reject past times for dm type (consistent with POST /schedule/dm).
+      // Non-dm rows (wake/check) intentionally allow a past `time` on PATCH so
+      // a schedule can be rescheduled for immediate catch-up execution — see
+      // the "no past-time rejection" test in agent.test.ts. A late DM, by
+      // contrast, is pointless, so only dm rows are rejected here.
       if (row.task_type === "dm" && parsedDate.getTime() < Date.now() - 60_000) {
         return respondWithAgentError(
           c,

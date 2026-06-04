@@ -281,7 +281,11 @@ export function createGitHubRoutes(deps: GitHubRouteDependencies): {
 
     const event = parseGitHubEvent(eventType, payload, resolved.repositoryId);
     if (event) {
-      eventBus.put(event);
+      // `EventBus.put` is async; awaiting it (like the repositories routes do)
+      // ensures the event is enqueued before the webhook returns `accepted`
+      // and surfaces any enqueue rejection instead of dropping it as an
+      // unhandled promise rejection.
+      await eventBus.put(event);
       logger.info(
         { eventType, action: payload.action, repositoryId: resolved.repositoryId },
         "GitHub webhook event received",

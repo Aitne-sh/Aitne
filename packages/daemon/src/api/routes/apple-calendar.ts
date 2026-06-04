@@ -274,7 +274,10 @@ export function createAppleCalendarRoutes(
     }
     let date = c.req.query("date") ?? localDateStr(new Date());
     if (date === "today") date = localDateStr(new Date());
-    const days = Math.min(Number(c.req.query("days") ?? "1"), 90);
+    // Guard non-finite `days` (e.g. `?days=abc` → NaN) so it can't propagate
+    // into `new Date(startMs + NaN).toISOString()` (RangeError → opaque 500).
+    const daysRaw = Number(c.req.query("days") ?? "1");
+    const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 90) : 1;
 
     const startMs = new Date(`${date}T00:00:00Z`).getTime();
     if (Number.isNaN(startMs)) {

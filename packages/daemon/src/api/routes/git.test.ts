@@ -187,6 +187,17 @@ describe("Git API routes", () => {
       expect(data.error).toBe("invalid ref format");
     });
 
+    it("rejects a colon in ref (blob/tree read syntax)", async () => {
+      // `git diff HEAD:README.md` would print committed file content, beyond
+      // the endpoint's commit-diff purpose.
+      const res = await app.request(
+        `/git/diff?repo=${encodeURIComponent(repoDir)}&ref=${encodeURIComponent("HEAD:README.md")}`,
+      );
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toBe("invalid ref format");
+    });
+
     it("rejects unknown repo", async () => {
       const res = await app.request(
         `/git/diff?repo=${encodeURIComponent("/not/allowed")}&ref=HEAD~1..HEAD`,
@@ -237,6 +248,14 @@ describe("Git API routes", () => {
     it("rejects shell metacharacters in hash", async () => {
       const res = await app.request(
         `/git/show?repo=${encodeURIComponent(repoDir)}&hash=${encodeURIComponent("HEAD`whoami`")}`,
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a colon in hash (blob/tree read syntax)", async () => {
+      // `git show HEAD:README.md` would print committed file content.
+      const res = await app.request(
+        `/git/show?repo=${encodeURIComponent(repoDir)}&hash=${encodeURIComponent("HEAD:README.md")}`,
       );
       expect(res.status).toBe(400);
     });

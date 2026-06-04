@@ -469,7 +469,12 @@ export const calendarFreeBusySchema = z.object({
 
 // ── Recurring Schedules ──
 
-const HH_MM_RE = /^\d{2}:\d{2}$/;
+// Strict 24-hour HH:MM. A loose `/^\d{2}:\d{2}$/` accepted out-of-range
+// values like "25:99", which `parseTime` (recurrence.ts) feeds to
+// `Date.UTC(..., 25, 99)` — silently wrapping to the next day ~02:39 instead
+// of erroring. Match the trigger schema's strict pattern so a bad time is
+// rejected at the validation boundary, not mis-fired at expansion time.
+const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
  * Recurrence schema. Four `frequency` values:

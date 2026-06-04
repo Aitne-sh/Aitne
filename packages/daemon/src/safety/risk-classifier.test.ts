@@ -122,6 +122,26 @@ describe("classifyRisk — integrations probe wildcard", () => {
   });
 });
 
+describe("classifyRisk — skill-curation run minting is Approve", () => {
+  it("POST /api/skill-curation/runs (token mint) requires Bearer", () => {
+    // The mint endpoint is a test seam; leaving it Autonomous let a Bearer-less
+    // caller mint a valid optimizer run-token. Approve confines it to the
+    // dashboard/operator.
+    expect(
+      classifyRisk("POST", "/api/skill-curation/runs"),
+    ).toBe(RiskTier.Approve);
+  });
+
+  it("proposals + finalize stay Autonomous (optimizer runToken is the gate)", () => {
+    expect(
+      classifyRisk("POST", "/api/skill-curation/proposals"),
+    ).toBe(RiskTier.Autonomous);
+    expect(
+      classifyRisk("POST", "/api/skill-curation/runs/skcur-123/finalize"),
+    ).toBe(RiskTier.Autonomous);
+  });
+});
+
 describe("classifyRisk — DELEGATED-TASK-MODE-DESIGN.md §4.2 generic /run", () => {
   it("POST /api/delegated/run is Approve-tier (Bearer required)", () => {
     // §4.2 / docs/design/14-integration-delegation.md §14.13.2 — wider

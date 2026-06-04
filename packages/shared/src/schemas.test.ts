@@ -663,6 +663,24 @@ describe("triggerUpdateSchema", () => {
     }).success).toBe(false);
   });
 
+  it("rejects out-of-range HH:MM (would silently wrap at expansion time)", () => {
+    // Old `/^\d{2}:\d{2}$/` accepted these; `Date.UTC(..., 25, 99)` then
+    // wrapped to the next day ~02:39 instead of erroring.
+    for (const time of ["25:99", "24:00", "29:00", "08:60", "00:99"]) {
+      expect(
+        recurrenceRuleSchema.safeParse({ frequency: "daily", time }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("accepts valid 24-hour edge times", () => {
+    for (const time of ["00:00", "09:30", "23:59"]) {
+      expect(
+        recurrenceRuleSchema.safeParse({ frequency: "daily", time }).success,
+      ).toBe(true);
+    }
+  });
+
   // ── hourly frequency ─────────────────────────────────────────────
   it("accepts hourly with no extra fields (defaults: 1h, :00)", () => {
     expect(recurrenceRuleSchema.safeParse({

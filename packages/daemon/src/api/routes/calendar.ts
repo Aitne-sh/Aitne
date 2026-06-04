@@ -247,7 +247,12 @@ export function createCalendarRoutes(deps: CalendarRouteDependencies): Hono {
       if (date === "today") {
         date = localDateStr(new Date());
       }
-      const days = Math.min(Number(c.req.query("days") ?? "1"), 90);
+      // Guard non-finite `days` (e.g. `?days=abc` → NaN) — without it the
+      // NaN propagates into `new Date(startMs + NaN).toISOString()`, which
+      // throws RangeError and surfaces as an opaque 500 instead of a sane
+      // bounded window. Clamp finite values to [1, 90]; fall back to 1.
+      const daysRaw = Number(c.req.query("days") ?? "1");
+      const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 90) : 1;
 
       // Append Z to ensure UTC parsing regardless of OS timezone
       const startMs = new Date(`${date}T00:00:00Z`).getTime();
@@ -643,7 +648,12 @@ export function createCalendarRoutes(deps: CalendarRouteDependencies): Hono {
       if (date === "today") {
         date = localDateStr(new Date());
       }
-      const days = Math.min(Number(c.req.query("days") ?? "1"), 90);
+      // Guard non-finite `days` (e.g. `?days=abc` → NaN) — without it the
+      // NaN propagates into `new Date(startMs + NaN).toISOString()`, which
+      // throws RangeError and surfaces as an opaque 500 instead of a sane
+      // bounded window. Clamp finite values to [1, 90]; fall back to 1.
+      const daysRaw = Number(c.req.query("days") ?? "1");
+      const days = Number.isFinite(daysRaw) ? Math.min(Math.max(daysRaw, 1), 90) : 1;
       const startMs = new Date(`${date}T00:00:00Z`).getTime();
       if (Number.isNaN(startMs)) {
         return respondWithAgentError(c, 400, [

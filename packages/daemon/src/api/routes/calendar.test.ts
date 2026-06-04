@@ -80,6 +80,22 @@ describe("Calendar API routes", () => {
       expect(res.status).toBe(502);
     });
 
+    it("falls back to a 1-day window when ?days is non-finite (no RangeError 500)", async () => {
+      // Regression: `Number("abc")` → NaN propagated into
+      // `new Date(startMs + NaN).toISOString()`, throwing RangeError → 500.
+      // The guard now clamps NaN to a 1-day window.
+      const cal = makeMockCalendar();
+      const app = createCalendarRoutes({ services: makeServices(cal) });
+      const res = await app.request("/calendar/events?date=2026-01-01&days=abc");
+      expect(res.status).toBe(200);
+      expect(cal.listEvents).toHaveBeenCalledWith(
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-02T00:00:00.000Z",
+        undefined,
+        undefined,
+      );
+    });
+
     // The ISO-range shape was added 2026-05-17 for the weekly_review
     // `cal_iso_week_to_now` pre-pass row. Direct mode previously used
     // `date=YYYY-MM-DD&days=7`, whose end snaps to UTC midnight of "today
@@ -861,6 +877,37 @@ describe("Calendar API routes", () => {
           endUtc: "2026-05-06T00:00:00.000Z",
         },
         { calendarId: "cal-foo" },
+      );
+    });
+
+    it("falls back to a 1-day window when ?days is non-finite (no RangeError 500)", async () => {
+      // Regression mirror of the Google route — NaN `days` must not reach
+      // `new Date(startMs + NaN).toISOString()`.
+      const fakeCalendarClient = {
+        listCalendars: vi.fn(),
+        listEvents: vi.fn(async () => []),
+      };
+      const fakeRegistry = {
+        listActiveAccounts: () => [{ id: "outlook-1", kind: "outlook" } as const],
+        getProvider: vi.fn(async () => ({
+          kind: "outlook",
+          createCalendarClient: () => fakeCalendarClient,
+        })),
+      };
+      const app = createCalendarRoutes({
+        services: {
+          calendar: null,
+          mail: fakeRegistry,
+        } as unknown as ServiceRegistry,
+      });
+      const res = await app.request("/calendar/outlook/events?date=2026-05-04&days=abc");
+      expect(res.status).toBe(200);
+      expect(fakeCalendarClient.listEvents).toHaveBeenCalledWith(
+        {
+          startUtc: "2026-05-04T00:00:00.000Z",
+          endUtc: "2026-05-05T00:00:00.000Z",
+        },
+        {},
       );
     });
 
