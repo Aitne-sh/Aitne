@@ -985,9 +985,17 @@ export class MessageHandler {
       // detection. Docs-QA messages are docs lookups, not feedback
       // signals, so they bypass the detector entirely.
       if (!isDocsQAMessage(event)) {
+        const responseToNotificationId =
+          typeof (event.data as { notificationDispatchId?: unknown }).notificationDispatchId === "string"
+            ? (event.data as { notificationDispatchId: string }).notificationDispatchId
+            : typeof (event.data as { notification_dispatch_id?: unknown }).notification_dispatch_id === "string"
+              ? (event.data as { notification_dispatch_id: string }).notification_dispatch_id
+              : undefined;
         this.getSignalDetector()?.onUserMessage({
           platform: event.platform,
+          channel: event.channel,
           content: event.content,
+          responseToNotificationId,
         });
       }
 

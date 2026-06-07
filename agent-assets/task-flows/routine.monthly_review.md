@@ -236,6 +236,27 @@ continue.
    cross-week frequency and drop the rest. Single-week anomalies are already
    in that week's journal entry and do not need re-listing.
 
+   For each concrete, actionable bullet in `### Proposed adjustments`, also
+   record a structured self-critique signal:
+
+   ```
+   POST /api/feedback
+   {
+     "source": "self_critique",
+     "summary": "<the specific testable adjustment, max 280 chars>",
+     "valence": "neutral",
+     "kind": "do-more",
+     "scope_type": "agent",
+     "action_kind": "agent_execution",
+     "evidence": { "excerpt": "monthly_review YYYY-MM proposed adjustment" }
+   }
+   ```
+
+   Post only concrete proposed adjustments. Do not post every retrospective
+   sentence, metrics row, or vague wish. If an adjustment is clearly about one
+   named Agent Definition's output, use `scope_type: "agent_slug"` and
+   `scope_ref` with that slug; otherwise keep `scope_type: "agent"`.
+
    If `journal/agent.md` does not yet exist, PUT a minimal file with
    `# Agent Journal\n\n` header plus this section, in a single call.
 

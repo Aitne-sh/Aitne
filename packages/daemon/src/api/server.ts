@@ -41,6 +41,7 @@ import { createSystemRoutes } from "./routes/system.js";
 import { createBackendRoutes } from "./routes/backends.js";
 import { createSkillsRoutes } from "./routes/skills.js";
 import { createObservationRoutes } from "./routes/observations.js";
+import { createFeedbackRoutes } from "./routes/feedback.js";
 import { createSkillCurationRoutes } from "./routes/skill-curation.js";
 import { createProfileQuestionsRoutes } from "./routes/profile-questions.js";
 import { createRecurringScheduleRoutes } from "./routes/recurring-schedules.js";
@@ -953,6 +954,7 @@ export function createApp(deps: ApiDependencies): Hono {
   const backendRoutes = createBackendRoutes(deps);
   const skillsRoutes = createSkillsRoutes({ config: deps.config });
   const observationRoutes = createObservationRoutes(deps);
+  const feedbackRoutes = createFeedbackRoutes(deps);
   const skillCurationRoutes = createSkillCurationRoutes(deps);
   const profileQuestionsRoutes = createProfileQuestionsRoutes(deps);
   const recurringScheduleRoutes = createRecurringScheduleRoutes(deps);
@@ -1031,6 +1033,7 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", backendRoutes);
   app.route("/api", skillsRoutes);
   app.route("/api", observationRoutes);
+  app.route("/api", feedbackRoutes);
   app.route("/api", skillCurationRoutes);
   app.route("/api", profileQuestionsRoutes);
   app.route("/api", recurringScheduleRoutes);

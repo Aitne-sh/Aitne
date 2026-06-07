@@ -641,7 +641,7 @@ export async function createEventPipeline(
   initTaskFlows(config.workspaceDir, config.dataDir);
 
   // ── Signal detector + dispatcher ──────────────────────────────────────
-  const signalDetector = new SignalDetector(config);
+  const signalDetector = new SignalDetector(config, { db });
 
   const dispatcher = new EventDispatcher(
     eventBus,

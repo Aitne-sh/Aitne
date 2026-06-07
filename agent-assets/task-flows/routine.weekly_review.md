@@ -320,6 +320,27 @@ workflow; the skill owns the file contract.
    everything — the monthly review synthesizes across weeks and surfaces
    recurring items anyway.
 
+   For each concrete, actionable bullet in `### System improvement ideas`,
+   also record a structured self-critique signal:
+
+   ```
+   POST /api/feedback
+   {
+     "source": "self_critique",
+     "summary": "<the specific testable improvement, max 280 chars>",
+     "valence": "neutral",
+     "kind": "do-more",
+     "scope_type": "agent",
+     "action_kind": "agent_execution",
+     "evidence": { "excerpt": "weekly_review YYYY-Www system improvement idea" }
+   }
+   ```
+
+   Post only concrete improvement ideas. Do not post every retrospective
+   sentence, metrics row, or vague wish. If an idea is clearly about one
+   named Agent Definition's output, use `scope_type: "agent_slug"` and
+   `scope_ref` with that slug; otherwise keep `scope_type: "agent"`.
+
    If `journal/agent.md` does not yet exist (GET returns 404), PUT a minimal
    file with just `# Agent Journal\n\n` as header and your new section below
    it, in a single call. Do not abort the review.

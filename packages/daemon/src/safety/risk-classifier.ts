@@ -471,6 +471,8 @@ const API_RISK: Record<string, RiskTier> = {
   "PUT /api/observations/{*}/consume": RiskTier.Autonomous,
   "PATCH /api/observations/{*}/consume": RiskTier.Autonomous,
   "DELETE /api/observations/{*}/consume": RiskTier.Autonomous,
+  "POST /api/feedback": RiskTier.Autonomous,
+  "POST /api/feedback/consume": RiskTier.Autonomous,
 
   // ── Notification ──
   "/api/notify": RiskTier.Autonomous,

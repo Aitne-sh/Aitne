@@ -214,3 +214,23 @@ describe("runtimeSettingsSchema — browser-task knobs (Phase 1)", () => {
     ).toBe(false);
   });
 });
+
+describe("runtimeSettingsSchema — feedback learning knobs", () => {
+  it("defaults feedback learning on with bounded caps and retention", () => {
+    const parsed = runtimeSettingsSchema.parse({});
+    expect(parsed.feedbackLearningEnabled).toBe(true);
+    expect(parsed.feedbackPromotionThreshold).toBe(2);
+    expect(parsed.feedbackLessonMaxBytesGlobal).toBe(8192);
+    expect(parsed.feedbackLessonMaxBytesPerAgent).toBe(4096);
+    expect(parsed.feedbackLessonStaleDays).toBe(60);
+    expect(parsed.feedbackSignalRetentionDays).toBe(180);
+  });
+
+  it("rejects out-of-range feedback learning knobs", () => {
+    expect(runtimeSettingsSchema.safeParse({ feedbackPromotionThreshold: 0 }).success).toBe(false);
+    expect(runtimeSettingsSchema.safeParse({ feedbackLessonMaxBytesGlobal: 999 }).success).toBe(false);
+    expect(runtimeSettingsSchema.safeParse({ feedbackLessonMaxBytesPerAgent: 511 }).success).toBe(false);
+    expect(runtimeSettingsSchema.safeParse({ feedbackLessonStaleDays: 6 }).success).toBe(false);
+    expect(runtimeSettingsSchema.safeParse({ feedbackSignalRetentionDays: 29 }).success).toBe(false);
+  });
+});

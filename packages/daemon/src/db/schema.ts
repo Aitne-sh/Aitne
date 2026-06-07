@@ -388,6 +388,34 @@ CREATE TABLE IF NOT EXISTS notification_log (
 CREATE INDEX IF NOT EXISTS idx_notification_dispatch
     ON notification_log(dispatch_id, platform);
 
+-- ── Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md Phase 1) ────────
+--
+-- Typed, append-only raw feedback signals. This is the structured sibling of
+-- identity/profile.md "Raw Signals": behavioral notification outcomes, explicit
+-- owner directives, and review-routine self-critique all land here before the
+-- nightly consolidation pass promotes them into scoped lessons.
+CREATE TABLE IF NOT EXISTS feedback_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    source TEXT NOT NULL
+        CHECK (source IN ('behavioral', 'explicit', 'self_critique')),
+    valence TEXT
+        CHECK (valence IN ('positive', 'negative', 'neutral', 'correction')),
+    scope_type TEXT NOT NULL
+        CHECK (scope_type IN ('user', 'agent', 'agent_slug', 'channel', 'task', 'integration')),
+    scope_ref TEXT,
+    action_kind TEXT,
+    action_ref TEXT,
+    agent_id TEXT,
+    summary TEXT NOT NULL,
+    evidence_json JSON DEFAULT '{}',
+    consumed_at TIMESTAMP,
+    lesson_ref TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_unconsumed
+    ON feedback_signals(consumed_at, scope_type, scope_ref)
+    WHERE consumed_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS owner_channels (
     platform TEXT PRIMARY KEY,
     sender_id TEXT,

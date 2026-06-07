@@ -186,6 +186,7 @@ export default defineConfig({
         // siblings `system.ts` / `delegated-sync.ts` / `commands.ts` /
         // `git-templates.ts` all landed at 100% in the same pass.
         "packages/daemon/src/api/routes/observations.ts",
+        "packages/daemon/src/api/routes/feedback.ts",     // thin capture/consume Hono handler; peer test pins validation, dedup, sanitize, consume
         "packages/daemon/src/api/routes/skill-curation.ts",
         
         "packages/daemon/src/api/routes/wiki.ts",

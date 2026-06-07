@@ -470,6 +470,15 @@ describe("classifyRisk — git templates (P6 git-lifecycle-and-triggers.md)", ()
   });
 });
 
+describe("classifyRisk — feedback learning loop", () => {
+  it("feedback capture and consume are Autonomous agent-callable writes", () => {
+    expect(classifyRisk("POST", "/api/feedback")).toBe(RiskTier.Autonomous);
+    expect(classifyRisk("POST", "/api/feedback/consume")).toBe(
+      RiskTier.Autonomous,
+    );
+  });
+});
+
 describe("classifyRisk — RiskTier.Notify removed (DELEGATED-MODE-V2 §5.6)", () => {
   it("RiskTier no longer exposes a Notify member", () => {
     // Compile-time check: the enum union is the 3-tier set. Runtime sanity

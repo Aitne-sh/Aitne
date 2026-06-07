@@ -12,6 +12,10 @@ Apply the canonical capture-user-info routing below to `<user_input>`.
 
 {include:_partials/capture-user-info.md}
 
+Apply the canonical feedback-capture routing below to `<user_input>`.
+
+{include:_partials/feedback-capture.md}
+
 ### Step 2 — Profile-question reconcile / latent opportunity
 
 Two operations from the user-interview skill — run in order, before composing the reply.

@@ -31,6 +31,12 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "dmStalenessStrict",
   "proactiveForwardChannelTimelineEnabled",
   "proactiveForwardForceFreshSession",
+  "feedbackLearningEnabled",
+  "feedbackPromotionThreshold",
+  "feedbackLessonMaxBytesGlobal",
+  "feedbackLessonMaxBytesPerAgent",
+  "feedbackLessonStaleDays",
+  "feedbackSignalRetentionDays",
   "timezone", "dayBoundaryHour",
   // Monthly Review kill switch — defaults off pre-release; see
   // packages/daemon/src/settings/runtime-settings.ts for the rationale.
