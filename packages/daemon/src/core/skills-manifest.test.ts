@@ -1703,7 +1703,7 @@ describe("per-skill body line-range pin (P1)", () => {
     // after the per-skill verbosity trims + reference extractions landed.
     context: { designTarget: 120, regressionCeiling: 120 },
     roadmap: { designTarget: 180, regressionCeiling: 207 },
-    notion: { designTarget: 70, regressionCeiling: 100 }, // +6 (94→95, ceiling re-ratcheted ×1.05): untrusted-content prompt-injection directive added 2026-06
+    notion: { designTarget: 70, regressionCeiling: 94 },
     attach: { designTarget: 80, regressionCeiling: 90 },
     // Operational-procedure-heavy skills — regression-guard ceiling
     // set above current size. Per-skill phases (§§ in

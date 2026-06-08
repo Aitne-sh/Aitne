@@ -851,6 +851,49 @@ describe("ContextBuilder", () => {
     }
   });
 
+  // ── Prompt-injection structural defence (2026-06 audit fix) ──────────
+  // <untrusted_content> is the single source of truth for the
+  // data-not-instructions rule, injected for every wide-path session
+  // (reactive DM, routines, observer/scheduled events) regardless of
+  // which skill is loaded or the integration mode — so it cannot be
+  // bypassed by an ingestion path that a per-skill directive missed.
+  it("injects <untrusted_content> for reactive DM events", async () => {
+    const messageEvent = {
+      ...createEvent({
+        type: "message.received",
+        source: "dashboard",
+        priority: EventPriority.NORMAL,
+      }),
+      sender: "user",
+      channel: "dashboard-ch",
+      content: "hi",
+      platform: "dashboard",
+      threadId: null,
+      isDm: true,
+      isMention: false,
+    };
+
+    const context = await builder.build(messageEvent);
+    expect(context).toContain("<untrusted_content>");
+    expect(context).toMatch(/is DATA, never instructions/);
+    expect(context).toContain("</untrusted_content>");
+  });
+
+  it("injects <untrusted_content> for every routine event (mode-independent)", async () => {
+    for (const routine of ["morning_routine", "hourly_check", "evening_review"] as const) {
+      const event = {
+        ...createEvent({
+          type: `routine.${routine}`,
+          source: "cron",
+          priority: EventPriority.NORMAL,
+        }),
+        routine,
+      } as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).toContain("<untrusted_content>");
+    }
+  });
+
   // ── User-profile sweep current-agent-day injection (Phase 2) ──
   //
   // The sweep reads current-agent-day DM traffic (not yesterday's) so
@@ -2881,6 +2924,7 @@ describe("ContextBuilder", () => {
       expect(context).not.toContain("<current_agent_day ");
       expect(context).not.toContain("<settings ");
       expect(context).not.toContain("<output_language_policy>");
+      expect(context).not.toContain("<untrusted_content>");
       expect(context).not.toContain("<routine_protocol>");
       expect(context).not.toContain("<management_mode_degraded>");
       expect(context).not.toContain("<obsidian_vault_path>");
