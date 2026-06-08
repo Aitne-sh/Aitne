@@ -26,7 +26,7 @@ ask_examples:
   - What is dayBoundaryHour?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - day boundary
   - 04:00
@@ -71,7 +71,7 @@ clean boundary before they start.
 
 - **Agent day**: the 24-hour window starting at the configured day-boundary hour and ending at the same hour the next calendar day.
 - **Day boundary**: the hour-of-day that starts the agent day. Configured via the `dayBoundaryHour` setting (default `4`, valid range `0`–`9`). Values above 9 are rejected — the boundary is intended for the small hours, not mid-day.
-- **Day-stamped file**: any file whose name includes `YYYY-MM-DD` (e.g. `journal/daily/2026-04-25.md`, `journal/weekly/2026-04-20.md`). The date stamp uses the agent-day boundary, not the calendar day.
+- **Day-stamped file**: any file whose name carries a date (e.g. `journal/daily/2026-04-25.md` with a `YYYY-MM-DD` stamp, `journal/weekly/2026-W17.md` with an ISO `YYYY-Www` week slug). The stamp uses the agent-day boundary, not the calendar day.
 
 ## Concrete Examples
 

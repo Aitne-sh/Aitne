@@ -430,7 +430,7 @@ describe("POST /api/delegated/run", () => {
     expect(observed).not.toBeNull();
     // The route must NOT forward `heavy` to the invoker — model tier is
     // fixed light per §4.2.
-    expect((observed as Record<string, unknown>).heavy).toBeUndefined();
+    expect((observed as unknown as Record<string, unknown>).heavy).toBeUndefined();
   });
 
   it("forwards x-event-id and x-process-key headers as parent attribution", async () => {
@@ -473,8 +473,8 @@ describe("POST /api/delegated/run", () => {
       }),
     });
     expect(res.status).toBe(200);
-    expect((observed as Record<string, unknown>).parentEventId).toBe("evt-123");
-    expect((observed as Record<string, unknown>).parentProcessKey).toBe("morning_routine");
+    expect((observed as unknown as Record<string, unknown>).parentEventId).toBe("evt-123");
+    expect((observed as unknown as Record<string, unknown>).parentProcessKey).toBe("morning_routine");
   });
 
   // DELEGATED-TASK-MODE-DESIGN.md §13 Phase 3.3 — verify the route forwards

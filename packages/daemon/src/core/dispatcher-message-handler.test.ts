@@ -44,12 +44,14 @@ function dmEvent(overrides: Partial<MessageEvent> = {}): MessageEvent {
   return {
     ...createEvent({
       type: "message.received",
-      platform: "dashboard",
-      channel: "chan-1",
-      sender: "owner",
-      content: "/auth status",
-      isDm: true,
+      source: "dashboard",
+      priority: 1,
     }),
+    platform: "dashboard",
+    channel: "chan-1",
+    sender: "owner",
+    content: "/auth status",
+    isDm: true,
     ...overrides,
   } as MessageEvent;
 }
@@ -219,8 +221,8 @@ function buildHandler(
 
   return {
     handler: new MessageHandler(deps),
-    notificationMgr,
-    audit,
+    notificationMgr: notificationMgr as { send: ReturnType<typeof vi.fn> },
+    audit: audit as { logSkip: ReturnType<typeof vi.fn> },
     authRecovery: authRecovery ?? makeAuthRecovery(),
     authHealthMonitor: authHealthMonitor ?? makeAuthHealthMonitor(),
     setSetupMode: (mode) => {

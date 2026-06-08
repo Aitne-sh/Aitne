@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { toSafeErrorMessage } from "../../logging.js";
+import { resolveWin32Invocation } from "../../core/backends/cli-utils.js";
 import type { McpProbeResult, McpServer } from "./types.js";
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -150,7 +151,32 @@ async function probeStdio(
   // required arrays, but the DB row can carry `args` as null, so only that
   // path is genuinely observable from tests.
   const env = buildStdioEnv(server.envKeys, options.secrets);
-  const child = spawn(server.command, server.args ?? [], {
+  // MCP stdio commands are overwhelmingly npx/uvx/pnpm launchers, which
+  // resolve to .cmd/.ps1 batch shims on Windows. The earlier stopgap used
+  // `shell: process.platform === "win32"`, which let cmd.exe re-parse
+  // metacharacters in the registered command/args (a corruption + injection
+  // surface for any DB-registered server whose command/args contain
+  // %VAR%/&/|/^). Instead route through the same injection-safe path
+  // runLineCommand uses: resolve the bare name via PATHEXT and launch a
+  // resolved `.cmd`/`.bat` through an explicit, hand-escaped `cmd.exe`
+  // wrapper with windowsVerbatimArguments. POSIX is byte-identical
+  // (resolveWin32Invocation is win32-only; the block below never runs, and
+  // windowsVerbatimArguments:false is inert there). The taskkill /T
+  // parent-pid walk in killTree still reaps the added cmd.exe wrapper.
+  let spawnCommand = server.command;
+  let spawnArgs = server.args ?? [];
+  let windowsVerbatim = false;
+  /* c8 ignore start — Windows-only .cmd/.bat shim resolution, untestable on POSIX CI. */
+  if (process.platform === "win32") {
+    const win = resolveWin32Invocation(server.command, server.args ?? []);
+    if (win) {
+      spawnCommand = win.command;
+      spawnArgs = win.args;
+      windowsVerbatim = win.windowsVerbatimArguments;
+    }
+  }
+  /* c8 ignore stop */
+  const child = spawn(spawnCommand, spawnArgs, {
     cwd: server.cwd ?? sandboxCwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -161,13 +187,9 @@ async function probeStdio(
     // hidden-window helps avoid a flashing console for child binaries.
     detached: process.platform !== "win32",
     windowsHide: true,
-    // MCP stdio commands are overwhelmingly npx/uvx/pnpm launchers, which
-    // resolve to .cmd/.ps1 batch shims on Windows; those need a shell to
-    // launch (shell:false spawn of a bare `npx` ENOENTs). POSIX keeps
-    // shell:false — bare npx/node resolve via PATH+exec-bit there. Same
-    // win32-gated pattern as scripts/run-node.mjs / bin/aitne.mjs spawns;
-    // the taskkill /T parent-pid walk above reaps the added cmd.exe wrapper.
-    shell: process.platform === "win32",
+    // The cmd.exe wrapper's args are pre-escaped for cmd.exe; tell Node not
+    // to re-quote them. Inert/false on POSIX and the direct-.exe path.
+    windowsVerbatimArguments: windowsVerbatim,
   });
 
   let settled = false;

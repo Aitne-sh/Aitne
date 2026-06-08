@@ -53,11 +53,13 @@ function makeAgentResult(overrides: Partial<AgentResult> = {}): AgentResult {
     numTurns: 1,
     costUsd: 0,
     durationMs: 1,
+    durationApiMs: 1,
+    stopReason: null,
     model: "test-model",
     backendId: "claude" as BackendId,
     sessionId: "test-session",
-    usage: null,
-    modelUsage: null,
+    usage: { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 },
+    modelUsage: {},
     costSource: "sdk",
     advisorCallCount: 0,
     ...overrides,
@@ -496,7 +498,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       const orch = makeOrchestrator();
       await orch.run({ parentEvent: makeParentEvent(), isRetry: true });
       expect(mocks.resultProcessor.processResult).toHaveBeenCalledTimes(1);
-      const event = mocks.resultProcessor.processResult.mock.calls[0]![1] as Event;
+      const event = (mocks.resultProcessor.processResult.mock.calls[0]! as unknown[])[1] as Event;
       expect(event.type).toBe("routine.morning_routine_today");
     });
 
@@ -549,7 +551,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // attempt's success.
       const successCalls = stageAMocks.resultProcessor.processResult.mock.calls;
       expect(successCalls).toHaveLength(1);
-      expect((successCalls[0]![1] as Event).type).toBe(
+      expect(((successCalls[0]! as unknown[])[1] as Event).type).toBe(
         "routine.morning_routine_journal",
       );
       // Stage A's rejection now writes a result='failed' row via
@@ -593,7 +595,7 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       // Stage A's success row still lands.
       const successCalls = stageBMocks.resultProcessor.processResult.mock.calls;
       expect(successCalls).toHaveLength(1);
-      expect((successCalls[0]![1] as Event).type).toBe(
+      expect(((successCalls[0]! as unknown[])[1] as Event).type).toBe(
         "routine.morning_routine_today",
       );
       // Stage B's rejection writes a result='failed' row via

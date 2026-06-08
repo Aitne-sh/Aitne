@@ -565,6 +565,53 @@ describe("GitHub webhook push handling", () => {
     );
   });
 
+  it("surfaces an EventBus.put rejection instead of dropping it", async () => {
+    // The webhook handler awaits `eventBus.put`. A rejected enqueue must
+    // propagate to Hono's error handler (500) rather than be swallowed as an
+    // unhandled promise rejection while the handler still returns 200
+    // `accepted`. This pins the await fix in github.ts.
+    const eventBus = {
+      put: vi.fn().mockRejectedValue(new Error("event queue saturated")),
+    };
+    const secretBroker = new SecretBroker(
+      new InMemorySecretStore({ githubWebhookSecret: secret }),
+      { cacheTtlMs: 0 },
+    );
+    seedRepoRow(db, "test-owner/test-repo");
+    const { webhookApp } = createGitHubRoutes({
+      db,
+      config: {} as unknown as AgentConfig,
+      secretBroker,
+      eventBus: eventBus as never,
+    });
+
+    const payload = {
+      action: "opened",
+      repository: { full_name: "test-owner/test-repo" },
+      pull_request: {
+        number: 7,
+        title: "Surface enqueue failures",
+        user: { login: "test-owner" },
+        html_url: "https://github.com/test-owner/test-repo/pull/7",
+        draft: false,
+      },
+    };
+    const raw = JSON.stringify(payload);
+
+    const res = await webhookApp.request("/webhook/github", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-github-event": "pull_request",
+        "x-hub-signature-256": sign(raw),
+      },
+      body: raw,
+    });
+
+    expect(eventBus.put).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(500);
+  });
+
   it("emits events for issues webhook", async () => {
     const eventBus = { put: vi.fn().mockResolvedValue(undefined) };
     const secretBroker = new SecretBroker(

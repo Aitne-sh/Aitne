@@ -25,7 +25,7 @@ ask_examples:
   - Will routines still run during quiet hours?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - quiet hours
   - dnd
@@ -94,8 +94,9 @@ timezone) before sending. The window may wrap midnight — the default
 ## Where in the Dashboard
 
 **Settings → Schedule** holds `quietHoursStart` and `quietHoursEnd`,
-shown as a red band on the same 24-hour slider as the hourly-check
-active window. There is **no overlap validation** — quiet hours and the
+shown as a red arc on the same 24-hour ring (dial) as the hourly-check
+active window — drag the handles to adjust either band. There is **no
+overlap validation** — quiet hours and the
 active window are allowed to overlap, and the morning routine fires
 regardless of where the bands sit.
 

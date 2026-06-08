@@ -142,8 +142,8 @@ describe("composeAllowlistRegex", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("ok");
-    expect(r.composed.test("https://ssl-images-amazon.com/")).toBe(true);
-    expect(r.composed.test("https://ssl-images-amazon.com/img/test.jpg")).toBe(true);
+    expect(r.composed!.test("https://ssl-images-amazon.com/")).toBe(true);
+    expect(r.composed!.test("https://ssl-images-amazon.com/img/test.jpg")).toBe(true);
   });
 
   it("accepts wildcard subdomain extras and matches one label deep", () => {
@@ -153,10 +153,10 @@ describe("composeAllowlistRegex", () => {
     });
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error("ok");
-    expect(r.composed.test("https://m.amazon.co.jp/")).toBe(true);
-    expect(r.composed.test("https://amazon.co.jp/")).toBe(true);
+    expect(r.composed!.test("https://m.amazon.co.jp/")).toBe(true);
+    expect(r.composed!.test("https://amazon.co.jp/")).toBe(true);
     // Does not over-match a different eTLD+1.
-    expect(r.composed.test("https://amazon.co.jp.attacker.test/")).toBe(false);
+    expect(r.composed!.test("https://amazon.co.jp.attacker.test/")).toBe(false);
   });
 
   it("emits a composed regex that requires path boundary on extras", () => {
@@ -167,7 +167,7 @@ describe("composeAllowlistRegex", () => {
     if (!r.ok) throw new Error("ok");
     // Reject `ssl-images-amazon.com.attacker.test` (prefix-only match).
     expect(
-      r.composed.test("https://ssl-images-amazon.com.attacker.test/"),
+      r.composed!.test("https://ssl-images-amazon.com.attacker.test/"),
     ).toBe(false);
   });
 

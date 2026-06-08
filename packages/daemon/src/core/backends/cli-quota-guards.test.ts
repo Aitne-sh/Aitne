@@ -201,7 +201,7 @@ describe("classifyCliFailure", () => {
 
   it("returns an extraClassifier verdict ahead of the auth branch", () => {
     const extraClassifier = vi.fn(
-      (message: string, backendId: "codex" | "gemini") =>
+      (message: string, backendId: "claude" | "codex" | "gemini" | "opencode") =>
         /denied by policy/i.test(message)
           ? new BackendDecisiveFailure(backendId, "policy_denied", new Error(message))
           : null,

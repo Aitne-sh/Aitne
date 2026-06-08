@@ -291,7 +291,7 @@ describe("recordTaskToolStep", () => {
         tokensInput: 10,
         tokensOutput: 20,
         durationMs: 100,
-        result: { threads: [] },
+        toolResult: { threads: [] },
       },
     });
 

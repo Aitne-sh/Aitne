@@ -611,7 +611,7 @@ describe("AgentScheduler", () => {
     ).get() as { status: string };
     expect(row.status).toBe("running");
 
-    const event = await setup.eventBus.get() as {
+    const event = await setup.eventBus.get() as unknown as {
       type: string;
       source: string;
       scheduleId: number;

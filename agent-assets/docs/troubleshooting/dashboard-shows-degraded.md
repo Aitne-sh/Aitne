@@ -13,9 +13,8 @@ category: troubleshooting
 summary: |
   A red "Daemon degraded" banner appears above every page when the daemon
   enters degraded mode. This almost always means your Obsidian-style primary
-  vault is unreachable (path moved, drive unplugged, or not yet seeded), or a
-  context migration is in progress. While degraded, every context write is
-  refused with HTTP 503.
+  vault is unreachable (path moved, drive unplugged, or not yet seeded). While
+  degraded, every context read AND write is refused with HTTP 503.
 section: troubleshooting
 status: stable
 tags:
@@ -29,7 +28,7 @@ ask_examples:
   - Why are context writes being refused with 503?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - degraded
   - degraded banner
@@ -62,8 +61,10 @@ related:
   followed by the offending path.
 - An **Open Management Mode** button on the right of the banner (links to
   Settings → Management Mode).
-- Any routine or skill that writes a context file fails: the context API
-  returns **HTTP 503** for every `POST`/`PUT`/`PATCH`/`DELETE` while degraded.
+- Any routine or skill that touches a context file fails: while degraded the
+  context API returns **HTTP 503** for every request — reads (`GET`) as well as
+  writes (`POST`/`PUT`/`PATCH`/`DELETE`) — so the agent never reads or writes a
+  stale fallback location.
 
 ## What "Degraded" Actually Means
 
@@ -83,15 +84,21 @@ The `reason` in the banner is one of:
 | `primary_vault_unreachable`    | The configured vault path doesn't exist, isn't a directory, or isn't writable (e.g. an external drive was unplugged). |
 | `primary_vault_not_configured` | Vault mode is Obsidian but no `primaryVaultPath` is set. |
 | `primary_vault_missing_content`| The path is reachable but doesn't carry the expected vault markers (it was never seeded / restructured). |
-| `migration_in_progress`        | A context-vault migration (`/api/setup/migrate-context`) is running. Writes are gated until it finishes; reads still work. This one clears itself. |
+
+A context-vault migration (`POST /api/setup/migrate-context`) is a **separate**
+state, not a degraded reason — it does **not** raise this banner. During a
+migration the daemon engages a context-write gate (`migration_in_progress`):
+writes return HTTP 503 while reads still work, `/api/health` stays
+`"status":"ok"`, and the gate clears itself when the migration finishes.
 
 ## Diagnostic Steps
 
 1. **Read the banner.** The `reason` and `path` tell you most of the story.
 2. `aitne logs` — look for `Vault health probe entered degraded mode`; the
    logged `reason` matches the banner.
-3. If the reason is `migration_in_progress`, **wait** — the migration releases
-   the write gate when it completes; do not restart mid-migration.
+3. If a context-vault migration is running (write-gate `migration_in_progress`
+   rather than the banner), **wait** — the migration releases the write gate
+   when it completes; do not restart mid-migration.
 4. Otherwise the issue is your vault path. Confirm it exists and is writable:
    - `ls -ld "<path-from-banner>"` — the directory must exist.
    - `df -h "<path-from-banner>"` — confirm the volume is mounted with free

@@ -34,7 +34,7 @@ ask_examples:
   - Where do I see what the agent has been doing?
 locale: en-US
 created: 2026-04-26
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - deniedTools
   - safety floor
@@ -74,8 +74,8 @@ The risk classifier has two write tiers, not three:
   delete event, …) and for normal context writes.
 - **Approve** — agent must present a Bearer token issued through the
   dashboard. Reserved for posture-changing daemon configuration:
-  flipping integration modes, swapping the main backend, deleting
-  backends, wiping config.
+  flipping integration modes, swapping the main backend, enabling/
+  disabling backends, wiping config.
 - (`ReadSensitive` is the third tier, but it gates *reads* of personal
   data — orthogonal to write notifications. It is unchanged.)
 
@@ -134,20 +134,22 @@ of "report to me" events. Information about what the agent did is
   `deniedTools` server-side — see the *Where the Defenses Apply* table
   below for the exact mechanism.
 - **`agent_actions`** — SQLite table of every agent action. Direct +
-  cross-backend rows are full-fidelity (current cross-backend writes
+  cross-backend rows are full-fidelity (cross-backend task-mode writes
   emit `delegated_task.run` / `delegated_task.exec` /
-  `delegated_task.tool_step`; legacy rows from before 2026-05-01 carry
-  `delegated_proxy.invoke`). Same-backend native MCP rolls up to
+  `delegated_task.tool_step`; the `delegated_proxy.invoke` row type
+  carries both legacy rows from the retired RPC `/invoke` route and
+  the hourly drift-detection probes still written by the
+  delegated-sync worker). Same-backend native MCP rolls up to
   `mcp_tool_calls` + the parent session row.
 
 ## Where the Defenses Apply
 
 | Path | Enforcement |
 |---|---|
-| Direct mode (`/api/mail/*`, `/api/calendar/*`) | Route handler middleware checks `deniedTools` against the materialized skill body's `allowed-tools` list (frontmatter). |
+| Direct mode (`/api/mail/*`, `/api/calendar/*`) | `deniedTools` is **inert** — the daemon runs the poller and the agent calls the daemon API through its direct-mode skill, so there is no per-tool deny surface. The list only persists for a future flip to delegated mode. Direct-mode safety comes from the route-level risk tiers (Approve gates posture-changing writes) and the always-disallowed layer, not `deniedTools`. |
 | Cross-backend (`/api/integrations/:key/exec`) | Invoker filters the integration's `capabilityTools` through `deniedTools` before spawning the delegated backend so the task-mode planner can only pick from the allowed surface. A fully-denied surface short-circuits with `errorClass: "denied_tool"`; individual tool denials surface as the same error from the invoker's `resolveAllowedToolPatterns`. |
 | Same-backend / native MCP — Claude | `collectSessionDeniedTools` merges the deny patterns into the SDK's `disallowedTools` array at `query()` time. Same code path covers both delegated same-backend and native — they share the in-session MCP surface. |
-| Same-backend / native MCP — Gemini | Patterns are folded into `generateAdminPolicy`'s TOML deny rules (priority 1000). |
+| Same-backend / native MCP — Gemini | Patterns are folded into `generateAdminPolicy`'s TOML deny rules (priority 936 — above the registry-driven native allows, below the absolute-block layer). |
 | Same-backend / native MCP — Codex | **Prose-only.** Codex bundles its connector apps into the binary; there is no per-tool deny config and the workspace-write sandbox does not match MCP tool calls. Skill prose lists the denied tools explicitly. Operators who require strict deny on Gmail / Calendar should pick a non-Codex DM backend or route those integrations through `delegated` cross-backend mode (which IS deny-enforced at `/exec`). |
 
 ## Recommended Starter Denylists
@@ -224,7 +226,7 @@ When the operator asks "what did you do yesterday?" / "have you sent
 anything from Gmail this week?" the agent calls:
 
 ```bash
-curl 'http://localhost:8321/api/agent/actions?since=2026-04-25T00:00:00Z&kind=delegated_task.run&kind=delegated_task.tool_step&limit=50'
+curl 'http://localhost:8321/api/agent/actions?since=2026-04-25T00:00:00Z&kind=delegated_task.exec&kind=delegated_task.tool_step&limit=50'
 ```
 
 and answers in conversation. The endpoint:
@@ -241,12 +243,12 @@ and answers in conversation. The endpoint:
   the per-call detail lives in `mcp_tool_calls`, which this endpoint
   does not join — query it separately if you need step-level fidelity.
 
-Common `kind` values for the cross-backend proxy: `delegated_task.run`
-(one row per `/exec` call), `delegated_task.exec` (the planner's
-chosen tool), `delegated_task.tool_step` (each individual tool call
-inside the task). The legacy `delegated_proxy.invoke` rows persist
-from before 2026-05-01 — include them if the `since` window crosses
-that date.
+Common `kind` values for the cross-backend proxy: `delegated_task.exec`
+(one header row per `/exec` call), `delegated_task.run` (one header row
+per generic `/run` call), `delegated_task.tool_step` (each individual
+tool call inside the task). The `delegated_proxy.invoke` rows cover the
+retired RPC `/invoke` route plus the delegated-sync worker's hourly
+drift-detection probes — include them when you want that surface too.
 
 This **replaces** the rejected daily-digest pattern. Reasons:
 
@@ -269,7 +271,8 @@ Approve still gates:
 
 - `PATCH /api/integrations/:key` — mode / `delegatedBackend` /
   `deniedTools` changes.
-- `PUT /api/backends/main`, `DELETE /api/backends/:id`.
+- `PUT /api/backends/main`, `POST /api/backends/:id/enable`,
+  `POST /api/backends/:id/disable`.
 - `PATCH /api/config` for fields that wipe protections.
 - `/api/system/*` — config reset, history purge, factory reset.
 

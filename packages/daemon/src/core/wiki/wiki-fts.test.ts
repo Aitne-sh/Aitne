@@ -89,6 +89,24 @@ describe("wiki-fts", () => {
       expect(row.title).toBe("Frontmatter Title");
     });
 
+    it("strips CRLF frontmatter and keeps the title fallback (Windows/autocrlf vaults)", () => {
+      // Obsidian files authored/synced on Windows are CRLF; the LF-only
+      // fence gate would otherwise index the whole `---\r\n…---\r\n` block
+      // as body and never populate the title fallback.
+      upsertWikiFulltextRow(db, {
+        workspaceId: 1,
+        path: "20_wiki/crlf.md",
+        layer: "wiki",
+        content: "---\r\ntitle: Frontmatter Title\r\n---\r\nJust body text.\r\n",
+      });
+      const row = db
+        .prepare(`SELECT title, body FROM fts_wiki WHERE path = ?`)
+        .get("20_wiki/crlf.md") as { title: string; body: string };
+      expect(row.title).toBe("Frontmatter Title");
+      expect(row.body).toContain("Just body text");
+      expect(row.body).not.toContain("title:");
+    });
+
     it("acts as upsert: re-upserting the same path replaces the previous row", () => {
       upsertWikiFulltextRow(db, {
         workspaceId: 1,

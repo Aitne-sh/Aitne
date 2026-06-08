@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import type { MessageEvent, WikiCostEstimate } from "@aitne/shared";
+import { EventPriority } from "@aitne/shared";
 import { applySchema } from "../../db/schema.js";
 import { enqueueWikiApproval } from "./approval-queue.js";
 import type { GitPreCompilePreview } from "./git-precompile.js";
@@ -9,7 +10,7 @@ function makeMessageEvent(overrides: Partial<MessageEvent> = {}): MessageEvent {
   return {
     type: "message.received",
     source: "slack",
-    priority: 5,
+    priority: EventPriority.NORMAL,
     timestamp: new Date("2026-05-15T08:00:00Z"),
     data: {},
     correlationId: "corr-123",

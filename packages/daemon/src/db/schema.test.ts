@@ -366,7 +366,7 @@ describe("applySchema", () => {
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
     expect(todayRefresh.main_model).toBe("claude-sonnet-4-6");
     expect(todayRefresh.max_turns).toBe(20);
-    expect(todayRefresh.max_budget_usd).toBe(0.3);
+    expect(todayRefresh.max_budget_usd).toBe(0.5);
 
     // Roadmap refresh seeds wider than the medium-tier nominal envelope
     // (50/$1.00) because the synthesis session itself drives the

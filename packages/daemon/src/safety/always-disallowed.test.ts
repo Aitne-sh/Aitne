@@ -956,6 +956,45 @@ describe("classifyAbsoluteBlock — adversarial bypass attempts", () => {
       expect(looksLikeSecretPath("~/.config/aitne/aitne.toml")).toBe(false);
     });
 
+    // ── Backend CLI OAuth credential files (2026-06 audit fix) ────────
+    // The agent's own Claude / Codex / Gemini token stores. Reading them
+    // would let an LLM-driven (e.g. prompt-injected) session lift the
+    // long-lived refresh token and exfiltrate it via the sanctioned
+    // curl-to-localhost write path. Pin so a refactor can't reopen it.
+    it("returns true for backend CLI OAuth credential files", () => {
+      expect(looksLikeSecretPath("~/.claude/.credentials.json")).toBe(true);
+      expect(looksLikeSecretPath("~/.claude.json")).toBe(true);
+      expect(looksLikeSecretPath("~/.codex/auth.json")).toBe(true);
+      expect(looksLikeSecretPath("~/.gemini/gemini-credentials.json")).toBe(true);
+      expect(looksLikeSecretPath("~/.gemini/oauth_creds.json")).toBe(true);
+      expect(looksLikeSecretPath("~/.config/anthropic/config.json")).toBe(true);
+      // Case-insensitive (macOS/Windows FS bypass closure).
+      expect(looksLikeSecretPath("~/.CODEX/AUTH.JSON")).toBe(true);
+    });
+
+    it("does not over-match on non-credential files in the same dirs", () => {
+      // Only the specific token files are secret — a benign history file
+      // inside ~/.codex is readable.
+      expect(looksLikeSecretPath("~/.codex/history.jsonl")).toBe(false);
+      expect(looksLikeSecretPath("~/.gemini/settings.json")).toBe(false);
+      // aitne's own ~/.config dir must never be swept in by the anthropic rule.
+      expect(looksLikeSecretPath("~/.config/aitne/aitne.toml")).toBe(false);
+    });
+
+    it("ALWAYS_DISALLOWED_TOOLS denies the credential files for Read/Write/Edit", () => {
+      for (const p of [
+        "~/.claude/.credentials.json",
+        "~/.codex/auth.json",
+        "~/.gemini/gemini-credentials.json",
+        "~/.gemini/oauth_creds.json",
+      ]) {
+        expect(ALWAYS_DISALLOWED_TOOLS as readonly string[]).toContain(`Read(${p})`);
+        expect(ALWAYS_DISALLOWED_TOOLS as readonly string[]).toContain(`Write(${p})`);
+        expect(ALWAYS_DISALLOWED_TOOLS as readonly string[]).toContain(`Edit(${p})`);
+      }
+      expect(ALWAYS_DISALLOWED_TOOLS as readonly string[]).toContain("Read(~/.config/anthropic/**)");
+    });
+
     // ── Case-insensitive matching (bypass-closure regression) ─────────
     // macOS (HFS+/APFS default) and Windows resolve paths case-
     // insensitively, so `Read("~/.SSH/id_rsa")` opens the real
@@ -1025,6 +1064,15 @@ describe("looksLikeBashSecretRead — Bash-side reader denylist", () => {
     expect(looksLikeBashSecretRead("cat ~/.personal-agent/secrets/master.key")).toBe(true);
     expect(looksLikeBashSecretRead("cat ~/.personal-agent/backups/snapshot.tar")).toBe(true);
     expect(looksLikeBashSecretRead("cat ~/.personal-agent/whatsapp/auth/creds.json")).toBe(true);
+  });
+
+  it("flags reader + backend CLI OAuth credential files (Claude/Codex/Gemini)", () => {
+    expect(looksLikeBashSecretRead("cat ~/.codex/auth.json")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.claude/.credentials.json")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.claude.json")).toBe(true);
+    expect(looksLikeBashSecretRead("head ~/.gemini/gemini-credentials.json")).toBe(true);
+    expect(looksLikeBashSecretRead("strings ~/.gemini/oauth_creds.json")).toBe(true);
+    expect(looksLikeBashSecretRead("cat ~/.config/anthropic/config.json")).toBe(true);
   });
 
   it("flags reader + .env in every realistic shell context", () => {

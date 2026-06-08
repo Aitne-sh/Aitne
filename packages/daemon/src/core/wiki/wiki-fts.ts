@@ -189,15 +189,22 @@ interface StripFrontmatterResult {
 }
 
 function stripFrontmatter(content: string): StripFrontmatterResult {
-  if (!content.startsWith("---\n")) {
-    return { frontmatterKeys: {}, body: content };
+  // Obsidian vaults authored/synced on Windows (or checked out under
+  // git core.autocrlf=true) are CRLF. The frontmatter fence gate below is
+  // LF-only, so without this normalize a `---\r\n…---\r\n` block leaks into
+  // the indexed body and the title fallback never populates. Indexed
+  // body/title are search tokens only and never round-trip to disk, so
+  // collapsing interior CRLF to LF is harmless (LF input is unchanged).
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) {
+    return { frontmatterKeys: {}, body: normalized };
   }
-  const end = content.indexOf("\n---\n", 4);
+  const end = normalized.indexOf("\n---\n", 4);
   if (end < 0) {
-    return { frontmatterKeys: {}, body: content };
+    return { frontmatterKeys: {}, body: normalized };
   }
-  const frontmatter = content.slice(4, end);
-  const body = content.slice(end + 5);
+  const frontmatter = normalized.slice(4, end);
+  const body = normalized.slice(end + 5);
   const keys: { title?: string } = {};
   for (const line of frontmatter.split("\n")) {
     const match = line.match(/^title:\s*(.*?)\s*$/);

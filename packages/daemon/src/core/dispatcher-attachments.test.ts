@@ -11,6 +11,7 @@ import { EventDispatcher } from "./dispatcher.js";
 import { EventBus } from "./event-bus.js";
 import { AttachmentStore } from "../services/attachments/store.js";
 import type { StoreAttachmentRow } from "../services/attachments/store.js";
+import type { VoiceTranscriptionResult } from "../services/voice/transcriber.js";
 import type {
   IAgentRouter,
   IContextBuilder,
@@ -90,6 +91,7 @@ function makeDispatcher(db: Database.Database, dataDir: string): {
     logError: vi.fn(),
     logAttachment: vi.fn(),
     logBangCommand: vi.fn(),
+    insertInProgressRow: vi.fn(() => -1),
   };
   const dispatcher = new EventDispatcher(
     new EventBus(),
@@ -254,7 +256,7 @@ describe("dispatcher attachment prompt block", () => {
       dispatcher as unknown as { prompt: {
         buildAttachmentPromptBlock(
           rows: StoreAttachmentRow[],
-          transcripts: typeof transcripts,
+          transcripts: Map<string, VoiceTranscriptionResult>,
         ): string;
       } }
     ).prompt.buildAttachmentPromptBlock([row], transcripts);
@@ -301,7 +303,7 @@ describe("dispatcher attachment prompt block", () => {
       dispatcher as unknown as { prompt: {
         buildAttachmentPromptBlock(
           rows: StoreAttachmentRow[],
-          transcripts: typeof transcripts,
+          transcripts: Map<string, VoiceTranscriptionResult>,
         ): string;
       } }
     ).prompt.buildAttachmentPromptBlock([row], transcripts);

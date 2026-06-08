@@ -193,6 +193,23 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Read(~/.personal-agent/whatsapp/auth/**)",
   "Read(~/.personal-agent/secrets/**)",
 
+  // ── Backend CLI credential files ──
+  // The agent's own Claude / Codex / Gemini OAuth tokens. The daemon
+  // reads these itself (claude-credentials-store.ts, codex-core.ts:377,
+  // gemini-cli-core.ts:488) to drive auth-health recovery, but the agent
+  // must never reach around to lift the long-lived refresh token for its
+  // own — or a sibling — backend and exfiltrate it through the sanctioned
+  // curl-to-localhost write path. On macOS the Claude token lives in the
+  // Keychain (covered by `~/Library/Keychains/**` above); these are the
+  // Linux/Windows plaintext fallback (Claude) and the all-platform
+  // plaintext stores (Codex `auth.json`, Gemini OAuth json).
+  "Read(~/.claude/.credentials.json)",
+  "Read(~/.claude.json)",
+  "Read(~/.codex/auth.json)",
+  "Read(~/.gemini/gemini-credentials.json)",
+  "Read(~/.gemini/oauth_creds.json)",
+  "Read(~/.config/anthropic/**)",
+
   // ── Secret-file writes ──
   // Kept symmetrical to the read list — an agent that can WRITE .env or
   // ~/.ssh/authorized_keys can leak via its own exfil channel even without
@@ -215,6 +232,15 @@ export const ALWAYS_DISALLOWED_TOOLS = [
   "Write(~/.personal-agent/backups/**)", "Edit(~/.personal-agent/backups/**)",
   "Write(~/.personal-agent/whatsapp/auth/**)", "Edit(~/.personal-agent/whatsapp/auth/**)",
   "Write(~/.personal-agent/secrets/**)", "Edit(~/.personal-agent/secrets/**)",
+  // Backend CLI credential files (symmetric twins of the read block above —
+  // an agent that can overwrite a token store can plant/replace credentials,
+  // which is strictly worse than reading them).
+  "Write(~/.claude/.credentials.json)", "Edit(~/.claude/.credentials.json)",
+  "Write(~/.claude.json)", "Edit(~/.claude.json)",
+  "Write(~/.codex/auth.json)", "Edit(~/.codex/auth.json)",
+  "Write(~/.gemini/gemini-credentials.json)", "Edit(~/.gemini/gemini-credentials.json)",
+  "Write(~/.gemini/oauth_creds.json)", "Edit(~/.gemini/oauth_creds.json)",
+  "Write(~/.config/anthropic/**)", "Edit(~/.config/anthropic/**)",
 
   // ── Browser-history profile directories (BROWSER_HISTORY_INTEGRATION_PLAN §11.4) ──
   // The browser-history integration's threat model assumes the agent
@@ -705,6 +731,13 @@ export function looksLikeBashSecretRead(cmd: string): boolean {
     "/.personal-agent/backups/",
     "/.personal-agent/whatsapp/auth/",
     "/.personal-agent/secrets/",
+    // Backend CLI OAuth credential files (Claude / Codex / Gemini).
+    "/.claude/.credentials.json",
+    "/.claude.json",
+    "/.codex/auth.json",
+    "/.gemini/gemini-credentials.json",
+    "/.gemini/oauth_creds.json",
+    "/.config/anthropic/",
   ];
   if (fragments.some((f) => lc.includes(f))) return true;
   // `.env` / `.env.*` — the `looksLikeSecretPath` regex requires `$`
@@ -895,6 +928,13 @@ export function looksLikeSecretPath(raw: string): boolean {
     /Library\/Keychains(\/|$)/i,
     /\.local\/share\/keyrings(\/|$)/i,
     /\.personal-agent\/(backups|whatsapp\/auth|secrets)(\/|$)/i,
+    // Backend CLI OAuth credential files (Claude / Codex / Gemini) +
+    // the Anthropic config dir.
+    /(^|\/)\.claude\.json$/i,
+    /\.claude\/\.credentials\.json$/i,
+    /\.codex\/auth\.json$/i,
+    /\.gemini\/(gemini-credentials|oauth_creds)\.json$/i,
+    /\.config\/anthropic(\/|$)/i,
   ];
   return patterns.some((r) => r.test(p));
 }

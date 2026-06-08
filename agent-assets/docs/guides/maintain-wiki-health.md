@@ -28,7 +28,7 @@ ask_examples:
   - What is a taxonomy candidate?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - wiki health
   - wiki lint
@@ -68,7 +68,7 @@ notes itself.
 ## When to Run
 
 `!lint` runs on the `wiki.lint` process key (medium tier — Sonnet
-by default, $1.00 budget envelope) and never changes your notes.
+by default, $0.50 budget envelope) and never changes your notes.
 Run it whenever you want a snapshot of wiki health. A practical
 cadence:
 

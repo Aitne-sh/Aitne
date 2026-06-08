@@ -179,7 +179,7 @@ describe("auditStreamObservation", () => {
   it("writes a blocked_absolute row with result='partial' on a hit", () => {
     const match = auditStreamObservation(
       { toolName: "Bash", arg: "rm -rf ~" },
-      { db, backend: "codex", mode: "safe" },
+      { db, backend: "codex", mode: "strict" },
     );
 
     expect(match).not.toBeNull();
@@ -214,7 +214,7 @@ describe("auditStreamObservation", () => {
   it("returns null and writes nothing for benign commands", () => {
     const match = auditStreamObservation(
       { toolName: "Bash", arg: "ls -la" },
-      { db, backend: "codex", mode: "safe" },
+      { db, backend: "codex", mode: "strict" },
     );
     expect(match).toBeNull();
     const rows = db.prepare("SELECT id FROM agent_actions").all();
@@ -231,7 +231,7 @@ describe("auditStreamObservation", () => {
     const match = auditStreamObservation(target, {
       db,
       backend: "gemini",
-      mode: "safe",
+      mode: "strict",
     });
     expect(match?.category).toBe("secret_read");
 
@@ -249,7 +249,7 @@ describe("auditStreamObservation", () => {
   it("is a no-op when db is undefined", () => {
     const match = auditStreamObservation(
       { toolName: "Bash", arg: "rm -rf ~" },
-      { db: undefined, backend: "codex", mode: "safe" },
+      { db: undefined, backend: "codex", mode: "strict" },
     );
     // Match is still returned (caller can act on it), but no DB write happens.
     expect(match).not.toBeNull();

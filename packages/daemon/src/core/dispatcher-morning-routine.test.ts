@@ -103,7 +103,7 @@ function makeStubOrchestrator(args: {
   );
   const appendMock = vi.fn(() =>
     args.appendOutcome ??
-      ({ ok: true, entryText: "stub-entry" } as ReturnType<
+      ({ ok: true, entryText: "stub-entry" } as unknown as ReturnType<
         MorningRoutinePipelineOrchestrator["appendAgentJournalEntry"]
       >),
   );
@@ -406,7 +406,7 @@ describe("MorningRoutineRunner — executeMorningRoutine", () => {
   // `routine.roadmap_refresh` session — one routine session instead of two.
   it("skips roadmap refresh when agent populated roadmap inline (was stale, now fresh)", async () => {
     const isRoadmapStale = vi
-      .fn<[], boolean>()
+      .fn<() => boolean>()
       .mockReturnValueOnce(true)
       .mockReturnValue(false);
     const { runner, emitRoadmapRefresh } = makeRunner({
@@ -421,7 +421,7 @@ describe("MorningRoutineRunner — executeMorningRoutine", () => {
   });
 
   it("does not call isRoadmapStale post-agent when it was fresh beforehand (preserves regular variant fast path)", async () => {
-    const isRoadmapStale = vi.fn<[], boolean>().mockReturnValue(false);
+    const isRoadmapStale = vi.fn<() => boolean>().mockReturnValue(false);
     const { runner, emitRoadmapRefresh } = makeRunner({
       db,
       dataDir,

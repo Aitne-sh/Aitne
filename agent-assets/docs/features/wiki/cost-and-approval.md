@@ -39,7 +39,7 @@ ask_examples:
   - Can I see the cost before running !compile full?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - cost estimate
   - cost bracket
@@ -178,8 +178,9 @@ its budget envelope is bounded by the per-process `maxBudgetUsd`
 
 Per workspace, in `/settings/wiki` — the **Approval threshold (USD)**
 input. The value lives on `wiki_workspaces.full_compile_approval_threshold_usd`
-with a CHECK constraint `> 0`. Setting it lower escalates more runs
-to manual approval; setting it higher trusts the estimator more.
+and the PATCH endpoint validates it to the `$0`–`$100` range. Setting it
+lower escalates more runs to manual approval; setting it higher trusts
+the estimator more.
 
 A common pattern: start at $2.00, watch the spend on the next
 `!compile full`, then dial up or down based on how close the

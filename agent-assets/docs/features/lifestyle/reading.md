@@ -26,7 +26,7 @@ ask_examples:
   - Where do reading-list items get stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - reading
   - books
@@ -65,10 +65,13 @@ at `/reading`.
     "Export Notebook" email.
 - **List** the library on `/reading` or via `GET /api/books`
   (filterable by `status` and `source`, paginated to 200 rows per call).
-- **Mark complete or abandoned** — the agent updates an existing row via
-  `PATCH /api/books/:id`. Setting `status` to `completed` stamps
-  `completed_at` automatically; you can also set a 1–5 `rating` or
-  `notes`.
+- **Mark complete or abandoned** — an existing row is updated via
+  `PATCH /api/books/:id`. This is an **Approve-tier** write that requires
+  an operator `Authorization: Bearer` token, so it is driven from the
+  dashboard, not autonomously by the agent (an unauthenticated agent curl
+  is rejected with **401** before the handler runs). Setting `status` to
+  `completed` stamps `completed_at` automatically; you can also set a 1–5
+  `rating` or `notes`.
 - **Recommend** from the list during reactive turns, and refresh the
   reading-taste profile during weekly and monthly reviews.
 
@@ -111,9 +114,13 @@ drives the list shape. The reading skill loads in two situations:
   network error there surfaces in the audit log even when the chat reply
   looked fine. A common cause is pasting a partial or non-Kindle
   clippings file, which yields zero parsed books.
-- **An edit that didn't stick**: `PATCH /api/books/:id` returns 404 if
-  the id doesn't exist and 400 for an invalid `status` (only `reading`,
-  `completed`, `abandoned`) or an out-of-range `rating` (must be 1–5).
+- **An edit that didn't stick**: `PATCH /api/books/:id` is Approve-tier,
+  so a request without a valid operator Bearer token is rejected with 401
+  before the handler runs — book status/rating/notes corrections are made
+  from the dashboard, not by an autonomous agent. Once authenticated, it
+  returns 404 if the id doesn't exist and 400 for an invalid `status`
+  (only `reading`, `completed`, `abandoned`) or an out-of-range `rating`
+  (must be 1–5).
 
 ## Related
 

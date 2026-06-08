@@ -1,17 +1,20 @@
 /**
- * Tests for POST /mcp/gemini-install — the route that shells out to the
- * `gemini` CLI to install the google-workspace extension or register the
- * Notion MCP server. These tests require mocking node:child_process to
- * avoid a real binary invocation, so they live in a separate file from
- * the main mcp.test.ts (which has a module-level probe mock that conflicts
- * with adding a child_process mock in the same file scope).
+ * Tests for POST /mcp/gemini-install — the route that runs the `gemini` CLI to
+ * install the google-workspace extension or register the Notion MCP server.
+ * The route shells out via `runLineCommand` (so the bare `gemini` name resolves
+ * through PATHEXT and a Windows `gemini.cmd` shim launches via the escaped
+ * cmd.exe wrapper instead of ENOENT-ing). These tests mock `runLineCommand` to
+ * avoid a real binary invocation; they live in a separate file from the main
+ * mcp.test.ts (which has a module-level probe mock that conflicts with adding a
+ * second module mock in the same file scope).
  */
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFile } from "node:child_process";
 import Database from "better-sqlite3";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runLineCommand } from "../../core/backends/cli-utils.js";
+import type { CommandRunResult } from "../../core/backends/cli-utils.js";
 import type { EncryptedBlobStore } from "../../secrets/encrypted-blob-store.js";
 import type { BlobName } from "../../secrets/types.js";
 import { createMcpRoutes } from "./mcp.js";
@@ -31,11 +34,13 @@ vi.mock("node:os", async (importOriginal) => {
   };
 });
 
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
+// Mock only `runLineCommand`; keep resolveWin32Invocation / buildCmdShimArgs
+// real so the rest of the cli-utils surface is untouched.
+vi.mock("../../core/backends/cli-utils.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../core/backends/cli-utils.js")>();
   return {
     ...actual,
-    execFile: vi.fn(),
+    runLineCommand: vi.fn(),
   };
 });
 
@@ -44,6 +49,18 @@ vi.mock("../../services/mcp/probe.js", () => ({
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Build a CommandRunResult for the mock with sensible defaults. */
+function runResult(over: Partial<CommandRunResult>): CommandRunResult {
+  return {
+    exitCode: 0,
+    signal: null,
+    stdoutLines: [],
+    stderrLines: [],
+    timedOut: false,
+    ...over,
+  };
+}
 
 class MemBlobStore implements EncryptedBlobStore {
   readonly blobs = new Map<string, string>();
@@ -100,7 +117,7 @@ describe("POST /mcp/gemini-install", () => {
     createSchema(db);
     home = mkdtempSync(join(tmpdir(), "pa-gemini-home-"));
     _homeDir = home; // update the closure so the mock returns our tmpdir
-    vi.mocked(execFile).mockReset();
+    vi.mocked(runLineCommand).mockReset();
     app = createMcpRoutes({ db, blobStore: new MemBlobStore(), dataDir: "/tmp" });
   });
 
@@ -151,7 +168,7 @@ describe("POST /mcp/gemini-install", () => {
     const body = json as { ok: boolean; alreadyInstalled: boolean };
     expect(body.ok).toBe(true);
     expect(body.alreadyInstalled).toBe(true);
-    expect(execFile).not.toHaveBeenCalled();
+    expect(runLineCommand).not.toHaveBeenCalled();
   });
 
   it("short-circuits for notion when settings.json already lists it", async () => {
@@ -167,19 +184,15 @@ describe("POST /mcp/gemini-install", () => {
     const body = json as { ok: boolean; alreadyInstalled: boolean };
     expect(body.ok).toBe(true);
     expect(body.alreadyInstalled).toBe(true);
-    expect(execFile).not.toHaveBeenCalled();
+    expect(runLineCommand).not.toHaveBeenCalled();
   });
 
-  it("returns ok:true when execFile succeeds for google-workspace", async () => {
-    // The real execFile uses util.promisify.custom which returns {stdout, stderr}.
-    // Our mock replaces execFile with a vi.fn(); promisify wraps it with the
-    // standard callback contract.  Calling callback(null, {stdout, stderr})
-    // passes a single value to the promisify wrapper → resolves with {stdout, stderr}.
-    vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
-      const cb = args[args.length - 1] as (err: null, result: { stdout: string; stderr: string }) => void;
-      cb(null, { stdout: "Installed\n", stderr: "" });
-      return {} as ReturnType<typeof execFile>;
-    });
+  it("returns ok:true when the install command succeeds for google-workspace", async () => {
+    // runLineCommand RESOLVES with exitCode 0 on success (unlike execFile, which
+    // would reject on non-zero) — see the contract remap in the mcp.ts route.
+    vi.mocked(runLineCommand).mockResolvedValueOnce(
+      runResult({ exitCode: 0, stdoutLines: ["Installed"] }),
+    );
 
     const { status, json } = await post({ kind: "google-workspace" });
     expect(status).toBe(200);
@@ -187,15 +200,13 @@ describe("POST /mcp/gemini-install", () => {
     expect(body.ok).toBe(true);
     expect(body.alreadyInstalled).toBe(false);
     expect(body.kind).toBe("google-workspace");
-    expect(execFile).toHaveBeenCalled();
+    expect(runLineCommand).toHaveBeenCalled();
   });
 
-  it("returns ok:true when execFile succeeds for notion", async () => {
-    vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
-      const cb = args[args.length - 1] as (err: null, result: { stdout: string; stderr: string }) => void;
-      cb(null, { stdout: "Added notion\n", stderr: "" });
-      return {} as ReturnType<typeof execFile>;
-    });
+  it("returns ok:true when the install command succeeds for notion", async () => {
+    vi.mocked(runLineCommand).mockResolvedValueOnce(
+      runResult({ exitCode: 0, stdoutLines: ["Added notion"] }),
+    );
 
     const { status, json } = await post({ kind: "notion" });
     expect(status).toBe(200);
@@ -204,17 +215,13 @@ describe("POST /mcp/gemini-install", () => {
     expect(body.kind).toBe("notion");
   });
 
-  it("returns 503 with gemini_cli_not_found when execFile fails with ENOENT", async () => {
-    vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
-      const cb = args[args.length - 1] as (err: Error & { code: string; stdout: string; stderr: string }) => void;
-      const err = Object.assign(new Error("spawn gemini ENOENT"), {
-        code: "ENOENT",
-        stdout: "",
-        stderr: "gemini: not found",
-      });
-      cb(err);
-      return {} as ReturnType<typeof execFile>;
-    });
+  it("returns 503 with gemini_cli_not_found when the spawn fails with ENOENT", async () => {
+    // Spawn-level failure: runLineCommand rejects (it does not resolve). On
+    // Windows an unresolvable bare `gemini` still ENOENTs naturally because
+    // resolveWin32Invocation returns null for it.
+    vi.mocked(runLineCommand).mockRejectedValueOnce(
+      Object.assign(new Error("spawn gemini ENOENT"), { code: "ENOENT" }),
+    );
 
     const { status, json } = await post({ kind: "google-workspace" });
     expect(status).toBe(503);
@@ -223,17 +230,16 @@ describe("POST /mcp/gemini-install", () => {
     expect(body.error).toBe("gemini_cli_not_found");
   });
 
-  it("returns 502 with install_failed when execFile fails with a numeric exit code", async () => {
-    vi.mocked(execFile).mockImplementationOnce((...args: unknown[]) => {
-      const cb = args[args.length - 1] as (err: Error & { code: number; stdout: string; stderr: string }) => void;
-      const err = Object.assign(new Error("Command failed: gemini extensions install"), {
-        code: 1,
-        stdout: "partial\n",
-        stderr: "Error: extension already exists",
-      });
-      cb(err);
-      return {} as ReturnType<typeof execFile>;
-    });
+  it("returns 502 with install_failed when the install command exits non-zero", async () => {
+    // Non-zero exit RESOLVES (does not reject) — the route's contract remap maps
+    // it to the 502 install_failed path with the exit code surfaced.
+    vi.mocked(runLineCommand).mockResolvedValueOnce(
+      runResult({
+        exitCode: 1,
+        stdoutLines: ["partial"],
+        stderrLines: ["Error: extension already exists"],
+      }),
+    );
 
     const { status, json } = await post({ kind: "notion" });
     expect(status).toBe(502);
@@ -241,5 +247,17 @@ describe("POST /mcp/gemini-install", () => {
     expect(body.ok).toBe(false);
     expect(body.error).toBe("install_failed");
     expect(body.exitCode).toBe(1);
+  });
+
+  it("returns 502 with install_failed when the install command times out", async () => {
+    vi.mocked(runLineCommand).mockResolvedValueOnce(
+      runResult({ exitCode: null, timedOut: true }),
+    );
+
+    const { status, json } = await post({ kind: "notion" });
+    expect(status).toBe(502);
+    const body = json as { ok: boolean; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe("install_failed");
   });
 });

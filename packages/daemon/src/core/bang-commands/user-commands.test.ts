@@ -724,6 +724,11 @@ describe("buildUserBangCommandPrompt", () => {
     data: { text: "!standup" },
     correlationId: "orig-id",
     content: "!standup",
+    sender: "owner",
+    channel: "dm",
+    threadId: null,
+    isDm: true,
+    isMention: false,
   };
 
   const baseCommand: UserBangCommand = {
@@ -799,6 +804,11 @@ describe("createUserBangCommandEvent", () => {
     data: { text: "!report", extra: "value" },
     correlationId: "orig-corr-id",
     content: "!report",
+    sender: "owner",
+    channel: "dm",
+    threadId: null,
+    isDm: true,
+    isMention: false,
   };
 
   const command: UserBangCommand = {

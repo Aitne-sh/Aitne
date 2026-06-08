@@ -3013,4 +3013,107 @@ describe("ContextBuilder", () => {
       expect(context).not.toContain("<roadmap_skeleton>");
     });
   });
+
+  describe("Phase 3 — <agent_lessons> injection (Feedback Learning Loop §5)", () => {
+    const LESSONS_FILE = [
+      "# Agent Lessons",
+      "",
+      "## Lessons",
+      "<!-- scope: agent · cap: 8192B · 40 entries -->",
+      "- [2026-06-07] Keep the BUDGET_SECTION in the weekly report.",
+      "  <!-- ev=2 kind=correction src=explicit conf=high last=2026-06-07 -->",
+      "- [2026-05-01] PROVISIONAL_DRAFT not yet promoted.",
+      "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-05-01 --> <!-- provisional -->",
+    ].join("\n");
+
+    function writeLessons(): void {
+      writeFileSync(
+        join(contextDir, "policies", "agent-lessons.md"),
+        LESSONS_FILE,
+      );
+    }
+
+    function dmEvent(): MessageEvent {
+      return createEvent({
+        type: "message.received.dm",
+        source: "telegram",
+        priority: EventPriority.NORMAL,
+      }) as MessageEvent;
+    }
+
+    function builderWith(overrides: Record<string, unknown>): ContextBuilder {
+      return new ContextBuilder(
+        {
+          dataDir: tmpDir,
+          externalObsidianVaultPath: null,
+          agentDisplayName: "ai bot",
+          ...overrides,
+        } as unknown as AgentConfig,
+        db,
+        createServiceRegistry(),
+      );
+    }
+
+    it("injects the global block on DM messages, excluding provisional lessons", async () => {
+      writeLessons();
+      const context = await builder.build(dmEvent());
+      expect(context).toContain("<agent_lessons>");
+      expect(context).toContain("Keep the BUDGET_SECTION in the weekly report.");
+      // Provisional lessons are stored but never injected (§4 step 4); the
+      // machine-readable trailer is dropped (agent reads prose, not bookkeeping).
+      expect(context).not.toContain("PROVISIONAL_DRAFT");
+      expect(context).not.toContain("<!-- ev=");
+    });
+
+    it("emits the slim notify-discipline variant on the hourly notify turn", async () => {
+      writeLessons();
+      const event = {
+        ...createEvent({
+          type: "routine.hourly_check",
+          source: "cron",
+          priority: EventPriority.NORMAL,
+        }),
+        routine: "hourly_check",
+      } as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).toContain("<agent_lessons>");
+      expect(context).toContain("Weigh these"); // slim preamble
+    });
+
+    it("does NOT inject on surfaces that opt out (today_refresh)", async () => {
+      writeLessons();
+      const event = {
+        ...createEvent({
+          type: "routine.today_refresh",
+          source: "dashboard",
+          priority: EventPriority.NORMAL,
+        }),
+        routine: "today_refresh",
+      } as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).not.toContain("<agent_lessons>");
+    });
+
+    it("omits the block entirely when no lessons file exists", async () => {
+      // No writeLessons() — the file is absent.
+      const context = await builder.build(dmEvent());
+      expect(context).not.toContain("<agent_lessons>");
+    });
+
+    it("is gated off entirely when feedbackLearningEnabled is false", async () => {
+      writeLessons();
+      const disabledBuilder = builderWith({ feedbackLearningEnabled: false });
+      const context = await disabledBuilder.build(dmEvent());
+      expect(context).not.toContain("<agent_lessons>");
+    });
+
+    it("skip-with-warns the global block when the rendered body exceeds the cap", async () => {
+      writeLessons();
+      // 8-byte cap is below even a single bullet → defensive skip (the hard
+      // inject-time backstop that makes the §6 cap non-bypassable).
+      const cappedBuilder = builderWith({ feedbackLessonMaxBytesGlobal: 8 });
+      const context = await cappedBuilder.build(dmEvent());
+      expect(context).not.toContain("<agent_lessons>");
+    });
+  });
 });

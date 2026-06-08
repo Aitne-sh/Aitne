@@ -33,7 +33,7 @@ ask_examples:
   - Which model handles detected calendar changes?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - calendar
   - google calendar
@@ -68,9 +68,9 @@ process_keys:
 
 # Calendar
 
-Aitne pulls events from one or more calendars (Google Calendar today,
-more backends planned) so it can build today's plan around them and
-DM you ahead of meetings that matter.
+Aitne pulls events from one or more calendars (Google Calendar,
+Outlook Calendar, and Apple Calendar) so it can build today's plan
+around them and DM you ahead of meetings that matter.
 
 ## What It Does
 

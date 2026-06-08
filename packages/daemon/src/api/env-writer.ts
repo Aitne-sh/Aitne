@@ -257,7 +257,7 @@ function expandHomePreservingRelative(p: string): string {
   return p;
 }
 
-function serializeForEnv(value: unknown): string {
+export function serializeForEnv(value: unknown): string {
   if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
     // JSON.stringify already escapes \r / \n inside strings, so the
     // serialized form is single-line and safe to write as one env value.

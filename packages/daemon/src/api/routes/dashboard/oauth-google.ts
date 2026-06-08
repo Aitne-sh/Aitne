@@ -196,8 +196,9 @@ export function registerOauthGoogleRoutes(app: Hono, deps: ApiDependencies): voi
       return c.json({ error: "googleapis package not installed" }, 500);
     }
 
-    // Use daemon's own port for the OAuth callback
-    const redirectUri = `http://localhost:${config.apiPort}/api/config/google-auth/callback`;
+    // Use daemon's own port for the OAuth callback.
+    // Use 127.0.0.1, not localhost: daemon binds IPv4 loopback only; on Windows localhost resolves to ::1 first and the callback would ECONNREFUSED. Google special-cases loopback redirects for installed-app clients.
+    const redirectUri = `http://127.0.0.1:${config.apiPort}/api/config/google-auth/callback`;
 
     const oauth2Client = new google.auth.OAuth2(
       clientConfig.client_id,
@@ -310,7 +311,8 @@ export function registerOauthGoogleRoutes(app: Hono, deps: ApiDependencies): voi
       const mod = await import("googleapis" as string);
       const google = mod.google;
 
-      const redirectUri = `http://localhost:${config.apiPort}/api/config/google-auth/callback`;
+      // Use 127.0.0.1, not localhost: must byte-match the auth-start redirect_uri (Google re-validates an exact string at getToken); daemon binds IPv4 loopback only, and on Windows localhost resolves to ::1 first.
+      const redirectUri = `http://127.0.0.1:${config.apiPort}/api/config/google-auth/callback`;
       const oauth2Client = new google.auth.OAuth2(
         clientConfig.client_id,
         clientConfig.client_secret,

@@ -25,7 +25,7 @@ ask_examples:
   - How does the agent write to a project file?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - projects
   - project file
@@ -67,9 +67,11 @@ only the minimum — `type: project`, `owner: shared`, an `updated`
 date, and an H1 title. By convention the agent also writes `slug`,
 `state`, `start`, `due`, `stakeholders`, `next_milestone`, and `tags`.
 
-`state` is what marks a project **active**: the dashboard's project
-view filters on it, and the morning routine only surfaces projects
-whose `state` is active.
+`state` is what marks a project **active**: the Obsidian `_active.base`
+Bases view filters on it (`state != "archived"`), and the morning
+routine surfaces every project whose `state` is not `archived` — a
+file with no `state` (or any state other than `archived`) is treated
+as active and surfaced.
 
 ```markdown
 ---

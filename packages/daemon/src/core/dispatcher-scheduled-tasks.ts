@@ -74,6 +74,8 @@ import { randomUUID } from "node:crypto";
 import type { AgentConfig } from "../config.js";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import { getContextDir } from "../config.js";
+import { ensureTodaySkeleton } from "./today-direct-writer.js";
+import type { TodayWriteLockManager } from "./today-write-lock.js";
 import {
   cleanupSessionWorkdir,
   ensureBackendMaterialized,
@@ -107,6 +109,14 @@ import type { MorningRoutineRunner } from "./dispatcher-morning-routine.js";
 import type { RoutineFetchWindowRunner } from "./routine-fetch-window-runner.js";
 import { routineWindowKeyFromEvent } from "./routine-fetch-window-runner.js";
 import { routineHasWindows } from "./routine-windows.js";
+import {
+  buildFeedbackWorksheet,
+  gatherFeedbackWorksheetScopes,
+  lessonCapsForScope,
+  type WorksheetScopeInput,
+} from "./feedback/consolidation-prep.js";
+import { scopeStoreFile } from "./feedback/scope-parser.js";
+import { sweepConsumedFeedbackSignals } from "../db/feedback-signals-store.js";
 import { morningRoutineRanToday } from "../bootstrap/schedule-helpers.js";
 import { resolveAgentId } from "./agents/agent-id-resolver.js";
 import { loadEffectiveDefinition } from "./agents/effective-definition.js";
@@ -309,6 +319,15 @@ export interface ScheduledTaskRunnerDeps {
    */
   fetchWindowRunner: RoutineFetchWindowRunner;
   roadmapWriteLock: RoadmapWriteLockManager | undefined;
+  /**
+   * Cross-session today.md write lock. Used by `executeDefault` to seed a
+   * `today.md` skeleton (lock-aware, absent-only) before a
+   * `routine.today_refresh` session so its section PATCH never 404s — see
+   * `ensureTodaySkeleton`. Undefined when the dispatcher was constructed
+   * without a lock (tests / degraded boot), in which case the seed is
+   * skipped and the pre-existing behaviour is preserved.
+   */
+  todayWriteLock: TodayWriteLockManager | undefined;
   writeTracker: AgentWriteTracker | undefined;
   /**
    * Returns the dispatcher's currently-configured "services" the
@@ -351,6 +370,7 @@ export class ScheduledTaskRunner {
   private readonly morningRoutine: MorningRoutineRunner;
   private readonly fetchWindowRunner: RoutineFetchWindowRunner;
   private readonly roadmapWriteLock: RoadmapWriteLockManager | undefined;
+  private readonly todayWriteLock: TodayWriteLockManager | undefined;
   private readonly writeTracker: AgentWriteTracker | undefined;
   private readonly getConfiguredServices: () => ReadonlySet<string>;
   private readonly getActiveMailAccounts: () => readonly MailAccount[];
@@ -368,6 +388,7 @@ export class ScheduledTaskRunner {
     this.morningRoutine = deps.morningRoutine;
     this.fetchWindowRunner = deps.fetchWindowRunner;
     this.roadmapWriteLock = deps.roadmapWriteLock;
+    this.todayWriteLock = deps.todayWriteLock;
     this.writeTracker = deps.writeTracker;
     this.getConfiguredServices = deps.getConfiguredServices;
     this.getActiveMailAccounts = deps.getActiveMailAccounts;
@@ -1411,6 +1432,60 @@ export class ScheduledTaskRunner {
           };
         }
       }
+      // Deterministic pre-step for `routine.today_refresh`. rotateDayFiles()
+      // intentionally leaves today.md absent at the day boundary for the
+      // morning routine to recreate; when that routine has not yet run (or
+      // failed — e.g. a quota/budget death with no fallback), today.md is
+      // missing and this section-only refresh would 404 on its PATCH and
+      // fall back to budget-burning full-file PUTs against the strict
+      // validateTodayContent schema (the "Refresh Today does nothing"
+      // symptom). Guarantee the canonical skeleton exists (lock-aware,
+      // absent-only) so the refresh session has a valid PATCH target; full
+      // creation/repair stays the morning routine's job. See
+      // ensureTodaySkeleton. Skipped when no today-write-lock was wired.
+      if (
+        this.todayWriteLock
+        && isRoutineEvent(effectiveEvent)
+        && (effectiveEvent as RoutineEvent).routine === "today_refresh"
+      ) {
+        // Failure-isolated like the sibling pre-steps below: this seed is a
+        // best-effort convenience so the refresh has a valid PATCH target.
+        // A throw here (e.g. getContextDir / serializer-lock internals) must
+        // NOT abort the whole today_refresh — that would reproduce the exact
+        // "Refresh Today does nothing" symptom the skeleton was added to
+        // prevent. The morning routine remains responsible for real repair.
+        try {
+          await ensureTodaySkeleton({
+            contextDir: getContextDir(this.config, this.db),
+            todayWriteLock: this.todayWriteLock,
+          });
+        } catch (err) {
+          logger.warn({ err }, "Failed to seed today.md skeleton for today_refresh");
+        }
+      }
+      // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 — deterministic consolidation
+      // pre-step for `routine.evening_review`. Runs synchronously BEFORE
+      // `contextBuilder.build` so the `<feedback_worksheet>` (unconsumed
+      // signals grouped by scope + per-candidate promotion verdicts +
+      // eviction ranking + consume ids) lands in the review session's
+      // context. Failure-isolated inside `prepareFeedbackWorksheet`: a throw
+      // there is swallowed and the review still ships. Skipped when feedback
+      // learning is off or no signals pend (no empty block in the prompt).
+      if (
+        isRoutineEvent(effectiveEvent)
+        && (effectiveEvent as RoutineEvent).routine === "evening_review"
+      ) {
+        const worksheetBlock = this.prepareFeedbackWorksheet();
+        if (worksheetBlock) {
+          effectiveEvent = {
+            ...effectiveEvent,
+            data: {
+              ...effectiveEvent.data,
+              feedbackWorksheetBlock: worksheetBlock,
+            },
+          };
+        }
+      }
       // WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.4 — deterministic
       // pre-hook for `routine.weekly_review`. Runs synchronously
       // BEFORE `contextBuilder.build` so the freshly-refreshed
@@ -1633,6 +1708,77 @@ export class ScheduledTaskRunner {
       this.appendWeeklyInterestsJournalLine(
         `interest reflection failed: ${message}`,
       );
+    }
+  }
+
+  /**
+   * FEEDBACK_LEARNING_LOOP_DESIGN.md §4 — the deterministic consolidation
+   * pre-step. Reads unconsumed `feedback_signals` (user + agent scope for
+   * Phase 2; `agent:<slug>` joins in Phase 4), reads each lessons store's
+   * current contents, and composes the `<feedback_worksheet>` block via the
+   * pure `core/feedback/*` modules. Returns the block string, or `null` when
+   * feedback learning is off, nothing pends, or anything throws — so the
+   * caller simply skips stamping and the evening review proceeds unchanged.
+   *
+   * The DB read + per-scope file read live here (the FS-/DB-heavy dispatcher
+   * is coverage-excluded); the byte-deterministic worksheet composition lives
+   * in `buildFeedbackWorksheet`, which is 100% unit-tested.
+   */
+  private prepareFeedbackWorksheet(): string | null {
+    if (this.config.feedbackLearningEnabled === false) return null;
+    try {
+      // Nightly retention close-out (§4 step 6 / §6): drop signal rows that
+      // were consumed past the retention horizon so the raw table stays
+      // bounded. Only touches already-consumed rows — an unconsolidated
+      // signal is never lost to retention. Runs once per Evening Review.
+      // Guarded against a missing/NaN retention knob so a config gap degrades
+      // to "skip the sweep", not "throw and abandon the whole consolidation".
+      const retentionDays = this.config.feedbackSignalRetentionDays;
+      if (Number.isFinite(retentionDays)) {
+        const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+        sweepConsumedFeedbackSignals(
+          this.db,
+          new Date(Date.now() - retentionMs).toISOString(),
+        );
+      }
+
+      const groups = gatherFeedbackWorksheetScopes(this.db, {
+        scopeTypes: ["user", "agent"],
+      });
+      if (groups.length === 0) return null;
+      const contextDir = getContextDir(this.config, this.db);
+      const byteCaps = {
+        global: this.config.feedbackLessonMaxBytesGlobal,
+        perAgent: this.config.feedbackLessonMaxBytesPerAgent,
+      };
+      const scopes: WorksheetScopeInput[] = groups.map((group) => {
+        const caps = lessonCapsForScope(group.scope, byteCaps);
+        let existingFileMd: string | null = null;
+        if (caps) {
+          const rel = scopeStoreFile(group.scope);
+          if (rel) {
+            const full = join(contextDir, rel);
+            existingFileMd = existsSync(full)
+              ? readFileSync(full, "utf-8")
+              : null;
+          }
+        }
+        return {
+          scope: group.scope,
+          signals: group.signals,
+          existingFileMd,
+          caps,
+        };
+      });
+      const result = buildFeedbackWorksheet(scopes, {
+        promotionThreshold: this.config.feedbackPromotionThreshold,
+        nowIso: new Date().toISOString(),
+        staleDays: this.config.feedbackLessonStaleDays,
+      });
+      return result?.block ?? null;
+    } catch (err) {
+      logger.warn({ err }, "Failed to prepare feedback worksheet");
+      return null;
     }
   }
 

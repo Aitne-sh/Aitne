@@ -34,7 +34,7 @@ ask_examples:
   - How do I bridge two domains with `!connect`?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - !ingest
   - !compile
@@ -145,9 +145,9 @@ The acknowledgement DM names the mode that ran (`in parallel` /
 Full rebuilds touch every wiki note and are the most expensive
 command in the wiki surface. The flow:
 
-1. The bang handler estimates the cost (raw note count × assumed
-   input tokens × Sonnet 4.6 input price, bracketed optimistic 0.5× /
-   expected 1× / pessimistic 2×).
+1. The bang handler estimates the cost (per raw note, an on-disk
+   char→token approximation × Sonnet 4.6 input price, bracketed
+   optimistic 0.5× / expected 1× / pessimistic 2×).
 2. On an external git-tracked vault with **Auto-commit before
    `!compile full`** enabled and a clean working tree, Aitne runs
    `git add -A && git commit -m "aitne wiki: pre-compile snapshot <ts>"`

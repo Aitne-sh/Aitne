@@ -28,7 +28,7 @@ ask_examples:
   - Where do skill overlays live?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - SKILL.md
   - allowed-tools
@@ -74,7 +74,7 @@ The agent runs against a real machine. Without scoped permissions, a
 "please summarize my mail" turn could in principle invoke `Bash(rm)`,
 post to your social accounts, or rewrite arbitrary files. Skills fix
 that by making the available toolset task-shaped: the morning routine
-loads the routines/observations/today/schedule skills; a docs question
+loads the context/today/observations/schedule skills; a docs question
 loads only `docs-search`. Tools outside the allow-list aren't even
 visible to the model.
 

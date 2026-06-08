@@ -536,13 +536,13 @@ describe("applyDefaultPresets", () => {
         expect(row.main_backend).toBe(backend);
         expect(row.main_model).toBe(mediumModel);
         expect(row.max_turns).toBe(20);
-        // Claude / OpenCode keep the Claude-baseline $0.30 cap because
+        // Claude / OpenCode keep the Claude-baseline $0.50 cap because
         // the SDK aborts mid-turn at the budget. Codex / Gemini scale up
         // (×1.5 on the medium tier) so the post-hoc check matches the
         // effective spend a Claude session lands on after the SDK
-        // truncates — $0.30 × 1.5 = $0.45.
+        // truncates — $0.50 × 1.5 = $0.75.
         const expectedBudget =
-          backend === "codex" || backend === "gemini" ? 0.45 : 0.3;
+          backend === "codex" || backend === "gemini" ? 0.75 : 0.5;
         expect(row.max_budget_usd).toBe(expectedBudget);
       });
     }

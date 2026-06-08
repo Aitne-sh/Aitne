@@ -75,7 +75,7 @@ describe("GitHubPoller — per-repo credential injection", () => {
       repoPaths: [],
       pollIntervalSeconds: 600,
       runner,
-      accountResolver,
+      accountResolver: accountResolver as unknown as ConstructorParameters<typeof GitHubPoller>[0]["accountResolver"],
       repoBindings: [
         {
           owner: "acme",
@@ -202,9 +202,7 @@ describe("GitHubPoller — per-repo credential injection", () => {
       repoPaths: [],
       pollIntervalSeconds: 600,
       runner,
-      accountResolver: accountResolver as unknown as Parameters<
-        typeof GitHubPoller
-      >[0]["accountResolver"],
+      accountResolver: accountResolver as unknown as ConstructorParameters<typeof GitHubPoller>[0]["accountResolver"],
       repoBindings: [
         {
           owner: "acme",

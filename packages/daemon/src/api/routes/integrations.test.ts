@@ -3343,7 +3343,7 @@ describe("Section 2 Group E coverage completions", () => {
       // INTEGRATION_DESCRIPTORS is a plain object — TypeScript's Readonly wrapper
       // is a compile-time fiction; the property is writable at runtime.
       const { INTEGRATION_DESCRIPTORS } = await import("@aitne/shared");
-      const gmailDescriptor = INTEGRATION_DESCRIPTORS.gmail as {
+      const gmailDescriptor = INTEGRATION_DESCRIPTORS.gmail as unknown as {
         supportedModes: string[];
       };
       const original = gmailDescriptor.supportedModes;
@@ -3418,7 +3418,7 @@ describe("Section 2 Group E coverage completions", () => {
   describe("PATCH backend_not_supported branch (lines 288-297)", () => {
     it("returns 400 backend_not_supported when the descriptor has no connector for the chosen backend", async () => {
       const { INTEGRATION_DESCRIPTORS } = await import("@aitne/shared");
-      const gmailDescriptor = INTEGRATION_DESCRIPTORS.gmail as {
+      const gmailDescriptor = INTEGRATION_DESCRIPTORS.gmail as unknown as {
         backendConnectors: Record<string, unknown>;
       };
       const originalConnectors = gmailDescriptor.backendConnectors;

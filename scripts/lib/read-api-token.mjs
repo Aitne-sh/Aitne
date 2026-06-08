@@ -56,7 +56,7 @@ function readDarwin() {
     return execFileSync(
       "security",
       ["find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-      { encoding: "utf-8" },
+      { encoding: "utf-8", timeout: 5_000 },
     ).trim();
   } catch {
     return null;

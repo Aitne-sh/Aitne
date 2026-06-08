@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { Hono } from "hono";
 import { z } from "zod";
 import type Database from "better-sqlite3";
@@ -35,6 +33,7 @@ import {
 } from "../../services/mcp/types.js";
 import { probeMcpServer } from "../../services/mcp/probe.js";
 import { listMcpToolCalls } from "../../services/mcp/tool-audit.js";
+import { runLineCommand } from "../../core/backends/cli-utils.js";
 
 const logger = createLogger("mcp-api");
 
@@ -576,10 +575,52 @@ export function createMcpRoutes(deps: McpRouteDependencies): Hono {
       });
     }
     try {
-      const { stdout, stderr } = await execFileAsync("gemini", args, {
-        timeout: 120_000,
-        maxBuffer: 1024 * 1024,
+      // Route through runLineCommand, not a bare execFile("gemini"): on
+      // Windows the npm-installed Gemini CLI is a `gemini.cmd` batch shim,
+      // which a shell:false spawn of the bare name cannot resolve (no PATHEXT)
+      // — so this dashboard install was 100% non-functional on Windows.
+      // runLineCommand's resolveWin32Invocation resolves the name via PATHEXT
+      // and launches the `.cmd` through an escaped cmd.exe wrapper (no
+      // shell:true, no metachar re-parse). The args are a static const, so
+      // there is no injection dimension regardless.
+      const result = await runLineCommand({
+        command: "gemini",
+        args: [...args],
+        cwd: homedir(),
+        timeoutMs: 120_000,
       });
+      const stdout = result.stdoutLines.join("\n");
+      const stderr = result.stderrLines.join("\n");
+      // Contract remap: execFile REJECTS on non-zero exit, but runLineCommand
+      // RESOLVES with exitCode !== 0 (it rejects only on a spawn-level error).
+      // Branch on exitCode/timedOut so an OAuth-required / version-mismatch
+      // failure still maps to the 502 install_failed path instead of being
+      // mis-reported as ok:true.
+      if (result.timedOut || (result.exitCode ?? 0) !== 0) {
+        const message = result.timedOut
+          ? "gemini install command timed out after 120s"
+          : stderr || stdout || `gemini exited with code ${result.exitCode}`;
+        logger.warn(
+          { kind, args, exitCode: result.exitCode, timedOut: result.timedOut },
+          "gemini install command failed",
+        );
+        return respondWithAgentError(
+          c,
+          502,
+          [composeIssue("mcp.install_failed", { field: "gemini", received: message })],
+          {
+            legacyFields: {
+              ok: false,
+              kind,
+              command: ["gemini", ...args].join(" "),
+              message,
+              stdout,
+              stderr,
+              exitCode: result.exitCode,
+            },
+          },
+        );
+      }
       logger.info(
         { kind, args, stdoutLen: stdout.length },
         "gemini install command completed",
@@ -593,18 +634,16 @@ export function createMcpRoutes(deps: McpRouteDependencies): Hono {
         stderr,
       });
     } catch (err) {
+      // Spawn-level failure only: runLineCommand rejects via child.once("error")
+      // with the raw spawn error (code:"ENOENT" when the bare/resolved name is
+      // unresolvable). On Windows, resolveWin32Invocation returns null for an
+      // unresolvable bare "gemini" so spawn still ENOENTs naturally — the 503
+      // gemini_cli_not_found path is preserved.
       const message = toSafeErrorMessage(err);
-      // execFile rejects with the spawn error AND attaches stdout/stderr
-      // / code on the rejection value. Surface them when present so the
-      // dashboard can show OAuth-required / version-mismatch hints.
-      const e = err as {
-        stdout?: string;
-        stderr?: string;
-        code?: number | string;
-      };
+      const e = err as { code?: number | string };
       logger.warn(
         { kind, args, code: e.code, message },
-        "gemini install command failed",
+        "gemini install command spawn failed",
       );
       const code = e.code === "ENOENT" ? "mcp.gemini_cli_not_found" : "mcp.install_failed";
       const status = e.code === "ENOENT" ? 503 : 502;
@@ -618,9 +657,9 @@ export function createMcpRoutes(deps: McpRouteDependencies): Hono {
             kind,
             command: ["gemini", ...args].join(" "),
             message,
-            stdout: e.stdout ?? "",
-            stderr: e.stderr ?? "",
-            exitCode: typeof e.code === "number" ? e.code : null,
+            stdout: "",
+            stderr: "",
+            exitCode: null,
           },
         },
       );
@@ -629,8 +668,6 @@ export function createMcpRoutes(deps: McpRouteDependencies): Hono {
 
   return app;
 }
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Pre-spawn idempotency check. Returns true when the target install is

@@ -25,7 +25,7 @@ class InMemorySecretStore implements SecretStore {
 
   constructor(seed: Partial<Record<StoredSecretName, string>> = {}) {
     for (const [key, value] of Object.entries(seed)) {
-      this.values.set(key as StoredSecretName, value);
+      if (typeof value === "string") this.values.set(key as StoredSecretName, value);
     }
   }
 
@@ -117,6 +117,7 @@ function makeTestDeps(tmpDir: string): {
           },
           },
           obsidian: { configured: false, connected: false, error: null },
+          appleCalendar: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: {
             configured: false,
@@ -332,6 +333,8 @@ describe("Daemon API", () => {
             integration: "google_calendar",
             windowKey: "primary:24h",
             enabled: true,
+            mode: "delegated",
+            backend: "claude",
             displayName: "Calendar — day-ahead (next 24 h)",
             description: "test fixture",
             defaultIntervalSeconds: 3600,
@@ -2797,6 +2800,7 @@ describe("ReadSensitive auth middleware", () => {
       getIntegrationStatus: () => ({
         google: { configured: false, connected: false, error: null, services: { calendar: { connected: false, error: null }, gmail: { connected: false, error: null } } },
         obsidian: { configured: false, connected: false, error: null },
+        appleCalendar: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: { configured: false, connected: false, error: null, state: "not_configured" },
       }),

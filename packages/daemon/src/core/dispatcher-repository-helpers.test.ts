@@ -19,7 +19,7 @@ describe("parseRepositoryRunTaskContext", () => {
   };
 
   it("returns null for null / non-object input", () => {
-    expect(parseRepositoryRunTaskContext(null)).toBeNull();
+    expect(parseRepositoryRunTaskContext(null as unknown as AgentTaskEvent["taskContext"])).toBeNull();
     expect(
       parseRepositoryRunTaskContext(undefined as unknown as AgentTaskEvent["taskContext"]),
     ).toBeNull();

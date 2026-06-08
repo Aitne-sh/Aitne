@@ -622,25 +622,28 @@ describe("getTaskFlow", () => {
     expect(flow).toContain("byte-for-byte");
   });
 
-  // `evening-review-slimdown.md` §2.4 — Step 4 (user-facing wrap-up)
-  // was deleted entirely. The built-in steps emit no user-facing
-  // output by default; user-defined `routines/evening.md` rules are
-  // authoritative and may still call /api/notify.
-  it("evening review Step 4 is removed from the task flow", () => {
+  // `evening-review-slimdown.md` §2.4 — the old Step 4 (user-facing
+  // wrap-up) was deleted entirely. FEEDBACK_LEARNING_LOOP_DESIGN.md §4
+  // (Phase 2) later reclaimed the Step-4 slot for *internal* feedback
+  // consolidation, which emits no user-facing output. This guard keeps
+  // the deleted wrap-up's load-bearing content gone while allowing the
+  // new consolidation step to occupy the slot.
+  it("evening review Step 4 is feedback consolidation, not the deleted wrap-up", () => {
     const flow = getTaskFlow("routine.evening_review");
-    // Section header itself must be gone.
-    expect(flow).not.toMatch(/^###\s+Step\s*4\b/m);
-    // 4a/4b/4c subheaders likewise.
+    // The deleted wrap-up's `#### 4a.` subheader shape must stay gone
+    // (the consolidation step uses inline `4a.` list markers, not H4s).
     expect(flow).not.toMatch(/^####\s+4[abc]\./m);
-    // The "Evening wrap-up contract" reference in the notify skill is
-    // dropped in the same PR (notify/SKILL.md edit). The task flow
-    // must NOT carry a hanging reference to it.
+    // The "Evening wrap-up contract" reference in the notify skill was
+    // dropped — the task flow must NOT carry a hanging reference to it.
     expect(flow).not.toMatch(/Evening\s+wrap-up contract/i);
     // The (a)–(e) positive-trigger gate set was the load-bearing
-    // structure of Step 4 — its absence is the strongest signal that
-    // the deletion landed cleanly.
+    // structure of the deleted Step 4 — its absence is the strongest
+    // signal that the wrap-up deletion still holds.
     expect(flow).not.toMatch(/positive triggers? holds?/i);
     expect(flow).not.toMatch(/awareness gate/i);
+    // The Step-4 slot now belongs to the feedback consolidation pass
+    // (internal bookkeeping; no user-facing output by default).
+    expect(flow).toMatch(/^###\s+Step\s*4\b.*[Cc]onsolidate feedback/m);
   });
 
   // §2.4 preamble Q3 resolution — the two-tier framing (built-in

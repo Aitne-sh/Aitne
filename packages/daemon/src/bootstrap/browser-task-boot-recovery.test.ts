@@ -37,7 +37,7 @@ describe("surfaceBrowserTaskBootRecovery", () => {
     expect(surfaceBrowserTaskBootRecovery(db)).toBe(0);
     const auditCount = (
       db
-        .prepare<[], { c: number }>(
+        .prepare<[string], { c: number }>(
           `SELECT COUNT(*) AS c FROM agent_actions WHERE action_type = ?`,
         )
         .get("browser_task.boot_recovery") as { c: number } | undefined
@@ -106,7 +106,7 @@ describe("surfaceBrowserTaskBootRecovery", () => {
     expect(c?.outcomeDetail).toBe("ok");
 
     const auditRows = db
-      .prepare<[], { detail: string }>(
+      .prepare<[string], { detail: string }>(
         `SELECT detail FROM agent_actions WHERE action_type = ?`,
       )
       .all("browser_task.boot_recovery");

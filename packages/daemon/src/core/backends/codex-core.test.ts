@@ -2481,7 +2481,7 @@ describe("CodexCore.runDelegatedTask", () => {
  * "GeminiCliCore daily request counter" suite below in gemini-cli-core.test.ts.
  */
 describe("CodexCore — quota reset hint + absolute-block stream observation", () => {
-  let Database: typeof import("better-sqlite3").default;
+  let Database: new (filename?: string, options?: object) => import("better-sqlite3").Database;
   let applySchema: typeof import("../../db/schema.js").applySchema;
 
   beforeEach(async () => {

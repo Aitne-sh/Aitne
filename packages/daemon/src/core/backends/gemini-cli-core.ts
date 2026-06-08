@@ -1339,6 +1339,13 @@ export class GeminiCliCore implements IAgentCore {
       "Library/Keychains/",
       "\\.personal-agent/backups/",
       "\\.personal-agent/whatsapp/auth/",
+      // Backend CLI OAuth credential files (Claude / Codex / Gemini) so the
+      // agent cannot read/plant a sibling backend's long-lived token.
+      "\\.codex/auth\\.json",
+      "\\.claude/\\.credentials\\.json",
+      "\\.claude\\.json",
+      "\\.gemini/(gemini-credentials|oauth_creds)\\.json",
+      "\\.config/anthropic/",
       // `\"` (closing JSON string quote) is a required terminator because
       // Gemini matches argsPattern against the JSON-stringified args object
       // like `{"file_path":".env"}` — without `\"` the pattern silently
@@ -1637,6 +1644,12 @@ ${absoluteBlockRules}${extraDenyRules}${nativeAllowRules}${sessionDenyRules}`;
       "\\.personal-agent[\\\\/]backups[\\\\/]",
       "\\.personal-agent[\\\\/]whatsapp[\\\\/]auth[\\\\/]",
       "\\.personal-agent[\\\\/]secrets[\\\\/]",
+      // Backend CLI OAuth credential files (Claude / Codex / Gemini).
+      "\\.codex[\\\\/]auth\\.json",
+      "\\.claude[\\\\/]\\.credentials\\.json",
+      "\\.claude\\.json",
+      "\\.gemini[\\\\/](gemini-credentials|oauth_creds)\\.json",
+      "\\.config[\\\\/]anthropic[\\\\/]",
       // `\"` (closing JSON string quote) is a required terminator because
       // Gemini matches argsPattern against the JSON-stringified args object
       // like `{"file_path":".env"}` — without `\"` the pattern silently

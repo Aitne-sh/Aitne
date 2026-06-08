@@ -240,6 +240,10 @@ export const IP_DENYLIST_CIDRS: ReadonlyArray<string> = Object.freeze([
   "100.64.0.0/10",
   "224.0.0.0/4",
   "0.0.0.0/8",
+  // IETF protocol assignments (RFC 6890) — includes the DNS64 well-known
+  // host 192.0.0.171/.170 used to discover the NAT64 prefix. Not globally
+  // routable; no legitimate browse target lives here.
+  "192.0.0.0/24",
   // IPv6 equivalents
   "::1/128",
   "::/128", // IPv6 unspecified — mirrors IPv4 0.0.0.0/8; routes to ::1 as a connect target on common stacks
@@ -371,8 +375,20 @@ export function matchesCidrDenylist(ip: string): boolean {
     const bits = ipv6ToBigInt(ip);
     if (bits !== null) {
       const mask96 = ((1n << 96n) - 1n) << 32n; // high 96 bits
-      const v4MappedPrefix = 0xffffn << 32n; // ::ffff:0:0
-      if ((bits & mask96) === v4MappedPrefix) {
+      const v4MappedPrefix = 0xffffn << 32n; // ::ffff:0:0/96
+      // NAT64 well-known prefix `64:ff9b::/96` (RFC 6052) — on NAT64/DNS64
+      // networks the entire IPv4 internet is reachable through this prefix,
+      // so `64:ff9b::a9fe:a9fe` routes to 169.254.169.254 and
+      // `64:ff9b::a00:1` to 10.0.0.1. We must NOT block the whole /96
+      // (that would break all IPv4 browsing on such networks) — instead
+      // decode the embedded IPv4 (low 32 bits, same position as the
+      // v4-mapped form) and run it through the IPv4 deny ranges, so only
+      // metadata/private destinations are blocked. Network-specific NAT64
+      // prefixes (operator-chosen /32../64) are out of scope — they aren't
+      // a guessable SSRF target the way the well-known prefix is.
+      const nat64WellKnownPrefix = 0x0064ff9bn << 96n; // 64:ff9b::/96
+      const prefix96 = bits & mask96;
+      if (prefix96 === v4MappedPrefix || prefix96 === nat64WellKnownPrefix) {
         const embedded = Number(bits & 0xffffffffn);
         const dotted = [
           (embedded >>> 24) & 255,

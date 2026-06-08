@@ -24,7 +24,7 @@ ask_examples:
   - Where do I approve a pending action?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - approval
   - approve tier
@@ -83,10 +83,11 @@ Deny asks for confirmation before discarding the item.
 
 ## When Something Goes Wrong
 
-- **An approval that never clears:** the agent session that produced
-  it may have timed out. The action expires with the session — redo
-  the request that triggered it (for example, re-send the DM or
-  re-run the routine).
+- **A stale approval you never answered:** a pending approval is
+  discarded once the agent day rolls over (the next 04:00 local
+  boundary) — it's marked skipped rather than replayed after the
+  day turns. If that happens, redo the request that triggered it
+  (for example, re-send the DM or re-run the routine).
 
 ## Related
 

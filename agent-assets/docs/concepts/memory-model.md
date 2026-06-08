@@ -29,7 +29,7 @@ ask_examples:
   - How does the daemon prevent the agent from writing to disk directly?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - context
   - markdown
@@ -153,8 +153,11 @@ curl -X PATCH http://localhost:8321/api/context/state/today.md \
   synthesized by the morning routine.
 - `plans/projects/<slug>.md` — one file per active project.
 - `policies/management.md` — the umbrella registry: Source-of-Truth
-  bindings, Managed Tasks, an Active Policies summary. Always
-  injected into every flow.
+  bindings, Managed Tasks, an Active Policies summary. Injected as
+  `<management_rules>` on the wide-path flows (DMs, mentions, the
+  morning routine); a few narrow routines (the journal stage, hourly
+  check, today refresh, observer events, scheduled tasks) opt out to
+  save budget.
 - `policies/management-captures/<slug>.md` — one file per durable management rule
   ("from now on, do X"). The daemon auto-maintains a slug index at
   `policies/management-captures/_index.md`.

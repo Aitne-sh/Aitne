@@ -84,9 +84,7 @@ describe("runGitPreCompile", () => {
       .mockResolvedValueOnce({ stdout: "", stderr: "" })
       .mockResolvedValueOnce({ stdout: "deadbeef0000abcd1234\n", stderr: "" });
     const markAgentCommit = vi.fn();
-    const writeTracker = { markAgentCommit } as unknown as Parameters<
-      typeof runGitPreCompile
-    >[1]["writeTracker"];
+    const writeTracker = { markAgentCommit } as unknown as NonNullable<Parameters<typeof runGitPreCompile>[1]>["writeTracker"];
 
     const result = await runGitPreCompile(externalWorkspace(rootPath), {
       run,

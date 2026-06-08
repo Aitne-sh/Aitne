@@ -168,3 +168,119 @@ export function getInjectionPolicy(eventOrProcessKey: string): InjectionPolicy {
 
   return DEFAULT_POLICY;
 }
+
+/**
+ * FEEDBACK_LEARNING_LOOP_DESIGN.md §5 — the Stage-3 *opt-in* resolver for the
+ * feedback learning-loop's `<agent_lessons>` blocks.
+ *
+ * Co-located with `getInjectionPolicy` on purpose: this module is the single
+ * source of truth for "which surface sees which always-/sometimes-injected
+ * block", and the design explicitly rejects scattering an
+ * `isMessageEvent(event) || isNotifyDecidingRoutine(event)` check across
+ * `context-builder.ts` (it would re-introduce the fragmentation V20
+ * consolidated away). `<agent_lessons>` is **default-off** — only the handful
+ * of surfaces below want it — so it is an *opt-in* resolver, not a member of
+ * the `alwaysBlocks` *opt-out* set (which is for default-*on* heavy blocks a
+ * narrow routine sheds; a positive opt-out member would be the wrong polarity).
+ *
+ * Three fields, matching the design's documented shape:
+ *
+ *  - `global` — inject `policies/agent-lessons.md ## Lessons` (scope `agent`:
+ *    global agent-operating behaviour — notification discipline, filter
+ *    quality). Phase 3 consumer: `ContextBuilder`.
+ *  - `slim`   — use the hard-2048-byte, top-N-by-score variant on the hourly
+ *    notify turn (§6). Only `routine.hourly_check` sets it. Implies `global`.
+ *  - `self`   — eligible for the per-agent `policies/agents/<slug>/lessons.md`
+ *    block (scope `agent:<slug>`). **Phase 4 consumer** — the slug is not in
+ *    the build today (`event.data.agentId` is stamped at the dispatch site in
+ *    Phase 4), so `ContextBuilder` deliberately does NOT read this field yet.
+ *    It is returned now so the surface→eligibility decision lives in this one
+ *    module from the start; Phase 4 only adds the consumer, not a new field.
+ *    Asserted per-surface in `injection-policy.test.ts` so it is not silently
+ *    rubber-stamped dead schema.
+ *
+ * **Surface keying is grounded in the real event-type strings build() sees,
+ * not the design's prose shorthand:**
+ *  - DM / dashboard messages arrive as `message.*` (dashboard DMs included —
+ *    they are `message.*` with `platform="dashboard"`).
+ *  - The morning routine's *notify-deciding* stage builds context as
+ *    `routine.morning_routine_today` (Stage A). The umbrella
+ *    `routine.morning_routine` never reaches `build()` (the orchestrator
+ *    decomposes it into the two stage events), and Stage B
+ *    (`routine.morning_routine_journal`) is a lite journal author that decides
+ *    no notifications — injecting lessons there would be wasted bytes against
+ *    the §0 cost constraint. So Stage A is keyed, the umbrella and Stage B are
+ *    not.
+ *  - `routine.hourly_check` is the escalated Stage-3 LLM/notify turn (gate
+ *    Layers 1–3 are code and build no prompt), so the slim block bites exactly
+ *    where the notify decision is made. The `.triage` lite classification is
+ *    intentionally excluded.
+ *  - Everything else — observers, `fetch_window`, `scheduled.task`,
+ *    `today_refresh`, and any unlisted key — gets nothing (the §5 "this
+ *    surface gets almost nothing" row, mirroring `buildFetchWindowContext`).
+ */
+export interface AgentLessonsInjection {
+  /** Inject the global `policies/agent-lessons.md ## Lessons` block. */
+  readonly global: boolean;
+  /**
+   * Eligible for the per-agent `policies/agents/<slug>/lessons.md` block.
+   * Phase 4 consumer — gated additionally on a resolved slug at the build site.
+   */
+  readonly self: boolean;
+  /** Use the slim, hard-2048-byte, top-N-by-score hourly notify variant. */
+  readonly slim: boolean;
+}
+
+/**
+ * Pre-allocated frozen shapes — `getAgentLessonsInjection` returns shared
+ * instances so equality comparisons are stable and allocation-free, mirroring
+ * the `ALL_BLOCKS` / `NO_BLOCKS` pattern above.
+ */
+const LESSONS_DM_REVIEW: AgentLessonsInjection = Object.freeze({
+  global: true,
+  self: true,
+  slim: false,
+});
+const LESSONS_HOURLY: AgentLessonsInjection = Object.freeze({
+  global: true,
+  self: false,
+  slim: true,
+});
+const LESSONS_NONE: AgentLessonsInjection = Object.freeze({
+  global: false,
+  self: false,
+  slim: false,
+});
+
+/**
+ * Resolve which `<agent_lessons>` block(s) a surface receives. See
+ * {@link AgentLessonsInjection} for the field/keying rationale.
+ */
+export function getAgentLessonsInjection(
+  eventOrProcessKey: string,
+): AgentLessonsInjection {
+  // DM / dashboard messages — the primary surface lessons calibrate.
+  if (eventOrProcessKey.startsWith("message.")) {
+    return LESSONS_DM_REVIEW;
+  }
+
+  switch (eventOrProcessKey) {
+    // Scheduled DM tone session (morning briefing, meeting nudges, …) — same
+    // conversational posture as a live DM.
+    case "scheduled.dm":
+    // Notify-deciding routines: morning Stage A + the review cadences. Each
+    // owns a go/no-go `/api/notify` decision that lessons should calibrate.
+    case "routine.morning_routine_today":
+    case "routine.evening_review":
+    case "routine.weekly_review":
+    case "routine.monthly_review":
+      return LESSONS_DM_REVIEW;
+
+    // Hourly notify turn — slim, hard-capped notification-discipline variant.
+    case "routine.hourly_check":
+      return LESSONS_HOURLY;
+
+    default:
+      return LESSONS_NONE;
+  }
+}

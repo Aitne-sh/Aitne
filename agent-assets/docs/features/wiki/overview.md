@@ -26,7 +26,7 @@ ask_examples:
   - Can I point the wiki at my Obsidian vault?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - wiki
   - wiki workspace
@@ -110,8 +110,8 @@ competes for budget with daily reactive memory.
 Aitne offers two modes:
 
 - **Internal** (recommended starting point) — the daemon owns the
-  vault at `$PA_DATA_DIR/wiki`. No sandbox issues, daemon-managed
-  snapshots, isolated from iCloud sync conflicts.
+  vault at `$PA_DATA_DIR/context/knowledge/wiki`. No sandbox issues,
+  daemon-managed snapshots, isolated from iCloud sync conflicts.
 - **External** — you point the wiki at an existing Obsidian vault on
   disk. The daemon writes directly when the filesystem allows, and
   falls back to the official Obsidian CLI when the vault sits in a

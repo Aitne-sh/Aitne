@@ -23,7 +23,7 @@ ask_examples:
   - The auth-health pill went red, what now?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - auth failed
   - auth error
@@ -60,8 +60,8 @@ api_endpoints:
    on a healthy install. Re-paste the key on `/settings/models`.
 2. **Subscription-fallback login expired** when no API key was
    registered (the daemon was running on the CLI's local login —
-   `claude`, `codex login`, `gemini auth` — and that session timed
-   out). The recommended fix is to register an API key.
+   `claude auth login`, `codex login`, `gemini` — and that session
+   timed out). The recommended fix is to register an API key.
 3. **Account-level scope change** at the provider (key disabled,
    project deleted, billing suspended). For cloud-provider auth
    (Bedrock / Vertex / Foundry for Claude, Vertex AI for Gemini),
@@ -87,13 +87,14 @@ re-probes immediately — no restart needed.
 **If the backend is on the subscription fallback:** the recommended
 fix is to register an API key on `/settings/models`. The same picker
 also exposes cloud-provider auth — Bedrock / Vertex / Foundry for
-Claude, Vertex AI for Gemini. (Codex Azure OpenAI is not offered here;
-it needs a `~/.codex/config.toml` the env-mirroring path cannot write,
-so Codex stays direct-key only.)
+Claude, Vertex AI for Gemini, and Azure OpenAI for Codex. (Codex Azure
+OpenAI needs a `config.toml` in addition to env vars; the daemon writes
+a managed one under `<dataDir>/codex-home/` and points `CODEX_HOME`
+there, leaving your `~/.codex/` untouched.)
 
 If you cannot or do not want to register a key, re-run the
-corresponding CLI login (`claude`, `codex login`, `gemini auth`) and
-the daemon picks up the new credentials on the next probe. Some
+corresponding CLI login (`claude auth login`, `codex login`, `gemini`)
+and the daemon picks up the new credentials on the next probe. Some
 backends also expose an in-dashboard device-code recovery flow
 (`recovery/start` → `recovery/code`) reachable from the pill's
 recovery hint. Note that subscription auth is not provider-supported

@@ -462,6 +462,58 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     },
   },
+  {
+    id: "0009-today-refresh-budget-bump",
+    description:
+      "(v0.1.9→next) — raise the routine.today_refresh per-turn budget "
+      + "ceiling from the seeded $0.30 to $0.50 for upgrading installs still "
+      + "on the seeded default. The drift-triggered today.md ## User Schedule "
+      + "refresh reads up to 200 pending calendar observations and retries the "
+      + "section PATCH up to 3x with 30s backoffs when the morning-routine lock "
+      + "is held; a busy-calendar drift compounded by that retry loop tipped a "
+      + "real run past $0.30 and surfaced BackendQuotaError(max_budget_usd) with "
+      + "no fallback (claude is the only binding) — the prior $0.10→$0.30 bump "
+      + "did not hold. Backend-aware: applyDefaultPresets stores the post-hoc-"
+      + "scaled budget (codex/gemini medium x1.5), so the OLD default is $0.30 "
+      + "on claude/opencode and $0.45 on codex/gemini, and the NEW default is "
+      + "the $0.50 base scaled the same way -> $0.50 / $0.75. Fresh installs "
+      + "already get the new value from the schema seed + the per-process "
+      + "envelope-overrides map; this migration only touches pre-existing "
+      + "installs. Gated so it ONLY moves preset rows still at the OLD per-"
+      + "backend default — operator-pinned rows (updated_by='user') and rows "
+      + "already at a custom value are left untouched. Idempotent: after the "
+      + "bump no row sits in the old band, and the recorded id short-circuits a "
+      + "re-run anyway.",
+    up(db) {
+      // Empty-DB safety (e.g. the runner's own unit tests run on a bare
+      // :memory: db): if applySchema never ran, the table is absent — the
+      // runner still records the id so a later boot does not re-evaluate.
+      if (!tableExists(db, "process_backend_config")) return;
+      // The NEW per-backend value mirrors what `resolveDefaultBindingFor`
+      // now produces for routine.today_refresh: the $0.50 base x the medium
+      // post-hoc factor (1.5 for codex/gemini, 1.0 for claude/opencode). The
+      // 0.75 literal is that product at migration time — a migration is a
+      // point-in-time snapshot, so the literal is correct even if the factor
+      // later changes. The old-default bands ([0.29,0.31] / [0.44,0.46]) keep
+      // us from clobbering a row already moved to a custom value while still
+      // tolerating float dust.
+      db.prepare(
+        `UPDATE process_backend_config
+            SET max_budget_usd = CASE
+              WHEN main_backend IN ('codex', 'gemini') THEN 0.75
+              ELSE 0.5
+            END
+          WHERE process_key = 'routine.today_refresh'
+            AND updated_by = 'preset'
+            AND (
+              (main_backend IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.44 AND max_budget_usd <= 0.46)
+              OR (main_backend NOT IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.29 AND max_budget_usd <= 0.31)
+            )`,
+      ).run();
+    },
+  },
 ];
 
 export interface MigrationRunResult {

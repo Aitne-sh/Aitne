@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, readdirSync } from "node:fs";
 import { readlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir, release } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ChromiumBrowserKey, HostProfile, SandboxPrimitive } from "../types.js";
@@ -535,6 +535,47 @@ async function isUnixProcessRunning(
   }
 }
 
+/**
+ * Resolve the Windows PowerShell executable defensively.
+ *
+ * This is the same `powershell.exe → pwsh.exe` probe every other PS call
+ * site in the codebase performs (secret-client-factory.ts:findExecutableInPath,
+ * doctor.mjs, scripts/lib/read-api-token.mjs). On Windows desktop SKUs the
+ * in-box Windows PowerShell 5.1 (`powershell.exe`) is present, but on
+ * minimal / headless / Server-Core / Nano hosts — or future builds where
+ * 5.1 has been removed — only PowerShell 7+ (`pwsh.exe`) exists, and a
+ * hardcoded `powershell.exe` exec throws ENOENT (which the caller's catch
+ * swallows, silently reporting the managed Chromium as not-running).
+ *
+ * Prefer 5.1, fall back to 7+, else keep the default so the first exec
+ * surfaces a clear ENOENT rather than masking a misconfigured host.
+ */
+function resolveWindowsPowerShell(): string {
+  const pathValue = process.env.PATH ?? "";
+  const exts = process.env.PATHEXT?.split(";").filter(Boolean) ?? [".EXE"];
+  const probe = (name: string): boolean => {
+    const hasExt = /\.[A-Za-z0-9]+$/.test(name);
+    for (const dir of pathValue.split(delimiter)) {
+      if (!dir) continue;
+      const candidates = hasExt ? [name] : exts.map((e) => `${name}${e}`);
+      for (const c of candidates) {
+        try {
+          accessSync(join(dir, c), constants.X_OK);
+          return true;
+        } catch {
+          // keep scanning
+        }
+      }
+    }
+    return false;
+  };
+  return probe("powershell.exe")
+    ? "powershell.exe"
+    : probe("pwsh.exe")
+      ? "pwsh.exe"
+      : "powershell.exe";
+}
+
 async function isWindowsProcessRunning(
   binaryPath: string,
   userDataDir: string,
@@ -544,7 +585,7 @@ async function isWindowsProcessRunning(
   const command =
     `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escapedBinary}*' -and $_.CommandLine -like '*--user-data-dir=${escapedDir}*' } | Select-Object -First 1`;
   try {
-    const { stdout } = await execFileAsync("powershell.exe", [
+    const { stdout } = await execFileAsync(resolveWindowsPowerShell(), [
       "-NoProfile",
       "-Command",
       command,

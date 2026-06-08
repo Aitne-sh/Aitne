@@ -1239,7 +1239,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
       {
         db,
         contextDir,
-        writeTracker: { markWriting },
+        writeTracker: { markWriting, unmark: vi.fn() },
         onIndexableContextChange: onIndexable,
       },
       {
@@ -1351,7 +1351,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     });
     const markWriting = vi.fn();
     const result = await appendMorningRoutineJournalEntry(
-      { db, contextDir, writeTracker: { markWriting } },
+      { db, contextDir, writeTracker: { markWriting, unmark: vi.fn() } },
       {
         correlationId: "corr-X",
         morningDateStr: "2026-05-15",

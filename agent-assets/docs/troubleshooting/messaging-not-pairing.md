@@ -22,7 +22,7 @@ tags:
 status: stable
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - magic phrase
   - owner channel
@@ -85,7 +85,7 @@ All secrets are single-use and expire after **5 minutes**.
 
 ## Diagnostic steps
 
-1. On `/connections/messaging`, click **Regenerate phrase** (Slack /
+1. On `/connections/messaging`, click **Generate pairing phrase** (Slack /
    Discord) or re-open the QR / deep link (Telegram / WhatsApp) so you
    start a fresh 5-minute window.
 2. For Slack / Discord, send **only** the four words — no surrounding

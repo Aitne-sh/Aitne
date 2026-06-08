@@ -17,6 +17,12 @@ import {
   resolveApiPort,
   resolveDashboardPort,
 } from "../scripts/lib/ports.mjs";
+import {
+  classifyPid,
+  parsePidMeta,
+  readProcessStartToken,
+  serializePidMeta,
+} from "../scripts/lib/process-identity.mjs";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -98,18 +104,25 @@ function rotateLogFile(logFile) {
   try { fs.renameSync(logFile, rotated); } catch { /* ignore */ }
 }
 
-function readPid(pidFile) {
+function readPidMeta(pidFile) {
   try {
-    const content = fs.readFileSync(pidFile, "utf8").trim();
-    const pid = parseInt(content, 10);
-    return Number.isFinite(pid) ? pid : null;
+    return parsePidMeta(fs.readFileSync(pidFile, "utf8"));
   } catch {
     return null;
   }
 }
 
+/**
+ * Persist the PID plus a start-identity token so a later `start`/`stop`/`status`
+ * can tell *our* process from a recycled PID after an unclean shutdown. Line 1
+ * stays the bare PID so an older aitne still reads the file. If the OS
+ * start-time read fails we write just the bare PID and degrade to the legacy
+ * unverified-but-trusted behavior. See process-lifecycle-2 in
+ * CROSS_PLATFORM_REAUDIT_2026-06.md.
+ */
 function writePid(pidFile, pid) {
-  fs.writeFileSync(pidFile, String(pid) + "\n");
+  const startToken = readProcessStartToken(pid);
+  fs.writeFileSync(pidFile, serializePidMeta({ pid, startToken }));
 }
 
 function removePid(pidFile) {
@@ -186,11 +199,25 @@ function nextSpawnArgs(dashboardDir, nextBin, userArgs) {
   return userArgs;
 }
 
+/**
+ * Resolve the live PID recorded in `pidFile`, or null. This is the single
+ * chokepoint every command (start/stop/status, plus open/uninstall/doctor via
+ * ctx.helpers) funnels through, so identity reconciliation here fixes them all
+ * at once. A recycled PID (start-time token mismatch) classifies `stale` → the
+ * pidfile is removed and null returned, so `start` won't false-"Already
+ * running" and `stop` won't kill an unrelated tree. `running-unverified`
+ * (legacy file with no token, or an OS start-time read failure) degrades to the
+ * pre-fix bare-PID behavior — no regression; a legacy file self-heals on the
+ * next writePid. verifyStartup() deliberately does NOT route through here: it
+ * checks the freshly-spawned in-memory pid via isAlive + health, preserving its
+ * "alive but health not responding = hung" branch.
+ */
 function getRunningPid(pidFile) {
-  const pid = readPid(pidFile);
-  if (pid == null) return null;
-  if (!isAlive(pid)) { removePid(pidFile); return null; }
-  return pid;
+  const meta = readPidMeta(pidFile);
+  if (!meta || meta.pid == null) return null;
+  const verdict = classifyPid(meta, { readToken: readProcessStartToken, isAlive });
+  if (verdict === "stale") { removePid(pidFile); return null; }
+  return meta.pid;
 }
 
 /**
@@ -314,7 +341,14 @@ async function cmdLogRunner(args) {
     }
   };
 
-  const child = spawn(spec.command, spec.args, {
+  // Under shell:true on Windows, cmd.exe re-parses the line and does NOT
+  // auto-quote the command, so a spaced install path (C:\\Users\\First Last\\...)
+  // would split at the space. Double-quote the command so it stays one token.
+  // POSIX is byte-identical: spec.shell is never true off Windows (the `.cmd`
+  // predicate at the call site is gated on IS_WINDOWS). Args here are static
+  // literals (start --port <n>) with no metacharacters, so they need no escaping.
+  const runCommand = spec.shell === true ? `"${spec.command}"` : spec.command;
+  const child = spawn(runCommand, spec.args, {
     cwd: spec.cwd,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -427,7 +461,7 @@ async function cmdStart(args = []) {
   // cmd.exe and are kept only as a last fallback.
   const nextBin = resolveNextBin(dashboardDir);
   const dashArgs = nextSpawnArgs(dashboardDir, nextBin, [
-    "start", "--port", String(DASHBOARD_PORT),
+    "start", "--port", String(DASHBOARD_PORT), "--hostname", "127.0.0.1",
   ]);
   const dashboard = spawnLoggedService({
     command: nextBin,

@@ -479,7 +479,7 @@ describe("VoiceTranscriber", () => {
       expect(result?.language).toBe("ja");
       expect(pipeline).toHaveBeenCalledTimes(2);
       // First pass: auto-detect (no language).
-      expect(pipeline.mock.calls[0][1]).toMatchObject({ language: null, task: "transcribe" });
+      expect((pipeline.mock.calls[0] as unknown[])[1]).toMatchObject({ language: null, task: "transcribe" });
       // Second pass: primary forced.
       expect(pipeline.mock.calls[1][1]).toMatchObject({ language: "ja", task: "transcribe" });
     });
@@ -609,7 +609,7 @@ describe("VoiceTranscriber", () => {
       });
       expect(result).toBeNull();
       expect(pipeline).toHaveBeenCalledTimes(1);
-      expect(pipeline.mock.calls[0][1]).toMatchObject({ language: "en", task: "transcribe" });
+      expect((pipeline.mock.calls[0] as unknown[])[1]).toMatchObject({ language: "en", task: "transcribe" });
     });
 
     it("re-reads the primary language on every call when given a getter", async () => {

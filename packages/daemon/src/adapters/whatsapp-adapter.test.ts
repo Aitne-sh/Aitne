@@ -954,7 +954,8 @@ describe("WhatsAppAdapter — reconnect classifier", () => {
     expect(internals.lastError).toMatch(/rejected client version/i);
 
     // Cleanup any scheduled timers
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
   it("invalidates the version cache on a 515 restart-required close", async () => {
@@ -969,7 +970,8 @@ describe("WhatsAppAdapter — reconnect classifier", () => {
     await internals.handleConnectionUpdate(makeCloseUpdate(515), internals.sock);
 
     expect(internals.cachedWAVersion).toBeNull();
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 });
 
@@ -1065,7 +1067,8 @@ describe("WhatsAppAdapter — closeSocket reentry safety", () => {
     // gating only the reentry path, not all closes.
     expect(internals.reconnectTimer).not.toBeNull();
     expect(internals.reconnectAttempts).toBe(1);
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 });
 
@@ -1161,7 +1164,8 @@ describe("WhatsAppAdapter — reconnect backoff", () => {
     internals.scheduleReconnect();
     const call = setTimeoutSpy.mock.calls.at(-1);
     expect(call?.[1]).toBe(60_000);
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
   it("stops scheduling once max attempts is exceeded", () => {
@@ -1253,7 +1257,8 @@ describe("WhatsAppAdapter — sustained network watch", () => {
     );
 
     expect(internals.lastCloseWasNetwork).toBe(true);
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
   it("enters the sustained watch instead of giving up on a network close past the fast cap", () => {
@@ -1275,7 +1280,8 @@ describe("WhatsAppAdapter — sustained network watch", () => {
     expect(internals.lastError ?? "").not.toMatch(/gave up/);
     // Counter pinned at the cap rather than growing across the offline window.
     expect(internals.reconnectAttempts).toBe(10);
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
   it("still gives up on a non-network close past the fast cap", () => {
@@ -1309,7 +1315,8 @@ describe("WhatsAppAdapter — sustained network watch", () => {
     // Re-armed for another probe rather than wedging in an error state.
     expect(internals.reconnectTimer).not.toBeNull();
     expect(internals.reconnecting).toBe(true);
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
   it("reconnects with a fresh fast phase once the network returns", async () => {
@@ -1342,7 +1349,8 @@ describe("WhatsAppAdapter — sustained network watch", () => {
     await internals.runReconnectAttempt(true);
 
     expect(internals.lastCloseWasNetwork).toBe(false);
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
   it("abandons the sustained attempt if shut down during the connectivity probe", async () => {
@@ -1482,7 +1490,8 @@ describe("WhatsAppAdapter — connection state accessors", () => {
         error: null,
       });
     } finally {
-      if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+      const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     }
   });
 
@@ -1568,7 +1577,8 @@ describe("WhatsAppAdapter — getStatusError", () => {
     try {
       expect(adapter.getStatusError()).toBeNull();
     } finally {
-      if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+      const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     }
   });
 
@@ -2131,7 +2141,8 @@ describe("WhatsAppAdapter — handleConnectionUpdate edge cases", () => {
 
     expect(internals.connectionState).toBe("disconnected");
     expect(internals.lastError).toBe("WhatsApp connection closed");
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     vi.useRealTimers();
   });
 
@@ -2165,7 +2176,8 @@ describe("WhatsAppAdapter — handleConnectionUpdate edge cases", () => {
 
     expect(internals.connectionState).toBe("disconnected");
     expect(internals.lastError).toContain("500");
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     vi.useRealTimers();
   });
 
@@ -2837,7 +2849,8 @@ describe("WhatsAppAdapter — scheduleReconnect timer callback paths", () => {
     await vi.runAllTimersAsync();
 
     expect(connectSpy).not.toHaveBeenCalled();
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     vi.useRealTimers();
   });
 
@@ -2856,7 +2869,8 @@ describe("WhatsAppAdapter — scheduleReconnect timer callback paths", () => {
     await vi.runAllTimersAsync();
 
     expect(connectSpy).not.toHaveBeenCalled();
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     vi.useRealTimers();
   });
 
@@ -2880,7 +2894,8 @@ describe("WhatsAppAdapter — scheduleReconnect timer callback paths", () => {
     expect(internals.lastError).toContain("connect failed");
 
     // Clean up any subsequent timer scheduled by the error-recovery path
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     vi.useRealTimers();
   });
 
@@ -2901,7 +2916,8 @@ describe("WhatsAppAdapter — scheduleReconnect timer callback paths", () => {
     expect(connectSpy).toHaveBeenCalledTimes(1);
     expect(internals.lastError).toBe("string connect err 1037");
 
-    if (internals.reconnectTimer) clearTimeout(internals.reconnectTimer);
+    const reconnectTimer = (internals as { reconnectTimer?: ReturnType<typeof setTimeout> | null }).reconnectTimer;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     vi.useRealTimers();
   });
 });
@@ -2927,7 +2943,7 @@ describe("WhatsAppAdapter — loadDependencies() via mocked modules", () => {
     // All of these start as null
     expect(internals.makeWASocket).toBeNull();
 
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
 
     // After loading, all fields should be populated
     expect(typeof internals.makeWASocket).toBe("function");
@@ -2961,7 +2977,7 @@ describe("WhatsAppAdapter — loadDependencies() via mocked modules", () => {
       makeWASocket: unknown;
     };
 
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
     expect(internals.makeWASocket).toBe(mockMakeWASocket);
 
     // Restore
@@ -2975,11 +2991,11 @@ describe("WhatsAppAdapter — loadDependencies() via mocked modules", () => {
       makeWASocket: unknown;
     };
 
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
     const firstSocket = internals.makeWASocket;
 
     // Call again — should not reimport or reassign
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
     expect(internals.makeWASocket).toBe(firstSocket);
   });
 
@@ -3153,7 +3169,7 @@ describe("WhatsAppAdapter — loadDependencies() via mocked modules", () => {
       fetchLatestBaileysVersion: (() => Promise<unknown>) | null;
     };
 
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
     internals.authState = { state: { creds: {} }, saveCreds: vi.fn().mockResolvedValue(undefined) };
     // Make version resolution set shuttingDown mid-flight
     internals.fetchLatestWaWebVersion = vi.fn().mockImplementation(async () => {
@@ -3177,7 +3193,7 @@ describe("WhatsAppAdapter — loadDependencies() via mocked modules", () => {
       loadDependencies: () => Promise<void>;
     };
 
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
     internals.authState = { state: { creds: {} }, saveCreds: vi.fn().mockResolvedValue(undefined) };
 
     const onCallbacks: Record<string, ((...args: unknown[]) => void)[]> = {};
@@ -3234,7 +3250,7 @@ describe("WhatsAppAdapter — loadDependencies() via mocked modules", () => {
     };
 
     // After loadDependencies (via start), makeWASocket should be set
-    await internals.loadDependencies();
+    await (internals as unknown as { loadDependencies: () => Promise<void> }).loadDependencies();
     expect(typeof internals.makeWASocket).toBe("function");
 
     // Manually call connect() with mocked socket

@@ -8,7 +8,7 @@ aliases:
 category: features
 summary: |
   Pair Telegram by creating a bot via @BotFather, pasting the token
-  into Aitne, and DMing the magic phrase.
+  into Aitne, and scanning the pairing QR code.
 section: messaging
 tags:
   - messaging
@@ -24,7 +24,7 @@ ask_examples:
   - Where do I get a Telegram bot token?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - telegram
   - telegram bot
@@ -41,7 +41,7 @@ related:
 ## In One Sentence
 
 The fastest messaging app to pair: create a Telegram bot, paste the
-token, type the magic phrase.
+token, scan the pairing QR code.
 
 ## What It Does
 
@@ -51,7 +51,7 @@ token, type the magic phrase.
 ## When It Runs / How It Is Triggered
 
 Before pairing, nothing listens. Once you paste the bot token and complete
-magic-phrase pairing, Aitne long-polls Telegram's Bot API continuously for new
+QR / deep-link pairing, Aitne long-polls Telegram's Bot API continuously for new
 direct messages.
 
 ## Where in the Dashboard
@@ -63,17 +63,18 @@ direct messages.
 | Field | Notes |
 |---|---|
 | Bot Token | From @BotFather. |
-| Owner Channel | Auto-set on successful magic-phrase pairing. |
+| Owner Channel | Auto-set on successful QR / deep-link pairing. |
 
 ## When Something Goes Wrong
 
 - Bot replied to in a group instead of a DM: group chats are filtered
   out by design; the agent only listens to direct messages.
-- No reply at all after DMing the magic phrase: confirm the bot has a username
-  set via @BotFather (/setname) — the daemon refuses to build the pairing deep
-  link otherwise.
+- No reply at all after scanning the QR: confirm the bot has a username
+  set via @BotFather (/setname or /newbot) — the daemon refuses to build the
+  pairing deep link otherwise.
 - Pairing never completes: re-check the token in Connections → Messaging →
-  Telegram, then DM the magic phrase from your own account. See
+  Telegram, generate a fresh QR, then scan it (or tap the deep link) and press
+  START in Telegram from your own account. See
   [Pairing & Magic Phrase](pairing-and-magic-phrase.md).
 
 ## Related

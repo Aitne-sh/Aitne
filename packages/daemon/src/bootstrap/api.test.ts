@@ -52,7 +52,7 @@ class InMemorySecretStore implements SecretStore {
 
   constructor(seed: Partial<Record<StoredSecretName, string>> = {}) {
     for (const [key, value] of Object.entries(seed)) {
-      this.values.set(key as StoredSecretName, value);
+      if (typeof value === "string") this.values.set(key as StoredSecretName, value);
     }
   }
 
@@ -250,7 +250,9 @@ function makeBootstrapApiDeps(
     buildCalendarPoller: () => null,
     buildNotionPoller: () => null,
     buildGitWatcher: () => null,
-    buildGithubPoller: () => null,
+    buildGithubPoller: () => null as unknown as ReturnType<BootstrapApiDeps["buildGithubPoller"]>,
+    browserTaskSlotStateRef: {} as unknown as BootstrapApiDeps["browserTaskSlotStateRef"],
+    browserTaskRunner: {} as unknown as BootstrapApiDeps["browserTaskRunner"],
     buildDelegatedSyncWorker: () =>
       ({}) as ReturnType<BootstrapApiDeps["buildDelegatedSyncWorker"]>,
     buildGitDelegatedCronObserver: () =>

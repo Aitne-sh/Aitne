@@ -21,6 +21,7 @@ function makeAudit(): IAuditLogger {
     logError: vi.fn(),
     logAttachment: vi.fn(),
     logBangCommand: vi.fn(),
+    insertInProgressRow: vi.fn(() => -1),
   };
 }
 

@@ -30,7 +30,7 @@ ask_examples:
   - How do I run !trace against a non-default wiki workspace?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - "!trace"
   - "!connect"
@@ -187,6 +187,7 @@ Every report is a regular wiki file under `30_outputs/`. You can:
 ## Cost Envelope
 
 Both commands run at Sonnet medium tier with a default $1.00
-spend cap per run, identical to `!ask`. The 7-day cost rollup on
-**Settings → Wiki** breaks the spend out per command so you can
-see where the budget went.
+spend cap per run, identical to `!ask`. The **Settings → Wiki**
+overview shows a single 7-day cost stat across all wiki commands;
+to see per-command spend, filter the timeline on `/wiki/timeline`
+by `wiki.trace` or `wiki.connect`.

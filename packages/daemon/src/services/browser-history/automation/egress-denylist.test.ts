@@ -332,6 +332,32 @@ describe("egress-denylist", () => {
       expect(matchesCidrDenylist("::")).toBe(true);
     });
 
+    // ── NAT64 embedded-IPv4 SSRF (2026-06 audit fix) ──────────────────
+    // On NAT64/DNS64 networks the whole IPv4 internet is reachable via the
+    // well-known `64:ff9b::/96` prefix, so a `64:ff9b::<private/metadata>`
+    // literal routes to that destination. We decode the embedded IPv4 and
+    // block only private/metadata targets — NOT the whole /96 (that would
+    // break all IPv4 browsing on those networks).
+    it("blocks NAT64 (64:ff9b::/96) embedded private/metadata IPv4", () => {
+      expect(matchesCidrDenylist("64:ff9b::a9fe:a9fe")).toBe(true); // 169.254.169.254 (metadata)
+      expect(matchesCidrDenylist("64:ff9b::169.254.169.254")).toBe(true); // dotted form
+      expect(matchesCidrDenylist("64:ff9b::0a00:0001")).toBe(true); // 10.0.0.1
+      expect(matchesCidrDenylist("64:ff9b::10.0.0.1")).toBe(true); // dotted 10/8
+      expect(matchesCidrDenylist("64:ff9b::c0a8:0101")).toBe(true); // 192.168.1.1
+    });
+
+    it("allows NAT64-embedded PUBLIC IPv4 (must not block all IPv4 browsing)", () => {
+      expect(matchesCidrDenylist("64:ff9b::8.8.8.8")).toBe(false);
+      expect(matchesCidrDenylist("64:ff9b::0808:0808")).toBe(false); // 8.8.8.8 (hex groups)
+    });
+
+    it("blocks IETF protocol-assignment range 192.0.0.0/24 (DNS64 host)", () => {
+      expect(matchesCidrDenylist("192.0.0.171")).toBe(true); // DNS64 well-known host
+      expect(matchesCidrDenylist("192.0.0.1")).toBe(true);
+      // Boundary: 192.0.1.x is outside the /24 and stays allowed.
+      expect(matchesCidrDenylist("192.0.1.1")).toBe(false);
+    });
+
     it("allows public IPv4 and IPv6", () => {
       expect(matchesCidrDenylist("8.8.8.8")).toBe(false);
       expect(matchesCidrDenylist("2606:4700:4700::1111")).toBe(false);

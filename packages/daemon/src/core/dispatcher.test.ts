@@ -1512,7 +1512,7 @@ describe("EventDispatcher", () => {
     const config = makeConfig();
     vi.mocked(mockAgentCore.resolveBinding).mockReturnValue({
       processKey: "dashboard.chat",
-      resolvedTier: "light",
+      resolvedTier: "lite",
       main: {
         backendId: "claude",
         modelId: "claude-sonnet-4-6",
@@ -1590,7 +1590,7 @@ describe("EventDispatcher", () => {
     const config = makeConfig();
     vi.mocked(mockAgentCore.resolveBinding).mockReturnValue({
       processKey: "message.received",
-      resolvedTier: "light",
+      resolvedTier: "lite",
       main: {
         backendId: "claude",
         modelId: "claude-sonnet-4-6",
@@ -2307,7 +2307,7 @@ describe("EventDispatcher", () => {
     const config = makeConfig();
     vi.mocked(mockAgentCore.resolveBinding).mockReturnValue({
       processKey: "dashboard.chat",
-      resolvedTier: "heavy",
+      resolvedTier: "high",
       main: {
         backendId: "codex",
         modelId: "gpt-5.4",
@@ -2415,7 +2415,7 @@ describe("EventDispatcher", () => {
     const config = makeConfig();
     vi.mocked(mockAgentCore.resolveBinding).mockReturnValue({
       processKey: "dashboard.chat",
-      resolvedTier: "heavy",
+      resolvedTier: "high",
       main: {
         backendId: "codex",
         modelId: "gpt-5.4",
@@ -3002,7 +3002,7 @@ describe("EventDispatcher", () => {
       const broadcaster = makeRecordingBroadcaster();
       const dispatcher = buildDispatcherWithBroadcaster(broadcaster);
 
-      const messageEvent: MessageEvent = {
+      const messageEvent = {
         ...createEvent({
           type: "message.received",
           source: "test",
@@ -3018,7 +3018,7 @@ describe("EventDispatcher", () => {
         isDm: true,
         isMention: false,
         attachments: [],
-      };
+      } as unknown as MessageEvent;
 
       // The dispatcher's handleMessage path is heavily mocked; we only care
       // that NO routine SSE events fire for a non-routine event regardless

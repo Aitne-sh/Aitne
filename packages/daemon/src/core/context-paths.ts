@@ -77,6 +77,12 @@ export const CONTEXT_RELATIVE_PATHS = {
   // `~/.personal-agent/integrations.md` moved under `policies/`.
   integrations: "policies/integrations.md",
 
+  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §3.3) —
+  // global `agent`-scope lessons store, lazy-created on first nightly
+  // consolidation write. Per-agent (`agent:<slug>`) lessons live next to
+  // the agent definition under `policies/agents/<slug>/lessons.md` (Phase 4).
+  agentLessons: "policies/agent-lessons.md",
+
   // User-registered skill bundles (lazy-created).
   skillsDir: "policies/skills",
 

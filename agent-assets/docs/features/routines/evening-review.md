@@ -27,7 +27,7 @@ ask_examples:
   - How do I disable the evening review?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - evening review
   - retro
@@ -48,6 +48,7 @@ context_files:
   - journal/agent.md
   - identity/profile.md
   - policies/routines/evening.md
+  - policies/agent-lessons.md
 ui_anchors:
   - /connections/journal
   - /settings/routines
@@ -64,7 +65,7 @@ your identity files.
 
 ## What It Does
 
-The routine runs three internal bookkeeping steps. These are quiet by
+The routine runs several internal bookkeeping steps. These are quiet by
 design — they prepare state that **tomorrow's morning routine depends on**
 rather than producing a chatty end-of-day report.
 
@@ -80,6 +81,11 @@ rather than producing a chatty end-of-day report.
 3. **Process profile signals.** Reads the day's Raw Signals from your
    profile and routes each into `character`, Learned Context, or a
    detailed identity file under `identity/`, then prunes stale entries.
+4. **Consolidate feedback signals into lessons.** When feedback learning is
+   on (default) and signals are pending, folds the day's unconsumed feedback
+   into the scoped lesson stores (`policies/agent-lessons.md` for agent-scope
+   lessons; identity files for owner directives), then marks them consumed.
+   Skipped entirely when no signals pend.
 
 ## When It Runs / How It Is Triggered
 
@@ -94,6 +100,8 @@ run is skipped while the agent is paused (`!stop`) or setup is incomplete.
 - Roadmap edits in `plans/roadmap.md` when a plan was promoted or fired.
 - A `journal/agent.md` line **only** when a roadmap review date fired or a
   validation error needs recording.
+- Lesson edits in `policies/agent-lessons.md` when feedback signals were
+  pending and consolidated.
 
 The built-in steps emit **no user-facing DM by default** — there is no
 "today wraps up here" message. (The one exception: any check you add to

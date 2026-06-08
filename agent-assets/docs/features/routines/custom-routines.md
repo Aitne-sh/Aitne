@@ -29,7 +29,7 @@ ask_examples:
   - Which tier does a custom routine run under?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - custom routine
   - routine.custom.<slug>
@@ -159,16 +159,20 @@ under the `medium` tier (Sonnet on the Claude backend), and stops
 spending once the run reaches $0.10.
 
 > **Distinct from `recurring_schedules`.** The `recurring_schedules`
-> table powers DM-style scheduled tasks (`agent.task` /
-> `agent.dm_task`) — e.g. "remind me at 9am every weekday". Those
-> use a structured `RecurrenceRule` (frequency + time + dayOf*) and
-> are managed via `POST /api/recurring-schedules`. They are not the
-> same surface as `routine.custom.<slug>`.
+> table now powers recurring scheduled DMs only (`task_type =
+> 'dm_session'`) — e.g. the morning briefing. They use a structured
+> `RecurrenceRule` (frequency + time + dayOf*) and are managed via
+> `POST /api/recurring-schedules`. Recurring agent *work* moved to the
+> `/agents` layer — `POST /api/recurring-schedules` with any
+> non-`dm_session` task type returns 410 Gone with a pointer to
+> `POST /api/agents`. Neither is the same surface as
+> `routine.custom.<slug>`.
 
 ## When Something Goes Wrong
 
 - A cron expression that resolves to "never": the routine appears in
-  the list but never fires. The dashboard shows next-fire as N/A.
+  the list but never fires. The dashboard's "Next runs" preview shows
+  "No upcoming runs found within the next year for this timezone."
 
 ## Related
 

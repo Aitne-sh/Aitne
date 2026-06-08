@@ -1118,6 +1118,37 @@ describe("Agent API routes", () => {
       expect(body.error).toBe("invalid_time");
     });
 
+    it("accepts a past time on non-dm (wake) schedules for catch-up rescheduling", async () => {
+      // The past-time rejection is deliberately dm-only: wake/check rows may
+      // be rescheduled into the past so the catch-up runner fires them on the
+      // next tick (see the dm-only guard in agent-schedule.ts). This pins that
+      // asymmetry so a future "reject all past times" change can't silently
+      // break catch-up rescheduling.
+      const app = createAgentRoutes({ db } as never);
+
+      db.prepare(
+        `INSERT INTO agent_schedule (scheduled_for, task_type, task_description, status)
+         VALUES (datetime('now', '+1 hour'), 'wake', 'task', 'pending')`,
+      ).run();
+
+      const past = new Date(Date.now() - 120_000).toISOString();
+      const res = await app.request("/schedule/1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ time: past }),
+      });
+
+      expect(res.status).toBe(200);
+      const row = db.prepare(
+        "SELECT scheduled_for FROM agent_schedule WHERE id = 1",
+      ).get() as { scheduled_for: string };
+      // scheduled_for now points at the (past) requested instant rather than
+      // the original "+1 hour" seed. SQLite stores 'YYYY-MM-DD HH:MM:SS' in
+      // UTC — normalize to ISO before parsing.
+      const storedMs = new Date(`${row.scheduled_for.replace(" ", "T")}Z`).getTime();
+      expect(storedMs).toBeLessThan(Date.now());
+    });
+
     it("normalizes legacy alias model on PATCH to tier_override (Phase D §4.3)", async () => {
       // PATCH `model: "opus"` is the legacy alias path — under Phase D
       // the resolver rewrites it to `tier_override: "high"`, clears
@@ -4050,7 +4081,7 @@ describe("Agent API routes", () => {
             if (!(key.startsWith("schedule.") || key.startsWith("agent_actions."))) {
               return false;
             }
-            if (entry.severity === "warning") return false;
+            if ((entry as { severity?: string }).severity === "warning") return false;
             if (entry.skillAnchor?.startsWith(RECURRING_ONLY_PREFIX)) return false;
             if (KNOWN_DEFENSIVE.has(key)) return false;
             return true;

@@ -29,7 +29,7 @@ ask_examples:
   - Can I send the agent a voice note?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - messaging
   - dm
@@ -75,10 +75,10 @@ so you can talk to the agent the same way you'd type.
 ## What It Does
 
 - **Reactive DMs**: the agent answers every direct message you send.
-- **@-mentions (Slack only)**: @-mentioning the agent inside a shared
-  channel routes to the `message.mention` ProcessKey and is answered
-  the same way as a DM. Telegram, Discord, and WhatsApp drop all
-  non-DM traffic (no group support).
+- **@-mentions (Slack and Discord)**: @-mentioning the agent inside a
+  shared channel routes to the `message.mention` ProcessKey and is
+  answered the same way as a DM. Telegram and WhatsApp drop all non-DM
+  traffic (no group support).
 - **Outbound notifications**: routines and observations fire alerts
   back through the same channel.
 - **Voice attachments**: when the platform attaches audio (Telegram

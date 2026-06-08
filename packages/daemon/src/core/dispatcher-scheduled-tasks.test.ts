@@ -20,6 +20,12 @@ import { ResultProcessor } from "./dispatcher-result-processor.js";
 import { DispatcherErrorRouter } from "./dispatcher-error-handling.js";
 import { MorningRoutineRunner } from "./dispatcher-morning-routine.js";
 import { EventBus } from "./event-bus.js";
+import {
+  InMemoryTodayWriteLockManager,
+  type TodayWriteLockManager,
+} from "./today-write-lock.js";
+import { FALLBACK_PLACEHOLDERS } from "./skeleton.js";
+import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import type { RoutineFetchWindowRunner } from "./routine-fetch-window-runner.js";
 import type { AgentConfig } from "../config.js";
 import type { IAgentRouter } from "./backends/backend-router.js";
@@ -62,6 +68,7 @@ function makeRunner(opts: {
   db: Database.Database;
   dataDir: string;
   fetchWindowRunner?: RoutineFetchWindowRunner;
+  todayWriteLock?: TodayWriteLockManager;
 }): {
   runner: ScheduledTaskRunner;
   router: IAgentRouter;
@@ -133,7 +140,6 @@ function makeRunner(opts: {
     db: opts.db,
     config,
     eventBus,
-    contextBuilder,
     agentRouter: router,
     notificationMgr,
     todayWriteLock: undefined,
@@ -147,7 +153,7 @@ function makeRunner(opts: {
     isRoadmapStale: () => false,
     emitRoadmapRefresh: vi.fn(),
     triggerHourlyCheck: vi.fn().mockResolvedValue(undefined),
-  });
+  } as unknown as ConstructorParameters<typeof MorningRoutineRunner>[0]);
   const runner = new ScheduledTaskRunner({
     db: opts.db,
     config,
@@ -159,6 +165,7 @@ function makeRunner(opts: {
     morningRoutine,
     fetchWindowRunner,
     roadmapWriteLock: undefined,
+    todayWriteLock: opts.todayWriteLock,
     writeTracker: undefined,
     getConfiguredServices: () => new Set<string>(),
     getActiveMailAccounts: () => [],
@@ -674,6 +681,106 @@ describe("ScheduledTaskRunner.executeDefault — Phase 4 / D4 pre-pass", () => {
       platform: "dashboard",
     } as unknown as Parameters<typeof runner.executeDefault>[0]);
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// today_refresh skeleton guard — executeDefault must guarantee a today.md
+// working surface exists before the refresh session so the agent's section
+// PATCH never 404s and budget-burns on full-file PUTs. rotateDayFiles()
+// intentionally leaves today.md absent for the morning routine to recreate;
+// when that routine has not run / failed, the dashboard "Refresh Today"
+// button (and the cron/drift today_refresh paths, which all funnel into
+// executeDefault) would otherwise hit the absent-file failure mode.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("ScheduledTaskRunner.executeDefault — today_refresh skeleton guard", () => {
+  let db: Database.Database;
+  let dataDir: string;
+  let todayPath: string;
+  const SKELETON = FALLBACK_PLACEHOLDERS[CONTEXT_RELATIVE_PATHS.today]!;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-st-tr-"));
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+    mkdirSync(join(dataDir, "context", "state"), { recursive: true });
+    todayPath = join(dataDir, "context", "state", "today.md");
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  function stubLlm(router: IAgentRouter): void {
+    (router.resolveBinding as ReturnType<typeof vi.fn>).mockReturnValue({
+      main: { backendId: "claude", modelId: "model", maxTurns: 1 },
+    });
+    (router.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      output: "",
+      isError: false,
+      durationMs: 10,
+      numTurns: 1,
+      sessionId: null,
+      model: "model",
+      backendId: "claude",
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      modelUsage: {},
+      costSource: "backend",
+      contextUpdated: false,
+      advisorCallCount: 0,
+      stopReason: null,
+    });
+  }
+
+  const todayRefreshEvent = {
+    type: "routine.today_refresh",
+    source: "dashboard_regenerate",
+    priority: 1,
+    timestamp: new Date(),
+    data: {},
+    correlationId: "evt-tr",
+    routine: "today_refresh",
+  } as unknown as Parameters<ScheduledTaskRunner["executeDefault"]>[0];
+
+  it("seeds the canonical skeleton when today.md is absent before the refresh session", async () => {
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const { runner, router } = makeRunner({ db, dataDir, todayWriteLock: lock });
+    stubLlm(router);
+    expect(existsSync(todayPath)).toBe(false);
+
+    await runner.executeDefault(todayRefreshEvent);
+
+    // The guard seeded the canonical skeleton so the agent's section PATCH
+    // (mocked here) has a valid target instead of a 404.
+    expect(existsSync(todayPath)).toBe(true);
+    expect(readFileSync(todayPath, "utf-8")).toBe(SKELETON);
+    // Released before the session — the later PATCH won't hit a 409.
+    expect(lock.getHolder()).toBeNull();
+  });
+
+  it("leaves an existing today.md untouched (does not clobber on refresh)", async () => {
+    const existing = "# 2026-05-06 (Wednesday)\n> Day type: Weekday | Work focus: on | Study focus: off | Personal focus: on\n\n## User Schedule\n- 09:00 keep me\n\n## Agent Log\n";
+    writeFileSync(todayPath, existing);
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const { runner, router } = makeRunner({ db, dataDir, todayWriteLock: lock });
+    stubLlm(router);
+
+    await runner.executeDefault(todayRefreshEvent);
+
+    expect(readFileSync(todayPath, "utf-8")).toBe(existing);
+  });
+
+  it("does not seed when no today-write-lock is wired (guard is lock-gated, preserving prior behaviour)", async () => {
+    const { runner, router } = makeRunner({ db, dataDir }); // todayWriteLock undefined
+    stubLlm(router);
+
+    await runner.executeDefault(todayRefreshEvent);
+
+    expect(existsSync(todayPath)).toBe(false);
   });
 });
 

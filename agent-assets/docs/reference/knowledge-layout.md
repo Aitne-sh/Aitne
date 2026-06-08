@@ -34,7 +34,7 @@ ask_examples:
   - Which files can the agent write to?
 locale: en-US
 created: 2026-05-18
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - context
   - knowledge
@@ -182,6 +182,10 @@ the write-permission whitelist in `packages/daemon/src/api/routes/context/permis
     ├── journal-export.md           Inclusion / exclusion rules for exporting journal/daily/
     ├── integrations.md             Integration-mode snapshot (daemon-rendered,
     │                               chokidar-watched at this new path)
+    ├── agent-lessons.md            Feedback Learning Loop global lessons (lazy)
+    ├── agents/                     User-authored Agent definitions (lazy)
+    │   └── <slug>/
+    │       └── agent.md
     ├── management-captures/        One captured policy per file
     │   ├── _index.md
     │   └── <slug>.md
@@ -237,7 +241,8 @@ runner merges that file into the reconciler block.)
 The current agent-day's working view. Daemon-managed structure:
 
 ```
-# Today
+# YYYY-MM-DD (day-of-week)   — line 1 is the canonical agent-day date
+> Day type: …               — parsed by every event handler
 ## User Schedule    — events for the day (from calendar observers)
 ## User Tasks       — what you need to do today
 ## Agent Plan       — what the agent intends to do today
@@ -558,6 +563,8 @@ listed is read-only via the API.
 | `state/profile-questions` · `state/activity/*` | `PUT`, `PATCH` |
 | `identity/_index` · `identity/*` | `PUT`, `PATCH` |
 | `policies/_index` · `policies/*` (top-level files) | `PUT`, `PATCH` |
+| `policies/agent-lessons` | `PUT`, `PATCH` (Feedback Learning Loop global lessons store) |
+| `policies/agents/{slug}/{file}` | `PUT`, `PATCH`, `DELETE` (user-authored Agent definitions) |
 | `policies/routines/_index` · `policies/routines/*` | `PUT`, `PATCH` |
 | `policies/routines/custom/*` | `PUT`, `PATCH`, `DELETE` |
 | `plans/projects/_index` · `plans/projects/*` | `PUT`, `PATCH` |
@@ -570,6 +577,7 @@ listed is read-only via the API.
 | `state/inbox/*` · `state/scratch/*` | `PUT`, `PATCH`, `DELETE` |
 | `journal/agent` | `PUT` once (create-only), then `PATCH` (append) |
 | `policies/management-captures/_index` · `policies/management-captures/*` | `PUT`, `PATCH` |
+| `research/*` | `PUT`, `PATCH` (browser-history research-cluster journals) |
 
 > Legacy URL forms (`/api/context/today.md`, `/api/context/user/profile`, `/api/context/rules/management`, `/api/context/agent/journal`, etc.) are normalized to the class-prefixed canonical paths in-process by `core/context-vault-aliases.ts` before any of the above checks run. Normalization is not a redirect (no HTTP 3xx) so legacy `curl -X PUT/PATCH` callers keep working. The alias bridge lives for one minor release after PR-6's content sweep lands. <!-- drift-allow -->
 

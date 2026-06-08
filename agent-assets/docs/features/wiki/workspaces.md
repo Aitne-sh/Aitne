@@ -37,7 +37,7 @@ ask_examples:
   - Can two wikis live in nested folders?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - wiki workspace
   - workspace
@@ -98,7 +98,7 @@ side-by-side wikis as you have distinct knowledge domains.
 |---|---|---|
 | Root path | `$PA_DATA_DIR/context/knowledge/wiki/<name>` (daemon-owned, inside the context vault) | Any path you pick (typically an existing Obsidian vault) |
 | Writes | Atomic local-fs writes | Atomic local-fs writes when permitted; Obsidian-CLI fallback for sandboxed paths |
-| Backup surface | `md_file_snapshots` table | git auto-commit (when the vault is git-tracked) + sibling backup mirror under `90_meta/health/pre-migrate-<date>/` |
+| Backup surface | On-disk `.snapshots/<timestamp>/` tree under the workspace root | git auto-commit (when the vault is git-tracked) + sibling backup mirror under `90_meta/health/pre-migrate-<date>/` |
 | iCloud-friendly | Yes (lives in `~/.personal-agent`) | Yes via the Obsidian CLI fallback (requires the Obsidian app running) |
 | Best for | First-time users, isolated wiki, no Obsidian dependency | Power users with an existing Obsidian vault they want the agent to extend |
 

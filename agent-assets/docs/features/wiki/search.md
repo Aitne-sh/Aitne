@@ -36,7 +36,7 @@ ask_examples:
   - What is fts_wiki?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - wiki search
   - fts_wiki
@@ -119,10 +119,10 @@ is the file on disk, not a row in another SQL table. This matters:
   because the source rows live in SQLite.
 - Wiki content lives on the filesystem. There's no source table to
   trigger off, so the wiki API write endpoints
-  (`POST /api/wiki/:ws/files/:path`, `PATCH /api/wiki/:ws/files/:path`,
-  `DELETE /api/wiki/:ws/files/:path`) call
-  `upsertWikiFulltextRow` / `deleteWikiFulltextRow` directly after a
-  successful disk write.
+  (`POST /api/wiki/:ws/files/:path`, `PATCH /api/wiki/:ws/files/:path`)
+  call `upsertWikiFulltextRow` directly after a successful disk write.
+  (`deleteWikiFulltextRow` is reached internally — it's how
+  `upsertWikiFulltextRow` drops a `log`/`inbox` row from the index.)
 
 The schema (`packages/daemon/src/db/schema.ts`):
 

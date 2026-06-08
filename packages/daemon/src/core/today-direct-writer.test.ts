@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,7 +8,10 @@ import {
 import {
   appendAgentLogLine,
   appendBulletToAgentLog,
+  ensureTodaySkeleton,
 } from "./today-direct-writer.js";
+import { FALLBACK_PLACEHOLDERS } from "./skeleton.js";
+import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 
 const sampleToday = [
   "# 2026-05-06 (Wednesday)",
@@ -270,5 +273,81 @@ describe("appendAgentLogLine", () => {
     const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
     expect(updated).toContain("- 12:00 [bullet-A] first\n");
     expect(updated).toContain("- 12:01 [bullet-B] second\n");
+  });
+});
+
+describe("ensureTodaySkeleton", () => {
+  let tempRoot: string;
+  let contextDir: string;
+  let todayPath: string;
+  const SKELETON = FALLBACK_PLACEHOLDERS[CONTEXT_RELATIVE_PATHS.today]!;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), "ensure-today-skeleton-"));
+    contextDir = join(tempRoot, "context");
+    mkdirSync(join(contextDir, "state"), { recursive: true });
+    todayPath = join(contextDir, "state", "today.md");
+  });
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it("seeds the canonical skeleton when today.md is absent", async () => {
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = await ensureTodaySkeleton({ contextDir, todayWriteLock: lock });
+    expect(result.seeded).toBe(true);
+    expect(result.reason).toBeUndefined();
+    // Byte-identical to the boot-time seeder's skeleton — the section
+    // PATCH the refresh agent issues next then has a valid target.
+    expect(readFileSync(todayPath, "utf-8")).toBe(SKELETON);
+    // Lock released after a successful seed.
+    expect(lock.getHolder()).toBeNull();
+  });
+
+  it("leaves a present (valid dated) today.md byte-untouched", async () => {
+    writeFileSync(todayPath, sampleToday);
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = await ensureTodaySkeleton({ contextDir, todayWriteLock: lock });
+    expect(result.seeded).toBe(false);
+    expect(result.reason).toBe("already_present");
+    expect(readFileSync(todayPath, "utf-8")).toBe(sampleToday);
+  });
+
+  it("leaves a present legacy `# Today` stub byte-untouched (never clobbers user content)", async () => {
+    const legacy = "# Today\n\n## User Schedule\n- 09:00 keep me\n\n## Agent Log\n";
+    writeFileSync(todayPath, legacy);
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const result = await ensureTodaySkeleton({ contextDir, todayWriteLock: lock });
+    expect(result.seeded).toBe(false);
+    expect(result.reason).toBe("already_present");
+    expect(readFileSync(todayPath, "utf-8")).toBe(legacy);
+  });
+
+  it("skips when the today-write-lock is already held (morning routine mid-creation)", async () => {
+    const lock = new InMemoryTodayWriteLockManager(60_000);
+    const held = lock.acquire();
+    expect(held.ok).toBe(true);
+    const result = await ensureTodaySkeleton({ contextDir, todayWriteLock: lock });
+    expect(result.seeded).toBe(false);
+    expect(result.reason).toBe("lock_unavailable");
+    // File stays absent — the lock holder owns creation.
+    expect(existsSync(todayPath)).toBe(false);
+  });
+
+  it("returns io_error when the skeleton write fails (parent is read-only)", async () => {
+    if (process.platform === "win32") return;
+    const stateDir = join(contextDir, "state");
+    chmodSync(stateDir, 0o500);
+    try {
+      const lock = new InMemoryTodayWriteLockManager(60_000);
+      const result = await ensureTodaySkeleton({ contextDir, todayWriteLock: lock });
+      expect(result.seeded).toBe(false);
+      expect(result.reason).toBe("io_error");
+      // Lock released even on the error path.
+      expect(lock.getHolder()).toBeNull();
+    } finally {
+      chmodSync(stateDir, 0o700);
+    }
   });
 });

@@ -25,7 +25,7 @@ describe("PollGuard", () => {
       throw new Error("must not run");
     });
     expect(second).toBe(false);
-    release?.();
+    (release as (() => void) | null)?.();
     await first;
     expect(guard.isInFlight()).toBe(false);
   });
@@ -104,7 +104,7 @@ describe("PollGuard", () => {
     // Two concurrent ticks both skip — pushes skipCount to 2.
     expect(await guard.run(async () => {})).toBe(false);
     expect(await guard.run(async () => {})).toBe(false);
-    release?.();
+    (release as (() => void) | null)?.();
     await first;
     // Next tick must execute AND reset the skip counter so a subsequent
     // back-to-back tick takes the non-resumed path again.
@@ -134,7 +134,7 @@ describe("raceWithAbort", () => {
     controller.abort(new Error("timeout"));
     await expect(raced).rejects.toThrow("timeout");
     // The original promise is still pending — caller must accept the leak.
-    resolveInner?.(1);
+    (resolveInner as ((v: number) => void) | null)?.(1);
   });
 
   it("rejects immediately when the signal is already aborted", async () => {

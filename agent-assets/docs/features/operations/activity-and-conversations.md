@@ -26,7 +26,7 @@ ask_examples:
   - How do I find why a routine failed?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - activity
   - conversations
@@ -104,9 +104,10 @@ Retention is unlimited locally — the SQLite database keeps every row
 forever. To prune history without losing your configuration, use
 `POST /api/system/purge-history` (it clears `agent_actions`,
 `conversation_sessions`, and `messages` but leaves settings and the
-context vault intact). To wipe everything, `aitne uninstall --wipe-data`
-removes the whole `~/.personal-agent` data directory after a `WIPE`
-confirmation.
+context vault intact). To wipe everything, `aitne uninstall` removes the
+whole `~/.personal-agent` data directory after a literal `WIPE`
+confirmation (pass `--wipe-data` to skip the prompt and wipe
+non-interactively, or `--keep-data` to leave the directory intact).
 
 ## When Something Goes Wrong
 

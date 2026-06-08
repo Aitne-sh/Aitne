@@ -111,6 +111,35 @@ describe("secret-redaction", () => {
       expect(redactSensitiveString(`see ${url}`)).toContain(url);
     });
 
+    // ── Google ya29. access tokens (2026-06 audit fix) ────────────────
+    it("redacts Google ya29. access tokens, including short variants", () => {
+      const tok = "ya29.a0ARrdaM9xKv-shortbutreal_token";
+      const out = redactSensitiveString(`token=${tok}`);
+      expect(out).not.toContain(tok);
+      expect(out).toContain("[REDACTED]");
+    });
+
+    // ── URL basic-auth / connection-string credentials (2026-06 audit) ─
+    it("redacts the password in scheme://user:password@host URLs, keeping host legible", () => {
+      const out = redactSensitiveString("https://alice:s3cr3tPass!9@example.com/x");
+      expect(out).not.toContain("s3cr3tPass!9");
+      expect(out).toContain("[REDACTED]");
+      // scheme + user + host stay visible for debuggability.
+      expect(out).toContain("https://alice:");
+      expect(out).toContain("@example.com/x");
+    });
+
+    it("redacts IMAP/SMTP connection-string passwords", () => {
+      const out = redactSensitiveString("smtp://me@x.com:mypassword123@smtp.x.com:587");
+      expect(out).not.toContain("mypassword123");
+      expect(out).toContain("[REDACTED]");
+    });
+
+    it("does not corrupt a credential-free URL via the userinfo rule", () => {
+      const url = "https://example.com/a:b/c";
+      expect(redactSensitiveString(url)).toContain(url);
+    });
+
     it("leaves <12 digit numbers : alphanumeric sequences shorter than 30 chars", () => {
       // Telegram regex requires \d{8,12}:[A-Za-z0-9_-]{30,}. A timestamp
       // followed by a short identifier MUST NOT trigger it.

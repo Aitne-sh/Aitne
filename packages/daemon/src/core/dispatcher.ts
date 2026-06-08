@@ -711,6 +711,7 @@ export class EventDispatcher {
       morningRoutine: this.morningRoutine,
       fetchWindowRunner: this.fetchWindowRunner,
       roadmapWriteLock: this.roadmapWriteLock,
+      todayWriteLock: this.todayWriteLock,
       writeTracker: this.writeTracker,
       getConfiguredServices: () => this.getConfiguredServices(),
       getActiveMailAccounts: () => this.getActiveMailAccounts(),

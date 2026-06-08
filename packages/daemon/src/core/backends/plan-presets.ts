@@ -161,9 +161,14 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // ── Medium-tier tighter envelopes ────────────────────────────────────
   //
   // `routine.today_refresh` is drift-triggered. A typical refresh on
-  // Sonnet runs ~$0.10 in 4 turns; the $0.30 cap is 3x observed cost,
-  // matching the headroom convention used by dashboard.docs_qa.
-  "routine.today_refresh": { maxTurns: 20, maxBudgetUsd: 0.3 },
+  // Sonnet runs ~$0.10 in 4 turns, but a busy-calendar drift (many/large
+  // pending calendar observations) compounded by a 409 morning-lock retry
+  // loop tripped the prior $0.30 cap and surfaced
+  // BackendQuotaError(max_budget_usd) with no fallback. Realigned to
+  // $0.50 — the medium-tier 20-turn peer dashboard.docs_qa value, well
+  // under the superset morning_routine_today ($1.50). Bumped for upgrading
+  // installs by migration 0009; keep in lock-step with the schema-seed row.
+  "routine.today_refresh": { maxTurns: 20, maxBudgetUsd: 0.5 },
   // Above medium nominal: V2-disabled monolithic path absorbs fetch +
   // synthesis in one session and tripped $1 on Sonnet. Lock-step with
   // the schema-seed row.

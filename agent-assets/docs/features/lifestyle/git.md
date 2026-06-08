@@ -46,7 +46,7 @@ ask_examples:
   - How much does one Architecture refresh cost?
 locale: en-US
 created: 2026-05-05
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - my life
   - git
@@ -110,7 +110,7 @@ per repo (all open by default so the controls are visible at a glance):
 2. **Triggers** — fire when matching Git or GitHub events arrive on
    this repository. Triggers run **alongside** the project-wide
    task-flow defaults, not in place of them. Each trigger has a
-   workdir mode (`local-clone` or `ephemeral`); local-clone triggers
+   workdir mode (`local-clone` or `temp`); local-clone triggers
    require the repository to have a `localPath`.
 3. **Daily git management** — opt-in per repo. Enabling it does three
    distinct kinds of work, on different cadences:
@@ -272,7 +272,7 @@ repository has a `localPath`:
 - **Triggers** with `workdirMode: "local-clone"` require a `localPath`
   on the parent repository (enforced when the trigger is created and
   again if you try to clear `localPath` while such a trigger exists).
-  Triggers with `workdirMode: "ephemeral"` work without a local clone.
+  Triggers with `workdirMode: "temp"` work without a local clone.
 - **Daily git management** is **local-clone-bound for v1**. The
   toggle is disabled and the dashboard surfaces "No local clone — link
   one to enable this feature." Internally the

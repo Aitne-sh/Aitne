@@ -93,21 +93,31 @@ try {
 }
 const nextBin = resolveNextBin(dashboardDir);
 const dashArgs = nextSpawnArgs(dashboardDir, nextBin, [
-  "dev", "--port", String(DASHBOARD_PORT),
+  // Bind IPv4 loopback explicitly: with no --hostname, Next binds the
+  // unspecified IPv6 address `::`, and on Windows (IPV6_V6ONLY on) the
+  // 127.0.0.1 readiness probe in bin/aitne.mjs can't reach it. Match the
+  // probe and the daemon's 127.0.0.1-only posture. Byte-identical on
+  // macOS/Linux where the probe already reaches a `::`-bound socket.
+  "dev", "--port", String(DASHBOARD_PORT), "--hostname", "127.0.0.1",
 ]);
-const dashboard = spawn(nextBin, dashArgs, {
+const useShimShell = IS_WINDOWS && nextBin.toLowerCase().endsWith(".cmd");
+const dashCommand = useShimShell ? `"${nextBin}"` : nextBin;
+const dashboard = spawn(dashCommand, dashArgs, {
   cwd: dashboardDir,
   env: process.env,
   stdio: "inherit",
   windowsHide: true,
-  shell: IS_WINDOWS && nextBin.toLowerCase().endsWith(".cmd"),
+  shell: useShimShell,
 });
 children.push(dashboard);
 
 // ── 4. Auto-open browser ──
 
 if (!noOpen) {
-  const url = `http://localhost:${DASHBOARD_PORT}`;
+  // Match the dashboard's 127.0.0.1-only bind above. Using `localhost` here
+  // resolves to `::1` first on Windows, so both the readiness probe AND the
+  // browser open would miss the IPv4-only socket and time out.
+  const url = `http://127.0.0.1:${DASHBOARD_PORT}`;
   waitForHttpReady(url, {
     // `next dev` can take ~30s on a cold boot; give it headroom.
     timeoutMs: 60_000,

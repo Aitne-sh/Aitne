@@ -759,7 +759,8 @@ export function buildDaemonApiCliEnv(
   const env: Record<string, string> = {
     ...Object.fromEntries(
       Object.entries(process.env).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
+        (entry): entry is [string, string] =>
+          typeof entry[1] === "string" && entry[0].toUpperCase() !== "PATH",
       ),
     ),
     PATH: pathParts.join(delimiter),

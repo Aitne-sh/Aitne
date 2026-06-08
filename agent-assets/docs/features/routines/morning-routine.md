@@ -26,7 +26,7 @@ ask_examples:
   - What model does morning routine use?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - morning
   - day plan
@@ -109,8 +109,9 @@ the daemon injects a `<roadmap_skeleton>` block carrying the pre-aggregated
 Annual Goals / Quarterly Focus / Preparation Timeline facts so Stage A
 can populate the wizard's placeholder roadmap on medium tier instead of
 paying for a one-shot high-tier session. (The dedicated
-`routine.morning_routine_initial` process key was retired in Phase 4, and
-Phase 7 — 2026-05-16 — removed its high-tier seed entirely.)
+`routine.morning_routine_initial` process key — along with its high-tier
+seed — was retired in Phase 7, 2026-05-16; the first-run branch now flows
+through the parent `routine.morning_routine` envelope.)
 
 ## What It Outputs
 

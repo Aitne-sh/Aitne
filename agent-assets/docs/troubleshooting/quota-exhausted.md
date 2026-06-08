@@ -26,7 +26,7 @@ ask_examples:
   - Why did an autonomous run get skipped for the cost cap?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - quota
   - BackendQuotaError
@@ -54,8 +54,9 @@ related:
 - Fallback ran the next routine instead of main.
 - Or: an autonomous run was skipped with reason
   `autonomous_cost_cap_exceeded` — this is a *separate* safety net
-  (`autonomousDailyCostCapUsd` / `autonomousMonthlyCostCapUsd`,
-  default off) that skips only autonomous work, never reactive DMs.
+  (`autonomousDailyCostCapUsd`, default off) that skips only autonomous
+  work, never reactive DMs. (`autonomousMonthlyCostCapUsd`, also default
+  off, is notifications-only — it never skips a run, just alerts.)
   It is not a provider quota error; raise the cap on `/settings/models`
   or wait for the next agent day.
 
@@ -92,9 +93,9 @@ related:
    account's spending / rate-limit settings. For cloud providers,
    open the matching console (AWS / GCP / Azure) and check the
    per-region / per-model quota.
-4. If on the subscription fallback, the backend card shows the
-   "next reset" timestamp for the rolling window. Consider
-   registering an API key — see
+4. If on the subscription fallback, the `BackendQuotaError` message in
+   Activity carries the "next reset" timestamp for the rolling window
+   (when the provider reports one). Consider registering an API key — see
    [Costs and Quotas](../concepts/costs-and-quotas.md).
 
 ## Confirming the Fix

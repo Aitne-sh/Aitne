@@ -31,7 +31,7 @@ ask_examples:
   - How do I block a site from managed Chromium?
 locale: en-US
 created: 2026-05-22
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - managed chromium
   - browser automation
@@ -136,7 +136,8 @@ ships empty.
 1. The agent prepares the checkout in a managed Chromium tab and
    pauses at the final confirm step.
 2. The daemon mints a single-use token with the prefix `!~` followed
-   by 8 random hex characters (e.g. `!~3a1f9c7b`), inserts a
+   by 8 random base32 characters (alphabet `A-Z2-7`, e.g.
+   `!~K7QM3ZAB`), inserts a
    `browser_automation_purchase_tokens` row keyed on a server-side
    `jti`, and DMs the token to a primary channel together with a
    screenshot of the exact cart state.

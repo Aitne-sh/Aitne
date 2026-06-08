@@ -20,6 +20,11 @@ const SECRET_VALUE_PATTERNS = [
   // refresh-token format. Length varies but the prefix is distinctive enough
   // to match safely.
   /\b1\/\/0[A-Za-z0-9_-]{20,}\b/g,
+  // Google OAuth access tokens: `ya29.` prefix. Short/medium variants slip
+  // past the generic ≥40-char fallback below, and these routinely surface in
+  // googleapis error / debug strings on the calendar/gmail refresh paths.
+  // No trailing `\b` — the token can end in `.`/`-`/`_` where `\b` would not fire.
+  /\bya29\.[A-Za-z0-9._-]{10,}/g,
   // Slack bot / app / user tokens.
   /\bxoxb-[A-Za-z0-9\-]+\b/g,
   /\bxapp-[A-Za-z0-9\-]+\b/g,
@@ -52,6 +57,14 @@ const SECRET_VALUE_PATTERNS = [
   // ── Generic header patterns ──────────────────────────────────────
   /\bX-Read-Token:\s*[A-Za-z0-9_-]{20,}\b/gi,
   /\bBearer\s+[A-Za-z0-9_\-]{20,}\b/g,
+  // URL basic-auth / connection-string credentials —
+  // `scheme://user:password@host`. Redacts ONLY the password (between the
+  // `://user:` userinfo and the `@`) so the scheme + user + host stay
+  // legible in logs. Covers https/imap/smtp/postgres/etc. The username part
+  // allows `@` (real IMAP/SMTP strings use an email as the username) but NOT
+  // `/`, so the bounded variable-length lookbehind can't cross out of the
+  // authority into a path. The password itself stops at the first `@`.
+  /(?<=:\/\/[^/\s:]{0,256}:)[^/\s@]+(?=@)/g,
   // ── Generic high-entropy strings ─────────────────────────────────
   /\b[A-Fa-f0-9]{32,}\b/g,
   // Ordering matters: base64-with-padding must run BEFORE the generic

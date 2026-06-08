@@ -44,6 +44,15 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
   // the captured history (origin DM, why, linked routine) survives.
   "policies/_index": ["PUT", "PATCH"],
   "policies/management": ["PUT", "PATCH"],
+  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §4 Phase 2).
+  // Global agent-scope lessons folded nightly by routine.evening_review.
+  // Without this row the consolidation PATCH/PUT 403s — the per-agent
+  // scope already rides the `policies/agents/{slug}/{file}` wildcard, but
+  // the global file matches no rule (no blanket `policies/*`). Like every
+  // other `policies/` write it trips `shouldRefreshPromptContext`, so a
+  // nightly lesson write invalidates the owner-session prompt cache —
+  // desirable (new lessons take effect next turn) and it fires at night.
+  "policies/agent-lessons": ["PUT", "PATCH"],
   "policies/mcp": ["PUT", "PATCH"],
   "policies/redaction": ["PUT", "PATCH"],
   "policies/journal-format": ["PUT", "PATCH"],

@@ -37,7 +37,7 @@ ask_examples:
   - What does the Enable Wiki button do?
 locale: en-US
 created: 2026-05-21
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - /wiki
   - /wiki/timeline
@@ -128,7 +128,7 @@ States:
 The last 8 entries from `log.md`, the wiki's append-only operational
 log. Each entry shows the wiki process key (`wiki.ingest_url`,
 `wiki.compile`, `wiki.ask`, `wiki.lint`, `wiki.trace`, `wiki.connect`),
-the operation (`write`, `delete`, …), the affected path, and the
+the operation (`post`, `patch`), the affected path, and the
 timestamp. A **View full timeline** button at the top of the card
 opens `/wiki/timeline`.
 
@@ -184,10 +184,11 @@ The configuration surface. Two-state:
 
 A two-card chooser:
 
-- **Internal** (recommended) — managed by Aitne in its data directory
-  (default `~/.personal-agent/wiki`), schema seeded automatically.
-  The **Enable internal wiki** button turns it on with nothing else
-  to configure.
+- **Internal** (recommended) — managed by Aitne inside the context
+  vault (default `<contextDir>/knowledge/wiki`, i.e.
+  `~/.personal-agent/context/knowledge/wiki`), schema seeded
+  automatically. The **Enable internal wiki** button turns it on with
+  nothing else to configure.
 - **Existing Obsidian vault** (external) — point Aitne at a folder you
   already own via the path picker, then confirm with **Use this
   folder**.

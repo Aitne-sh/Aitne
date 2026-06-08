@@ -52,7 +52,7 @@ context_files:
 api_endpoints:
   - POST /api/knowledge/import
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 related:
   - getting-started/02-first-steps
   - getting-started/03-what-can-this-do
@@ -273,7 +273,7 @@ Shortest path from zero to that:
    - Max budget (USD): `0.20` (a generous per-execute override; the
      form default is `0.05`)
    - Description: paste the four numbered steps above verbatim.
-3. **Watch the next firing in Activity** and iterate. The vault file
+3. **Watch the next firing in Agent Log** and iterate. The vault file
    at `~/.personal-agent/context/policies/routines/custom/morning-deep-prep.md`
    is a plain Markdown file: edit the `## Checks` body to refine the
    step wording, or the `cron:` field in the YAML frontmatter to

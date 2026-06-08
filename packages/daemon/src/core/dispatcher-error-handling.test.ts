@@ -332,7 +332,7 @@ describe("DispatcherErrorRouter — handleError", () => {
         modelId: "gpt-5.4",
         numTurns: 12,
         durationMs: 514_000,
-        costSource: "registry",
+        costSource: "litellm",
       },
     );
     await router.handleError(event, quota);

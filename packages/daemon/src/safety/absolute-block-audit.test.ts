@@ -317,7 +317,7 @@ describe("recordAbsoluteBlockAudit (direct call)", () => {
     recordAbsoluteBlockAudit({
       db,
       backend: "codex",
-      mode: "safe",
+      mode: "strict",
       match: { category: "recursive_delete", redacted: "rm" },
       toolName: "Bash",
       result: "partial",

@@ -25,7 +25,7 @@ ask_examples:
   - Why can't the agent read my .env or SSH keys?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - disallowedTools
   - deniedTools
@@ -42,8 +42,9 @@ related:
 # Disallowed Tools
 
 There are two distinct deny layers — the **absolute-block layer**
-(non-overridable) and the **default strict-mode list** (in `config.ts`,
-relaxable in Allow mode or via `allowedToolsOverride`).
+(non-overridable) and the **default strict-mode list** (`DEFAULT_DISALLOWED_TOOLS`
+in `src/settings/runtime-settings.ts`, relaxable in Allow mode or via
+`allowedToolsOverride`).
 
 ## Absolute-block layer (cannot be widened past)
 
@@ -78,7 +79,8 @@ managed-Chromium chokepoints above).
 
 ## Default strict-mode list (relaxable)
 
-`config.ts > disallowedTools` ships with additional defaults that the
+`DEFAULT_DISALLOWED_TOOLS` (in `src/settings/runtime-settings.ts`, the
+seed for `config.disallowedTools`) ships with additional defaults that the
 operator can widen out of via `allowedToolsOverride` or by switching
 to Allow mode. These include `Bash(chmod *)`, `Bash(chown *)`,
 `Bash(git push --force *)`, `Bash(git reset --hard *)` and a handful

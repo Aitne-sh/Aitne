@@ -224,3 +224,74 @@ PATCH:
       Learned Context entries out to the matching user/*.md file and
       remove them from user/profile.md so the primary profile stays compact.
 
+### Step 4 — Consolidate feedback signals into lessons
+
+If a `<feedback_worksheet>` block is present in your context, fold the
+unconsumed feedback signals it lists into the scoped lesson stores. The daemon
+already did the mechanical work: every candidate carries a deterministic
+`decision`, `conf`, `weighted_ev`, and `reason`; every existing lesson carries a
+`rank` (rank 1 = lowest score = evict first); and the block ends with the exact
+`<consume ids="…">` set. Your job is only the **semantic** part — judge whether a
+candidate matches an existing lesson's intent, phrase the generalization, and
+detect contradictions. Do **not** recompute promotion or caps; honour the
+worksheet's `decision` and `rank` verbatim. If the block is absent, skip this
+step entirely. Like Steps 1–3 it is internal bookkeeping and emits no
+user-facing output.
+
+4a. **Agent-scope lessons** (`<scope label="agent" … mode="lessons">` →
+    `policies/agent-lessons.md`). GET the file first. If it 404s, PUT a fresh
+    file: frontmatter `type: rule` / `owner: agent` / `updated: <agent_day_date>`,
+    an H1 `# Agent Lessons`, then a `## Lessons` section. Then, per candidate:
+    - `decision="promote"` → find an existing `## Lessons` bullet with the same
+      intent. If found, bump its `ev=` by `weighted_ev` (rounded to a whole
+      number), refresh `last=` to today, raise `conf`, and tighten the wording.
+      If not, add a new **active** bullet:
+      `- [<today>] <directive> <!-- ev=<round(weighted_ev), min 1> kind=<kind> src=<src> conf=<conf> last=<today> -->`
+      (`src`/`conf` come from the candidate; use the candidate's `kind=` when
+      present, otherwise infer it from the directive; `kind` ∈
+      preference|correction|do-more|do-less|constraint).
+    - `decision="hold-provisional"` with `reason="below-threshold"` → if it
+      matches an existing lesson's intent, bump that lesson's `ev`; otherwise add
+      the bullet with a trailing `<!-- provisional -->` marker (stored, not yet
+      injected — it promotes once corroboration reaches the threshold).
+    - `decision="hold-provisional"` with `reason="ignored-non-initiating"` →
+      silence never *starts* a lesson. Only use it to bump the `ev` of an
+      existing matching lesson; if none matches, write nothing for it.
+    - A newer `correction` that contradicts an active lesson **supersedes** it:
+      drop the stale bullet in the same rebuild so a changed mind leaves no
+      stale guidance.
+    - **Staleness prune** (§4 step 7): drop any existing lesson the worksheet
+      marks `stale="true"` (its `last=` is past the staleness horizon and it is
+      not a `constraint`) unless a fresh candidate re-reinforces it this pass —
+      a `constraint` is durable and is never stale-pruned.
+    Write the section back with `PATCH section=lessons mode=replace`, applying the
+    Step-2 section-body-rebuild discipline (GET fresh, write the keep-list down
+    first, byte-for-byte for unchanged bullets).
+
+4b. **Cap enforcement.** After your edits, if the `## Lessons` section exceeds
+    the scope's `cap_bytes` or `max_entries`, remove existing lessons starting
+    from `rank="1"` (the worksheet's lowest-scored) upward until it fits, then
+    append exactly one marker line:
+    `- [...N lower-signal lessons omitted — full history in feedback_signals]`.
+    Never evict a `kind=constraint` lesson — drop the next-lowest instead.
+
+4c. **User-scope signals** (`<scope label="user" … mode="raw">`). These are
+    explicit owner directives captured via `POST /api/feedback`, *not* Raw
+    Signals. Route each into `## Learned Context` (or the matching
+    `identity/*.md` file) using the same bucket rules as Step 3 (a₂ / b),
+    respecting the ~600-token profile budget. Do not double-write a signal you
+    already folded from Raw Signals.
+
+4d. **Consume.** Once every scope above is written, mark the processed signals
+    consumed so they don't resurface tomorrow — send the worksheet's full
+    `<consume>` id list:
+    ```bash
+    curl -s -X POST http://localhost:8321/api/feedback/consume \
+      -H 'Content-Type: application/json' \
+      -d '{"ids": [<the ids from <consume ids="…"/>>]}'
+    ```
+    Consume is by id and race-safe: any signal the detector appended after the
+    worksheet was built has a higher id absent from the list and survives
+    untouched for tomorrow's pass. If a lesson write failed, omit that scope's
+    ids from the consume call so its signals are retried next Evening Review.
+

@@ -78,7 +78,7 @@ ui_anchors:
   - /settings/advanced
   - /settings/models
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 related:
   - reference/api
   - reference/cli-commands
@@ -93,7 +93,7 @@ The full `AgentConfig` schema lives in
 `packages/shared/src/editable-config-keys.ts` govern what is editable
 and when:
 
-- **`EDITABLE_RUNTIME_KEY_TUPLE`** — the ~80 keys mutable at runtime
+- **`EDITABLE_RUNTIME_KEY_TUPLE`** — the ~130 keys mutable at runtime
   via `PATCH /api/config`. Both the daemon and the dashboard import
   from this tuple so the accepted-key set is enforced at compile time
   in both packages.
@@ -117,7 +117,7 @@ Anything not in those tuples must be set via env or restart.
 ## Selected Keys
 
 A representative slice of `EDITABLE_RUNTIME_KEY_TUPLE` — the full list
-of ~80 keys is in `editable-config-keys.ts`. Names below are exact and
+of ~130 keys is in `editable-config-keys.ts`. Names below are exact and
 case-sensitive.
 
 ### Identity and timezone
@@ -125,7 +125,7 @@ case-sensitive.
 | Key | Type | Notes |
 |---|---|---|
 | `agentDisplayName` | string | What the agent calls itself in DMs. |
-| `character` | string | Persona key (one of the entries in `agent-assets/agent-profiles/`). |
+| `character` | string | Free-text user-defined communication style / persona (max 1000 chars). When non-empty, rendered as a `## Character (user-defined)` block into each backend's instruction file. The agent profile itself is selected by ProcessKey, not by this key. |
 | `timezone` | IANA tz | Empty falls back to the system tz. |
 | `dayBoundaryHour` | 0–9 | Default `4`. Controls the agent-day rollover (must be an early-morning hour). |
 | `primaryLanguage` | BCP-47 | Output language for DMs, journal, and Obsidian writes. Templates stay English-headered. |

@@ -28,7 +28,7 @@ ask_examples:
   - How do I list registered backends?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - API
   - REST
@@ -54,7 +54,7 @@ The daemon serves a single Hono app on `127.0.0.1:PA_API_PORT` (default
 `8321`). Almost all endpoints are mounted under `/api/*`; the lone
 exception is the GitHub webhook receiver, mounted at root `/webhook/github`.
 **Source of truth:** `packages/daemon/src/api/server.ts` (`createApp`)
-registers most route groups, with two post-compose mounts in
+registers most route groups, with one post-compose mount in
 `packages/daemon/src/bootstrap/api.ts` (the docs corpus + docs-QA, wired
 only after the indexer handle exists). Each group lives in its own file
 or directory under `packages/daemon/src/api/routes/`.
@@ -93,13 +93,13 @@ callers pass it as `Authorization: Bearer <token>`.
 | Activity sources | `/api/activity-sources/*` | `activity-sources.ts` | Activity feed sources. |
 | Entities | `/api/entities/*` | `entities.ts` | Entity registry CRUD. |
 | SoT bindings | `/api/sot-bindings/*` | `sot-bindings.ts` | Source-of-truth bindings (vault ↔ daemon). |
-| Voice | `/api/voice/*` | `voice.ts` | Voice transcript cache + transcribe-on-demand. |
+| Voice | `/api/voice/*` | `voice.ts` | Whisper model install / status / weight-removal opt-in surface for the dashboard. |
 
 ### Integrations
 
 | Group | Path | Source | Purpose |
 |---|---|---|---|
-| Mail | `/api/mail/*` | `mail.ts`, `mail-search.ts` | Multi-provider mail proxy (Gmail / Outlook / Yahoo / iCloud / IMAP) + FTS5 local search. |
+| Mail | `/api/mail/*` | `mail/` | Multi-provider mail proxy (Gmail / Outlook / Yahoo / iCloud / IMAP) + FTS5 local search. |
 | Calendar | `/api/calendar/*` | `calendar.ts` | Google Calendar proxy. |
 | Apple Calendar | `/api/apple-calendar/*` | `apple-calendar.ts` | macOS Calendar.app bridge. |
 | Notion | `/api/notion/*` | `notion.ts` | Notion proxy. |
@@ -107,7 +107,7 @@ callers pass it as `Authorization: Bearer <token>`.
 | Git | `/api/git/*`, `/api/git-accounts/*` | `git.ts`, `git-accounts.ts`, `git-templates.ts` | Read-only git proxy (`/api/git/{log,diff,show}`), repo templates (`/api/git/templates/*`), and git-account CRUD (`/api/git-accounts/*`). |
 | Repositories | `/api/repositories/*` | `repositories.ts` | Unified repository CRUD (replaces split Git/GitHub settings). |
 | GitHub | `/api/github/*`, `POST /webhook/github` | `github.ts` | GitHub proxy and webhook receiver (mounted under `/`, not `/api`). |
-| Integrations | `/api/integrations/*` | `integrations.ts`, `integrations-reconcile.ts` | Integration mode CRUD (`direct \| delegated \| native \| disabled`), live probe endpoint, mode reconciliation. |
+| Integrations | `/api/integrations/*` | `integrations/`, `integrations-reconcile.ts` | Integration mode CRUD (`direct \| delegated \| native \| disabled`), live probe endpoint, mode reconciliation. |
 | Delegated sync | `/api/delegated/*`, `/api/delegated-sync/*` | `delegated.ts`, `delegated-sync.ts` | Delegated worker control + opt-in cadence config. |
 | MCP | `/api/mcp/*` | `mcp.ts` | Per-session MCP materializer. |
 

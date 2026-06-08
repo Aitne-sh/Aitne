@@ -106,7 +106,7 @@ class InMemorySecretStore implements SecretStore {
 
   constructor(seed: Partial<Record<StoredSecretName, string>> = {}) {
     for (const [key, value] of Object.entries(seed)) {
-      this.values.set(key as StoredSecretName, value);
+      if (typeof value === "string") this.values.set(key as StoredSecretName, value);
     }
   }
 
@@ -182,6 +182,7 @@ function makeBackendCore(
     listModels: vi.fn().mockReturnValue(models),
     probeTools: vi.fn().mockResolvedValue([]),
     runDelegatedTool: vi.fn().mockRejectedValue(new Error("not implemented")),
+    runDelegatedTask: vi.fn().mockRejectedValue(new Error("not implemented")),
   };
 }
 
@@ -226,6 +227,7 @@ describe("Dashboard API", () => {
           },
         },
         obsidian: { configured: false, connected: false, error: null },
+        appleCalendar: { configured: false, connected: false, error: null },
         notion: { configured: false, connected: false, error: null },
         whatsapp: {
           configured: false,
@@ -242,14 +244,14 @@ describe("Dashboard API", () => {
               backendId: "claude",
               modelId: "claude-sonnet-4-6",
               label: "Claude Sonnet 4.6",
-              tier: "light",
+              tier: "lite",
               available: true,
             },
             {
               backendId: "claude",
               modelId: "claude-opus-4-6",
               label: "Claude Opus 4.6",
-              tier: "heavy",
+              tier: "high",
               available: true,
             },
           ],
@@ -262,14 +264,14 @@ describe("Dashboard API", () => {
               backendId: "codex",
               modelId: "gpt-5.4-mini",
               label: "GPT-5.4 Mini",
-              tier: "light",
+              tier: "lite",
               available: true,
             },
             {
               backendId: "codex",
               modelId: "gpt-5.4",
               label: "GPT-5.4",
-              tier: "heavy",
+              tier: "high",
               available: true,
             },
           ],
@@ -282,14 +284,14 @@ describe("Dashboard API", () => {
               backendId: "gemini",
               modelId: "gemini-3-flash-preview",
               label: "Gemini 3 Flash",
-              tier: "light",
+              tier: "lite",
               available: true,
             },
             {
               backendId: "gemini",
               modelId: "gemini-3-pro-preview",
               label: "Gemini 3 Pro",
-              tier: "heavy",
+              tier: "high",
               available: true,
             },
           ],
@@ -726,6 +728,7 @@ describe("Dashboard API", () => {
             },
           },
           obsidian: { configured: false, connected: false, error: null },
+          appleCalendar: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: {
             configured: false,
@@ -815,6 +818,7 @@ describe("Dashboard API", () => {
             },
           },
           obsidian: { configured: false, connected: false, error: null },
+          appleCalendar: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: {
             configured: false,
@@ -890,6 +894,7 @@ describe("Dashboard API", () => {
             },
           },
           obsidian: { configured: false, connected: false, error: null },
+          appleCalendar: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: {
             configured: false,
@@ -2119,6 +2124,7 @@ describe("Dashboard API", () => {
             },
           },
           obsidian: { configured: false, connected: false, error: null },
+          appleCalendar: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: {
             configured: false,
@@ -2279,6 +2285,7 @@ describe("Dashboard API", () => {
             },
           },
           obsidian: { configured: false, connected: false, error: null },
+          appleCalendar: { configured: false, connected: false, error: null },
           notion: { configured: false, connected: false, error: null },
           whatsapp: {
             configured: false,
@@ -2609,6 +2616,7 @@ describe("Dashboard API", () => {
                 gmail: { connected: false, error: null },
               },
             },
+            appleCalendar: { configured: false, connected: false, error: null },
             obsidian: { configured: false, connected: false, error: null },
             notion: { configured: false, connected: false, error: null },
             whatsapp: {

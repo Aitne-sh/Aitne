@@ -64,8 +64,13 @@ export function normalizeContextPath(userPath: string): string {
 }
 
 export function isDeniedPath(relativePath: string): boolean {
+  // path.relative emits OS-native separators (backslash on Windows); the
+  // DENIED_SUBPATH_ROOTS prefixes are forward-slash. Normalize before the
+  // compare so nested `.git\config`, `.obsidian\workspace.json`, etc. are
+  // caught on Windows. POSIX paths contain no backslashes -> no-op there.
+  const normalized = relativePath.replace(/\\/g, "/");
   for (const root of DENIED_SUBPATH_ROOTS) {
-    if (relativePath === root || relativePath.startsWith(`${root}/`)) {
+    if (normalized === root || normalized.startsWith(`${root}/`)) {
       return true;
     }
   }

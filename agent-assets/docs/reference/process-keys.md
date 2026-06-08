@@ -41,7 +41,7 @@ keywords:
   - delegated_task
   - gmail_classify
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 config_keys:
   - monthlyReviewEnabled
   - delegatedTaskHeavyEnabled
@@ -80,7 +80,7 @@ The **default tier** column maps to a model size, not a specific id:
 | `routine.morning_routine_journal` | Stage B of the morning-routine pipeline — authors `journal/daily/<yesterday>.md` from the daemon-prepared journal skeleton. | lite | yes |
 | `routine.today_refresh` | Calendar-drift-triggered (calendar change touching today's items; 5-min dedup, fires ~30s later) — drift-refresh of `state/today.md` | medium | yes |
 | `routine.evening_review` | Daily at 18:00 local (fixed) | medium | yes |
-| `routine.weekly_review` | Friday 18:00 local (fixed) | medium | yes |
+| `routine.weekly_review` | Friday 19:00 local (fixed) | medium | yes |
 | `routine.monthly_review` | Monthly cadence (gated OFF by default — kill switch `monthlyReviewEnabled` in runtime settings). The routine itself is off by default, but its backend/tier binding is still configurable. | medium | yes |
 | `routine.hourly_check` | Every `hourlyCheckIntervalMinutes` (default 60) inside the active window | medium | yes |
 | `routine.hourly_check.triage` | Stage 2 triage gate of every hourly check | lite | yes |

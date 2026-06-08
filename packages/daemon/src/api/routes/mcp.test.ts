@@ -590,7 +590,7 @@ describe("GET /mcp/servers/:id/activity", () => {
   beforeEach(() => {
     db = new Database(":memory:");
     createSchema(db);
-    app = createMcpRoutes({ db, blobStore: new (class implements import("../../secrets/encrypted-blob-store.js").EncryptedBlobStore {
+    app = createMcpRoutes({ db, blobStore: new (class implements EncryptedBlobStore {
       async exists() { return false; }
       async readUtf8() { return null; }
       async writeUtf8() {}

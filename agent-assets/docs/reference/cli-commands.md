@@ -28,7 +28,7 @@ ask_examples:
   - How do I check my install with aitne doctor?
 locale: en-US
 created: 2026-04-27
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - aitne start
   - aitne stop
@@ -95,7 +95,7 @@ needed.
 | `aitne open` | Open the dashboard root in the default browser. |
 | `aitne doctor` | Install-health checks (Node, ports, OS keychain, backend CLIs, native bindings, …). |
 | `aitne audit [--since 24h] [--type X] [--result failed]` | Show the agent action log; flags filter by time, action type, result, or backend. `--json` for machine-readable. |
-| `aitne run-now <job>` | Fire a daemon-internal maintenance job on demand. The only supported job today is `roadmap_maintenance`. Reads the API token from the macOS Keychain, so this command is macOS-only. |
+| `aitne run-now <job>` | Fire a daemon-internal maintenance job on demand. The only supported job today is `roadmap_maintenance`. Reads the API token from the OS secret store (macOS Keychain, Windows DPAPI, Linux libsecret, or the encrypted file fallback), so it works on every supported platform. |
 | `aitne verify [target]` | Run post-launch verification for a shipped design surface (e.g. `evening-review-slimdown`). |
 | `aitne version [--json]` | Print version, Node version, install path, last build time. |
 | `aitne update [--check]` | Print the npm command to upgrade. `--check` makes one network call to compare against the latest published version. |
@@ -150,7 +150,7 @@ and the cost-gate / approval semantics.
 |---|---|---|
 | `PA_DATA_DIR` | `~/.personal-agent` | Where logs, the SQLite DB, context Markdown, and prompts live. |
 | `PA_API_PORT` | `8321` | Daemon HTTP port. |
-| `PA_DASHBOARD_PORT` | `3000` | Dashboard port. |
+| `PA_DASHBOARD_PORT` | `8322` | Dashboard port. |
 
 All runtime state — PIDs, logs, SQLite DB, context Markdown, prompts —
 lives under `PA_DATA_DIR`, **not** inside the repo.

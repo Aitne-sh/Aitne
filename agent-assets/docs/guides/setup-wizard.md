@@ -29,7 +29,7 @@ ask_examples:
   - Where do I paste my API key?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - setup
   - wizard
@@ -58,6 +58,7 @@ ui_anchors:
   - /settings/models
   - /connections
   - /settings/routines
+  - /settings/schedule
 ---
 
 # Setup Wizard Walkthrough
@@ -187,10 +188,12 @@ character prompt referenced in Step 1 actually gets written.
 
 ## After the wizard
 
-Routines are **not** configured in the wizard. Enable and schedule the
-morning / evening / weekly reviews and the hourly check post-setup on
-`/settings/routines`. Repositories are also added after setup, from
-Settings → Connections → Repositories.
+Routines are **not** configured in the wizard. Edit the per-cadence
+rulebooks (morning / evening / weekly / hourly) and register custom cron
+routines post-setup on `/settings/routines`; the hourly-check master
+switch, active / quiet hours, and the monthly review live on
+`/settings/schedule`. Repositories are also added after setup, from
+Connections → Repositories.
 
 ## Verification
 

@@ -326,6 +326,7 @@ describe("Docs QA — end-to-end (DOCS_QA_B7_DESIGN.md §S9)", () => {
 
     const mockContextBuilder = {
       build: vi.fn().mockResolvedValue(""),
+      buildResumeCatchupContext: vi.fn().mockResolvedValue(""),
     };
     const mockNotificationMgr = {
       send: vi.fn().mockResolvedValue(undefined),
@@ -339,6 +340,7 @@ describe("Docs QA — end-to-end (DOCS_QA_B7_DESIGN.md §S9)", () => {
       logError: vi.fn(),
       logAttachment: vi.fn(),
       logBangCommand: vi.fn(),
+      insertInProgressRow: vi.fn(() => -1),
     };
 
     dispatcher = new EventDispatcher(

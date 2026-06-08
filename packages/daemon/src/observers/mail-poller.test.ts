@@ -1424,7 +1424,7 @@ describe("MailPoller — §4.8 non-direct-mode per-account suppression", () => {
     db.close();
   });
 
-  type IntegrationMode = "direct" | "delegated" | "disabled";
+  type IntegrationMode = "direct" | "delegated" | "native" | "disabled";
 
   /**
    * Seed `settings.integrations` with the requested modes for gmail and

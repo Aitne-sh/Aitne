@@ -31,7 +31,7 @@ keywords:
   - dashboard onboarding
   - health pill
 created: 2026-04-27
-updated: 2026-05-28
+updated: 2026-06-07
 related:
   - getting-started/01-what-is-this
   - getting-started/03-what-can-this-do
@@ -55,8 +55,10 @@ health pill, a paired messaging app, and a backend the agent can call.
 ## What you should see right now
 
 If the dashboard just opened, you are on `/setup` — the setup wizard.
-The dashboard refuses to leave this page until the minimum is filled
-in (a backend, a messaging pair). Run through it once, top to bottom.
+The dashboard sends you back to this page until the required steps are
+done (Basics, Vault, a main backend, and the Customize Rules step that
+saves your management rules). Messaging and the other integrations are
+skippable in the wizard. Run through it once, top to bottom.
 
 ## Steps
 

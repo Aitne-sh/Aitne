@@ -8,6 +8,7 @@ import {
   AGENT_ERROR_REGISTRY,
   type AgentErrorCode,
 } from "./agent-errors-registry.js";
+import type { AgentErrorRegistryEntry } from "./agent-errors-types.js";
 
 // ── AGENT_ERROR_REGISTRY shape + content invariants ──────────────────────────
 //
@@ -35,7 +36,7 @@ const REPO_ROOT = resolve(__dirname, "../../../../../");
 
 describe("registry coverage", () => {
   it("every registry entry has hint, expected, skillAnchor", () => {
-    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY)) {
+    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY) as [string, AgentErrorRegistryEntry][]) {
       expect(entry.hint, `${code}.hint`).toBeTruthy();
       expect(entry.expected, `${code}.expected`).toBeTruthy();
       expect(entry.skillAnchor, `${code}.skillAnchor`).toBeTruthy();
@@ -77,7 +78,7 @@ describe("registry coverage", () => {
       "management-task-stop",
     ];
     const violations: string[] = [];
-    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY)) {
+    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY) as [string, AgentErrorRegistryEntry][]) {
       const anchor = entry.skillAnchor;
       if (!anchor) continue;
       const slug = anchor.split("#", 1)[0];
@@ -101,7 +102,7 @@ describe("registry coverage", () => {
    */
   it("every schedule.* entry has a docsUrl pointing at the per-code anchor in errors.md", () => {
     const violations: string[] = [];
-    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY)) {
+    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY) as [string, AgentErrorRegistryEntry][]) {
       if (!code.startsWith("schedule.")) continue;
       const tail = code.slice("schedule.".length);
       const expected = `agent-assets/skills/schedule/references/errors.md#${tail}`;
@@ -145,7 +146,7 @@ describe("registry coverage", () => {
     }
 
     const violations: string[] = [];
-    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY)) {
+    for (const [code, entry] of Object.entries(AGENT_ERROR_REGISTRY) as [string, AgentErrorRegistryEntry][]) {
       if (!entry.docsUrl) continue;
       // Only inspect repo-relative paths into the schedule errors page
       // (and any future per-skill errors.md sibling). Absolute URLs

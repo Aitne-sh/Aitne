@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getAgentLessonsInjection,
   getInjectionPolicy,
+  type AgentLessonsInjection,
   type AlwaysBlockKey,
   type InjectionPolicy,
 } from "./injection-policy.js";
@@ -83,6 +85,90 @@ describe("getInjectionPolicy — §8 declarative table", () => {
     const b = getInjectionPolicy("routine.today_refresh");
     // Both drop heavy blocks → same shared empty set instance.
     expect(a.alwaysBlocks).toBe(b.alwaysBlocks);
+  });
+});
+
+describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
+  const tuple = (i: AgentLessonsInjection) => [i.global, i.self, i.slim];
+
+  it("DM / dashboard messages get global + self, no slim", () => {
+    for (const key of [
+      "message.received.dm",
+      "message.dm",
+      "message.received.dm_first",
+      "message.mention",
+    ]) {
+      expect(tuple(getAgentLessonsInjection(key))).toEqual([true, true, false]);
+    }
+  });
+
+  it("scheduled.dm gets global + self (conversational posture)", () => {
+    expect(tuple(getAgentLessonsInjection("scheduled.dm"))).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("notify-deciding routines (morning Stage A + reviews) get global + self", () => {
+    for (const key of [
+      "routine.morning_routine_today",
+      "routine.evening_review",
+      "routine.weekly_review",
+      "routine.monthly_review",
+    ]) {
+      expect(tuple(getAgentLessonsInjection(key))).toEqual([true, true, false]);
+    }
+  });
+
+  it("hourly_check gets the slim variant: global + slim, no self", () => {
+    expect(tuple(getAgentLessonsInjection("routine.hourly_check"))).toEqual([
+      true,
+      false,
+      true,
+    ]);
+  });
+
+  it("the morning umbrella + Stage B journal author get nothing", () => {
+    // The umbrella `routine.morning_routine` never reaches build(); Stage B
+    // (`routine.morning_routine_journal`) decides no notifications. Keying
+    // either would burn bytes against the §0 cost constraint.
+    for (const key of [
+      "routine.morning_routine",
+      "routine.morning_routine_journal",
+    ]) {
+      expect(tuple(getAgentLessonsInjection(key))).toEqual([false, false, false]);
+    }
+  });
+
+  it("the §5 'gets nothing' surfaces opt out entirely", () => {
+    for (const key of [
+      "scheduled.task",
+      "routine.today_refresh",
+      "routine.fetch_window",
+      "routine.hourly_check.triage",
+      "github.pull_request.opened",
+      "git.new_commit",
+      "schedule.approaching",
+      "unknown.event",
+    ]) {
+      expect(tuple(getAgentLessonsInjection(key))).toEqual([false, false, false]);
+    }
+  });
+
+  it("returns shared frozen instances for equality stability + immutability", () => {
+    const a = getAgentLessonsInjection("message.dm");
+    const b = getAgentLessonsInjection("routine.evening_review");
+    expect(a).toBe(b); // same DM/review shape instance
+    expect(Object.isFrozen(a)).toBe(true);
+    expect(getAgentLessonsInjection("scheduled.task")).toBe(
+      getAgentLessonsInjection("unknown.event"),
+    );
+  });
+
+  it("slim always implies global (a slim-only surface would be incoherent)", () => {
+    const hourly = getAgentLessonsInjection("routine.hourly_check");
+    expect(hourly.slim && hourly.global).toBe(true);
   });
 });
 

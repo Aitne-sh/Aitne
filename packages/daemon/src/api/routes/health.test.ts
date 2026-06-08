@@ -664,7 +664,7 @@ describe("health routes — gmail delegation status", () => {
 
   it("sets delegationUpgradeAvailable=true when gmail is in direct mode", async () => {
     writeIntegrations(db, {
-      gmail: { mode: "direct", lastChangedAt: "2026-05-01T00:00:00.000Z" },
+      gmail: { mode: "direct", deniedTools: [], lastChangedAt: "2026-05-01T00:00:00.000Z" },
     });
 
     const app = createHealthRoutes(makeDeps(db, tmpDir));
@@ -683,6 +683,7 @@ describe("health routes — gmail delegation status", () => {
       gmail: {
         mode: "delegated",
         delegatedBackend: "claude",
+        deniedTools: [],
         lastChangedAt: "2026-05-01T00:00:00.000Z",
       },
     });

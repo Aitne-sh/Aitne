@@ -27,7 +27,7 @@ ask_examples:
   - Why did journal/agent.md stop growing?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - journal
   - retros
@@ -47,7 +47,7 @@ process_keys:
 context_files:
   - journal/agent.md
 ui_anchors:
-  - /connections/journal
+  - /knowledge?tab=context-files
   - /settings/journal
 ---
 
@@ -68,12 +68,17 @@ of *what happened* — the journal is reflection-shaped: it captures
 
 Each entry carries:
 
-- A timestamp (the routine stamps an `Appended at:` line).
+- A dated heading — the morning routine stamps a
+  `## YYYY-MM-DD morning routine` H2; the weekly and monthly retros add
+  a `> Appended at: YYYY-MM-DD HH:MM` line under their section header.
 - A short context line — which routine or conversation prompted it.
 - The reflection itself.
 
-The file lives at `~/.personal-agent/context/journal/agent.md` and
-grows forever. Later routines read it back to look for patterns.
+The file lives at `~/.personal-agent/context/journal/agent.md`. The
+day-to-day morning and ad-hoc entries accumulate indefinitely; the
+daily retention rollup keeps only a rolling window of the structured
+retros (the most recent 12 `## Weekly` and 24 `## Monthly` sections),
+pruning older ones. Later routines read it back to look for patterns.
 
 ## Who writes it, and when
 
@@ -127,10 +132,17 @@ cannot destroy history. Writes go through the daemon context API
 
 ## Where in the dashboard
 
-- **Connections → Journal** (`/connections/journal`) is the read view
-  of the file.
-- **Settings → Journal** (`/settings/journal`) controls retention and
-  which routines contribute.
+- **Knowledge → Context Files** (`/knowledge?tab=context-files`) is the
+  read view of the file — `journal/agent` is listed among the top-level
+  context files. It is flagged as sensitive: entering edit mode surfaces
+  a "deliberately pruning noise" warning before you change anything.
+- **Settings → Journal** (`/settings/journal`) does *not* edit this
+  file. It is a two-tab editor for the daily-journal rule files —
+  `policies/journal-format.md` (sections, voice, frontmatter) and
+  `policies/journal-export.md` (redaction / inclusion rules) — both of
+  which the morning routine reads when synthesizing `daily/YYYY-MM-DD.md`,
+  not `journal/agent.md`. `/connections/journal` is a compatibility alias
+  that redirects here.
 
 ## Configuration
 
@@ -147,9 +159,12 @@ agent's own writes, not to you editing the file on disk.
   [Evening Review](../routines/evening-review.md).
 - **Entries look duplicated.** This usually means a routine retried
   after a backend fallback. Because writes are append-only, a retry
-  can re-append rather than overwrite; the weekly review has an
-  idempotency check for its own section, but it is best-effort — a
-  manual prune is fine.
+  re-appends rather than overwrites — the weekly review deliberately
+  appends a fresh section instead of editing in place. The daemon's
+  daily retention rollup (`rollupAgentJournal`) collapses duplicate
+  `## Weekly YYYY-Www` / `## Monthly YYYY-MM` keys last-write-wins
+  within 24 hours, so duplicates self-heal; a manual prune is fine but
+  rarely needed.
 
 ## Related
 

@@ -1,9 +1,15 @@
 /**
- * Daemon-direct writer that appends a single bullet to today.md
- * `## Agent Log` without going through the agent at all. Used by the
- * three-stage hourly_check gate (cost-reduction-structural §B) on the
- * stage0_silent / stage2_log_only paths so a "no-op" cron tick still
- * leaves an audit trail in today.md without paying for an LLM session.
+ * Daemon-direct, lock-aware writes to today.md that run *before* (or
+ * instead of) an agent session — bypassing `/api/context/*` because there
+ * is no subprocess to issue the curl call from. Two operations live here:
+ *
+ *   1. {@link appendAgentLogLine} — append a single `## Agent Log` bullet.
+ *      Used by the three-stage hourly_check gate (cost-reduction-structural
+ *      §B) on the stage0_silent / stage2_log_only paths so a "no-op" cron
+ *      tick still leaves an audit trail without paying for an LLM session.
+ *   2. {@link ensureTodaySkeleton} — seed the canonical empty skeleton when
+ *      today.md is **absent**, so a section-only refresh routine has a valid
+ *      PATCH target instead of 404-ing and budget-burning on full-file PUTs.
  *
  * Why this lives in the daemon (not /api/context/* via curl):
  *   - These paths run *before* the agent is spawned. There is no
@@ -12,21 +18,23 @@
  *     `context-staleness.ts`) — the same tier the PATCH route already
  *     classifies for `## Agent Log` appends. Bypassing the route is
  *     fine because we never touch the prompt-context-changed hook here.
- *   - The today-write-lock invariant is preserved: we acquire it before
- *     mutating the file, so morning_routine and direct writes never
- *     interleave.
+ *   - The today-write-lock invariant is preserved: both functions acquire
+ *     it before mutating the file, so morning_routine and direct writes
+ *     never interleave.
  *
- * Failure mode: when today.md is missing, malformed, or lacks the
- * `## Agent Log` heading, the writer logs a warning and returns false
- * rather than synthesizing the structure — that is the morning routine's
- * job. The gate caller treats false as "log not appended; consume
- * observations regardless".
+ * Synthesis boundary: `appendAgentLogLine` NEVER synthesizes structure —
+ * a missing / malformed / heading-less file returns false and the gate
+ * caller proceeds. `ensureTodaySkeleton` synthesizes ONLY the empty
+ * skeleton, ONLY when the file is entirely absent, and never touches a
+ * present file. Neither populates today.md — full creation and repair stay
+ * the morning routine's job.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { writeFileAtomically } from "./atomic-write.js";
 import { serializeContextFileWrite } from "./context-file-serializer.js";
 import { fullPath, CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
+import { FALLBACK_PLACEHOLDERS } from "./skeleton.js";
 import { createLogger } from "../logging.js";
 import type { TodayWriteLockManager } from "./today-write-lock.js";
 
@@ -123,6 +131,94 @@ export async function appendAgentLogLine(
       } catch (err) {
         logger.error({ err, path }, "Failed to write today.md for Agent Log append");
         return { appended: false, reason: "io_error" } as AppendAgentLogLineResult;
+      }
+    });
+  } finally {
+    input.todayWriteLock.release(lock.lockId);
+  }
+}
+
+/**
+ * Canonical empty `today.md` skeleton, reused byte-for-byte from the
+ * boot-time seeder (`skeleton.ts`) so a refresh-path seed and a
+ * fresh-install seed produce identical structure. `skeleton.test.ts`
+ * asserts this placeholder matches `agent-assets/templates/state/today.md`
+ * byte-for-byte, so the two definitions never drift. The non-null
+ * assertion is safe: the key is a literal entry of `FALLBACK_PLACEHOLDERS`.
+ */
+const TODAY_SKELETON = FALLBACK_PLACEHOLDERS[CONTEXT_RELATIVE_PATHS.today]!;
+
+export interface EnsureTodaySkeletonInput {
+  contextDir: string;
+  todayWriteLock: TodayWriteLockManager;
+}
+
+export interface EnsureTodaySkeletonResult {
+  seeded: boolean;
+  reason?: "already_present" | "lock_unavailable" | "io_error";
+}
+
+/**
+ * Guarantee a `today.md` working surface exists before a section-only
+ * refresh routine (`routine.today_refresh`) assumes it.
+ *
+ * `rotateDayFiles()` intentionally renames `today.md` → `yesterday.md` at
+ * the day boundary and relies on the morning routine to recreate the
+ * dated file. When the morning routine has not run yet — or failed (e.g.
+ * a quota/budget death with no fallback backend) — `today.md` is absent
+ * and the refresh task flow's `PATCH section=user_schedule` 404s. The
+ * agent then improvises full-file `PUT`s, which the strict
+ * `validateTodayContent` schema rejects line-by-line; on a single-backend
+ * binding with a tight per-turn budget that loop tips into
+ * `BackendQuotaError(max_budget_usd)` and the refresh dies without ever
+ * writing the file — the "Refresh Today does nothing" symptom.
+ *
+ * This deterministic pre-step removes that whole failure mode: when the
+ * file is **entirely absent** we seed the canonical empty skeleton so the
+ * agent's section PATCH always has a valid target. A file that already
+ * exists is left byte-untouched — a valid dated file OR the legacy
+ * `# Today` bridge stub both accept the section PATCH (the route's
+ * `allowLegacyToday` branch). We never repair a malformed-but-present
+ * file and never overwrite user content; full creation/repair stays the
+ * morning routine's job. The seeded skeleton is dateless (`# Today`), so
+ * it does NOT satisfy `hasCurrentAgentDayTodayMd()` and the pending
+ * morning-routine retry still fires and upgrades it.
+ *
+ * Lock-aware exactly like {@link appendAgentLogLine}: if the morning
+ * routine holds the today-write-lock (mid-creation) we skip and let it
+ * win — the refresh session then 409-defers on its own PATCH.
+ */
+export async function ensureTodaySkeleton(
+  input: EnsureTodaySkeletonInput,
+): Promise<EnsureTodaySkeletonResult> {
+  const lock = input.todayWriteLock.acquire();
+  if (!lock.ok) {
+    logger.info(
+      { holder: lock.holder },
+      "Skipping today.md skeleton seed — today-write-lock held",
+    );
+    return { seeded: false, reason: "lock_unavailable" };
+  }
+
+  try {
+    const path = fullPath(input.contextDir, CONTEXT_RELATIVE_PATHS.today);
+    return await serializeContextFileWrite(path, () => {
+      if (existsSync(path)) {
+        return {
+          seeded: false,
+          reason: "already_present",
+        } as EnsureTodaySkeletonResult;
+      }
+      try {
+        writeFileAtomically(path, TODAY_SKELETON);
+        logger.info(
+          { path },
+          "Seeded today.md skeleton for refresh — file was absent (morning routine not yet run for the agent-day)",
+        );
+        return { seeded: true } as EnsureTodaySkeletonResult;
+      } catch (err) {
+        logger.error({ err, path }, "Failed to seed today.md skeleton");
+        return { seeded: false, reason: "io_error" } as EnsureTodaySkeletonResult;
       }
     });
   } finally {

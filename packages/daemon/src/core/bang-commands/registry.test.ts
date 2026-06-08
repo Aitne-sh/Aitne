@@ -15,7 +15,7 @@ import {
   makeNotify,
   tryHandle,
 } from "./index.js";
-import type { BangCommand } from "./index.js";
+import type { BangCommand, BangCommandContext } from "./index.js";
 
 function makeAudit(): IAuditLogger {
   return {
@@ -24,6 +24,7 @@ function makeAudit(): IAuditLogger {
     logError: vi.fn(),
     logAttachment: vi.fn(),
     logBangCommand: vi.fn(),
+    insertInProgressRow: vi.fn(() => -1),
   };
 }
 
@@ -665,7 +666,7 @@ describe("tryHandle decision tree", () => {
     registry2.register({
       prefix: "!probe-browser",
       describe: "probe",
-      handler: async (ctx) => {
+      handler: async (ctx: BangCommandContext) => {
         seen.hasCallback = typeof ctx.enqueueBrowserResearchEvent === "function";
       },
     });

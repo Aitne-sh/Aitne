@@ -80,7 +80,8 @@ describe("task-flow override layer (P5)", () => {
         mode: "delegated",
         delegatedBackend: "claude",
         delegatedModel: null,
-        capabilities: null,
+        deniedTools: [],
+        lastChangedAt: "2026-05-01T00:00:00.000Z",
       },
     });
     expect(flow).toContain("USER-OVERRIDE-MARKER");

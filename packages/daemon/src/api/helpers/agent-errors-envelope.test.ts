@@ -181,7 +181,7 @@ describe("buildEnvelope", () => {
       ],
       { legacyErrorCode: null },
     );
-    expect((env as Record<string, unknown>).error).toBeUndefined();
+    expect((env as unknown as Record<string, unknown>).error).toBeUndefined();
   });
 
   it("explicit `legacyErrorCode: \"forced_alias\"` overrides the registry default", () => {
@@ -196,7 +196,7 @@ describe("buildEnvelope", () => {
       ],
       { legacyErrorCode: "forced_alias" },
     );
-    expect((env as Record<string, unknown>).error).toBe("forced_alias");
+    expect((env as unknown as Record<string, unknown>).error).toBe("forced_alias");
   });
 });
 
@@ -337,7 +337,7 @@ describe("buildEnvelope with warnings channel", () => {
         received: "past",
       }),
     ]);
-    expect((env as Record<string, unknown>).warnings).toBeUndefined();
+    expect((env as unknown as Record<string, unknown>).warnings).toBeUndefined();
   });
 
   it("omits warnings[] when the warnings array is explicitly empty", () => {
@@ -352,7 +352,7 @@ describe("buildEnvelope with warnings channel", () => {
       ],
       { warnings: [] },
     );
-    expect((env as Record<string, unknown>).warnings).toBeUndefined();
+    expect((env as unknown as Record<string, unknown>).warnings).toBeUndefined();
   });
 
   it("retryable computation ignores warnings (severity check is on errors[] only)", () => {

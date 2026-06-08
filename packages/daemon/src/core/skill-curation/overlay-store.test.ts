@@ -157,14 +157,14 @@ describe("OverlayStore.delete", () => {
 
 describe("payloadHash", () => {
   it("is stable across key order", () => {
-    const a = { kind: "convention_notes", notes: [{ rule: "A.", topic: "T" }] } as const;
-    const b = { kind: "convention_notes", notes: [{ topic: "T", rule: "A." }] } as const;
+    const a = { kind: "convention_notes" as const, notes: [{ rule: "A.", topic: "T" }] };
+    const b = { kind: "convention_notes" as const, notes: [{ topic: "T", rule: "A." }] };
     expect(payloadHash(a)).toBe(payloadHash(b));
   });
 
   it("differs for distinct payloads", () => {
-    const a = { kind: "convention_notes", notes: [{ topic: "T", rule: "A." }] } as const;
-    const b = { kind: "convention_notes", notes: [{ topic: "T", rule: "B." }] } as const;
+    const a = { kind: "convention_notes" as const, notes: [{ topic: "T", rule: "A." }] };
+    const b = { kind: "convention_notes" as const, notes: [{ topic: "T", rule: "B." }] };
     expect(payloadHash(a)).not.toBe(payloadHash(b));
   });
 });

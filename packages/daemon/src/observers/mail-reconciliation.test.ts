@@ -609,7 +609,7 @@ describe("MailReconciliationJob", () => {
             folders: { INBOX: { uidValidity: 100, lastUid: 5000 } },
           };
         }
-        return { kind: "imap", folders: {} };
+        return { kind: "imap", folders: {} } as PollCursor;
       },
     });
 

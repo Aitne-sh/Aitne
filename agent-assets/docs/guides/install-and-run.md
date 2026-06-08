@@ -29,7 +29,7 @@ ask_examples:
   - How do I install the aitne npm package?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - install
   - first run
@@ -60,7 +60,7 @@ through the setup wizard.
   Google (`GEMINI_API_KEY` / `GOOGLE_API_KEY`). API keys are the
   recommended and provider-supported way to run Aitne. If you skip
   the key, Aitne falls back to the corresponding CLI's local
-  subscription login (`claude`, `codex login`, `gemini auth`); see
+  subscription login (`claude auth login`, `codex login`, `gemini`); see
   [Costs and Quotas](../concepts/costs-and-quotas.md) for the trade-
   offs and the provider policies that apply.
 - The CLI binary for whichever backend you pick (Claude Code, Codex

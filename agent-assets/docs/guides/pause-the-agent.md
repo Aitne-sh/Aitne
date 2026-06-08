@@ -23,7 +23,7 @@ ask_examples:
   - Can I disable everything for a week?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - pause agent
   - stop agent
@@ -38,6 +38,7 @@ related:
 ui_anchors:
   - /settings/schedule
   - /settings/routines
+  - /agents
 config_keys:
   - hourlyCheckEnabled
   - monthlyReviewEnabled
@@ -88,10 +89,13 @@ If you want to mute specific behaviour rather than pause everything, use
    Routines still run; they just don't notify you.
 
 Morning (fires at the day boundary, default 04:00), evening (18:00),
-and weekly (Fri 18:00) reviews have no per-routine enable toggle in the
-dashboard — to stop them, use `!stop` above. You can still edit each
-routine's instructions on `/settings/routines`, but that page does not
-turn them on or off.
+and weekly (Fri 19:00) reviews each have a per-routine Enable/Disable
+toggle on the `/agents` page — open `/agents/<slug>` (e.g.
+`/agents/weekly-review`) and click Disable (a stop-warning confirmation
+appears for these system agents). To halt all of them at once, use
+`!stop` above instead. You can still edit each routine's instructions
+on `/settings/routines`, but that page does not turn the built-in
+reviews on or off.
 
 ## Last resort: stop the daemon
 

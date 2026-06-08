@@ -110,7 +110,7 @@ describe("parseResearchArgs", () => {
   });
 
   it("researchCommand.parseArgs is a thin wrapper around parseResearchArgs", () => {
-    const parsed = researchCommand.parseArgs?.("quantum-mechanics");
+    const parsed = researchCommand.parseArgs?.("quantum-mechanics", undefined as never);
     expect(parsed).toMatchObject({
       subcommand: "show",
       slug: "quantum-mechanics",

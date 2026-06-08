@@ -12,9 +12,10 @@ aliases:
 category: features
 summary: |
   Local-only poller that reads the browser's own SQLite databases
-  (Chrome / Safari / Firefox / Arc), records visits as observations,
-  derives research clusters from sustained reading patterns, and
-  surfaces what you keep refreshing. Nothing leaves the daemon.
+  (Chrome / Chromium / Edge / Brave / Comet / Atlas), records visits as
+  observations, derives research clusters from sustained reading
+  patterns, and surfaces what you keep refreshing. Nothing leaves the
+  daemon.
 section: integrations
 tags:
   - integrations
@@ -31,7 +32,7 @@ ask_examples:
   - How do I opt out of browser history?
 locale: en-US
 created: 2026-05-22
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - browser history
   - browser history poller
@@ -74,9 +75,9 @@ api_endpoints:
 
 # Browser History
 
-Aitne can read the SQLite history databases that Chrome, Safari,
-Firefox, and Arc already maintain on disk, classify visits into
-categories, and use the result to notice what you've been
+Aitne can read the SQLite history databases that Chrome, Chromium,
+Edge, Brave, Comet, and Atlas already maintain on disk, classify visits
+into categories, and use the result to notice what you've been
 researching, what you've been refreshing, and what comparison-shopping
 windows you're in. Everything stays local — no URLs, titles, or
 clicks leave the daemon.
@@ -122,7 +123,7 @@ clicks leave the daemon.
   enable / disable each detected browser independently and override
   the DB path for atypical installs.
 - **Per-category gate.** `browserHistoryCategories` controls which
-  visit categories (research / shopping / docs / media / …) get
+  visit categories (research / shopping / news / dev / entertainment / …) get
   ingested. Categories you exclude are dropped at ingest time, not
   filtered later.
 - **Retention.** `browserHistoryRetentionDays` (visits) and

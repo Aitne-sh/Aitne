@@ -27,7 +27,7 @@ ask_examples:
   - Where are my travel bookings stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - flight
   - hotel
@@ -99,8 +99,9 @@ classifier do the rest. The flow is:
 
 ## API
 
-Read-only and status-update access (read endpoints are autonomous; the
-PATCH endpoint follows the standard write-safety tier):
+Read-only and status-update access (read endpoints are read-sensitive —
+they expose personal travel data; the PATCH endpoint follows the standard
+write-safety tier and requires approval):
 
 ```bash
 # All bookings (optionally filter by type/status/date range)

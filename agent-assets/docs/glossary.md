@@ -35,7 +35,7 @@ ask_examples:
   - What is an observation?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - terminology
   - vocabulary
@@ -111,8 +111,8 @@ enabled as fallbacks.
 ## Browser History (B-3)
 
 Local-only history poller that reads the browser's own SQLite database
-(Chrome / Safari / Firefox / Arc) and records page visits as
-observations. Drives the **research cluster** derivation, the weekly
+(Chromium-based browsers — Chrome, Chromium, Edge, Brave, Comet, Atlas)
+and records page visits as observations. Drives the **research cluster** derivation, the weekly
 reload-memory block, and the [`!checks`](features/messaging/bang-commands.md)
 on-demand reload tally. No content is uploaded; only URLs, titles, and
 visit timings the browser itself recorded. See
@@ -206,7 +206,7 @@ connected service: `direct | delegated | native | disabled`.
   MCP / skill harness — `outlook_mail`, `outlook_calendar`).
 - **disabled** — silence; no poller, no native handoff.
 
-Mode lookup goes through `getIntegrationState(db, key)`; never
+Mode lookup goes through `readIntegrationState(db, key)`; never
 hardcode an integration reference outside
 `packages/shared/src/integrations.ts`. See
 [Delegated Mode](concepts/delegated-mode.md).

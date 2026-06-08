@@ -2000,7 +2000,7 @@ describe("BackendRouter", () => {
     }
 
     function routineEvent() {
-      return { ...makeDmEvent(), type: "routine.morning_routine", platform: "cron" };
+      return { ...makeDmEvent(), type: "routine.morning_routine", platform: "cron" } as MessageEvent;
     }
 
     it("keeps a compatible fallback — Gmail delegated to Claude, fallback=Codex has Gmail connector", () => {
@@ -2266,7 +2266,7 @@ describe("BackendRouter", () => {
 
       const router = new BackendRouter(db, makeConfig(), [makeCore()]);
       const binding = router.resolveBinding(
-        { ...makeDmEvent(), type: "routine.morning_routine", platform: "cron" },
+        { ...makeDmEvent(), type: "routine.morning_routine", platform: "cron" } as MessageEvent,
         { processKey: "routine.morning_routine" },
       );
 

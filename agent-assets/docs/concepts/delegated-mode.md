@@ -36,7 +36,7 @@ ask_examples:
   - Why don't I see a SKILL.md for Gmail in my Codex session?
 locale: en-US
 created: 2026-04-26
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - delegated mode
   - direct mode
@@ -100,8 +100,8 @@ backend is the same as the integration's `delegatedBackend`:
   for the task-mode body shape.
 
 `native` has no sub-cases. The integration's `nativeBackend` must equal
-the main DM backend — `BackendRouter.setMainBackend` cascades unmatched
-`native` rows to `disabled`. From the agent's call-site view, `native`
+the main DM backend — `cascadeNativeBindingsOnMainSwitch` cascades
+unmatched `native` rows to `disabled`. From the agent's call-site view, `native`
 is indistinguishable from `delegated` same-backend (both are in-session
 MCP); the difference is who polls (no one, for `native`).
 
@@ -152,8 +152,8 @@ that case the daemon spawns the other backend per call.
 - **`nativeBackend`** — when native, which backend's connector is
   expected. Must equal the main DM backend; changing the main backend
   cascades unmatched `native` rows to `disabled` (the cascade is
-  triggered by `BackendRouter.setMainBackend` /
-  `PUT /api/backends/main`).
+  performed by `cascadeNativeBindingsOnMainSwitch` from the
+  `PUT /api/backends/main` handler).
 - **Same-backend** — DM session backend matches `delegatedBackend` /
   `nativeBackend`. The daemon is not in the loop; the agent calls
   native MCP directly. No skill body is materialized for the

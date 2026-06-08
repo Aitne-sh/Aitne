@@ -31,7 +31,7 @@ ask_examples:
   - How does Gemini's per-day quota work?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - cost
   - budget
@@ -196,8 +196,9 @@ register an API key on `/settings/models`.
 
 In the dashboard:
 
-- **Analytics** (`/analytics`) rolls today's cost by backend, by
-  ProcessKey, and by hour. When a backend is running on the
+- **Analytics** (`/analytics`) rolls cost by backend, by ProcessKey
+  (event type), by model, and over daily / weekly / monthly periods,
+  plus a today total. When a backend is running on the
   subscription fallback, remaining-window math is shown there too.
 - **Sidebar footer** shows the day's running total.
 - **Activity** event details include the per-execute cost.

@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   buildDaemonApiCliEnv,
@@ -12,6 +12,7 @@ import {
   DAEMON_API_SESSION_BACKEND_ENV,
   DAEMON_API_SESSION_ID_ENV,
   ensureDaemonApiCli,
+  SESSION_DAEMON_API_BIN_DIR,
   SESSION_DAEMON_API_CLI_REL_PATH,
   SESSION_DAEMON_CURL_SHIM_REL_PATH,
 } from "./daemon-api-cli.js";
@@ -204,5 +205,59 @@ describe("daemon-api-cli", () => {
     expect(shimContent).toContain("PA_SESSION_ID");
     expect(shimContent).toContain("/api/notify");
     expect(shimContent).toContain("NOTIFY_ROUTE_PATTERN");
+  });
+
+  // CROSS_PLATFORM_AUDIT — env-home-temp-path-case-collision.
+  // Windows env var names are case-insensitive at the OS level but
+  // `process.env` preserves the OS casing (canonically `Path`). The spread
+  // predicate must drop ANY pre-existing case-variant of PATH so the explicit
+  // `PATH` key (with the session-local `.pa/bin` shim dir) is the sole PATH
+  // key handed to child_process.spawn — otherwise the child can resolve the
+  // original `Path` (no shim dir), bypassing the daemon-API curl chokepoint.
+  //
+  // The predicate reads `process.env` directly, so we simulate the Windows
+  // casing by injecting a `Path` case-variant. On POSIX `process.env.Path` is
+  // a distinct key from the real `PATH` (case-sensitive env), which is exactly
+  // the duplicate the predicate must collapse; assertions below hold on both
+  // OSes because they test the key-set, not the case-variant's VALUE (which
+  // the function never reads — it builds pathParts from `process.env.PATH`).
+  it("collapses case-variant PATH keys so the shim dir leads exactly one PATH", () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "pa-daemon-api-env-"));
+    tempDirs.push(sessionDir);
+
+    const hadPath = Object.prototype.hasOwnProperty.call(process.env, "Path");
+    const savedPath = process.env.Path;
+    try {
+      // A stray case-variant that the OLD predicate would leak through.
+      process.env.Path = "C:/should-not-leak";
+      const env = buildDaemonApiCliEnv(sessionDir, 8321);
+
+      // (a) exactly one key whose uppercase form is PATH
+      expect(
+        Object.keys(env).filter((k) => k.toUpperCase() === "PATH").length,
+      ).toBe(1);
+      // (b) it is the canonical `PATH`; the case-variant `Path` is dropped
+      expect(env.Path).toBeUndefined();
+      expect(env.PATH).toBeDefined();
+      // the leaked value must never become the surviving PATH
+      expect(env.PATH).not.toContain("C:/should-not-leak");
+      // (c) the session-local shim dir still leads
+      expect(env.PATH?.split(delimiter)[0]).toBe(
+        join(sessionDir, SESSION_DAEMON_API_BIN_DIR),
+      );
+      // (d) no PATH data loss — the canonical system path is appended after
+      // the shim dir (when the host actually has a PATH set).
+      if (process.env.PATH) {
+        expect(env.PATH?.split(delimiter).slice(1).join(delimiter)).toBe(
+          process.env.PATH,
+        );
+      }
+    } finally {
+      if (hadPath) {
+        process.env.Path = savedPath;
+      } else {
+        delete process.env.Path;
+      }
+    }
   });
 });

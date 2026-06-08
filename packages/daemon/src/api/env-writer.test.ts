@@ -73,7 +73,7 @@ vi.mock("node:fs", async () => {
   };
 });
 
-const { applyConfigUpdates } = await import("./env-writer.js");
+const { applyConfigUpdates, serializeForEnv } = await import("./env-writer.js");
 const mockedFs = await import("node:fs");
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -832,5 +832,44 @@ describe("getEnvFilePath", () => {
   it("returns a path ending with .env", async () => {
     const path = getEnvFilePath();
     expect(path).toMatch(/\.env$/);
+  });
+});
+
+describe("serializeForEnv", () => {
+  // A raw newline in a scalar env value would be written verbatim as
+  // `KEY=foo\nBAR=...`, and dotenv would parse the injected `BAR=...` as a
+  // separate variable on next load — silently corrupting `.env`. The scalar
+  // path strips CR/LF so no such injection survives.
+  it("collapses a bare LF in a scalar to a single space", () => {
+    expect(serializeForEnv("foo\nBAR=evil")).toBe("foo BAR=evil");
+  });
+
+  it("collapses CRLF and runs of line breaks to a single space", () => {
+    expect(serializeForEnv("a\r\nb")).toBe("a b");
+    expect(serializeForEnv("a\n\n\nb")).toBe("a b");
+    expect(serializeForEnv("a\r\r\nb")).toBe("a b");
+  });
+
+  it("leaves a clean scalar string untouched", () => {
+    expect(serializeForEnv("/Users/me/vault")).toBe("/Users/me/vault");
+  });
+
+  it("coerces non-string scalars to their string form", () => {
+    expect(serializeForEnv(8321)).toBe("8321");
+    expect(serializeForEnv(true)).toBe("true");
+  });
+
+  it("returns an empty string for null and undefined", () => {
+    expect(serializeForEnv(null)).toBe("");
+    expect(serializeForEnv(undefined)).toBe("");
+  });
+
+  it("JSON-encodes arrays and objects on a single line, escaping embedded newlines", () => {
+    expect(serializeForEnv(["a", "b"])).toBe('["a","b"]');
+    // JSON.stringify escapes \n to a literal backslash-n, so the serialized
+    // form stays single-line and cannot inject a second env line.
+    const encoded = serializeForEnv({ note: "line1\nline2" });
+    expect(encoded).toBe('{"note":"line1\\nline2"}');
+    expect(encoded).not.toContain("\n");
   });
 });

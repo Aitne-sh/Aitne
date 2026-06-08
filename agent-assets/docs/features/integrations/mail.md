@@ -27,7 +27,7 @@ ask_examples:
   - How do I add a second mail account?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - mail
   - gmail
@@ -118,7 +118,8 @@ mode lifecycle.
 
 ## What It Outputs
 
-- New threads land in the local `messages` table (FTS-indexed).
+- New threads land in the local `mail_messages_index` table
+  (FTS-indexed via `fts_mail_messages`).
 - Classification labels are written via the provider API.
 - A short "mail" section in `state/today.md` when items qualified.
 

@@ -23,7 +23,15 @@ import { getContextDir } from "../config.js";
 import { getDegradedMode } from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
-import { getInjectionPolicy } from "./injection-policy.js";
+import {
+  getAgentLessonsInjection,
+  getInjectionPolicy,
+  type AgentLessonsInjection,
+} from "./injection-policy.js";
+import {
+  AGENT_LESSONS_SLIM_CAP_BYTES,
+  renderAgentLessonsBlock,
+} from "./feedback/lesson-injection.js";
 import { POLICY_FILE_MAX_BYTES } from "./policy-files.js";
 import { renderOutputLanguagePolicyBlock } from "./output-language-policy.js";
 import {
@@ -193,7 +201,16 @@ export class ContextBuilder implements IContextBuilder {
     // `resolveAlwaysInjectionPolicy` for the opt-out table and the
     // rationale per event-type.
     const injectionPolicy = resolveAlwaysInjectionPolicy(event);
-    const [userMd, rulesMd, todayMd] = await Promise.all([
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §5 — Stage-3 `<agent_lessons>` opt-in.
+    // The surface→block decision lives in `injection-policy.ts` (single source
+    // of truth), read here next to `resolveAlwaysInjectionPolicy`. Gated on the
+    // master `feedbackLearningEnabled` flag so the whole loop turns off cleanly
+    // (same `=== false` posture the capture sink + consolidation pre-step use).
+    const lessonsInjection: AgentLessonsInjection | null =
+      this.config.feedbackLearningEnabled === false
+        ? null
+        : getAgentLessonsInjection(event.type);
+    const [userMd, rulesMd, todayMd, agentLessonsMd] = await Promise.all([
       injectionPolicy.injectUserProfile
         ? this.readFile(CONTEXT_RELATIVE_PATHS.user.profile)
         : Promise.resolve(null),
@@ -201,6 +218,9 @@ export class ContextBuilder implements IContextBuilder {
         ? this.readFile(CONTEXT_RELATIVE_PATHS.rules.management)
         : Promise.resolve(null),
       this.readFile(CONTEXT_RELATIVE_PATHS.today),
+      lessonsInjection?.global
+        ? this.readFile(CONTEXT_RELATIVE_PATHS.agentLessons)
+        : Promise.resolve(null),
     ]);
     // Capture the read time as the authoritative "as of when did this
     // conversation see today.md" anchor. Read-time (not mtime) is what the
@@ -237,6 +257,36 @@ export class ContextBuilder implements IContextBuilder {
         );
       } else {
         sections.push(`<management_rules>\n${rulesMd}\n</management_rules>`);
+      }
+    }
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §5/§6 — the scope-`agent` lessons block.
+    // Emitted next to `<management_rules>` (its sibling policy block) for the
+    // surfaces `getAgentLessonsInjection` opts in. The renderer drops
+    // provisional lessons (§4 step 4) and enforces the inject-time cap: the
+    // global path skip-with-warns over `feedbackLessonMaxBytesGlobal` (the hard
+    // backstop that makes the §6 cap non-bypassable — v1.3 §11.5); the hourly
+    // slim path packs top-N-by-score under the hard 2 KB budget. `self`-scope
+    // (`agent:<slug>`) injection is Phase 4 — the slug is not in the build yet.
+    if (lessonsInjection?.global && agentLessonsMd) {
+      const capBytes = lessonsInjection.slim
+        ? AGENT_LESSONS_SLIM_CAP_BYTES
+        : this.config.feedbackLessonMaxBytesGlobal ?? 8192;
+      const lessonsResult = renderAgentLessonsBlock(agentLessonsMd, {
+        capBytes,
+        slim: lessonsInjection.slim,
+        nowIso: new Date().toISOString(),
+      });
+      if (lessonsResult.block) {
+        sections.push(lessonsResult.block);
+      } else if (lessonsResult.skipped) {
+        logger.warn(
+          {
+            path: CONTEXT_RELATIVE_PATHS.agentLessons,
+            size: lessonsResult.skipped.bytes,
+            cap: lessonsResult.skipped.cap,
+          },
+          "policies/agent-lessons.md exceeds inject cap — skipped from <agent_lessons>",
+        );
       }
     }
     if (todayMd) {
@@ -359,6 +409,17 @@ export class ContextBuilder implements IContextBuilder {
     // block's wire format.
     if (typeof event.data?.fetchReportBlock === "string") {
       sections.push(event.data.fetchReportBlock);
+    }
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 — the evening-review session
+    // receives a `<feedback_worksheet>` block assembled by the dispatcher's
+    // deterministic consolidation pre-step (`core/feedback/consolidation-prep.ts`).
+    // It carries the unconsumed signals grouped by scope, each candidate's
+    // weighted-evidence promotion verdict, the lessons file's eviction ranking,
+    // and the exact consume id set — so the LLM does only the semantic merge +
+    // phrasing and then `POST /api/feedback/consume`. Injected verbatim — the
+    // dispatcher owns the block's wire format; absent when no signals pend.
+    if (typeof event.data?.feedbackWorksheetBlock === "string") {
+      sections.push(event.data.feedbackWorksheetBlock);
     }
     // morning-routine-optimization.md Phase 5 — daemon-prepared blocks
     // injected verbatim by `MorningRoutinePipelineOrchestrator` before

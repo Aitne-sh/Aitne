@@ -26,7 +26,7 @@ ask_examples:
   - Why is Split greyed out?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - external vault
   - existing obsidian vault
@@ -68,11 +68,11 @@ vs Split**.
 
 Open **`/settings/wiki`** in the dashboard (or open `/wiki` and follow
 the **Enable Wiki** button — both land on the same page). If you have
-no workspace yet, the page shows two CTAs:
+no workspace yet, the page shows two options:
 
-- **Enable Internal Workspace** — uses the daemon-owned root.
-- **Probe & Create External** — points at the path you choose with
-  the folder picker.
+- **Internal** → **Enable internal wiki** — uses the daemon-owned root.
+- **Existing Obsidian vault** → **Use this folder** — points at the
+  path you choose with the folder picker.
 
 ### Picking the path
 
@@ -110,7 +110,7 @@ levels:
   an existing wiki layout is detected, the wizard will surface the
   Adopt / Migrate decision in Step 3.
 
-The **Probe & Create External** button is greyed out while the banner
+The **Use this folder** button is greyed out while the banner
 is an error so you cannot fire a workspace-create that the daemon
 already knows will fail.
 

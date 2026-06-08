@@ -27,7 +27,7 @@ ask_examples:
   - How do I connect an Outlook mailbox?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - mail
   - imap
@@ -48,6 +48,7 @@ api_endpoints:
   - /api/config/mail/app-password
 config_keys:
   - enabledMailProviders
+  - mailPollIntervalSeconds
 context_files:
   - state/today.md
 ---
@@ -96,7 +97,8 @@ kind authenticates differently:
 4. Save. Registration succeeds regardless of the enabled-providers
    setting (`enabledMailProviders`); the account goes live only when
    you flip its **Enable** toggle on the mail card.
-5. The first poll runs within a minute of being enabled.
+5. The account is picked up on the next mail poll tick (default every
+   180 seconds, configurable via `mailPollIntervalSeconds`).
 
 ## Verification
 

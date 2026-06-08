@@ -2171,12 +2171,21 @@ VALUES
     ('routine.morning_routine_today',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50, 1.50, 'preset'),
     ('routine.morning_routine_journal', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',   20, 0.30, 'preset'),
     ('routine.hourly_check',    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
-    -- $0.30 budget: a typical drift-triggered refresh on Sonnet runs ~$0.10
-    -- in 4 turns; the previous $0.10 cap left zero headroom and any larger
-    -- today.md / longer drift summary tipped over the SDK max_budget guard
-    -- and surfaced as BackendQuotaError(max_budget_usd). 3x observed cost
-    -- matches the headroom convention used by dashboard.docs_qa.
-    ('routine.today_refresh',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  20,  0.30, 'preset'),
+    -- $0.50 budget: a typical drift-triggered refresh on Sonnet runs ~$0.10
+    -- in 4 turns, but a busy-calendar drift (many/large pending calendar
+    -- observations read via the task-flow GET limit=200) compounded by a
+    -- 409 morning-lock retry loop (3x with 30s backoffs) tipped a real run
+    -- past the prior $0.30 cap and surfaced as BackendQuotaError(max_budget_usd)
+    -- with no fallback (claude is the only binding). The previous $0.10→$0.30
+    -- bump did not hold. Realigned to $0.50 — the medium-tier 20-turn peer
+    -- dashboard.docs_qa value, and well under the superset
+    -- routine.morning_routine_today ($1.50), which writes the full today.md
+    -- from the same calendar data. A third trip should drive a
+    -- work-reduction fix (tighter GET limit / cheaper 409 backoff), not
+    -- another blind bump. Bumped for upgrading installs by migration 0009.
+    -- Keep in lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in
+    -- plan-presets.ts.
+    ('routine.today_refresh',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  20,  0.50, 'preset'),
     ('routine.evening_review',  'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     ('routine.weekly_review',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     -- routine.monthly_review: row seeded but the routine is gated OFF by

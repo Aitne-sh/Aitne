@@ -27,7 +27,7 @@ ask_examples:
   - What does the pre-compile snapshot do?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - wiki budget
   - wiki cost
@@ -126,7 +126,7 @@ before `!compile full`** enabled, Aitne runs:
 git -C <vault> status --porcelain
 # must be empty — dirty trees refuse the operation entirely
 git -C <vault> add -A
-git -C <vault> commit -m "aitne wiki: pre-compile snapshot <ISO-8601-ts>"
+git -C <vault> commit --allow-empty -m "aitne wiki: pre-compile snapshot <ISO-8601-ts>"
 ```
 
 before the compile session starts. The commit message is

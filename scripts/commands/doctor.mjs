@@ -12,7 +12,9 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 export async function run(args, ctx) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -164,7 +166,13 @@ async function checkSecretStore(ctx) {
       return { status: "pass", label: "Secret store", detail: "libsecret (`secret-tool`) reachable" };
     } catch {
       const hasMaster = !!process.env.PA_MASTER_PASSWORD;
-      const keyfile = path.join(ctx.DATA_DIR, "secrets", ".master-key");
+      // The daemon's secret clients hardcode ~/.personal-agent/secrets and do
+      // NOT honor PA_DATA_DIR (secret-client-file.ts:99,209 — homedir-hardcoded;
+      // createSecretClient passes no dir). Probe the same homedir-anchored path
+      // so this diagnostic agrees with where keys are actually read. If the
+      // daemon is ever changed to honor PA_DATA_DIR for secrets, revert this and
+      // fix at the factory (secret-client-factory.ts) instead.
+      const keyfile = path.join(os.homedir(), ".personal-agent", "secrets", ".master-key");
       const hasKeyfile = fs.existsSync(keyfile);
       if (hasMaster || hasKeyfile) {
         return {
@@ -371,7 +379,8 @@ async function checkRepositoryGithubLinkDrift(dataDir) {
         },
       ];
     }
-    Database = (await import(found)).default ?? (await import(found));
+    const mod = await import(pathToFileURL(found).href);
+    Database = mod.default ?? mod;
   } catch (err) {
     return [
       {
