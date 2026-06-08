@@ -28,7 +28,7 @@ ask_examples:
   - How do I list registered backends?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-08
 keywords:
   - API
   - REST
@@ -128,6 +128,16 @@ callers pass it as `Authorization: Bearer <token>`.
 | Receipts | `/api/receipts/*` | `receipts.ts` | Receipt CRUD. |
 | Books | `/api/books/*` | `books.ts` | Reading-list CRUD. |
 | Travel bookings | `/api/travel-bookings/*` | `travel-bookings.ts` | Travel-booking CRUD. |
+
+### Feedback learning
+
+All three routes are `RiskTier.Autonomous`. `POST /api/feedback` server-restricts `source` to `explicit` / `self_critique` — `behavioral` signals are daemon-only (written by `SignalDetector`) and a `behavioral` body returns 400.
+
+| Group | Path | Source | Purpose |
+|---|---|---|---|
+| Feedback | `POST /api/feedback` | `feedback.ts` | Record an explicit or self-critique feedback signal. Dedups on `(scope_type, scope_ref, summary)` within 10 min. When `feedbackLearningEnabled=false` returns `200 {disabled:true}` without recording. |
+| Feedback consume | `POST /api/feedback/consume` | `feedback.ts` | `{ids: number[], lessonRef?}` → `{consumed, notFound}`. Marks signals consumed after a consolidation pass. |
+| Feedback lessons | `GET /api/feedback/lessons` | `feedback.ts` | Read-only lesson-store overview for the dashboard — global `agent` store plus every per-agent store on disk, with cap-utilisation metrics. |
 
 ### Docs and wiki
 

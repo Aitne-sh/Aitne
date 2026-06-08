@@ -127,7 +127,10 @@ import {
   scopeStoreFile,
   type CanonicalScope,
 } from "./feedback/scope-parser.js";
-import { sweepConsumedFeedbackSignals } from "../db/feedback-signals-store.js";
+import {
+  feedbackRetentionCutoff,
+  sweepConsumedFeedbackSignals,
+} from "../db/feedback-signals-store.js";
 import { morningRoutineRanToday } from "../bootstrap/schedule-helpers.js";
 import { resolveAgentId } from "./agents/agent-id-resolver.js";
 import { loadEffectiveDefinition } from "./agents/effective-definition.js";
@@ -1770,13 +1773,14 @@ export class ScheduledTaskRunner {
       // signal is never lost to retention. Runs once per Evening Review.
       // Guarded against a missing/NaN retention knob so a config gap degrades
       // to "skip the sweep", not "throw and abandon the whole consolidation".
-      const retentionDays = this.config.feedbackSignalRetentionDays;
-      if (Number.isFinite(retentionDays)) {
-        const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
-        sweepConsumedFeedbackSignals(
-          this.db,
-          new Date(Date.now() - retentionMs).toISOString(),
-        );
+      // The guard + cutoff math live in the pure, 100%-covered
+      // `feedbackRetentionCutoff` helper (returns null → skip).
+      const retentionCutoff = feedbackRetentionCutoff(
+        this.config.feedbackSignalRetentionDays,
+        Date.now(),
+      );
+      if (retentionCutoff) {
+        sweepConsumedFeedbackSignals(this.db, retentionCutoff);
       }
 
       const groups = gatherFeedbackWorksheetScopes(this.db, {

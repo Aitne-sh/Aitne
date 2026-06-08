@@ -248,3 +248,23 @@ export function sweepConsumedFeedbackSignals(
     )
     .run(cutoff).changes;
 }
+
+/**
+ * Compute the retention cutoff ISO timestamp for
+ * {@link sweepConsumedFeedbackSignals} from the `feedbackSignalRetentionDays`
+ * knob. Returns `null` when the knob is missing or non-finite (NaN / Infinity),
+ * so the caller degrades to "skip the sweep" instead of throwing on
+ * `new Date(NaN).toISOString()` and abandoning the whole nightly consolidation
+ * (FEEDBACK_LEARNING_LOOP_DESIGN.md §11 v1.3 robustness). `nowMs` is injected so
+ * the math is deterministically testable.
+ */
+export function feedbackRetentionCutoff(
+  retentionDays: number | undefined,
+  nowMs: number,
+): string | null {
+  if (typeof retentionDays !== "number" || !Number.isFinite(retentionDays)) {
+    return null;
+  }
+  const retentionMs = retentionDays * 24 * 60 * 60 * 1000;
+  return new Date(nowMs - retentionMs).toISOString();
+}

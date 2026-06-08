@@ -34,7 +34,7 @@ ask_examples:
   - Which files can the agent write to?
 locale: en-US
 created: 2026-05-18
-updated: 2026-06-07
+updated: 2026-06-08
 keywords:
   - context
   - knowledge
@@ -185,7 +185,8 @@ the write-permission whitelist in `packages/daemon/src/api/routes/context/permis
     ├── agent-lessons.md            Feedback Learning Loop global lessons (lazy)
     ├── agents/                     User-authored Agent definitions (lazy)
     │   └── <slug>/
-    │       └── agent.md
+    │       ├── agent.md
+    │       └── lessons.md          Per-agent Feedback Learning Loop lessons (lazy)
     ├── management-captures/        One captured policy per file
     │   ├── _index.md
     │   └── <slug>.md

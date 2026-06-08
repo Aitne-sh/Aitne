@@ -38,6 +38,7 @@ related:
   - features/routines/morning-routine
   - features/routines/evening-review
   - features/routines/weekly-review
+  - features/memory-files/agent-lessons
   - features/operations/activity-and-conversations
   - concepts/memory-model
 process_keys:
@@ -177,5 +178,7 @@ agent's own writes, not to you editing the file on disk.
 - [Activity & Conversations](../operations/activity-and-conversations.md)
   — the action-shaped audit log, distinct from the reflection-shaped
   journal.
+- [agent lessons](agent-lessons.md) — the directive-shaped learned-behavior
+  stores, distinct from this reflection-shaped diary.
 - [Memory model](../../concepts/memory-model.md) — how the journal fits
   the wider context vault.

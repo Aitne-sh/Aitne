@@ -78,7 +78,7 @@ ui_anchors:
   - /settings/advanced
   - /settings/models
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-08
 related:
   - reference/api
   - reference/cli-commands
@@ -236,6 +236,23 @@ case-sensitive.
 |---|---|---|
 | `advisorEnabled` | boolean | SDK advisor toggle. |
 | `advisorModel` | string / null | Model id; default `null`. Validated against `ADVISOR_ALLOWED_MODELS`, which the SDK pins to `claude-sonnet-4-6` and `claude-opus-4-6` only. Newer Opus generations (`claude-opus-4-7`, `claude-opus-4-8`) are silently skipped by the SDK advisor path — see `docs/advisor.md`. |
+
+### Feedback learning
+
+The feedback learning loop (capture → nightly consolidation → injection of
+durable lessons). All six knobs are runtime-editable via `PATCH /api/config`,
+surfaced by `GET /config`, and tunable from the dashboard `/settings/lessons`
+page. Defaults and ranges below are enforced in
+`packages/daemon/src/settings/runtime-settings.ts`.
+
+| Key | Type | Notes |
+|---|---|---|
+| `feedbackLearningEnabled` | boolean | Default `true` (env `FEEDBACK_LEARNING_ENABLED`). Master kill-switch for the whole loop — capture, consolidation, and injection. |
+| `feedbackPromotionThreshold` | 1–10 | Default `2` (env `FEEDBACK_PROMOTION_THRESHOLD`). Weighted-evidence threshold a behavioral / self-critique lesson must clear before it becomes injectable. |
+| `feedbackLessonMaxBytesGlobal` | 1024–32768 | Default `8192` (env `FEEDBACK_LESSON_MAX_BYTES_GLOBAL`). Byte cap for `policies/agent-lessons.md`. |
+| `feedbackLessonMaxBytesPerAgent` | 512–16384 | Default `4096` (env `FEEDBACK_LESSON_MAX_BYTES_PER_AGENT`). Byte cap for each `policies/agents/<slug>/lessons.md`. |
+| `feedbackLessonStaleDays` | 7–365 | Default `60` (env `FEEDBACK_LESSON_STALE_DAYS`). Lessons whose `last=` date is older are pruned, except `kind=constraint` (durable). |
+| `feedbackSignalRetentionDays` | 30–365 | Default `180` (env `FEEDBACK_SIGNAL_RETENTION_DAYS`). Consumed `feedback_signals` rows older than this are swept. |
 
 ## Routine Schedule Times Are Not Configurable
 

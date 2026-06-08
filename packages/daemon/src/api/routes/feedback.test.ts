@@ -205,6 +205,174 @@ describe("feedback routes", () => {
     expect(row.lesson_ref).toBe("policies/agent-lessons#1");
   });
 
+  it("rejects a non-object POST /feedback body", async () => {
+    const app = makeApp(makeDb());
+    const res = await app.request("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([1, 2, 3]),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: "validation_error",
+      message: "Body must be a JSON object",
+    });
+  });
+
+  it("rejects POST /feedback with per-field validation issues", async () => {
+    const app = makeApp(makeDb());
+    // Fully-valid baseline (would 200); each case mutates exactly one field so
+    // a single, attributable issue fires. `valence: undefined` is dropped by
+    // JSON.stringify → the missing-valence branch.
+    const base: Record<string, unknown> = {
+      source: "explicit",
+      summary: "Lead with blockers",
+      valence: "neutral",
+      scope_type: "agent",
+    };
+    const cases: Array<{ patch: Record<string, unknown>; field: string }> = [
+      { patch: { summary: "" }, field: "summary" },
+      { patch: { valence: undefined }, field: "valence" },
+      { patch: { valence: "bogus" }, field: "valence" },
+      { patch: { kind: "bogus" }, field: "kind" },
+      { patch: { action_kind: "bogus" }, field: "action_kind" },
+      { patch: { scope_type: "bogus" }, field: "scope_type" },
+    ];
+    for (const { patch, field } of cases) {
+      const res = await app.request("/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...base, ...patch }),
+      });
+      expect(res.status, `field=${field}`).toBe(400);
+      const json = (await res.json()) as {
+        error: string;
+        issues?: Array<{ field: string }>;
+      };
+      expect(json.error).toBe("validation_error");
+      expect(
+        json.issues?.some((issue) => issue.field === field),
+        `expected an issue for field=${field}`,
+      ).toBe(true);
+    }
+  });
+
+  it("distinguishes a missing agent_slug scope_ref from an unknown one", async () => {
+    const app = makeApp(makeDb());
+    const res = await app.request("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "explicit",
+        summary: "Tune this agent",
+        valence: "correction",
+        scope_type: "agent_slug",
+        // scope_ref intentionally omitted
+      }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as {
+      issues: Array<{ field: string; got: string }>;
+    };
+    const issue = json.issues.find((i) => i.field === "scope_ref");
+    expect(issue).toBeDefined();
+    expect(issue?.got).toBe("missing");
+  });
+
+  it("truncates an over-length summary to the 280-char cap", async () => {
+    const db = makeDb();
+    const app = makeApp(db);
+    // 300 chars of short spaced tokens: no contiguous 32+ run, so the redactor
+    // leaves it intact and only the length truncation applies. "ab " * 100 puts
+    // a non-space char at index 279, so the clip lands at exactly 280.
+    const longSummary = "ab ".repeat(100);
+    expect(longSummary.length).toBe(300);
+    const res = await app.request("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "self_critique",
+        summary: longSummary,
+        valence: "neutral",
+        scope_type: "agent",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: number };
+    const row = db
+      .prepare("SELECT summary FROM feedback_signals WHERE id = ?")
+      .get(id) as { summary: string };
+    expect(row.summary.length).toBe(280);
+    expect(row.summary).not.toContain("[REDACTED]");
+  });
+
+  it("redaction-scrubs secrets out of summary and evidence before storing", async () => {
+    const db = makeDb();
+    const app = makeApp(db);
+    // Word-form fakes (no real xoxb-<digits>-<digits>-<hash> / sk-ant-api03-
+    // structure) so they trip the redactor's loose provider patterns without
+    // matching GitHub push-protection's detectors — same approach as the
+    // existing secret-redaction.test.ts fixtures.
+    const slackToken = "xoxb-fake-placeholder-not-a-real-token";
+    const anthropicKey = "sk-ant-fakeplaceholdernotarealsecretvalue";
+    const res = await app.request("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "explicit",
+        summary: `owner pasted ${anthropicKey} into chat`,
+        valence: "correction",
+        scope_type: "agent",
+        evidence: { excerpt: `leaked ${slackToken} oops` },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { id } = (await res.json()) as { id: number };
+    const row = db
+      .prepare("SELECT summary, evidence_json FROM feedback_signals WHERE id = ?")
+      .get(id) as { summary: string; evidence_json: string };
+    expect(row.summary).toContain("[REDACTED]");
+    expect(row.summary).not.toContain(anthropicKey);
+    const evidence = JSON.parse(row.evidence_json) as { excerpt: string };
+    expect(evidence.excerpt).toContain("[REDACTED]");
+    expect(evidence.excerpt).not.toContain(slackToken);
+  });
+
+  it("rejects malformed POST /feedback/consume bodies", async () => {
+    const app = makeApp(makeDb());
+
+    const nonObject = await app.request("/feedback/consume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([1, 2]),
+    });
+    expect(nonObject.status).toBe(400);
+    expect(await nonObject.json()).toMatchObject({
+      error: "validation_error",
+      message: "Body must be a JSON object",
+    });
+
+    const idsNotArray = await app.request("/feedback/consume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: "nope" }),
+    });
+    expect(idsNotArray.status).toBe(400);
+    expect((await idsNotArray.json() as { message: string }).message).toContain(
+      "must be an array",
+    );
+
+    const idsNonInteger = await app.request("/feedback/consume", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [1, 2.5, "x"] }),
+    });
+    expect(idsNonInteger.status).toBe(400);
+    expect((await idsNonInteger.json() as { message: string }).message).toContain(
+      "only integers",
+    );
+  });
+
   describe("GET /feedback/lessons", () => {
     afterEach(() => {
       while (tempDirs.length > 0) {

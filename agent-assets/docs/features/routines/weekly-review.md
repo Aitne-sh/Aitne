@@ -39,6 +39,7 @@ related:
   - concepts/routines
   - features/routines/evening-review
   - features/memory-files/agent-journal
+  - features/memory-files/agent-lessons
 process_keys:
   - routine.weekly_review
 config_keys:
@@ -69,6 +70,11 @@ into every morning routine of the following ISO week.
   Lessons — and writes the user-facing snapshot.
 - Appends an agent-internal block to `journal/agent.md` for
   self-critique, filter quality, and improvement ideas.
+- Feeds the learning loop: for each concrete, actionable system
+  improvement idea it identifies, it also posts a `source=self_critique`
+  feedback signal (in addition to the `journal/agent.md` prose), so the
+  idea is consolidated into the [agent lessons](../memory-files/agent-lessons.md)
+  rather than only living in the journal.
 - Sends a brief Friday-evening notification by default (the silence
   gate triggers only on an essentially blank week).
 - Refreshes `identity/reading-taste.md` and Book Candidates when

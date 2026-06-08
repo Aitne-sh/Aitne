@@ -5,6 +5,7 @@ import { applySchema } from "./schema.js";
 import {
   consumeFeedbackSignals,
   countPendingFeedbackSignals,
+  feedbackRetentionCutoff,
   findRecentFeedbackSignal,
   getPendingFeedbackSignals,
   hasFeedbackSignalForAction,
@@ -207,5 +208,23 @@ describe("feedback-signals-store", () => {
       .prepare("SELECT lesson_ref FROM feedback_signals WHERE id = ?")
       .get(id) as { lesson_ref: string | null };
     expect(row.lesson_ref).toBeNull();
+  });
+
+  describe("feedbackRetentionCutoff", () => {
+    it("returns a round-trippable ISO cutoff of nowMs minus retentionDays", () => {
+      const now = Date.UTC(2026, 5, 8); // 2026-06-08T00:00:00.000Z
+      const cutoff = feedbackRetentionCutoff(180, now);
+      expect(cutoff).not.toBeNull();
+      // Validates both the arithmetic and the ISO round-trip without
+      // re-deriving the same `toISOString()` formula the helper uses.
+      expect(Date.parse(cutoff!)).toBe(now - 180 * 24 * 60 * 60 * 1000);
+    });
+
+    it("returns null for a missing / NaN / non-finite knob (degrade to skip the sweep)", () => {
+      const now = Date.UTC(2026, 5, 8);
+      expect(feedbackRetentionCutoff(undefined, now)).toBeNull();
+      expect(feedbackRetentionCutoff(Number.NaN, now)).toBeNull();
+      expect(feedbackRetentionCutoff(Number.POSITIVE_INFINITY, now)).toBeNull();
+    });
   });
 });
