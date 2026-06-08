@@ -1,6 +1,6 @@
 {
   "name": "@aitne/dashboard",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Aitne dashboard — Next.js web UI for the Aitne personal agent. Consumed by the `aitne` CLI; not intended for standalone use.",
   "homepage": "https://github.com/Aitne-sh/Aitne#readme",
   "bugs": {
