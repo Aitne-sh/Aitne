@@ -473,6 +473,10 @@ const API_RISK: Record<string, RiskTier> = {
   "DELETE /api/observations/{*}/consume": RiskTier.Autonomous,
   "POST /api/feedback": RiskTier.Autonomous,
   "POST /api/feedback/consume": RiskTier.Autonomous,
+  // Read-only lesson-store overview for the dashboard Lessons settings page
+  // (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5). Summarises cap utilisation
+  // only — lesson prose was redaction-scrubbed at capture — so Autonomous.
+  "GET /api/feedback/lessons": RiskTier.Autonomous,
 
   // ── Notification ──
   "/api/notify": RiskTier.Autonomous,

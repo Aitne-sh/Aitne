@@ -823,6 +823,14 @@ export interface ConfigResponse {
   authProbeDisabled: boolean;
   autonomousDailyCostCapUsd: number | null;
   autonomousMonthlyCostCapUsd: number | null;
+  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5) —
+  // tuned from the Lessons settings page.
+  feedbackLearningEnabled: boolean;
+  feedbackPromotionThreshold: number;
+  feedbackLessonMaxBytesGlobal: number;
+  feedbackLessonMaxBytesPerAgent: number;
+  feedbackLessonStaleDays: number;
+  feedbackSignalRetentionDays: number;
   primaryLanguage: string;
   vaultMode: "obsidian" | "plain";
   /**
@@ -831,6 +839,34 @@ export interface ConfigResponse {
    * degraded-mode fallback — this is the *configured* target.
    */
   contextDir: string;
+}
+
+// ── Feedback Learning Loop — lesson stores (GET /api/feedback/lessons) ──
+// FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5. Read-only cap-utilisation
+// overview rendered by the Lessons settings page; the file bodies are
+// read/edited through GET/PUT /api/context/<path>.
+export interface LessonStore {
+  /** Canonical scope label (`agent` / `agent:<slug>`). */
+  scope: string;
+  /** Writable-vault relative path (without leading slash). */
+  path: string;
+  /** False when no consolidation pass has created the store yet. */
+  exists: boolean;
+  lastModified: string | null;
+  bytes: number;
+  capBytes: number;
+  entries: number;
+  maxEntries: number;
+  active: number;
+  provisional: number;
+  overCap: boolean;
+}
+
+export interface FeedbackLessonsResponse {
+  enabled: boolean;
+  promotionThreshold: number;
+  pendingSignals: number;
+  stores: LessonStore[];
 }
 
 // ── Management Mode (migration endpoint) ──

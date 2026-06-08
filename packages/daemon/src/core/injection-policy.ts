@@ -191,13 +191,12 @@ export function getInjectionPolicy(eventOrProcessKey: string): InjectionPolicy {
  *  - `slim`   — use the hard-2048-byte, top-N-by-score variant on the hourly
  *    notify turn (§6). Only `routine.hourly_check` sets it. Implies `global`.
  *  - `self`   — eligible for the per-agent `policies/agents/<slug>/lessons.md`
- *    block (scope `agent:<slug>`). **Phase 4 consumer** — the slug is not in
- *    the build today (`event.data.agentId` is stamped at the dispatch site in
- *    Phase 4), so `ContextBuilder` deliberately does NOT read this field yet.
- *    It is returned now so the surface→eligibility decision lives in this one
- *    module from the start; Phase 4 only adds the consumer, not a new field.
- *    Asserted per-surface in `injection-policy.test.ts` so it is not silently
- *    rubber-stamped dead schema.
+ *    block (scope `agent:<slug>`). **Phase 4 consumer.** The builder reads it
+ *    next to `<agent_identity>` and gates it on a resolved, path-safe slug
+ *    stamped onto `event.data.agentId` at the dispatch site — `self === true`
+ *    here means "this surface *may* carry self lessons"; an actual injection
+ *    additionally requires the run to be bound to an Agent. `hourly_check`
+ *    keeps `self: false` so the slim notify turn never carries a second block.
  *
  * **Surface keying is grounded in the real event-type strings build() sees,
  * not the design's prose shorthand:**
@@ -215,9 +214,18 @@ export function getInjectionPolicy(eventOrProcessKey: string): InjectionPolicy {
  *    Layers 1–3 are code and build no prompt), so the slim block bites exactly
  *    where the notify decision is made. The `.triage` lite classification is
  *    intentionally excluded.
- *  - Everything else — observers, `fetch_window`, `scheduled.task`,
- *    `today_refresh`, and any unlisted key — gets nothing (the §5 "this
- *    surface gets almost nothing" row, mirroring `buildFetchWindowContext`).
+ *  - `scheduled.task` is **binding-aware** (Phase 4). A *bare* scheduled.task
+ *    (generic close-the-loop task, observer-emitted cron, roadmap refresh — no
+ *    resolved Agent) gets nothing, preserving the §5 last-row opt-out. A
+ *    scheduled.task that *resolves to an Agent* (`agentBound`, a user-defined
+ *    task-output Agent — `report-writer` et al.) is the §5 "Defined-agent
+ *    execution" row: it gets global + self so feedback on the Agent's output
+ *    reaches that Agent (requirement #3). The builder supplies the binding fact
+ *    via `opts.agentBound` so the decision still lives in this one module rather
+ *    than fragmenting a `resolveAgentId() != null` check into `context-builder.ts`.
+ *  - Everything else — observers, `fetch_window`, `today_refresh`, and any
+ *    unlisted key — gets nothing (the §5 "this surface gets almost nothing"
+ *    row, mirroring `buildFetchWindowContext`).
  */
 export interface AgentLessonsInjection {
   /** Inject the global `policies/agent-lessons.md ## Lessons` block. */
@@ -255,9 +263,16 @@ const LESSONS_NONE: AgentLessonsInjection = Object.freeze({
 /**
  * Resolve which `<agent_lessons>` block(s) a surface receives. See
  * {@link AgentLessonsInjection} for the field/keying rationale.
+ *
+ * `opts.agentBound` (Phase 4) tells the resolver whether this firing resolved
+ * to an Agent (`resolveAgentId() != null`, surfaced by the builder as a stamped
+ * `event.data.agentId`). It only changes the binding-aware `scheduled.task`
+ * surface — every other key returns the same shape regardless — so a call with
+ * no opts is identical to the Phase-3 behaviour.
  */
 export function getAgentLessonsInjection(
   eventOrProcessKey: string,
+  opts?: { agentBound?: boolean },
 ): AgentLessonsInjection {
   // DM / dashboard messages — the primary surface lessons calibrate.
   if (eventOrProcessKey.startsWith("message.")) {
@@ -279,6 +294,12 @@ export function getAgentLessonsInjection(
     // Hourly notify turn — slim, hard-capped notification-discipline variant.
     case "routine.hourly_check":
       return LESSONS_HOURLY;
+
+    // Defined-agent task execution (§5 "Defined-agent execution"). A bare
+    // scheduled.task stays NONE (the §5 opt-out); one that resolves to an Agent
+    // gets global + self so a generated Agent sees feedback on its own output.
+    case "scheduled.task":
+      return opts?.agentBound ? LESSONS_DM_REVIEW : LESSONS_NONE;
 
     default:
       return LESSONS_NONE;

@@ -19,8 +19,9 @@
  *     each lessons file's current contents so this stays I/O-free and 100%
  *     coverable.
  *
- * Phase 2 stores `user` + `agent`; `agent:<slug>` lands in Phase 4. The builder
- * already renders any lessons scope, so Phase 4 is wiring, not new logic here.
+ * Phase 2 stored `user` + `agent`; Phase 4 added `agent:<slug>` (the evening-review
+ * pre-step now requests it). This module already rendered any lessons scope
+ * generically, so Phase 4 was wiring (`scopeTypes` + task-flow), not new logic here.
  */
 
 import type Database from "better-sqlite3";
@@ -42,6 +43,7 @@ import { evaluatePromotion } from "./promotion-gate.js";
 import {
   enforceCaps,
   scoreLesson,
+  isLessonStale,
   DEFAULT_RECENCY_HALFLIFE_DAYS,
 } from "./eviction-scorer.js";
 import { groupSignalsBySummary } from "./lesson-merge.js";
@@ -71,9 +73,9 @@ export interface WorksheetScopeGroup {
  * canonical scope. Each scope type is queried independently (oldest-first
  * within the type) so the per-pass row budget applies *per type*. A single
  * global `LIMIT` over `created_at ASC` would let a backlog of unconsumed
- * `agent_slug` rows — written by the behavioral sink but not consolidated
- * until Phase 4 — occupy the oldest-N window and silently starve the
- * `user`/`agent` scopes this pass actually processes. Groups come back in
+ * `agent_slug` rows occupy the oldest-N window and silently starve the
+ * `user`/`agent` scopes — the per-type fetch caps each scope type
+ * independently so a busy agent can't crowd out the others. Groups come back in
  * `scopeTypes` order; rows whose `(scope_type, scope_ref)` can't be parsed
  * (defensive — the route + behavioral sink only write valid pairs) are skipped
  * so a bad row never breaks the pass.
@@ -225,24 +227,6 @@ function candidateKind(
     if (kind) return kind;
   }
   return rows.some((row) => row.valence === "correction") ? "correction" : null;
-}
-
-/**
- * §4 step 7 staleness test: a lesson is prunable for staleness when its `last`
- * reinforcement predates `now − staleDays` and it is not a durable
- * `constraint`. With no horizon configured, nothing is stale. An unparseable
- * date yields a `NaN` comparison, which is `false` — i.e. never prune on a
- * clock/format quirk.
- */
-function isLessonStale(
-  lesson: Lesson,
-  nowIso: string,
-  staleDays: number | undefined,
-): boolean {
-  if (staleDays === undefined || lesson.kind === "constraint") return false;
-  const lastMs = Date.parse(`${lesson.last.slice(0, 10)}T00:00:00Z`);
-  const nowMs = Date.parse(nowIso);
-  return (nowMs - lastMs) / 86_400_000 > staleDays;
 }
 
 function renderLessonsScope(

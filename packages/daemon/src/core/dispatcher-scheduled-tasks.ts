@@ -65,6 +65,7 @@ import {
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -72,7 +73,7 @@ import {
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentConfig } from "../config.js";
-import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
+import { CONTEXT_RELATIVE_PATHS, agentLessonsPath } from "./context-paths.js";
 import { getContextDir } from "../config.js";
 import { ensureTodaySkeleton } from "./today-direct-writer.js";
 import type { TodayWriteLockManager } from "./today-write-lock.js";
@@ -113,9 +114,19 @@ import {
   buildFeedbackWorksheet,
   gatherFeedbackWorksheetScopes,
   lessonCapsForScope,
+  GLOBAL_LESSON_ENTRY_CAP,
+  PER_AGENT_LESSON_ENTRY_CAP,
   type WorksheetScopeInput,
 } from "./feedback/consolidation-prep.js";
-import { scopeStoreFile } from "./feedback/scope-parser.js";
+import {
+  buildRegeneralizationWorksheet,
+  type RegeneralizationScopeInput,
+} from "./feedback/regeneralization-prep.js";
+import {
+  isSafeAgentSlug,
+  scopeStoreFile,
+  type CanonicalScope,
+} from "./feedback/scope-parser.js";
 import { sweepConsumedFeedbackSignals } from "../db/feedback-signals-store.js";
 import { morningRoutineRanToday } from "../bootstrap/schedule-helpers.js";
 import { resolveAgentId } from "./agents/agent-id-resolver.js";
@@ -1486,6 +1497,32 @@ export class ScheduledTaskRunner {
           };
         }
       }
+      // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 "Monthly re-generalization" /
+      // Phase 5 — deterministic pre-step for `routine.monthly_review`. Re-reads
+      // the consolidated lesson stores (global + per-agent) and stamps a
+      // `<feedback_regeneralization>` block so the monthly session collapses
+      // same-theme lessons into higher-level principles. Distinct from the
+      // nightly evening-review pass: it carries no signals and consumes
+      // nothing — it only surfaces existing lessons ranked for collapse.
+      // Failure-isolated inside `prepareRegeneralizationWorksheet`; skipped
+      // when feedback learning is off or no scope has enough lessons. Rides the
+      // same `monthlyReviewEnabled` kill switch as the rest of the monthly
+      // routine (the routine never dispatches while it is off).
+      if (
+        isRoutineEvent(effectiveEvent)
+        && (effectiveEvent as RoutineEvent).routine === "monthly_review"
+      ) {
+        const regeneralizationBlock = this.prepareRegeneralizationWorksheet();
+        if (regeneralizationBlock) {
+          effectiveEvent = {
+            ...effectiveEvent,
+            data: {
+              ...effectiveEvent.data,
+              regeneralizationBlock,
+            },
+          };
+        }
+      }
       // WEEKLY_INTERESTS_REFLECTION_PLAN.md §10.4 — deterministic
       // pre-hook for `routine.weekly_review`. Runs synchronously
       // BEFORE `contextBuilder.build` so the freshly-refreshed
@@ -1713,12 +1750,12 @@ export class ScheduledTaskRunner {
 
   /**
    * FEEDBACK_LEARNING_LOOP_DESIGN.md §4 — the deterministic consolidation
-   * pre-step. Reads unconsumed `feedback_signals` (user + agent scope for
-   * Phase 2; `agent:<slug>` joins in Phase 4), reads each lessons store's
-   * current contents, and composes the `<feedback_worksheet>` block via the
-   * pure `core/feedback/*` modules. Returns the block string, or `null` when
-   * feedback learning is off, nothing pends, or anything throws — so the
-   * caller simply skips stamping and the evening review proceeds unchanged.
+   * pre-step. Reads unconsumed `feedback_signals` (user + agent + `agent:<slug>`
+   * scope as of Phase 4), reads each lessons store's current contents, and
+   * composes the `<feedback_worksheet>` block via the pure `core/feedback/*`
+   * modules. Returns the block string, or `null` when feedback learning is off,
+   * nothing pends, or anything throws — so the caller simply skips stamping and
+   * the evening review proceeds unchanged.
    *
    * The DB read + per-scope file read live here (the FS-/DB-heavy dispatcher
    * is coverage-excluded); the byte-deterministic worksheet composition lives
@@ -1743,7 +1780,11 @@ export class ScheduledTaskRunner {
       }
 
       const groups = gatherFeedbackWorksheetScopes(this.db, {
-        scopeTypes: ["user", "agent"],
+        // Phase 4 adds `agent_slug` — per-agent (`agent:<slug>`) signals captured
+        // by the explicit route + behavioral sink now fold into
+        // `policies/agents/<slug>/lessons.md`. Per-scope-type fetch (not a global
+        // LIMIT) keeps an `agent_slug` backlog from starving user/agent.
+        scopeTypes: ["user", "agent", "agent_slug"],
       });
       if (groups.length === 0) return null;
       const contextDir = getContextDir(this.config, this.db);
@@ -1751,25 +1792,46 @@ export class ScheduledTaskRunner {
         global: this.config.feedbackLessonMaxBytesGlobal,
         perAgent: this.config.feedbackLessonMaxBytesPerAgent,
       };
-      const scopes: WorksheetScopeInput[] = groups.map((group) => {
+      const scopes: WorksheetScopeInput[] = [];
+      for (const group of groups) {
         const caps = lessonCapsForScope(group.scope, byteCaps);
         let existingFileMd: string | null = null;
         if (caps) {
           const rel = scopeStoreFile(group.scope);
           if (rel) {
             const full = join(contextDir, rel);
-            existingFileMd = existsSync(full)
-              ? readFileSync(full, "utf-8")
-              : null;
+            // Per-scope read isolation (FEEDBACK_LEARNING_LOOP_DESIGN.md §11
+            // v1.9 nuance #3, now closed). A *missing* file is the normal
+            // first-write case (existingFileMd stays null → the LLM PUTs a
+            // fresh store); but a *present-but-unreadable* file (EACCES, a
+            // mid-write truncation) must NOT forfeit the whole night's
+            // consolidation. Skip just this scope: its signals stay unconsumed
+            // and retry next Evening Review, the file is left untouched, and the
+            // user/agent scopes that read cleanly still consolidate. Crucially
+            // we do NOT fall back to existingFileMd=null on a read error — that
+            // would make the LLM PUT a fresh file and destroy the existing
+            // lessons.
+            try {
+              existingFileMd = existsSync(full)
+                ? readFileSync(full, "utf-8")
+                : null;
+            } catch (err) {
+              logger.warn(
+                { err, path: rel },
+                "Skipping feedback scope — lessons file present but unreadable; its signals will retry next Evening Review",
+              );
+              continue;
+            }
           }
         }
-        return {
+        scopes.push({
           scope: group.scope,
           signals: group.signals,
           existingFileMd,
           caps,
-        };
-      });
+        });
+      }
+      if (scopes.length === 0) return null;
       const result = buildFeedbackWorksheet(scopes, {
         promotionThreshold: this.config.feedbackPromotionThreshold,
         nowIso: new Date().toISOString(),
@@ -1778,6 +1840,96 @@ export class ScheduledTaskRunner {
       return result?.block ?? null;
     } catch (err) {
       logger.warn({ err }, "Failed to prepare feedback worksheet");
+      return null;
+    }
+  }
+
+  /**
+   * FEEDBACK_LEARNING_LOOP_DESIGN.md §4 "Monthly re-generalization" / Phase 5 —
+   * the deterministic monthly pre-step. Enumerates the consolidated lesson
+   * stores on disk (the global `policies/agent-lessons.md` plus every per-agent
+   * `policies/agents/<slug>/lessons.md`), reads their contents, and composes a
+   * `<feedback_regeneralization>` block via the pure
+   * `buildRegeneralizationWorksheet`. Returns the block, or `null` when feedback
+   * learning is off, no store holds enough lessons to collapse, or anything
+   * throws — so the caller simply skips stamping and the monthly review
+   * proceeds unchanged.
+   *
+   * The FS enumeration lives here (the dispatcher is coverage-excluded); the
+   * byte-deterministic composition lives in `buildRegeneralizationWorksheet`,
+   * which is 100% unit-tested.
+   */
+  private prepareRegeneralizationWorksheet(): string | null {
+    if (this.config.feedbackLearningEnabled === false) return null;
+    try {
+      const contextDir = getContextDir(this.config, this.db);
+      const scopes: RegeneralizationScopeInput[] = [];
+
+      // Per-file read isolation (FEEDBACK_LEARNING_LOOP_DESIGN.md §11 v1.9
+      // nuance #3, now closed): one present-but-unreadable lessons file must
+      // skip only that scope, not abandon the whole monthly collapse. A scope
+      // that fails to read is simply not surfaced for re-generalization this
+      // month; the file is left untouched.
+      const readScopeFile = (rel: string): string | null => {
+        const full = join(contextDir, rel);
+        if (!existsSync(full)) return null;
+        try {
+          return readFileSync(full, "utf-8");
+        } catch (err) {
+          logger.warn(
+            { err, path: rel },
+            "Skipping re-generalization scope — lessons file present but unreadable",
+          );
+          return null;
+        }
+      };
+
+      // Global `agent`-scope store.
+      const globalRel = CONTEXT_RELATIVE_PATHS.agentLessons;
+      const globalMd = readScopeFile(globalRel);
+      if (globalMd !== null) {
+        scopes.push({
+          scope: { kind: "agent" } as CanonicalScope,
+          storeFile: globalRel,
+          existingFileMd: globalMd,
+          caps: {
+            capBytes: this.config.feedbackLessonMaxBytesGlobal,
+            maxEntries: GLOBAL_LESSON_ENTRY_CAP,
+          },
+        });
+      }
+
+      // Per-agent `agent:<slug>` stores under `policies/agents/<slug>/lessons.md`.
+      // The slug is the directory name; the same `isSafeAgentSlug` guard the
+      // inject + consolidate sides apply rejects any unsafe directory name so a
+      // hand-created `..`-style dir never reaches the worksheet.
+      const agentsDir = join(contextDir, "policies", "agents");
+      if (existsSync(agentsDir)) {
+        for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory() || !isSafeAgentSlug(entry.name)) continue;
+          const rel = agentLessonsPath(entry.name);
+          const md = readScopeFile(rel);
+          if (md === null) continue;
+          scopes.push({
+            scope: { kind: "agent_slug", ref: entry.name } as CanonicalScope,
+            storeFile: rel,
+            existingFileMd: md,
+            caps: {
+              capBytes: this.config.feedbackLessonMaxBytesPerAgent,
+              maxEntries: PER_AGENT_LESSON_ENTRY_CAP,
+            },
+          });
+        }
+      }
+
+      if (scopes.length === 0) return null;
+      const result = buildRegeneralizationWorksheet(scopes, {
+        nowIso: new Date().toISOString(),
+        staleDays: this.config.feedbackLessonStaleDays,
+      });
+      return result?.block ?? null;
+    } catch (err) {
+      logger.warn({ err }, "Failed to prepare feedback re-generalization worksheet");
       return null;
     }
   }

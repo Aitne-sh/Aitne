@@ -232,6 +232,19 @@ export class SignalDetector {
    * Record a positive action correlated with a notification. This is the
    * narrow "acted" path: callers must have an actual task/action observation,
    * never silence, before invoking it.
+   *
+   * NOTE — intentional Phase-1.5 seam, no production caller yet (by design).
+   * Firing `acted` deterministically needs the notification's subject
+   * `(source, ref)` in `pendingNotifications` to match a later observation,
+   * but that subject never reaches `trackNotification`: entity-related
+   * proactive DMs are re-authored by an agent turn and delivered via
+   * `POST /api/agent/notify`, which carries only message/platform/priority
+   * (no subject), and the direct `NotificationManager.send()` paths carry
+   * `data:{}`. So this stays correct + silence-safe but dormant — do NOT
+   * wire it from a silence- or substring-heuristic source (that re-opens the
+   * sign-inversion the promotion gate exists to kill). The loop is complete
+   * without it (`explicit` + `replied` drive promotion). See
+   * FEEDBACK_LEARNING_LOOP_DESIGN.md §11 v1.9#2 + v1.11.
    */
   onNotificationActed(params: {
     notificationId: string;

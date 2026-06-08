@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatScope,
+  isSafeAgentSlug,
   parseScope,
   scopeKey,
   scopeNeedsRef,
@@ -93,6 +94,15 @@ describe("scope-parser", () => {
       expect(scopeStoreFile({ kind: "task", ref: "x" })).toBeNull();
       expect(scopeStoreFile({ kind: "integration", ref: "gmail" })).toBeNull();
     });
+
+    it("returns null for a path-unsafe agent_slug ref (defence-in-depth)", () => {
+      // Mirrors the inject-side isSafeAgentSlug guard so a malformed / forged
+      // scope_ref can never compose an unsafe `policies/agents/<ref>/lessons.md`
+      // for the consolidation worksheet to surface as a `store=` PATCH target.
+      expect(scopeStoreFile({ kind: "agent_slug", ref: "../etc" })).toBeNull();
+      expect(scopeStoreFile({ kind: "agent_slug", ref: "a/b" })).toBeNull();
+      expect(scopeStoreFile({ kind: "agent_slug", ref: ".hidden" })).toBeNull();
+    });
   });
 
   describe("scopeSectionSlug", () => {
@@ -113,6 +123,28 @@ describe("scope-parser", () => {
       expect(scopeNeedsRef("integration")).toBe(true);
       expect(scopeNeedsRef("user")).toBe(false);
       expect(scopeNeedsRef("agent")).toBe(false);
+    });
+  });
+
+  describe("isSafeAgentSlug", () => {
+    it("accepts real built-in + user agent slugs", () => {
+      expect(isSafeAgentSlug("report-writer")).toBe(true);
+      expect(isSafeAgentSlug("morning-routine")).toBe(true);
+      expect(isSafeAgentSlug("user-profile-sweep-evening")).toBe(true);
+      expect(isSafeAgentSlug("agent_1")).toBe(true);
+      expect(isSafeAgentSlug("a.b")).toBe(true);
+      expect(isSafeAgentSlug("9lives")).toBe(true);
+    });
+
+    it("rejects path-traversal + separator + empty shapes", () => {
+      expect(isSafeAgentSlug("")).toBe(false);
+      expect(isSafeAgentSlug("..")).toBe(false);
+      expect(isSafeAgentSlug(".hidden")).toBe(false);
+      expect(isSafeAgentSlug("a..b")).toBe(false);
+      expect(isSafeAgentSlug("../etc")).toBe(false);
+      expect(isSafeAgentSlug("a/b")).toBe(false);
+      expect(isSafeAgentSlug("UPPER")).toBe(false);
+      expect(isSafeAgentSlug("has space")).toBe(false);
     });
   });
 });

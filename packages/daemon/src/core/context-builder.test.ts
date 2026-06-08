@@ -2863,6 +2863,33 @@ describe("ContextBuilder", () => {
     });
   });
 
+  // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 / Phase 5 — the monthly re-generalization
+  // worksheet is assembled by the dispatcher pre-step and injected verbatim,
+  // exactly like the evening-review `<feedback_worksheet>`.
+  describe("Phase 5 — feedback re-generalization injection", () => {
+    it("injects <feedback_regeneralization> when event.data.regeneralizationBlock is a string", async () => {
+      const block = `<feedback_regeneralization generated_at="2026-06-07T00:00:00Z" scopes="1">\n  <scope label="agent" store="policies/agent-lessons.md" section="lessons"></scope>\n</feedback_regeneralization>`;
+      const event = createEvent({
+        type: "routine.monthly_review",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+        data: { regeneralizationBlock: block },
+      }) as unknown as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).toContain(block);
+    });
+
+    it("omits the block when event.data.regeneralizationBlock is absent", async () => {
+      const event = createEvent({
+        type: "routine.monthly_review",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      const context = await builder.build(event);
+      expect(context).not.toContain("<feedback_regeneralization");
+    });
+  });
+
   // docs/design/appendices/fetch-window-cost-reduction.md §5 (Phase 2) — slim context for
   // the pre-pass fetcher. The session has no causal dependency on the
   // wide-path always-injected blocks, so the builder short-circuits them.
@@ -3151,13 +3178,168 @@ describe("ContextBuilder", () => {
       expect(context).not.toContain("<agent_lessons>");
     });
 
-    it("skip-with-warns the global block when the rendered body exceeds the cap", async () => {
+    it("skips the block when not even one lesson fits the cap (degrade floor)", async () => {
       writeLessons();
-      // 8-byte cap is below even a single bullet → defensive skip (the hard
-      // inject-time backstop that makes the §6 cap non-bypassable).
+      // 8-byte cap is below even a single bullet → no lesson fits, so the block
+      // is dropped entirely (the hard inject-time backstop; the cap is never
+      // breached). The over-cap is logged via `overflow`.
       const cappedBuilder = builderWith({ feedbackLessonMaxBytesGlobal: 8 });
       const context = await cappedBuilder.build(dmEvent());
       expect(context).not.toContain("<agent_lessons>");
+    });
+
+    it("degrades to the top lessons by score when over cap but some fit", async () => {
+      // Two active lessons; cap sits between a single top bullet and the
+      // combined body → the block degrades to the highest-scored lesson instead
+      // of dropping everything (v1.5 §11.6). BUDGET outscores BLOCKERS for any
+      // wall-clock `now >= the fixture dates`, so the kept lesson is stable.
+      const topBullet = "- Keep the BUDGET_SECTION in the weekly report.";
+      writeFileSync(
+        join(contextDir, "policies", "agent-lessons.md"),
+        [
+          "# Agent Lessons",
+          "",
+          "## Lessons",
+          "- [2026-06-07] Keep the BUDGET_SECTION in the weekly report.",
+          "  <!-- ev=2 kind=correction src=explicit conf=high last=2026-06-07 -->",
+          "- [2026-05-29] Lead with BLOCKERS_FIRST, not status, in standup summaries.",
+          "  <!-- ev=4 kind=do-more src=behavioral conf=high last=2026-06-05 -->",
+        ].join("\n"),
+      );
+      const cap = Buffer.byteLength(topBullet, "utf-8") + 2;
+      const degradedBuilder = builderWith({ feedbackLessonMaxBytesGlobal: cap });
+      const context = await degradedBuilder.build(dmEvent());
+      expect(context).toContain("<agent_lessons>");
+      expect(context).toContain("BUDGET_SECTION");
+      expect(context).not.toContain("BLOCKERS_FIRST");
+    });
+  });
+
+  describe("Phase 4 — <agent_lessons scope=\"self\"> per-agent injection (§5)", () => {
+    const SLUG = "report-writer";
+    const SELF_LESSONS_FILE = [
+      "# Agent Lessons — agent:report-writer",
+      "",
+      "## Lessons",
+      "<!-- scope: agent:report-writer · cap: 4096B · 20 entries -->",
+      "- [2026-06-07] Keep the BUDGET_TABLE in the weekly report; owner flagged it missing twice.",
+      "  <!-- ev=2 kind=correction src=explicit conf=high last=2026-06-07 -->",
+      "- [2026-05-01] PROVISIONAL_SELF not yet promoted.",
+      "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-05-01 --> <!-- provisional -->",
+    ].join("\n");
+
+    function writeSelfLessons(slug = SLUG): void {
+      mkdirSync(join(contextDir, "policies", "agents", slug), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(contextDir, "policies", "agents", slug, "lessons.md"),
+        SELF_LESSONS_FILE,
+      );
+    }
+
+    /** A defined-agent task execution bound to `slug` (the dispatch site stamps
+     *  `event.data.agentId`); scheduled.task is global+self only when bound.
+     *  Pass `null` for the unbound (bare scheduled.task) case. */
+    function boundTaskEvent(agentId: string | null = SLUG) {
+      return createEvent({
+        type: "scheduled.task",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+        data: agentId === null ? {} : { agentId },
+      });
+    }
+
+    function builderWith(overrides: Record<string, unknown>): ContextBuilder {
+      return new ContextBuilder(
+        {
+          dataDir: tmpDir,
+          externalObsidianVaultPath: null,
+          agentDisplayName: "ai bot",
+          ...overrides,
+        } as unknown as AgentConfig,
+        db,
+        createServiceRegistry(),
+      );
+    }
+
+    it("injects the per-agent self block for an agent-bound execution", async () => {
+      writeSelfLessons();
+      const context = await builder.build(boundTaskEvent());
+      expect(context).toContain('<agent_lessons scope="self">');
+      expect(context).toContain("Keep the BUDGET_TABLE in the weekly report");
+      expect(context).toContain("THIS agent's own past"); // self preamble
+      // Provisional self lessons + trailers + dates are dropped, same as global.
+      expect(context).not.toContain("PROVISIONAL_SELF");
+      expect(context).not.toContain("<!-- ev=");
+    });
+
+    it("does NOT inject the self block when the run is not bound to a slug", async () => {
+      writeSelfLessons();
+      // A bare scheduled.task (no resolved Agent) is the §5 opt-out.
+      const context = await builder.build(boundTaskEvent(null));
+      expect(context).not.toContain('scope="self"');
+    });
+
+    it("does NOT inject the self block when agentId is an unsafe path segment", async () => {
+      writeSelfLessons();
+      // Defence-in-depth: a traversal-shaped agentId never builds a vault path.
+      const context = await builder.build(boundTaskEvent("../../etc"));
+      expect(context).not.toContain('scope="self"');
+    });
+
+    it("does NOT inject the self block on hourly_check (self:false) even when bound", async () => {
+      writeSelfLessons("hourly-check");
+      const event = {
+        ...createEvent({
+          type: "routine.hourly_check",
+          source: "cron",
+          priority: EventPriority.NORMAL,
+          data: { agentId: "hourly-check" },
+        }),
+        routine: "hourly_check",
+      } as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).not.toContain('scope="self"');
+    });
+
+    it("omits the self block when the per-agent file is absent", async () => {
+      // No writeSelfLessons() — the file does not exist for this slug.
+      const context = await builder.build(boundTaskEvent());
+      expect(context).not.toContain('scope="self"');
+    });
+
+    it("is gated off when feedbackLearningEnabled is false", async () => {
+      writeSelfLessons();
+      const disabled = builderWith({ feedbackLearningEnabled: false });
+      const context = await disabled.build(boundTaskEvent());
+      expect(context).not.toContain('scope="self"');
+    });
+
+    it("self block coexists with the global block on a self+global surface", async () => {
+      writeSelfLessons();
+      writeFileSync(
+        join(contextDir, "policies", "agent-lessons.md"),
+        [
+          "# Agent Lessons",
+          "",
+          "## Lessons",
+          "- [2026-06-07] GLOBAL_DISCIPLINE — keep notifications terse.",
+          "  <!-- ev=3 kind=do-less src=behavioral conf=high last=2026-06-07 -->",
+        ].join("\n"),
+      );
+      const context = await builder.build(boundTaskEvent());
+      // Both the plain global block and the scope="self" block are present.
+      expect(context).toContain('<agent_lessons scope="self">');
+      expect(context).toContain("GLOBAL_DISCIPLINE");
+      expect(context).toContain("Keep the BUDGET_TABLE in the weekly report");
+    });
+
+    it("skips the self block when not even one lesson fits the per-agent cap", async () => {
+      writeSelfLessons();
+      const capped = builderWith({ feedbackLessonMaxBytesPerAgent: 8 });
+      const context = await capped.build(boundTaskEvent());
+      expect(context).not.toContain('scope="self"');
     });
   });
 });

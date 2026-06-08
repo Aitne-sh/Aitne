@@ -24,15 +24,15 @@ const TWO_ACTIVE = file(
 );
 
 describe("renderAgentLessonsBlock — global path", () => {
-  it("returns null block (no skip) when the file is null", () => {
+  it("returns null block (no overflow) when the file is null", () => {
     expect(renderAgentLessonsBlock(null, { capBytes: 8192, slim: false, nowIso: NOW }))
-      .toEqual({ block: null, skipped: null });
+      .toEqual({ block: null, overflow: null });
   });
 
   it("returns null when there is no ## Lessons section", () => {
     const md = "# Agent Lessons\n\n## Notes\n- nothing here\n";
     expect(renderAgentLessonsBlock(md, { capBytes: 8192, slim: false, nowIso: NOW }))
-      .toEqual({ block: null, skipped: null });
+      .toEqual({ block: null, overflow: null });
   });
 
   it("returns null when the section has no active (non-provisional) lessons", () => {
@@ -43,7 +43,7 @@ describe("renderAgentLessonsBlock — global path", () => {
       ].join("\n"),
     );
     expect(renderAgentLessonsBlock(md, { capBytes: 8192, slim: false, nowIso: NOW }))
-      .toEqual({ block: null, skipped: null });
+      .toEqual({ block: null, overflow: null });
   });
 
   it("renders active lessons, wrapped + preamble, dropping provisional + trailers + dates", () => {
@@ -55,12 +55,12 @@ describe("renderAgentLessonsBlock — global path", () => {
         "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-05-01 --> <!-- provisional -->",
       ].join("\n"),
     );
-    const { block, skipped } = renderAgentLessonsBlock(md, {
+    const { block, overflow } = renderAgentLessonsBlock(md, {
       capBytes: 8192,
       slim: false,
       nowIso: NOW,
     });
-    expect(skipped).toBeNull();
+    expect(overflow).toBeNull();
     expect(block).not.toBeNull();
     expect(block).toMatch(/^<agent_lessons>\n/);
     expect(block).toMatch(/\n<\/agent_lessons>$/);
@@ -72,17 +72,45 @@ describe("renderAgentLessonsBlock — global path", () => {
     expect(block).not.toContain("[2026-");
   });
 
-  it("skip-with-warn when the rendered body exceeds capBytes", () => {
-    const { block, skipped } = renderAgentLessonsBlock(TWO_ACTIVE, {
+  it("degrades to the top-N lessons by score when over cap but some fit", () => {
+    // Cap between a single top bullet and the combined body → keep the
+    // highest-scored lesson, drop the rest (graceful degradation, not
+    // all-or-nothing). BUDGET (correction, reinforced today) outscores BLOCKERS
+    // for every `now >= the fixture dates`, so the kept lesson is deterministic.
+    const topBullet = "- Keep the BUDGET_SECTION in the weekly report.";
+    const cap = Buffer.byteLength(topBullet, "utf-8") + 2;
+    const { block, overflow } = renderAgentLessonsBlock(TWO_ACTIVE, {
+      capBytes: cap,
+      slim: false,
+      nowIso: NOW,
+    });
+    expect(block).not.toBeNull();
+    expect(block).toContain("BUDGET_SECTION");
+    expect(block).not.toContain("BLOCKERS_FIRST");
+    expect(overflow).toEqual({ bytes: expect.any(Number), cap, dropped: 1 });
+    expect(overflow?.bytes).toBeGreaterThan(cap);
+    // The cap stays a hard guarantee on the body even while degrading.
+    const bodyBytes = Buffer.byteLength(
+      (block as string)
+        .split("\n")
+        .filter((line) => line.startsWith("- "))
+        .join("\n"),
+      "utf-8",
+    );
+    expect(bodyBytes).toBeLessThanOrEqual(cap);
+  });
+
+  it("drops all lessons (null block) + flags overflow when not even one fits", () => {
+    const { block, overflow } = renderAgentLessonsBlock(TWO_ACTIVE, {
       capBytes: 10,
       slim: false,
       nowIso: NOW,
     });
     expect(block).toBeNull();
-    expect(skipped).not.toBeNull();
-    expect(skipped?.reason).toBe("over_cap");
-    expect(skipped?.cap).toBe(10);
-    expect(skipped?.bytes).toBeGreaterThan(10);
+    expect(overflow).not.toBeNull();
+    expect(overflow?.cap).toBe(10);
+    expect(overflow?.bytes).toBeGreaterThan(10);
+    expect(overflow?.dropped).toBe(2); // both active lessons dropped
   });
 });
 
@@ -103,12 +131,12 @@ describe("renderAgentLessonsBlock — slim path", () => {
 
   it("packs by score and keeps the whole block under the hard byte cap", () => {
     const cap = 300;
-    const { block, skipped } = renderAgentLessonsBlock(SCORED, {
+    const { block, overflow } = renderAgentLessonsBlock(SCORED, {
       capBytes: cap,
       slim: true,
       nowIso: NOW,
     });
-    expect(skipped).toBeNull();
+    expect(overflow).toBeNull();
     expect(block).not.toBeNull();
     expect(Buffer.byteLength(block as string, "utf-8")).toBeLessThanOrEqual(cap);
     // Highest-scored survives; the lower-signal tail is dropped (score order,
@@ -131,15 +159,16 @@ describe("renderAgentLessonsBlock — slim path", () => {
     expect(block).not.toContain("LOW_SIGNAL");
   });
 
-  it("returns null when even the single highest-scored bullet exceeds the cap", () => {
+  it("returns null (no overflow) when even the single highest-scored bullet exceeds the cap", () => {
     // Cap below the fixed preamble/wrapper overhead → nothing can be kept.
-    const { block, skipped } = renderAgentLessonsBlock(SCORED, {
+    // The slim path never reports overflow — tail-dropping is routine here.
+    const { block, overflow } = renderAgentLessonsBlock(SCORED, {
       capBytes: 10,
       slim: true,
       nowIso: NOW,
     });
     expect(block).toBeNull();
-    expect(skipped).toBeNull();
+    expect(overflow).toBeNull();
   });
 
   it("fits every active lesson when the budget is generous", () => {
@@ -156,5 +185,83 @@ describe("renderAgentLessonsBlock — slim path", () => {
   it("exposes sane defaults", () => {
     expect(AGENT_LESSONS_SLIM_CAP_BYTES).toBe(2048);
     expect(AGENT_LESSONS_SLIM_MAX_ENTRIES).toBeGreaterThan(0);
+  });
+});
+
+describe("renderAgentLessonsBlock — self path (Phase 4, agent:<slug>)", () => {
+  it("wraps as <agent_lessons scope=\"self\"> with the self preamble", () => {
+    const { block, overflow } = renderAgentLessonsBlock(TWO_ACTIVE, {
+      capBytes: 4096,
+      slim: false,
+      selfScope: true,
+      nowIso: NOW,
+    });
+    expect(overflow).toBeNull();
+    expect(block).not.toBeNull();
+    expect(block).toMatch(/^<agent_lessons scope="self">\n/);
+    expect(block).toMatch(/\n<\/agent_lessons>$/);
+    // Self-facing preamble distinguishes it from the global block's text.
+    expect(block).toContain("THIS agent's own past");
+    expect(block).toContain("- Keep the BUDGET_SECTION in the weekly report.");
+    expect(block).not.toContain("<!-- ev=");
+    expect(block).not.toContain("[2026-");
+  });
+
+  it("drops provisional lessons just like the global path", () => {
+    const md = file(
+      [
+        "- [2026-06-07] Keep the BUDGET_SECTION in the weekly report.",
+        "  <!-- ev=2 kind=correction src=explicit conf=high last=2026-06-07 -->",
+        "- [2026-05-01] PROVISIONAL_DRAFT not yet promoted.",
+        "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-05-01 --> <!-- provisional -->",
+      ].join("\n"),
+    );
+    const { block } = renderAgentLessonsBlock(md, {
+      capBytes: 4096,
+      slim: false,
+      selfScope: true,
+      nowIso: NOW,
+    });
+    expect(block).toContain("BUDGET_SECTION");
+    expect(block).not.toContain("PROVISIONAL_DRAFT");
+  });
+
+  it("degrades to the top lesson by score + flags overflow when over the per-agent cap", () => {
+    const topBullet = "- Keep the BUDGET_SECTION in the weekly report.";
+    const cap = Buffer.byteLength(topBullet, "utf-8") + 2;
+    const { block, overflow } = renderAgentLessonsBlock(TWO_ACTIVE, {
+      capBytes: cap,
+      slim: false,
+      selfScope: true,
+      nowIso: NOW,
+    });
+    expect(block).toMatch(/^<agent_lessons scope="self">\n/);
+    expect(block).toContain("BUDGET_SECTION");
+    expect(block).not.toContain("BLOCKERS_FIRST");
+    expect(overflow).toEqual({ bytes: expect.any(Number), cap, dropped: 1 });
+  });
+
+  it("returns null when the file is null", () => {
+    expect(
+      renderAgentLessonsBlock(null, {
+        capBytes: 4096,
+        slim: false,
+        selfScope: true,
+        nowIso: NOW,
+      }),
+    ).toEqual({ block: null, overflow: null });
+  });
+
+  it("slim wins over selfScope (slim is global-only by construction)", () => {
+    const { block } = renderAgentLessonsBlock(TWO_ACTIVE, {
+      capBytes: AGENT_LESSONS_SLIM_CAP_BYTES,
+      slim: true,
+      selfScope: true,
+      nowIso: NOW,
+    });
+    // The plain <agent_lessons> wrapper + slim preamble, never scope="self".
+    expect(block).toMatch(/^<agent_lessons>\n/);
+    expect(block).toContain("Weigh these");
+    expect(block).not.toContain('scope="self"');
   });
 });

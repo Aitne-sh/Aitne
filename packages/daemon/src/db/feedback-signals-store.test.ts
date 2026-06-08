@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { applySchema } from "./schema.js";
 import {
   consumeFeedbackSignals,
+  countPendingFeedbackSignals,
   findRecentFeedbackSignal,
   getPendingFeedbackSignals,
   hasFeedbackSignalForAction,
@@ -170,6 +171,28 @@ describe("feedback-signals-store", () => {
     expect(consumeFeedbackSignals(db, [])).toEqual({ consumed: 0, notFound: [] });
     // No lessonRef arg + every id missing → existingIds.size === 0 branch.
     expect(consumeFeedbackSignals(db, [4242])).toEqual({ consumed: 0, notFound: [4242] });
+  });
+
+  it("counts pending signals overall and narrowed by scope type", () => {
+    const db = makeDb();
+    expect(countPendingFeedbackSignals(db)).toBe(0);
+    const agentId = recordFeedbackSignal(db, {
+      source: "behavioral",
+      scopeType: "agent",
+      summary: "agent scope row",
+    });
+    recordFeedbackSignal(db, {
+      source: "explicit",
+      scopeType: "user",
+      summary: "user scope row",
+    });
+    expect(countPendingFeedbackSignals(db)).toBe(2);
+    expect(countPendingFeedbackSignals(db, { scopeType: "agent" })).toBe(1);
+    expect(countPendingFeedbackSignals(db, { scopeType: "agent_slug" })).toBe(0);
+    // Consumed rows drop out of the pending count.
+    consumeFeedbackSignals(db, [agentId]);
+    expect(countPendingFeedbackSignals(db)).toBe(1);
+    expect(countPendingFeedbackSignals(db, { scopeType: "agent" })).toBe(0);
   });
 
   it("consumes without a lessonRef, leaving lesson_ref null", () => {

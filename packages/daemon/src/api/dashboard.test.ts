@@ -96,6 +96,12 @@ function makeConfig(dataDir: string): AgentConfig {
     gmailPollIntervalSeconds: 600,
     autonomousDailyCostCapUsd: null,
     autonomousMonthlyCostCapUsd: null,
+    feedbackLearningEnabled: true,
+    feedbackPromotionThreshold: 2,
+    feedbackLessonMaxBytesGlobal: 8192,
+    feedbackLessonMaxBytesPerAgent: 4096,
+    feedbackLessonStaleDays: 60,
+    feedbackSignalRetentionDays: 180,
     primaryLanguage: "en",
     vaultMode: "plain",
   } as unknown as AgentConfig;
@@ -334,6 +340,14 @@ describe("Dashboard API", () => {
       // settings UI can let the user revisit the wizard choices.
       expect(data.primaryLanguage).toBe("en");
       expect(data.vaultMode).toBe("plain");
+      // FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5 — feedback knobs are
+      // surfaced so the Lessons settings page can read + tune them.
+      expect(data.feedbackLearningEnabled).toBe(true);
+      expect(data.feedbackPromotionThreshold).toBe(2);
+      expect(data.feedbackLessonMaxBytesGlobal).toBe(8192);
+      expect(data.feedbackLessonMaxBytesPerAgent).toBe(4096);
+      expect(data.feedbackLessonStaleDays).toBe(60);
+      expect(data.feedbackSignalRetentionDays).toBe(180);
       // Should NOT contain API keys
       expect(data.slackBotToken).toBeUndefined();
       expect(data.apiToken).toBeUndefined();
@@ -366,6 +380,8 @@ describe("Dashboard API", () => {
       expect(data.opencodeBaseUrl).toBe("http://127.0.0.1:4096");
       expect(data.opencodeServerUsername).toBe("opencode");
       expect(data.autonomousDailyCostCapUsd).toBeNull();
+      expect(data.feedbackPromotionThreshold).toBe(2);
+      expect(data.feedbackLessonMaxBytesGlobal).toBe(8192);
       // Bootstrap key
       expect(data.apiPort).toBe(8321);
       // allowedToolsOverride null → allowedTools []

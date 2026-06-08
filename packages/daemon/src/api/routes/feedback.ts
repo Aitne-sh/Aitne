@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { redactSensitiveString } from "@aitne/shared";
 
 import type { ApiDependencies } from "../server.js";
@@ -6,6 +8,7 @@ import { readJsonBody } from "../json-body.js";
 import { getAgent } from "../../db/agents-store.js";
 import {
   consumeFeedbackSignals,
+  countPendingFeedbackSignals,
   findRecentFeedbackSignal,
   recordFeedbackSignal,
   type FeedbackActionKind,
@@ -13,6 +16,17 @@ import {
   type FeedbackSignalSource,
   type FeedbackSignalValence,
 } from "../../db/feedback-signals-store.js";
+import { getContextDir } from "../../config.js";
+import {
+  CONTEXT_RELATIVE_PATHS,
+  agentLessonsPath,
+} from "../../core/context-paths.js";
+import {
+  GLOBAL_LESSON_ENTRY_CAP,
+  PER_AGENT_LESSON_ENTRY_CAP,
+} from "../../core/feedback/consolidation-prep.js";
+import { summarizeLessonStore } from "../../core/feedback/lesson-store-overview.js";
+import { isSafeAgentSlug } from "../../core/feedback/scope-parser.js";
 import { createLogger } from "../../logging.js";
 
 const logger = createLogger("feedback-api");
@@ -93,11 +107,132 @@ function describeType(value: unknown): string {
   return typeof value;
 }
 
+interface LessonStoreEntry {
+  /** Canonical scope label (`agent` / `agent:<slug>`). */
+  scope: string;
+  /** Writable-vault relative path (the dashboard editor PUTs here). */
+  path: string;
+  /** False when the store has not been created by a consolidation pass yet. */
+  exists: boolean;
+  /** ISO mtime, or null when the file does not exist. */
+  lastModified: string | null;
+  bytes: number;
+  capBytes: number;
+  entries: number;
+  maxEntries: number;
+  active: number;
+  provisional: number;
+  overCap: boolean;
+}
+
+function buildLessonStoreEntry(
+  contextDir: string,
+  scope: string,
+  relPath: string,
+  caps: { capBytes: number; maxEntries: number },
+): LessonStoreEntry {
+  const full = join(contextDir, relPath);
+  if (!existsSync(full)) {
+    return {
+      scope,
+      path: relPath,
+      exists: false,
+      lastModified: null,
+      bytes: 0,
+      capBytes: caps.capBytes,
+      entries: 0,
+      maxEntries: caps.maxEntries,
+      active: 0,
+      provisional: 0,
+      overCap: false,
+    };
+  }
+  const summary = summarizeLessonStore(readFileSync(full, "utf-8"), caps);
+  return {
+    scope,
+    path: relPath,
+    exists: true,
+    lastModified: statSync(full).mtime.toISOString(),
+    ...summary,
+  };
+}
+
 export function createFeedbackRoutes(deps: ApiDependencies): Hono {
   const app = new Hono();
-  const { db } = deps;
+  const { db, config } = deps;
+
+  /**
+   * GET /feedback/lessons — read-only overview of the consolidated lesson
+   * stores for the dashboard "view/edit lessons and tune caps/threshold"
+   * surface (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5). Lists the global
+   * `agent` store (always, so its cap shows even before first write) plus every
+   * per-agent `agent:<slug>` store that exists on disk, each with cap-utilisation
+   * metrics. The file bodies are read/edited through the existing
+   * `GET/PUT /api/context/<path>` chokepoint — this endpoint only enumerates +
+   * summarises. `RiskTier.Autonomous` (read-only, no secrets — lesson prose was
+   * redaction-scrubbed at capture).
+   */
+  app.get("/feedback/lessons", (c) => {
+    const contextDir = getContextDir(config, db);
+    const globalCaps = {
+      capBytes: config.feedbackLessonMaxBytesGlobal,
+      maxEntries: GLOBAL_LESSON_ENTRY_CAP,
+    };
+    const perAgentCaps = {
+      capBytes: config.feedbackLessonMaxBytesPerAgent,
+      maxEntries: PER_AGENT_LESSON_ENTRY_CAP,
+    };
+
+    const stores: LessonStoreEntry[] = [
+      buildLessonStoreEntry(
+        contextDir,
+        "agent",
+        CONTEXT_RELATIVE_PATHS.agentLessons,
+        globalCaps,
+      ),
+    ];
+
+    const agentsDir = join(contextDir, "policies", "agents");
+    if (existsSync(agentsDir)) {
+      const slugs = readdirSync(agentsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && isSafeAgentSlug(entry.name))
+        .map((entry) => entry.name)
+        .sort();
+      for (const slug of slugs) {
+        const rel = agentLessonsPath(slug);
+        if (!existsSync(join(contextDir, rel))) continue;
+        stores.push(
+          buildLessonStoreEntry(
+            contextDir,
+            `agent:${slug}`,
+            rel,
+            perAgentCaps,
+          ),
+        );
+      }
+    }
+
+    return c.json({
+      enabled: config.feedbackLearningEnabled !== false,
+      promotionThreshold: config.feedbackPromotionThreshold,
+      pendingSignals: countPendingFeedbackSignals(db),
+      stores,
+    });
+  });
 
   app.post("/feedback", async (c) => {
+    // Master kill-switch (FEEDBACK_LEARNING_LOOP_DESIGN.md §7). When the loop is
+    // disabled the daemon-side behavioral sink already short-circuits
+    // (`SignalDetector`); mirror that here so explicit / self_critique captures
+    // from the always-included DM + review task-flows are dropped too. Otherwise
+    // unconsumed rows would accumulate unbounded — the nightly consolidation that
+    // would consume them is gated off, and the retention sweep only deletes
+    // already-consumed rows. Returns 200 so the calling turn neither errors nor
+    // retries. `config` is optional in some test harnesses → default-on.
+    if (config?.feedbackLearningEnabled === false) {
+      return c.json({ disabled: true });
+    }
+
     const parsedBody = await readJsonBody(c);
     if (!parsedBody.ok) return parsedBody.response;
     const body = parsedBody.body;

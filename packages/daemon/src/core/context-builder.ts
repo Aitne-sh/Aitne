@@ -22,7 +22,7 @@ import type { AgentConfig } from "../config.js";
 import { getContextDir } from "../config.js";
 import { getDegradedMode } from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
-import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
+import { agentLessonsPath, CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 import {
   getAgentLessonsInjection,
   getInjectionPolicy,
@@ -32,6 +32,7 @@ import {
   AGENT_LESSONS_SLIM_CAP_BYTES,
   renderAgentLessonsBlock,
 } from "./feedback/lesson-injection.js";
+import { isSafeAgentSlug } from "./feedback/scope-parser.js";
 import { POLICY_FILE_MAX_BYTES } from "./policy-files.js";
 import { renderOutputLanguagePolicyBlock } from "./output-language-policy.js";
 import {
@@ -206,22 +207,43 @@ export class ContextBuilder implements IContextBuilder {
     // of truth), read here next to `resolveAlwaysInjectionPolicy`. Gated on the
     // master `feedbackLearningEnabled` flag so the whole loop turns off cleanly
     // (same `=== false` posture the capture sink + consolidation pre-step use).
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §5 Phase 4 — the per-agent self slug,
+    // stamped onto `event.data.agentId` at the dispatch site (`resolveAgentId`).
+    // Validated to a single safe path segment before it is interpolated into a
+    // vault path (defence-in-depth — the carrier is `Record<string, unknown>`).
+    // `null` for reactive DMs + any firing that resolves to no Agent.
+    const boundAgentSlug =
+      typeof event.data.agentId === "string"
+      && isSafeAgentSlug(event.data.agentId)
+        ? event.data.agentId
+        : null;
     const lessonsInjection: AgentLessonsInjection | null =
       this.config.feedbackLearningEnabled === false
         ? null
-        : getAgentLessonsInjection(event.type);
-    const [userMd, rulesMd, todayMd, agentLessonsMd] = await Promise.all([
-      injectionPolicy.injectUserProfile
-        ? this.readFile(CONTEXT_RELATIVE_PATHS.user.profile)
-        : Promise.resolve(null),
-      injectionPolicy.injectManagementRules
-        ? this.readFile(CONTEXT_RELATIVE_PATHS.rules.management)
-        : Promise.resolve(null),
-      this.readFile(CONTEXT_RELATIVE_PATHS.today),
-      lessonsInjection?.global
-        ? this.readFile(CONTEXT_RELATIVE_PATHS.agentLessons)
-        : Promise.resolve(null),
-    ]);
+        : getAgentLessonsInjection(event.type, {
+            agentBound: boundAgentSlug !== null,
+          });
+    // Self block is injected only when the surface opts in (`self`) AND the run
+    // is bound to a resolved Agent slug (§5: "read … when the run is bound to a
+    // slug"). hourly_check keeps `self:false`, so its slim turn never doubles up.
+    const wantSelfLessons =
+      lessonsInjection?.self === true && boundAgentSlug !== null;
+    const [userMd, rulesMd, todayMd, agentLessonsMd, selfLessonsMd] =
+      await Promise.all([
+        injectionPolicy.injectUserProfile
+          ? this.readFile(CONTEXT_RELATIVE_PATHS.user.profile)
+          : Promise.resolve(null),
+        injectionPolicy.injectManagementRules
+          ? this.readFile(CONTEXT_RELATIVE_PATHS.rules.management)
+          : Promise.resolve(null),
+        this.readFile(CONTEXT_RELATIVE_PATHS.today),
+        lessonsInjection?.global
+          ? this.readFile(CONTEXT_RELATIVE_PATHS.agentLessons)
+          : Promise.resolve(null),
+        wantSelfLessons
+          ? this.readFile(agentLessonsPath(boundAgentSlug as string))
+          : Promise.resolve(null),
+      ]);
     // Capture the read time as the authoritative "as of when did this
     // conversation see today.md" anchor. Read-time (not mtime) is what the
     // freshness contract needs: mtime advances every quiet append from
@@ -262,11 +284,14 @@ export class ContextBuilder implements IContextBuilder {
     // FEEDBACK_LEARNING_LOOP_DESIGN.md §5/§6 — the scope-`agent` lessons block.
     // Emitted next to `<management_rules>` (its sibling policy block) for the
     // surfaces `getAgentLessonsInjection` opts in. The renderer drops
-    // provisional lessons (§4 step 4) and enforces the inject-time cap: the
-    // global path skip-with-warns over `feedbackLessonMaxBytesGlobal` (the hard
-    // backstop that makes the §6 cap non-bypassable — v1.3 §11.5); the hourly
-    // slim path packs top-N-by-score under the hard 2 KB budget. `self`-scope
-    // (`agent:<slug>`) injection is Phase 4 — the slug is not in the build yet.
+    // provisional lessons (§4 step 4) and enforces the inject-time cap. The
+    // global path keeps the body under `feedbackLessonMaxBytesGlobal`: when the
+    // file is over cap it degrades to the top-N lessons by score and sets
+    // `overflow` (v1.5 §11.6) rather than dropping all of them — the cap is
+    // still a hard guarantee, and the degrade is an operability signal we warn
+    // on (consolidation should have pre-capped the file). The hourly slim path
+    // packs top-N-by-score under the hard 2 KB budget. The self block (Phase 4)
+    // rides the same renderer + degrade discipline for the per-agent file.
     if (lessonsInjection?.global && agentLessonsMd) {
       const capBytes = lessonsInjection.slim
         ? AGENT_LESSONS_SLIM_CAP_BYTES
@@ -278,14 +303,54 @@ export class ContextBuilder implements IContextBuilder {
       });
       if (lessonsResult.block) {
         sections.push(lessonsResult.block);
-      } else if (lessonsResult.skipped) {
+      }
+      // `overflow` is set only on the global path when the file was over cap.
+      // `block` present ⇒ degraded to the top lessons by score; `block` null ⇒
+      // not even one lesson fit, so nothing was injected. Warn either way.
+      if (lessonsResult.overflow) {
         logger.warn(
           {
             path: CONTEXT_RELATIVE_PATHS.agentLessons,
-            size: lessonsResult.skipped.bytes,
-            cap: lessonsResult.skipped.cap,
+            size: lessonsResult.overflow.bytes,
+            cap: lessonsResult.overflow.cap,
+            dropped: lessonsResult.overflow.dropped,
           },
-          "policies/agent-lessons.md exceeds inject cap — skipped from <agent_lessons>",
+          lessonsResult.block
+            ? "policies/agent-lessons.md over inject cap — kept top lessons by score, dropped the rest"
+            : "policies/agent-lessons.md over inject cap — no lesson fits, skipped <agent_lessons>",
+        );
+      }
+    }
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §5 Phase 4 — the per-agent
+    // `<agent_lessons scope="self">` block. Injected only when the surface opts
+    // into `self` AND the run resolved to an Agent (the dispatch site stamped
+    // `event.data.agentId`); `wantSelfLessons` already encodes both. Capped at
+    // `feedbackLessonMaxBytesPerAgent` with the same skip/degrade-and-warn
+    // discipline as the global block. This is the seam that delivers
+    // requirement #3: feedback on a generated Agent's output reaches that Agent.
+    if (wantSelfLessons && selfLessonsMd) {
+      const selfPath = agentLessonsPath(boundAgentSlug as string);
+      const selfResult = renderAgentLessonsBlock(selfLessonsMd, {
+        capBytes: this.config.feedbackLessonMaxBytesPerAgent ?? 4096,
+        slim: false,
+        selfScope: true,
+        nowIso: new Date().toISOString(),
+      });
+      if (selfResult.block) {
+        sections.push(selfResult.block);
+      }
+      if (selfResult.overflow) {
+        logger.warn(
+          {
+            path: selfPath,
+            agentId: boundAgentSlug,
+            size: selfResult.overflow.bytes,
+            cap: selfResult.overflow.cap,
+            dropped: selfResult.overflow.dropped,
+          },
+          selfResult.block
+            ? "per-agent lessons over inject cap — kept top lessons by score, dropped the rest"
+            : "per-agent lessons over inject cap — no lesson fits, skipped <agent_lessons scope=self>",
         );
       }
     }
@@ -420,6 +485,17 @@ export class ContextBuilder implements IContextBuilder {
     // dispatcher owns the block's wire format; absent when no signals pend.
     if (typeof event.data?.feedbackWorksheetBlock === "string") {
       sections.push(event.data.feedbackWorksheetBlock);
+    }
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 "Monthly re-generalization" / Phase 5 —
+    // the monthly-review session receives a `<feedback_regeneralization>` block
+    // assembled by the dispatcher's deterministic pre-step
+    // (`core/feedback/regeneralization-prep.ts`). It carries each lesson store's
+    // existing lessons ranked by eviction score (lowest-first) plus staleness /
+    // over-cap flags, so the LLM can collapse same-theme lessons into a single
+    // higher-level principle. Injected verbatim — the dispatcher owns the wire
+    // format; absent when no scope holds enough lessons to collapse.
+    if (typeof event.data?.regeneralizationBlock === "string") {
+      sections.push(event.data.regeneralizationBlock);
     }
     // morning-routine-optimization.md Phase 5 — daemon-prepared blocks
     // injected verbatim by `MorningRoutinePipelineOrchestrator` before

@@ -170,6 +170,62 @@ describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
     const hourly = getAgentLessonsInjection("routine.hourly_check");
     expect(hourly.slim && hourly.global).toBe(true);
   });
+
+  it("agent-bound scheduled.task gets global + self (§5 Defined-agent execution)", () => {
+    // A bare scheduled.task (no resolved Agent) opts out; one that resolves to
+    // a user-defined Agent gets both blocks so feedback reaches that Agent.
+    expect(tuple(getAgentLessonsInjection("scheduled.task"))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect(
+      tuple(getAgentLessonsInjection("scheduled.task", { agentBound: false })),
+    ).toEqual([false, false, false]);
+    expect(
+      tuple(getAgentLessonsInjection("scheduled.task", { agentBound: true })),
+    ).toEqual([true, true, false]);
+  });
+
+  it("agentBound never resurrects a §5 'gets nothing' non-task surface", () => {
+    // The binding flag is scoped to scheduled.task; observers / fetch_window /
+    // today_refresh stay NONE even if (hypothetically) bound to an Agent.
+    for (const key of [
+      "routine.today_refresh",
+      "routine.fetch_window",
+      "github.pull_request.opened",
+      "unknown.event",
+    ]) {
+      expect(
+        tuple(getAgentLessonsInjection(key, { agentBound: true })),
+      ).toEqual([false, false, false]);
+    }
+  });
+
+  it("agent-bound maintenance routines stay NONE (§5 / v1.6 §11.1 cost guarantee)", () => {
+    // user_profile_sweep / skill_curation DO resolve to a built-in Agent, so
+    // the builder supplies { agentBound: true } — unlike today_refresh /
+    // observers above, which never resolve to an Agent. The guarantee is that
+    // binding alone does NOT inject lessons: only `scheduled.task` is rescued.
+    // These routines decide no notifications, so keying them would burn bytes
+    // against the §0 cost constraint. This pins the exact "resolves to an Agent
+    // but is not scheduled.task" path the binding-aware resolver must reject.
+    for (const key of ["routine.user_profile_sweep", "routine.skill_curation"]) {
+      expect(tuple(getAgentLessonsInjection(key))).toEqual([false, false, false]);
+      expect(
+        tuple(getAgentLessonsInjection(key, { agentBound: true })),
+      ).toEqual([false, false, false]);
+    }
+  });
+
+  it("agentBound does not change matched surfaces (hourly stays slim, no self)", () => {
+    expect(
+      tuple(getAgentLessonsInjection("routine.hourly_check", { agentBound: true })),
+    ).toEqual([true, false, true]);
+    expect(
+      tuple(getAgentLessonsInjection("message.dm", { agentBound: true })),
+    ).toEqual([true, true, false]);
+  });
 });
 
 /**

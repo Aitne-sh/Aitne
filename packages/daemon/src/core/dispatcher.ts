@@ -978,10 +978,25 @@ export class EventDispatcher {
       isScheduledEvent(event) && event.scheduleId !== undefined
         ? event.scheduleId
         : null;
-    this.agentExecutionTracker.begin(event.correlationId, resolution, {
-      scheduleRowId,
-      trigger: this.resolveExecutionTrigger(event, taskContext),
-    });
+    // `begin` opens the rollup row AND returns the resolved Agent slug (or null
+    // for a firing that resolves to no Agent — reactive DMs, legacy tasks).
+    const agentId = this.agentExecutionTracker.begin(
+      event.correlationId,
+      resolution,
+      {
+        scheduleRowId,
+        trigger: this.resolveExecutionTrigger(event, taskContext),
+      },
+    );
+    // FEEDBACK_LEARNING_LOOP_DESIGN.md §5 Phase 4 — thread the resolved slug onto
+    // the event so `ContextBuilder` can inject this Agent's own
+    // `policies/agents/<slug>/lessons.md` (scope `agent:<slug>`). This runs in
+    // `dispatchSafe` before `dispatch(event)`, so the stamp is visible to the
+    // builder downstream; the morning routine propagates it to Stage A via the
+    // `{...parent.data}` spread in `composeStageAEvent`. No-op for unbound runs.
+    if (agentId !== null) {
+      event.data.agentId = agentId;
+    }
   }
 
   /** Classify an execution's trigger for the rollup row (§5.2). */

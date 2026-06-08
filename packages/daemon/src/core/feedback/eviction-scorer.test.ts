@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_EVICTION_WEIGHTS,
   enforceCaps,
+  isLessonStale,
   kindImportance,
   omittedMarker,
   recencyDecay,
@@ -34,6 +35,33 @@ describe("eviction-scorer", () => {
       expect(kindImportance("do-more")).toBe(2);
       expect(kindImportance("do-less")).toBe(2);
       expect(kindImportance("preference")).toBe(1);
+    });
+  });
+
+  describe("isLessonStale", () => {
+    it("never stale when no horizon is configured", () => {
+      expect(isLessonStale(lesson({ last: "2020-01-01" }), NOW, undefined)).toBe(
+        false,
+      );
+    });
+    it("never stale for a durable constraint, even past the horizon", () => {
+      expect(
+        isLessonStale(
+          lesson({ kind: "constraint", last: "2020-01-01" }),
+          NOW,
+          60,
+        ),
+      ).toBe(false);
+    });
+    it("flags a non-constraint lesson reinforced past the horizon", () => {
+      // 2026-01-01 → 2026-06-07 is > 60 days.
+      expect(isLessonStale(lesson({ last: "2026-01-01" }), NOW, 60)).toBe(true);
+    });
+    it("keeps a lesson reinforced within the horizon", () => {
+      expect(isLessonStale(lesson({ last: "2026-06-01" }), NOW, 60)).toBe(false);
+    });
+    it("is not stale on an unparseable last date (NaN comparison)", () => {
+      expect(isLessonStale(lesson({ last: "not-a-date" }), NOW, 60)).toBe(false);
     });
   });
 

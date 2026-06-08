@@ -18,7 +18,7 @@
  */
 
 import type { FeedbackScopeType } from "../../db/feedback-signals-store.js";
-import { CONTEXT_RELATIVE_PATHS } from "../context-paths.js";
+import { agentLessonsPath, CONTEXT_RELATIVE_PATHS } from "../context-paths.js";
 
 /** Parsed, normalised scope. `agent_slug` collapses to `kind: "agent_slug"`. */
 export type CanonicalScope =
@@ -102,6 +102,16 @@ export function scopeKey(scope: CanonicalScope): string {
  *   - `agent`      → `policies/agent-lessons.md`
  *   - `agent:slug` → `policies/agents/<slug>/lessons.md`
  *   - everything else (v2 channel/task/integration) → `null` (not yet stored)
+ *
+ * The `agent:<slug>` ref is path-validated with {@link isSafeAgentSlug} before
+ * it is composed into a vault path — the same guard the inject side applies to
+ * `event.data.agentId` (`context-builder.ts`), so both consumers of a slug
+ * reject the same unsafe shapes (`agentLessonsPath` itself trusts a
+ * pre-validated slug). A path-unsafe ref yields `null` ("surface but do not
+ * persist"), so the consolidation worksheet never emits an unsafe `store=` for
+ * the LLM to PATCH. In practice the `/api/feedback` route + the behavioral
+ * sink only ever write a real `agents.id` ref, so this is pure defence-in-depth
+ * against a malformed / forged row.
  */
 export function scopeStoreFile(scope: CanonicalScope): string | null {
   switch (scope.kind) {
@@ -110,10 +120,29 @@ export function scopeStoreFile(scope: CanonicalScope): string | null {
     case "agent":
       return CONTEXT_RELATIVE_PATHS.agentLessons;
     case "agent_slug":
-      return `policies/agents/${scope.ref}/lessons.md`;
+      return isSafeAgentSlug(scope.ref) ? agentLessonsPath(scope.ref) : null;
     default:
       return null;
   }
+}
+
+/**
+ * Path-safety guard for an `agent:<slug>` ref before it is interpolated into a
+ * vault file path (`agentLessonsPath`). The Phase-4 inject path reads
+ * `event.data.agentId` — a `Record<string, unknown>` value set by the dispatch
+ * site from `resolveAgentId()` — and joins it under `policies/agents/`. Although
+ * `resolveAgentId` only ever returns DB-verified / built-in-registry slugs,
+ * defence-in-depth requires the consuming side validate the shape rather than
+ * trust the carrier: the slug must be a single safe segment (kebab-case-ish,
+ * the same `[a-z0-9._-]` alphabet `deriveSlug` and the context-write whitelist
+ * use), start alphanumeric (so `.`/`..` are rejected outright), and contain no
+ * `..` traversal or `/` separator. A failing value yields no self block rather
+ * than a path escape.
+ */
+const SAFE_AGENT_SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+export function isSafeAgentSlug(value: string): boolean {
+  return SAFE_AGENT_SLUG_RE.test(value) && !value.includes("..");
 }
 
 /**

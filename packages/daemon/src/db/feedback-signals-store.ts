@@ -178,6 +178,33 @@ export function getPendingFeedbackSignals(
     .all(...values) as FeedbackSignalRow[];
 }
 
+/**
+ * Count unconsumed signals, optionally narrowed to one scope type. Drives the
+ * `GET /api/feedback/lessons` "N signals awaiting tonight's consolidation"
+ * health figure (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5) without loading
+ * the rows. Uses the same `consumed_at IS NULL` partial index as
+ * {@link getPendingFeedbackSignals}.
+ */
+export function countPendingFeedbackSignals(
+  db: Database.Database,
+  params: { scopeType?: FeedbackScopeType } = {},
+): number {
+  const where = ["consumed_at IS NULL"];
+  const values: unknown[] = [];
+  if (params.scopeType !== undefined) {
+    where.push("scope_type = ?");
+    values.push(params.scopeType);
+  }
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM feedback_signals
+       WHERE ${where.join(" AND ")}`,
+    )
+    .get(...values) as { n: number };
+  return row.n;
+}
+
 export function consumeFeedbackSignals(
   db: Database.Database,
   ids: number[],

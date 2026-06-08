@@ -103,6 +103,16 @@ const PUBLIC_CONFIG_RUNTIME_KEYS = [
   "delegatedProbeIntervalMinutes",
   "autonomousDailyCostCapUsd",
   "autonomousMonthlyCostCapUsd",
+  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5) —
+  // surfaced so the Lessons settings page can read + tune the master toggle,
+  // promotion threshold, per-scope byte caps, staleness horizon, and signal
+  // retention via the deferred-save EditableField flow.
+  "feedbackLearningEnabled",
+  "feedbackPromotionThreshold",
+  "feedbackLessonMaxBytesGlobal",
+  "feedbackLessonMaxBytesPerAgent",
+  "feedbackLessonStaleDays",
+  "feedbackSignalRetentionDays",
   "primaryLanguage",
   "vaultMode",
 ] as const;

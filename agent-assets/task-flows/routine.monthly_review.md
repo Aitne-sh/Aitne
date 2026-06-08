@@ -265,6 +265,57 @@ continue.
    rollup collapses duplicate keys last-write-wins, so your newer append
    automatically supersedes the earlier one within 24 hours.
 
+### Phase 3c: Re-generalize feedback lessons (internal)
+
+If a `<feedback_regeneralization>` block is present in your context, collapse
+accumulated specific lessons into a smaller set of higher-level principles. This
+is the monthly counterpart to the Evening Review's signal-folding: it processes
+**no new signals and consumes nothing** — it only re-reads the already-consolidated
+lesson stores the block lists and rewrites them. The daemon already did the
+mechanical work: every `<scope>` carries its `store=` path and caps, and every
+`<lesson>` carries a `rank` (rank 1 = lowest eviction score = drop-first), its
+`ev`/`kind`/`last`, and a `stale="true"` flag when it is past the staleness
+horizon. Your job is the **semantic** part — cluster lessons that share a theme
+and phrase the generalization. If the block is absent, skip this phase entirely.
+Like Phase 3b it is internal bookkeeping and emits no user-facing output.
+
+For **each** `<scope … >` in the block, writing back to the `store=` path it
+declares (`policies/agent-lessons.md` for the global `agent` scope;
+`policies/agents/<slug>/lessons.md` for a per-agent `agent:<slug>` scope):
+
+11. GET the scope's `store=` file. Identify clusters of two or more lessons that
+    express the same underlying preference at different surfaces — e.g.
+    "shorter mail summary", "shorter standup", "shorter report" all express
+    "default to terse output". For each cluster:
+    - Replace its members with **one** higher-level bullet that captures the
+      shared principle:
+      `- [<today>] <generalized directive> <!-- ev=<sum of the cluster's ev, min 1> kind=<the cluster's strongest kind> src=<strongest src> conf=<high if any member was high, else medium> last=<today> -->`
+      (summing `ev` keeps the merged lesson harder to evict — never re-derive it lower).
+    - Leave a lesson that belongs to no cluster untouched, byte-for-byte.
+    - **Never collapse, merge, or promote a `<!-- provisional -->` lesson.** The
+      worksheet block lists only active (promoted) lessons; the file also holds
+      provisional lessons awaiting corroboration, which the nightly evening pass
+      alone may promote. Preserve every provisional lesson in the file exactly as
+      it is — re-generalization is not a promotion path.
+    - **Do not** collapse across a contradiction: if two lessons give opposing
+      guidance, keep them separate and prefer the one with the more recent `last=`;
+      drop the stale opposite only when a `correction` superseded it.
+    - Drop any lesson the block marks `stale="true"` unless it joins a cluster —
+      a `kind=constraint` lesson is durable and is never collapsed away or
+      stale-pruned.
+    Re-generalization should make each store **smaller**, not larger; if a scope
+    has no genuine clusters, leave it unchanged.
+12. After your edits, if the section still exceeds the scope's `cap_bytes` or
+    `max_entries`, remove existing lessons starting from `rank="1"` upward until
+    it fits, then append exactly one marker line:
+    `- [...N lower-signal lessons omitted — full history in feedback_signals]`.
+    Never evict a `kind=constraint` lesson.
+    Write the scope's section back with `PATCH <store= path> section=lessons
+    mode=replace`, applying the same GET-fresh / write-the-keep-list discipline
+    Phase 3a uses. A write failure on one scope must not block the others or any
+    later phase. There is **no consume call** in this phase — re-generalization
+    rewrites lessons in place and touches no `feedback_signals` rows.
+
 ### Phase 4: Notify (user-facing only)
 10. The notification is for the USER, not a report of Phases 1–3. Never
    mention journal/monthly/YYYY-MM.md, journal/agent.md, "Monthly Review complete",

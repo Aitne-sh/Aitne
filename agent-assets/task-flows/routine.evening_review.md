@@ -238,10 +238,17 @@ worksheet's `decision` and `rank` verbatim. If the block is absent, skip this
 step entirely. Like Steps 1–3 it is internal bookkeeping and emits no
 user-facing output.
 
-4a. **Agent-scope lessons** (`<scope label="agent" … mode="lessons">` →
-    `policies/agent-lessons.md`). GET the file first. If it 404s, PUT a fresh
+4a. **Lesson-store scopes** — process **every** `<scope … mode="lessons">` in the
+    worksheet, writing each to the `store=` path it declares: the global `agent`
+    scope (`store="policies/agent-lessons.md"`) and any per-agent
+    `agent:<slug>` scope (`store="policies/agents/<slug>/lessons.md"` — feedback
+    on one named agent's own output, injected only into that agent's runs). The
+    per-candidate rules below are identical for each; only the target file and
+    its H1 change. GET the scope's `store=` file first. If it 404s, PUT a fresh
     file: frontmatter `type: rule` / `owner: agent` / `updated: <agent_day_date>`,
-    an H1 `# Agent Lessons`, then a `## Lessons` section. Then, per candidate:
+    an H1 (`# Agent Lessons` for the global `agent` scope; `# Agent Lessons —
+    <label>` for an `agent:<slug>` scope, e.g. `# Agent Lessons — agent:report-writer`),
+    then a `## Lessons` section. Then, per candidate in that scope:
     - `decision="promote"` → find an existing `## Lessons` bullet with the same
       intent. If found, bump its `ev=` by `weighted_ev` (rounded to a whole
       number), refresh `last=` to today, raise `conf`, and tighten the wording.
@@ -264,14 +271,16 @@ user-facing output.
       marks `stale="true"` (its `last=` is past the staleness horizon and it is
       not a `constraint`) unless a fresh candidate re-reinforces it this pass —
       a `constraint` is durable and is never stale-pruned.
-    Write the section back with `PATCH section=lessons mode=replace`, applying the
-    Step-2 section-body-rebuild discipline (GET fresh, write the keep-list down
-    first, byte-for-byte for unchanged bullets).
+    Write the scope's section back with `PATCH <store= path> section=lessons
+    mode=replace`, applying the Step-2 section-body-rebuild discipline (GET fresh,
+    write the keep-list down first, byte-for-byte for unchanged bullets). Repeat
+    for each `mode="lessons"` scope; a write failure on one scope must not block
+    the others (omit only the failed scope's ids from the consume call, 4d).
 
-4b. **Cap enforcement.** After your edits, if the `## Lessons` section exceeds
-    the scope's `cap_bytes` or `max_entries`, remove existing lessons starting
-    from `rank="1"` (the worksheet's lowest-scored) upward until it fits, then
-    append exactly one marker line:
+4b. **Cap enforcement.** After your edits to each scope, if its `## Lessons`
+    section exceeds that scope's `cap_bytes` or `max_entries`, remove existing
+    lessons starting from `rank="1"` (the worksheet's lowest-scored) upward until
+    it fits, then append exactly one marker line:
     `- [...N lower-signal lessons omitted — full history in feedback_signals]`.
     Never evict a `kind=constraint` lesson — drop the next-lowest instead.
 

@@ -92,6 +92,31 @@ export function scoreLesson(
   return evTerm + recencyTerm + kindTerm - penalty;
 }
 
+/**
+ * §4 step 7 staleness test — a lesson is prunable for staleness when its `last`
+ * reinforcement predates `now − staleDays` and it is not a durable
+ * `constraint`. Shared single source of truth for both worksheet builders
+ * (the nightly `consolidation-prep` and the monthly `regeneralization-prep`)
+ * so the `stale="…"` flag they stamp can never drift apart.
+ *
+ * Semantics (kept byte-stable across the two prior local copies):
+ *   - no horizon configured (`staleDays === undefined`) ⇒ never stale;
+ *   - `kind=constraint` ⇒ never stale (durable);
+ *   - an unparseable `last` (or `nowIso`) yields a `NaN` comparison, which is
+ *     `false` — i.e. never prune on a clock/format quirk. Reuses {@link dateToMs}
+ *     for the same `YYYY-MM-DD → epoch ms` parse the recency decay uses.
+ */
+export function isLessonStale(
+  lesson: Lesson,
+  nowIso: string,
+  staleDays: number | undefined,
+): boolean {
+  if (staleDays === undefined || lesson.kind === "constraint") return false;
+  const lastMs = dateToMs(lesson.last);
+  const nowMs = Date.parse(nowIso);
+  return (nowMs - lastMs) / 86_400_000 > staleDays;
+}
+
 export interface CapConfig {
   maxBytes: number;
   maxEntries: number;

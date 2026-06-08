@@ -264,6 +264,18 @@ export function customRoutinePath(slug: string): string {
 }
 
 /**
+ * Relative path to an Agent's per-agent (`agent:<slug>`) feedback lessons store
+ * (FEEDBACK_LEARNING_LOOP_DESIGN.md §3.3, Phase 4). Sits next to the agent
+ * definition at `policies/agents/<slug>/agent.md`; lazy-created on the first
+ * nightly consolidation write and injected only into that agent's own
+ * executions. The slug is assumed pre-validated (`isSafeAgentSlug`); this
+ * helper does not re-validate — it only composes the canonical path.
+ */
+export function agentLessonsPath(slug: string): string {
+  return `policies/agents/${slug}/lessons.md`;
+}
+
+/**
  * Relative path to a dossier file for a given flow slug.
  */
 export function dossierPath(flowSlug: string): string {

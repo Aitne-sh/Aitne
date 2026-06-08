@@ -477,6 +477,12 @@ describe("classifyRisk — feedback learning loop", () => {
       RiskTier.Autonomous,
     );
   });
+
+  it("the lesson-store overview read is Autonomous", () => {
+    expect(classifyRisk("GET", "/api/feedback/lessons")).toBe(
+      RiskTier.Autonomous,
+    );
+  });
 });
 
 describe("classifyRisk — RiskTier.Notify removed (DELEGATED-MODE-V2 §5.6)", () => {

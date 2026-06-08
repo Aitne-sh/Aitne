@@ -16,6 +16,7 @@ import {
   Repeat,
   ClipboardList,
   Sparkles,
+  GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import type { EditableConfigKey } from "@aitne/shared";
@@ -59,6 +60,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Self-learning",
     icon: Sparkles,
     description: "Knowledge-map skill curation (Preview)",
+  },
+  {
+    href: "/settings/lessons",
+    label: "Lessons",
+    icon: GraduationCap,
+    description: "Feedback learning — view/edit lessons, tune caps (Preview)",
   },
   {
     href: "/settings/management",
@@ -143,6 +150,17 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "autonomousDailyCostCapUsd",
     "autonomousMonthlyCostCapUsd",
     // advisorEnabled / advisorModel are managed by BackendsAndPlansSection (own save flow, not deferred)
+  ],
+  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5) — the
+  // six tuning knobs use the deferred-save EditableField flow, so the sidebar
+  // dirty dot needs them mapped here.
+  "/settings/lessons": [
+    "feedbackLearningEnabled",
+    "feedbackPromotionThreshold",
+    "feedbackLessonMaxBytesGlobal",
+    "feedbackLessonMaxBytesPerAgent",
+    "feedbackLessonStaleDays",
+    "feedbackSignalRetentionDays",
   ],
   "/settings/advanced": [
     "disallowedTools", "allowedToolsOverride",
