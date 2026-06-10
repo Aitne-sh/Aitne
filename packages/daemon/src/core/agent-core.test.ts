@@ -7,6 +7,8 @@ import {
   LiveProbeUnsupportedError,
   TaskModeUnsupportedError,
   classifyAbortReason,
+  extractBackendSpend,
+  type BackendQuotaSpend,
 } from "./agent-core.js";
 
 describe("DelegatedProxyTimeoutError", () => {
@@ -151,5 +153,56 @@ describe("BackendDecisiveFailure", () => {
     expect(err.kind).toBe("auth");
     expect(err.cause).toBe(cause);
     expect(err.message).toBe("codex decisive failure: auth");
+  });
+});
+
+describe("extractBackendSpend (PREPASS_COST_REDUCTION_PLAN.md N1)", () => {
+  const spend: BackendQuotaSpend = {
+    usage: {
+      inputTokens: 1_000,
+      outputTokens: 100,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    },
+    costUsd: 0.2,
+    modelId: "claude-haiku-4-5",
+    numTurns: 3,
+    durationMs: 5_000,
+    costSource: "sdk_partial",
+  };
+
+  it("returns the spend from a BackendQuotaError", () => {
+    const err = new BackendQuotaError("claude", "max_budget_usd", null, "x", spend);
+    expect(extractBackendSpend(err)).toBe(spend);
+  });
+
+  it("returns null for a spend-less BackendQuotaError", () => {
+    const err = new BackendQuotaError("claude", "rate_limited", null, "x");
+    expect(extractBackendSpend(err)).toBeNull();
+  });
+
+  it("returns the spend from a BackendDecisiveFailure", () => {
+    const err = new BackendDecisiveFailure("gemini", "timeout", new Error("t"), spend);
+    expect(extractBackendSpend(err)).toBe(spend);
+  });
+
+  it("prefers the nested quota error's spend on the kind=quota wrap", () => {
+    const inner = new BackendQuotaError("codex", "max_budget_usd", null, "x", spend);
+    const wrapped = new BackendDecisiveFailure("codex", "quota", inner);
+    expect(extractBackendSpend(wrapped)).toBe(spend);
+  });
+
+  it("falls back to the outer spend when the nested quota error carries none", () => {
+    const inner = new BackendQuotaError("codex", "rate_limited", null, "x");
+    const wrapped = new BackendDecisiveFailure("codex", "quota", inner, spend);
+    expect(extractBackendSpend(wrapped)).toBe(spend);
+  });
+
+  it("returns null for spend-less decisive failures and non-backend errors", () => {
+    expect(
+      extractBackendSpend(new BackendDecisiveFailure("claude", "auth", new Error("a"))),
+    ).toBeNull();
+    expect(extractBackendSpend(new Error("plain"))).toBeNull();
+    expect(extractBackendSpend(null)).toBeNull();
   });
 });

@@ -174,18 +174,18 @@ export function TipsCardBody({
   onCycle?: () => void;
 }) {
   return (
-    <Card className="border-amber-200/70 bg-amber-50/40 dark:border-amber-900/60 dark:bg-amber-950/20">
+    <Card className="border-dashed bg-card/60 p-4">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Lightbulb className="h-4 w-4" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-400">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               Did you know?
             </span>
             {tip?.badge && (
-              <span className="rounded-full bg-amber-200/70 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-primary">
                 {tip.badge}
               </span>
             )}

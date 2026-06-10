@@ -136,7 +136,9 @@ describe("eviction-scorer", () => {
         opts,
       );
       expect(plan.keep.map((l) => l.text)).toEqual(["a"]);
-      expect(plan.evicted.map((l) => l.text).sort()).toEqual(["b", "c"]);
+      // Pin the documented `evicted` order: lowest-scored FIRST (c before b),
+      // not the descending-sorted overflow slice order.
+      expect(plan.evicted.map((l) => l.text)).toEqual(["c", "b"]);
       expect(plan.omittedMarker).toBe(omittedMarker(2));
     });
 

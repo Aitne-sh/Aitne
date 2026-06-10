@@ -689,8 +689,42 @@ export class BackendDecisiveFailure extends Error {
       | "policy_denied"
       | "other_non_retryable",
     public readonly cause: unknown,
+    /**
+     * PREPASS_COST_REDUCTION_PLAN.md N1 — best-effort spend recovered
+     * from the failed run when the SDK/CLI surfaced usage before the
+     * terminal error (auth rejection mid-run, timeout, transport
+     * failure). Same shape as `BackendQuotaError.spend` so the
+     * dispatcher's post-hoc audit writer can record what the provider
+     * actually billed for a turn that produced no `AgentResult`.
+     * `null` when the failure happened before any usage was observed.
+     */
+    public readonly spend: BackendQuotaSpend | null = null,
   ) {
     super(`${backendId} decisive failure: ${kind}`);
     this.name = "BackendDecisiveFailure";
   }
+}
+
+/**
+ * Recover the spend payload from a backend failover signal, regardless
+ * of which of the two error classes carries it. Handles the nested
+ * `BackendDecisiveFailure(kind="quota", cause=BackendQuotaError)` wrap
+ * the router produces, preferring the inner quota error's spend when
+ * both layers carry one. Returns `null` for non-backend errors.
+ *
+ * PREPASS_COST_REDUCTION_PLAN.md N1 — shared by the dispatcher's
+ * post-hoc audit writer and the pre-pass fan-out runner so both
+ * failure paths record the same figure for the same error.
+ */
+export function extractBackendSpend(error: unknown): BackendQuotaSpend | null {
+  if (error instanceof BackendQuotaError) {
+    return error.spend;
+  }
+  if (error instanceof BackendDecisiveFailure) {
+    if (error.cause instanceof BackendQuotaError && error.cause.spend) {
+      return error.cause.spend;
+    }
+    return error.spend;
+  }
+  return null;
 }

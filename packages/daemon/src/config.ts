@@ -174,6 +174,9 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     proactiveForwardChannelTimelineEnabled: parseBooleanOrDefault(env("PROACTIVE_FORWARD_CHANNEL_TIMELINE_ENABLED"), true),
     proactiveForwardForceFreshSession: parseBooleanOrDefault(env("PROACTIVE_FORWARD_FORCE_FRESH_SESSION"), false),
     feedbackLearningEnabled: parseBooleanOrDefault(env("FEEDBACK_LEARNING_ENABLED"), true),
+    // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §6 — Phase 3 actuation gate.
+    // Default false = shadow mode (recommend + verdict only, no actuation).
+    selfTuningEnabled: parseBooleanOrDefault(env("SELF_TUNING_ENABLED"), false),
     feedbackPromotionThreshold: parseNumberOrDefault(env("FEEDBACK_PROMOTION_THRESHOLD"), 2),
     feedbackLessonMaxBytesGlobal: parseNumberOrDefault(env("FEEDBACK_LESSON_MAX_BYTES_GLOBAL"), 8192),
     feedbackLessonMaxBytesPerAgent: parseNumberOrDefault(env("FEEDBACK_LESSON_MAX_BYTES_PER_AGENT"), 4096),

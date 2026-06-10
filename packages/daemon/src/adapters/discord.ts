@@ -10,7 +10,12 @@ import {
 } from "discord.js";
 import { EventPriority, createEvent } from "@aitne/shared";
 import type { AttachmentRef, Event } from "@aitne/shared";
-import type { MessageAdapter, OnMessageCallback, OutboundAttachmentRef } from "./types.js";
+import type {
+  AdapterConnectionState,
+  MessageAdapter,
+  OnMessageCallback,
+  OutboundAttachmentRef,
+} from "./types.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
 import { splitOutboundText } from "./outbound-text.js";
@@ -106,6 +111,14 @@ export class DiscordAdapter implements MessageAdapter {
     | null;
   private botUserId: string | null = null;
   private botInfo: DiscordBotInfo | null = null;
+  /**
+   * Set when the gateway emits `Events.Invalidated` — discord.js stops
+   * reconnecting entirely on an invalidated session, so without external
+   * intervention the adapter is permanently deaf. Cleared on `start()`.
+   */
+  private sessionInvalidated = false;
+  /** True once `client.login()` has resolved; cleared in `stop()`. */
+  private startCompleted = false;
   private pairingChallenge: DiscordPairingChallenge | null = null;
   private readonly attachmentStore: AttachmentStore | null;
 
@@ -215,6 +228,7 @@ export class DiscordAdapter implements MessageAdapter {
     // Remove all listeners first to prevent duplicates on re-start
     this.client.removeAllListeners(Events.Error);
     this.client.removeAllListeners(Events.Warn);
+    this.client.removeAllListeners(Events.Invalidated);
     rawClient.removeAllListeners("raw");
 
     this.client.on(Events.Error, (err) => {
@@ -224,6 +238,15 @@ export class DiscordAdapter implements MessageAdapter {
     this.client.on(Events.Warn, (info) => {
       logger.warn({ info }, "Discord client warn");
     });
+
+    // Session invalidation is terminal for discord.js — the client stops
+    // reconnecting. Record it so getConnectionState reports "down" and the
+    // adapter watchdog performs a full stop→start cycle.
+    this.client.on(Events.Invalidated, () => {
+      this.sessionInvalidated = true;
+      logger.error("Discord gateway session invalidated — client will not reconnect on its own");
+    });
+    this.sessionInvalidated = false;
 
     // We deliberately do NOT subscribe to Events.MessageCreate.
     //
@@ -260,6 +283,7 @@ export class DiscordAdapter implements MessageAdapter {
         avatarUrl: this.client.user.avatarURL() ?? null,
       };
     }
+    this.startCompleted = true;
     logger.info(
       { botUser: this.client.user?.tag },
       "Discord adapter connected",
@@ -267,8 +291,22 @@ export class DiscordAdapter implements MessageAdapter {
   }
 
   async stop(): Promise<void> {
+    this.startCompleted = false;
     this.client.destroy();
     logger.info("Discord adapter disconnected");
+  }
+
+  /**
+   * Live gateway liveness for the adapter watchdog. discord.js resumes /
+   * reconnects on its own for transient closes, so a momentary not-ready
+   * state is normal — the watchdog only acts on consecutive "down"
+   * observations. An invalidated session is reported "down" immediately
+   * because the client never recovers from it without a fresh login.
+   */
+  getConnectionState(): AdapterConnectionState {
+    if (!this.startCompleted) return "unknown";
+    if (this.sessionInvalidated) return "down";
+    return this.client.isReady() ? "ok" : "down";
   }
 
   async resolveUserChannel(): Promise<string | null> {

@@ -26,9 +26,16 @@ import { reconcileRecurringSchedules } from "../db/recurring-schedules.js";
 import { recordAgentFiringBlocked } from "./agents/firing-blocked.js";
 import type { AgentEnabledCache } from "./agents/loader.js";
 import {
+  getDueCatchupRoutines,
+  getRecoverableStalledMorningWake,
   getStalledMorningRoutineWake,
+  MORNING_MISSED_FIRE_GRACE_MINUTES,
+  morningRoutineRanToday,
   readMorningRoutineStallThresholdMinutes,
+  shouldCatchUpHourlyCheck,
+  shouldQueueMissedMorningFire,
 } from "../bootstrap/schedule-helpers.js";
+import { WakeDetector } from "./wake-detector.js";
 import { readRuntimeState, writeRuntimeState } from "../db/runtime-state.js";
 import { recordProactiveForwardDeliveries } from "./channel-timeline.js";
 import { isInQuietHoursAt, nextQuietHoursEndMs } from "./quiet-hours.js";
@@ -40,6 +47,51 @@ import { isInQuietHoursAt, nextQuietHoursEndMs } from "./quiet-hours.js";
  * agent-day even if the cron tick that owns it runs every minute.
  */
 const MORNING_ROUTINE_STALL_ALERT_KEY = "morning_routine.stall_alert_day";
+
+/**
+ * Cadence of the morning self-heal tick. The tick is cheap (three indexed
+ * SQLite reads in the common healthy case), and 10 minutes bounds the
+ * worst-case detection latency for a swallowed 04:00 cron fire at
+ * `MORNING_MISSED_FIRE_GRACE_MINUTES + 10`. Deliberately a dedicated
+ * interval rather than a rider on the hourly-check cron: the watchdog
+ * historically rode that cron and went silently dead the moment an
+ * operator set `hourlyCheckEnabled=false` — exactly the configuration
+ * where the morning routine has no other safety net.
+ */
+export const MORNING_SELF_HEAL_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * Per-agent-day cap on hung-run recovery flips. Each flip re-runs the
+ * morning pipeline (pre-pass + Stage A — real backend spend), so a
+ * deterministically-wedging environment must not be retried every
+ * stall-threshold window all day. Past the cap the self-heal degrades to
+ * alert-only; the owner DM and a daemon restart are the escape hatches.
+ */
+export const MAX_SELFHEAL_REQUEUES_PER_AGENT_DAY = 2;
+
+/**
+ * Missed-fire suppression window after process start. Boot catchup owns
+ * stale-today.md recovery at startup and runs the morning routine
+ * INLINE — no wake row exists for `shouldQueueMissedMorningFire` to
+ * dedup against, and its attempt audit row only appears once the
+ * fetch-window pre-pass hands over to Stage A. A pathologically slow
+ * pre-pass must not read as a missed fire, so the layer stays quiet
+ * until the boot path has long since either produced attempt rows or
+ * died (in which case the next tick after the window picks it up).
+ */
+export const MISSED_FIRE_BOOT_SUPPRESSION_MS = 30 * 60_000;
+
+/**
+ * Routine name → built-in Agent slug, for the per-agent enabled gate on the
+ * wake catch-up path. Must match the slugs the corresponding cron callbacks
+ * pass to `isAgentEnabledForFiring` so a disabled Agent is suppressed
+ * identically whether its trigger arrives via cron or via wake catch-up.
+ */
+const WAKE_CATCHUP_AGENT_SLUGS: Record<string, string> = {
+  evening_review: "evening-review",
+  weekly_review: "weekly-review",
+  monthly_review: "monthly-review",
+};
 
 const logger = createLogger("scheduler");
 
@@ -257,6 +309,20 @@ export class AgentScheduler {
    */
   private onAuthProbe: (() => Promise<unknown>) | null = null;
   /**
+   * SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4 Phase 3 — auto-revert monitor.
+   * Piggybacks the hourly cron tick (P2 — zero new scheduled sessions),
+   * fired AHEAD of the per-agent enabled gate and the autonomous setup
+   * gate so rollback safety survives the owner disabling the hourly-check
+   * Agent or a setup-gated daemon; the callback owns its own 1/day
+   * throttle, per-entry isolation, and DM emission. Remaining coupling:
+   * with `hourlyCheckEnabled=false` this cron is never registered and
+   * applied changes stay unverified until the check is re-enabled —
+   * acceptable because R1/R3 govern the (now-idle) hourly pipeline
+   * itself; an applied R5 (`feedbackLessonMaxBytesGlobal`) change would
+   * sit unverified, with `!revert tuning` as the manual escape hatch.
+   */
+  private onSelfTuningRevertMonitor: (() => Promise<unknown>) | null = null;
+  /**
    * B-004 Phase 2a — nightly context-index reconciler callback (§4.1).
    * Fires at 03:45 local (dayBoundaryHour - 15 min) via an internal cron
    * job, BEFORE the morning routine so the index is fresh when the
@@ -334,6 +400,27 @@ export class AgentScheduler {
     resolve: () => void;
     timer: ReturnType<typeof setTimeout>;
   } | null = null;
+  /**
+   * Detects machine sleep / forward clock jumps and replays the cron
+   * triggers the sleep swallowed (node-cron never fires missed ticks).
+   * See {@link runWakeCatchup}.
+   */
+  private readonly wakeDetector = new WakeDetector({
+    onWake: (gapMs) => this.runWakeCatchup(gapMs),
+  });
+  /**
+   * Independent self-heal tick for the morning routine (alert + recover +
+   * missed-fire re-queue). See {@link runMorningSelfHeal}. Kept off the
+   * hourly-check cron on purpose — that cron is operator-disableable.
+   */
+  private morningSelfHealTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Wall-clock instant this scheduler instance was constructed (one
+   * instance per daemon process). Drives the missed-fire boot
+   * suppression; tests override via cast to simulate a long-lived
+   * process.
+   */
+  private startedAtMs = Date.now();
 
   constructor(eventBus: EventBus, db: Database.Database, config: AgentConfig) {
     this.eventBus = eventBus;
@@ -369,6 +456,16 @@ export class AgentScheduler {
    */
   setAuthProbeCallback(fn: () => Promise<unknown>): void {
     this.onAuthProbe = fn;
+  }
+
+  /**
+   * Register the Phase 3 self-tuning auto-revert monitor. Called on each
+   * hourly cron tick alongside the auth probe; the monitor throttles
+   * itself to one pass per day and is a no-op until the actuator has
+   * written ledger entries.
+   */
+  setSelfTuningRevertMonitorCallback(fn: () => Promise<unknown>): void {
+    this.onSelfTuningRevertMonitor = fn;
   }
 
   /**
@@ -592,14 +689,337 @@ export class AgentScheduler {
     }
   }
 
+  /**
+   * Self-heal tick for the morning routine. Three layers:
+   *
+   * 1. **Recover** — a wake row stuck in `running` whose claim
+   *    (`task_context.claimedAt`) is ≥ stall-threshold minutes old with
+   *    no success today (machine slept mid-run, the backend stream died)
+   *    is flipped back to `pending` so the ScheduleWatcher re-claims it.
+   *    Without this, `queueMorningRoutineWake` dedups into the corpse
+   *    forever and the day stays frozen until a daemon restart. Runs
+   *    BEFORE the alert so a stall the self-heal is about to fix doesn't
+   *    burn the once-per-day DM budget on a misleading "restart the
+   *    daemon" message; if the re-run wedges too, the next tick still
+   *    alerts (the row's created_at age keeps growing). Capped at
+   *    {@link MAX_SELFHEAL_REQUEUES_PER_AGENT_DAY} re-runs per agent-day
+   *    so a deterministic hang cannot burn backend spend every
+   *    threshold-window all day. Worst case if the original execution is
+   *    alive after all: one duplicate morning run, serialized by the
+   *    today-write-lock.
+   * 2. **Alert** — the stall watchdog ({@link checkMorningRoutineStall}).
+   *    Previously this only ran on hourly-check cron ticks, so
+   *    `hourlyCheckEnabled=false` silently disabled it; this timer is the
+   *    guaranteed host now (the cron-tick invocation remains, made safe
+   *    by the watchdog's mutex + per-day DM dedup).
+   * 3. **Missed fire** — no attempt, no wake row, agent-day older than the
+   *    grace window: the boundary cron tick was swallowed (sleep shorter
+   *    than the WakeDetector's gap threshold straddling 04:00, or a
+   *    detector failure) — open the day exactly the way the cron and the
+   *    wake catch-up do (day-boundary callback → daily cleanup → wake row
+   *    with due reviews riding the post-catchup context). Never resurrects
+   *    an exhausted retry chain: failed attempts leave audit rows, which
+   *    `shouldQueueMissedMorningFire` treats as "attempted". Suppressed
+   *    during the first {@link MISSED_FIRE_BOOT_SUPPRESSION_MS} of process
+   *    life: that window belongs to the boot catchup, whose INLINE morning
+   *    run leaves no wake row for the predicate to dedup against (a slow
+   *    pre-pass there must not look like a missed fire).
+   *
+   * Fire-and-forget; each layer owns its own error containment.
+   */
+  private async runMorningSelfHeal(now: Date): Promise<void> {
+    const gateReason = this.autonomousGate();
+    if (gateReason !== null) {
+      this.logGateBlock(gateReason, { timer: "morning_self_heal" });
+      return;
+    }
+
+    const agentDayConfig = {
+      timezone: this.config.timezone || undefined,
+      dayBoundaryHour: this.config.dayBoundaryHour,
+    };
+
+    // Layer 1 — hung-claim recovery.
+    try {
+      const thresholdMinutes = readMorningRoutineStallThresholdMinutes(this.db);
+      const recoverable = getRecoverableStalledMorningWake(
+        this.db,
+        agentDayConfig,
+        thresholdMinutes,
+        now,
+      );
+      if (
+        recoverable
+        && this.countSelfHealRequeuesToday(now) < MAX_SELFHEAL_REQUEUES_PER_AGENT_DAY
+      ) {
+        const flipped = this.db
+          .prepare(
+            `UPDATE agent_schedule
+                SET status = 'pending', scheduled_for = ?
+              WHERE id = ? AND status = 'running'`,
+          )
+          .run(formatSqliteDatetime(now), recoverable.id);
+        if (flipped.changes > 0) {
+          logger.warn(
+            {
+              scheduleId: recoverable.id,
+              claimedAgeMinutes: recoverable.claimedAgeMinutes,
+              thresholdMinutes,
+            },
+            "Morning routine wake stuck in 'running' — flipped back to pending for re-claim",
+          );
+          try {
+            this.db
+              .prepare(
+                `INSERT INTO agent_actions
+                   (action_type, detail, result, started_at, completed_at)
+                 VALUES (?, ?, 'success', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+              )
+              .run(
+                "morning_routine.selfheal_requeued",
+                JSON.stringify({
+                  scheduleId: recoverable.id,
+                  claimedAgeMinutes: recoverable.claimedAgeMinutes,
+                  thresholdMinutes,
+                }),
+              );
+          } catch (auditErr) {
+            logger.warn(
+              { err: auditErr, scheduleId: recoverable.id },
+              "Failed to record morning_routine.selfheal_requeued audit",
+            );
+          }
+          this.nudgeWatcher();
+          // Skip the alert for this tick — the recovery is the response.
+          // The missed-fire layer cannot apply (a wake row exists).
+          return;
+        }
+      }
+      // Recoverable-but-capped (or lost the flip race) falls through to
+      // the alert so the operator hears about a hang the self-heal is no
+      // longer allowed to chase.
+    } catch (err) {
+      logger.warn({ err }, "Morning self-heal recovery step failed");
+    }
+
+    // Layer 2 — alert-only watchdog.
+    await this.checkMorningRoutineStall(now).catch((err: unknown) => {
+      logger.warn({ err }, "Morning routine stall watchdog threw (self-heal tick)");
+    });
+
+    // Layer 3 — missed boundary fire.
+    try {
+      if (Date.now() - this.startedAtMs < MISSED_FIRE_BOOT_SUPPRESSION_MS) {
+        return;
+      }
+      if (
+        !shouldQueueMissedMorningFire(
+          this.db,
+          agentDayConfig,
+          MORNING_MISSED_FIRE_GRACE_MINUTES,
+          now,
+        )
+      ) {
+        return;
+      }
+      if (!this.isAgentEnabledForFiring("morning-routine", "morning_self_heal")) {
+        return;
+      }
+      // Mirror runWakeCatchup's morning branch: open the day properly and
+      // let any due reviews / hourly check ride the wake row's
+      // post-catchup context instead of being skipped by the dispatcher's
+      // morning-pending gate.
+      const tz = this.config.timezone || undefined;
+      const { start, end } = getAgentDayBoundsUtc(
+        tz,
+        this.config.dayBoundaryHour,
+        now,
+      );
+      const dueRoutines = getDueCatchupRoutines(
+        this.db,
+        this.config,
+        start,
+        end,
+        now,
+      ).filter((routine) =>
+        this.isAgentEnabledForFiring(
+          WAKE_CATCHUP_AGENT_SLUGS[routine] ?? routine,
+          `${routine}_self_heal`,
+        ),
+      );
+      const needsHourlyCheck =
+        shouldCatchUpHourlyCheck(this.db, this.config, now)
+        && this.isAgentEnabledForFiring("hourly-check", "hourly_check_self_heal");
+      try {
+        if (this.onDayBoundary) {
+          await this.onDayBoundary();
+        }
+      } catch (err) {
+        logger.error({ err }, "Day boundary callback failed during morning self-heal");
+      }
+      this.dailyCleanup();
+      const queued = this.queueMorningRoutineWake("missed_cron_selfheal", {
+        postCatchupRoutines: dueRoutines,
+        postCatchupHourlyCheck: needsHourlyCheck,
+      });
+      this.nudgeWatcher();
+      logger.warn(
+        { queued, dueRoutines, needsHourlyCheck },
+        "Morning routine fire was missed (sleep swallowed the boundary cron tick) — self-heal queued wake",
+      );
+    } catch (err) {
+      logger.warn({ err }, "Morning self-heal missed-fire step failed");
+    }
+  }
+
+  /**
+   * Number of self-heal re-queues already performed this agent-day,
+   * counted from the `morning_routine.selfheal_requeued` audit rows the
+   * recovery layer writes. Throws propagate to the recovery layer's
+   * catch (fail-closed: an unreadable counter must not unlock unlimited
+   * re-runs).
+   */
+  private countSelfHealRequeuesToday(now: Date): number {
+    const { start } = getAgentDayBoundsUtc(
+      this.config.timezone || undefined,
+      this.config.dayBoundaryHour,
+      now,
+    );
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS cnt
+           FROM agent_actions
+          WHERE action_type = 'morning_routine.selfheal_requeued'
+            AND started_at >= ?`,
+      )
+      .get(start) as { cnt: number };
+    return row.cnt;
+  }
+
+  /**
+   * Replay cron triggers swallowed by a machine sleep (or forward clock
+   * jump). node-cron does not fire ticks whose time passed while the
+   * process was suspended, so without this a daemon that sleeps through
+   * 04:00 / 18:00 / a Friday 19:00 recovers those routines only on the
+   * next daemon RESTART (`bootstrap/catchup.ts`) — possibly days later.
+   *
+   * Reuses the boot-time catchup's decision predicates so the two paths
+   * cannot drift: `getDueCatchupRoutines` dedups against `agent_actions`,
+   * `shouldCatchUpHourlyCheck` replays at most the current slot, and the
+   * morning routine goes through `queueMorningRoutineWake`'s DB-backed
+   * dedup. Downstream dispatch-time gates (autonomous setup gate,
+   * morning-pending review gate) still apply.
+   *
+   * Ordering: when the morning routine has not completed for the current
+   * agent-day, the review routines and the hourly check ride along on the
+   * wake row's `postCatchupRoutines` / `postCatchupHourlyCheck` context
+   * (same replay mechanism the boot catchup uses) so they run AFTER the
+   * day is opened instead of being skipped by the dispatcher's
+   * pre-routine gate.
+   */
+  private async runWakeCatchup(gapMs: number): Promise<void> {
+    const gapMinutes = Math.round(gapMs / 60_000);
+    const gateReason = this.autonomousGate();
+    if (gateReason !== null) {
+      this.logGateBlock(gateReason, { cron: "wake_catchup", gapMinutes });
+      return;
+    }
+
+    const now = new Date();
+    const tz = this.config.timezone || undefined;
+    const { start, end } = getAgentDayBoundsUtc(
+      tz,
+      this.config.dayBoundaryHour,
+      now,
+    );
+
+    const dueRoutines = getDueCatchupRoutines(
+      this.db,
+      this.config,
+      start,
+      end,
+      now,
+    ).filter((routine) =>
+      this.isAgentEnabledForFiring(
+        WAKE_CATCHUP_AGENT_SLUGS[routine] ?? routine,
+        `${routine}_wake_catchup`,
+      ),
+    );
+    const needsHourlyCheck =
+      shouldCatchUpHourlyCheck(this.db, this.config, now)
+      && this.isAgentEnabledForFiring("hourly-check", "hourly_check_wake_catchup");
+
+    if (
+      !morningRoutineRanToday(
+        this.db,
+        { timezone: tz, dayBoundaryHour: this.config.dayBoundaryHour },
+        now,
+      )
+    ) {
+      // Slept across the day boundary (or the morning routine never
+      // succeeded today) — re-run the full 04:00 flow. The wake row
+      // dedups against an already-pending/running morning run, merging
+      // the post-catchup context instead of double-firing.
+      if (!this.isAgentEnabledForFiring("morning-routine", "morning_routine_wake_catchup")) {
+        return;
+      }
+      try {
+        if (this.onDayBoundary) {
+          await this.onDayBoundary();
+        }
+      } catch (err) {
+        logger.error({ err }, "Day boundary callback failed during wake catch-up");
+      }
+      this.dailyCleanup();
+      const queued = this.queueMorningRoutineWake("wake_catchup", {
+        postCatchupRoutines: dueRoutines,
+        postCatchupHourlyCheck: needsHourlyCheck,
+      });
+      this.nudgeWatcher();
+      logger.info(
+        { gapMinutes, queued, dueRoutines, needsHourlyCheck },
+        "Wake catch-up queued morning routine",
+      );
+      return;
+    }
+
+    for (const routine of dueRoutines) {
+      logger.info({ routine, gapMinutes }, "Wake catch-up replaying missed routine");
+      this.emitRoutine(routine);
+    }
+    if (needsHourlyCheck && this.onHourlyCheck) {
+      logger.info({ gapMinutes }, "Wake catch-up triggering missed hourly check");
+      void Promise.resolve(this.onHourlyCheck("wake_catchup")).catch(
+        (err: unknown) => {
+          logger.warn({ err }, "Wake catch-up hourly check failed");
+        },
+      );
+    }
+    if (dueRoutines.length === 0 && !needsHourlyCheck) {
+      logger.info({ gapMinutes }, "Wake catch-up: nothing missed");
+    }
+  }
+
   start(): void {
     this.setupRecurringJobs();
     this.startScheduleWatcher();
+    this.wakeDetector.start();
+    this.morningSelfHealTimer = setInterval(() => {
+      void this.runMorningSelfHeal(new Date()).catch((err: unknown) => {
+        logger.warn({ err }, "Morning self-heal tick threw");
+      });
+    }, MORNING_SELF_HEAL_INTERVAL_MS);
+    this.morningSelfHealTimer.unref?.();
     logger.info("Scheduler started");
   }
 
   stop(): void {
     this.shutdown = true;
+    this.wakeDetector.stop();
+    if (this.morningSelfHealTimer) {
+      clearInterval(this.morningSelfHealTimer);
+      this.morningSelfHealTimer = null;
+    }
     // Wake up the ScheduleWatcher's poll sleep so the loop returns
     // immediately instead of waiting for the next interval tick. The
     // sleepInterruptible body re-checks `shutdown` before re-entering
@@ -925,6 +1345,18 @@ export class AgentScheduler {
           ) {
             return;
           }
+          // Self-tuning auto-revert monitor — ahead of BOTH the per-agent
+          // enabled gate and the autonomous setup gate below: rollback
+          // safety must survive the owner disabling the hourly-check
+          // Agent (a plausible cost-saving move while a tuned knob sits
+          // unverified) and a degraded/setup-gated daemon. It is pure
+          // daemon code (no LLM dispatch), owns its own 1/day throttle,
+          // and is a no-op until the actuator has written ledger entries.
+          if (this.onSelfTuningRevertMonitor) {
+            void this.onSelfTuningRevertMonitor().catch((err: unknown) => {
+              logger.warn({ err }, "Self-tuning revert monitor failed");
+            });
+          }
           // Per-built-in enabled gate, AFTER the interval gate so a
           // per-minute non-firing tick never inflates the suppressed count.
           if (!this.isAgentEnabledForFiring("hourly-check", "hourly_check")) return;
@@ -1083,7 +1515,13 @@ export class AgentScheduler {
         const mergedHourlyCheck =
           existingContext.postCatchupHourlyCheck === true ||
           options?.postCatchupHourlyCheck === true;
+        // Spread the existing context FIRST so keys this merge doesn't
+        // know about survive — in particular the ScheduleWatcher's
+        // `claimedAt` stamp on a running row: dropping it would blind
+        // the self-heal recovery predicate exactly when the 04:00 cron
+        // merges into a hung overnight run.
         const mergedContext = {
+          ...existingContext,
           routine: "morning_routine",
           source: existingContext.source ?? source,
           postCatchupRoutines: mergedRoutines,
@@ -1228,6 +1666,30 @@ export class AgentScheduler {
 
             if (result.changes === 0) continue;
 
+            // Stamp the claim time on morning-routine wake rows. This is
+            // the staleness signal the self-heal recovery predicate
+            // (`getRecoverableStalledMorningWake`) measures from —
+            // `created_at` and `scheduled_for` both lie after sleeps and
+            // dedup merges. Best-effort and morning-scoped: a failure
+            // here only demotes that row from auto-recovery to the
+            // alert-only watchdog path.
+            try {
+              this.db
+                .prepare(
+                  `UPDATE agent_schedule
+                      SET task_context = json_set(COALESCE(task_context, '{}'), '$.claimedAt', ?)
+                    WHERE id = ?
+                      AND json_valid(COALESCE(task_context, '{}'))
+                      AND json_extract(task_context, '$.routine') = 'morning_routine'`,
+                )
+                .run(formatSqliteDatetime(new Date()), row.id);
+            } catch (stampErr) {
+              logger.warn(
+                { err: stampErr, taskId: row.id },
+                "Failed to stamp claimedAt on claimed schedule row",
+              );
+            }
+
             // Per-row try/catch: if the row body throws (e.g. malformed
             // task_context JSON), flip the claim to 'failed' so the row
             // doesn't stay 'running' forever and the watcher can move on.
@@ -1317,75 +1779,16 @@ export class AgentScheduler {
               // delay; the row's status is reverted to `pending` so
               // the next ScheduleWatcher tick re-evaluates.
               if (row.task_type === "browser_task") {
-                const fireAt = new Date();
                 const respectQuietHours =
                   this.config.browserTaskRespectQuietHours !== false;
-                if (respectQuietHours) {
-                  const quietHoursWindow = {
-                    start: this.config.quietHoursStart,
-                    end: this.config.quietHoursEnd,
-                    timezone: this.config.timezone || undefined,
-                  };
-                  if (isInQuietHoursAt(fireAt, quietHoursWindow)) {
-                    const deferUntilMs = nextQuietHoursEndMs(
-                      fireAt,
-                      quietHoursWindow,
-                    );
-                    if (deferUntilMs !== null) {
-                      const deferredFor = formatSqliteDatetime(
-                        new Date(deferUntilMs),
-                      );
-                      this.db
-                        .prepare(
-                          `UPDATE agent_schedule
-                              SET scheduled_for = ?, status = 'pending'
-                            WHERE id = ?`,
-                        )
-                        .run(deferredFor, row.id);
-                      try {
-                        this.db
-                          .prepare(
-                            `INSERT INTO agent_actions
-                               (action_type, detail, result, started_at, completed_at)
-                             VALUES (?, ?, 'success', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-                          )
-                          .run(
-                            "browser_task.deferred_for_quiet_hours",
-                            JSON.stringify({
-                              scheduleId: row.id,
-                              originalScheduledFor: row.scheduled_for,
-                              deferredUntil: deferredFor,
-                              quietHoursStart: this.config.quietHoursStart,
-                              quietHoursEnd: this.config.quietHoursEnd,
-                            }),
-                          );
-                      } catch (auditErr) {
-                        /* c8 ignore start -- defensive against schema partials */
-                        logger.warn(
-                          { err: auditErr, scheduleId: row.id },
-                          "Failed to record browser_task.deferred_for_quiet_hours audit",
-                        );
-                        /* c8 ignore stop */
-                      }
-                      logger.info(
-                        {
-                          scheduleId: row.id,
-                          deferredUntil: deferredFor,
-                          quietHoursStart: this.config.quietHoursStart,
-                          quietHoursEnd: this.config.quietHoursEnd,
-                        },
-                        "scheduled.browser_task deferred for quiet hours",
-                      );
-                      continue;
-                    }
-                    // `nextQuietHoursEndMs` returning null inside a quiet-
-                    // hours predicate that just returned true would mean
-                    // a 24-hour window — the runtime-settings schema
-                    // disallows this (equal start/end short-circuits the
-                    // predicate), so it cannot occur in normal operation.
-                    // Fall through to dispatch rather than re-deferring
-                    // forever.
-                  }
+                if (
+                  respectQuietHours &&
+                  this.deferClaimedRowForQuietHours(
+                    row,
+                    "browser_task.deferred_for_quiet_hours",
+                  )
+                ) {
+                  continue;
                 }
 
                 const base = createEvent({
@@ -1422,15 +1825,41 @@ export class AgentScheduler {
                 continue;
               }
 
+              const parsedTaskContext = JSON.parse(row.task_context ?? "{}") as Record<
+                string,
+                unknown
+              >;
+
+              // QUIET_HOURS_HARDENING_PLAN.md §6 — per-row opt-in quiet-hours
+              // deferral for user-Agent firings. The Agent loader copies the
+              // definition's `schedule.defer_in_quiet_hours: true` into the
+              // recurring row's task_context and `generateNextScheduleRow`
+              // spreads it into every materialised row, so the check is
+              // row-local (no `agents` join). The whole RUN moves past the
+              // quiet window (fresh data at delivery time, no wasted 03:00
+              // session), mirroring the browser_task deferral above. Built-ins
+              // fire outside `recurring_schedules` and never carry the flag;
+              // manual run-now rows omit it too (an explicit "run now" click
+              // must fire immediately).
+              if (
+                row.task_type === "agent.task" &&
+                parsedTaskContext.defer_in_quiet_hours === true &&
+                this.deferClaimedRowForQuietHours(
+                  row,
+                  "agent.task.deferred_for_quiet_hours",
+                  typeof parsedTaskContext.agent_id === "string"
+                    ? parsedTaskContext.agent_id
+                    : null,
+                )
+              ) {
+                continue;
+              }
+
               const base = createEvent({
                 type: "scheduled.task",
                 source: row.task_type,
                 priority: EventPriority.NORMAL,
               });
-              const parsedTaskContext = JSON.parse(row.task_context ?? "{}") as Record<
-                string,
-                unknown
-              >;
               // WIKI_BUILDER_DESIGN.md §3.4-bis — bang-spawned approval rows
               // (today: wiki.compile via `!compile full` above threshold;
               // generalisable to any future bang→approval path) carry a
@@ -1530,6 +1959,100 @@ export class AgentScheduler {
     };
 
     void loop();
+  }
+
+  /**
+   * Quiet-hours deferral for a claimed `agent_schedule` row (shared by the
+   * `browser_task` always-on-by-config path and the `agent.task` per-row
+   * opt-in, QUIET_HOURS_HARDENING_PLAN.md §6). When the current wall-clock
+   * instant falls inside the configured quiet-hours window, the row is pushed
+   * forward to the next quiet-hours-end boundary (status reverted to
+   * `pending` so the next ScheduleWatcher tick re-evaluates), one
+   * `agent_actions` audit row is written per deferral so the user can see the
+   * delay, and `true` is returned. Returns `false` when outside the window —
+   * or when `nextQuietHoursEndMs` cannot resolve a boundary, which inside a
+   * quiet-hours predicate that just returned true would mean a 24-hour
+   * window; the runtime-settings schema disallows this (equal start/end
+   * short-circuits the predicate), so it cannot occur in normal operation.
+   * Falling through to dispatch beats re-deferring forever.
+   *
+   * `agentId` (the owning user Agent's slug from `task_context.agent_id`)
+   * stamps the audit row's `agent_id` column so the deferral is attributable
+   * per Agent; the browser_task path has no owning Agent and passes none.
+   */
+  private deferClaimedRowForQuietHours(
+    row: ScheduleRow,
+    actionType: string,
+    agentId: string | null = null,
+  ): boolean {
+    const fireAt = new Date();
+    const quietHoursWindow = {
+      start: this.config.quietHoursStart,
+      end: this.config.quietHoursEnd,
+      timezone: this.config.timezone || undefined,
+    };
+    if (!isInQuietHoursAt(fireAt, quietHoursWindow)) return false;
+    const deferUntilMs = nextQuietHoursEndMs(fireAt, quietHoursWindow);
+    if (deferUntilMs === null) return false;
+
+    const deferredFor = formatSqliteDatetime(new Date(deferUntilMs));
+    // `quiet_hours_deferred` marks the row as ACTUALLY deferred (vs merely
+    // carrying the `defer_in_quiet_hours` opt-in on a future cron slot) so a
+    // quiet-hours config change can retime exactly these rows
+    // (`retimeDeferredRunRows` in db/deferred-dm.ts, the sibling of the
+    // Phase-1 deferred-DM retime). Invalid task_context JSON is left
+    // untouched — stamping must never destroy a browser_task's frozen body.
+    this.db
+      .prepare(
+        `UPDATE agent_schedule
+            SET scheduled_for = ?, status = 'pending',
+                task_context = CASE
+                  WHEN task_context IS NULL
+                    THEN json_object('quiet_hours_deferred', json('true'))
+                  WHEN json_valid(task_context)
+                    THEN json_set(task_context, '$.quiet_hours_deferred', json('true'))
+                  ELSE task_context
+                END
+          WHERE id = ?`,
+      )
+      .run(deferredFor, row.id);
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO agent_actions
+             (action_type, detail, result, agent_id, started_at, completed_at)
+           VALUES (?, ?, 'success', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        )
+        .run(
+          actionType,
+          JSON.stringify({
+            scheduleId: row.id,
+            originalScheduledFor: row.scheduled_for,
+            deferredUntil: deferredFor,
+            quietHoursStart: this.config.quietHoursStart,
+            quietHoursEnd: this.config.quietHoursEnd,
+          }),
+          agentId,
+        );
+    } catch (auditErr) {
+      /* c8 ignore start -- defensive against schema partials */
+      logger.warn(
+        { err: auditErr, scheduleId: row.id, actionType },
+        "Failed to record quiet-hours deferral audit",
+      );
+      /* c8 ignore stop */
+    }
+    logger.info(
+      {
+        scheduleId: row.id,
+        taskType: row.task_type,
+        deferredUntil: deferredFor,
+        quietHoursStart: this.config.quietHoursStart,
+        quietHoursEnd: this.config.quietHoursEnd,
+      },
+      "Scheduled row deferred for quiet hours",
+    );
+    return true;
   }
 
   /**

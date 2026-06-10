@@ -67,14 +67,29 @@ const WA_VERSION_TTL_MS = 12 * 60 * 60 * 1000;
  *     networks) drops into the sustained connectivity watch below, which never
  *     gives up and recovers on its own once the network returns;
  *   - any other close (WhatsApp rejected us at the app layer — bad version,
- *     bad session, throttle) surfaces an error and stops, because hammering a
- *     relay that keeps closing us is the fast path to an IP-level ban.
+ *     bad session, throttle) surfaces an error and drops into the slow
+ *     app-layer watch below — hammering a relay that keeps closing us is the
+ *     fast path to an IP-level ban, but stopping forever turns a transient
+ *     server-side condition into a wedge only a daemon restart clears.
  */
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const RECONNECT_BACKOFF_FACTOR = 2;
 const RECONNECT_JITTER_MS = 500;
 const RECONNECT_MAX_ATTEMPTS = 10;
+
+/**
+ * App-layer watch tunables. Once the fast phase exhausts on a *non*-network
+ * close (WhatsApp rejecting us at the app layer), we retry on this long
+ * cadence instead of giving up: throttles lift, server-side restarts settle,
+ * and version rejections clear after the cache refetch. Each watch tick
+ * grants only {@link RECONNECT_APP_LAYER_RETRY_BUDGET} fast attempts (enough
+ * for the 515 → version-refetch → connect handshake chain) rather than a full
+ * fresh fast phase, keeping the worst-case connect rate low enough to pose no
+ * ban risk while still recovering unattended.
+ */
+const RECONNECT_APP_LAYER_WATCH_DELAY_MS = 30 * 60_000;
+const RECONNECT_APP_LAYER_RETRY_BUDGET = 3;
 
 /**
  * Sustained-watch tunables. Once the fast phase exhausts on a *network-class*
@@ -367,9 +382,17 @@ export class WhatsAppAdapter implements MessageAdapter {
    * watch's async connectivity probe) is in flight, and we have NOT
    * permanently given up. Lets the status accessors report "connecting"
    * during the brief timer-less window of a sustained probe instead of
-   * flashing a red error. Cleared on open / give-up / logout / stop.
+   * flashing a red error. Cleared on open / logout / stop.
    */
   private reconnecting = false;
+  /**
+   * True while the slow app-layer watch is armed (fast phase exhausted on a
+   * non-network close). Unlike the network-class sustained watch, this state
+   * IS surfaced as an error by {@link getStatusError} — WhatsApp is actively
+   * rejecting us and the user may want to act (re-pair, check the dashboard)
+   * rather than wait out the ~30-min retry cadence.
+   */
+  private appLayerWatch = false;
   /**
    * Connectivity probe used by the sustained watch. Injectable so tests can
    * drive the offline / back-online transitions without real DNS; production
@@ -413,9 +436,10 @@ export class WhatsAppAdapter implements MessageAdapter {
    *   - `logged_out` → terminal, surface the error.
    *   - `disconnected` → recovery is in flight when a reconnect timer is
    *     pending OR a sustained-watch attempt is mid-probe ({@link reconnecting}
-   *     covers the brief timer-less DNS window). Only when neither holds have
-   *     we permanently given up (app-layer rejection past the fast cap) — a
-   *     real, user-actionable failure.
+   *     covers the brief timer-less DNS window) — EXCEPT the slow app-layer
+   *     watch ({@link appLayerWatch}), which is surfaced even though a timer
+   *     is pending: WhatsApp is actively rejecting us and the ~30-min retry
+   *     cadence is slow enough that the user may want to act first.
    */
   getStatusError(): string | null {
     switch (this.connectionState) {
@@ -427,6 +451,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       case "logged_out":
         return this.lastError ?? "WhatsApp logged out";
       case "disconnected":
+        if (this.appLayerWatch) return this.lastError ?? "WhatsApp disconnected";
         if (this.reconnectTimer !== null || this.reconnecting) return null;
         return this.lastError ?? "WhatsApp disconnected";
       /* v8 ignore next 2 — default branch unreachable with correctly typed connectionState */
@@ -485,6 +510,7 @@ export class WhatsAppAdapter implements MessageAdapter {
     this.lastError = null;
     this.reconnectAttempts = 0;
     this.reconnecting = false;
+    this.appLayerWatch = false;
     this.lastCloseWasNetwork = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -577,6 +603,7 @@ export class WhatsAppAdapter implements MessageAdapter {
     }
     this.reconnectAttempts = 0;
     this.reconnecting = false;
+    this.appLayerWatch = false;
     this.lastCloseWasNetwork = false;
     this.sentMessageIds.clear();
     this.clearQrSnapshot();
@@ -1089,6 +1116,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       this.lastError = null;
       this.reconnectAttempts = 0;
       this.reconnecting = false;
+      this.appLayerWatch = false;
       this.lastCloseWasNetwork = false;
       this.clearQrSnapshot();
       this.clearQrFile();
@@ -1134,6 +1162,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       this.lastError = `WhatsApp logged out (status ${statusCode ?? "unknown"}) — re-pair required`;
       this.reconnectAttempts = 0;
       this.reconnecting = false;
+      this.appLayerWatch = false;
       logger.error({ statusCode }, "whatsapp connection closed: logged out");
       if (this.onLoggedOut) {
         try {
@@ -1149,6 +1178,7 @@ export class WhatsAppAdapter implements MessageAdapter {
       this.connectionState = "disabled";
       this.reconnectAttempts = 0;
       this.reconnecting = false;
+      this.appLayerWatch = false;
       return;
     }
 
@@ -1200,29 +1230,41 @@ export class WhatsAppAdapter implements MessageAdapter {
    *     on its own instead of wedging in an error state.
    *
    * If the fast phase exhausts on a *non*-network close (WhatsApp rejecting us
-   * at the app layer — bad version, bad session, throttle) we stop and surface
-   * an error: hammering a relay that keeps closing us is the fast path to an
-   * IP-level block and needs operator action (re-pair / wait it out).
+   * at the app layer — bad version, bad session, throttle) we drop into the
+   * slow **app-layer watch**: same timer machinery as the sustained watch but
+   * on a much longer cadence ({@link RECONNECT_APP_LAYER_WATCH_DELAY_MS}) and
+   * with the error surfaced to the dashboard. Hammering a relay that keeps
+   * closing us is the fast path to an IP-level block, but a permanent stop
+   * would wedge the adapter until daemon restart over conditions that
+   * routinely clear on their own (throttles, server restarts, version churn).
    */
   private scheduleReconnect(): void {
     if (this.reconnectTimer || this.shuttingDown) return;
     if (this.connectionState === "logged_out") return;
 
     const exhaustedFastPhase = this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS;
-
-    if (exhaustedFastPhase && !this.lastCloseWasNetwork) {
-      const previousError = this.lastError ?? "unknown error";
-      this.lastError = `WhatsApp reconnect gave up after ${RECONNECT_MAX_ATTEMPTS} attempts (${previousError})`;
-      this.reconnecting = false;
-      logger.error(
-        { attempts: this.reconnectAttempts, lastError: previousError },
-        "whatsapp reconnect: max attempts exceeded",
-      );
-      return;
-    }
+    const appLayerWatch = exhaustedFastPhase && !this.lastCloseWasNetwork;
 
     let delayMs: number;
-    if (exhaustedFastPhase) {
+    if (appLayerWatch) {
+      // Wrap lastError and log only on ENTRY into the watch. Re-scheduling
+      // from within it (the probe-unreachable path of runReconnectAttempt
+      // calls scheduleReconnect on every watch tick) must not re-wrap —
+      // each pass would nest the previous wrapped message inside the new
+      // one, growing lastError without bound, and would re-emit the
+      // error-level log every ~30 min for one underlying condition.
+      if (!this.appLayerWatch) {
+        const previousError = this.lastError ?? "unknown error";
+        this.lastError = `WhatsApp reconnect: ${RECONNECT_MAX_ATTEMPTS} fast attempts failed at the app layer (${previousError}); retrying every ~${Math.round(RECONNECT_APP_LAYER_WATCH_DELAY_MS / 60_000)} min`;
+        logger.error(
+          { attempts: this.reconnectAttempts, lastError: previousError },
+          "whatsapp reconnect: fast phase exhausted at app layer; entering slow watch",
+        );
+      }
+      delayMs =
+        RECONNECT_APP_LAYER_WATCH_DELAY_MS
+        + Math.floor(Math.random() * RECONNECT_SUSTAINED_JITTER_MS);
+    } else if (exhaustedFastPhase) {
       // Sustained network watch — fixed cadence, counter left pinned at the
       // cap so we stay in this branch without growing reconnectAttempts.
       delayMs =
@@ -1238,8 +1280,9 @@ export class WhatsAppAdapter implements MessageAdapter {
     }
 
     this.reconnecting = true;
+    this.appLayerWatch = appLayerWatch;
     logger.info(
-      { attempt: this.reconnectAttempts, delayMs, sustained: exhaustedFastPhase },
+      { attempt: this.reconnectAttempts, delayMs, sustained: exhaustedFastPhase, appLayerWatch },
       "whatsapp reconnect scheduled",
     );
 
@@ -1249,7 +1292,7 @@ export class WhatsAppAdapter implements MessageAdapter {
         this.reconnecting = false;
         return;
       }
-      void this.runReconnectAttempt(exhaustedFastPhase);
+      void this.runReconnectAttempt(exhaustedFastPhase, appLayerWatch);
     }, delayMs);
     this.reconnectTimer.unref?.();
   }
@@ -1268,8 +1311,14 @@ export class WhatsAppAdapter implements MessageAdapter {
    * `exhausted && !network` in {@link scheduleReconnect} and falsely give up.
    * A fresh fast phase gives those handshake closes their proper retry budget
    * (a clean `open` doesn't fire before a 515, so we can't rely on it here).
+   *
+   * The app-layer watch (`appLayerWatch=true`) reuses this path but grants
+   * only {@link RECONNECT_APP_LAYER_RETRY_BUDGET} fast attempts instead of a
+   * full fresh phase: the network never went away, so a still-broken app
+   * layer should fall back into the slow watch after a short burst rather
+   * than re-earning ten rapid connects every watch tick.
    */
-  private async runReconnectAttempt(sustained: boolean): Promise<void> {
+  private async runReconnectAttempt(sustained: boolean, appLayerWatch = false): Promise<void> {
     if (sustained) {
       const reachable = await this.isNetworkReachable();
       // shuttingDown / logged_out may have flipped during the async probe.
@@ -1283,7 +1332,9 @@ export class WhatsAppAdapter implements MessageAdapter {
         return;
       }
       logger.info("whatsapp reconnect: network reachable, reconnecting");
-      this.reconnectAttempts = 0;
+      this.reconnectAttempts = appLayerWatch
+        ? RECONNECT_MAX_ATTEMPTS - RECONNECT_APP_LAYER_RETRY_BUDGET
+        : 0;
     }
 
     try {

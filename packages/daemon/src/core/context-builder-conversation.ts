@@ -21,11 +21,25 @@ import {
   getConversationScope,
 } from "../messaging/constants.js";
 import { createLogger } from "../logging.js";
+import { sanitizeUntrustedTemplateValue } from "./backends/prompt-utils.js";
 import {
   formatSqliteTimestampForContext,
   truncateContextText,
   truncateForBlock,
 } from "./context-builder-format.js";
+
+/**
+ * Stored message content is user/platform-originated and therefore
+ * untrusted in the same sense as `event_data[content]`: a past message
+ * carrying `</conversation_history>` (or any structural close tag) could
+ * end its wrapper early and inject instructions outside the quarantined
+ * block. The cross-session path already escapes via `buildExecutionPrompt`
+ * (`prompt-utils.ts`); every renderer here applies the same defence so the
+ * active-session blocks can't be used as the unescaped side door.
+ */
+function sanitizeMessageContent(content: string): string {
+  return sanitizeUntrustedTemplateValue(content);
+}
 
 const logger = createLogger("context-builder-conversation");
 
@@ -95,7 +109,10 @@ export function renderRecentDmActivityBlock(
 
   if (rows.length === 0) return null;
   return rows
-    .map((r) => `[${r.timestamp}] ${truncateForBlock(r.content, 200)}`)
+    .map(
+      (r) =>
+        `[${r.timestamp}] ${sanitizeMessageContent(truncateForBlock(r.content, 200))}`,
+    )
     .join("\n");
 }
 
@@ -146,7 +163,7 @@ export function renderOwnerDmConversationHistory(
         r.role === "assistant"
           ? formatForwardSuffix(parseMessageMetadata(r.metadata))
           : "";
-      return `[${r.timestamp}] [${r.role}]${forwardSuffix}: ${truncateForBlock(r.content, 400)}`;
+      return `[${r.timestamp}] [${r.role}]${forwardSuffix}: ${sanitizeMessageContent(truncateForBlock(r.content, 400))}`;
     })
     .join("\n");
 }
@@ -246,7 +263,7 @@ export function getConversationHistoryForEvent(
       : `[${r.timestamp}] [${r.role}]`;
     const forwardSuffix =
       r.role === "assistant" ? formatForwardSuffix(metadata) : "";
-    const line = `${tag}${forwardSuffix}: ${r.content}`;
+    const line = `${tag}${forwardSuffix}: ${sanitizeMessageContent(r.content)}`;
     tokenBudget -= line.length;
     if (tokenBudget < 0 && lines.length > 0) {
       lines.unshift(`[...${reversed.length - lines.length} older messages omitted]`);
@@ -330,7 +347,7 @@ export function renderRecentOtherSurfaceBlock(
     const forwardType = getProactiveForwardType(metadata);
     if (forwardType) {
       lines.push(
-        `[${row.timestamp}] [${forwardType} → ${row.platform}]: ${row.content}`,
+        `[${row.timestamp}] [${forwardType} → ${row.platform}]: ${sanitizeMessageContent(row.content)}`,
       );
       continue;
     }
@@ -608,7 +625,7 @@ export async function renderResumeCatchupContext(
     });
     const suffix = formatForwardSuffix(metadata);
     const scopeTag = r.scope === scope ? "this surface" : "other surface";
-    return `[${r.timestamp}] [assistant → ${r.platform}, ${scopeTag}]${suffix}: ${r.content}`;
+    return `[${r.timestamp}] [assistant → ${r.platform}, ${scopeTag}]${suffix}: ${sanitizeMessageContent(r.content)}`;
   });
   if (proactiveRows.length > 0) {
     logProactiveForwardInjected(db, proactiveRows);

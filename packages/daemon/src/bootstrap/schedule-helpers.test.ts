@@ -7,15 +7,19 @@ import { applySchema } from "../db/schema.js";
 import type { AgentConfig } from "../config.js";
 import {
   getDueCatchupRoutines,
+  getLatestMorningAttemptStartMs,
   getProgressMinutesForHour,
+  getRecoverableStalledMorningWake,
   getStalledMorningRoutineWake,
   hasFreshAgentDayTodayMd,
+  MORNING_MISSED_FIRE_GRACE_MINUTES,
   MORNING_ROUTINE_CONFIG_KEY,
   MORNING_ROUTINE_STALL_THRESHOLD_MINUTES,
   morningRoutineRanToday,
   readMorningRoutineStallThresholdMinutes,
   readSkillCurationCadence,
   shouldCatchUpHourlyCheck,
+  shouldQueueMissedMorningFire,
 } from "./schedule-helpers.js";
 
 const tokyo = { timezone: "Asia/Tokyo", dayBoundaryHour: 4 };
@@ -875,5 +879,211 @@ describe("readSkillCurationCadence", () => {
       .prepare(`INSERT INTO runtime_state (key, value_json) VALUES (?, ?)`)
       .run("skill_curation.config", "{not valid json");
     expect(readSkillCurationCadence(db)).toBe("weekly");
+  });
+});
+
+// ── Morning self-heal predicates (missed-fire + hung-execution recovery) ──
+
+function insertMorningAttempt(
+  db: Database.Database,
+  opts: {
+    actionType?: string;
+    result: "success" | "failed" | "in_progress";
+    startedAt: string;
+  },
+): void {
+  db
+    .prepare(
+      `INSERT INTO agent_actions
+         (event_id, action_type, result, started_at)
+       VALUES (?, ?, ?, ?)`,
+    )
+    .run(
+      "evt-" + Math.random().toString(36).slice(2),
+      opts.actionType ?? "routine.morning_routine_today",
+      opts.result,
+      opts.startedAt,
+    );
+}
+
+describe("getLatestMorningAttemptStartMs", () => {
+  let db: Database.Database;
+  // 19:00 JST on 2026-05-14 — agent-day 2026-05-14 spans
+  // [2026-05-13 19:00 UTC, 2026-05-14 19:00 UTC) for the tokyo config.
+  const NOW = new Date("2026-05-14T10:00:00Z");
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("returns null when no attempt has started this agent-day", () => {
+    expect(getLatestMorningAttemptStartMs(db, tokyo, NOW)).toBeNull();
+  });
+
+  it("returns the most recent attempt across parent and Stage A rows, including in_progress", () => {
+    insertMorningRoutine(db, { result: "failed", startedAt: "2026-05-14 01:00:00" });
+    insertMorningAttempt(db, { result: "in_progress", startedAt: "2026-05-14 02:00:00" });
+    expect(getLatestMorningAttemptStartMs(db, tokyo, NOW)).toBe(
+      Date.parse("2026-05-14T02:00:00Z"),
+    );
+  });
+
+  it("ignores attempts from the previous agent-day", () => {
+    insertMorningAttempt(db, { result: "success", startedAt: "2026-05-13 12:00:00" });
+    expect(getLatestMorningAttemptStartMs(db, tokyo, NOW)).toBeNull();
+  });
+});
+
+describe("getRecoverableStalledMorningWake", () => {
+  let db: Database.Database;
+  const NOW = new Date("2026-05-14T10:00:00Z");
+  const THRESHOLD = 120;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  function insertWakeWithContext(
+    status: "pending" | "running",
+    taskContext: string,
+  ): number {
+    const result = db
+      .prepare(
+        `INSERT INTO agent_schedule
+           (scheduled_for, task_type, task_description, task_context, status, created_at)
+         VALUES ('2026-05-14 05:00:00', 'wake', 'Morning routine', ?, ?, '2026-05-14 05:00:00')`,
+      )
+      .run(taskContext, status);
+    return Number(result.lastInsertRowid);
+  }
+
+  const ctxWithClaim = (claimedAt: string) =>
+    JSON.stringify({ routine: "morning_routine", claimedAt });
+
+  it("returns null when no morning wake row exists", () => {
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+    // Default-clock variant — deterministic on an empty DB.
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD)).toBeNull();
+  });
+
+  it("returns null for a pending (not running) wake row — backoff retries are not hung", () => {
+    insertWakeWithContext("pending", ctxWithClaim("2026-05-14 05:00:00"));
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+  });
+
+  it("returns null for a running row without a claim stamp — alert-only", () => {
+    insertWakeWithContext("running", JSON.stringify({ routine: "morning_routine" }));
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+  });
+
+  it("returns null when the claim stamp is not a parseable timestamp", () => {
+    insertWakeWithContext(
+      "running",
+      JSON.stringify({ routine: "morning_routine", claimedAt: "garbage" }),
+    );
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+    db.exec("DELETE FROM agent_schedule");
+    insertWakeWithContext(
+      "running",
+      JSON.stringify({ routine: "morning_routine", claimedAt: 12345 }),
+    );
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+  });
+
+  it("returns null when task_context is JSON5 — valid to SQLite's parser, not to JSON.parse", () => {
+    // SQLite >= 3.42 json_extract accepts JSON5 (unquoted keys), so the
+    // row matches the WHERE while the JS-side strict parse throws.
+    insertWakeWithContext(
+      "running",
+      "{routine:'morning_routine',claimedAt:'2026-05-14 05:00:00'}",
+    );
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+  });
+
+  it("returns null while the claim is younger than the threshold", () => {
+    insertWakeWithContext("running", ctxWithClaim("2026-05-14 09:30:00"));
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+  });
+
+  it("returns the row when the claim is older than the threshold with no success", () => {
+    const id = insertWakeWithContext("running", ctxWithClaim("2026-05-14 05:05:00"));
+    const recoverable = getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW);
+    expect(recoverable).toEqual({ id, claimedAgeMinutes: 295 });
+  });
+
+  it("recovers a claim from before the agent-day boundary (hung overnight run)", () => {
+    // Claimed 22:55 the previous agent-day; at 04:30+ the next day the
+    // stamp is ~5.6h old. An agent-day-windowed signal would miss this.
+    const id = insertWakeWithContext("running", ctxWithClaim("2026-05-13 22:55:00"));
+    const recoverable = getRecoverableStalledMorningWake(
+      db,
+      tokyo,
+      THRESHOLD,
+      new Date("2026-05-14T04:30:00Z"),
+    );
+    expect(recoverable).toEqual({ id, claimedAgeMinutes: 335 });
+  });
+
+  it("returns null once the morning routine has succeeded this agent-day", () => {
+    insertWakeWithContext("running", ctxWithClaim("2026-05-14 05:05:00"));
+    insertMorningRoutine(db, { result: "success", startedAt: "2026-05-14 06:00:00" });
+    expect(getRecoverableStalledMorningWake(db, tokyo, THRESHOLD, NOW)).toBeNull();
+  });
+});
+
+describe("shouldQueueMissedMorningFire", () => {
+  let db: Database.Database;
+  const NOW = new Date("2026-05-14T10:00:00Z");
+  const GRACE = MORNING_MISSED_FIRE_GRACE_MINUTES;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("returns false inside the post-boundary grace window", () => {
+    // 04:10 JST — 10 minutes into the agent-day, under the 15-min grace.
+    expect(
+      shouldQueueMissedMorningFire(db, tokyo, GRACE, new Date("2026-05-13T19:10:00Z")),
+    ).toBe(false);
+  });
+
+  it("returns false while a pending or running morning wake row exists", () => {
+    insertMorningWake(db, { createdAt: "2026-05-14 05:00:00", status: "pending" });
+    expect(shouldQueueMissedMorningFire(db, tokyo, GRACE, NOW)).toBe(false);
+    db.prepare("UPDATE agent_schedule SET status = 'running'").run();
+    expect(shouldQueueMissedMorningFire(db, tokyo, GRACE, NOW)).toBe(false);
+  });
+
+  it("returns false when any attempt exists — never resurrects an exhausted retry chain", () => {
+    insertMorningRoutine(db, { result: "failed", startedAt: "2026-05-14 02:00:00" });
+    expect(shouldQueueMissedMorningFire(db, tokyo, GRACE, NOW)).toBe(false);
+  });
+
+  it("returns true when the boundary fire was swallowed: no attempt, no live wake row, grace elapsed", () => {
+    // A completed wake row from a prior day must not mask the miss.
+    insertMorningWake(db, { createdAt: "2026-05-13 05:00:00", status: "completed" });
+    expect(shouldQueueMissedMorningFire(db, tokyo, GRACE, NOW)).toBe(true);
+    // Default-clock variant — grace 0 makes the progress check pass at
+    // any real wall-clock instant, and the empty-DB conditions are
+    // time-independent.
+    expect(shouldQueueMissedMorningFire(db, tokyo, 0)).toBe(true);
   });
 });

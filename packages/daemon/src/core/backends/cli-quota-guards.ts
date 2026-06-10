@@ -123,6 +123,50 @@ export function assertPromptCostWithinMaxBudget(params: {
 }
 
 /**
+ * PREPASS_COST_REDUCTION_PLAN.md N1 — recover a best-effort spend payload
+ * for a CLI run that failed after the provider already billed tokens.
+ * Returns `null` when the JSONL stream never surfaced usage (failure
+ * before the first `turn.completed` / stats event), so callers can pass
+ * the result straight to `classifyCliFailure` without an empty-usage
+ * guard. The dollar figure is a price-fetcher estimate from the observed
+ * token totals — same path the success branch uses — so a failed and a
+ * successful run with identical usage report identical cost.
+ */
+export function recoverCliFailureSpend(params: {
+  backendId: BackendId;
+  priceFetcher: PriceFetcher;
+  usage: BackendUsage;
+  modelId: string;
+  numTurns: number;
+  durationMs: number;
+}): BackendQuotaSpend | null {
+  const { backendId, priceFetcher, usage, modelId, numTurns, durationMs } =
+    params;
+  const sawUsage =
+    usage.inputTokens > 0
+    || usage.outputTokens > 0
+    || usage.cacheCreationInputTokens > 0
+    || usage.cacheReadInputTokens > 0;
+  if (!sawUsage) {
+    return null;
+  }
+  const { costUsd, costSource } = priceFetcher.estimateUsageCost({
+    backendId,
+    modelId,
+    usage,
+    fallbackModel: findRegisteredModel(backendId, modelId),
+  });
+  return {
+    usage,
+    costUsd,
+    modelId,
+    numTurns: numTurns || 1,
+    durationMs,
+    costSource,
+  };
+}
+
+/**
  * Optional pre-auth classifier — given a failure `message`, returns a
  * `BackendDecisiveFailure` when it owns the message, else `null` to fall
  * through to the shared auth/timeout/fallback branches. Runs BEFORE the auth
@@ -157,11 +201,28 @@ export function classifyCliFailure(params: {
   rateLimitPattern: RegExp;
   authPattern: RegExp;
   extraClassifier?: CliFailureExtraClassifier;
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N1 — best-effort spend recovered from
+   * the failed run's JSONL stream (usage totals + price-fetcher
+   * estimate). Attached to every error constructed here so the
+   * dispatcher's post-hoc audit writer can record what the provider
+   * already billed for a turn that produced no `AgentResult`. Errors
+   * returned by `extraClassifier` keep their own (usually absent) spend
+   * — the classifier owns the full construction of those.
+   */
+  spend?: BackendQuotaSpend | null;
 }): BackendQuotaError | BackendDecisiveFailure {
   const { backendId, message, rateLimitPattern, authPattern, extraClassifier } =
     params;
+  const spend = params.spend ?? null;
   if (isMaxBudgetMessage(message)) {
-    return new BackendQuotaError(backendId, "max_budget_usd", null, message);
+    return new BackendQuotaError(
+      backendId,
+      "max_budget_usd",
+      null,
+      message,
+      spend,
+    );
   }
   if (rateLimitPattern.test(message)) {
     // Best-effort reset-time extraction so the dashboard can surface
@@ -172,6 +233,7 @@ export function classifyCliFailure(params: {
       "rate_limited",
       extractGenericQuotaResetHint(message),
       message,
+      spend,
     );
   }
   const extra = extraClassifier?.(message, backendId);
@@ -179,14 +241,25 @@ export function classifyCliFailure(params: {
     return extra;
   }
   if (authPattern.test(message)) {
-    return new BackendDecisiveFailure(backendId, "auth", new Error(message));
+    return new BackendDecisiveFailure(
+      backendId,
+      "auth",
+      new Error(message),
+      spend,
+    );
   }
   if (/timed out|timeout/i.test(message)) {
-    return new BackendDecisiveFailure(backendId, "timeout", new Error(message));
+    return new BackendDecisiveFailure(
+      backendId,
+      "timeout",
+      new Error(message),
+      spend,
+    );
   }
   return new BackendDecisiveFailure(
     backendId,
     "other_non_retryable",
     new Error(message),
+    spend,
   );
 }

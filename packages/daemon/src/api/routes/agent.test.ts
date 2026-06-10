@@ -435,6 +435,96 @@ describe("Agent API routes", () => {
       expect(row?.platform).toBe("telegram");
     });
 
+    it("threads X-Pa-Event-Correlation-Id into sendNotification as correlationId (quiet-hours agent resolution)", async () => {
+      const sendNotification = vi.fn().mockResolvedValue({ status: "sent", dispatchId: "d-corr", deliveries: [] });
+      const app = createAgentRoutes({ db, sendNotification } as never);
+
+      const res = await app.request("/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Pa-Event-Correlation-Id": "evt-corr-9",
+        },
+        body: JSON.stringify({ message: "test" }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(sendNotification).toHaveBeenCalledWith(expect.objectContaining({
+        correlationId: "evt-corr-9",
+      }));
+    });
+
+    it("returns the deferred_quiet_hours envelope and marks the event notified (message will deliver)", async () => {
+      const sendNotification = vi.fn().mockResolvedValue({
+        status: "deferred_quiet_hours",
+        scheduleId: "77",
+        deliverAfter: "2026-06-11 08:00:00",
+      });
+      const markEventNotified = vi.fn();
+      const app = createAgentRoutes({ db, sendNotification, markEventNotified } as never);
+
+      const res = await app.request("/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Pa-Event-Correlation-Id": "evt-corr-defer",
+        },
+        body: JSON.stringify({ message: "overnight ping" }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        status: "deferred_quiet_hours",
+        scheduleId: "77",
+        deliverAfter: "2026-06-11 08:00:00",
+      });
+      expect(markEventNotified).toHaveBeenCalledWith("evt-corr-defer");
+    });
+
+    it("deferred_quiet_hours without a correlation header skips markEventNotified", async () => {
+      const sendNotification = vi.fn().mockResolvedValue({
+        status: "deferred_quiet_hours",
+        scheduleId: "78",
+        deliverAfter: "2026-06-11 08:00:00",
+      });
+      const markEventNotified = vi.fn();
+      const app = createAgentRoutes({ db, sendNotification, markEventNotified } as never);
+
+      const res = await app.request("/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "overnight ping" }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(markEventNotified).not.toHaveBeenCalled();
+    });
+
+    it("returns 429 rate_limited and does NOT mark the event notified (nothing delivered)", async () => {
+      const sendNotification = vi.fn().mockResolvedValue({
+        status: "rate_limited",
+        retryAfter: "2026-06-10 13:00:00",
+      });
+      const markEventNotified = vi.fn();
+      const app = createAgentRoutes({ db, sendNotification, markEventNotified } as never);
+
+      const res = await app.request("/notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Pa-Event-Correlation-Id": "evt-corr-limited",
+        },
+        body: JSON.stringify({ message: "noisy ping" }),
+      });
+
+      expect(res.status).toBe(429);
+      expect(await res.json()).toEqual({
+        status: "rate_limited",
+        retryAfter: "2026-06-10 13:00:00",
+      });
+      expect(markEventNotified).not.toHaveBeenCalled();
+    });
+
     it("notify-dedup: skips markEventNotified on the warn-fallback branch (sendNotification absent)", async () => {
       // The DB-logging fallback fires when the daemon failed to wire up
       // sendNotification — that's a misconfiguration path, not real

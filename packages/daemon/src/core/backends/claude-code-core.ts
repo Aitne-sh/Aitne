@@ -46,7 +46,9 @@ import { logMcpToolCall, updateMcpToolCallResult } from "../../services/mcp/tool
 import {
   BackendQuotaError,
   BackendDecisiveFailure,
+  type BackendQuotaSpend,
 } from "../agent-core.js";
+import { PriceFetcher } from "./price-fetcher.js";
 import { flattenToolResultContent } from "../../services/delegated-tool-runtime.js";
 import {
   runDelegatedTool as runDelegatedToolFn,
@@ -224,6 +226,98 @@ export const _testInternals = {
  * question based on the CLI / SDK's own startup cost, not on
  * pattern-matching against one of the existing three.
  */
+
+// ── Partial-spend recovery (PREPASS_COST_REDUCTION_PLAN.md N1) ────────────
+//
+// The SDK populates authoritative usage/cost only on the terminal `result`
+// stream message. When the stream aborts before that message arrives —
+// the SDK's `max_budget_usd` kill, a wall-clock timeout, a transport
+// failure — the run's spend would otherwise be unrecoverable: the thrown
+// error carries no usage, and the dispatcher's post-hoc audit writer
+// (`recordPostHocBudgetSpend`) drops payload-less errors. The accumulator
+// below sums per-assistant-message usage during `consumeStream` so a
+// partial figure exists at throw time; `executeOnce` / `executeResumeOnce`
+// stamp the snapshot onto the propagating error via a symbol property,
+// and `classifyExecutionError` / `toBackendQuotaError` lift it onto the
+// classified `BackendQuotaError` / `BackendDecisiveFailure`.
+
+/** Carrier property for the partial-spend snapshot on a propagating error. */
+const PARTIAL_SPEND_PROP = Symbol("aitne.claudePartialSpend");
+
+interface PartialUsageAccumulator {
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+  };
+  numTurns: number;
+}
+
+function createPartialUsageAccumulator(): PartialUsageAccumulator {
+  return {
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    },
+    numTurns: 0,
+  };
+}
+
+/**
+ * Fold one SDK assistant message's API-call usage into the accumulator.
+ * The SDK reports usage per API call on each assistant message; summing
+ * them approximates the run's total the same way the terminal result
+ * message would have.
+ */
+function recordAssistantUsage(
+  acc: PartialUsageAccumulator,
+  rawUsage: unknown,
+): void {
+  acc.numTurns += 1;
+  if (typeof rawUsage !== "object" || rawUsage === null) return;
+  const u = rawUsage as Record<string, unknown>;
+  const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  acc.usage.inputTokens += num(u.input_tokens);
+  acc.usage.outputTokens += num(u.output_tokens);
+  acc.usage.cacheCreationInputTokens += num(u.cache_creation_input_tokens);
+  acc.usage.cacheReadInputTokens += num(u.cache_read_input_tokens);
+}
+
+function accumulatorSawUsage(acc: PartialUsageAccumulator): boolean {
+  return (
+    acc.usage.inputTokens > 0
+    || acc.usage.outputTokens > 0
+    || acc.usage.cacheCreationInputTokens > 0
+    || acc.usage.cacheReadInputTokens > 0
+  );
+}
+
+function attachPartialSpend(error: unknown, spend: BackendQuotaSpend): void {
+  if (typeof error !== "object" || error === null) return;
+  try {
+    Object.defineProperty(error, PARTIAL_SPEND_PROP, {
+      value: spend,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch {
+    // Frozen/sealed error object — losing the snapshot is acceptable;
+    // the row simply stays payload-less like before N1.
+  }
+}
+
+/** Visible for testing. */
+export function getAttachedPartialSpend(
+  error: unknown,
+): BackendQuotaSpend | null {
+  if (typeof error !== "object" || error === null) return null;
+  const value = (error as Record<symbol, unknown>)[PARTIAL_SPEND_PROP];
+  return value ? (value as BackendQuotaSpend) : null;
+}
+
 export class ClaudeCodeCore implements IAgentCore {
   readonly backendId = "claude" as const;
   private static readonly RETRY_DELAY_MS = 5 * 60 * 1000;
@@ -278,6 +372,19 @@ export class ClaudeCodeCore implements IAgentCore {
      * own vault writes every cycle and loop.
      */
     private readonly writeTracker?: AgentWriteTracker,
+    /**
+     * PREPASS_COST_REDUCTION_PLAN.md N1 — used only to estimate the
+     * dollar figure of a partial spend snapshot when the SDK stream
+     * terminates abnormally (budget abort, timeout, transport failure).
+     * Success-path cost still comes from the SDK's own metering.
+     * Defaulted like the CLI cores' fetchers so bootstrap stays
+     * unchanged; guarded on `dataDir` because several unit tests
+     * construct the core with a partial config — those fall back to
+     * cap-floor-only estimation in `stampPartialSpend`.
+     */
+    private readonly priceFetcher: PriceFetcher | undefined = config.dataDir
+      ? new PriceFetcher(config.dataDir)
+      : undefined,
   ) {
     this.warnOnMissingCriticalTools();
     this.cliPathCache = new CliPathCache("claude");
@@ -625,6 +732,9 @@ export class ClaudeCodeCore implements IAgentCore {
       "Agent execute started",
     );
 
+    // Declared outside the try so the catch can stamp a partial-spend
+    // snapshot onto the propagating error (PREPASS_COST_REDUCTION_PLAN.md N1).
+    const partialUsage = createPartialUsageAccumulator();
     try {
       const allowMode = this.config.claudeExecutionPermissionMode === "allow";
       // P22 §3.4 step 4 — when the dispatcher pins a per-execute
@@ -735,7 +845,15 @@ export class ClaudeCodeCore implements IAgentCore {
 
       const result = await this.withTimeout(
         stream,
-        () => this.consumeStream(stream, actualModelId, startMs, streamCallbacks, event.type),
+        () =>
+          this.consumeStream(
+            stream,
+            actualModelId,
+            startMs,
+            streamCallbacks,
+            event.type,
+            partialUsage,
+          ),
         this.config.executeTimeoutMinutes,
       );
       logger.info(
@@ -744,6 +862,7 @@ export class ClaudeCodeCore implements IAgentCore {
       );
       return result;
     } catch (err) {
+      this.stampPartialSpend(err, partialUsage, actualModelId, startMs, maxBudgetUsd);
       logger.error(
         { err, eventType: event.type, model: actualModelId, durationMs: Date.now() - startMs },
         "Agent execute failed",
@@ -862,18 +981,25 @@ export class ClaudeCodeCore implements IAgentCore {
       },
     });
 
-    return await this.withTimeout(
-      stream,
-      () =>
-        this.consumeStream(
-          stream,
-          actualModelId,
-          startMs,
-          streamCallbacks,
-          "message.received",
-        ),
-      this.config.executeTimeoutMinutes,
-    );
+    const partialUsage = createPartialUsageAccumulator();
+    try {
+      return await this.withTimeout(
+        stream,
+        () =>
+          this.consumeStream(
+            stream,
+            actualModelId,
+            startMs,
+            streamCallbacks,
+            "message.received",
+            partialUsage,
+          ),
+        this.config.executeTimeoutMinutes,
+      );
+    } catch (err) {
+      this.stampPartialSpend(err, partialUsage, actualModelId, startMs, maxBudgetUsd);
+      throw err;
+    }
   }
 
   private async runWithRetry<T>(
@@ -943,6 +1069,72 @@ export class ClaudeCodeCore implements IAgentCore {
     );
   }
 
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N1 — build a spend snapshot from the
+   * stream's partial-usage accumulator and stamp it onto the propagating
+   * error so `classifyExecutionError` / `toBackendQuotaError` (which only
+   * see the error object) can lift it onto the classified failure.
+   *
+   * Dollar figure: estimated from the accumulated tokens via the shared
+   * price fetcher. For the SDK's `max_budget_usd` abort the figure is
+   * additionally floored at the cap — the SDK's own metering crossed it,
+   * so any lower estimate (e.g. usage observed only for the first few
+   * messages) would under-report what was actually billed. `costSource`
+   * is `"sdk_partial"` to mark the figure as a partial reconstruction.
+   *
+   * No-op when nothing recordable exists: no usage observed AND the
+   * error is not a budget abort with a known cap.
+   */
+  private stampPartialSpend(
+    error: unknown,
+    acc: PartialUsageAccumulator,
+    modelId: string,
+    startMs: number,
+    maxBudgetUsd: number | undefined,
+  ): void {
+    try {
+      if (
+        error instanceof BackendQuotaError
+        || error instanceof BackendDecisiveFailure
+      ) {
+        // Already classified upstream (carries its own spend or lack of
+        // one) — re-stamping could only disagree with the classified
+        // payload.
+        return;
+      }
+      const isBudgetAbort = isClaudeCodeMaxBudgetError(error);
+      const sawUsage = accumulatorSawUsage(acc);
+      if (!sawUsage && !(isBudgetAbort && typeof maxBudgetUsd === "number")) {
+        return;
+      }
+      const estimated = sawUsage && this.priceFetcher
+        ? this.priceFetcher.estimateUsageCost({
+            backendId: this.backendId,
+            modelId,
+            usage: acc.usage,
+            fallbackModel: findRegisteredModel(this.backendId, modelId),
+          }).costUsd
+        : 0;
+      const costUsd = isBudgetAbort
+        ? Math.max(estimated, maxBudgetUsd ?? 0)
+        : estimated;
+      attachPartialSpend(error, {
+        usage: { ...acc.usage },
+        costUsd,
+        modelId,
+        numTurns: acc.numTurns,
+        durationMs: Date.now() - startMs,
+        costSource: "sdk_partial",
+      });
+    } catch (stampErr) {
+      // Best-effort telemetry — never mask the original failure.
+      logger.warn(
+        { err: stampErr, modelId },
+        "Failed to stamp partial spend onto Claude execution error",
+      );
+    }
+  }
+
   /** Visible for testing. */
   classifyExecutionError(
     error: unknown,
@@ -958,26 +1150,43 @@ export class ClaudeCodeCore implements IAgentCore {
     if (quotaError) {
       return quotaError;
     }
+    const partialSpend = getAttachedPartialSpend(error);
     if (error instanceof AgentTimeoutError) {
-      return new BackendDecisiveFailure(this.backendId, "timeout", error);
+      return new BackendDecisiveFailure(
+        this.backendId,
+        "timeout",
+        error,
+        partialSpend,
+      );
     }
     if (this.isAuthError(error)) {
-      return new BackendDecisiveFailure(this.backendId, "auth", error);
+      return new BackendDecisiveFailure(
+        this.backendId,
+        "auth",
+        error,
+        partialSpend,
+      );
     }
     return new BackendDecisiveFailure(
       this.backendId,
       "other_non_retryable",
       error,
+      partialSpend,
     );
   }
 
   private toBackendQuotaError(error: unknown): BackendQuotaError | null {
     if (isClaudeCodeMaxBudgetError(error)) {
+      // The partial-spend snapshot stamped by `stampPartialSpend` is the
+      // only usage figure that exists for a budget abort — the SDK kills
+      // the stream before the terminal `result` message
+      // (PREPASS_COST_REDUCTION_PLAN.md N1).
       return new BackendQuotaError(
         this.backendId,
         "max_budget_usd",
         null,
         this.getErrorMessage(error),
+        getAttachedPartialSpend(error),
       );
     }
 
@@ -991,6 +1200,7 @@ export class ClaudeCodeCore implements IAgentCore {
       this.getErrorCode(error) ?? "rate_limited",
       hint ? this.toBackendQuotaResetHint(hint) : null,
       this.getErrorMessage(error),
+      getAttachedPartialSpend(error),
     );
   }
 
@@ -1218,6 +1428,13 @@ export class ClaudeCodeCore implements IAgentCore {
     startMs: number,
     streamCallbacks?: StreamCallbacks,
     eventType?: string,
+    /**
+     * PREPASS_COST_REDUCTION_PLAN.md N1 — live per-message usage sink the
+     * caller keeps a reference to. When the stream throws before the
+     * terminal `result` message, the caller stamps a spend snapshot built
+     * from this accumulator onto the propagating error.
+     */
+    partialUsage?: PartialUsageAccumulator,
   ): Promise<AgentResult> {
     let output = "";
     let streamedOutput = "";
@@ -1275,6 +1492,12 @@ export class ClaudeCodeCore implements IAgentCore {
           // Track Bash tool_use blocks that hit the context API + server-side
           // advisor tool invocations.
           const assistantMsg = message as SDKAssistantMessage;
+          if (partialUsage) {
+            recordAssistantUsage(
+              partialUsage,
+              (assistantMsg.message as { usage?: unknown } | undefined)?.usage,
+            );
+          }
           const blocks = assistantMsg.message?.content;
           if (Array.isArray(blocks)) {
             for (const block of blocks) {

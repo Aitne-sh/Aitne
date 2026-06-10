@@ -36,84 +36,119 @@ type NavItem = {
   description: string;
 };
 
-const NAV_ITEMS: NavItem[] = [
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+/**
+ * Settings IA — grouped by what the user is configuring, not by when the
+ * page was added. Routes are unchanged (deep links and PAGE_KEYS stay
+ * valid); only the navigation presentation is grouped.
+ */
+const NAV_GROUPS: NavGroup[] = [
   {
-    href: "/settings",
-    label: "Profile",
-    icon: User,
-    description: "Identity and time axis",
+    label: "Agent",
+    items: [
+      {
+        href: "/settings",
+        label: "Profile",
+        icon: User,
+        description: "Identity and time axis",
+      },
+      {
+        href: "/settings/schedule",
+        label: "Schedule",
+        icon: Clock,
+        description: "Hourly check, quiet hours, notifications",
+      },
+      {
+        href: "/settings/routines",
+        label: "Routines",
+        icon: Repeat,
+        description: "Per-cadence check rulebooks and custom cron routines",
+      },
+      {
+        href: "/settings/journal",
+        label: "Journal",
+        icon: BookText,
+        description: "Daily journal format template and export redaction rules",
+      },
+    ],
   },
   {
-    href: "/settings/schedule",
-    label: "Schedule",
-    icon: Clock,
-    description: "Hourly check, quiet hours, notifications",
+    label: "Intelligence",
+    items: [
+      {
+        href: "/settings/models",
+        label: "Models",
+        icon: Cpu,
+        description: "Backends, routing, execution limits",
+      },
+      {
+        href: "/settings/self-learning",
+        label: "Self-learning",
+        icon: Sparkles,
+        description: "Knowledge-map skill curation (Preview)",
+      },
+      {
+        href: "/settings/lessons",
+        label: "Lessons",
+        icon: GraduationCap,
+        description: "Feedback learning — view/edit lessons, tune caps (Preview)",
+      },
+      {
+        href: "/settings/wiki",
+        label: "Wiki",
+        icon: BookOpenText,
+        description: "Workspace, commands, wiki budgets",
+      },
+    ],
   },
   {
-    href: "/settings/routines",
-    label: "Routines",
-    icon: Repeat,
-    description: "Per-cadence check rulebooks and custom cron routines",
+    label: "Operations",
+    items: [
+      {
+        href: "/settings/management",
+        label: "Management",
+        icon: ClipboardList,
+        description: "Source-of-truth bindings and managed tasks",
+      },
+      {
+        href: "/settings/commands",
+        label: "Commands",
+        icon: Terminal,
+        description: "Messaging shortcuts and custom prompts",
+      },
+    ],
   },
   {
-    href: "/settings/self-learning",
-    label: "Self-learning",
-    icon: Sparkles,
-    description: "Knowledge-map skill curation (Preview)",
+    label: "Browser",
+    items: [
+      {
+        href: "/settings/integrations/browser-history",
+        label: "Browser History",
+        icon: History,
+        description: "Read from your existing Chrome",
+      },
+      {
+        href: "/settings/integrations/browser-history-managed",
+        label: "Browser Automation",
+        icon: MonitorCog,
+        description: "Dedicated Chromium (OAuth + tasks)",
+      },
+    ],
   },
   {
-    href: "/settings/lessons",
-    label: "Lessons",
-    icon: GraduationCap,
-    description: "Feedback learning — view/edit lessons, tune caps (Preview)",
-  },
-  {
-    href: "/settings/management",
-    label: "Management",
-    icon: ClipboardList,
-    description: "Source-of-truth bindings and managed tasks",
-  },
-  {
-    href: "/settings/journal",
-    label: "Journal",
-    icon: BookText,
-    description: "Daily journal format template and export redaction rules",
-  },
-  {
-    href: "/settings/models",
-    label: "Models",
-    icon: Cpu,
-    description: "Backends, routing, execution limits",
-  },
-  {
-    href: "/settings/wiki",
-    label: "Wiki",
-    icon: BookOpenText,
-    description: "Workspace, commands, wiki budgets",
-  },
-  {
-    href: "/settings/integrations/browser-history",
-    label: "Browser History",
-    icon: History,
-    description: "Read from your existing Chrome",
-  },
-  {
-    href: "/settings/integrations/browser-history-managed",
-    label: "Browser Automation",
-    icon: MonitorCog,
-    description: "Dedicated Chromium (OAuth + tasks)",
-  },
-  {
-    href: "/settings/commands",
-    label: "Commands",
-    icon: Terminal,
-    description: "Messaging shortcuts and custom prompts",
-  },
-  {
-    href: "/settings/advanced",
-    label: "Advanced",
-    icon: SlidersHorizontal,
-    description: "Safety, infrastructure, danger zone",
+    label: "System",
+    items: [
+      {
+        href: "/settings/advanced",
+        label: "Advanced",
+        icon: SlidersHorizontal,
+        description: "Safety, infrastructure, danger zone",
+      },
+    ],
   },
 ];
 
@@ -215,59 +250,70 @@ export function SettingsNavigation() {
       aria-label="Settings sections"
       className="w-full md:w-60 md:shrink-0"
     >
-      <ul className="flex flex-row gap-1 overflow-x-auto md:flex-col md:gap-0.5">
-        {NAV_ITEMS.map((item) => {
-          // Use exact match OR prefix-with-`/` boundary so sibling routes
-          // don't fight for the active state — e.g. `/settings/integrations/
-          // browser-history-managed` previously matched both `/…/browser-
-          // history` and `/…/browser-history-managed` because plain
-          // `startsWith` ignores the segment boundary.
-          const active =
-            pathname === item.href
-            || (item.href !== "/settings"
-              && pathname.startsWith(item.href + "/"));
-          const Icon = item.icon;
-          const pageDirtyCount = dirtyCountForPage(item.href);
+      <div className="flex flex-row gap-1 overflow-x-auto md:flex-col md:gap-4">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label} className="flex flex-row gap-1 md:block">
+            {/* Group headers only make sense in the vertical (md+) layout —
+                the mobile horizontal scroller stays a flat chip row. */}
+            <p className="hidden px-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70 md:block">
+              {group.label}
+            </p>
+            <ul className="flex flex-row gap-1 md:flex-col md:gap-0.5">
+              {group.items.map((item) => {
+                // Use exact match OR prefix-with-`/` boundary so sibling routes
+                // don't fight for the active state — e.g. `/settings/integrations/
+                // browser-history-managed` previously matched both `/…/browser-
+                // history` and `/…/browser-history-managed` because plain
+                // `startsWith` ignores the segment boundary.
+                const active =
+                  pathname === item.href
+                  || (item.href !== "/settings"
+                    && pathname.startsWith(item.href + "/"));
+                const Icon = item.icon;
+                const pageDirtyCount = dirtyCountForPage(item.href);
 
-          return (
-            <li key={item.href}>
-              <Link
-                href={item.href}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "group flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors md:whitespace-normal",
-                  active
-                    ? "bg-primary/10 text-primary font-medium"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="flex-1">
-                  <span className="block">
-                    {item.label}
-                    {pageDirtyCount > 0 && (
-                      <span
-                        className="ml-1.5 inline-block h-2 w-2 rounded-full bg-blue-500"
-                        title={`${pageDirtyCount} unsaved change${pageDirtyCount !== 1 ? "s" : ""}`}
-                      />
-                    )}
-                  </span>
-                  <span
-                    className={cn(
-                      "hidden text-[11px] font-normal md:block",
-                      active
-                        ? "text-primary/70"
-                        : "text-muted-foreground/70 group-hover:text-muted-foreground",
-                    )}
-                  >
-                    {item.description}
-                  </span>
-                </span>
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      className={cn(
+                        "group flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors md:whitespace-normal",
+                        active
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="flex-1">
+                        <span className="block">
+                          {item.label}
+                          {pageDirtyCount > 0 && (
+                            <span
+                              className="ml-1.5 inline-block h-2 w-2 rounded-full bg-primary"
+                              title={`${pageDirtyCount} unsaved change${pageDirtyCount !== 1 ? "s" : ""}`}
+                            />
+                          )}
+                        </span>
+                        <span
+                          className={cn(
+                            "hidden text-[11px] font-normal md:block",
+                            active
+                              ? "text-primary/70"
+                              : "text-muted-foreground/70 group-hover:text-muted-foreground",
+                          )}
+                        >
+                          {item.description}
+                        </span>
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
       <div className="hidden md:block mt-4 px-3">
         <kbd className="text-[10px] text-muted-foreground/60 font-mono">
           {"⌘K"}

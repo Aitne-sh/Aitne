@@ -33,6 +33,7 @@ import {
   computeNativeClaudeTools,
   extractClaudeCodeQuotaResetHint,
   isClaudeCodeQuotaError,
+  getAttachedPartialSpend,
 } from "./claude-code-core.js";
 import type {
   IntegrationKey,
@@ -4672,5 +4673,90 @@ describe("ClaudeCodeCore", () => {
         teardown(sessionDir);
       }
     });
+  });
+});
+
+describe("partial-spend recovery (PREPASS_COST_REDUCTION_PLAN.md N1)", () => {
+  type StampArgs = [unknown, { usage: { inputTokens: number; outputTokens: number; cacheCreationInputTokens: number; cacheReadInputTokens: number }; numTurns: number }, string, number, number | undefined];
+  const stamp = (core: ClaudeCodeCore, ...args: StampArgs): void => {
+    (core as unknown as { stampPartialSpend: (...a: StampArgs) => void })
+      .stampPartialSpend(...args);
+  };
+  const acc = (tokens: number, turns: number) => ({
+    usage: {
+      inputTokens: tokens,
+      outputTokens: Math.floor(tokens / 10),
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    },
+    numTurns: turns,
+  });
+
+  it("stamps nothing when no usage was observed and the error is not a budget abort", () => {
+    const core = new ClaudeCodeCore(makeConfig());
+    const err = new Error("socket hang up");
+    stamp(core, err, acc(0, 0), "claude-haiku-4-5-20251001", Date.now(), 0.5);
+    expect(getAttachedPartialSpend(err)).toBeNull();
+  });
+
+  it("stamps a cap-floored sdk_partial spend on a max-budget abort", () => {
+    const core = new ClaudeCodeCore(makeConfig());
+    const err = new Error("max budget exceeded for this turn");
+    stamp(core, err, acc(1_000, 2), "claude-haiku-4-5-20251001", Date.now() - 5_000, 0.5);
+    const spend = getAttachedPartialSpend(err);
+    expect(spend).not.toBeNull();
+    expect(spend?.costSource).toBe("sdk_partial");
+    // Token-derived estimate for 1k input tokens is far below the $0.50
+    // cap the SDK's own metering crossed — the floor must win.
+    expect(spend?.costUsd).toBeGreaterThanOrEqual(0.5);
+    expect(spend?.numTurns).toBe(2);
+    expect(spend?.durationMs).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it("stamps a budget abort even with zero observed usage when the cap is known", () => {
+    const core = new ClaudeCodeCore(makeConfig());
+    const err = new Error("per-turn budget limit reached");
+    stamp(core, err, acc(0, 0), "claude-haiku-4-5-20251001", Date.now(), 1.5);
+    const spend = getAttachedPartialSpend(err);
+    expect(spend?.costUsd).toBe(1.5);
+    expect(spend?.costSource).toBe("sdk_partial");
+  });
+
+  it("classifyExecutionError lifts the stamped spend onto the max_budget_usd quota error", () => {
+    const core = new ClaudeCodeCore(makeConfig());
+    const err = new Error("max budget exceeded for this turn");
+    stamp(core, err, acc(2_000, 3), "claude-haiku-4-5-20251001", Date.now(), 0.3);
+    const classified = core.classifyExecutionError(err);
+    expect(classified).toBeInstanceOf(BackendQuotaError);
+    const quota = classified as BackendQuotaError;
+    expect(quota.originalCode).toBe("max_budget_usd");
+    expect(quota.spend?.costSource).toBe("sdk_partial");
+    expect(quota.spend?.costUsd).toBeGreaterThanOrEqual(0.3);
+  });
+
+  it("classifyExecutionError lifts the stamped spend onto timeout decisive failures", () => {
+    const core = new ClaudeCodeCore(makeConfig());
+    const err = new AgentTimeoutError(60_000);
+    stamp(core, err, acc(50_000, 7), "claude-sonnet-4-6", Date.now() - 60_000, 1.0);
+    const classified = core.classifyExecutionError(err);
+    expect(classified).toBeInstanceOf(BackendDecisiveFailure);
+    const failure = classified as BackendDecisiveFailure;
+    expect(failure.kind).toBe("timeout");
+    expect(failure.spend?.costSource).toBe("sdk_partial");
+    expect(failure.spend?.numTurns).toBe(7);
+    // Timeout is NOT a budget abort — no cap floor, token estimate only.
+    expect(failure.spend?.costUsd).toBeGreaterThan(0);
+  });
+
+  it("classifyExecutionError leaves spend null for unstamped errors", () => {
+    const core = new ClaudeCodeCore(makeConfig());
+    const classified = core.classifyExecutionError(new Error("weird transport error"));
+    expect((classified as BackendDecisiveFailure).spend).toBeNull();
+  });
+
+  it("getAttachedPartialSpend returns null for primitives and clean objects", () => {
+    expect(getAttachedPartialSpend(null)).toBeNull();
+    expect(getAttachedPartialSpend("boom")).toBeNull();
+    expect(getAttachedPartialSpend(new Error("clean"))).toBeNull();
   });
 });

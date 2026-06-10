@@ -676,6 +676,56 @@ describe("planCreate (POST /api/agents)", () => {
     expect(plan.markdown).toContain("state/today.md");
   });
 
+  it("carries schedule.defer_in_quiet_hours through the recurring form (QUIET_HOURS_HARDENING_PLAN §6)", () => {
+    const plan = planCreate(
+      cronBody({
+        schedule: {
+          kind: "recurring",
+          recurrence: { frequency: "daily", time: "03:00" },
+          timezone: "Asia/Tokyo",
+          defer_in_quiet_hours: true,
+        },
+      }),
+      NONE,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.markdown).toContain("defer_in_quiet_hours: true");
+  });
+
+  it("carries schedule.defer_in_quiet_hours through the raw cron form", () => {
+    const plan = planCreate(
+      cronBody({
+        schedule: {
+          kind: "cron",
+          expression: "0 3 * * *",
+          timezone: "Asia/Tokyo",
+          defer_in_quiet_hours: true,
+        },
+      }),
+      NONE,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.markdown).toContain("defer_in_quiet_hours: true");
+  });
+
+  it("rejects a non-boolean defer_in_quiet_hours as invalid_definition", () => {
+    const plan = planCreate(
+      cronBody({
+        schedule: {
+          kind: "recurring",
+          recurrence: { frequency: "daily", time: "03:00" },
+          defer_in_quiet_hours: "yes",
+        },
+      }),
+      NONE,
+    );
+    if (plan.ok || plan.status !== 400) throw new Error("expected invalid_definition");
+    expect(plan.error).toBe("invalid_definition");
+    expect(plan.issues?.some((i) => i.field === "schedule.defer_in_quiet_hours")).toBe(true);
+  });
+
   it("rejects a one_shot schedule with a pointer to /schedule", () => {
     const plan = planCreate(
       { slug: "x", name: "X", schedule: { kind: "one_shot", one_shot_at: "2099-01-01T00:00:00Z" } },

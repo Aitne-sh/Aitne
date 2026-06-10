@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createEvent, EventPriority } from "@aitne/shared";
 import type { AgentResult, BackendId, RoutineEvent } from "@aitne/shared";
 import { applySchema } from "../db/schema.js";
+import { BackendQuotaError } from "./agent-core.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import {
   getTaskFlow as realGetTaskFlow,
@@ -26,6 +27,7 @@ const REPO_ROOT = join(TEST_DIR, "..", "..", "..", "..");
 import type { IntegrationKey, IntegrationState } from "@aitne/shared";
 import type { AgentConfig } from "../config.js";
 import type { IAgentRouter } from "./backends/backend-router.js";
+import type { AutonomousSpawnGate } from "./spawn-gates.js";
 import type { IAuditLogger, IContextBuilder } from "./dispatcher-types.js";
 import type { MailAccount } from "../services/mail/provider.js";
 
@@ -118,6 +120,8 @@ function makeFetcherRunner(opts: {
   audit?: IAuditLogger;
   contextBuilder?: IContextBuilder;
   config?: Partial<AgentConfig>;
+  /** N2 spawn-gate stub — omitted = no gate (legacy behavior). */
+  spawnGate?: AutonomousSpawnGate;
   /**
    * Optional override for the task-flow body the assembler resolves.
    * Most existing tests use the default constant "fetcher-prompt-body";
@@ -160,8 +164,22 @@ function makeFetcherRunner(opts: {
     audit,
     prompt,
     getActiveMailAccounts: () => opts.mailAccounts ?? [],
+    ...(opts.spawnGate ? { spawnGate: opts.spawnGate } : {}),
   });
   return { runner, audit, router, prompt };
+}
+
+/** Permissive-or-blocking N2 spawn-gate stub. */
+function makeSpawnGate(decision: {
+  skip: boolean;
+  reason?: "offline" | "auth_unhealthy";
+}): AutonomousSpawnGate {
+  return {
+    evaluate: vi.fn(async () => ({
+      ...decision,
+      backends: [],
+    })),
+  } as unknown as AutonomousSpawnGate;
 }
 
 function morningEvent(over: Partial<RoutineEvent> = {}): RoutineEvent {
@@ -2819,5 +2837,296 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
         requestedBackend: "claude",
       },
     });
+  });
+});
+
+describe("RoutineFetchWindowRunner — N2 spawn gate + N1 failure spend + N3 drops", () => {
+  let db: Database.Database;
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-fw-n2-"));
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+    gmailIntegrationDirect(db);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("skips the sub-session with a skipped audit row when the gate blocks, leaving freshness unwritten", async () => {
+    const { router, execute } = makeRouter();
+    const audit = makeAudit();
+    const spawnGate = makeSpawnGate({ skip: true, reason: "offline" });
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      spawnGate,
+      mailAccounts: [seedMailAccount()],
+      config: { prePassMaxAttemptsPerIntegration: 1 },
+    });
+    const { report } = await runner.run(morningEvent());
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(report.status).toBe("skipped");
+    expect((report.perIntegration ?? [])[0]).toMatchObject({
+      integrationKey: "gmail",
+      status: "skipped",
+    });
+    expect(audit.logSkip).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      "offline",
+      "autonomous",
+      expect.objectContaining({
+        prePass: expect.objectContaining({
+          integrationKey: "gmail",
+          skipReason: "offline",
+        }),
+      }),
+    );
+    // Freshness untouched — the next tick retries.
+    const freshness = db
+      .prepare("SELECT value_json FROM runtime_state WHERE key = 'pre_pass_last_run:gmail'")
+      .get();
+    expect(freshness).toBeUndefined();
+  });
+
+  it("runs normally when the gate passes", async () => {
+    const { router, execute } = makeRouter();
+    const spawnGate = makeSpawnGate({ skip: false });
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      spawnGate,
+      mailAccounts: [seedMailAccount()],
+      config: { prePassMaxAttemptsPerIntegration: 1 },
+    });
+    const { report } = await runner.run(morningEvent());
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(report.status).toBe("success");
+    expect(
+      (spawnGate as unknown as { evaluate: ReturnType<typeof vi.fn> }).evaluate,
+    ).toHaveBeenCalledWith(["claude"]);
+  });
+
+  it("fails open when the gate itself rejects", async () => {
+    const { router, execute } = makeRouter();
+    const spawnGate = {
+      evaluate: vi.fn(async () => {
+        throw new Error("gate exploded");
+      }),
+    } as unknown as AutonomousSpawnGate;
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      spawnGate,
+      mailAccounts: [seedMailAccount()],
+      config: { prePassMaxAttemptsPerIntegration: 1 },
+    });
+    const { report } = await runner.run(morningEvent());
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(report.status).toBe("success");
+  });
+
+  it("recovers the failure spend into the attempt record, budget guard, and audit row (N1)", async () => {
+    const spend = {
+      usage: {
+        inputTokens: 30_000,
+        outputTokens: 1_000,
+        cacheCreationInputTokens: 34_000,
+        cacheReadInputTokens: 0,
+      },
+      costUsd: 0.5,
+      modelId: "claude-haiku-4-5",
+      numTurns: 9,
+      durationMs: 90_000,
+      costSource: "sdk_partial" as const,
+    };
+    const quotaKill = new BackendQuotaError(
+      "claude",
+      "max_budget_usd",
+      null,
+      "max budget exceeded",
+      spend,
+    );
+    const { router, execute } = makeRouter(quotaKill as unknown as Error);
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [seedMailAccount()],
+      config: { prePassMaxAttemptsPerIntegration: 1 },
+    });
+    const { report } = await runner.run(morningEvent());
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    const sub = (report.perIntegration ?? [])[0];
+    expect(sub?.status).toBe("failed");
+    // The attempt record carries the recovered spend, not a silent 0.
+    expect(sub?.attempts[0]?.costUsd).toBeCloseTo(0.5, 4);
+    expect(sub?.attempts[0]?.numTurns).toBe(9);
+    // The audit row carries the recovered cost/tokens/turns.
+    expect(audit.logError).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      expect.any(Error),
+      "autonomous",
+      expect.objectContaining({
+        failureKind: "agent-execute-failed",
+        costUsd: 0.5,
+        costSource: "sdk_partial",
+        tokensInput: 30_000,
+        tokensOutput: 1_000,
+        numTurns: 9,
+      }),
+    );
+  });
+
+  it("writes one plan_drop audit row per dropped integration×reason group (N3)", async () => {
+    // gmail is seeded direct (beforeEach) but NO mail accounts are passed
+    // → its per-account mail windows drop with `no_accounts`. The other
+    // mode-aware integrations sit at the store default `disabled`.
+    // (A delegated/native row without a binding cannot round-trip through
+    // the integrations store — integrationStateSchema rejects it — so the
+    // defensive `no_binding` reason is exercised at the
+    // routine-acquisition-plan unit level instead.)
+    const { router, execute } = makeRouter();
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({ db, dataDir, router, audit });
+    const { report } = await runner.run(morningEvent());
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(report.status).toBe("skipped");
+    expect(audit.logSkip).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      "plan_drop:no_accounts",
+      "autonomous",
+      expect.objectContaining({
+        prePass: expect.objectContaining({
+          parentRoutine: "routine.morning_routine",
+          integrationKey: "gmail",
+          skipReason: "no_accounts",
+          windows: expect.arrayContaining([expect.any(String)]),
+        }),
+      }),
+    );
+    expect(audit.logSkip).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      "plan_drop:disabled",
+      "autonomous",
+      expect.objectContaining({
+        prePass: expect.objectContaining({
+          integrationKey: "notion",
+          skipReason: "disabled",
+        }),
+      }),
+    );
+    // One row per (integration, reason) group — gmail's mail windows
+    // collapse into a single no_accounts row.
+    const gmailDropCalls = (audit.logSkip as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([, reason]) => reason === "plan_drop:no_accounts");
+    expect(gmailDropCalls).toHaveLength(1);
+  });
+
+  it("filters direct_inline_prefetch drops out of the N3 audit stream — only the genuine drop group logs", async () => {
+    // morning_routine with both calendar providers in `direct` mode hits
+    // the deliberately-omitted cal_morning_7d direct cells →
+    // `direct_inline_prefetch` drops (catalog working as designed —
+    // ContextBuilder pre-fetches those events inline). notion `disabled`
+    // is the single genuine drop group. gmail / outlook_mail run direct
+    // with one account each so the mail windows emit rows instead of
+    // dropping.
+    seedIntegrations(db, {
+      gmail: integrationState({ mode: "direct" }),
+      outlook_mail: integrationState({ mode: "direct" }),
+      google_calendar: integrationState({ mode: "direct" }),
+      outlook_calendar: integrationState({ mode: "direct" }),
+      notion: integrationState({ mode: "disabled" }),
+    });
+    const { router } = makeRouter();
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [
+        seedMailAccount(),
+        {
+          ...seedMailAccount(),
+          id: "acct2",
+          kind: "outlook",
+          email: "alice@outlook.example.com",
+        },
+      ],
+    });
+    const { report } = await runner.run(morningEvent());
+
+    expect(report.status).toBe("success");
+    // Exactly ONE skipped audit row — the notion disabled group. The two
+    // direct_inline_prefetch drops (google_calendar + outlook_calendar)
+    // must NOT produce rows: counting them would pollute the R4/R5
+    // sizing data every single run.
+    expect(audit.logSkip).toHaveBeenCalledTimes(1);
+    expect(audit.logSkip).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      "plan_drop:disabled",
+      "autonomous",
+      expect.objectContaining({
+        prePass: expect.objectContaining({
+          parentRoutine: "routine.morning_routine",
+          integrationKey: "notion",
+          skipReason: "disabled",
+          windows: ["updated_24h"],
+        }),
+      }),
+    );
+  });
+
+  it("writes zero plan_drop audit rows when every drop is direct_inline_prefetch", async () => {
+    // All five morning_routine integrations active in `direct` mode: the
+    // mail + notion windows emit rows, and the ONLY drops are the two
+    // cal_morning_7d direct_inline_prefetch cells. The N3 audit stream
+    // must stay silent — these drops are deterministic catalog design,
+    // not a signal.
+    seedIntegrations(db, {
+      gmail: integrationState({ mode: "direct" }),
+      outlook_mail: integrationState({ mode: "direct" }),
+      google_calendar: integrationState({ mode: "direct" }),
+      outlook_calendar: integrationState({ mode: "direct" }),
+      notion: integrationState({ mode: "direct" }),
+    });
+    const { router, execute } = makeRouter();
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [
+        seedMailAccount(),
+        {
+          ...seedMailAccount(),
+          id: "acct2",
+          kind: "outlook",
+          email: "alice@outlook.example.com",
+        },
+      ],
+    });
+    const { report } = await runner.run(morningEvent());
+
+    // The plan was non-empty (gmail + outlook_mail + notion sub-sessions
+    // spawned) — the drops were real but all filtered.
+    expect(execute).toHaveBeenCalledTimes(3);
+    expect(report.status).toBe("success");
+    expect(audit.logSkip).not.toHaveBeenCalled();
   });
 });

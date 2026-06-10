@@ -348,6 +348,43 @@ describe("MailPoller", () => {
     expect(health.lastError).toBeNull();
   });
 
+  it("aborts a hung pollSince after the wall-clock cap and records a failed tick", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = makeRegistry((account) => ({
+        ...scriptedProvider(account, { pages: [] }),
+        // Never settles — models the half-dead TCP socket left behind after
+        // machine sleep, where the server never RSTs and no error fires.
+        pollSince: () => new Promise(() => undefined),
+      }));
+      const account = await seedOutlookAccount(registry);
+
+      const poller = new MailPoller({
+        registry,
+        db,
+        writeTracker,
+        pollIntervalSeconds: 60,
+        maxMessagesPerPoll: 20,
+      });
+
+      const tick = (poller as unknown as { tick: () => Promise<void> }).tick();
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+      await tick;
+
+      const health = registry.getHealth(account.id)!;
+      expect(health.consecutiveErrorCount).toBe(1);
+      expect(health.lastError).toContain("mail_poll_timeout");
+
+      // The tick-level inFlight flag must be released so the next tick runs.
+      const second = (poller as unknown as { tick: () => Promise<void> }).tick();
+      await vi.advanceTimersByTimeAsync(4 * 60 * 1000);
+      await second;
+      expect(registry.getHealth(account.id)!.consecutiveErrorCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("flips auth_status to requires_consent on AADSTS invalid_grant and DMs the owner", async () => {
     const err = new Error("AADSTS700082: ExpiredOrRevoked");
     const registry = makeRegistry((account) =>

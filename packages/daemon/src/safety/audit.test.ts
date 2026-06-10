@@ -1911,3 +1911,185 @@ describe("AuditLogger", () => {
     });
   });
 });
+
+describe("PREPASS_COST_REDUCTION_PLAN.md N1/N2/N3 audit extensions", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  function makeRoutineEvent() {
+    return createEvent({
+      type: "routine.fetch_window",
+      source: "cron",
+      priority: EventPriority.NORMAL,
+    });
+  }
+
+  it("logSkip persists the optional detail payload as JSON", () => {
+    const audit = new AuditLogger(db);
+    const event = makeRoutineEvent();
+    audit.logSkip(event, "offline", "autonomous", {
+      spawnGate: { backends: [{ backendId: "claude", offline: true }] },
+    });
+    const row = db
+      .prepare("SELECT result, error, detail FROM agent_actions LIMIT 1")
+      .get() as { result: string; error: string; detail: string };
+    expect(row.result).toBe("skipped");
+    expect(row.error).toBe("offline");
+    const detail = JSON.parse(row.detail) as {
+      spawnGate: { backends: Array<{ backendId: string; offline: boolean }> };
+    };
+    expect(detail.spawnGate.backends[0]).toMatchObject({
+      backendId: "claude",
+      offline: true,
+    });
+  });
+
+  it("logSkip without detail keeps the legacy NULL detail shape", () => {
+    const audit = new AuditLogger(db);
+    audit.logSkip(makeRoutineEvent(), "no_observations", "autonomous");
+    const row = db
+      .prepare("SELECT detail FROM agent_actions LIMIT 1")
+      .get() as { detail: string | null };
+    expect(row.detail).toBeNull();
+  });
+
+  it("logError persists recovered spend fields (cost/tokens/turns/source)", () => {
+    const audit = new AuditLogger(db);
+    const event = makeRoutineEvent();
+    audit.logError(event, new Error("agent-execute-failed"), "autonomous", {
+      durationMs: 12_000,
+      backendId: "claude",
+      modelId: "claude-haiku-4-5-20251001",
+      failureKind: "agent-execute-failed",
+      costUsd: 0.5,
+      costSource: "sdk_partial",
+      tokensInput: 30_000,
+      tokensOutput: 1_500,
+      numTurns: 9,
+    });
+    const row = db
+      .prepare(
+        `SELECT result, cost_usd, cost_source, tokens_input, tokens_output, num_turns
+         FROM agent_actions LIMIT 1`,
+      )
+      .get() as {
+        result: string;
+        cost_usd: number;
+        cost_source: string;
+        tokens_input: number;
+        tokens_output: number;
+        num_turns: number;
+      };
+    expect(row.result).toBe("failed");
+    expect(row.cost_usd).toBeCloseTo(0.5, 4);
+    expect(row.cost_source).toBe("sdk_partial");
+    expect(row.tokens_input).toBe(30_000);
+    expect(row.tokens_output).toBe(1_500);
+    expect(row.num_turns).toBe(9);
+  });
+
+  it("logError persists cache-token spend fields into cache_creation_tokens / cache_read_tokens", () => {
+    const audit = new AuditLogger(db);
+    audit.logError(makeRoutineEvent(), new Error("budget kill"), "autonomous", {
+      durationMs: 5_000,
+      backendId: "claude",
+      costUsd: 0.3,
+      costSource: "sdk_partial",
+      tokensInput: 1_000,
+      tokensOutput: 200,
+      tokensCacheCreation: 4_321,
+      tokensCacheRead: 9_876,
+      numTurns: 2,
+    });
+    const row = db
+      .prepare(
+        "SELECT result, cache_creation_tokens, cache_read_tokens FROM agent_actions LIMIT 1",
+      )
+      .get() as {
+        result: string;
+        cache_creation_tokens: number;
+        cache_read_tokens: number;
+      };
+    expect(row.result).toBe("failed");
+    expect(row.cache_creation_tokens).toBe(4_321);
+    expect(row.cache_read_tokens).toBe(9_876);
+  });
+
+  it("logError without cache-token fields leaves cache columns NULL", () => {
+    const audit = new AuditLogger(db);
+    audit.logError(makeRoutineEvent(), new Error("boom"), "autonomous", {
+      durationMs: 1_000,
+      costUsd: 0.1,
+      tokensInput: 500,
+      tokensOutput: 50,
+    });
+    const row = db
+      .prepare(
+        "SELECT cache_creation_tokens, cache_read_tokens FROM agent_actions LIMIT 1",
+      )
+      .get() as {
+        cache_creation_tokens: number | null;
+        cache_read_tokens: number | null;
+      };
+    expect(row.cache_creation_tokens).toBeNull();
+    expect(row.cache_read_tokens).toBeNull();
+  });
+
+  it("logError without spend fields leaves cost columns NULL (no fabricated values)", () => {
+    const audit = new AuditLogger(db);
+    audit.logError(makeRoutineEvent(), new Error("boom"), "autonomous", {
+      durationMs: 1_000,
+      failureKind: "context-build-failed",
+    });
+    const row = db
+      .prepare("SELECT cost_usd, tokens_input, num_turns FROM agent_actions LIMIT 1")
+      .get() as { cost_usd: number | null; tokens_input: number | null; num_turns: number | null };
+    expect(row.cost_usd).toBeNull();
+    expect(row.tokens_input).toBeNull();
+    expect(row.num_turns).toBeNull();
+  });
+
+  it("logError settles an in_progress sentinel row with the spend fields (UPSERT path)", () => {
+    const audit = new AuditLogger(db);
+    const event = makeRoutineEvent();
+    const id = audit.insertInProgressRow({
+      correlationId: event.correlationId,
+      actionType: event.type,
+      trigger: "autonomous",
+    });
+    expect(id).toBeGreaterThan(0);
+    audit.logError(event, new Error("late failure"), "autonomous", {
+      costUsd: 0.25,
+      costSource: "post_hoc_error",
+      numTurns: 4,
+    });
+    const rows = db
+      .prepare(
+        "SELECT id, result, cost_usd, cost_source, num_turns FROM agent_actions WHERE event_id = ?",
+      )
+      .all(event.correlationId) as Array<{
+        id: number;
+        result: string;
+        cost_usd: number | null;
+        cost_source: string | null;
+        num_turns: number | null;
+      }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id,
+      result: "failed",
+      cost_source: "post_hoc_error",
+      num_turns: 4,
+    });
+    expect(rows[0]?.cost_usd).toBeCloseTo(0.25, 4);
+  });
+});

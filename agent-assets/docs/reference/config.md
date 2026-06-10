@@ -143,7 +143,7 @@ case-sensitive.
 | `hourlyCheckStage2Enabled` | boolean | cost-reduction-structural §B Stage 2 toggle. |
 | `hourlyCheckHeartbeatHours` | number | Quiet-day heartbeat cadence. |
 | `hourlyCheckLowSignalPendingCeiling` | number | Low-signal ceiling before forcing dispatch. |
-| `hourlyCheckPrePassFreshnessMinutes` | number | Layer-1 freshness window — `harvestForGate` skips a per-integration fetch if `runtime_state.pre_pass_last_run:<key>` is fresher. |
+| `hourlyCheckPrePassFreshnessMinutes` | 0–480 | Default `30`. Layer-1 freshness window — `harvestForGate` skips a per-integration fetch if `runtime_state.pre_pass_last_run:<key>` is fresher. Cap widened 240 → 480 for the self-tuning R1 ladder (120/240/360/480). |
 
 ### Notifications and quiet hours
 
@@ -248,6 +248,7 @@ page. Defaults and ranges below are enforced in
 | Key | Type | Notes |
 |---|---|---|
 | `feedbackLearningEnabled` | boolean | Default `true` (env `FEEDBACK_LEARNING_ENABLED`). Master kill-switch for the whole loop — capture, consolidation, and injection. |
+| `selfTuningEnabled` | boolean | Default `false` (env `SELF_TUNING_ENABLED`). Actuation gate for the self-tuning review cycle. While `false`, the loop runs in shadow mode: the weekly review still receives `<tuning_recommendations>` and records verdicts via `POST /api/tuning/verdicts`, but no config change is ever applied. With the flag on, apply verdicts for config knobs actuate through the bounded config chokepoint — one owner DM per applied change, `!revert tuning` undoes the latest, and a daily monitor auto-reverts any change whose 7-day verify metrics regressed. Flip only after ≥2 clean shadow cycles (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §7 shadow→live gate). |
 | `feedbackPromotionThreshold` | 1–10 | Default `2` (env `FEEDBACK_PROMOTION_THRESHOLD`). Weighted-evidence threshold a behavioral / self-critique lesson must clear before it becomes injectable. |
 | `feedbackLessonMaxBytesGlobal` | 1024–32768 | Default `8192` (env `FEEDBACK_LESSON_MAX_BYTES_GLOBAL`). Byte cap for `policies/agent-lessons.md`. |
 | `feedbackLessonMaxBytesPerAgent` | 512–16384 | Default `4096` (env `FEEDBACK_LESSON_MAX_BYTES_PER_AGENT`). Byte cap for each `policies/agents/<slug>/lessons.md`. |

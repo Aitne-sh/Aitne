@@ -33,8 +33,28 @@ import {
   type MailIngestionStats,
 } from "../services/mail-ingestion.js";
 import type { TriggerRoadmapRefresh } from "../core/roadmap-refresh-triggers.js";
+import { raceWithAbort } from "../core/abort-utils.js";
 
 const logger = createLogger("mail-poller");
+
+/**
+ * Wall-clock cap on the per-account `pollSince` paging loop. Matches the
+ * NotionPoller tick cap. Without it, a half-dead connection (typical after
+ * machine sleep kills the TCP socket but the server never RSTs) hangs the
+ * account's poll forever — the tick-level `inFlight` flag then blocks every
+ * subsequent tick for ALL accounts until daemon restart. The aborted call
+ * leaks per the {@link raceWithAbort} contract; the transport's own timeout
+ * eventually reaps it.
+ */
+const ACCOUNT_POLL_TIMEOUT_MS = 4 * 60 * 1000;
+
+/**
+ * Wall-clock cap on `startIdle` (connect + mailboxOpen round-trips). Shorter
+ * than the poll cap — IDLE setup is two cheap round-trips; if they don't
+ * complete in a minute the socket is dead and the next tick should retry
+ * with a fresh connection.
+ */
+const IDLE_START_TIMEOUT_MS = 60 * 1000;
 
 export interface MailPollerOptions {
   registry: MailAccountRegistry;
@@ -261,6 +281,26 @@ export class MailPoller implements Observer {
     if (!account.idleEnabled) return;
     const provider = await this.registry.getProvider(account.id);
     if (!provider || !hasIdleSupport(provider)) return;
+    const aborter = new AbortController();
+    const timer = setTimeout(() => {
+      aborter.abort(
+        new Error(
+          `mail_idle_start_timeout:${account.id}:${IDLE_START_TIMEOUT_MS}ms`,
+        ),
+      );
+    }, IDLE_START_TIMEOUT_MS);
+    timer.unref?.();
+    try {
+      await raceWithAbort(this.startIdleForAccount(account, provider), aborter.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async startIdleForAccount(
+    account: MailAccount,
+    provider: IdleCapableMailProvider,
+  ): Promise<void> {
     await provider.startIdle({
       onDirty: () => {
         // INTEGRATION_NATIVE_MODE_DESIGN.md §6.2 — the tick-level filter
@@ -450,9 +490,21 @@ export class MailPoller implements Observer {
     let pages = 0;
     const maxPages = 5;
 
+    const aborter = new AbortController();
+    const timer = setTimeout(() => {
+      aborter.abort(
+        new Error(
+          `mail_poll_timeout:${account.id}:${ACCOUNT_POLL_TIMEOUT_MS}ms`,
+        ),
+      );
+    }, ACCOUNT_POLL_TIMEOUT_MS);
+    timer.unref?.();
     try {
       while (!drained && pages < maxPages) {
-        const result = await provider.pollSince(cursor, this.maxMessagesPerPoll);
+        const result = await raceWithAbort(
+          provider.pollSince(cursor, this.maxMessagesPerPoll),
+          aborter.signal,
+        );
         cursor = result.nextCursor;
         drained = result.drained;
         aggregated = aggregated.concat(result.messages);
@@ -466,6 +518,8 @@ export class MailPoller implements Observer {
         error: err instanceof Error ? err.message : String(err),
       });
       return;
+    } finally {
+      clearTimeout(timer);
     }
 
     this.registry.recordPollTick(account.id, { success: true });

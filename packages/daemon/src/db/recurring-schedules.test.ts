@@ -1246,6 +1246,39 @@ describe("recurring-schedules — Agent identity stamping (§7.2)", () => {
     expect("agent_id" in pendingContext(dto.id)).toBe(false);
   });
 
+  // QUIET_HOURS_HARDENING_PLAN.md §6 — the quiet-hours opt-in rides the parent
+  // row's task_context and must spread onto every materialised occurrence so
+  // the scheduler can read it row-locally at claim time.
+  it("spreads task_context.defer_in_quiet_hours onto materialised rows for opted-in Agents", () => {
+    const dto = createRecurringSchedule(db, {
+      taskType: "agent.task",
+      description: "Nightly DM digest",
+      recurrenceRule: makeRule(),
+      taskContext: { defer_in_quiet_hours: true },
+    });
+    pairAgent("nightly-dm-digest", dto.id);
+
+    // First materialisation (at create) already carries the flag…
+    expect(pendingContext(dto.id).defer_in_quiet_hours).toBe(true);
+
+    // …and so does a re-materialised occurrence after a rule change.
+    updateRecurringSchedule(db, dto.id, {
+      recurrenceRule: makeRule({ time: "10:00" }),
+    });
+    const ctx = pendingContext(dto.id);
+    expect(ctx.defer_in_quiet_hours).toBe(true);
+    expect(ctx.agent_id).toBe("nightly-dm-digest");
+  });
+
+  it("materialises rows without the flag when the parent row never opted in", () => {
+    const dto = createRecurringSchedule(db, {
+      taskType: "agent.task",
+      description: "Silent overnight writer",
+      recurrenceRule: makeRule(),
+    });
+    expect("defer_in_quiet_hours" in pendingContext(dto.id)).toBe(false);
+  });
+
   it("re-materialises a pending row but leaves a running row untouched on rule change (§11.3.2)", () => {
     const dto = createRecurringSchedule(db, {
       taskType: "agent.task",

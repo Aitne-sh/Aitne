@@ -27,7 +27,7 @@ ask_examples:
   - Where do weekly retros get stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-09
 keywords:
   - weekly review
   - Friday review
@@ -45,6 +45,7 @@ process_keys:
 config_keys:
   - timezone
   - dayBoundaryHour
+  - selfTuningEnabled
 ui_anchors:
   - /settings/models
   - /settings/routines
@@ -75,6 +76,17 @@ into every morning routine of the following ISO week.
   feedback signal (in addition to the `journal/agent.md` prose), so the
   idea is consolidated into the [agent lessons](../memory-files/agent-lessons.md)
   rather than only living in the journal.
+- Judges the daemon's self-tuning recommendations: when the weekly
+  pre-step finds a cost knob worth changing (e.g. raising the mail
+  pre-pass freshness window because most fetches came back empty), it
+  injects up to three bounded proposals and the review records an
+  apply / reject / defer verdict for each. While `selfTuningEnabled` is
+  `false` (the default) nothing is ever changed automatically — verdicts
+  are recorded for the owner to review (shadow mode). With the flag on,
+  an apply verdict is actuated immediately by the daemon within hard
+  per-key bounds; the owner gets a one-line DM per applied change
+  (`!revert tuning` undoes the latest one) and a daily monitor
+  auto-reverts any change whose 7-day follow-up metrics regressed.
 - Sends a brief Friday-evening notification by default (the silence
   gate triggers only on an essentially blank week).
 - Refreshes `identity/reading-taste.md` and Book Candidates when

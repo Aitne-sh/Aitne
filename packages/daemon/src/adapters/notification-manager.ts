@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { Event, MessageEvent } from "@aitne/shared";
-import { isMessageEvent, getAgentDayBoundsUtc } from "@aitne/shared";
+import { isMessageEvent } from "@aitne/shared";
 import { randomUUID } from "node:crypto";
 import type { AgentConfig } from "../config.js";
 import type { INotificationManager, ReplyActivityHandle } from "../core/dispatcher.js";
@@ -9,6 +9,8 @@ import {
   isInQuietHoursAt,
   nextQuietHoursEndMs as computeNextQuietHoursEndMs,
 } from "../core/quiet-hours.js";
+import { evaluateNotificationRateLimit } from "../core/notification-rate-limit.js";
+import { SAFETY_CATEGORIES } from "../core/notification-gate.js";
 import type { SignalDetector } from "../core/signal-detector.js";
 import type { MessageHub } from "./message-hub.js";
 import { MessageDeliveryError } from "./message-hub.js";
@@ -38,14 +40,6 @@ function logDeliveryFailure(err: unknown, msg: string): void {
 const NOOP_REPLY_ACTIVITY: ReplyActivityHandle = {
   stop: async () => {},
 };
-
-/** Safety categories bypass quiet hours and user preferences */
-const SAFETY_CATEGORIES = [
-  "security",
-  "deadline",
-  "error",
-  "critical",
-] as const;
 
 /**
  * Default bounded-retry shape for `deliverReply`. Sized so the operator's
@@ -801,42 +795,19 @@ export class NotificationManager implements INotificationManager {
     };
   }
 
-  /** Check if hourly or daily notification limits have been reached */
+  /**
+   * Check if hourly or daily notification limits have been reached.
+   * Counting lives in the shared `core/notification-rate-limit.ts` helper
+   * so this gate and the `/api/notify` route gate
+   * (QUIET_HOURS_HARDENING_PLAN.md Phase 1) cannot drift.
+   */
   private isRateLimited(): boolean {
-    // Hourly check
-    const hourlyCount = this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT CASE
-             WHEN dispatch_id != '' THEN dispatch_id
-             ELSE CAST(id AS TEXT)
-           END) as cnt
-         FROM notification_log
-         WHERE status = 'delivered'
-           AND COALESCE(notification_type, '') != 'message.received'
-           AND created_at > datetime('now', '-1 hour')`,
-      )
-      .get() as { cnt: number };
-
-    if (hourlyCount.cnt >= this.config.maxNotificationsPerHour) {
-      return true;
-    }
-
-    // Daily check (timezone-aware agent day)
-    const bounds = getAgentDayBoundsUtc(this.config.timezone, this.config.dayBoundaryHour);
-    const dailyCount = this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT CASE
-             WHEN dispatch_id != '' THEN dispatch_id
-             ELSE CAST(id AS TEXT)
-           END) as cnt
-         FROM notification_log
-         WHERE status = 'delivered'
-           AND COALESCE(notification_type, '') != 'message.received'
-           AND created_at >= ? AND created_at < ?`,
-      )
-      .get(bounds.start, bounds.end) as { cnt: number };
-
-    return dailyCount.cnt >= this.config.maxNotificationsPerDay;
+    return evaluateNotificationRateLimit(this.db, {
+      maxNotificationsPerHour: this.config.maxNotificationsPerHour,
+      maxNotificationsPerDay: this.config.maxNotificationsPerDay,
+      timezone: this.config.timezone,
+      dayBoundaryHour: this.config.dayBoundaryHour,
+    }).limited;
   }
 
   /**

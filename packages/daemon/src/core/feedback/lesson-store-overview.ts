@@ -20,7 +20,7 @@ import {
 } from "./lesson-format.js";
 
 export interface LessonStoreSummary {
-  /** UTF-8 byte size of the whole file (the cap unit, §6). */
+  /** UTF-8 byte size of the on-disk `## Lessons` section (the cap unit, §6). */
   bytes: number;
   /** Per-scope byte cap. */
   capBytes: number;
@@ -40,9 +40,13 @@ export interface LessonStoreSummary {
  * Summarise one lesson store from its raw file contents. A file with no
  * `## Lessons` section (or an empty one) reports zero entries — never throws,
  * so a hand-edited or partially-written file degrades to "empty store" rather
- * than breaking the overview. `bytes` is measured against the *whole* file
- * because that is what the consolidation cap and the eviction scorer both
- * guard, matching what lands on disk.
+ * than breaking the overview. `bytes` measures the on-disk `## Lessons`
+ * section body — the §6 cap unit (`lessonsSectionByteLength` in
+ * lesson-format.ts) the eviction scorer and the nightly worksheet's
+ * `over_cap` enforce. Measuring the whole file here previously reported a
+ * permanently-stuck `overCap: true` in the band where the section fit the
+ * cap but frontmatter + heading overhead pushed the file past it — a state
+ * no enforcement actor would ever clear.
  */
 export function summarizeLessonStore(
   fileMd: string,
@@ -51,7 +55,7 @@ export function summarizeLessonStore(
   const sectionBody = extractMarkdownSection(fileMd, "Lessons");
   const lessons: Lesson[] = sectionBody ? parseLessonsSection(sectionBody) : [];
   const provisional = lessons.filter((lesson) => lesson.provisional).length;
-  const bytes = Buffer.byteLength(fileMd, "utf-8");
+  const bytes = sectionBody ? Buffer.byteLength(sectionBody, "utf-8") : 0;
   return {
     bytes,
     capBytes: caps.capBytes,

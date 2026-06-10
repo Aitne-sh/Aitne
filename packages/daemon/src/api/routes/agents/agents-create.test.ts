@@ -127,6 +127,39 @@ describe("POST /api/agents", () => {
     expect(recurring[0].recurrenceRule.intervalHours).toBe(1);
   });
 
+  it("carries schedule.defer_in_quiet_hours end-to-end onto the recurring row and its materialised occurrence (QUIET_HOURS_HARDENING_PLAN §6)", async () => {
+    const res = await postAgent(h.app, {
+      ...CRON_BODY,
+      slug: "nightly-dm",
+      name: "Nightly DM",
+      schedule: {
+        kind: "cron",
+        expression: "0 3 * * *",
+        timezone: "Asia/Tokyo",
+        defer_in_quiet_hours: true,
+      },
+    });
+    expect(res.status).toBe(201);
+
+    const dto = getAgent(h.db, "nightly-dm")!;
+    expect(dto.invalid).toBe(false);
+    expect(dto.recurringScheduleId).not.toBeNull();
+
+    // The flag landed in the recurring row's task_context …
+    const recurring = listRecurringSchedules(h.db);
+    expect(recurring[0].taskContext.defer_in_quiet_hours).toBe(true);
+
+    // … and spread onto the materialised agent_schedule occurrence the
+    // scheduler will claim (the row-local read path).
+    const pending = h.db
+      .prepare(
+        "SELECT task_context FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+      )
+      .get(dto.recurringScheduleId) as { task_context: string } | undefined;
+    expect(pending).toBeDefined();
+    expect(JSON.parse(pending!.task_context).defer_in_quiet_hours).toBe(true);
+  });
+
   it("pairs a raw hourly cron (0 * * * *) — previously written-but-never-fired", async () => {
     const res = await postAgent(h.app, {
       slug: "hourly-cron",

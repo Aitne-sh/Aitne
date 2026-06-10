@@ -365,6 +365,143 @@ describe("DispatcherErrorRouter — handleError", () => {
     expect(row?.error).toContain("per-turn budget limit");
   });
 
+  it("records spend with cost_source='post_hoc_error' for a non-quota decisive failure carrying usage (N1)", async () => {
+    const event = makeMessageEvent();
+    const { router } = makeRouter({ db, dataDir });
+    const failure = new BackendDecisiveFailure(
+      "gemini",
+      "timeout",
+      new Error("Gemini execution exceeded timeout of 30 minutes"),
+      {
+        usage: {
+          inputTokens: 12_000,
+          outputTokens: 3_000,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        costUsd: 0.42,
+        modelId: "gemini-3-flash",
+        numTurns: 5,
+        durationMs: 1_800_000,
+        costSource: "litellm",
+      },
+    );
+    await router.handleError(event, failure);
+    const row = db
+      .prepare(
+        `SELECT result, backend, cost_usd, cost_source, num_turns
+         FROM agent_actions WHERE event_id = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(event.correlationId) as {
+        result: string;
+        backend: string;
+        cost_usd: number;
+        cost_source: string;
+        num_turns: number;
+      } | undefined;
+    expect(row).toBeDefined();
+    expect(row?.result).toBe("failed");
+    expect(row?.backend).toBe("gemini");
+    expect(row?.cost_usd).toBeCloseTo(0.42, 4);
+    expect(row?.cost_source).toBe("post_hoc_error");
+    expect(row?.num_turns).toBe(5);
+  });
+
+  it("unwraps BackendRouterHandledError and records the wrapped failure's spend (N1 — no-fallback quota kill)", async () => {
+    const event = makeMessageEvent();
+    const { router } = makeRouter({ db, dataDir });
+    const quota = new BackendQuotaError(
+      "claude",
+      "max_budget_usd",
+      null,
+      "max budget exceeded",
+      {
+        usage: {
+          inputTokens: 30_000,
+          outputTokens: 2_000,
+          cacheCreationInputTokens: 34_000,
+          cacheReadInputTokens: 0,
+        },
+        costUsd: 1.5,
+        modelId: "claude-haiku-4-5-20251001",
+        numTurns: 9,
+        durationMs: 120_000,
+        costSource: "sdk_partial",
+      },
+    );
+    const handled = new BackendRouterHandledError(
+      'Backend "claude" failed without fallback: quota',
+      quota,
+      quota,
+    );
+    await router.handleError(event, handled);
+    const row = db
+      .prepare(
+        `SELECT cost_usd, cost_source, backend FROM agent_actions
+         WHERE event_id = ? AND result = 'failed' ORDER BY id DESC LIMIT 1`,
+      )
+      .get(event.correlationId) as
+      | { cost_usd: number; cost_source: string; backend: string }
+      | undefined;
+    expect(row).toBeDefined();
+    expect(row?.cost_usd).toBeCloseTo(1.5, 4);
+    expect(row?.cost_source).toBe("sdk_partial");
+    expect(row?.backend).toBe("claude");
+  });
+
+  it("records one row per backend when main AND fallback both billed before failing (N1)", async () => {
+    const event = makeMessageEvent();
+    const { router } = makeRouter({ db, dataDir });
+    const spend = (modelId: string, costUsd: number) => ({
+      usage: {
+        inputTokens: 1_000,
+        outputTokens: 100,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      costUsd,
+      modelId,
+      numTurns: 2,
+      durationMs: 10_000,
+      costSource: "litellm" as const,
+    });
+    const mainFailure = new BackendDecisiveFailure(
+      "claude",
+      "timeout",
+      new Error("timeout"),
+      spend("claude-sonnet-4-6", 0.3),
+    );
+    const fallbackFailure = new BackendQuotaError(
+      "codex",
+      "max_budget_usd",
+      null,
+      "budget",
+      spend("gpt-5.4", 0.7),
+    );
+    const handled = new BackendRouterHandledError(
+      "both failed",
+      fallbackFailure,
+      mainFailure,
+      fallbackFailure,
+    );
+    await router.handleError(event, handled);
+    const rows = db
+      .prepare(
+        `SELECT backend, cost_usd, cost_source FROM agent_actions
+         WHERE event_id = ? AND result = 'failed' ORDER BY id`,
+      )
+      .all(event.correlationId) as Array<{
+        backend: string;
+        cost_usd: number;
+        cost_source: string;
+      }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ backend: "claude", cost_source: "post_hoc_error" });
+    expect(rows[0]?.cost_usd).toBeCloseTo(0.3, 4);
+    expect(rows[1]).toMatchObject({ backend: "codex", cost_source: "litellm" });
+    expect(rows[1]?.cost_usd).toBeCloseTo(0.7, 4);
+  });
+
   it("does not record an agent_actions row for quota errors without spend data", async () => {
     const event = makeMessageEvent();
     const { router } = makeRouter({ db, dataDir });

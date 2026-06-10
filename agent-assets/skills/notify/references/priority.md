@@ -8,10 +8,11 @@ description: Notification priority levels — critical / high / normal / low —
 
 `priority` is a metadata field you set on the `/api/notify` call. It
 travels into `notification_log` and helps the user (and the
-retrospective) gauge how urgent each message was. It does NOT gate
-delivery on this endpoint — `/api/notify` sends immediately regardless
-of level. Pick the lowest priority that still honestly describes the
-message. **Default to `normal`.**
+retrospective) gauge how urgent each message was. One level changes
+delivery: `critical` bypasses the endpoint's quiet-hours deferral and
+rate caps and always sends immediately — every other level rides the
+gates below. Pick the lowest priority that still honestly describes
+the message. **Default to `normal`.**
 
 | Priority | Use for |
 |---|---|
@@ -53,16 +54,28 @@ send `low`. Drop it to an Agent Log entry instead.
 
 ## Delivery semantics
 
-`/api/notify` delivers immediately — there is no quiet-hours gate, no
-per-priority suppression, and no rate cap on this endpoint. A `200
-{status:"sent"}` means the message was delivered to at least one
-channel; a total delivery failure THROWS and surfaces as HTTP 500 (not
-a silent 200-drop). So `"sent"` IS proof of delivery — do NOT re-post
-the same item on a 200.
+`/api/notify` returns one of three envelopes:
 
-Noise control is YOUR job, not the endpoint's. The agent CANNOT query
-`notification_log` directly (Approve-tier), so use `<today>` `## Agent
-Log` as the authoritative dedup source (look for `notify sent` / `DM
-sent` lines) and self-throttle before firing. Don't re-send the same
-item at the same level; if the situation has genuinely escalated, raise
-the priority metadata to reflect that.
+- `200 {status:"sent", ...}` — delivered to at least one channel right
+  now. `"sent"` IS proof of delivery — do NOT re-post the same item on
+  a 200. A total delivery failure THROWS and surfaces as HTTP 500 (not
+  a silent 200-drop).
+- `200 {status:"deferred_quiet_hours", scheduleId, deliverAfter}` —
+  you fired inside the user's quiet hours; the message was queued as a
+  scheduled DM that delivers at `deliverAfter` (quiet-hours end).
+  Nothing was lost; do NOT re-post. Repeat calls from the same origin
+  coalesce into the same pending DM. If the item will be stale by
+  `deliverAfter`, `DELETE /api/schedule/{scheduleId}` and record it in
+  `<today>` `## Agent Log` instead. `critical` priority bypasses this
+  gate entirely.
+- `429 {status:"rate_limited", retryAfter}` — the proactive hourly or
+  daily notification cap is spent. Nothing was sent or queued. Do not
+  retry-loop; drop the item to `<today>` `## Agent Log` (or escalate
+  honestly to `critical` if it truly cannot wait).
+
+Noise control is still YOUR job, not the endpoint's. The agent CANNOT
+query `notification_log` directly (Approve-tier), so use `<today>`
+`## Agent Log` as the authoritative dedup source (look for `notify
+sent` / `DM sent` lines) and self-throttle before firing. Don't
+re-send the same item at the same level; if the situation has
+genuinely escalated, raise the priority metadata to reflect that.

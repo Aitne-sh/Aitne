@@ -455,7 +455,9 @@ describe("applySchema", () => {
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
     expect(fetchWindow.main_model).toBe("claude-haiku-4-5-20251001");
-    expect(fetchWindow.max_turns).toBe(20);
+    // 20 → 10 per PREPASS_COST_REDUCTION_PLAN.md N4 (live P99 = 8 turns
+    // over 502 per-integration fan-out runs).
+    expect(fetchWindow.max_turns).toBe(10);
     expect(fetchWindow.max_budget_usd).toBe(0.5);
   });
 

@@ -341,8 +341,10 @@ async function handleRename(
 export const researchCommand: BangPrefixCommand = {
   prefix: "!research",
   title: "Research clusters",
-  describe:
-    "manage browser-history research clusters (list / show / accept / wiki / decline / mute / unmute / rename / conclude)",
+  // Keep this one-liner short: `!help` renders every registered describe
+  // inside the 1500-char MOBILE_REPLY_BUDGET, and the subcommand catalogue
+  // already lives in `details` below (and in the `!research` reply itself).
+  describe: "manage browser-history research clusters",
   details: [
     "Subcommands:",
     "- `!research` — list active clusters",

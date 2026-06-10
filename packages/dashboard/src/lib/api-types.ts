@@ -195,6 +195,7 @@ export interface HealthResponse {
   status: string;
   /** Populated when the daemon is in degraded mode; `null` otherwise. Management Mode §5.4. */
   degraded: DegradedModeStatus | null;
+  /** Seconds since daemon start. */
   uptime: number;
   /**
    * Notifications Center heartbeat (epoch ms). The dashboard treats

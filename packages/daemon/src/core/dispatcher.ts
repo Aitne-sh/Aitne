@@ -8,6 +8,7 @@ import {
   EventPriority,
   createEvent,
   getAgentDayBoundsUtc,
+  isBackendId,
   isMessageEvent,
   isRoutineEvent,
   isAgentTaskEvent,
@@ -136,6 +137,10 @@ import { MorningRoutinePipelineOrchestrator } from "./morning/orchestrator.js";
 import { DailyJournalComposer } from "./morning/daily-journal-composer.js";
 import { randomUUID } from "node:crypto";
 import { RoutineFetchWindowRunner } from "./routine-fetch-window-runner.js";
+import {
+  AutonomousSpawnGate,
+  type SpawnGateDecision,
+} from "./spawn-gates.js";
 import {
   ScheduledTaskRunner,
   SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS,
@@ -440,6 +445,23 @@ export class EventDispatcher {
    * mutable state of its own.
    */
   private readonly fetchWindowRunner: RoutineFetchWindowRunner;
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N2 — offline (backend-API-host DNS) +
+   * cached-auth spawn gate for autonomous sessions. Shared with the
+   * pre-pass fan-out runner so both layers reuse one DNS verdict cache.
+   */
+  private readonly spawnGate: AutonomousSpawnGate;
+  /**
+   * Last spawn-gate skip *audit write* per (schedule-or-type, reason) —
+   * ms epoch. A released schedule row is re-claimed by the
+   * ScheduleWatcher every poll tick (default 5s), so an hours-long
+   * offline window would otherwise INSERT thousands of identical
+   * `result='skipped'` rows. The DB row release/claim churn is bounded
+   * (UPDATEs to one row); the audit INSERT is what must be throttled.
+   * In-memory on purpose: worst case after a restart is one extra row.
+   */
+  private readonly spawnGateSkipAuditAt = new Map<string, number>();
+  private static readonly SPAWN_GATE_SKIP_AUDIT_THROTTLE_MS = 10 * 60 * 1000;
   private readonly hourlyCheck: HourlyCheckCoordinator;
   /**
    * Phase D-2 coordinator: owns morning-routine execution end-to-end
@@ -527,6 +549,13 @@ export class EventDispatcher {
     // (D2), and ScheduledTaskRunner.executeDefault (D4). Constructed
     // before all three so it can be injected as a dep rather than
     // lazily resolved.
+    // PREPASS_COST_REDUCTION_PLAN.md N2 — shared offline/auth spawn gate.
+    // One instance for the dispatcher's autonomous-event gate AND the
+    // pre-pass fan-out runner so the per-host DNS verdict cache (~60s)
+    // is shared across both layers within a tick.
+    this.spawnGate = new AutonomousSpawnGate(this.db, {
+      authFreshnessMs: this.config.authPreflightFreshnessMs,
+    });
     this.fetchWindowRunner = new RoutineFetchWindowRunner({
       db: this.db,
       config: this.config,
@@ -534,6 +563,7 @@ export class EventDispatcher {
       agentRouter: this.agentRouter,
       audit: this.audit,
       prompt: this.prompt,
+      spawnGate: this.spawnGate,
       getActiveMailAccounts: () => this.getActiveMailAccounts(),
       // Live accessor so the SSE broadcaster wired later via
       // `setEventBroadcaster` (after dispatcher construction in
@@ -934,6 +964,17 @@ export class EventDispatcher {
    */
   setAgentExecutionTracker(tracker: AgentExecutionTracker): void {
     this.agentExecutionTracker = tracker;
+  }
+
+  /**
+   * Resolve the user-Agent slug owning an in-flight firing, for stamping
+   * `agent_id` into quiet-hours-deferred DM rows (QUIET_HOURS_HARDENING_PLAN
+   * Phase 1 — the `/api/notify` gate coalesces per Agent so an hourly Agent
+   * firing five times overnight yields one combined DM). `null` when no
+   * tracker is wired or no execution is active for the correlation id.
+   */
+  agentIdForCorrelation(correlationId: string): string | null {
+    return this.agentExecutionTracker?.currentAgentId(correlationId) ?? null;
   }
 
   /**
@@ -1388,6 +1429,52 @@ export class EventDispatcher {
     return todayCost >= cap * threshold;
   }
 
+  /**
+   * Resolve the candidate backends for an autonomous event and run the
+   * N2 spawn gates against them. Fail-open on every internal error
+   * (binding resolution included) — the gate exists to save sessions
+   * that would deterministically fail, never to block live ones.
+   * Returns `null` when the gate could not be evaluated.
+   */
+  private async evaluateAutonomousSpawnGate(
+    event: Event,
+  ): Promise<SpawnGateDecision | null> {
+    try {
+      // Scheduled rows / integration cron events can pin a backend via
+      // `requestedBackendId`; the router's backend-only override branch
+      // then routes to exactly that backend WITHOUT a fallback. Mirror
+      // that contract here: gating a pinned row on the *default* binding
+      // would keep skipping it while its pinned backend is healthy (and
+      // re-skip every watcher tick until the wrong backend recovered).
+      const pinned = (event as { requestedBackendId?: string })
+        .requestedBackendId;
+      if (typeof pinned === "string" && isBackendId(pinned)) {
+        return await this.spawnGate.evaluate([pinned]);
+      }
+      // No pin → event-type default binding. Process-key overrides that
+      // some dispatch branches apply (e.g. `agent.task`, morning stage
+      // keys) are approximated by this default: a mismatch is possible
+      // only when the operator routed that specific process key to a
+      // different backend, and the gate's fail-open posture bounds the
+      // cost to one tick of latency during a partial outage.
+      const binding = this.agentRouter.resolveBinding(event);
+      const candidates = [binding.main.backendId];
+      if (
+        binding.fallback
+        && binding.fallback.backendId !== binding.main.backendId
+      ) {
+        candidates.push(binding.fallback.backendId);
+      }
+      return await this.spawnGate.evaluate(candidates);
+    } catch (err) {
+      logger.warn(
+        { err, eventType: event.type },
+        "Spawn-gate binding resolution failed — failing open",
+      );
+      return null;
+    }
+  }
+
   private async handleEvent(event: Event): Promise<void> {
     try {
       await this.handleEventInner(event);
@@ -1482,6 +1569,41 @@ export class EventDispatcher {
     }
   }
 
+  /**
+   * Throttle for spawn-gate skip audit rows. A released schedule row is
+   * due immediately, so the watcher re-claims it every poll tick (5s
+   * default) for the whole outage — without this, one offline day per
+   * pending row writes ~17k identical agent_actions rows. Keyed by
+   * (schedule id | event type) × reason so distinct routines and
+   * distinct reasons each still get their own first row, and a reason
+   * flip (offline → auth_unhealthy) is recorded promptly.
+   */
+  private shouldWriteSpawnGateSkipAudit(event: Event, reason: string): boolean {
+    const subject = isScheduledEvent(event) && event.scheduleId
+      ? `schedule:${event.scheduleId}`
+      : `type:${event.type}`;
+    const key = `${subject}|${reason}`;
+    const now = Date.now();
+    const last = this.spawnGateSkipAuditAt.get(key);
+    if (
+      last !== undefined
+      && now - last < EventDispatcher.SPAWN_GATE_SKIP_AUDIT_THROTTLE_MS
+    ) {
+      return false;
+    }
+    // Opportunistic prune so a long outage across many schedule rows
+    // cannot grow the map unbounded.
+    if (this.spawnGateSkipAuditAt.size > 256) {
+      for (const [k, ts] of this.spawnGateSkipAuditAt) {
+        if (now - ts >= EventDispatcher.SPAWN_GATE_SKIP_AUDIT_THROTTLE_MS) {
+          this.spawnGateSkipAuditAt.delete(k);
+        }
+      }
+    }
+    this.spawnGateSkipAuditAt.set(key, now);
+    return true;
+  }
+
   private async dispatchSafe(event: Event): Promise<void> {
     const trigger: "reactive" | "autonomous" = this.isReactive(event) ? "reactive" : "autonomous";
     const startMs = Date.now();
@@ -1532,6 +1654,42 @@ export class EventDispatcher {
             { eventType: event.type, source: event.source },
             "Event skipped — autonomous daily cost cap exceeded",
           );
+          return;
+        }
+
+        // PREPASS_COST_REDUCTION_PLAN.md N2 — offline + auth spawn gates.
+        // Skip the spawn only when EVERY candidate backend (main +
+        // fallback) is non-viable: backend API host unresolvable
+        // (`reason='offline'`) or auth confirmed bad in a fresh cache
+        // (`reason='auth_unhealthy'`). A scheduled row is released back
+        // to `pending` so the next watcher tick retries — the skip costs
+        // at most one tick of latency, and only during a window where
+        // the session would have failed anyway. Reactive work (user DMs)
+        // is exempt by construction: a user-visible attempt + error beats
+        // silent suppression.
+        const gateDecision = await this.evaluateAutonomousSpawnGate(event);
+        if (gateDecision?.skip) {
+          this.releaseClaimedSchedule(event);
+          const reason = gateDecision.reason ?? "offline";
+          if (this.shouldWriteSpawnGateSkipAudit(event, reason)) {
+            this.audit.logSkip(event, reason, trigger, {
+              spawnGate: { backends: gateDecision.backends },
+            });
+            logger.info(
+              {
+                eventType: event.type,
+                source: event.source,
+                reason,
+                backends: gateDecision.backends,
+              },
+              "Event skipped — autonomous spawn gate (offline / auth-unhealthy backends)",
+            );
+          } else {
+            logger.debug(
+              { eventType: event.type, source: event.source, reason },
+              "Event skipped — spawn gate (audit row throttled, same skip already recorded)",
+            );
+          }
           return;
         }
       }

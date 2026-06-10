@@ -477,6 +477,16 @@ const API_RISK: Record<string, RiskTier> = {
   // (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5). Summarises cap utilisation
   // only — lesson prose was redaction-scrubbed at capture — so Autonomous.
   "GET /api/feedback/lessons": RiskTier.Autonomous,
+  // Self-tuning verdict endpoint (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4).
+  // Autonomous + (Phase 3) mandatory owner DM on apply — the exact pattern
+  // that replaced the abolished Notify tier; requiring the Approve bearer
+  // would put a human back in every loop iteration and defeat the design.
+  // Safety is carried by code, not tier: verdicts may only reference
+  // daemon-generated single-use recommendation ids from the current cycle,
+  // the handler is idempotent per id, and Phase 2 never actuates (shadow).
+  "POST /api/tuning/verdicts": RiskTier.Autonomous,
+  // Pending-cycle read — knob names + telemetry counts only, no user prose.
+  "GET /api/tuning/pending": RiskTier.Autonomous,
 
   // ── Notification ──
   "/api/notify": RiskTier.Autonomous,
@@ -948,9 +958,14 @@ export function findExplicitRiskClassification(
       const keyMethod = key.includes(" ") ? key.split(" ")[0] : null;
       /* c8 ignore stop */
       if (keyMethod && keyMethod !== method) return false;
-      return path.startsWith(keyPath);
+      return pathPrefixMatches(keyPath, path);
     })
-    .sort((a, b) => b[0].length - a[0].length);
+    // Rank by matched path-prefix length so the most-specific prefix wins.
+    // Must compare the path segment, NOT the raw key: the `"METHOD "` token
+    // would otherwise lift a shorter, less-specific method-keyed prefix
+    // (e.g. `DELETE /api/git`) above a longer path-only one (`/api/github`),
+    // silently downgrading the tier. Mirrors the step-3 pattern tiebreaker.
+    .sort((a, b) => keyPathOf(b[0]).length - keyPathOf(a[0]).length);
 
   if (candidates.length > 0) return candidates[0][1];
 
@@ -1059,16 +1074,42 @@ function matchesPattern(keyPath: string, actualPath: string): boolean {
   return true;
 }
 
-/** Count characters before the first `{*}` (or whole length if none) —
- *  used to rank pattern candidates by specificity. Defensive against future
- *  overlapping `{*}` keys: today no two `{*}` entries in `API_RISK` match
- *  the same `(method, path)` pair, so the sort comparator never invokes
- *  this helper. The function exists so the first overlapping pair added
- *  picks the more specific entry instead of relying on iteration order. */
+/** Extract the path portion of an `API_RISK` key: `"METHOD /path"` → `/path`,
+ *  or a bare `"/path"` path-only key unchanged. Ranking must compare the path
+ *  segment alone — the leading `"METHOD "` token (3–6 chars) would otherwise
+ *  inflate a shorter, less-specific method-keyed prefix above a longer
+ *  path-only one. */
+export function keyPathOf(key: string): string {
+  return key.includes(" ") ? key.split(" ")[1] : key;
+}
+
+/** Segment-aware prefix test for step-4 (non-`{*}`) keys. A raw
+ *  `path.startsWith(keyPath)` matches a *string* prefix, so `/api/git`
+ *  would spuriously match the unrelated sibling `/api/git-accounts` (and,
+ *  worse, an unclassified future `/api/git-webhook` — silently inheriting
+ *  the sibling's tier instead of failing closed to Approve). A key that
+ *  ends in `/` is an explicit subtree catch-all, so a raw `startsWith` is
+ *  already the boundary; otherwise the match must be a strict
+ *  `/`-delimited descendant. Exact `path === keyPath` is pre-empted by the
+ *  step-1/step-2 exact lookups, so step 4 only ever matches descendants.
+ *  Mirrors the segment discipline of `matchesPattern` (step 3). */
+function pathPrefixMatches(keyPath: string, path: string): boolean {
+  if (keyPath.endsWith("/")) return path.startsWith(keyPath);
+  return path.startsWith(keyPath + "/");
+}
+
+/** Count characters of the path prefix before the first `{*}` (or the whole
+ *  path length if none) — used to rank pattern candidates by specificity.
+ *  Defensive against future overlapping `{*}` keys: today no two `{*}` entries
+ *  in `API_RISK` match the same `(method, path)` pair, so the sort comparator
+ *  never invokes this helper. The function exists so the first overlapping
+ *  pair added picks the more specific entry instead of relying on iteration
+ *  order. */
 /* c8 ignore start */
 function literalPrefixLength(key: string): number {
-  const idx = key.indexOf("{*}");
-  return idx < 0 ? key.length : idx;
+  const keyPath = keyPathOf(key);
+  const idx = keyPath.indexOf("{*}");
+  return idx < 0 ? keyPath.length : idx;
 }
 /* c8 ignore stop */
 

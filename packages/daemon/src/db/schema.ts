@@ -2276,14 +2276,18 @@ VALUES
     -- fetcher dispatched before each routine session. Lite tier
     -- (Haiku-class) per P3 ("Lite for Fetch"). Envelope sized for the
     -- worst-case routine (morning_routine: fan-out across 2 mail
-    -- providers × N accounts + 2 calendar providers + notion). 20
-    -- turns is enough headroom for ~6 partials × 3 tool calls each;
+    -- providers × N accounts + 2 calendar providers + notion);
     -- $0.50 caps the fan-out so a misconfigured account list cannot
     -- drain budget. The lite-tier nominal ($0.20) under-provisioned
     -- real morning fan-outs and tripped BackendQuotaError(max_budget_usd)
     -- mid-fetch, so this envelope is widened via the per-process
     -- override in plan-presets.ts (ENVELOPE_OVERRIDES_BY_PROCESS_KEY).
-    ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 20,  0.50, 'preset'),
+    -- max_turns 20 → 10 (PREPASS_COST_REDUCTION_PLAN.md N4): with the
+    -- per-integration fan-out each session handles ONE partial; live
+    -- P99 over 502 runs is 8 turns. Lock-step with plan-presets.ts.
+    -- Seed-only change — existing installs keep their row (INSERT is
+    -- ignore-on-conflict) until they re-apply defaults.
+    ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 10,  0.50, 'preset'),
     -- BROWSER_HISTORY_INTEGRATION_PLAN P3:
     --   research_cluster_update — nightly per-cluster journal append.
     --     Lite tier (Haiku-class) — templated DM dispatcher with a

@@ -90,6 +90,12 @@ Fields:
   fires. Only shapes that map are actually run: minute a single value; hour a
   single value or `*` / `*/N`. Pick one explicit, mappable cadence.
 - **`schedule.timezone`** — IANA zone; omit to inherit the daemon default.
+- **`schedule.defer_in_quiet_hours`** — boolean, default `false`. When `true`, a
+  firing that lands inside the user's quiet hours is pushed to the window's end
+  instead of running — the whole run moves, so the data is fresh at delivery
+  time. Mechanical rule: **set `true` whenever the Expected output includes
+  DMing the user**; leave it `false` for silent file-writing work deliberately
+  scheduled overnight.
 - **`backend`** — optional. `tier` is `lite`/`medium`/`high` (cost/capability knob;
   the standalone control that works). `process_key` defaults to `agent.task`;
   omit unless you know you need another. (Pinning a backend *engine* without a
@@ -136,6 +142,11 @@ Each morning, surface inbox items that need the user's decision today.
 
 **Bad prompt:** `"Triage my inbox."` — no requirements, no steps, no output
 contract; the Agent will improvise differently every day.
+
+The Expected-output decision feeds one schedule field: if the output contract
+includes DMing the user, also set `schedule.defer_in_quiet_hours: true` so a
+firing inside quiet hours waits for the window's end instead of producing a
+message that would be held anyway.
 
 ## Responses & errors
 

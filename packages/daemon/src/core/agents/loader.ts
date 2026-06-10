@@ -130,6 +130,14 @@ export interface RecurringCreateInput {
   tier: string | null;
   backendId: string | null;
   recurrence: AgentRecurrenceSpec;
+  /**
+   * Row-local flags copied into every materialised `agent_schedule` row by
+   * `generateNextScheduleRow` (the `pin_to_quiet_hours_end` precedent). Today
+   * carries `defer_in_quiet_hours: true` for opted-in Agents
+   * (QUIET_HOURS_HARDENING_PLAN.md §6); omitted/empty otherwise (the store
+   * defaults the column to `{}`).
+   */
+  taskContext?: Record<string, unknown>;
 }
 
 /** Divergent-field patch applied when reconciling a paired recurring row (YAML wins). */
@@ -141,6 +149,9 @@ export interface RecurringUpdateInput {
   tier?: string | null;
   backendId?: string | null;
   recurrence?: AgentRecurrenceSpec;
+  /** Full replacement `task_context` (the loader merges off the row's current
+   *  value, so unrelated keys survive a flag flip). */
+  taskContext?: Record<string, unknown>;
 }
 
 /**
@@ -631,6 +642,14 @@ function pairRecurring(
     tier: def.backend.tier,
     backendId: def.backend.backend_id,
     recurrence: spec,
+    // QUIET_HOURS_HARDENING_PLAN.md §6 — `generateNextScheduleRow` spreads the
+    // row's `task_context` into every materialised `agent_schedule` row, so the
+    // scheduler can read the flag row-locally at claim time (no `agents` join).
+    // Opt-in only: an absent key keeps default-false context clean (the
+    // `pin_to_quiet_hours_end` convention on `dm_session` rows).
+    taskContext: def.schedule.defer_in_quiet_hours
+      ? { defer_in_quiet_hours: true }
+      : {},
   };
 
   const existingId = existing?.recurringScheduleId ?? null;
@@ -657,6 +676,20 @@ function pairRecurring(
       if (row.backendId !== desired.backendId) patch.backendId = desired.backendId;
       // Structural compare so a re-parsed-but-identical spec is not a "change".
       if (stableStringify(row.recurrence) !== stableStringify(spec)) patch.recurrence = spec;
+      // Reconcile the quiet-hours opt-in (YAML wins), merging off the row's
+      // current context so unrelated keys survive the flip. A `taskContext`
+      // update does NOT cancel + re-materialise the pending row (only
+      // recurrence/enabled do), so a pending materialisation keeps the prior
+      // flag until its next generation — the same one-cycle staleness the
+      // model/tier pins already have.
+      const rowOptedIn = row.taskContext.defer_in_quiet_hours === true;
+      const wantOptIn = def.schedule.defer_in_quiet_hours;
+      if (rowOptedIn !== wantOptIn) {
+        const nextContext = { ...row.taskContext };
+        if (wantOptIn) nextContext.defer_in_quiet_hours = true;
+        else delete nextContext.defer_in_quiet_hours;
+        patch.taskContext = nextContext;
+      }
       if (Object.keys(patch).length > 0) port.update(existingId, patch);
       return existingId;
     }

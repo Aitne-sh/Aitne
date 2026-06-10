@@ -43,6 +43,7 @@ export {
 } from "./commands-wiki.js";
 export { researchCommand, parseResearchArgs } from "./commands-research.js";
 export { checksCommand, formatChecks } from "./commands-checks.js";
+export { revertTuningCommand } from "./commands-revert-tuning.js";
 export {
   buildSystemMarker,
   ensureSystemMarker,
@@ -97,6 +98,7 @@ import {
 } from "./commands-wiki.js";
 import { researchCommand } from "./commands-research.js";
 import { checksCommand } from "./commands-checks.js";
+import { revertTuningCommand } from "./commands-revert-tuning.js";
 
 /**
  * Build a registry preloaded with the v1 built-in commands. The registry
@@ -129,5 +131,8 @@ export function createDefaultBangCommandRegistry(): BangCommandRegistry {
   // weekly surfacing lives inside `routine.weekly_review` and uses
   // `/api/browser-history/reloads/weekly` instead.
   registry.register(checksCommand);
+  // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4 Phase 3 — `!revert tuning`,
+  // the owner-side undo for autonomously applied tuning changes.
+  registry.register(revertTuningCommand);
   return registry;
 }

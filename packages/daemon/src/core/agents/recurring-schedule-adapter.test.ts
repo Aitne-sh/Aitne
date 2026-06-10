@@ -236,6 +236,43 @@ describe("recurring-schedule-adapter — port over the DB", () => {
     expect(dto?.prompt).toBeNull();
   });
 
+  it("create() forwards taskContext (quiet-hours opt-in) onto the recurring row", () => {
+    const port = createRecurringSchedulePort(db, "UTC");
+    const id = port.create({
+      enabled: true,
+      taskType: "agent.task",
+      description: "DM-bearing agent",
+      prompt: null,
+      model: null,
+      tier: null,
+      backendId: null,
+      recurrence: { frequency: "daily", time: "03:00", timezone: TZ },
+      taskContext: { defer_in_quiet_hours: true },
+    });
+    expect(getRecurringSchedule(db, id)?.taskContext).toEqual({
+      defer_in_quiet_hours: true,
+    });
+  });
+
+  it("update() replaces taskContext when patched", () => {
+    const port = createRecurringSchedulePort(db, "UTC");
+    const id = port.create({
+      enabled: true,
+      taskType: "agent.task",
+      description: "Flag flip",
+      prompt: null,
+      model: null,
+      tier: null,
+      backendId: null,
+      recurrence: { frequency: "daily", time: "03:00", timezone: TZ },
+      taskContext: { defer_in_quiet_hours: true, keep: "me" },
+    });
+    // The loader merges off the row's current context before patching, so the
+    // adapter applies the patch value as the full replacement.
+    port.update(id, { taskContext: { keep: "me" } });
+    expect(getRecurringSchedule(db, id)?.taskContext).toEqual({ keep: "me" });
+  });
+
   it("create() forwards a disabled (§6.4-resolved) enabled state", () => {
     const port = createRecurringSchedulePort(db, "UTC");
     const id = port.create({

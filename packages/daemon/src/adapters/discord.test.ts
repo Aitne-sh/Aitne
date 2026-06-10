@@ -1315,3 +1315,37 @@ describe("DiscordAdapter handleRawMessage content ?? '' branch", () => {
     expect(onMessage.mock.calls[0][0].content).toBe("");
   });
 });
+
+describe("DiscordAdapter getConnectionState (watchdog probe)", () => {
+  type Internals = {
+    client: { isReady: () => boolean };
+    startCompleted: boolean;
+    sessionInvalidated: boolean;
+  };
+
+  it("reports unknown before start() completes", () => {
+    const adapter = makeAdapter();
+    expect(adapter.getConnectionState()).toBe("unknown");
+  });
+
+  it("mirrors client.isReady() once started", () => {
+    const adapter = makeAdapter();
+    const internals = adapter as unknown as Internals;
+    internals.startCompleted = true;
+
+    internals.client = { isReady: () => true };
+    expect(adapter.getConnectionState()).toBe("ok");
+
+    internals.client = { isReady: () => false };
+    expect(adapter.getConnectionState()).toBe("down");
+  });
+
+  it("reports down on an invalidated session even when the client claims ready", () => {
+    const adapter = makeAdapter();
+    const internals = adapter as unknown as Internals;
+    internals.startCompleted = true;
+    internals.client = { isReady: () => true };
+    internals.sessionInvalidated = true;
+    expect(adapter.getConnectionState()).toBe("down");
+  });
+});

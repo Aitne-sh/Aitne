@@ -13,6 +13,23 @@ import { KnowledgeUploadContent } from "@/components/knowledge/upload-content";
 import { ActivityContent } from "@/components/knowledge/activity-content";
 import { EntitiesContent } from "@/components/knowledge/entities-content";
 
+// One concise line per tab. The full breakdown of all five surfaces used to
+// live permanently in the page header, which wrapped to ~6 lines and pushed
+// the two-pane file browser into the lower half of the viewport. Showing only
+// the active tab's description keeps the header to a single line so the
+// folder tree + file viewer get the vertical space.
+const TAB_DESCRIPTIONS: Record<string, React.ReactNode> = {
+  "context-files":
+    "Markdown notes the agent loads on each run — its long-term memory.",
+  skills:
+    "Per-event-type behavioral guides materialized into the session workdir.",
+  activity: "Per-source aggregates written by the management registry.",
+  entities:
+    "Structured records (people, organizations, projects) filterable by source, domain, type, or date.",
+  upload:
+    "Ingest a Markdown or text file; facts are folded into the right Context Files by topic.",
+};
+
 function KnowledgePageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -30,17 +47,9 @@ function KnowledgePageInner() {
   return (
     <div className="flex h-full flex-col p-6">
       <PageHeader
-        className="mb-4"
+        className="mb-3"
         title="Knowledge"
-        description={
-          <>
-            The agent&rsquo;s long-term memory. <strong>Context Files</strong> &mdash; Markdown notes the agent loads on each run.
-            {" "}<strong>Skills</strong> &mdash; per-event-type behavioral guides materialized into the session workdir.
-            {" "}<strong>Activity</strong> &mdash; per-source aggregates written by the management registry.
-            {" "}<strong>Entities</strong> &mdash; structured records (people, organizations, projects) filterable by source, domain, type, or date.
-            {" "}<strong>Upload</strong> &mdash; ingest a Markdown or text file; facts are folded into the right Context Files by topic.
-          </>
-        }
+        description={TAB_DESCRIPTIONS[tab]}
       />
 
       <Tabs

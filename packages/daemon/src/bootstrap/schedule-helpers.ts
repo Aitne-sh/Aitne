@@ -382,6 +382,194 @@ export function getStalledMorningRoutineWake(
   };
 }
 
+/**
+ * Audit-row action types that count as "a morning-routine attempt started"
+ * for the missed-fire predicate below. The parent row
+ * (`routine.morning_routine`) is written when the pipeline finishes
+ * (success or failure); the Stage A row
+ * (`routine.morning_routine_today`) is written `in_progress` the moment
+ * the agent execution starts, so a hung Stage A is still visible as an
+ * attempt. The fetch-window pre-pass is deliberately NOT included — it
+ * also runs for hourly/scheduled flows, and counting it would let an
+ * unrelated pre-pass mask a dead morning pipeline.
+ */
+export const MORNING_ROUTINE_ATTEMPT_ACTION_TYPES = [
+  "routine.morning_routine",
+  "routine.morning_routine_today",
+] as const;
+
+/**
+ * Grace period after the agent-day boundary before the missed-fire
+ * self-heal may conclude the 04:00 cron tick was swallowed. Wide enough
+ * that the normal cron → queueMorningRoutineWake → ScheduleWatcher claim
+ * → Stage A start chain has long since produced either a wake row or an
+ * attempt row; short enough that a swallowed tick costs at most ~25 min
+ * (grace + one self-heal interval) once the machine is awake.
+ */
+export const MORNING_MISSED_FIRE_GRACE_MINUTES = 15;
+
+/**
+ * Epoch ms of the most recent morning-routine attempt (any result,
+ * including `in_progress`) started within the current agent-day, or null
+ * when nothing has been attempted yet. Pure read.
+ */
+export function getLatestMorningAttemptStartMs(
+  db: Database.Database,
+  agentDayConfig: { timezone?: string; dayBoundaryHour: number },
+  now?: Date,
+): number | null {
+  const { start } = getAgentDayBoundsUtc(
+    agentDayConfig.timezone,
+    agentDayConfig.dayBoundaryHour,
+    now,
+  );
+  const row = db
+    .prepare(
+      `SELECT MAX(started_at) AS latest
+         FROM agent_actions
+        WHERE action_type IN (${MORNING_ROUTINE_ATTEMPT_ACTION_TYPES.map(() => "?").join(",")})
+          AND started_at >= ?`,
+    )
+    .get(...MORNING_ROUTINE_ATTEMPT_ACTION_TYPES, start) as {
+    latest: string | null;
+  };
+  if (!row.latest) return null;
+  return parseSqliteUtcMs(row.latest);
+}
+
+export interface RecoverableStalledMorningWake {
+  /** agent_schedule.id of the `running` wake row to flip back to pending. */
+  id: number;
+  /** Minutes since the ScheduleWatcher claimed the row. */
+  claimedAgeMinutes: number;
+}
+
+/**
+ * Detect the hung-execution variant of the morning-routine silent stall:
+ * a wake row claimed to `running` at least `thresholdMinutes` ago with
+ * still no `routine.morning_routine` success for the current agent-day
+ * (machine slept mid-run and the backend stream died on the network
+ * change, the SDK call wedged, or the dispatch event was lost).
+ *
+ * `queueMorningRoutineWake`'s dedup treats a `running` row as "already
+ * in flight" and merges into it forever, so without recovery the day
+ * stays frozen until a daemon restart. The caller (scheduler self-heal
+ * tick) flips the returned row back to `pending` so the ScheduleWatcher
+ * re-claims it; the today-write-lock's wall-clock TTL guarantees a hung
+ * original cannot hold the lock against the re-run indefinitely.
+ *
+ * Staleness is measured from `task_context.claimedAt`, stamped by the
+ * ScheduleWatcher at claim time. That is the only signal that survives
+ * every confounder: `created_at` predates sleeps that delay the claim,
+ * `scheduled_for` is bumped by dedup merges, and attempt audit rows are
+ * windowed to the current agent-day (a run that started before the
+ * 04:00 boundary and hung across it has no attempt row "today").
+ * Invariants this leans on:
+ *   - boot recovery (`recoverOrphanedRunningSchedules`) clears every
+ *     `running` row at daemon start, so a live `running` row was always
+ *     claimed by the current process — which always stamps;
+ *   - `queueMorningRoutineWake`'s dedup-merge preserves unknown
+ *     task_context keys, so a 04:00 cron merge cannot strip the stamp.
+ * A row without a readable stamp (stamp UPDATE failed, malformed JSON)
+ * is left to the alert-only watchdog rather than guessed at.
+ *
+ * Pure read — the caller owns the UPDATE.
+ */
+export function getRecoverableStalledMorningWake(
+  db: Database.Database,
+  agentDayConfig: { timezone?: string; dayBoundaryHour: number },
+  thresholdMinutes: number,
+  now?: Date,
+): RecoverableStalledMorningWake | null {
+  const reference = now ?? new Date();
+  if (morningRoutineRanToday(db, agentDayConfig, reference)) {
+    return null;
+  }
+  const row = db
+    .prepare(
+      `SELECT id, task_context
+         FROM agent_schedule
+        WHERE task_type = 'wake'
+          AND status = 'running'
+          AND json_extract(task_context, '$.routine') = 'morning_routine'
+        ORDER BY created_at ASC
+        LIMIT 1`,
+    )
+    .get() as { id: number; task_context: string } | undefined;
+  if (!row) return null;
+  let claimedAt: unknown;
+  try {
+    // The WHERE's json_extract guarantees task_context is non-null and
+    // valid to SQLite's JSON parser — but SQLite ≥3.42 accepts JSON5,
+    // which JSON.parse rejects, so the parse can still throw.
+    claimedAt = (JSON.parse(row.task_context) as {
+      claimedAt?: unknown;
+    }).claimedAt;
+  } catch {
+    return null;
+  }
+  if (typeof claimedAt !== "string") return null;
+  const claimedMs = parseSqliteUtcMs(claimedAt);
+  if (!Number.isFinite(claimedMs)) return null;
+  const claimedAgeMinutes = Math.floor(
+    (reference.getTime() - claimedMs) / 60_000,
+  );
+  if (claimedAgeMinutes < thresholdMinutes) return null;
+  return { id: row.id, claimedAgeMinutes };
+}
+
+/**
+ * Detect the missed-fire variant of the morning-routine silent stall:
+ * the machine was asleep at the day-boundary minute, node-cron silently
+ * dropped the tick (it never replays missed firings), and nothing since
+ * has re-queued the routine. Observable signature, all three at once:
+ *
+ *   1. no morning-routine attempt has *started* this agent-day (any
+ *      result — a failed/exhausted retry chain counts as attempted, so
+ *      this self-heal never resurrects a chain that
+ *      `scheduleMorningRetry` deliberately stopped after MAX_RETRIES);
+ *   2. no `pending`/`running` morning wake row exists (the cron, the
+ *      wake catch-up, and the retry chain all leave one when they are
+ *      mid-flight);
+ *   3. the agent-day is at least `graceMinutes` old, so a healthy cron
+ *      fire has had ample time to produce 1 or 2.
+ *
+ * Complements the WakeDetector: gaps shorter than its 5-min threshold
+ * that straddle the boundary minute (lid closed 03:59–04:02), or a
+ * detector failure, still converge here within one self-heal interval.
+ *
+ * Pure read — the caller routes through `queueMorningRoutineWake`,
+ * whose DB-backed dedup makes double-queueing impossible.
+ */
+export function shouldQueueMissedMorningFire(
+  db: Database.Database,
+  agentDayConfig: { timezone?: string; dayBoundaryHour: number },
+  graceMinutes: number,
+  now?: Date,
+): boolean {
+  const reference = now ?? new Date();
+  const progressMinutes = getAgentDayProgressMinutes(
+    agentDayConfig.timezone,
+    agentDayConfig.dayBoundaryHour,
+    reference,
+  );
+  if (progressMinutes < graceMinutes) return false;
+  const wakeRow = db
+    .prepare(
+      `SELECT 1
+         FROM agent_schedule
+        WHERE task_type = 'wake'
+          AND status IN ('pending', 'running')
+          AND json_extract(task_context, '$.routine') = 'morning_routine'
+        LIMIT 1`,
+    )
+    .get();
+  if (wakeRow !== undefined) return false;
+  return (
+    getLatestMorningAttemptStartMs(db, agentDayConfig, reference) === null
+  );
+}
+
 // P22 — read the operator's chosen cadence for skill curation runs.
 // Mirrors the helper in `core/scheduler.ts` so the dispatcher hook here can
 // resolve cadence at runtime without crossing module boundaries.

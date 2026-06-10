@@ -566,7 +566,8 @@ describe("BackendRouter", () => {
 
     it("inherits maxTurns / maxBudgetUsd from process_backend_config", () => {
       applySchema(db);
-      // routine.fetch_window's seed: max_turns=20, max_budget_usd=0.50.
+      // routine.fetch_window's seed: max_turns=10 (N4: 20 → 10),
+      // max_budget_usd=0.50.
       const codexCore = makeCore({
         backendId: "codex",
         listModels: () => [
@@ -587,7 +588,7 @@ describe("BackendRouter", () => {
       });
 
       // Envelope from the seed row — backend swap doesn't reset caps.
-      expect(binding.main.maxTurns).toBe(20);
+      expect(binding.main.maxTurns).toBe(10);
       expect(binding.main.maxBudgetUsd).toBe(0.5);
     });
 
@@ -1397,6 +1398,171 @@ describe("BackendRouter", () => {
         processKey: "dashboard.chat",
       }),
     ).rejects.toBeInstanceOf(RangeError);
+  });
+
+  describe("main failure-spend recording on fallback paths (PREPASS_COST_REDUCTION_PLAN.md N1)", () => {
+    function makeSpend() {
+      return {
+        usage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheCreationInputTokens: 10,
+          cacheReadInputTokens: 20,
+        },
+        costUsd: 0.42,
+        modelId: "claude-sonnet-4-6",
+        numTurns: 3,
+        durationMs: 1234,
+        costSource: "sdk_partial" as const,
+      };
+    }
+
+    function configureFallback() {
+      db.prepare(
+        `UPDATE process_backend_config
+           SET fallback_backend = ?, fallback_model = ?
+         WHERE process_key = 'dashboard.chat'`,
+      ).run("codex", "gpt-5.4");
+    }
+
+    function makeFallbackCore(overrides: Partial<IAgentCore> = {}) {
+      return makeCore({
+        backendId: "codex",
+        execute: vi.fn().mockResolvedValue(
+          makeResult({ backendId: "codex", modelId: "gpt-5.4" }),
+        ),
+        listModels: vi.fn().mockReturnValue([
+          { backendId: "codex", modelId: "gpt-5.4", label: "gpt-5.4", tier: "high", available: true },
+        ]),
+        ...overrides,
+      });
+    }
+
+    function readFailedRows() {
+      return db
+        .prepare(
+          `SELECT result, backend, cost_usd, cost_source, model_used,
+                  cache_creation_tokens, cache_read_tokens
+             FROM agent_actions WHERE result = 'failed'`,
+        )
+        .all() as Array<{
+          result: string;
+          backend: string;
+          cost_usd: number;
+          cost_source: string | null;
+          model_used: string;
+          cache_creation_tokens: number | null;
+          cache_read_tokens: number | null;
+        }>;
+    }
+
+    it("fallback SUCCESS records the main attempt's billed spend as a failed row", async () => {
+      applySchema(db);
+      configureFallback();
+
+      const mainCore = makeCore({
+        execute: vi.fn().mockRejectedValue(
+          new BackendQuotaError("claude", "max_budget_usd", null, "budget exceeded", makeSpend()),
+        ),
+      });
+      const fallbackCore = makeFallbackCore();
+      const router = new BackendRouter(
+        db,
+        makeConfig(),
+        [mainCore, fallbackCore],
+        makeNotifier(),
+      );
+
+      const result = await router.execute({
+        event: makeDmEvent(),
+        prompt: "p",
+        context: "c",
+        processKey: "dashboard.chat",
+      });
+
+      // The call still returns the fallback's result.
+      expect(result.backendId).toBe("codex");
+
+      const rows = readFailedRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        result: "failed",
+        backend: "claude",
+        cost_source: "sdk_partial",
+        model_used: "claude-sonnet-4-6",
+        cache_creation_tokens: 10,
+        cache_read_tokens: 20,
+      });
+      expect(rows[0]?.cost_usd).toBeCloseTo(0.42, 4);
+    });
+
+    it("raw (unclassified) fallback error is rethrown AND the main spend row is written", async () => {
+      applySchema(db);
+      configureFallback();
+
+      const mainCore = makeCore({
+        execute: vi.fn().mockRejectedValue(
+          new BackendQuotaError("claude", "max_budget_usd", null, "budget exceeded", makeSpend()),
+        ),
+      });
+      const fallbackCore = makeFallbackCore({
+        execute: vi.fn().mockRejectedValue(new RangeError("out of range")),
+      });
+      const router = new BackendRouter(
+        db,
+        makeConfig(),
+        [mainCore, fallbackCore],
+        makeNotifier(),
+      );
+
+      await expect(
+        router.execute({
+          event: makeDmEvent(),
+          prompt: "p",
+          context: "c",
+          processKey: "dashboard.chat",
+        }),
+      ).rejects.toBeInstanceOf(RangeError);
+
+      const rows = readFailedRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        backend: "claude",
+        cost_source: "sdk_partial",
+      });
+      expect(rows[0]?.cost_usd).toBeCloseTo(0.42, 4);
+    });
+
+    it("main failure WITHOUT spend leaves no extra agent_actions row on fallback success", async () => {
+      applySchema(db);
+      configureFallback();
+
+      const mainCore = makeCore({
+        execute: vi.fn().mockRejectedValue(
+          new BackendQuotaError("claude", "rate_limited", null, "quota"),
+        ),
+      });
+      const fallbackCore = makeFallbackCore();
+      const router = new BackendRouter(
+        db,
+        makeConfig(),
+        [mainCore, fallbackCore],
+        makeNotifier(),
+      );
+
+      const result = await router.execute({
+        event: makeDmEvent(),
+        prompt: "p",
+        context: "c",
+        processKey: "dashboard.chat",
+      });
+
+      expect(result.backendId).toBe("codex");
+      const count = db
+        .prepare("SELECT COUNT(*) AS n FROM agent_actions")
+        .get() as { n: number };
+      expect(count.n).toBe(0);
+    });
   });
 
   it("resolveTier defaults to medium for unknown process keys", () => {

@@ -408,6 +408,13 @@ export function planCreate(
       kind: "cron",
       expression: recurrenceRuleToCron(parsedRule.data),
       ...(timezone !== undefined ? { timezone } : {}),
+      // Quiet-hours opt-in (QUIET_HOURS_HARDENING_PLAN.md §6) — carried
+      // verbatim so the schema validates it (a non-boolean is rejected as
+      // invalid_definition on schedule.defer_in_quiet_hours, same as the raw
+      // cron form, where the whole schedule block passes through).
+      ...(schedule.defer_in_quiet_hours !== undefined
+        ? { defer_in_quiet_hours: schedule.defer_in_quiet_hours }
+        : {}),
     };
   } else if (scheduleKind === "cron") {
     scheduleFrontmatter = schedule;

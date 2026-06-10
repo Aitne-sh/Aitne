@@ -166,6 +166,11 @@ export function createRecurringSchedulePort(
         ...(input.model !== null ? { model: input.model } : {}),
         ...(input.tier !== null ? { tier: input.tier } : {}),
         ...(input.backendId !== null ? { backendId: input.backendId } : {}),
+        // Quiet-hours opt-in (and any future row-local flags) — spread into
+        // every materialised agent_schedule row by generateNextScheduleRow.
+        ...(input.taskContext !== undefined
+          ? { taskContext: input.taskContext }
+          : {}),
       });
       return dto.id;
     },
@@ -187,6 +192,9 @@ export function createRecurringSchedulePort(
             : {}),
           ...(patch.recurrence !== undefined
             ? { recurrenceRule: specToRecurrenceRule(patch.recurrence) }
+            : {}),
+          ...(patch.taskContext !== undefined
+            ? { taskContext: patch.taskContext }
             : {}),
         },
         // Agent-driven edits tag a superseded pending row so the dispatcher /

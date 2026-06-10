@@ -70,7 +70,7 @@ describe("InMemoryRoadmapWriteLockManager", () => {
     expect(mgr.isHeldBy(undefined)).toBe(false);
   });
 
-  it("the timer auto-releases the lock after the timeout", () => {
+  it("auto-releases the lock after the timeout", () => {
     const mgr = new InMemoryRoadmapWriteLockManager(60_000);
     const first = mgr.acquire();
     expect(first.ok).toBe(true);
@@ -81,6 +81,32 @@ describe("InMemoryRoadmapWriteLockManager", () => {
     expect(mgr.getHolder()).toBeNull();
     const second = mgr.acquire();
     expect(second.ok).toBe(true);
+  });
+
+  it("expires by wall clock even when timers never fire (machine-sleep simulation)", () => {
+    const mgr = new InMemoryRoadmapWriteLockManager(60_000);
+    const first = mgr.acquire();
+    if (!first.ok) throw new Error("expected acquire to succeed");
+
+    // Jump the wall clock past the TTL without running any timer callbacks —
+    // this is what waking from machine sleep looks like to the process.
+    vi.setSystemTime(Date.now() + 60_001);
+
+    expect(mgr.isHeldBy(first.lockId)).toBe(false);
+    expect(mgr.getHolder()).toBeNull();
+    const second = mgr.acquire();
+    expect(second.ok).toBe(true);
+  });
+
+  it("does not expire before the TTL elapses on the wall clock", () => {
+    const mgr = new InMemoryRoadmapWriteLockManager(60_000);
+    const first = mgr.acquire();
+    if (!first.ok) throw new Error("expected acquire to succeed");
+
+    vi.setSystemTime(Date.now() + 59_999);
+
+    expect(mgr.isHeldBy(first.lockId)).toBe(true);
+    expect(mgr.getHolder()).toBe(first.lockId);
   });
 });
 

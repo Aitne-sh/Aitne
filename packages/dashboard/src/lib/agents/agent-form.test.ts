@@ -207,6 +207,15 @@ describe("agentFormToFrontmatter", () => {
       timeout_minutes: 30,
     });
   });
+  it("emits schedule.defer_in_quiet_hours only when opted in (QUIET_HOURS_HARDENING_PLAN §6)", () => {
+    const off = agentFormToFrontmatter(validState()) as { schedule: Record<string, unknown> };
+    expect("defer_in_quiet_hours" in off.schedule).toBe(false);
+
+    const on = agentFormToFrontmatter(validState({ deferInQuietHours: true })) as {
+      schedule: Record<string, unknown>;
+    };
+    expect(on.schedule.defer_in_quiet_hours).toBe(true);
+  });
 });
 
 describe("agentFormToMarkdown", () => {
@@ -231,6 +240,7 @@ describe("agentFormToMarkdown", () => {
         tier: "lite",
         backendId: "claude",
         enabled: false,
+        deferInQuietHours: true,
       }),
     );
     expect(validateAgentMarkdown(md)).toEqual({ ok: true });

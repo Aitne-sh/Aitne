@@ -298,6 +298,25 @@ export function NewAgentForm({
             />
           </FormField>
         )}
+
+        <FormField
+          label="Respect quiet hours"
+          description="When a run lands inside your quiet hours, wait and run at the end of the window instead. Turn this on whenever the agent messages you; leave it off for silent overnight work."
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={state.deferInQuietHours}
+              onChange={(e) => set("deferInQuietHours", e.target.checked)}
+              className="h-4 w-4 rounded border-input"
+            />
+            <span className="text-muted-foreground">
+              {state.deferInQuietHours
+                ? "On — runs move past quiet hours"
+                : "Off — runs at the scheduled time"}
+            </span>
+          </label>
+        </FormField>
       </div>
 
       {/* ── Backend ── */}

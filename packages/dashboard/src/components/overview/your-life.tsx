@@ -80,12 +80,14 @@ const LENSES: Lens[] = [
 
 export function YourLife() {
   return (
-    <section className="space-y-3">
+    <section className="space-y-2.5">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-medium text-foreground">Your Life</h2>
-        <span className="text-[11px] text-muted-foreground">Domain lenses over Knowledge</span>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+          Your Life
+        </h2>
+        <span className="text-[11px] text-muted-foreground/70">Domain lenses over Knowledge</span>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         {LENSES.filter((lens) => !lens.hidden).map((lens) => (
           <LensCard key={lens.href} lens={lens} />
         ))}
@@ -100,25 +102,21 @@ function LensCard({ lens }: { lens: Lens }) {
   return (
     <Link
       href={lens.href}
+      title={lens.description}
       className={cn(
-        "group relative flex flex-col rounded-xl border bg-card p-4 shadow-[0_1px_3px_rgb(0_0_0/0.04)] transition-all duration-150",
-        "hover:shadow-[0_4px_8px_rgb(0_0_0/0.06)] hover:-translate-y-0.5 hover:border-border/80",
+        "group flex items-center gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 shadow-[0_1px_2px_rgb(0_0_0/0.03)] transition-all duration-150",
+        "hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_4px_12px_-6px_rgb(0_0_0/0.10)]",
         isPlaceholder && "border-dashed",
       )}
     >
-      <div className="flex items-center justify-between">
-        <Icon className="h-4 w-4 text-muted-foreground" />
-        <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
-      </div>
-      <div className="mt-3 flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground">{lens.label}</span>
-        {lens.status.kind !== "ready" && (
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
-            {lens.status.label}
-          </span>
-        )}
-      </div>
-      <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{lens.description}</p>
+      <Icon className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
+      <span className="truncate text-sm font-medium text-foreground">{lens.label}</span>
+      {lens.status.kind !== "ready" && (
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+          {lens.status.label}
+        </span>
+      )}
+      <ArrowUpRight className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-primary" />
     </Link>
   );
 }

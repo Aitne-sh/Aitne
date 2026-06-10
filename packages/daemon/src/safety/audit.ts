@@ -480,7 +480,19 @@ export class AuditLogger implements IAuditLogger {
     }
   }
 
-  logSkip(event: Event, reason: string, trigger: "reactive" | "autonomous"): void {
+  logSkip(
+    event: Event,
+    reason: string,
+    trigger: "reactive" | "autonomous",
+    /**
+     * Optional structured context persisted to the `detail` JSON column.
+     * Used by the N2 spawn gates (`detail.spawnGate` — per-backend
+     * offline/auth verdicts) and the N3 pre-pass plan-assembly drop rows
+     * (`detail.prePass.skipReason`) so skip telemetry is queryable
+     * without parsing the `error` string. PREPASS_COST_REDUCTION_PLAN.md.
+     */
+    detail?: Record<string, unknown>,
+  ): void {
     try {
       // AGENT_DEFINITIONS_DESIGN.md §8.1 — stamp the owning Agent when the
       // in-flight firing resolved to one (e.g. a review routine skipped by the
@@ -488,22 +500,30 @@ export class AuditLogger implements IAuditLogger {
       // skips (setup-mode / cost-cap) resolve to NULL — no execution context
       // exists yet — which is the legacy row shape.
       const resolvedAgentId = this.agentIdResolver?.(event) ?? null;
-      const insertResult =
-        resolvedAgentId !== null
-          ? this.db
-              .prepare(
-                `INSERT INTO agent_actions
-               (event_id, action_type, trigger, result, error, agent_id, started_at)
-               VALUES (?, ?, ?, 'skipped', ?, ?, datetime('now'))`,
-              )
-              .run(event.correlationId, event.type, trigger, reason, resolvedAgentId)
-          : this.db
-              .prepare(
-                `INSERT INTO agent_actions
-               (event_id, action_type, trigger, result, error, started_at)
-               VALUES (?, ?, ?, 'skipped', ?, datetime('now'))`,
-              )
-              .run(event.correlationId, event.type, trigger, reason);
+      const columns = ["event_id", "action_type", "trigger", "result", "error"];
+      const values: (string | number | null)[] = [
+        event.correlationId,
+        event.type,
+        trigger,
+        "skipped",
+        reason,
+      ];
+      if (resolvedAgentId !== null) {
+        columns.push("agent_id");
+        values.push(resolvedAgentId);
+      }
+      if (detail !== undefined) {
+        columns.push("detail");
+        values.push(JSON.stringify(detail));
+      }
+      const placeholders = columns.map(() => "?").join(", ");
+      const insertResult = this.db
+        .prepare(
+          `INSERT INTO agent_actions
+             (${columns.join(", ")}, started_at)
+           VALUES (${placeholders}, datetime('now'))`,
+        )
+        .run(...values);
       this.emitInsertedRow(Number(insertResult.lastInsertRowid), event.type);
     } catch (err) {
       logger.error({ err, event: event.type }, "Failed to log skip");
@@ -600,10 +620,12 @@ export class AuditLogger implements IAuditLogger {
      * hit `max_budget_usd` because the row was written with no
      * timing/backend/model info.
      *
-     * Tokens / cost / num_turns are intentionally NOT passed: an aborted
-     * SDK stream doesn't surface a usable AgentResult, so any value here
-     * would be a guess. duration_ms + backend + failure shape are
-     * recoverable and that's what we record.
+     * Tokens / cost / num_turns are passed ONLY when the caller holds a
+     * real recovered spend figure (PREPASS_COST_REDUCTION_PLAN.md N1 —
+     * post-hoc budget kills, partial stream aborts). Callers without one
+     * must omit them: a fabricated value here would corrupt the cost
+     * dials. duration_ms + backend + failure shape are always
+     * recoverable and that's the baseline record.
      */
     context?: {
       durationMs?: number;
@@ -611,6 +633,20 @@ export class AuditLogger implements IAuditLogger {
       modelId?: string;
       failureKind?: string;
       failureCode?: string;
+      /**
+       * PREPASS_COST_REDUCTION_PLAN.md N1 — recovered spend for a failed
+       * turn the provider already billed. Pass ONLY a real recovered
+       * figure (BackendQuotaSpend / partial-usage snapshot), never a
+       * guess — the historical contract that failure rows carry no
+       * fabricated cost still holds for callers without one.
+       */
+      costUsd?: number;
+      costSource?: string;
+      tokensInput?: number;
+      tokensOutput?: number;
+      tokensCacheCreation?: number;
+      tokensCacheRead?: number;
+      numTurns?: number;
       /**
        * Pre-pass fan-out failure block. Mirrors the `prePass` payload on
        * `logAction` so `MetricsCollector.collectPrePassMetrics` can see
@@ -682,6 +718,47 @@ export class AuditLogger implements IAuditLogger {
       if (this.hasBackendColumn && context?.backendId) {
         columns.splice(columns.length - 2, 0, "backend");
         values.splice(values.length, 0, context.backendId);
+      }
+      // PREPASS_COST_REDUCTION_PLAN.md N1 — recovered spend for a failed
+      // turn the provider already billed (post-hoc budget kill, partial
+      // stream abort, timeout-with-usage). Only callers that hold a real
+      // recovered figure pass these; the historical "no guessed values"
+      // contract still applies to everyone else.
+      if (typeof context?.costUsd === "number" && context.costUsd >= 0) {
+        columns.splice(columns.length - 2, 0, "cost_usd");
+        values.splice(values.length, 0, context.costUsd);
+      }
+      if (this.hasCostSourceColumn && context?.costSource) {
+        columns.splice(columns.length - 2, 0, "cost_source");
+        values.splice(values.length, 0, context.costSource);
+      }
+      if (typeof context?.tokensInput === "number" && context.tokensInput >= 0) {
+        columns.splice(columns.length - 2, 0, "tokens_input");
+        values.splice(values.length, 0, context.tokensInput);
+      }
+      if (typeof context?.tokensOutput === "number" && context.tokensOutput >= 0) {
+        columns.splice(columns.length - 2, 0, "tokens_output");
+        values.splice(values.length, 0, context.tokensOutput);
+      }
+      if (
+        this.hasCacheCreationTokensColumn
+        && typeof context?.tokensCacheCreation === "number"
+        && context.tokensCacheCreation >= 0
+      ) {
+        columns.splice(columns.length - 2, 0, "cache_creation_tokens");
+        values.splice(values.length, 0, context.tokensCacheCreation);
+      }
+      if (
+        this.hasCacheReadTokensColumn
+        && typeof context?.tokensCacheRead === "number"
+        && context.tokensCacheRead >= 0
+      ) {
+        columns.splice(columns.length - 2, 0, "cache_read_tokens");
+        values.splice(values.length, 0, context.tokensCacheRead);
+      }
+      if (typeof context?.numTurns === "number" && context.numTurns > 0) {
+        columns.splice(columns.length - 2, 0, "num_turns");
+        values.splice(values.length, 0, context.numTurns);
       }
       // AGENT_DEFINITIONS_DESIGN.md §8.1 — stamp the owning Agent when the
       // in-flight firing resolved to one, so a FAILED routine's audit row is

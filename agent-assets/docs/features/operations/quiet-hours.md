@@ -25,7 +25,7 @@ ask_examples:
   - Will routines still run during quiet hours?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-10
 keywords:
   - quiet hours
   - dnd
@@ -65,6 +65,16 @@ the window:
   notification path, sees that it is quiet hours, and is logged as
   `suppressed` — it is **dropped, not held**. You will not receive it
   later.
+- **An explicit agent notification (`POST /api/notify`) is deferred,
+  not dropped.** When an agent session calls the notify endpoint inside
+  the window, the full message is queued as a scheduled DM that fires
+  the moment the window ends (visible under Schedule). Repeat calls
+  from the same agent overnight coalesce into one combined DM at the
+  edge instead of a morning pile-up. `critical` priority bypasses the
+  gate and sends immediately. If you change the quiet-hours window
+  while deferred DMs are pending, they are retimed to the new window
+  end (or released immediately when the new window no longer covers
+  the current time).
 - **A notification already in a batch queue is deferred, not dropped.**
   Aitne batches repeat notifications of the same event type within
   `batchIntervalMinutes`. When a batch is pending and quiet hours are
@@ -82,6 +92,20 @@ the window:
   defaults — boundary `04`, quiet hours `22:00`→`08:00` — that 04:00 run
   lands inside quiet hours, so it runs normally but its proactive output
   is held back or suppressed like any other notification.
+- **A custom Agent can opt its whole run out of the window.** A user
+  Agent created with `schedule.defer_in_quiet_hours: true` (the
+  "Respect quiet hours" toggle in the New Agent form) does not run
+  inside the window at all — the firing itself is pushed to the moment
+  quiet hours end, so a DM-producing Agent delivers fresh results right
+  at the edge instead of burning a 3 AM session whose message would be
+  held anyway. Each deferral is recorded in the action log
+  (`agent.task.deferred_for_quiet_hours`). The default is off, so a
+  silent file-writing Agent deliberately scheduled overnight stays put.
+  Built-in routines never defer. Scheduled browser tasks get the same
+  treatment via `browserTaskRespectQuietHours` (default on). Like
+  deferred DMs, already-deferred runs are retimed when you change the
+  quiet-hours window — shrinking or disabling it releases them at the
+  new edge instead of holding them until the old one.
 
 ## When It Runs / How It Is Triggered
 
@@ -112,10 +136,12 @@ regardless of where the bands sit.
 
 - **You expected an important alert to wake you but nothing came.**
   Only the safety categories (`security`, `deadline`, `error`,
-  `critical`) bypass quiet hours. A regular proactive notification that
-  isn't already batched is dropped, not delayed. If you need real-time
-  night alerts for, say, a critical mail label, either ensure that path
-  emits a safety-category notification or disable quiet hours.
+  `critical`) bypass quiet hours. A regular routine-output notification
+  that isn't already batched is dropped, not delayed (explicit
+  `/api/notify` messages are deferred to the window end instead). If
+  you need real-time night alerts for, say, a critical mail label,
+  either ensure that path emits a safety-category notification or
+  disable quiet hours.
 - **A notification fired after the window ended but feels stale.**
   Check `batchIntervalMinutes` — a long interval means a deferred batch
   flush can lag the window end by several minutes. The deferral targets

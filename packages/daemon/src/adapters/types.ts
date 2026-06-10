@@ -30,6 +30,21 @@ export interface NotificationRuntimeStatus {
 }
 
 /**
+ * Live transport-level connection state, read by the adapter watchdog
+ * (`adapter-watchdog.ts`).
+ *
+ *  - `"ok"`      — the underlying socket / poll loop is alive right now.
+ *  - `"down"`    — the library reports the connection dead (socket closed,
+ *                  poll loop exited, gateway session invalidated). The
+ *                  watchdog restarts the adapter after consecutive `"down"`
+ *                  observations.
+ *  - `"unknown"` — liveness cannot be determined (adapter not started, or
+ *                  the library's internals are not introspectable). The
+ *                  watchdog takes no action on `"unknown"`.
+ */
+export type AdapterConnectionState = "ok" | "down" | "unknown";
+
+/**
  * MessageAdapter — platform-specific messaging integration.
  *
  * Each adapter handles one platform (Slack, Telegram, Dashboard, etc.)
@@ -56,6 +71,13 @@ export interface MessageAdapter {
    * generic registered/error state tracked by MessageHub.
    */
   getNotificationRuntimeStatus?(): NotificationRuntimeStatus;
+
+  /**
+   * Cheap synchronous probe of the live transport state, for the adapter
+   * watchdog. Adapters that cannot introspect their library (or manage
+   * their own reconnection, like WhatsApp) omit this.
+   */
+  getConnectionState?(): AdapterConnectionState;
 
   /** Start receiving messages (connects to platform) */
   start(): Promise<void>;

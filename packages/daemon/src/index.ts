@@ -105,6 +105,7 @@ import {
 } from "./bootstrap/catchup.js";
 import {
   createAdapterReloaders,
+  createAdapterWatchdog,
   type AdapterState,
 } from "./bootstrap/adapters.js";
 import {
@@ -545,6 +546,16 @@ async function startup(): Promise<void> {
     reloadSlackAdapter(false),
     reloadTelegramAdapter(false),
   ]);
+
+  // Connection watchdog for the library-managed adapters. Probes the live
+  // socket/poll state on an interval and forces a stop→start cycle through
+  // the reloaders when a transport stays dead (e.g. after machine sleep
+  // kills the TCP sockets and the library's own reconnect gave up).
+  // Started after messageHub.startAll() below; stopped in shutdown.
+  const adapterWatchdog = createAdapterWatchdog(
+    { messageHub, state: adapterState },
+    { reloadDiscordAdapter, reloadSlackAdapter, reloadTelegramAdapter },
+  );
 
   if (config.whatsappEnabled) {
     if (!config.whatsappOwnerPhone) {
@@ -1400,6 +1411,46 @@ async function startup(): Promise<void> {
   // observation-threshold gate. checkAll() owns its own kill switch
   // (authProbeDisabled), morning-routine skip, and in-flight dedupe.
   scheduler.setAuthProbeCallback(() => authHealthMonitor.checkAll());
+  // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4 Phase 3 — self-tuning
+  // auto-revert monitor. Rides the hourly cron tick (P2 — no new scheduled
+  // session), throttles itself to one pass per day, and is a pure no-op
+  // until the Phase 3 actuator has written `runtime_state.self_tuning:*`
+  // ledger entries. Reverts go through the same `applyConfigUpdates`
+  // chokepoint the actuator used; the owner is DM'd on every auto-revert.
+  // Deliberately NOT gated on `selfTuningEnabled`: a safety rollback must
+  // keep working even if the owner turns the loop off after a change
+  // landed.
+  scheduler.setSelfTuningRevertMonitorCallback(async () => {
+    const { runSelfTuningRevertMonitor } = await import(
+      "./core/feedback/tuning-revert-monitor.js"
+    );
+    const { applyConfigUpdates } = await import("./api/env-writer.js");
+    const { SELF_TUNING_NOTIFICATION_TYPE } = await import(
+      "./core/feedback/tuning-recommender.js"
+    );
+    return runSelfTuningRevertMonitor({
+      db,
+      applyUpdates: (updates) =>
+        applyConfigUpdates(config, settingsStore, updates, { db }),
+      feedbackLearningEnabled: config.feedbackLearningEnabled,
+      sendDm: async (message) => {
+        await notificationManager.send(
+          message,
+          {
+            // Logged to notification_log under this type; R2 excludes it
+            // from demotion candidates (SELF_TUNING_NOTIFICATION_TYPE).
+            type: SELF_TUNING_NOTIFICATION_TYPE,
+            source: "self-tuning-revert-monitor",
+            priority: EventPriority.NORMAL,
+            timestamp: new Date(),
+            data: {},
+            correlationId: randomBytes(8).toString("hex"),
+          },
+          { priority: "high", destinationMode: "configured_only" },
+        );
+      },
+    });
+  });
   // Wire the autonomous-work gate: when policies/management.md is missing
   // or a setup conversation is active, the scheduler pauses cron routines
   // and ScheduleWatcher claims. This prevents any autonomous turn from
@@ -1421,6 +1472,7 @@ async function startup(): Promise<void> {
 
   // ── 13. Start all components ──
   await messageHub.startAll();
+  adapterWatchdog.start();
   scheduler.start();
   customRoutineScheduler.start();
   signalDetector.start();
@@ -1617,6 +1669,7 @@ async function startup(): Promise<void> {
     logger.info({ signal }, "Shutdown signal received");
 
     dispatcher.stop(); // Signals dispatcher to exit run() loop
+    adapterWatchdog.stop();
     scheduler.stop();
     customRoutineScheduler.stop();
     healthMonitor.stop();

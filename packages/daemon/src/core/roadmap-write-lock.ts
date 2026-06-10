@@ -30,11 +30,22 @@ export interface RoadmapWriteLockManager {
 
 export class InMemoryRoadmapWriteLockManager implements RoadmapWriteLockManager {
   private holder: string | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private expiresAtMs = 0;
 
   constructor(private readonly timeoutMs: number) {}
 
+  // Wall-clock lazy expiry — mirrors today-write-lock.ts. A setTimeout
+  // here would freeze across machine sleep (monotonic clock) and hold
+  // the lock long past its TTL after wake.
+  private expireIfStale(): void {
+    if (this.holder && Date.now() >= this.expiresAtMs) {
+      logger.warn({ lockId: this.holder }, "Roadmap write lock expired by timeout");
+      this.holder = null;
+    }
+  }
+
   acquire(): { ok: true; lockId: string } | { ok: false; holder: string } {
+    this.expireIfStale();
     if (this.holder) {
       logger.debug({ existingHolder: this.holder }, "Lock acquire rejected — already held");
       return { ok: false, holder: this.holder };
@@ -42,31 +53,25 @@ export class InMemoryRoadmapWriteLockManager implements RoadmapWriteLockManager 
 
     const lockId = randomUUID();
     this.holder = lockId;
-    this.timer = setTimeout(() => {
-      logger.warn({ lockId: this.holder }, "Roadmap write lock expired by timeout");
-      this.holder = null;
-      this.timer = null;
-    }, this.timeoutMs);
+    this.expiresAtMs = Date.now() + this.timeoutMs;
 
     logger.debug({ lockId }, "Roadmap write lock acquired");
     return { ok: true, lockId };
   }
 
   release(lockId: string): boolean {
+    this.expireIfStale();
     if (!this.holder || this.holder !== lockId) {
       return false;
     }
 
     this.holder = null;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
     logger.debug({ lockId }, "Roadmap write lock released");
     return true;
   }
 
   isHeldBy(lockId?: string | null): boolean {
+    this.expireIfStale();
     if (!this.holder) {
       return false;
     }
@@ -74,6 +79,7 @@ export class InMemoryRoadmapWriteLockManager implements RoadmapWriteLockManager 
   }
 
   getHolder(): string | null {
+    this.expireIfStale();
     return this.holder;
   }
 }

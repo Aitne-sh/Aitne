@@ -10,6 +10,7 @@ import {
   assertPromptCostWithinMaxBudget,
   classifyCliFailure,
   isMaxBudgetMessage,
+  recoverCliFailureSpend,
 } from "./cli-quota-guards.js";
 
 describe("isMaxBudgetMessage", () => {
@@ -245,5 +246,118 @@ describe("classifyCliFailure", () => {
   it("tags everything else as other_non_retryable", () => {
     const err = classifyCliFailure({ ...base, message: "segfault in subprocess" });
     expect((err as BackendDecisiveFailure).kind).toBe("other_non_retryable");
+  });
+});
+
+describe("classifyCliFailure — spend pass-through (PREPASS_COST_REDUCTION_PLAN.md N1)", () => {
+  const base = {
+    backendId: "codex" as const,
+    rateLimitPattern: /rate limit|quota/i,
+    authPattern: /unauthorized|login/i,
+  };
+  const spend: BackendQuotaSpend = {
+    usage: {
+      inputTokens: 1_000,
+      outputTokens: 200,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    },
+    costUsd: 0.12,
+    modelId: "gpt-x",
+    numTurns: 3,
+    durationMs: 9_000,
+    costSource: "litellm",
+  };
+
+  it("attaches spend to max-budget quota errors", () => {
+    const err = classifyCliFailure({ ...base, message: "max budget exceeded", spend });
+    expect(err).toBeInstanceOf(BackendQuotaError);
+    expect((err as BackendQuotaError).spend).toBe(spend);
+  });
+
+  it("attaches spend to rate-limit quota errors", () => {
+    const err = classifyCliFailure({ ...base, message: "rate limit reached", spend });
+    expect((err as BackendQuotaError).spend).toBe(spend);
+  });
+
+  it.each([
+    ["auth", "unauthorized request"],
+    ["timeout", "request timed out"],
+    ["other_non_retryable", "segfault in subprocess"],
+  ] as const)("attaches spend to %s decisive failures", (kind, message) => {
+    const err = classifyCliFailure({ ...base, message, spend });
+    expect(err).toBeInstanceOf(BackendDecisiveFailure);
+    expect((err as BackendDecisiveFailure).kind).toBe(kind);
+    expect((err as BackendDecisiveFailure).spend).toBe(spend);
+  });
+
+  it("defaults spend to null when not supplied", () => {
+    const err = classifyCliFailure({ ...base, message: "segfault" });
+    expect((err as BackendDecisiveFailure).spend).toBeNull();
+  });
+});
+
+describe("recoverCliFailureSpend (PREPASS_COST_REDUCTION_PLAN.md N1)", () => {
+  const priceFetcher = {
+    estimateUsageCost: vi.fn(() => ({ costUsd: 0.05, costSource: "litellm" as const })),
+  } as unknown as PriceFetcher;
+
+  it("returns null when no usage was observed", () => {
+    expect(
+      recoverCliFailureSpend({
+        backendId: "codex",
+        priceFetcher,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        },
+        modelId: "gpt-x",
+        numTurns: 0,
+        durationMs: 1_000,
+      }),
+    ).toBeNull();
+  });
+
+  it("builds the spend payload from observed usage via the price fetcher", () => {
+    const spend = recoverCliFailureSpend({
+      backendId: "codex",
+      priceFetcher,
+      usage: {
+        inputTokens: 5_000,
+        outputTokens: 100,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelId: "gpt-x",
+      numTurns: 4,
+      durationMs: 30_000,
+    });
+    expect(spend).toMatchObject({
+      costUsd: 0.05,
+      modelId: "gpt-x",
+      numTurns: 4,
+      durationMs: 30_000,
+      costSource: "litellm",
+    });
+    expect(spend?.usage.inputTokens).toBe(5_000);
+  });
+
+  it("floors numTurns at 1 and accepts cache-only usage", () => {
+    const spend = recoverCliFailureSpend({
+      backendId: "gemini",
+      priceFetcher,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheCreationInputTokens: 8_000,
+        cacheReadInputTokens: 0,
+      },
+      modelId: "gemini-3-flash",
+      numTurns: 0,
+      durationMs: 2_000,
+    });
+    expect(spend?.numTurns).toBe(1);
   });
 });

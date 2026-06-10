@@ -87,13 +87,18 @@ import {
   type RoutineWindowKey,
 } from "./routine-windows.js";
 import {
+  buildAcquisitionPlanAssembly,
   buildAcquisitionTimestamps,
   splitAcquisitionPlanByIntegration,
   type AcquisitionAccount,
+  type AcquisitionPlanDrop,
   type AcquisitionSubPlan,
   type AcquisitionTimestamps,
   type BuildAcquisitionPlanInput,
 } from "./routine-acquisition-plan.js";
+import { extractBackendSpend } from "./agent-core.js";
+import { BackendRouterHandledError } from "./backends/backend-router.js";
+import type { AutonomousSpawnGate, SpawnGateDecision } from "./spawn-gates.js";
 import {
   RETRY_REASONS,
   buildPriorAttemptHintBlock,
@@ -249,6 +254,14 @@ export interface RoutineFetchWindowRunnerDeps {
    * pre-A2, including the empty-plan short-circuit.
    */
   getEventBroadcaster?: () => { broadcastEvent: (data: unknown) => void } | null;
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N2 — offline/auth spawn gate shared
+   * with the dispatcher. Evaluated per integration sub-session (the
+   * hourly `harvestForGate` path spawns the runner directly, bypassing
+   * the dispatcher's own gate). Optional: when undefined the runner
+   * spawns unconditionally, exactly as pre-N2.
+   */
+  spawnGate?: AutonomousSpawnGate;
 }
 
 // ── Module helpers ────────────────────────────────────────────────────────
@@ -1032,6 +1045,13 @@ interface FanOutPlanContext {
    */
   accounts: readonly AcquisitionAccount[];
   timestamps: AcquisitionTimestamps;
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N3 — (window × integration) cells the
+   * plan assembly dropped (no binding, disabled, no catalog query, no
+   * accounts). Surfaced as `skipped` audit rows by `logPlanAssemblyDrops`
+   * so the drops stop vanishing without a trace.
+   */
+  drops: readonly AcquisitionPlanDrop[];
 }
 
 interface FanOutRunInput {
@@ -1088,6 +1108,73 @@ async function runWithConcurrency<T>(
   return results;
 }
 
+/**
+ * PREPASS_COST_REDUCTION_PLAN.md N1 — total spend recovered from a
+ * fan-out execute throw. The router can wrap up to two backend failures
+ * (main + fallback, both possibly billed) in a
+ * `BackendRouterHandledError`; sum across the distinct failures so the
+ * budget guards and the attempt record reflect everything the provider
+ * charged for the attempt.
+ */
+interface RecoveredFailureSpend {
+  costUsd: number;
+  numTurns: number;
+  costSource: string | null;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+  } | null;
+}
+
+function recoverRouterErrorSpend(error: unknown): RecoveredFailureSpend | null {
+  const failures: unknown[] = [];
+  if (error instanceof BackendRouterHandledError) {
+    failures.push(error.mainFailure);
+    if (error.fallbackFailure && error.fallbackFailure !== error.mainFailure) {
+      failures.push(error.fallbackFailure);
+    }
+    if (error.cause && !failures.includes(error.cause)) {
+      failures.push(error.cause);
+    }
+  } else {
+    failures.push(error);
+  }
+  let found = false;
+  let costUsd = 0;
+  let numTurns = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let cacheReadInputTokens = 0;
+  let costSource: string | null = null;
+  for (const failure of failures) {
+    const spend = extractBackendSpend(failure);
+    if (!spend) continue;
+    found = true;
+    costUsd += spend.costUsd;
+    numTurns += spend.numTurns;
+    inputTokens += spend.usage.inputTokens;
+    outputTokens += spend.usage.outputTokens;
+    cacheCreationInputTokens += spend.usage.cacheCreationInputTokens;
+    cacheReadInputTokens += spend.usage.cacheReadInputTokens;
+    costSource = costSource ?? spend.costSource ?? null;
+  }
+  if (!found) return null;
+  return {
+    costUsd,
+    numTurns,
+    costSource,
+    usage: {
+      inputTokens,
+      outputTokens,
+      cacheCreationInputTokens,
+      cacheReadInputTokens,
+    },
+  };
+}
+
 // ── Runner ────────────────────────────────────────────────────────────────
 
 export class RoutineFetchWindowRunner {
@@ -1101,6 +1188,7 @@ export class RoutineFetchWindowRunner {
   private readonly getEventBroadcaster:
     | (() => { broadcastEvent: (data: unknown) => void } | null)
     | null;
+  private readonly spawnGate: AutonomousSpawnGate | null;
 
   constructor(deps: RoutineFetchWindowRunnerDeps) {
     this.db = deps.db;
@@ -1111,6 +1199,7 @@ export class RoutineFetchWindowRunner {
     this.prompt = deps.prompt;
     this.getActiveMailAccounts = deps.getActiveMailAccounts;
     this.getEventBroadcaster = deps.getEventBroadcaster ?? null;
+    this.spawnGate = deps.spawnGate ?? null;
   }
 
   /**
@@ -1281,6 +1370,12 @@ export class RoutineFetchWindowRunner {
       );
     }
 
+    // PREPASS_COST_REDUCTION_PLAN.md N3 — surface plan-assembly drops as
+    // `skipped` audit rows before the empty-plan short-circuit below, so
+    // the all-cells-dropped case (the one the short-circuit hides) is
+    // recorded too. Observability only — no new skip behavior.
+    this.logPlanAssemblyDrops(parentEvent, key, planContext.drops);
+
     // HOURLY_CHECK_GATE_REDESIGN_PLAN.md §3.4 — when the caller is the
     // hourly_check coordinator, the freshness gate restricts pre-pass to
     // a subset of integrations. `integrationKeyFilter` is honoured here
@@ -1382,7 +1477,7 @@ export class RoutineFetchWindowRunner {
       accounts,
       timestamps,
     };
-    const subPlans = splitAcquisitionPlanByIntegration(planInput);
+    const { subPlans, drops } = buildAcquisitionPlanAssembly(planInput);
 
     // Observability: surface integrations whose `<fetch>` row will spawn
     // on a backend OTHER than the pre-pass default. Per-integration
@@ -1423,6 +1518,7 @@ export class RoutineFetchWindowRunner {
       subPlans,
       accounts,
       timestamps,
+      drops,
     };
   }
 
@@ -1616,6 +1712,18 @@ export class RoutineFetchWindowRunner {
     globalBudget: FanOutBudgetGuard;
     preResolvedBinding: ReturnType<IAgentRouter["resolveBinding"]> | null;
   }): Promise<SubReport> {
+    // PREPASS_COST_REDUCTION_PLAN.md N2 — offline/auth spawn gate, per
+    // sub-session because each integration can route to a different
+    // backend (`requiredBackend`). Skips only when EVERY candidate
+    // backend is non-viable; the DNS verdict is cached (~60s) inside the
+    // gate so an N-integration fan-out costs one lookup per host.
+    // Freshness (`pre_pass_last_run:<key>`) is untouched by construction
+    // — only `success` writes it — so the next tick retries.
+    const gateDecision = await this.evaluateSpawnGate(input);
+    if (gateDecision?.skip) {
+      return this.spawnGateSkippedSubReport(input, gateDecision);
+    }
+
     const attempts: SubAttemptRecord[] = [];
     // Per-integration budget cap is enforced at TWO complementary layers,
     // BOTH driven by `policy.perIntegrationBudgetUsd`:
@@ -1918,8 +2026,17 @@ export class RoutineFetchWindowRunner {
         integrationBudget.commit(integrationReservation, result.costUsd);
         record = this.attemptRecordFromResult(attempt, fetcherEvent, startedAt, result);
       } catch (err) {
-        input.globalBudget.commit(globalReservation, 0);
-        integrationBudget.commit(integrationReservation, 0);
+        // PREPASS_COST_REDUCTION_PLAN.md N1 — the throw path can still
+        // have billed the provider (post-hoc budget kill, partial stream
+        // abort). Recover the spend the backend cores attached so the
+        // budget guards account for real consumption and the attempt
+        // record / audit row carry the cost instead of a silent 0.
+        const failureSpend = recoverRouterErrorSpend(err);
+        input.globalBudget.commit(globalReservation, failureSpend?.costUsd ?? 0);
+        integrationBudget.commit(
+          integrationReservation,
+          failureSpend?.costUsd ?? 0,
+        );
         executeErr = err;
         record = this.failedAttemptRecord(
           attempt,
@@ -1927,6 +2044,7 @@ export class RoutineFetchWindowRunner {
           startedAt,
           "agent-execute-failed",
           err,
+          failureSpend,
         );
       }
 
@@ -1956,6 +2074,7 @@ export class RoutineFetchWindowRunner {
           err: executeErr,
           binding: binding.main,
           startedAt,
+          spend: recoverRouterErrorSpend(executeErr),
         });
       }
       this.emitSubSessionCompleted(input, fetcherEvent.correlationId, attempt, record, decision);
@@ -2166,6 +2285,13 @@ export class RoutineFetchWindowRunner {
     startedAt: string,
     kind: string,
     err: unknown,
+    /**
+     * PREPASS_COST_REDUCTION_PLAN.md N1 — spend recovered from the
+     * failure signal when the provider already billed the attempt.
+     * Absent for pre-execute failures (binding/context), which are
+     * genuinely zero-cost.
+     */
+    spend?: RecoveredFailureSpend | null,
   ): SubAttemptRecord {
     const message = err instanceof Error ? err.message : String(err);
     const endedAt = new Date().toISOString();
@@ -2179,8 +2305,8 @@ export class RoutineFetchWindowRunner {
       fetcherCorrelationId,
       startedAt,
       endedAt,
-      costUsd: 0,
-      numTurns: 0,
+      costUsd: spend?.costUsd ?? 0,
+      numTurns: spend?.numTurns ?? 0,
     };
   }
 
@@ -2245,6 +2371,198 @@ export class RoutineFetchWindowRunner {
   }
 
   /**
+   * PREPASS_COST_REDUCTION_PLAN.md N2 — evaluate the offline/auth spawn
+   * gate for one integration's sub-session. Candidates are the
+   * pre-resolved binding's main + fallback backends; when pre-resolve
+   * failed, the sub-plan's `requiredBackend` is the only candidate the
+   * attempt loop could use. Fail-open on every error path (returns null).
+   */
+  private async evaluateSpawnGate(input: FanOutRunInput & {
+    subPlan: AcquisitionSubPlan;
+    preResolvedBinding: ReturnType<IAgentRouter["resolveBinding"]> | null;
+  }): Promise<SpawnGateDecision | null> {
+    if (!this.spawnGate) return null;
+    try {
+      const binding = input.preResolvedBinding;
+      const candidates: BackendId[] = binding
+        ? [binding.main.backendId]
+        : [input.subPlan.requiredBackend];
+      if (
+        binding?.fallback
+        && binding.fallback.backendId !== binding.main.backendId
+      ) {
+        candidates.push(binding.fallback.backendId);
+      }
+      return await this.spawnGate.evaluate(candidates);
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          routine: input.key,
+          integrationKey: input.subPlan.integrationKey,
+        },
+        "Pre-pass spawn-gate evaluation failed — failing open",
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Build the `skipped` SubReport for a spawn-gate skip and write its
+   * audit row. Mirrors the empty-attempts synthetic record (attempt 0,
+   * no SSE sub-session emits — no session was spawned). The audit row is
+   * `result='skipped'` with `detail.prePass.skipReason` carrying N2's
+   * `offline` / `auth_unhealthy`, matching the N3 plan-drop row shape so
+   * all pre-pass skip telemetry is queryable through one path.
+   */
+  private spawnGateSkippedSubReport(
+    input: FanOutRunInput & {
+      subPlan: AcquisitionSubPlan;
+      policy: RetryPolicy;
+    },
+    decision: SpawnGateDecision,
+  ): SubReport {
+    const reason = decision.reason ?? "offline";
+    const now = new Date().toISOString();
+    const record: SubAttemptRecord = {
+      attempt: 0,
+      status: "skipped",
+      fetched: 0,
+      posted: 0,
+      duplicates: 0,
+      errors: [{ type: "spawn-gate-skipped", reason, attempt: 0 }],
+      fetcherCorrelationId: input.parentEvent.correlationId,
+      startedAt: now,
+      endedAt: now,
+      costUsd: 0,
+      numTurns: 0,
+    };
+    try {
+      const fetcherEvent = this.createFanOutFetcherEvent(
+        input.parentEvent,
+        input.key,
+        input.subPlan,
+        0,
+        input.policy.maxAttempts,
+      );
+      this.audit.logSkip(fetcherEvent, reason, "autonomous", {
+        prePass: {
+          parentCorrelationId: input.parentEvent.correlationId,
+          parentRoutine: input.key,
+          integrationKey: input.subPlan.integrationKey,
+          skipReason: reason,
+          spawnGate: { backends: decision.backends },
+        },
+      });
+    } catch (err) {
+      logger.warn(
+        {
+          err,
+          routine: input.key,
+          integrationKey: input.subPlan.integrationKey,
+          reason,
+        },
+        "Failed to log spawn-gate skip audit row",
+      );
+    }
+    logger.info(
+      {
+        routine: input.key,
+        integrationKey: input.subPlan.integrationKey,
+        reason,
+        backends: decision.backends,
+        parentCorrelationId: input.parentEvent.correlationId,
+      },
+      "Pre-pass sub-session skipped — spawn gate (offline / auth-unhealthy backends)",
+    );
+    return {
+      ...record,
+      integrationKey: input.subPlan.integrationKey,
+      attempts: [record],
+      retriesExhausted: false,
+    };
+  }
+
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N3 — one `skipped` audit row per
+   * (integration × reason) group of plan-assembly drops, with the
+   * dropped windows listed in `detail.prePass.windows`. Grouped at
+   * integration granularity because that is the unit a session would
+   * have been spawned for (and the unit the deferred R5 streak skip
+   * will key on). Observability only — no skip behavior changes here.
+   */
+  private logPlanAssemblyDrops(
+    parentEvent: Event,
+    key: RoutineWindowKey,
+    allDrops: readonly AcquisitionPlanDrop[],
+  ): void {
+    // `direct_inline_prefetch` is the catalog working as designed (the
+    // daemon fetches that data inline; see the reason's doc comment) —
+    // auditing it every run would bury the genuine drop signal R4/R5
+    // need under deterministic noise.
+    const drops = allDrops.filter((d) => d.reason !== "direct_inline_prefetch");
+    if (drops.length === 0) return;
+    try {
+      const groups = new Map<string, {
+        integration: IntegrationKey;
+        reason: AcquisitionPlanDrop["reason"];
+        windows: string[];
+      }>();
+      for (const drop of drops) {
+        const groupKey = `${drop.integration}|${drop.reason}`;
+        const existing = groups.get(groupKey);
+        if (existing) {
+          existing.windows.push(drop.window);
+        } else {
+          groups.set(groupKey, {
+            integration: drop.integration,
+            reason: drop.reason,
+            windows: [drop.window],
+          });
+        }
+      }
+      for (const group of groups.values()) {
+        const dropEvent: RoutineEvent = {
+          ...createEvent({
+            type: FETCH_WINDOW_EVENT_TYPE,
+            source: parentEvent.source,
+            priority: EventPriority.NORMAL,
+            correlationId: parentEvent.correlationId,
+          }),
+          routine: "fetch_window",
+        };
+        this.audit.logSkip(
+          dropEvent,
+          `plan_drop:${group.reason}`,
+          "autonomous",
+          {
+            prePass: {
+              parentCorrelationId: parentEvent.correlationId,
+              parentRoutine: key,
+              integrationKey: group.integration,
+              skipReason: group.reason,
+              windows: group.windows,
+            },
+          },
+        );
+      }
+      logger.debug(
+        {
+          routine: key,
+          parentCorrelationId: parentEvent.correlationId,
+          drops,
+        },
+        "Pre-pass plan-assembly drops recorded",
+      );
+    } catch (err) {
+      logger.warn(
+        { err, routine: key, dropCount: drops.length },
+        "Failed to log pre-pass plan-assembly drop audit rows",
+      );
+    }
+  }
+
+  /**
    * Unified audit-row companion for every fan-out failure mode —
    * binding-resolve-failed, global-budget-cap, budget-cap (per-integration),
    * context-build-failed, and agent-execute-failed. Routes through
@@ -2273,6 +2591,13 @@ export class RoutineFetchWindowRunner {
       err?: unknown;
       binding?: { backendId: BackendId; modelId: string };
       startedAt: string;
+      /**
+       * PREPASS_COST_REDUCTION_PLAN.md N1 — spend recovered from the
+       * failure signal. When present the audit row carries the real
+       * cost/tokens the provider billed; pre-execute failure modes keep
+       * the historical no-cost row (they are genuinely zero-cost).
+       */
+      spend?: RecoveredFailureSpend | null;
     },
   ): void {
     try {
@@ -2290,6 +2615,24 @@ export class RoutineFetchWindowRunner {
         ...(durationMs !== undefined ? { durationMs } : {}),
         ...(options.binding ? { backendId: options.binding.backendId } : {}),
         ...(options.binding ? { modelId: options.binding.modelId } : {}),
+        ...(options.spend
+          ? {
+              costUsd: options.spend.costUsd,
+              numTurns: options.spend.numTurns,
+              ...(options.spend.costSource
+                ? { costSource: options.spend.costSource }
+                : {}),
+              ...(options.spend.usage
+                ? {
+                    tokensInput: options.spend.usage.inputTokens,
+                    tokensOutput: options.spend.usage.outputTokens,
+                    tokensCacheCreation:
+                      options.spend.usage.cacheCreationInputTokens,
+                    tokensCacheRead: options.spend.usage.cacheReadInputTokens,
+                  }
+                : {}),
+            }
+          : {}),
         failureKind: options.failureKind,
         prePass: {
           parentCorrelationId: input.parentEvent.correlationId,

@@ -173,6 +173,7 @@ function makeBootstrapApiDeps(
       beginSetupMode: vi.fn(),
       clearSetupMode: vi.fn(),
       validateAttachmentTurnToken: () => null,
+      agentIdForCorrelation: vi.fn(() => null),
     } as unknown as BootstrapApiDeps["dispatcher"],
     sessionManager: {} as BootstrapApiDeps["sessionManager"],
     scheduler: {
@@ -543,6 +544,181 @@ describe("startApiServer", () => {
         headers: { Host: "127.0.0.1" },
       });
       expect(res.status).toBe(200);
+    });
+  });
+
+  // QUIET_HOURS_HARDENING_PLAN.md Phase 1 — the `sendNotification`
+  // closure assembled here is THE quiet-hours/rate-limit chokepoint for
+  // `POST /api/notify` (finding F1: it used to wire straight into
+  // `messageHub.sendToUser`). These tests run the real wiring end to end
+  // so a refactor that drops the gate goes loud, complementing the
+  // unit-level coverage in `core/notification-gate.test.ts` and the
+  // mocked-callback envelope tests in `api/routes/agent.test.ts`.
+  describe("outbound notification gate (quiet hours / rate limits)", () => {
+    function hhmm(date: Date): string {
+      return `${String(date.getUTCHours()).padStart(2, "0")}:${String(
+        date.getUTCMinutes(),
+      ).padStart(2, "0")}`;
+    }
+
+    /** Config whose quiet-hours window brackets "now" (UTC ±1h) so the
+     *  gate is deterministically inside the window at run time. */
+    function gateConfig(overrides: Record<string, unknown> = {}): AgentConfig {
+      const now = new Date();
+      return {
+        dataDir: tmpDir,
+        workspaceDir: resolve(__dirname, "..", "..", "..", ".."),
+        apiPort: 8321,
+        timezone: "UTC",
+        dayBoundaryHour: 0,
+        agentDisplayName: "ai bot",
+        apiToken: "test-token",
+        enforceReadToken: false,
+        defaultNotificationPlatforms: [],
+        whatsappEnabled: false,
+        quietHoursStart: hhmm(new Date(now.getTime() - 60 * 60 * 1000)),
+        quietHoursEnd: hhmm(new Date(now.getTime() + 60 * 60 * 1000)),
+        maxNotificationsPerHour: 3,
+        maxNotificationsPerDay: 12,
+        ...overrides,
+      } as unknown as AgentConfig;
+    }
+
+    async function postNotify(
+      app: ReturnType<typeof startApiServer>["app"],
+      body: Record<string, unknown>,
+      headers: Record<string, string> = {},
+    ): Promise<Response> {
+      return app.request("/api/notify", {
+        method: "POST",
+        headers: {
+          Host: "127.0.0.1",
+          "content-type": "application/json",
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      });
+    }
+
+    it("defers a normal-priority notify inside quiet hours to a pending dm row (nothing sent)", async () => {
+      const { spy } = makeServeSpy();
+      const sendToUser = vi.fn(async () => []);
+      const markEventNotified = vi.fn();
+      const built = makeBootstrapApiDeps(tmpDir, {
+        serveImpl: spy as never,
+        config: gateConfig(),
+        messageHub: {
+          sendToUser,
+          getEffectiveFallbackPlatforms: () => [],
+        } as unknown as BootstrapApiDeps["messageHub"],
+        dispatcher: {
+          getInFlightExecutions: () => [],
+          isAutonomousAllowed: () => null,
+          markEventNotified,
+          agentIdForCorrelation: vi.fn(() => "inbox-watcher"),
+          validateAttachmentTurnToken: () => null,
+        } as unknown as BootstrapApiDeps["dispatcher"],
+      });
+      db = built.db;
+      const { app } = startApiServer(built.deps);
+
+      const res = await postNotify(
+        app,
+        { message: "overnight ping" },
+        { "X-Pa-Event-Correlation-Id": "evt-1" },
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.status).toBe("deferred_quiet_hours");
+      expect(body.scheduleId).toEqual(expect.any(String));
+      expect(sendToUser).not.toHaveBeenCalled();
+      // The deferred message WILL deliver → event marked notified.
+      expect(markEventNotified).toHaveBeenCalledWith("evt-1");
+
+      const row = db
+        .prepare(
+          "SELECT task_type, status, task_description, task_context FROM agent_schedule",
+        )
+        .get() as {
+        task_type: string;
+        status: string;
+        task_description: string;
+        task_context: string;
+      };
+      expect(row.task_type).toBe("dm");
+      expect(row.status).toBe("pending");
+      expect(row.task_description).toBe("overnight ping");
+      const ctx = JSON.parse(row.task_context) as Record<string, unknown>;
+      expect(ctx.deferred_from).toBe("api.notify");
+      expect(ctx.agent_id).toBe("inbox-watcher");
+      // No delivered notification_log row — the dm row is the durable record.
+      expect(
+        db.prepare("SELECT COUNT(*) AS cnt FROM notification_log").get(),
+      ).toEqual({ cnt: 0 });
+    });
+
+    it("delivers critical priority immediately even inside quiet hours", async () => {
+      const { spy } = makeServeSpy();
+      const sendToUser = vi.fn(async () => [
+        { platform: "slack", channel: "D1", messageId: "m1" },
+      ]);
+      const built = makeBootstrapApiDeps(tmpDir, {
+        serveImpl: spy as never,
+        config: gateConfig(),
+        messageHub: {
+          sendToUser,
+          getEffectiveFallbackPlatforms: () => [],
+        } as unknown as BootstrapApiDeps["messageHub"],
+      });
+      db = built.db;
+      const { app } = startApiServer(built.deps);
+
+      const res = await postNotify(app, {
+        message: "credential leak detected",
+        priority: "critical",
+      });
+
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { status: string }).status).toBe("sent");
+      expect(sendToUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects with 429 rate_limited outside quiet hours once the hourly cap is spent", async () => {
+      const { spy } = makeServeSpy();
+      const sendToUser = vi.fn(async () => []);
+      const built = makeBootstrapApiDeps(tmpDir, {
+        serveImpl: spy as never,
+        // start === end disables quiet hours → immediate path.
+        config: gateConfig({
+          quietHoursStart: "00:00",
+          quietHoursEnd: "00:00",
+        }),
+        messageHub: {
+          sendToUser,
+          getEffectiveFallbackPlatforms: () => [],
+        } as unknown as BootstrapApiDeps["messageHub"],
+      });
+      db = built.db;
+      const insert = db.prepare(
+        `INSERT INTO notification_log
+           (dispatch_id, notification_type, priority, platform, content_summary, status, created_at, delivered_at)
+         VALUES (?, 'agent', 'normal', 'slack', 'x', 'delivered', datetime('now'), datetime('now'))`,
+      );
+      for (let i = 0; i < 3; i++) insert.run(`d${i}`);
+      const { app } = startApiServer(built.deps);
+
+      const res = await postNotify(app, { message: "one too many" });
+
+      expect(res.status).toBe(429);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.status).toBe("rate_limited");
+      expect(body.retryAfter).toEqual(expect.any(String));
+      expect(sendToUser).not.toHaveBeenCalled();
+      // Nothing queued either — the live session adapts instead.
+      expect(
+        db.prepare("SELECT COUNT(*) AS cnt FROM agent_schedule").get(),
+      ).toEqual({ cnt: 0 });
     });
   });
 });

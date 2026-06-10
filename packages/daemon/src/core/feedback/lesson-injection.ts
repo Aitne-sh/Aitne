@@ -127,9 +127,25 @@ function activeLessons(fileMd: string): Lesson[] {
   );
 }
 
+/**
+ * Neutralise XML-tag breakout in lesson prose. Lesson text is
+ * LLM-synthesized during consolidation from signals that can carry
+ * untrusted excerpts, and the rendered block is framed to the model as
+ * standing directives — a body containing `</agent_lessons>` must not be
+ * able to close the wrapper and forge a sibling high-trust block. Same
+ * escape set the worksheet builders' `xmlEscape` applies to the same text
+ * on the consolidation side (`consolidation-prep.ts`).
+ */
+function escapeLessonText(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 /** One lesson as an agent-facing bullet (trailer + date stripped). */
 function bulletFor(lesson: Lesson): string {
-  return `- ${lesson.text}`;
+  return `- ${escapeLessonText(lesson.text)}`;
 }
 
 function wrap(style: BlockStyle, bullets: ReadonlyArray<string>): string {

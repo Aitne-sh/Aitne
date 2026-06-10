@@ -191,12 +191,19 @@ export function parseLessonsSection(sectionBody: string): Lesson[] {
       flush();
       continue;
     }
-    if (current && (line.startsWith("  ") || line.trim().length > 0)) {
-      // Continuation of the current lesson (indented, or a trailer comment
-      // the author placed on its own non-indented line).
+    if (
+      current &&
+      (line.startsWith("  ") || line.trim().startsWith("<!--"))
+    ) {
+      // Continuation of the current lesson: indented prose, or a trailer
+      // comment the author placed on its own non-indented line.
       current.buffer.push(line.trim());
     } else if (current) {
-      // Blank line ends the current lesson.
+      // Blank line or non-indented stray prose ends the current lesson.
+      // The stray line itself is ignored (module contract: non-lesson
+      // lines are ignored) — folding it into the preceding lesson would
+      // absorb a hand-written note into an injectable directive and
+      // re-serialize it permanently on the next consolidation.
       flush();
     }
   }

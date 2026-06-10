@@ -1,5 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
+
+// PREPASS_COST_REDUCTION_PLAN.md N2 — the dispatcher constructs an
+// AutonomousSpawnGate internally, whose default DNS probe would hit the
+// real resolver from unit tests. Replace it with a controllable stub:
+// permissive by default (skip: false) so every existing dispatch test
+// stays hermetic; individual tests override `spawnGateEvaluateMock` to
+// exercise the skip path.
+const spawnGateEvaluateMock = vi.hoisted(() =>
+  vi.fn(async () => ({ skip: false as const, backends: [] })),
+);
+vi.mock("./spawn-gates.js", () => ({
+  AutonomousSpawnGate: class {
+    evaluate = spawnGateEvaluateMock;
+  },
+}));
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3566,6 +3581,351 @@ describe("EventDispatcher", () => {
   //  (b) `isAutonomousAllowed()` — gates all non-message event processing
   //      while either `rules/management.md` is missing (cold gate) OR a
   //      setup conversation is active (warm gate).
+  describe("spawn gates (PREPASS_COST_REDUCTION_PLAN.md N2)", () => {
+    function buildGateDispatcher(): EventDispatcher {
+      return new EventDispatcher(
+        eventBus,
+        mockAgentCore,
+        mockContextBuilder,
+        mockGetTaskFlow,
+        mockNotificationMgr,
+        mockSessionMgr,
+        mockMessageRecorder,
+        mockAudit,
+        db,
+        makeConfig(),
+      );
+    }
+
+    function makeHourlyEvent(): Event {
+      const event = createEvent({
+        type: "routine.hourly_check",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      Object.assign(event, {
+        routine: "hourly_check",
+        data: { pendingCount: 1 },
+      });
+      return event;
+    }
+
+    it("skips an autonomous event with the gate's reason and never dispatches", async () => {
+      spawnGateEvaluateMock.mockResolvedValueOnce({
+        skip: true,
+        reason: "offline",
+        backends: [
+          {
+            backendId: "claude",
+            host: "api.anthropic.com",
+            offline: true,
+            authStatus: "ok",
+            authShouldSkip: false,
+            viable: false,
+          },
+        ],
+      } as never);
+      const dispatcher = buildGateDispatcher();
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(makeHourlyEvent());
+
+      expect(mockAudit.logSkip).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "routine.hourly_check" }),
+        "offline",
+        "autonomous",
+        expect.objectContaining({
+          spawnGate: expect.objectContaining({
+            backends: expect.arrayContaining([
+              expect.objectContaining({ backendId: "claude", offline: true }),
+            ]),
+          }),
+        }),
+      );
+      expect(mockAgentCore.execute).not.toHaveBeenCalled();
+    });
+
+    it("does not consult the gate for reactive (DM) events", async () => {
+      spawnGateEvaluateMock.mockClear();
+      const dispatcher = buildGateDispatcher();
+      const dmEvent = createEvent({
+        type: "message.received",
+        source: "slack",
+        priority: EventPriority.NORMAL,
+      });
+      Object.assign(dmEvent, {
+        platform: "slack",
+        channel: "D123",
+        user: "U1",
+        content: "hello",
+        isDm: true,
+        isMention: false,
+      });
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(dmEvent);
+
+      expect(spawnGateEvaluateMock).not.toHaveBeenCalled();
+    });
+
+    it("fails open when binding resolution throws — event still dispatches", async () => {
+      spawnGateEvaluateMock.mockClear();
+      vi.mocked(mockAgentCore.resolveBinding).mockImplementationOnce(() => {
+        throw new Error("no binding for you");
+      });
+      const dispatcher = buildGateDispatcher();
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(makeHourlyEvent());
+
+      // Gate never reached (binding threw before evaluate), and the skip
+      // path did not fire — dispatch proceeded.
+      expect(spawnGateEvaluateMock).not.toHaveBeenCalled();
+      expect(mockAudit.logSkip).not.toHaveBeenCalledWith(
+        expect.anything(),
+        "offline",
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it("releases a claimed schedule row back to pending on a gate skip", async () => {
+      spawnGateEvaluateMock.mockResolvedValueOnce({
+        skip: true,
+        reason: "auth_unhealthy",
+        backends: [],
+      } as never);
+      const dispatcher = buildGateDispatcher();
+
+      const scheduleId = Number(
+        db
+          .prepare(
+            `INSERT INTO agent_schedule (task_type, task_description, scheduled_for, status)
+             VALUES ('wake', 'gate test', datetime('now'), 'running')`,
+          )
+          .run().lastInsertRowid,
+      );
+      const event = createEvent({
+        type: "scheduled.task",
+        source: "schedule_watcher",
+        priority: EventPriority.NORMAL,
+      });
+      Object.assign(event, { scheduleId });
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(event);
+
+      const row = db
+        .prepare("SELECT status FROM agent_schedule WHERE id = ?")
+        .get(scheduleId) as { status: string };
+      expect(row.status).toBe("pending");
+      expect(mockAudit.logSkip).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "scheduled.task" }),
+        "auth_unhealthy",
+        "autonomous",
+        expect.anything(),
+      );
+    });
+
+    // ── requestedBackendId pin ────────────────────────────────────────
+    //
+    // Scheduled rows / integration cron events can pin a backend; the
+    // router's backend-only override then routes to exactly that backend
+    // with NO fallback. The gate must mirror that contract: evaluate the
+    // pinned candidate alone, ignoring the default binding entirely.
+
+    it("gates a pinned event on exactly the pinned backend — healthy pin dispatches even when the default binding is non-viable", async () => {
+      spawnGateEvaluateMock.mockClear();
+      // Anything other than the pinned single-candidate list (e.g. the
+      // default binding's ["claude"]) reports non-viable — so a pass
+      // here proves the gate consulted only the pin.
+      spawnGateEvaluateMock.mockImplementationOnce((async (
+        ...args: unknown[]
+      ) => {
+        const candidates = args[0] as string[];
+        return candidates.length === 1 && candidates[0] === "codex"
+          ? { skip: false, backends: [] }
+          : { skip: true, reason: "offline", backends: [] };
+      }) as never);
+      const dispatcher = buildGateDispatcher();
+      const event = makeHourlyEvent();
+      Object.assign(event, { requestedBackendId: "codex" });
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(event);
+
+      expect(spawnGateEvaluateMock).toHaveBeenCalledTimes(1);
+      expect(spawnGateEvaluateMock).toHaveBeenCalledWith(["codex"]);
+      // The hourly dispatch path may log unrelated pre-pass skips
+      // (plan_drop:*); the spawn-gate reasons must be absent.
+      const gateSkipReasons = vi
+        .mocked(mockAudit.logSkip)
+        .mock.calls.map((c) => c[1])
+        .filter((r) => r === "offline" || r === "auth_unhealthy");
+      expect(gateSkipReasons).toEqual([]);
+      expect(mockAgentCore.execute).toHaveBeenCalled();
+    });
+
+    it("skips when the pinned backend is non-viable even though the default binding is healthy", async () => {
+      spawnGateEvaluateMock.mockClear();
+      spawnGateEvaluateMock.mockImplementationOnce((async (
+        ...args: unknown[]
+      ) => {
+        const candidates = args[0] as string[];
+        return candidates.length === 1 && candidates[0] === "gemini"
+          ? { skip: true, reason: "auth_unhealthy", backends: [] }
+          : { skip: false, backends: [] };
+      }) as never);
+      const dispatcher = buildGateDispatcher();
+      const event = makeHourlyEvent();
+      Object.assign(event, { requestedBackendId: "gemini" });
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(event);
+
+      expect(spawnGateEvaluateMock).toHaveBeenCalledWith(["gemini"]);
+      expect(mockAudit.logSkip).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "routine.hourly_check" }),
+        "auth_unhealthy",
+        "autonomous",
+        expect.anything(),
+      );
+      expect(mockAgentCore.execute).not.toHaveBeenCalled();
+    });
+
+    it("ignores an invalid requestedBackendId and falls back to the default binding's candidates", async () => {
+      spawnGateEvaluateMock.mockClear();
+      const dispatcher = buildGateDispatcher();
+      const event = makeHourlyEvent();
+      Object.assign(event, { requestedBackendId: "openai" });
+
+      await (
+        dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+      ).handleEvent(event);
+
+      // Default binding mock: main=claude, fallback=null.
+      expect(spawnGateEvaluateMock).toHaveBeenCalledWith(["claude"]);
+    });
+
+    // ── skip-audit throttle ───────────────────────────────────────────
+    //
+    // A released schedule row is due immediately, so the watcher re-claims
+    // it every poll tick for the whole outage. The audit INSERT for the
+    // same (schedule, reason) key is throttled to one per 10 minutes; the
+    // row release itself must still happen on every skip.
+
+    function insertRunningSchedule(): number {
+      return Number(
+        db
+          .prepare(
+            `INSERT INTO agent_schedule (task_type, task_description, scheduled_for, status)
+             VALUES ('wake', 'gate throttle test', datetime('now'), 'running')`,
+          )
+          .run().lastInsertRowid,
+      );
+    }
+
+    function makeScheduledEvent(scheduleId: number): Event {
+      const event = createEvent({
+        type: "scheduled.task",
+        source: "schedule_watcher",
+        priority: EventPriority.NORMAL,
+      });
+      Object.assign(event, { scheduleId });
+      return event;
+    }
+
+    function setRunning(scheduleId: number): void {
+      db.prepare("UPDATE agent_schedule SET status = 'running' WHERE id = ?")
+        .run(scheduleId);
+    }
+
+    function getStatus(scheduleId: number): string {
+      return (
+        db
+          .prepare("SELECT status FROM agent_schedule WHERE id = ?")
+          .get(scheduleId) as { status: string }
+      ).status;
+    }
+
+    it("throttles duplicate skip audit rows for the same (schedule, reason) but still releases the row every time", async () => {
+      spawnGateEvaluateMock.mockClear();
+      spawnGateEvaluateMock
+        .mockResolvedValueOnce(
+          { skip: true, reason: "offline", backends: [] } as never,
+        )
+        .mockResolvedValueOnce(
+          { skip: true, reason: "offline", backends: [] } as never,
+        );
+      const dispatcher = buildGateDispatcher();
+      const handle = (e: Event) =>
+        (
+          dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+        ).handleEvent(e);
+      const scheduleId = insertRunningSchedule();
+
+      await handle(makeScheduledEvent(scheduleId));
+      expect(mockAudit.logSkip).toHaveBeenCalledTimes(1);
+      expect(getStatus(scheduleId)).toBe("pending");
+
+      // Watcher re-claims the still-due row on the next tick…
+      setRunning(scheduleId);
+      await handle(makeScheduledEvent(scheduleId));
+
+      // …the audit INSERT is throttled, but the release is NOT.
+      expect(mockAudit.logSkip).toHaveBeenCalledTimes(1);
+      expect(getStatus(scheduleId)).toBe("pending");
+    });
+
+    it("a different reason or a different schedule id still writes its own skip audit row", async () => {
+      spawnGateEvaluateMock.mockClear();
+      spawnGateEvaluateMock
+        .mockResolvedValueOnce(
+          { skip: true, reason: "offline", backends: [] } as never,
+        )
+        .mockResolvedValueOnce(
+          { skip: true, reason: "auth_unhealthy", backends: [] } as never,
+        )
+        .mockResolvedValueOnce(
+          { skip: true, reason: "offline", backends: [] } as never,
+        );
+      const dispatcher = buildGateDispatcher();
+      const handle = (e: Event) =>
+        (
+          dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
+        ).handleEvent(e);
+      const scheduleA = insertRunningSchedule();
+      const scheduleB = insertRunningSchedule();
+
+      await handle(makeScheduledEvent(scheduleA));
+      expect(mockAudit.logSkip).toHaveBeenCalledTimes(1);
+
+      // Same schedule, reason flips offline → auth_unhealthy: recorded
+      // promptly (its own throttle key).
+      setRunning(scheduleA);
+      await handle(makeScheduledEvent(scheduleA));
+      expect(mockAudit.logSkip).toHaveBeenCalledTimes(2);
+      expect(mockAudit.logSkip).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: "scheduled.task" }),
+        "auth_unhealthy",
+        "autonomous",
+        expect.anything(),
+      );
+
+      // Different schedule row, same reason as A's first skip: its own
+      // first row still lands.
+      await handle(makeScheduledEvent(scheduleB));
+      expect(mockAudit.logSkip).toHaveBeenCalledTimes(3);
+      expect(getStatus(scheduleB)).toBe("pending");
+    });
+  });
+
   describe("setup gate", () => {
     it("isAutonomousAllowed returns setup_incomplete when rules/management.md is missing", () => {
       const emptyDataDir = mkdtempSync(join(tmpdir(), "pa-setup-cold-"));
@@ -5685,11 +6045,17 @@ describe("EventDispatcher", () => {
         dispatcher as unknown as { handleEvent: (e: Event) => Promise<void> }
       ).handleEvent(hourlyEvent);
 
-      const call = vi.mocked(mockAgentCore.resolveBinding).mock.calls.find(
+      // The N2 spawn gate adds an options-less resolveBinding(event) call
+      // before dispatch, so assert over EVERY call for this event type:
+      // none may carry requestedTier (the gate passes no options at all;
+      // the dispatch-path call passes options without the tier).
+      const calls = vi.mocked(mockAgentCore.resolveBinding).mock.calls.filter(
         ([event]) => (event as { type?: string }).type === "routine.hourly_check",
       );
-      expect(call).toBeDefined();
-      expect(call?.[1]).not.toHaveProperty("requestedTier");
+      expect(calls.length).toBeGreaterThan(0);
+      for (const call of calls) {
+        expect(call[1] ?? {}).not.toHaveProperty("requestedTier");
+      }
     });
 
     it("dashboard chat message with requestedModel='opus' passes requestedTier='high' to resolveBinding", async () => {

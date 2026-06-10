@@ -112,7 +112,9 @@ function makeCostBackendCommand(backend: BackendId): BangCommand {
   return {
     name: `!cost ${backend}`,
     title: `Cost for ${backend}`,
-    describe: `Agent spend on ${backend} over the past 7 days.`,
+    // Short on purpose — one of these renders per registered backend in
+    // `!help`, and the whole list must fit MOBILE_REPLY_BUDGET.
+    describe: `Agent spend on ${backend} (7 days).`,
     details: [
       `Reports trailing 7-day spend for ${backend}.`,
       "Does not invoke an LLM.",

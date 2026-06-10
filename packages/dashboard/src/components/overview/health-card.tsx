@@ -15,7 +15,7 @@ function StatusDot({ ok, pulse }: { ok: boolean; pulse?: boolean }) {
     <span
       className={cn(
         "inline-block h-2 w-2 rounded-full",
-        ok ? "bg-emerald-500" : "bg-red-500",
+        ok ? "bg-success" : "bg-destructive",
         ok && pulse && "animate-pulse",
       )}
     />
@@ -25,7 +25,7 @@ function StatusDot({ ok, pulse }: { ok: boolean; pulse?: boolean }) {
 function IntegrationDot({ status }: { status: IntegrationStatus | undefined }) {
   if (!status || !status.configured) {
     return (
-      <span className="inline-block h-2 w-2 rounded-full bg-gray-300 dark:bg-gray-600" />
+      <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30" />
     );
   }
   return <StatusDot ok={status.connected} />;
@@ -37,11 +37,8 @@ function integrationLabel(status: IntegrationStatus | undefined): string {
 }
 
 function integrationColor(status: IntegrationStatus | undefined): string {
-  if (!status || !status.configured)
-    return "text-gray-400 dark:text-gray-500";
-  return status.connected
-    ? "text-emerald-600 dark:text-emerald-400"
-    : "text-red-600 dark:text-red-400";
+  if (!status || !status.configured) return "text-muted-foreground/70";
+  return status.connected ? "text-success" : "text-destructive";
 }
 
 const INTEGRATION_LABELS: Record<string, string> = {
@@ -72,7 +69,7 @@ export function HealthCard({ health }: HealthCardProps) {
             <span className="text-muted-foreground">{item.label}</span>
             <div className="flex items-center gap-2">
               <StatusDot ok={item.ok} pulse={item.pulse} />
-              <span className={item.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+              <span className={item.ok ? "text-success" : "text-destructive"}>
                 {item.ok ? "Connected" : "Disconnected"}
               </span>
             </div>

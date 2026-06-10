@@ -100,6 +100,7 @@ Pair your messaging app first; see
 | `!cost claude` · `!cost codex` · `!cost gemini` · `!cost opencode` | Spend for a single backend (one row per registered backend). |
 | `!report` | Recent agent failures (last 7 days, top groups, most recent sample). |
 | `!checks` | Today's top browser reload patterns (domain + first path segment). Pure read on `browser_reload_signals`; anchored on the agent-day (`dayBoundaryHour`). Empty state is the common case for a quiet day. |
+| `!revert tuning` | Undo the most recent self-tuning config change (the one announced in a "Self-tuning (R…)" DM). Restores the previous value through the standard config chokepoint and puts the key into a 28-day re-proposal cool-down. Safe while paused. |
 
 ### Research clusters (browser-history)
 

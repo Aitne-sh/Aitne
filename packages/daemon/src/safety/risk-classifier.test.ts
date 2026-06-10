@@ -3,6 +3,7 @@ import {
   auditRiskClassifications,
   classifyRisk,
   findExplicitRiskClassification,
+  keyPathOf,
   listReadSensitiveGetPathKeys,
   RiskTier,
 } from "./risk-classifier.js";
@@ -485,6 +486,20 @@ describe("classifyRisk — feedback learning loop", () => {
   });
 });
 
+describe("classifyRisk — self-tuning verdicts (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4)", () => {
+  it("the verdict endpoint is Autonomous — safety is carried by code, not tier", () => {
+    expect(classifyRisk("POST", "/api/tuning/verdicts")).toBe(
+      RiskTier.Autonomous,
+    );
+  });
+
+  it("the pending-cycle read is Autonomous", () => {
+    expect(classifyRisk("GET", "/api/tuning/pending")).toBe(
+      RiskTier.Autonomous,
+    );
+  });
+});
+
 describe("classifyRisk — RiskTier.Notify removed (DELEGATED-MODE-V2 §5.6)", () => {
   it("RiskTier no longer exposes a Notify member", () => {
     // Compile-time check: the enum union is the 3-tier set. Runtime sanity
@@ -727,5 +742,72 @@ describe("listReadSensitiveGetPathKeys — drift-guard contract", () => {
     // must be GET-reachable. This is asserted indirectly by the prefix
     // and uniqueness checks; this test serves as a documentation anchor.
     expect(Array.isArray(keys)).toBe(true);
+  });
+});
+
+describe("findExplicitRiskClassification — prefix tiebreak ranks by path length, not raw key length", () => {
+  it("keyPathOf strips the leading METHOD token so length comparison sees the path only", () => {
+    // The bug class: ranking by the raw `"METHOD /path"` key length lets the
+    // 3–6 char method token inflate a shorter, less-specific prefix above a
+    // longer, more-specific path-only one — silently downgrading the tier.
+    expect(keyPathOf("DELETE /api/git")).toBe("/api/git");
+    expect(keyPathOf("GET /api/git")).toBe("/api/git");
+    // Path-only keys (no space) pass through unchanged.
+    expect(keyPathOf("/api/git-accounts")).toBe("/api/git-accounts");
+    // Raw-length would rank `"DELETE /api/git"` (15) above `"/api/github"`
+    // (11); path-length ranks `/api/github` (11) above `/api/git` (8) —
+    // the correct, more-specific winner.
+    expect(keyPathOf("DELETE /api/git").length).toBeLessThan(
+      keyPathOf("/api/github").length,
+    );
+    expect("DELETE /api/git".length).toBeGreaterThan("/api/github".length);
+  });
+
+  it("longest matching path prefix wins even when a shorter prefix also matches the subtree", () => {
+    // `/api/git` (Autonomous) and `/api/git/templates` (Approve) both
+    // segment-match `/api/git/templates/<x>`. The Approve entry has the
+    // longer path prefix and must win, so the templates subtree stays
+    // Bearer-gated and is never downgraded to the bare-git Autonomous tier.
+    expect(
+      findExplicitRiskClassification("GET", "/api/git/templates/anything"),
+    ).toBe(RiskTier.Approve);
+  });
+});
+
+describe("findExplicitRiskClassification — prefix match respects path-segment boundaries", () => {
+  it("a non-slash key matches its own subtree but NOT a string-prefix sibling", () => {
+    // `GET /api/git` (Autonomous) must match `/api/git` descendants…
+    expect(findExplicitRiskClassification("GET", "/api/git/status")).toBe(
+      RiskTier.Autonomous,
+    );
+    // …but must NOT bleed into the sibling `/api/git-accounts` resource,
+    // which carries its own (Approve) tier. Before the segment fix a raw
+    // `startsWith` matched it, and only the longest-prefix tiebreak kept the
+    // result correct — fragile. Pin the resolved tier here.
+    expect(
+      findExplicitRiskClassification("GET", "/api/git-accounts/acct-1"),
+    ).toBe(RiskTier.Approve);
+  });
+
+  it("an unclassified sibling that merely shares a string prefix fails closed, not into the sibling's tier", () => {
+    // Regression for the real defect: a future route like `/api/git-webhook`
+    // has no entry and is NOT under `/api/git/`. A raw `startsWith` would
+    // have matched `GET /api/git` (Autonomous) and made it anonymously
+    // reachable. Segment matching returns null here so `classifyRisk` can
+    // apply the fail-closed Approve default.
+    expect(
+      findExplicitRiskClassification("GET", "/api/git-webhook"),
+    ).toBeNull();
+    expect(classifyRisk("GET", "/api/git-webhook")).toBe(RiskTier.Approve);
+  });
+
+  it("trailing-slash catch-all keys still match their subtree (boundary already explicit)", () => {
+    // `/api/mail/` (trailing slash) is an intentional subtree catch-all; the
+    // slash already enforces the boundary, so descendant routes resolve via
+    // it while a string-prefix sibling like `/api/mailbox` does not.
+    expect(
+      classifyRisk("DELETE", "/api/mail/some-account/hypothetical"),
+    ).toBe(RiskTier.Autonomous);
+    expect(findExplicitRiskClassification("GET", "/api/mailbox")).toBeNull();
   });
 });

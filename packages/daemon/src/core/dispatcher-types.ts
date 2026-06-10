@@ -410,7 +410,13 @@ export interface IAuditLogger {
      */
     dailyWrite?: DailyWriteAuditDetail | null;
   }): void;
-  logSkip(event: Event, reason: string, trigger: "reactive" | "autonomous"): void;
+  logSkip(
+    event: Event,
+    reason: string,
+    trigger: "reactive" | "autonomous",
+    /** Optional structured context for the `detail` JSON column (N2/N3). */
+    detail?: Record<string, unknown>,
+  ): void;
   logError(
     event: Event,
     error: Error,
@@ -421,6 +427,18 @@ export interface IAuditLogger {
       modelId?: string;
       failureKind?: string;
       failureCode?: string;
+      /**
+       * PREPASS_COST_REDUCTION_PLAN.md N1 — recovered spend for a failed
+       * turn the provider already billed. Only real recovered figures;
+       * never a guess (see `AuditLogger.logError`).
+       */
+      costUsd?: number;
+      costSource?: string;
+      tokensInput?: number;
+      tokensOutput?: number;
+      tokensCacheCreation?: number;
+      tokensCacheRead?: number;
+      numTurns?: number;
       /**
        * Pre-pass fan-out failure block. Mirrors the `prePass` payload on
        * `logAction` so `MetricsCollector.collectPrePassMetrics` can see

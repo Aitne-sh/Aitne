@@ -42,6 +42,10 @@ import {
   recordReactiveAuthFailure,
   recordReactiveAuthSuccess,
 } from "./auth-health-monitor.js";
+import {
+  extractFailureSpendInfo,
+  recordFailureSpendRow,
+} from "./failure-spend.js";
 import type { AuthTelemetry } from "./auth-telemetry.js";
 
 const logger = createLogger("backend-router");
@@ -680,6 +684,14 @@ export class BackendRouter implements IAgentRouter {
         fallback.backendId,
         this.authTelemetry,
       );
+      // PREPASS_COST_REDUCTION_PLAN.md N1 — the main attempt may have
+      // billed before failing over (e.g. a Claude max_budget_usd abort
+      // with a partial-usage snapshot). On fallback SUCCESS the
+      // dispatcher's error path never runs, so this is the only place
+      // the main attempt's spend can land in agent_actions; without it
+      // the run shows only the fallback's success row and the main
+      // attempt's cost is invisible.
+      this.recordMainFailureSpend(params.event, mainFailure);
       await this.notifyFallbackSuccess(
         params.event,
         binding.processKey,
@@ -706,6 +718,11 @@ export class BackendRouter implements IAgentRouter {
         !(fallbackError instanceof BackendDecisiveFailure
           || fallbackError instanceof BackendQuotaError)
       ) {
+        // Raw (unclassified) fallback errors are rethrown without the
+        // router wrap, so the dispatcher's spend unwrap never sees
+        // `mainFailure` — record its spend here before rethrowing.
+        // PREPASS_COST_REDUCTION_PLAN.md N1.
+        this.recordMainFailureSpend(params.event, mainFailure);
         throw fallbackError;
       }
       await this.handleFallbackFailure(
@@ -723,6 +740,25 @@ export class BackendRouter implements IAgentRouter {
         fallbackError,
         mainFailure,
         fallbackError,
+      );
+    }
+  }
+
+  /**
+   * Best-effort `agent_actions` record of the main attempt's billed
+   * spend on paths where the dispatcher's `BackendRouterHandledError`
+   * unwrap will never see `mainFailure` (fallback success, raw fallback
+   * rethrow). No-op when the failure carries no spend.
+   * PREPASS_COST_REDUCTION_PLAN.md N1.
+   */
+  private recordMainFailureSpend(event: Event, mainFailure: BackendFailure): void {
+    const spendInfo = extractFailureSpendInfo(mainFailure);
+    if (spendInfo) {
+      recordFailureSpendRow(
+        this.db,
+        event,
+        spendInfo,
+        describeBackendFailure(mainFailure),
       );
     }
   }

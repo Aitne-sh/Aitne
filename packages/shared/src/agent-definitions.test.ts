@@ -284,6 +284,33 @@ describe("agentScheduleSchema", () => {
         .success,
     ).toBe(false);
   });
+
+  it("defaults defer_in_quiet_hours to false (additive — existing files parse unchanged)", () => {
+    expect(
+      agentScheduleSchema.parse({ kind: "cron", expression: "* * * * *" })
+        .defer_in_quiet_hours,
+    ).toBe(false);
+  });
+
+  it("preserves an explicit defer_in_quiet_hours: true", () => {
+    expect(
+      agentScheduleSchema.parse({
+        kind: "cron",
+        expression: "0 3 * * *",
+        defer_in_quiet_hours: true,
+      }).defer_in_quiet_hours,
+    ).toBe(true);
+  });
+
+  it("rejects a non-boolean defer_in_quiet_hours", () => {
+    expect(
+      agentScheduleSchema.safeParse({
+        kind: "cron",
+        expression: "* * * * *",
+        defer_in_quiet_hours: "yes",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 // ── agentDefinitionSchema ───────────────────────────────────────────────────

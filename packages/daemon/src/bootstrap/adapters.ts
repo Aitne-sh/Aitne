@@ -42,6 +42,8 @@ import {
   type WhatsAppQrSnapshot,
 } from "../adapters/whatsapp-adapter.js";
 import type { WhatsAppQrResponse } from "../api/server.js";
+import { AdapterWatchdog } from "../adapters/adapter-watchdog.js";
+import type { AdapterConnectionState } from "../adapters/types.js";
 import { createLogger, toSafeErrorMessage } from "../logging.js";
 
 const logger = createLogger("daemon-bootstrap-adapters");
@@ -308,6 +310,79 @@ export function createAdapterReloaders(
     teardownWhatsAppAdapter,
     enableWhatsAppAdapter,
   };
+}
+
+/**
+ * Build the connection watchdog for the library-managed adapters
+ * (Slack socket-mode, Discord gateway, Telegram long-poll).
+ *
+ * Each entry reads the live instance out of the mutable `AdapterState`
+ * slot — a reload that swaps the instance is picked up on the next probe
+ * automatically — and restarts through the bootstrap reloader so the
+ * stop→register→start lifecycle (and its MessageHub status transitions)
+ * stays in one place. WhatsApp is deliberately NOT watched: the Baileys
+ * adapter owns a sustained reconnect watch with ban-risk-aware pacing
+ * that a blunt stop→start cycle would fight against.
+ *
+ * On a down/recovery transition the hub status flips to error/ok so
+ * `/health` and notification-eligibility reflect the live socket state
+ * instead of the boot-time snapshot (pre-watchdog, a dead socket kept
+ * reporting "ok" forever).
+ */
+export function createAdapterWatchdog(
+  deps: Pick<BootstrapAdapterDeps, "messageHub" | "state">,
+  reloaders: Pick<
+    AdapterReloaders,
+    "reloadDiscordAdapter" | "reloadSlackAdapter" | "reloadTelegramAdapter"
+  >,
+): AdapterWatchdog {
+  const { messageHub, state } = deps;
+  const watchdog = new AdapterWatchdog();
+
+  const entries: Array<{
+    platform: "discord" | "slack" | "telegram";
+    getConnectionState: () => AdapterConnectionState;
+    restart: () => Promise<void>;
+  }> = [
+    {
+      platform: "discord",
+      getConnectionState: () => state.discord?.getConnectionState() ?? "unknown",
+      restart: () => reloaders.reloadDiscordAdapter(true),
+    },
+    {
+      platform: "slack",
+      getConnectionState: () => state.slack?.getConnectionState() ?? "unknown",
+      restart: () => reloaders.reloadSlackAdapter(true),
+    },
+    {
+      platform: "telegram",
+      getConnectionState: () => state.telegram?.getConnectionState() ?? "unknown",
+      restart: () => reloaders.reloadTelegramAdapter(true),
+    },
+  ];
+
+  for (const entry of entries) {
+    watchdog.register({
+      platform: entry.platform,
+      getConnectionState: entry.getConnectionState,
+      restart: entry.restart,
+      onStateChange: (connectionState) => {
+        if (connectionState === "down") {
+          messageHub.setPlatformRuntimeStatus(entry.platform, {
+            runtimeState: "error",
+            error: "Connection lost — watchdog will restart the adapter if it does not self-recover",
+          });
+        } else if (connectionState === "ok") {
+          messageHub.setPlatformRuntimeStatus(entry.platform, {
+            runtimeState: "ok",
+            error: null,
+          });
+        }
+      },
+    });
+  }
+
+  return watchdog;
 }
 
 /**

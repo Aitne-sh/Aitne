@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { extractMarkdownSection } from "./lesson-format.js";
 import { summarizeLessonStore } from "./lesson-store-overview.js";
 
 const CAPS = { capBytes: 8192, maxEntries: 40 };
@@ -29,9 +30,37 @@ describe("lesson-store-overview", () => {
       expect(summary.entries).toBe(2);
       expect(summary.active).toBe(1);
       expect(summary.provisional).toBe(1);
-      expect(summary.bytes).toBe(Buffer.byteLength(md, "utf-8"));
+      // `bytes` is the on-disk `## Lessons` SECTION body — the §6 cap unit
+      // the eviction scorer and nightly `over_cap` enforce — NOT the whole
+      // file (frontmatter + heading overhead must not count against the cap,
+      // or the overview reports a stuck overCap no actor ever clears).
+      expect(summary.bytes).toBe(
+        Buffer.byteLength(extractMarkdownSection(md, "Lessons")!, "utf-8"),
+      );
+      expect(summary.bytes).toBeLessThan(Buffer.byteLength(md, "utf-8"));
       expect(summary.capBytes).toBe(8192);
       expect(summary.maxEntries).toBe(40);
+      expect(summary.overCap).toBe(false);
+    });
+
+    it("does not count frontmatter/heading overhead against the byte cap", () => {
+      const bullets = [
+        "- [2026-06-01] Lead with blockers. <!-- ev=4 kind=do-more src=behavioral conf=high last=2026-06-05 -->",
+      ];
+      const md = file(bullets);
+      const sectionBytes = Buffer.byteLength(
+        extractMarkdownSection(md, "Lessons")!,
+        "utf-8",
+      );
+      // Cap sits between section size and whole-file size: the section fits,
+      // so the store is NOT over cap even though the file as a whole is
+      // bigger. (The old whole-file measure reported a permanently-stuck
+      // overCap here.)
+      const summary = summarizeLessonStore(md, {
+        capBytes: sectionBytes + 10,
+        maxEntries: 40,
+      });
+      expect(Buffer.byteLength(md, "utf-8")).toBeGreaterThan(sectionBytes + 10);
       expect(summary.overCap).toBe(false);
     });
 

@@ -100,20 +100,21 @@ function round2(value: number): string {
   return (Math.round(value * 100) / 100).toFixed(2);
 }
 
-/** Collapse a one-line excerpt of a lesson for an XML text node. */
+/** Collapse a one-line excerpt of a lesson for an XML text node.
+ *  The clip strips a trailing lone high surrogate so cutting through an
+ *  astral char (emoji) can't leave a U+FFFD in the worksheet. */
 function inline(text: string, max = 300): string {
   const flat = text.replace(/\s+/g, " ").trim();
-  const clipped = flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+  const clipped =
+    flat.length > max
+      ? `${flat.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…`
+      : flat;
   return xmlEscape(clipped);
-}
-
-function parseScopeLessons(existingFileMd: string): Lesson[] {
-  const sectionBody = extractMarkdownSection(existingFileMd, "Lessons");
-  return sectionBody ? parseLessonsSection(sectionBody) : [];
 }
 
 function renderScope(
   input: RegeneralizationScopeInput,
+  sectionBody: string,
   activeLessons: Lesson[],
   totalEntries: number,
   opts: BuildRegeneralizationOptions,
@@ -122,11 +123,18 @@ function renderScope(
   const label = formatScope(input.scope);
   const section = scopeSectionSlug(input.scope);
   const halfLife = opts.recencyHalfLifeDays ?? DEFAULT_RECENCY_HALFLIFE_DAYS;
-  const currentBytes = Buffer.byteLength(input.existingFileMd, "utf-8");
-  // `current_bytes` / `current_entries` describe the WHOLE on-disk file
-  // (active + provisional), because that is exactly what the byte/entry caps
-  // guard (§6). `over_cap` therefore reflects the real file state, not the
-  // collapsible subset — the LLM's Step-12 eviction targets the disk cap.
+  // `current_bytes` / `current_entries` describe the on-disk `## Lessons`
+  // SECTION (active + provisional) — the §6 cap unit
+  // (`lessonsSectionByteLength` in lesson-format.ts), the same unit the
+  // nightly worksheet's `over_cap` and the eviction engine measure. The
+  // whole-file measure used previously disagreed with the nightly pass in a
+  // narrow band (frontmatter + `# heading` overhead), making the two
+  // worksheets contradict each other on the same store. `over_cap` covers
+  // the full entry set, not just the collapsible active subset — the LLM's
+  // Step-12 eviction targets the disk cap. The caller extracted
+  // `sectionBody` once during eligibility (a scope is only eligible when
+  // its `## Lessons` section parsed), so it is measured here verbatim.
+  const currentBytes = Buffer.byteLength(sectionBody, "utf-8");
   const overCap =
     currentBytes > input.caps.capBytes || totalEntries > input.caps.maxEntries;
   const provisionalHeld = totalEntries - activeLessons.length;
@@ -183,17 +191,23 @@ export function buildRegeneralizationWorksheet(
 ): RegeneralizationResult | null {
   const eligible: Array<{
     input: RegeneralizationScopeInput;
+    sectionBody: string;
     active: Lesson[];
     totalEntries: number;
   }> = [];
   for (const input of scopes) {
-    const allLessons = parseScopeLessons(input.existingFileMd);
+    // Single extraction per scope — `renderScope` reuses this body for its
+    // `current_bytes` measure instead of re-extracting (the old double
+    // extraction left renderScope with an unreachable missing-section arm).
+    const sectionBody = extractMarkdownSection(input.existingFileMd, "Lessons");
+    if (!sectionBody) continue;
+    const allLessons = parseLessonsSection(sectionBody);
     // Collapse the ACTIVE set only — provisional lessons are owned by the
     // evening promotion gate (see module header); merging them here would
     // bypass the `ignored`-only-never-promotes guard.
     const active = allLessons.filter((lesson) => !lesson.provisional);
     if (active.length >= MIN_LESSONS_FOR_REGENERALIZATION) {
-      eligible.push({ input, active, totalEntries: allLessons.length });
+      eligible.push({ input, sectionBody, active, totalEntries: allLessons.length });
     }
   }
   if (eligible.length === 0) return null;
@@ -204,8 +218,8 @@ export function buildRegeneralizationWorksheet(
       `scopes="${eligible.length}">`,
   );
   let lessonCount = 0;
-  for (const { input, active, totalEntries } of eligible) {
-    renderScope(input, active, totalEntries, opts, out);
+  for (const { input, sectionBody, active, totalEntries } of eligible) {
+    renderScope(input, sectionBody, active, totalEntries, opts, out);
     lessonCount += active.length;
   }
   out.push("</feedback_regeneralization>");

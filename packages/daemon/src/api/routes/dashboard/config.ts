@@ -12,6 +12,10 @@ import type { ApiDependencies } from "../../server.js";
 import { applyConfigUpdates } from "../../env-writer.js";
 import { runDefaultSchedulesReconciler } from "../../../core/context/default-schedules-runner.js";
 import { syncDmSessionTimesToQuietHours } from "../../../core/quiet-hours-sync.js";
+import {
+  retimeDeferredDmRows,
+  retimeDeferredRunRows,
+} from "../../../db/deferred-dm.js";
 import { getContextDir } from "../../../config.js";
 import { CONTEXT_RELATIVE_PATHS } from "../../../core/context-paths.js";
 import { createLogger, toSafeErrorMessage } from "../../../logging.js";
@@ -396,6 +400,42 @@ export function registerConfigRoutes(app: Hono, deps: ApiDependencies): void {
         logger.warn(
           { err },
           "syncDmSessionTimesToQuietHours threw after dashboard config PATCH",
+        );
+      }
+    }
+
+    // QUIET_HOURS_HARDENING_PLAN.md Phase 1 follow-up — pending
+    // quiet-hours-deferred DM rows (`task_context.deferred_from`) were
+    // stamped with the *old* window's end; retime them so a widened
+    // window doesn't fire them inside the new quiet hours and a
+    // narrowed one doesn't hold them past the new edge. Phase 2's
+    // deferred RUN rows (`task_context.quiet_hours_deferred` — agent.task
+    // opt-in + browser_task) get the same treatment; for them only the
+    // narrowed/disabled direction matters (a widened window re-defers at
+    // claim time anyway). `timezone` is in the trigger set because the
+    // window's *absolute* position is tz-relative — an unchanged
+    // "22:00→08:00" still moves on the UTC axis when the tz changes, and
+    // deferred DM rows are delivered by `handleDirectDm`, which skips the
+    // quiet-hours check by design.
+    if (
+      (result.updated.includes("quietHoursEnd")
+        || result.updated.includes("quietHoursStart")
+        || result.updated.includes("timezone"))
+      && /^\d{2}:\d{2}$/.test(config.quietHoursStart)
+      && /^\d{2}:\d{2}$/.test(config.quietHoursEnd)
+    ) {
+      const window = {
+        start: config.quietHoursStart,
+        end: config.quietHoursEnd,
+        timezone: config.timezone || undefined,
+      };
+      try {
+        retimeDeferredDmRows(db, window);
+        retimeDeferredRunRows(db, window);
+      } catch (err) {
+        logger.warn(
+          { err },
+          "Retiming quiet-hours-deferred rows threw after dashboard config PATCH",
         );
       }
     }

@@ -72,6 +72,10 @@ export interface AgentFormState {
   daysOfWeek: number[];
   /** 1…31 — used by monthly. */
   daysOfMonth: number[];
+  /** Quiet-hours opt-in (QUIET_HOURS_HARDENING_PLAN.md §6): when true, a
+   *  firing that lands inside quiet hours runs at the window's end instead.
+   *  Set it whenever the agent's expected output includes DMing the user. */
+  deferInQuietHours: boolean;
   /** "" = default routing; otherwise a `BackendId`. */
   backendId: string;
   /** "" = default tier; otherwise an `AgentTier`. */
@@ -94,6 +98,7 @@ export const EMPTY_AGENT_FORM_STATE: AgentFormState = {
   minuteOfHour: 0,
   daysOfWeek: [],
   daysOfMonth: [],
+  deferInQuietHours: false,
   backendId: "",
   tier: "",
   maxTurns: DEFAULT_MAX_TURNS,
@@ -252,6 +257,9 @@ export function agentFormToFrontmatter(state: AgentFormState): Record<string, un
     kind: "cron",
     expression: agentFormToCron(state),
   };
+  // Opt-in only — omitted when false so the file stays minimal and the
+  // schema default applies (mirrors the tier / backend_id treatment).
+  if (state.deferInQuietHours) schedule.defer_in_quiet_hours = true;
 
   return {
     slug: state.slug.trim(),

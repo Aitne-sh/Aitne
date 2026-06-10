@@ -625,6 +625,87 @@ describe("loadAgents: user agents", () => {
     expect("enabled" in patch).toBe(false);
   });
 
+  it("creates the recurring row with task_context.defer_in_quiet_hours for an opted-in Agent", () => {
+    // QUIET_HOURS_HARDENING_PLAN.md §6 — the flag rides the recurring row's
+    // task_context (the pin_to_quiet_hours_end precedent) so every materialised
+    // agent_schedule row carries it for the scheduler's claim-time check.
+    writeAgentFile(userDir, "dm-y", userFrontmatter("dm-y", {
+      schedule: { kind: "cron", expression: "0 3 * * *", defer_in_quiet_hours: true },
+    }));
+    const { port, created } = fakePort();
+    loadAgents(db, baseOptions({ recurring: port }));
+    expect(created).toHaveLength(1);
+    expect(
+      (created[0].input as { taskContext: Record<string, unknown> }).taskContext,
+    ).toEqual({ defer_in_quiet_hours: true });
+  });
+
+  it("creates the recurring row with an empty task_context when the flag is absent (default false)", () => {
+    writeAgentFile(userDir, "silent", userFrontmatter("silent"));
+    const { port, created } = fakePort();
+    loadAgents(db, baseOptions({ recurring: port }));
+    expect(created).toHaveLength(1);
+    expect(
+      (created[0].input as { taskContext: Record<string, unknown> }).taskContext,
+    ).toEqual({});
+  });
+
+  it("reconciles a flag opt-in onto an existing row, preserving unrelated context keys", () => {
+    writeAgentFile(userDir, "weekly-bookmarks", userFrontmatter("weekly-bookmarks", {
+      name: "Imported task", // match the row so only the flag diverges
+      schedule: {
+        kind: "cron",
+        expression: "0 9 * * *",
+        timezone: "America/New_York",
+        defer_in_quiet_hours: true,
+      },
+    }));
+    loadAgents(db, baseOptions());
+    const { port, updated } = fakePort([
+      makeRow({ id: 7, description: "Imported task", taskContext: { keep: "me" } }),
+    ]);
+    setRecurringId(db, "weekly-bookmarks", 7);
+    loadAgents(db, baseOptions({ recurring: port }));
+    const patch = updated.find((u) => u.id === 7)!.patch as Record<string, unknown>;
+    expect(patch.taskContext).toEqual({ keep: "me", defer_in_quiet_hours: true });
+  });
+
+  it("reconciles a flag opt-out by dropping the key, preserving unrelated context keys", () => {
+    writeAgentFile(userDir, "weekly-bookmarks", userFrontmatter("weekly-bookmarks", {
+      name: "Imported task",
+      schedule: { kind: "cron", expression: "0 9 * * *", timezone: "America/New_York" },
+    }));
+    loadAgents(db, baseOptions());
+    const { port, updated } = fakePort([
+      makeRow({
+        id: 7,
+        description: "Imported task",
+        taskContext: { keep: "me", defer_in_quiet_hours: true },
+      }),
+    ]);
+    setRecurringId(db, "weekly-bookmarks", 7);
+    loadAgents(db, baseOptions({ recurring: port }));
+    const patch = updated.find((u) => u.id === 7)!.patch as Record<string, unknown>;
+    expect(patch.taskContext).toEqual({ keep: "me" });
+  });
+
+  it("does not patch task_context when the flag already matches", () => {
+    writeAgentFile(userDir, "weekly-bookmarks", userFrontmatter("weekly-bookmarks", {
+      schedule: {
+        kind: "cron",
+        expression: "0 21 * * 0",
+        timezone: "America/New_York",
+        defer_in_quiet_hours: true,
+      },
+    }));
+    const { port, updated } = fakePort();
+    loadAgents(db, baseOptions({ recurring: port })); // boot 1: create (flag set)
+    loadAgents(db, baseOptions({ recurring: port })); // boot 2: identical
+    expect(
+      updated.every((u) => !("taskContext" in (u.patch as Record<string, unknown>))),
+    ).toBe(true);
+  });
+
   it("recreates a paired recurring row that has vanished from the port view", () => {
     writeAgentFile(userDir, "weekly-bookmarks", userFrontmatter("weekly-bookmarks"));
     loadAgents(db, baseOptions());

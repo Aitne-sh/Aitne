@@ -194,6 +194,99 @@ describe("SignalDetector", () => {
     expect(body.content).toContain("[correction]");
   });
 
+  it("does not classify benign negations as corrections (false-positive guard)", () => {
+    // Each of these previously matched the broad `\b(stop|no)\b.*\b(do|that|…)\b`
+    // / bare `don't` patterns, marked the reply `corrected`, and — because the
+    // promotion gate promotes any correction on FIRST occurrence — minted a
+    // bogus standing directive from a friendly reply.
+    const db = makeDb();
+    db.prepare(
+      `INSERT INTO notification_log (
+         dispatch_id, notification_type, platform, delivery_channel, content_summary, status
+       ) VALUES ('dispatch-benign', 'message.received.dm', 'slack', 'C1', 'update', 'delivered')`,
+    ).run();
+    const benignReplies = [
+      "No worries, that sounds great",
+      "I don't have anything else today",
+      "No idea what to do",
+      "Don't worry about it",
+    ];
+    for (const content of benignReplies) {
+      const d = createDetectorWithDb(db);
+      d.trackNotification("dispatch-benign:slack", "slack", "update");
+      d.onUserMessage({ platform: "slack", channel: "C1", content });
+    }
+
+    const log = db.prepare("SELECT user_reaction FROM notification_log").get() as {
+      user_reaction: string | null;
+    };
+    expect(log.user_reaction).toBe("replied");
+    const corrections = db
+      .prepare("SELECT COUNT(*) AS n FROM feedback_signals WHERE valence = 'correction'")
+      .get() as { n: number };
+    expect(corrections.n).toBe(0);
+    // No [correction] raw signal appended either.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still detects imperative stop/don't corrections", () => {
+    const d = createDetector();
+    const imperatives = [
+      "stop notifying me about CI runs",
+      "please don't send these reminders",
+      "no more messages after 10pm",
+      "don't do that again",
+      "you can stop sending these",
+    ];
+    for (const content of imperatives) {
+      fetchMock.mockClear();
+      d.onUserMessage({ platform: "slack", content });
+      expect(fetchMock, content).toHaveBeenCalledTimes(1);
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.content).toContain("[correction]");
+    }
+  });
+
+  it("records a thumbs-down reaction as negative valence with the emoji in the summary", () => {
+    const db = makeDb();
+    db.prepare(
+      `INSERT INTO notification_log (
+         dispatch_id, notification_type, platform, delivery_channel, content_summary, status
+       ) VALUES ('dispatch-neg', 'routine.hourly_check', 'slack', 'C1', 'noisy alert', 'delivered')`,
+    ).run();
+    const d = createDetectorWithDb(db);
+    d.trackNotification("dispatch-neg:slack", "slack", "noisy alert");
+    // Skin-tone variant must normalize to the base emoji.
+    d.onReaction({ platform: "slack", notificationId: "dispatch-neg:slack", emoji: "👎🏽" });
+
+    const signal = db
+      .prepare("SELECT valence, summary FROM feedback_signals")
+      .get() as { valence: string; summary: string };
+    expect(signal.valence).toBe("negative");
+    // The consolidation LLM only ever sees the summary — the disapproval
+    // must be legible there, not buried in evidence_json.
+    expect(signal.summary).toContain("reacted negatively");
+    expect(signal.summary).toContain("👎");
+  });
+
+  it("records a positive emoji reaction with the emoji in the summary", () => {
+    const db = makeDb();
+    db.prepare(
+      `INSERT INTO notification_log (
+         dispatch_id, notification_type, platform, delivery_channel, content_summary, status
+       ) VALUES ('dispatch-pos', 'routine.hourly_check', 'slack', 'C1', 'useful alert', 'delivered')`,
+    ).run();
+    const d = createDetectorWithDb(db);
+    d.trackNotification("dispatch-pos:slack", "slack", "useful alert");
+    d.onReaction({ platform: "slack", notificationId: "dispatch-pos:slack", emoji: "👍" });
+
+    const signal = db
+      .prepare("SELECT valence, summary FROM feedback_signals")
+      .get() as { valence: string; summary: string };
+    expect(signal.valence).toBe("positive");
+    expect(signal.summary).toContain("👍");
+  });
+
   it("checkIgnoredMessages fires after threshold", () => {
     const d = createDetector();
     d.trackNotification("n1", "slack", "Important update");

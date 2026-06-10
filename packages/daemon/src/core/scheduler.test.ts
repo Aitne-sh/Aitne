@@ -104,7 +104,8 @@ function createTestSetup() {
       cost_usd REAL DEFAULT 0,
       detail JSON,
       started_at TEXT DEFAULT (datetime('now')),
-      completed_at TEXT
+      completed_at TEXT,
+      agent_id TEXT
     );
     CREATE TABLE notification_log (
       id INTEGER PRIMARY KEY,
@@ -674,14 +675,21 @@ describe("AgentScheduler", () => {
     // Row should still be 'pending' — the scheduler reverted from
     // 'running' (after the CAS claim) to 'pending' for retry.
     const row = setup.db.prepare(
-      "SELECT status, scheduled_for FROM agent_schedule WHERE id = 1",
-    ).get() as { status: string; scheduled_for: string };
+      "SELECT status, scheduled_for, task_context FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string; scheduled_for: string; task_context: string };
     expect(row.status).toBe("pending");
     // scheduled_for must have moved forward past the original
     // 'now - 1 minute' (the row was due in the past initially).
     const nowMs = Date.now();
     const newDueMs = Date.parse(row.scheduled_for.replace(" ", "T") + "Z");
     expect(newDueMs).toBeGreaterThan(nowMs);
+
+    // Deferral marker stamped (retimeDeferredRunRows selects on it) without
+    // disturbing the frozen browser_task body.
+    const rowCtx = JSON.parse(row.task_context) as Record<string, unknown>;
+    expect(rowCtx.quiet_hours_deferred).toBe(true);
+    expect(rowCtx.preGeneratedTaskId).toBe("22222222-2222-3333-4444-555555555555");
+    expect(rowCtx.siteKey).toBe("amazon_jp");
 
     // EventBus must NOT have received a scheduled.browser_task event.
     // The watcher loop bumped + continued without dispatching.
@@ -693,6 +701,105 @@ describe("AgentScheduler", () => {
     ).get() as { action_type: string; result: string } | undefined;
     expect(audit).toBeDefined();
     expect(audit?.result).toBe("success");
+  });
+
+  // QUIET_HOURS_HARDENING_PLAN.md §6 — agent.task parity with the
+  // browser_task deferral above: a user-Agent firing whose materialised row
+  // carries `task_context.defer_in_quiet_hours: true` moves past the quiet
+  // window instead of burning a 03:00 session.
+  it("defers task_type='agent.task' carrying defer_in_quiet_hours inside quiet hours", async () => {
+    // Same dynamic-window technique as the browser_task peer test: open the
+    // quiet window at "now" so the dispatch instant is guaranteed inside it.
+    const local = nowInTimezone(undefined);
+    const nowMinutes = local.hours * 60 + local.minutes;
+    const fmtHhMm = (mins: number) => {
+      const norm = ((mins % 1440) + 1440) % 1440;
+      const hh = String(Math.floor(norm / 60)).padStart(2, "0");
+      const mm = String(norm % 60).padStart(2, "0");
+      return `${hh}:${mm}`;
+    };
+    const cfg = { ...setup.config } as AgentConfig;
+    (cfg as { quietHoursStart: string }).quietHoursStart = fmtHhMm(nowMinutes);
+    (cfg as { quietHoursEnd: string }).quietHoursEnd = fmtHhMm(nowMinutes + 120);
+    cfg.schedulePollIntervalSeconds = 0.1;
+
+    const ctx = JSON.stringify({
+      defer_in_quiet_hours: true,
+      agent_id: "nightly-digest",
+      recurringScheduleId: 42,
+      importance: "low",
+    });
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, task_context, status) VALUES (datetime('now', '-1 minutes'), 'agent.task', 'Nightly digest', 'Compose the digest', ?, 'pending')",
+    ).run(ctx);
+
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, cfg);
+    scheduler2.start();
+
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    // Reverted to 'pending' with scheduled_for pushed past the window edge.
+    const row = setup.db.prepare(
+      "SELECT status, scheduled_for, task_context FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string; scheduled_for: string; task_context: string };
+    expect(row.status).toBe("pending");
+    const newDueMs = Date.parse(row.scheduled_for.replace(" ", "T") + "Z");
+    expect(newDueMs).toBeGreaterThan(Date.now());
+
+    // Deferral marker stamped (retimeDeferredRunRows selects on it),
+    // pre-existing context keys preserved.
+    const rowCtx = JSON.parse(row.task_context) as Record<string, unknown>;
+    expect(rowCtx.quiet_hours_deferred).toBe(true);
+    expect(rowCtx.defer_in_quiet_hours).toBe(true);
+    expect(rowCtx.agent_id).toBe("nightly-digest");
+
+    // No scheduled.task event dispatched.
+    expect(setup.eventBus.size).toBe(0);
+
+    // Audit row recorded with the owning Agent stamped.
+    const audit = setup.db.prepare(
+      "SELECT action_type, result, agent_id FROM agent_actions WHERE action_type = 'agent.task.deferred_for_quiet_hours'",
+    ).get() as { action_type: string; result: string; agent_id: string | null } | undefined;
+    expect(audit).toBeDefined();
+    expect(audit?.result).toBe("success");
+    expect(audit?.agent_id).toBe("nightly-digest");
+  });
+
+  it("does NOT defer task_type='agent.task' without the opt-in flag, even inside quiet hours", async () => {
+    // Default-false is mandatory (§6): silent file-writing Agents deliberately
+    // scheduled overnight must not move.
+    const local = nowInTimezone(undefined);
+    const nowMinutes = local.hours * 60 + local.minutes;
+    const fmtHhMm = (mins: number) => {
+      const norm = ((mins % 1440) + 1440) % 1440;
+      const hh = String(Math.floor(norm / 60)).padStart(2, "0");
+      const mm = String(norm % 60).padStart(2, "0");
+      return `${hh}:${mm}`;
+    };
+    const cfg = { ...setup.config } as AgentConfig;
+    (cfg as { quietHoursStart: string }).quietHoursStart = fmtHhMm(nowMinutes);
+    (cfg as { quietHoursEnd: string }).quietHoursEnd = fmtHhMm(nowMinutes + 120);
+    cfg.schedulePollIntervalSeconds = 0.1;
+
+    setup.db.prepare(
+      "INSERT INTO agent_schedule (scheduled_for, task_type, task_description, task_prompt, task_context, status) VALUES (datetime('now', '-1 minutes'), 'agent.task', 'Silent overnight job', 'Write the file', '{\"agent_id\":\"overnight-writer\"}', 'pending')",
+    ).run();
+
+    const scheduler2 = new AgentScheduler(setup.eventBus, setup.db, cfg);
+    scheduler2.start();
+
+    await new Promise((r) => setTimeout(r, 300));
+    scheduler2.stop();
+
+    // Claimed + dispatched normally as a scheduled.task event.
+    const row = setup.db.prepare(
+      "SELECT status FROM agent_schedule WHERE id = 1",
+    ).get() as { status: string };
+    expect(row.status).toBe("running");
+    const event = await setup.eventBus.get() as AgentTaskEvent;
+    expect(event.type).toBe("scheduled.task");
+    expect(event.source).toBe("agent.task");
   });
 
   it("does NOT defer task_type='browser_task' when browserTaskRespectQuietHours is false", async () => {
@@ -2224,5 +2331,457 @@ describe("AgentScheduler additional coverage", () => {
       const result = scheduler.queueMorningRoutineWake("second_source");
       expect(result.inserted).toBe(false);
     });
+  });
+
+  describe("wake catch-up (machine sleep recovery)", () => {
+    type WakeInternals = {
+      runWakeCatchup: (gapMs: number) => Promise<void>;
+      dailyCleanup: () => void;
+    };
+
+    function wakeInternals(s: AgentScheduler): WakeInternals {
+      return s as unknown as WakeInternals;
+    }
+
+    function seedMorningSuccess(startedAt: string): void {
+      setup.db
+        .prepare(
+          `INSERT INTO agent_actions (action_type, result, started_at)
+           VALUES ('routine.morning_routine', 'success', ?)`,
+        )
+        .run(startedAt);
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      // Tuesday 19:30 UTC — past the 18:00 evening slot, not in the
+      // Fri–Sun weekly-review catchup window, outside the boundary hour.
+      vi.setSystemTime(new Date("2026-06-09T19:30:00Z"));
+      setup.config.timezone = "UTC";
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("replays a missed evening review when the morning routine already ran", async () => {
+      seedMorningSuccess("2026-06-09 05:00:00");
+      const putSpy = vi.spyOn(setup.eventBus, "put");
+
+      await wakeInternals(scheduler).runWakeCatchup(2 * 60 * 60 * 1000);
+
+      const emitted = putSpy.mock.calls.map(
+        (call) => (call[0] as RoutineEvent).type,
+      );
+      expect(emitted).toContain("routine.evening_review");
+    });
+
+    it("does not double-fire a routine that already ran today", async () => {
+      seedMorningSuccess("2026-06-09 05:00:00");
+      setup.db
+        .prepare(
+          `INSERT INTO agent_actions (action_type, result, started_at)
+           VALUES ('routine.evening_review', 'success', '2026-06-09 18:00:30')`,
+        )
+        .run();
+      const putSpy = vi.spyOn(setup.eventBus, "put");
+
+      await wakeInternals(scheduler).runWakeCatchup(2 * 60 * 60 * 1000);
+
+      expect(putSpy).not.toHaveBeenCalled();
+    });
+
+    it("queues the morning routine (with riders) when the day boundary was slept through", async () => {
+      // No morning success row for the current agent-day.
+      const internals = wakeInternals(scheduler);
+      internals.dailyCleanup = vi.fn();
+      const putSpy = vi.spyOn(setup.eventBus, "put");
+
+      await internals.runWakeCatchup(8 * 60 * 60 * 1000);
+
+      const row = setup.db
+        .prepare(
+          `SELECT task_context FROM agent_schedule
+            WHERE task_type = 'wake' AND status = 'pending'`,
+        )
+        .get() as { task_context: string } | undefined;
+      expect(row).toBeDefined();
+      const ctx = JSON.parse(row!.task_context);
+      expect(ctx.routine).toBe("morning_routine");
+      expect(ctx.source).toBe("wake_catchup");
+      // Evening review rides along instead of being emitted now (the
+      // dispatcher's pre-routine gate would skip it before the day opens).
+      expect(ctx.postCatchupRoutines).toContain("evening_review");
+      expect(putSpy).not.toHaveBeenCalled();
+      expect(internals.dailyCleanup).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing while the autonomous gate is engaged", async () => {
+      scheduler.setAutonomousGate(() => "setup_pending");
+      const putSpy = vi.spyOn(setup.eventBus, "put");
+
+      await wakeInternals(scheduler).runWakeCatchup(8 * 60 * 60 * 1000);
+
+      expect(putSpy).not.toHaveBeenCalled();
+      const wakeRows = setup.db
+        .prepare(`SELECT COUNT(*) AS n FROM agent_schedule WHERE task_type = 'wake'`)
+        .get() as { n: number };
+      expect(wakeRows.n).toBe(0);
+    });
+  });
+});
+
+describe("morning self-heal tick", () => {
+  let setup: ReturnType<typeof createTestSetup>;
+  // Agent-day 2026-05-14 for the UTC config below (boundary 04:00 UTC).
+  const NOW = new Date("2026-05-14T10:00:00Z");
+
+  beforeEach(() => {
+    setup = createTestSetup();
+  });
+
+  afterEach(() => {
+    setup.eventBus.close();
+    rmSync(setup.tmpDir, { recursive: true, force: true });
+  });
+
+  function makeScheduler(opts?: { freshBoot?: boolean }): AgentScheduler {
+    // Explicit UTC so agent-day progress math is deterministic across
+    // CI machines (the shared setup leaves timezone = system).
+    const s = new AgentScheduler(setup.eventBus, setup.db, {
+      ...setup.config,
+      timezone: "UTC",
+    } as AgentConfig);
+    if (!opts?.freshBoot) {
+      // Simulate a long-lived process so the missed-fire boot
+      // suppression window does not mask the layers under test.
+      (s as unknown as { startedAtMs: number }).startedAtMs =
+        Date.now() - 31 * 60_000;
+    }
+    return s;
+  }
+
+  const heal = (s: AgentScheduler, now: Date) =>
+    (s as unknown as {
+      runMorningSelfHeal: (now: Date) => Promise<void>;
+    }).runMorningSelfHeal(now);
+
+  function insertMorningWakeRow(opts: {
+    createdAt: string;
+    status: "pending" | "running";
+    claimedAt?: string;
+  }): number {
+    const result = setup.db
+      .prepare(
+        `INSERT INTO agent_schedule
+           (scheduled_for, task_type, task_description, task_context, status, created_at)
+         VALUES (?, 'wake', 'Morning routine', ?, ?, ?)`,
+      )
+      .run(
+        opts.createdAt,
+        JSON.stringify({
+          routine: "morning_routine",
+          ...(opts.claimedAt ? { claimedAt: opts.claimedAt } : {}),
+        }),
+        opts.status,
+        opts.createdAt,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  function insertAttempt(opts: { result: string; startedAt: string }): void {
+    setup.db
+      .prepare(
+        `INSERT INTO agent_actions (action_type, result, started_at)
+         VALUES ('routine.morning_routine_today', ?, ?)`,
+      )
+      .run(opts.result, opts.startedAt);
+  }
+
+  it("flips a hung running wake row back to pending, records an audit row, and skips the alert that tick", async () => {
+    const sendDmMock = vi.fn().mockResolvedValue([]);
+    const id = insertMorningWakeRow({
+      createdAt: "2026-05-14 05:00:00",
+      status: "running",
+      // Claimed 05:00 and silent ever since — 300 min ago at NOW, far
+      // past the 120-min default threshold.
+      claimedAt: "2026-05-14 05:00:00",
+    });
+    const s = makeScheduler();
+    s.setSendDmCallback(sendDmMock);
+
+    await heal(s, NOW);
+
+    const row = setup.db
+      .prepare("SELECT status, scheduled_for FROM agent_schedule WHERE id = ?")
+      .get(id) as { status: string; scheduled_for: string };
+    expect(row.status).toBe("pending");
+    expect(row.scheduled_for).toBe(formatSqliteDatetime(NOW));
+    const audit = setup.db
+      .prepare(
+        "SELECT detail FROM agent_actions WHERE action_type = 'morning_routine.selfheal_requeued'",
+      )
+      .get() as { detail: string };
+    expect(JSON.parse(audit.detail)).toMatchObject({
+      scheduleId: id,
+      claimedAgeMinutes: 300,
+    });
+    // The recovery is the response — no "restart the daemon" DM on the
+    // same tick.
+    expect(sendDmMock).not.toHaveBeenCalled();
+    s.stop();
+  });
+
+  it("recovers a run that started before the day boundary and hung across it", async () => {
+    // Claimed yesterday 22:55 UTC, hung through the 04:00 boundary.
+    // The agent-day-windowed attempt heuristic would miss this; the
+    // claim stamp does not.
+    const id = insertMorningWakeRow({
+      createdAt: "2026-05-13 22:50:00",
+      status: "running",
+      claimedAt: "2026-05-13 22:55:00",
+    });
+    const s = makeScheduler();
+    s.setSendDmCallback(vi.fn().mockResolvedValue([]));
+
+    await heal(s, new Date("2026-05-14T04:30:00Z"));
+
+    const row = setup.db
+      .prepare("SELECT status FROM agent_schedule WHERE id = ?")
+      .get(id) as { status: string };
+    expect(row.status).toBe("pending");
+    s.stop();
+  });
+
+  it("leaves a running wake row alone while its claim is fresh", async () => {
+    const id = insertMorningWakeRow({
+      createdAt: "2026-05-14 05:00:00",
+      status: "running",
+      claimedAt: "2026-05-14 09:30:00", // 30 min ago — plausibly mid-run
+    });
+    const s = makeScheduler();
+    s.setSendDmCallback(vi.fn().mockResolvedValue([]));
+
+    await heal(s, NOW);
+
+    const row = setup.db
+      .prepare("SELECT status FROM agent_schedule WHERE id = ?")
+      .get(id) as { status: string };
+    expect(row.status).toBe("running");
+    // The running row also blocks the missed-fire layer — no second row.
+    const count = setup.db
+      .prepare("SELECT COUNT(*) AS cnt FROM agent_schedule")
+      .get() as { cnt: number };
+    expect(count.cnt).toBe(1);
+    s.stop();
+  });
+
+  it("does not flip a running row without a claim stamp — alert-only", async () => {
+    const sendDmMock = vi.fn().mockResolvedValue([]);
+    const id = insertMorningWakeRow({
+      createdAt: "2026-05-14 05:00:00",
+      status: "running",
+    });
+    const s = makeScheduler();
+    s.setSendDmCallback(sendDmMock);
+
+    await heal(s, NOW);
+
+    const row = setup.db
+      .prepare("SELECT status FROM agent_schedule WHERE id = ?")
+      .get(id) as { status: string };
+    expect(row.status).toBe("running");
+    // The watchdog still surfaces it (created_at is 300 min old).
+    expect(sendDmMock).toHaveBeenCalledTimes(1);
+    s.stop();
+  });
+
+  it("stops flipping after the per-agent-day cap and falls back to the alert", async () => {
+    const sendDmMock = vi.fn().mockResolvedValue([]);
+    const id = insertMorningWakeRow({
+      createdAt: "2026-05-14 05:00:00",
+      status: "running",
+      claimedAt: "2026-05-14 05:00:00",
+    });
+    // Two earlier flips already happened this agent-day.
+    for (const at of ["2026-05-14 06:00:00", "2026-05-14 08:00:00"]) {
+      setup.db
+        .prepare(
+          `INSERT INTO agent_actions (action_type, result, started_at)
+           VALUES ('morning_routine.selfheal_requeued', 'success', ?)`,
+        )
+        .run(at);
+    }
+    const s = makeScheduler();
+    s.setSendDmCallback(sendDmMock);
+
+    await heal(s, NOW);
+
+    const row = setup.db
+      .prepare("SELECT status FROM agent_schedule WHERE id = ?")
+      .get(id) as { status: string };
+    expect(row.status).toBe("running");
+    expect(sendDmMock).toHaveBeenCalledTimes(1);
+    s.stop();
+  });
+
+  it("queues a wake row with the full day-open sequence when the boundary cron fire was swallowed", async () => {
+    const dayBoundary = vi.fn().mockResolvedValue(undefined);
+    const s = makeScheduler();
+    s.setDayBoundaryCallback(dayBoundary);
+
+    await heal(s, NOW);
+
+    expect(dayBoundary).toHaveBeenCalledTimes(1);
+    const row = setup.db
+      .prepare(
+        "SELECT status, task_context FROM agent_schedule WHERE task_type = 'wake'",
+      )
+      .get() as { status: string; task_context: string };
+    expect(row.status).toBe("pending");
+    const ctx = JSON.parse(row.task_context) as {
+      routine: string;
+      source: string;
+      postCatchupRoutines: string[];
+      postCatchupHourlyCheck: boolean;
+    };
+    expect(ctx.routine).toBe("morning_routine");
+    expect(ctx.source).toBe("missed_cron_selfheal");
+    // 10:00 UTC is before the 18:00 review slot and the hourly check is
+    // disabled in the test config — nothing rides along today.
+    expect(ctx.postCatchupRoutines).toEqual([]);
+    expect(ctx.postCatchupHourlyCheck).toBe(false);
+    s.stop();
+  });
+
+  it("suppresses the missed-fire layer during the boot window (boot catchup owns it)", async () => {
+    const s = makeScheduler({ freshBoot: true });
+
+    await heal(s, NOW);
+
+    const count = setup.db
+      .prepare("SELECT COUNT(*) AS cnt FROM agent_schedule")
+      .get() as { cnt: number };
+    expect(count.cnt).toBe(0);
+    s.stop();
+  });
+
+  it("does not queue a missed-fire wake inside the grace window", async () => {
+    const s = makeScheduler();
+
+    await heal(s, new Date("2026-05-14T04:10:00Z"));
+
+    const count = setup.db
+      .prepare("SELECT COUNT(*) AS cnt FROM agent_schedule")
+      .get() as { cnt: number };
+    expect(count.cnt).toBe(0);
+    s.stop();
+  });
+
+  it("does not resurrect an exhausted retry chain", async () => {
+    insertAttempt({ result: "failed", startedAt: "2026-05-14 05:00:00" });
+    const s = makeScheduler();
+    s.setSendDmCallback(vi.fn().mockResolvedValue([]));
+
+    await heal(s, NOW);
+
+    const count = setup.db
+      .prepare("SELECT COUNT(*) AS cnt FROM agent_schedule")
+      .get() as { cnt: number };
+    expect(count.cnt).toBe(0);
+    s.stop();
+  });
+
+  it("is fully suppressed by the autonomous gate", async () => {
+    const s = makeScheduler();
+    s.setAutonomousGate(() => "setup_incomplete");
+
+    await heal(s, NOW);
+
+    const count = setup.db
+      .prepare("SELECT COUNT(*) AS cnt FROM agent_schedule")
+      .get() as { cnt: number };
+    expect(count.cnt).toBe(0);
+    s.stop();
+  });
+});
+
+describe("morning wake claim stamping", () => {
+  let setup: ReturnType<typeof createTestSetup>;
+
+  beforeEach(() => {
+    setup = createTestSetup();
+  });
+
+  afterEach(() => {
+    setup.eventBus.close();
+    rmSync(setup.tmpDir, { recursive: true, force: true });
+  });
+
+  it("stamps claimedAt on morning wake rows at claim, and only on those", async () => {
+    setup.db
+      .prepare(
+        `INSERT INTO agent_schedule
+           (scheduled_for, task_type, task_description, task_context, status)
+         VALUES (datetime('now', '-1 minutes'), 'wake', 'Morning routine', ?, 'pending')`,
+      )
+      .run(JSON.stringify({ routine: "morning_routine" }));
+    setup.db
+      .prepare(
+        `INSERT INTO agent_schedule
+           (scheduled_for, task_type, task_description, task_context, status)
+         VALUES (datetime('now', '-1 minutes'), 'wake', 'unrelated task', '{}', 'pending')`,
+      )
+      .run();
+
+    setup.config.schedulePollIntervalSeconds = 0.1;
+    const s = new AgentScheduler(setup.eventBus, setup.db, setup.config);
+    s.start();
+    await new Promise((r) => setTimeout(r, 300));
+    s.stop();
+
+    const rows = setup.db
+      .prepare("SELECT task_context FROM agent_schedule ORDER BY id")
+      .all() as { task_context: string }[];
+    const morningCtx = JSON.parse(rows[0].task_context) as {
+      claimedAt?: string;
+    };
+    expect(typeof morningCtx.claimedAt).toBe("string");
+    const otherCtx = JSON.parse(rows[1].task_context) as {
+      claimedAt?: string;
+    };
+    expect(otherCtx.claimedAt).toBeUndefined();
+  });
+
+  it("queueMorningRoutineWake's dedup-merge preserves the claimedAt stamp", () => {
+    setup.db
+      .prepare(
+        `INSERT INTO agent_schedule
+           (scheduled_for, task_type, task_description, task_context, status)
+         VALUES ('2026-05-14 05:00:00', 'wake', 'Morning routine', ?, 'running')`,
+      )
+      .run(
+        JSON.stringify({
+          routine: "morning_routine",
+          claimedAt: "2026-05-14 05:00:00",
+        }),
+      );
+    const s = new AgentScheduler(setup.eventBus, setup.db, setup.config);
+
+    const result = s.queueMorningRoutineWake("cron", {
+      postCatchupRoutines: ["evening_review"],
+    });
+
+    expect(result.inserted).toBe(false);
+    const row = setup.db
+      .prepare("SELECT task_context FROM agent_schedule")
+      .get() as { task_context: string };
+    const ctx = JSON.parse(row.task_context) as {
+      claimedAt?: string;
+      postCatchupRoutines?: string[];
+    };
+    expect(ctx.claimedAt).toBe("2026-05-14 05:00:00");
+    expect(ctx.postCatchupRoutines).toEqual(["evening_review"]);
+    s.stop();
   });
 });

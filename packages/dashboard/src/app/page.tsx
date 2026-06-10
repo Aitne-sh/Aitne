@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useHealth } from "@/lib/hooks/use-health";
 import { useSetupStatus } from "@/lib/hooks/use-setup-status";
@@ -10,19 +10,17 @@ import { HealthCard } from "@/components/overview/health-card";
 import { RecentEventsCard } from "@/components/overview/recent-events-card";
 import { CalendarPreview } from "@/components/overview/calendar-preview";
 import { CostSummaryCard } from "@/components/overview/cost-summary-card";
-import { ReadingWidget } from "@/components/overview/reading-widget";
 import { InlineApprovals } from "@/components/overview/inline-approvals";
 import { NotificationsPanel } from "@/components/overview/notifications-panel";
 import { DraftsAwaitingCard } from "@/components/overview/drafts-awaiting-card";
+import { StatusBar } from "@/components/overview/status-bar";
 import { YourLife } from "@/components/overview/your-life";
 import { TipsCard } from "@/components/overview/tips-card";
 import { useConfirm } from "@/components/shared/confirm-dialog";
 import { CardSkeleton } from "@/components/shared/query-result";
-import { Card, CardHeader, CardStatLabel, CardValue } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { api } from "@/lib/api-client";
-import { formatCurrency, formatAbsoluteTime, parseUtcDate } from "@/lib/utils";
+import { formatRelativeTime, formatShortDateTime, parseUtcDate } from "@/lib/utils";
 import type { EventsResponse } from "@/lib/api-types";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -77,10 +75,16 @@ export default function OverviewPage() {
     }
   }, [setupStatus?.needsSetup, router]);
 
-  const nextCheckLabel = useMemo(() => {
-    if (!nextCheck?.nextRunAt) return "Disabled";
-    return parseUtcDate(nextCheck.nextRunAt).toLocaleString();
-  }, [nextCheck?.nextRunAt]);
+  // Relative hero label ("in 23 minutes") recomputed on every render — the
+  // 10s health poll keeps it fresh without a dedicated ticker. Deliberately
+  // NOT memoized: nextRunAt stays constant between checks, so a useMemo
+  // keyed on it would freeze the relative phrasing.
+  const nextCheckLabel = nextCheck?.nextRunAt
+    ? formatRelativeTime(nextCheck.nextRunAt)
+    : "Disabled";
+  const nextCheckAtLabel = nextCheck?.nextRunAt
+    ? formatShortDateTime(nextCheck.nextRunAt)
+    : null;
 
   const confirm = useConfirm();
 
@@ -156,99 +160,51 @@ export default function OverviewPage() {
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="mx-auto w-full max-w-7xl space-y-8 p-6">
       <PageHeader
         title="Overview"
-        description={
-          <>
-            Live snapshot of your agent. The cards below show when the next automatic hourly check will run and today&rsquo;s spend. Everything auto-refreshes. Use <em>Run now</em> to trigger the hourly check immediately when you&rsquo;re impatient.
-          </>
-        }
+        description="Your agent at a glance — current status, today's activity, and anything that needs you."
       />
 
+      {/* ① Needs attention — system warnings + pending approvals.
+          Both render nothing when there is nothing to act on. */}
       <NotificationsPanel />
+      <InlineApprovals />
 
       {healthLoading ? (
         <CardSkeleton count={3} />
       ) : (
         <>
-          {/* ① Status Strip — Next Check (with manual trigger) + Today's Cost */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardStatLabel>Next Check</CardStatLabel>
-              </CardHeader>
-              <p className="text-sm font-medium text-foreground">{nextCheckLabel}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {nextCheck?.active ? "Active window" : "Outside active window"}
-              </p>
-              {scheduleNext?.next && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Scheduled: {formatAbsoluteTime(scheduleNext.next.scheduled_for)}
-                </p>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-3 w-full"
-                onClick={handleRunNow}
-                disabled={runNowState === "running"}
-              >
-                {runNowState === "running" ? "Running..." : "Run hourly check now"}
-              </Button>
-              {runNowFeedback?.tone === "success" && (
-                <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
-                  {runNowFeedback.message}
-                </p>
-              )}
-              {runNowFeedback?.tone === "warning" && (
-                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                  {runNowFeedback.message}
-                </p>
-              )}
-              {runNowFeedback?.tone === "error" && (
-                <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-                  {runNowFeedback.message}
-                </p>
-              )}
-            </Card>
+          {/* ② Status bar — agent state, next check (manual trigger), today's spend */}
+          <StatusBar
+            health={health}
+            nextCheckLabel={nextCheckLabel}
+            nextCheckAtLabel={nextCheckAtLabel}
+            nextCheckActive={nextCheck?.active ?? false}
+            scheduledNextLabel={
+              scheduleNext?.next ? formatShortDateTime(scheduleNext.next.scheduled_for) : null
+            }
+            onRunNow={handleRunNow}
+            runNowRunning={runNowState === "running"}
+            runNowFeedback={runNowFeedback}
+          />
 
-            <Card>
-              <CardHeader>
-                <CardStatLabel>Today&apos;s Cost</CardStatLabel>
-              </CardHeader>
-              <CardValue>{health ? formatCurrency(health.todayCostUsd) : "—"}</CardValue>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {health?.todaySessions ?? 0} session{(health?.todaySessions ?? 0) !== 1 ? "s" : ""}
-              </p>
-            </Card>
-          </div>
-
-          {/* Tips — randomly surface a buried capability per page load */}
-          <TipsCard />
-
-          {/* Your Life — Lens cards into MY LIFE pages */}
-          <YourLife />
-
+          {/* ③ Activity (left) + today's context and system detail (right) */}
           <div className="grid gap-6 lg:grid-cols-3">
-            {/* Left column (2/3) */}
             <div className="space-y-6 lg:col-span-2">
-              {/* ② Inline Approvals (conditional — hidden when 0) */}
-              <InlineApprovals />
-
-              {/* ③ Recent Activity */}
               <RecentEventsCard />
             </div>
-
-            {/* Right column (1/3) */}
             <div className="space-y-6">
-              <HealthCard health={health} />
               <CalendarPreview />
               <DraftsAwaitingCard />
-              <ReadingWidget />
+              <HealthCard health={health} />
               <CostSummaryCard />
             </div>
           </div>
+
+          {/* ④ Your Life shortcuts + one rotating capability hint */}
+          <YourLife />
+          <TipsCard />
         </>
       )}
     </div>

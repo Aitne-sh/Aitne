@@ -49,6 +49,7 @@ context_files:
   - journal/agent.md
 ui_anchors:
   - /knowledge?tab=context-files
+  - /connections/journal
   - /settings/journal
 ---
 
@@ -115,10 +116,14 @@ worth recording during reactive work.
 ### System improvement ideas
 - Add Saturday to the Weekend day-type default so weekend pushes triage.
 ### Metrics (agent side)
-- Agent plan rows completed: 12
-- Did-not-fire / failed rows: 1
-- Observations reviewed / ignored: 18 / 4
+- Routine runs (7d): 142 total / 3 failed (prev week: 150 / 5)
+- Spend (7d): $4.10 (prev week: $4.80); top cost: routine.fetch_window $2.10
+- Notifications (7d): 9 sent / 4 ignored (prev week sent: 11)
 ```
+
+The metrics lines are copied verbatim from the `<self_performance>`
+block the daemon computes and injects into the weekly session — the
+review does not count anything itself.
 
 ## Append-only — enforced, not just convention
 

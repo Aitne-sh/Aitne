@@ -835,7 +835,9 @@ describe("TelegramAdapter start() dynamic import paths", () => {
     const mockOn = vi.fn().mockImplementation((event: string, handler: (ctx: unknown) => Promise<void>) => {
       if (event === "message") capturedMessageHandler = handler;
     });
-    const mockLaunch = vi.fn();
+    // Real telegraf launch() returns a promise that stays pending while
+    // the polling loop runs — settling it would mark the adapter down.
+    const mockLaunch = vi.fn().mockReturnValue(new Promise<void>(() => undefined));
     vi.doMock("telegraf", () => ({
       Telegraf: vi.fn().mockImplementation(() => ({
         on: mockOn,
@@ -885,7 +887,9 @@ describe("TelegramAdapter start() dynamic import paths", () => {
     const mockOn = vi.fn().mockImplementation((event: string, handler: (ctx: unknown) => Promise<void>) => {
       if (event === "message") capturedHandler = handler;
     });
-    const mockLaunch = vi.fn();
+    // Real telegraf launch() returns a promise that stays pending while
+    // the polling loop runs — settling it would mark the adapter down.
+    const mockLaunch = vi.fn().mockReturnValue(new Promise<void>(() => undefined));
     vi.doMock("telegraf", () => ({
       Telegraf: vi.fn().mockImplementation(() => ({
         on: mockOn,
@@ -926,7 +930,9 @@ describe("TelegramAdapter start() dynamic import paths", () => {
 
   it("warns and continues when fetchBotInfo fails during start", async () => {
     const mockOn = vi.fn();
-    const mockLaunch = vi.fn();
+    // Real telegraf launch() returns a promise that stays pending while
+    // the polling loop runs — settling it would mark the adapter down.
+    const mockLaunch = vi.fn().mockReturnValue(new Promise<void>(() => undefined));
     vi.doMock("telegraf", () => ({
       Telegraf: vi.fn().mockImplementation(() => ({
         on: mockOn,
@@ -2545,5 +2551,104 @@ describe("TelegramAdapter: remaining branch coverage for sendMessage and handleM
     // Should emit event (isDm = true since chatType = "private")
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(onMessage.mock.calls[0][0].isDm).toBe(true);
+  });
+});
+
+describe("TelegramAdapter getConnectionState (watchdog probe)", () => {
+  function mockTelegrafWith(launch: () => Promise<void>) {
+    vi.doMock("telegraf", () => ({
+      Telegraf: vi.fn().mockImplementation(() => ({
+        on: vi.fn(),
+        launch: vi.fn().mockImplementation(launch),
+        stop: vi.fn(),
+        telegram: { getFile: vi.fn(), sendMessage: vi.fn() },
+      })),
+    }));
+    vi.resetModules();
+  }
+
+  async function freshAdapter() {
+    const { TelegramAdapter: FreshTelegram } = await import("./telegram-adapter.js");
+    const fetchInfoSpy = vi
+      .spyOn(FreshTelegram, "fetchBotInfo")
+      .mockResolvedValue({ id: 1, username: "TestBot", firstName: null });
+    const adapter = new FreshTelegram({
+      botToken: "fake:token",
+      ownerChatId: null,
+      onMessage: vi.fn(),
+    });
+    return { adapter, fetchInfoSpy };
+  }
+
+  it("reports unknown before start, ok while polling, down when the loop dies", async () => {
+    let rejectLaunch: ((err: Error) => void) | null = null;
+    mockTelegrafWith(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectLaunch = reject;
+        }),
+    );
+    const { adapter, fetchInfoSpy } = await freshAdapter();
+
+    expect(adapter.getConnectionState()).toBe("unknown");
+
+    await adapter.start();
+    expect(adapter.getConnectionState()).toBe("ok");
+
+    // Poll loop dies on a non-retryable error (e.g. 409 conflict).
+    rejectLaunch!(new Error("409: terminated by other getUpdates request"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(adapter.getConnectionState()).toBe("down");
+
+    fetchInfoSpy.mockRestore();
+    vi.doUnmock("telegraf");
+    vi.resetModules();
+  });
+
+  it("marks down when the loop exits cleanly without a stop()", async () => {
+    let resolveLaunch: (() => void) | null = null;
+    mockTelegrafWith(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLaunch = resolve;
+        }),
+    );
+    const { adapter, fetchInfoSpy } = await freshAdapter();
+
+    await adapter.start();
+    resolveLaunch!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(adapter.getConnectionState()).toBe("down");
+
+    fetchInfoSpy.mockRestore();
+    vi.doUnmock("telegraf");
+    vi.resetModules();
+  });
+
+  it("ignores launch settlement caused by stop()", async () => {
+    let resolveLaunch: (() => void) | null = null;
+    mockTelegrafWith(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveLaunch = resolve;
+        }),
+    );
+    const { adapter, fetchInfoSpy } = await freshAdapter();
+
+    await adapter.start();
+    await adapter.stop();
+    // telegraf resolves the pending launch() promise once polling aborts.
+    resolveLaunch!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Stopped adapter: no bot — unknown, and no spurious dead-loop marker.
+    expect(adapter.getConnectionState()).toBe("unknown");
+    expect(
+      (adapter as unknown as { pollingDeadError: string | null }).pollingDeadError,
+    ).toBeNull();
+
+    fetchInfoSpy.mockRestore();
+    vi.doUnmock("telegraf");
+    vi.resetModules();
   });
 });

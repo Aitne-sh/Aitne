@@ -136,6 +136,15 @@ export const agentScheduleSchema = z
     // routine for operators outside that zone, so resolution is deferred to
     // load time rather than baked in here.
     timezone: z.string().min(1).optional(),
+    // QUIET_HOURS_HARDENING_PLAN.md §6 — when true, a firing that lands
+    // inside the owner's quiet-hours window is pushed to the window's end
+    // (the whole RUN moves, mirroring the browser_task deferral) instead of
+    // burning a session whose DM output would then be deferred anyway. Set
+    // it whenever the Agent's expected output includes DMing the user.
+    // Default false is mandatory: silent file-writing Agents deliberately
+    // scheduled overnight must not move. User Agents only — built-ins fire
+    // outside `recurring_schedules` and must run inside quiet hours (§2).
+    defer_in_quiet_hours: z.boolean().default(false),
   })
   .refine(
     (s) =>

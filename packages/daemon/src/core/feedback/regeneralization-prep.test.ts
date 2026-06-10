@@ -123,6 +123,33 @@ describe("regeneralization-prep", () => {
       expect(result!.block).toContain('over_cap="false"');
     });
 
+    it("measures current_bytes against the ## Lessons section — the §6 cap unit", () => {
+      // Same unit the nightly worksheet and the eviction engine use. The
+      // whole-file measure used previously made the monthly pass call a store
+      // over-cap (and instruct eviction) while the nightly pass — measuring
+      // the section — considered the same store fine.
+      const fileMd = lessonsFile(TWO_LESSONS);
+      const sectionBytes = Buffer.byteLength(
+        fileMd.split("## Lessons\n")[1],
+        "utf-8",
+      );
+      const result = buildRegeneralizationWorksheet(
+        [
+          scope({
+            existingFileMd: fileMd,
+            // Cap between section size and whole-file size: must NOT be over.
+            caps: { capBytes: sectionBytes + 10, maxEntries: 40 },
+          }),
+        ],
+        { nowIso: NOW },
+      );
+      expect(Buffer.byteLength(fileMd, "utf-8")).toBeGreaterThan(
+        sectionBytes + 10,
+      );
+      expect(result!.block).toContain(`current_bytes="${sectionBytes}"`);
+      expect(result!.block).toContain('over_cap="false"');
+    });
+
     it("excludes provisional lessons from the collapse set (promotion-neutral)", () => {
       const result = buildRegeneralizationWorksheet(
         [
@@ -249,6 +276,27 @@ describe("regeneralization-prep", () => {
       );
       expect(result!.block).toContain("…");
       expect(result!.block).not.toContain("x".repeat(400));
+    });
+
+    it("does not split a surrogate pair at the truncation boundary", () => {
+      // 298 chars then an astral emoji: the 299-char clip lands exactly on
+      // the high surrogate and would otherwise leave a lone \uD83C.
+      const long = `${"y".repeat(298)}🎉 and more text past the clip cap`;
+      const result = buildRegeneralizationWorksheet(
+        [
+          scope({
+            existingFileMd: lessonsFile([
+              `- [2026-06-01] ${long} <!-- ev=2 kind=preference src=behavioral conf=medium last=2026-06-01 -->`,
+              "- [2026-06-02] Second lesson. <!-- ev=2 kind=preference src=behavioral conf=medium last=2026-06-02 -->",
+            ]),
+          }),
+        ],
+        { nowIso: NOW },
+      );
+      const block = result!.block;
+      expect(block).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+      expect(Buffer.from(block, "utf-8").toString("utf-8")).toBe(block);
+      expect(block).not.toContain("�");
     });
 
     it("honours a custom recency half-life without throwing", () => {

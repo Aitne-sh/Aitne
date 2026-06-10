@@ -55,6 +55,7 @@ type AdapterInternals = {
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   lastCloseWasNetwork: boolean;
   reconnecting: boolean;
+  appLayerWatch: boolean;
   dnsLookup: (hostname: string) => Promise<unknown>;
   connectionState: string;
   loggedOutCode: number | null;
@@ -63,7 +64,7 @@ type AdapterInternals = {
   resolveWAVersion: () => Promise<number[] | undefined>;
   invalidateWAVersionCache: () => void;
   scheduleReconnect: () => void;
-  runReconnectAttempt: (sustained: boolean) => Promise<void>;
+  runReconnectAttempt: (sustained: boolean, appLayerWatch?: boolean) => Promise<void>;
   isNetworkReachable: () => Promise<boolean>;
   connect: () => Promise<void>;
   handleConnectionUpdate: (update: unknown, sock: unknown) => Promise<void>;
@@ -1168,9 +1169,10 @@ describe("WhatsAppAdapter — reconnect backoff", () => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
-  it("stops scheduling once max attempts is exceeded", () => {
+  it("enters the slow app-layer watch once max fast attempts is exceeded", () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
 
     const adapter = createAdapter();
     const internals = asInternals(adapter);
@@ -1178,8 +1180,17 @@ describe("WhatsAppAdapter — reconnect backoff", () => {
     internals.reconnectAttempts = 10; // == RECONNECT_MAX_ATTEMPTS
     internals.scheduleReconnect();
 
-    expect(internals.reconnectTimer).toBeNull();
-    expect(internals.lastError).toMatch(/gave up after 10 attempts/);
+    // Slow watch cadence (30 min, jitter pinned to 0) — NOT a permanent stop.
+    expect(setTimeoutSpy.mock.calls.at(-1)?.[1]).toBe(30 * 60_000);
+    expect(internals.reconnectTimer).not.toBeNull();
+    expect(internals.reconnecting).toBe(true);
+    expect(internals.appLayerWatch).toBe(true);
+    expect(internals.lastError).toMatch(/failed at the app layer/);
+    expect(internals.lastError).toMatch(/retrying every ~30 min/);
+    if (internals.reconnectTimer) {
+      clearTimeout(internals.reconnectTimer);
+      internals.reconnectTimer = null;
+    }
   });
 
   it("does not schedule when shuttingDown", () => {
@@ -1284,19 +1295,76 @@ describe("WhatsAppAdapter — sustained network watch", () => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 
-  it("still gives up on a non-network close past the fast cap", () => {
+  it("enters the slow app-layer watch (with the error surfaced) on a non-network close past the fast cap", () => {
     vi.useFakeTimers();
     const adapter = createAdapter();
     const internals = asInternals(adapter);
     internals.reconnectAttempts = 10;
     internals.lastCloseWasNetwork = false;
+    internals.connectionState = "disconnected";
     internals.lastError = "WhatsApp rejected client version (status 515)";
 
     internals.scheduleReconnect();
 
-    expect(internals.reconnectTimer).toBeNull();
-    expect(internals.reconnecting).toBe(false);
-    expect(internals.lastError).toMatch(/gave up after 10 attempts/);
+    expect(internals.reconnectTimer).not.toBeNull();
+    expect(internals.reconnecting).toBe(true);
+    expect(internals.appLayerWatch).toBe(true);
+    expect(internals.lastError).toMatch(/failed at the app layer/);
+    // Unlike the network-class sustained watch, the app-layer watch IS
+    // surfaced as an error even though a retry timer is pending — WhatsApp
+    // is actively rejecting us and the cadence is ~30 min.
+    expect(adapter.getStatusError()).toMatch(/failed at the app layer/);
+    expect(adapter.getNotificationRuntimeStatus().runtimeState).toBe("error");
+    if (internals.reconnectTimer) {
+      clearTimeout(internals.reconnectTimer);
+      internals.reconnectTimer = null;
+    }
+  });
+
+  it("does not re-wrap lastError when re-scheduling from within the app-layer watch", () => {
+    vi.useFakeTimers();
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10;
+    internals.lastCloseWasNetwork = false;
+    internals.connectionState = "disconnected";
+    internals.lastError = "WhatsApp rejected client version (status 515)";
+
+    internals.scheduleReconnect();
+    const wrappedOnce = internals.lastError;
+    expect(wrappedOnce).toMatch(/failed at the app layer \(WhatsApp rejected client version/);
+
+    // Simulate the probe-unreachable watch tick: timer fires (cleared),
+    // runReconnectAttempt finds the network down and re-schedules while
+    // appLayerWatch is still engaged.
+    if (internals.reconnectTimer) {
+      clearTimeout(internals.reconnectTimer);
+      internals.reconnectTimer = null;
+    }
+    internals.scheduleReconnect();
+
+    expect(internals.lastError).toBe(wrappedOnce);
+    if (internals.reconnectTimer) {
+      clearTimeout(internals.reconnectTimer);
+      internals.reconnectTimer = null;
+    }
+  });
+
+  it("grants only a partial fast budget when the app-layer watch fires", async () => {
+    const adapter = createAdapter();
+    const internals = asInternals(adapter);
+    internals.reconnectAttempts = 10;
+    internals.lastCloseWasNetwork = false;
+    internals.connectionState = "disconnected";
+    internals.dnsLookup = vi.fn().mockResolvedValue({ address: "1.2.3.4", family: 4 });
+    const connectSpy = vi.spyOn(internals, "connect").mockResolvedValue();
+
+    await internals.runReconnectAttempt(true, true);
+
+    expect(connectSpy).toHaveBeenCalledTimes(1);
+    // 10 - 3 = 7: three fast attempts before falling back into the slow
+    // watch, instead of a full fresh fast phase of ten.
+    expect(internals.reconnectAttempts).toBe(7);
   });
 
   it("keeps watching without opening a socket while still offline", async () => {

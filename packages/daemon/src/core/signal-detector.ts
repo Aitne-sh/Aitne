@@ -57,6 +57,28 @@ const MAX_RAW_SIGNALS = 20;
 const DEDUP_TTL_MS = 10 * 60 * 1000;
 
 /**
+ * Reaction emoji that signal disapproval. A 👎 must not be recorded as a
+ * positive behavioral signal — the consolidation LLM only sees the row's
+ * summary, so a mis-valenced reaction would count as positive corroboration
+ * for the very notification the owner disliked. Conservative set: ambiguous
+ * emoji (😢, 😕, …) stay positive-by-default rather than guessing.
+ */
+const NEGATIVE_REACTION_EMOJI: ReadonlySet<string> = new Set([
+  "👎",
+  "❌",
+  "🚫",
+  "🛑",
+  "😠",
+  "😡",
+  "💢",
+]);
+
+/** Strip skin-tone modifiers + variation selectors so 👎🏽 matches 👎. */
+function normalizeReactionEmoji(emoji: string): string {
+  return emoji.replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0E}\u{FE0F}]/gu, "").trim();
+}
+
+/**
  * SignalDetector — collects implicit user feedback signals (no LLM required).
  *
  * Detects behavioral patterns from messaging platforms and appends
@@ -160,10 +182,12 @@ export class SignalDetector {
     if (params.notificationId) {
       const pendingId = this.resolvePendingNotificationId(params.notificationId);
       this.pendingNotifications.delete(pendingId);
+      const negative = NEGATIVE_REACTION_EMOJI.has(normalizeReactionEmoji(emoji));
       this.recordNotificationOutcome({
         notificationId: pendingId,
         reaction: "replied",
-        valence: "positive",
+        valence: negative ? "negative" : "positive",
+        emoji,
         evidence: {
           emoji,
           responseTimeMs,
@@ -381,14 +405,28 @@ export class SignalDetector {
     }
   }
 
+  /**
+   * Precision matters more than recall here: a match marks the reply
+   * `corrected` (valence `correction`), and the promotion gate treats any
+   * correction as an authoritative directive that promotes a lesson on
+   * FIRST occurrence — one false positive writes a bogus standing
+   * directive into `policies/agent-lessons.md`. So the stop/don't pattern
+   * requires imperative shape (sentence-initial, modulo a couple of
+   * politeness tokens) paired with an agent-action verb, instead of the
+   * old `\b(stop|no)\b.*\b(do|that|…)\b` / bare `don't` catch-alls that
+   * matched benign replies like "No worries, that sounds great" or
+   * "I don't have anything else today".
+   */
   private static isCorrectionContent(content: string): boolean {
     const correctionPatterns = [
-      /shorter|brief|concise/i,
-      /more detail|elaborate|expand/i,
+      /\b(shorter|brief|briefly|concise|concisely|less verbose|too long|too verbose)\b/i,
+      /\b(more detail|elaborate|expand)\b/i,
       /\bin (english|spanish|french|german|portuguese|italian|chinese|japanese|korean|arabic|hindi|russian)\b/i,
-      /bullet points|bulleted list/i,
-      /\b(stop|no)\b.*\b(notify|message|remind|send|doing|do|again|that)\b/i,
-      /\b(do not|don't)\b/i,
+      /\b(bullet points|bulleted list)\b/i,
+      // Imperative "stop/don't/no more <agent action>" at the start of the
+      // reply: optional politeness tokens, a negation/stop verb, then an
+      // agent-action word within the same clause.
+      /^\W*(?:(?:please|pls|just|hey|ok|okay|can you|could you|you can|maybe)\s+){0,2}(?:stop|quit|don['’]t|do not|never|no more)\b[^.!?\n]{0,40}?\b(?:notify(?:ing)?|notifications?|messag(?:e|es|ing)|remind(?:er|ers|ing)?|send(?:ing)?|ping(?:ing)?|dm(?:s|ing)?|post(?:ing)?|repeat(?:ing)?|do(?:ing)?\s+(?:that|this))\b/i,
     ];
     return correctionPatterns.some((pattern) => pattern.test(content));
   }
@@ -485,6 +523,10 @@ export class SignalDetector {
     reaction: NotificationReaction;
     valence: FeedbackSignalValence;
     evidence: Record<string, unknown>;
+    /** Reaction emoji, when the outcome came from one — surfaced in the
+     *  summary so the consolidation LLM can read the sentiment (it never
+     *  sees `evidence_json`). */
+    emoji?: string;
   }): void {
     const db = this.deps.db;
     if (this.config.feedbackLearningEnabled === false || !db) return;
@@ -511,7 +553,10 @@ export class SignalDetector {
       }
 
       const scopeType = metadata.agentId ? "agent_slug" : "agent";
-      const summary = this.buildOutcomeSummary(params.reaction, metadata);
+      const summary = this.buildOutcomeSummary(params.reaction, metadata, {
+        valence: params.valence,
+        emoji: params.emoji,
+      });
       const evidence = this.sanitizeEvidence({
         ...params.evidence,
         userReaction: params.reaction,
@@ -563,6 +608,7 @@ export class SignalDetector {
   private buildOutcomeSummary(
     reaction: NotificationReaction,
     metadata: NotificationMetadata,
+    opts: { valence?: FeedbackSignalValence; emoji?: string } = {},
   ): string {
     const content = metadata.contentSummary
       ? ` "${metadata.contentSummary}"`
@@ -570,13 +616,18 @@ export class SignalDetector {
     const notificationType = metadata.notificationType
       ? ` (${metadata.notificationType})`
       : "";
+    const emojiNote = opts.emoji ? ` (${opts.emoji})` : "";
     const raw = reaction === "ignored"
       ? `Owner did not respond to notification${content}${notificationType}`
       : reaction === "corrected"
         ? `Owner corrected notification${content}${notificationType}`
         : reaction === "acted"
           ? `Owner acted on notification${content}${notificationType}`
-          : `Owner responded to notification${content}${notificationType}`;
+          : opts.valence === "negative"
+            ? `Owner reacted negatively${emojiNote} to notification${content}${notificationType}`
+            : opts.emoji
+              ? `Owner reacted${emojiNote} to notification${content}${notificationType}`
+              : `Owner responded to notification${content}${notificationType}`;
     return redactSensitiveString(raw.replace(/\s+/g, " ").trim()).slice(0, 280);
   }
 

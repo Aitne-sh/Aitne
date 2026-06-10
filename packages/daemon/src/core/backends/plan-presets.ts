@@ -259,9 +259,17 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // (2 mail providers × N accounts + calendar + notion) and tripped
   // BackendQuotaError(max_budget_usd) mid-fetch — widened to $0.50 so
   // the cap still binds well before runaway but accommodates the real
-  // worst-case fan-out. 20-turn turn count is unchanged. Keep in
-  // lock-step with the corresponding schema-seed row.
-  "routine.fetch_window": { maxTurns: 20, maxBudgetUsd: 0.5 },
+  // worst-case fan-out. Keep in lock-step with the corresponding
+  // schema-seed row.
+  //
+  // maxTurns 20 → 10 (PREPASS_COST_REDUCTION_PLAN.md N4, 2026-06-10):
+  // measured over 502 fetch_window runs on a live install, num_turns
+  // P50=3 / P95=6 / P99=8 / max=11 (avg 3.08). The per-integration
+  // fan-out means each session handles ONE partial, so the original
+  // "~6 partials × 3 tool calls" sizing no longer applies. 10 bounds
+  // budget-cap wander (a stuck session now stops at half the previous
+  // exploration depth) while clearing P99 with 2 turns of headroom.
+  "routine.fetch_window": { maxTurns: 10, maxBudgetUsd: 0.5 },
   // BROWSER_HISTORY_INTEGRATION_PLAN P3 — keep these in lock-step with
   // the schema seed rows. cluster_update is a tiny dispatcher (1 PUT
   // + a list call), so the absolute floor of 5/$0.05 is the right

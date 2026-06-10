@@ -77,6 +77,7 @@ import {
   assertCostWithinMaxBudget,
   assertPromptCostWithinMaxBudget,
   classifyCliFailure,
+  recoverCliFailureSpend,
 } from "./cli-quota-guards.js";
 import { buildAgentDayBoundaryHint } from "./quota-reset-hints.js";
 import {
@@ -1086,6 +1087,7 @@ export class GeminiCliCore implements IAgentCore {
           new Error(
             `Gemini execution exceeded max-turns cap of ${maxTurns} (observed ${toolCallCount} tool calls).`,
           ),
+          this.recoverFailureSpend(stats, params.modelId, toolCallCount, startMs),
         );
         logger.error(
           {
@@ -1108,6 +1110,7 @@ export class GeminiCliCore implements IAgentCore {
           new Error(
             `Gemini reactive stream went idle for ${REACTIVE_IDLE_TIMEOUT_MS}ms (no events from CLI subprocess)`,
           ),
+          this.recoverFailureSpend(stats, params.modelId, toolCallCount, startMs),
         );
         logger.error(
           { err, eventType: params.eventType, model: params.modelId, durationMs: Date.now() - startMs },
@@ -1121,6 +1124,7 @@ export class GeminiCliCore implements IAgentCore {
           this.backendId,
           "timeout",
           new Error(`Gemini execution exceeded timeout of ${this.config.executeTimeoutMinutes} minutes`),
+          this.recoverFailureSpend(stats, params.modelId, toolCallCount, startMs),
         );
         logger.error(
           { err, eventType: params.eventType, model: params.modelId, durationMs: Date.now() - startMs },
@@ -1141,7 +1145,10 @@ export class GeminiCliCore implements IAgentCore {
           ?? firstFailureLine(runResult.stdoutLines)
           ?? firstFailureLine(runResult.stderrLines)
           ?? "Gemini execution did not complete successfully.";
-        const classified = this.classifyFailure(failureText);
+        const classified = this.classifyFailure(
+          failureText,
+          this.recoverFailureSpend(stats, params.modelId, toolCallCount, startMs),
+        );
         logger.error(
           { err: classified, eventType: params.eventType, model: params.modelId, exitCode: runResult.exitCode, durationMs: Date.now() - startMs },
           "Gemini execute failed",
@@ -2100,7 +2107,10 @@ ${fetchClause}`;
   // Codex core; the logic lives in `cli-quota-guards.ts` (single source of
   // truth) and each backend passes its own regexes / label. Gemini adds a
   // pre-auth policy-deny branch via `classifyGeminiPolicyDeny`.
-  private classifyFailure(message: string): BackendQuotaError | BackendDecisiveFailure {
+  private classifyFailure(
+    message: string,
+    spend?: import("../agent-core.js").BackendQuotaSpend | null,
+  ): BackendQuotaError | BackendDecisiveFailure {
     return classifyCliFailure({
       backendId: this.backendId,
       message,
@@ -2108,6 +2118,31 @@ ${fetchClause}`;
       rateLimitPattern: /rate limit|quota|429/i,
       authPattern: /authentication page|oauth|api key|login|required/i,
       extraClassifier: classifyGeminiPolicyDeny,
+      ...(spend !== undefined ? { spend } : {}),
+    });
+  }
+
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N1 — spend recovered from the failed
+   * run's JSONL stats so terminal errors carry what the provider already
+   * billed. Null when the stream never reported usage.
+   */
+  private recoverFailureSpend(
+    stats: GeminiStats | null,
+    modelId: string,
+    toolCallCount: number,
+    startMs: number,
+  ): import("../agent-core.js").BackendQuotaSpend | null {
+    return recoverCliFailureSpend({
+      backendId: this.backendId,
+      priceFetcher: this.priceFetcher,
+      usage: normalizeGeminiUsage(stats),
+      modelId,
+      // Matches the success branch / budget-assert formula
+      // (`toolCallCount + 1`) so a failed and a successful run with the
+      // same tool fan-out report the same turn count.
+      numTurns: toolCallCount + 1,
+      durationMs: Date.now() - startMs,
     });
   }
 

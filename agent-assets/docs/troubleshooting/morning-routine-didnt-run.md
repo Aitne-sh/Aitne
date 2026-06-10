@@ -13,7 +13,7 @@ summary: |
   Causes are ordered by frequency: daemon was stopped at the trigger
   time, both backends failed, quota exhausted, the routine threw and is
   mid-retry, or it is a day-boundary subtlety. Most cases self-heal via
-  boot-time catch-up or the retry/stall watchdog.
+  boot/wake catch-up, the missed-fire self-heal, or the retry chain.
 section: morning-routine-didnt-run
 tags:
   - troubleshooting
@@ -28,7 +28,7 @@ ask_examples:
   - How do I regenerate today.md by hand?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-10
 keywords:
   - morning routine didn't run
   - morning routine skipped
@@ -66,26 +66,42 @@ ui_anchors:
 
 ## Before You Worry: It Often Self-Heals
 
-The morning routine has two recovery paths that usually fix this
+The morning routine has several recovery paths that usually fix this
 without any action from you:
 
 - **Boot-time catch-up.** If the daemon was stopped during the trigger
   window, it fires the unrun morning routine the next time it starts.
   So a missed routine often resolves itself on the next `aitne start`
   or `aitne restart`.
+- **Sleep wake catch-up.** If the machine was asleep at the trigger
+  minute (laptop lid closed at 04:00), the cron fire is silently lost —
+  cron never replays missed ticks. The daemon detects the wall-clock
+  gap when the machine wakes and queues the morning routine itself,
+  along with any missed evening/weekly reviews.
+- **Missed-fire self-heal.** A periodic check (every 10 minutes)
+  notices when the day is more than ~15 minutes old with no morning
+  attempt and nothing queued, and queues the routine. This covers
+  sleeps too short for the wake detector and any other lost trigger.
 - **Retry on failure.** If the routine runs but fails to produce a
   fresh `state/today.md`, the daemon retries up to 3 times with an
   exponential back-off (5, then 10, then 15 minutes). After 3 failed
-  attempts it sends you a DM asking you to regenerate manually. If the
-  wake row sits unfinished for ~2 hours (the stall watchdog threshold),
-  you also get an owner DM so the silence never goes unnoticed.
+  attempts it sends you a DM asking you to regenerate manually.
+- **Hung-run recovery.** If a run starts and then wedges (typically a
+  sleep mid-run that kills the backend connection), the self-heal
+  check re-queues it once the run has been silent past the stall
+  threshold (~2 hours by default) — at most twice per day, after which
+  it alerts instead of re-running. Either way you get an owner DM so
+  the silence never goes unnoticed.
 
 Give it a few minutes, or restart the daemon, before digging deeper.
 
 ## Most Likely Causes (in probability order)
 
-1. **Daemon was stopped at the trigger time.** Check `aitne status`.
-   Boot-time catch-up should cover this once the daemon is back up.
+1. **Daemon was stopped — or the machine was asleep — at the trigger
+   time.** Check `aitne status`. Boot-time catch-up covers the stopped
+   case once the daemon is back up; sleep wake catch-up and the
+   missed-fire self-heal cover the asleep case within minutes of the
+   machine waking.
 2. **Both backends failed.** The routine tried the main backend, fell
    back, and the fallback failed too. Check `/activity` for an error
    outcome and `aitne logs` for the failure.

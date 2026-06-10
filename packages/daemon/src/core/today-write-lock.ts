@@ -12,11 +12,23 @@ export interface TodayWriteLockManager {
 
 export class InMemoryTodayWriteLockManager implements TodayWriteLockManager {
   private holder: string | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private expiresAtMs = 0;
 
   constructor(private readonly timeoutMs: number) {}
 
+  // Expiry is wall-clock (Date.now) checked lazily on access, not a
+  // setTimeout: Node timers run on the monotonic clock and don't advance
+  // while the machine sleeps, so a timer armed before sleep would hold the
+  // lock up to the whole sleep duration past its intended TTL.
+  private expireIfStale(): void {
+    if (this.holder && Date.now() >= this.expiresAtMs) {
+      logger.warn({ lockId: this.holder }, "Today write lock expired by timeout");
+      this.holder = null;
+    }
+  }
+
   acquire(): { ok: true; lockId: string } | { ok: false; holder: string } {
+    this.expireIfStale();
     if (this.holder) {
       logger.debug({ existingHolder: this.holder }, "Lock acquire rejected — already held");
       return { ok: false, holder: this.holder };
@@ -24,31 +36,25 @@ export class InMemoryTodayWriteLockManager implements TodayWriteLockManager {
 
     const lockId = randomUUID();
     this.holder = lockId;
-    this.timer = setTimeout(() => {
-      logger.warn({ lockId: this.holder }, "Today write lock expired by timeout");
-      this.holder = null;
-      this.timer = null;
-    }, this.timeoutMs);
+    this.expiresAtMs = Date.now() + this.timeoutMs;
 
     logger.debug({ lockId }, "Today write lock acquired");
     return { ok: true, lockId };
   }
 
   release(lockId: string): boolean {
+    this.expireIfStale();
     if (!this.holder || this.holder !== lockId) {
       return false;
     }
 
     this.holder = null;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
     logger.debug({ lockId }, "Today write lock released");
     return true;
   }
 
   isHeldBy(lockId?: string | null): boolean {
+    this.expireIfStale();
     if (!this.holder) {
       return false;
     }
@@ -56,6 +62,7 @@ export class InMemoryTodayWriteLockManager implements TodayWriteLockManager {
   }
 
   getHolder(): string | null {
+    this.expireIfStale();
     return this.holder;
   }
 }
@@ -78,44 +85,49 @@ export function getTodayWriteLockTimeoutMs(executeTimeoutMinutes: number): numbe
  */
 export class MigrationLock {
   private holder: string | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private expiresAtMs = 0;
 
   constructor(private readonly timeoutMs: number) {}
 
+  // Wall-clock lazy expiry — see InMemoryTodayWriteLockManager for why
+  // this is not a setTimeout.
+  private expireIfStale(): void {
+    if (this.holder && Date.now() >= this.expiresAtMs) {
+      logger.warn({ lockId: this.holder }, "Migration lock expired by timeout");
+      this.holder = null;
+    }
+  }
+
   acquire(): { ok: true; lockId: string } | { ok: false; holder: string } {
+    this.expireIfStale();
     if (this.holder) {
       logger.debug({ existingHolder: this.holder }, "Migration lock rejected — already held");
       return { ok: false, holder: this.holder };
     }
     const lockId = randomUUID();
     this.holder = lockId;
-    this.timer = setTimeout(() => {
-      logger.warn({ lockId: this.holder }, "Migration lock expired by timeout");
-      this.holder = null;
-      this.timer = null;
-    }, this.timeoutMs);
+    this.expiresAtMs = Date.now() + this.timeoutMs;
     logger.debug({ lockId }, "Migration lock acquired");
     return { ok: true, lockId };
   }
 
   release(lockId: string): boolean {
+    this.expireIfStale();
     if (!this.holder || this.holder !== lockId) {
       return false;
     }
     this.holder = null;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
     logger.debug({ lockId }, "Migration lock released");
     return true;
   }
 
   isHeld(): boolean {
+    this.expireIfStale();
     return this.holder !== null;
   }
 
   getHolder(): string | null {
+    this.expireIfStale();
     return this.holder;
   }
 }

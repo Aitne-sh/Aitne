@@ -3,7 +3,7 @@ import { type VariantProps, cva } from "class-variance-authority";
 import type { HTMLAttributes } from "react";
 
 const cardVariants = cva(
-  "rounded-xl border p-5 shadow-[0_1px_3px_rgb(0_0_0/0.04)]",
+  "rounded-xl border p-5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_8px_24px_-16px_rgb(0_0_0/0.10)]",
   {
     variants: {
       tone: {
@@ -41,7 +41,7 @@ export function CardHeader({ className, ...props }: HTMLAttributes<HTMLDivElemen
 export function CardTitle({ className, ...props }: HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={cn("text-lg font-semibold text-foreground", className)}
+      className={cn("text-base font-semibold tracking-tight text-foreground", className)}
       {...props}
     />
   );
@@ -53,12 +53,23 @@ export function CardStatLabel({
 }: HTMLAttributes<HTMLHeadingElement>) {
   return (
     <h3
-      className={cn("text-sm font-medium text-muted-foreground", className)}
+      className={cn(
+        "text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground",
+        className,
+      )}
       {...props}
     />
   );
 }
 
 export function CardValue({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("text-3xl font-bold text-foreground", className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        "font-display text-3xl font-semibold tracking-tight tabular-nums text-foreground",
+        className,
+      )}
+      {...props}
+    />
+  );
 }

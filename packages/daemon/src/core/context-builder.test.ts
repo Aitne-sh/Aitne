@@ -2890,6 +2890,60 @@ describe("ContextBuilder", () => {
     });
   });
 
+  // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.1 / Phase 1 — the weekly Measure
+  // block is assembled by the dispatcher pre-step and injected verbatim,
+  // exactly like the evening-review `<feedback_worksheet>`.
+  describe("self-tuning Phase 1 — self-performance injection", () => {
+    it("injects <self_performance> when event.data.selfPerformanceBlock is a string", async () => {
+      const block = `<self_performance generated_at="2026-06-09T12:00:00Z" window_days="7" baseline="prior_7d">\n  <totals runs="12" failed="1" cost_usd="3.5" prev_runs="10" prev_failed="0" prev_cost_usd="4.1" notif_sent="5" notif_ignored="2" prev_notif_sent="6" />\n</self_performance>`;
+      const event = createEvent({
+        type: "routine.weekly_review",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+        data: { selfPerformanceBlock: block },
+      }) as unknown as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).toContain(block);
+    });
+
+    it("omits the block when event.data.selfPerformanceBlock is absent", async () => {
+      const event = createEvent({
+        type: "routine.weekly_review",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      const context = await builder.build(event);
+      expect(context).not.toContain("<self_performance");
+    });
+  });
+
+  // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.2 / Phase 2 — the weekly Recommend
+  // block is assembled by the dispatcher pre-step and injected verbatim for
+  // the task-flow's Phase 3c verdict step.
+  describe("self-tuning Phase 2 — tuning recommendations injection", () => {
+    it("injects <tuning_recommendations> when event.data.tuningRecommendationsBlock is a string", async () => {
+      const block = `<tuning_recommendations cycle="2026-06-09" count="1" mode="shadow" verdict_endpoint="POST /api/tuning/verdicts">\n  <r id="2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes" rule="R1" actuator="config" key="hourlyCheckPrePassFreshnessMinutes" current="240" proposed="360" bounds="120..480" evidence="fetch_window 80% empty over 20 runs/14d" />\n</tuning_recommendations>`;
+      const event = createEvent({
+        type: "routine.weekly_review",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+        data: { tuningRecommendationsBlock: block },
+      }) as unknown as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).toContain(block);
+    });
+
+    it("omits the block when event.data.tuningRecommendationsBlock is absent", async () => {
+      const event = createEvent({
+        type: "routine.weekly_review",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      const context = await builder.build(event);
+      expect(context).not.toContain("<tuning_recommendations");
+    });
+  });
+
   // docs/design/appendices/fetch-window-cost-reduction.md §5 (Phase 2) — slim context for
   // the pre-pass fetcher. The session has no causal dependency on the
   // wide-path always-injected blocks, so the builder short-circuits them.
@@ -2908,7 +2962,7 @@ describe("ContextBuilder", () => {
       } as RoutineEvent;
     }
 
-    it("emits the three slim sections and nothing else", async () => {
+    it("emits the four slim sections and nothing else", async () => {
       // Seed the integrations table so the slim path has something to
       // render in <integration_modes>; without rows the helper emits the
       // empty self-closing tag, which is also valid but less illustrative.
@@ -2939,6 +2993,11 @@ describe("ContextBuilder", () => {
       expect(context).toContain("<integration_modes ");
       expect(context).toContain(`gmail="direct"`);
       expect(context).toContain(acquisitionPlanBlock);
+      // Prompt-injection defence: the pre-pass is the session that reads
+      // attacker-controlled mail/calendar/Notion bodies as tool results,
+      // so the slim path must carry the data-not-instructions rule itself.
+      expect(context).toContain("<untrusted_content>");
+      expect(context).toContain("</untrusted_content>");
 
       // Wide-path blocks must be absent — every one of these is on the
       // §5 drop-list and present in the seeded data so this fails loud
@@ -2951,7 +3010,6 @@ describe("ContextBuilder", () => {
       expect(context).not.toContain("<current_agent_day ");
       expect(context).not.toContain("<settings ");
       expect(context).not.toContain("<output_language_policy>");
-      expect(context).not.toContain("<untrusted_content>");
       expect(context).not.toContain("<routine_protocol>");
       expect(context).not.toContain("<management_mode_degraded>");
       expect(context).not.toContain("<obsidian_vault_path>");

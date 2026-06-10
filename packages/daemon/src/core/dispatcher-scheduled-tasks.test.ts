@@ -15,6 +15,8 @@ import {
 } from "./dispatcher-scheduled-tasks.js";
 import { writeIntegrations } from "../db/integrations-store.js";
 import { upsertAgent } from "../db/agents-store.js";
+import { readRuntimeState, writeRuntimeState } from "../db/runtime-state.js";
+import { TUNING_PENDING_CYCLE_STATE_KEY } from "./feedback/tuning-recommender.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import { ResultProcessor } from "./dispatcher-result-processor.js";
 import { DispatcherErrorRouter } from "./dispatcher-error-handling.js";
@@ -45,6 +47,13 @@ function fakeConfig(dataDir: string): AgentConfig {
     timezone: "UTC",
     dayBoundaryHour: 4,
     character: "default",
+    // Self-performance Measure pre-step reads the lesson-store byte caps
+    // (production values come from the Zod defaults in config.ts).
+    feedbackLessonMaxBytesGlobal: 8192,
+    feedbackLessonMaxBytesPerAgent: 4096,
+    // Phase 2 Recommend pre-step knob inputs (rule-table current values).
+    hourlyCheckPrePassFreshnessMinutes: 240,
+    hourlyCheckLowSignalPendingCeiling: 0,
   } as unknown as AgentConfig;
 }
 
@@ -69,6 +78,7 @@ function makeRunner(opts: {
   dataDir: string;
   fetchWindowRunner?: RoutineFetchWindowRunner;
   todayWriteLock?: TodayWriteLockManager;
+  configOverrides?: Partial<AgentConfig>;
 }): {
   runner: ScheduledTaskRunner;
   router: IAgentRouter;
@@ -76,7 +86,7 @@ function makeRunner(opts: {
   fetchWindowRunner: RoutineFetchWindowRunner;
   morningRoutine: MorningRoutineRunner;
 } {
-  const config = fakeConfig(opts.dataDir);
+  const config = Object.assign(fakeConfig(opts.dataDir), opts.configOverrides);
   const eventBus = new EventBus();
   const audit: IAuditLogger = {
     logAction: vi.fn(),
@@ -1619,6 +1629,302 @@ describe("ScheduledTaskRunner.executeDefault — weekly interests reflection pre
       .get() as { n: number };
     expect(applied.n).toBe(0);
     expect(existsSync(join(contextDir, "journal", "agent.md"))).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.1 / Phase 1 — deterministic Measure
+// pre-step on `routine.weekly_review`. Verifies: (a) telemetry present → the
+// event handed to contextBuilder.build carries a `<self_performance>` block;
+// (b) lesson stores on disk surface utilization rows; (c) a prep throw is
+// caught — weekly_review still proceeds without the block; (d) non-weekly
+// routines never get the block.
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("ScheduledTaskRunner.executeDefault — self-performance Measure pre-step", () => {
+  let db: Database.Database;
+  let dataDir: string;
+  let contextDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-st-perf-"));
+    contextDir = join(dataDir, "context");
+    mkdirSync(contextDir, { recursive: true });
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  function stubExecute(router: IAgentRouter): void {
+    (router.resolveBinding as ReturnType<typeof vi.fn>).mockReturnValue({
+      main: { backendId: "claude", modelId: "model", maxTurns: 1 },
+    });
+    (router.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      output: "",
+      isError: false,
+      durationMs: 10,
+      numTurns: 1,
+      sessionId: null,
+      model: "model",
+      backendId: "claude",
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      modelUsage: {},
+      costSource: "backend",
+      contextUpdated: false,
+      advisorCallCount: 0,
+      stopReason: null,
+    });
+  }
+
+  function makeRoutineEvent(
+    routine: string,
+  ): Parameters<ScheduledTaskRunner["executeDefault"]>[0] {
+    return {
+      type: `routine.${routine}`,
+      source: "cron",
+      priority: 2,
+      timestamp: new Date(),
+      data: {},
+      correlationId: "evt-perf",
+      routine,
+    } as unknown as Parameters<ScheduledTaskRunner["executeDefault"]>[0];
+  }
+
+  function builtBlock(contextBuilder: IContextBuilder): unknown {
+    const call = (contextBuilder.build as ReturnType<typeof vi.fn>).mock
+      .calls[0] as [{ data?: Record<string, unknown> }];
+    return call[0].data?.selfPerformanceBlock;
+  }
+
+  it("stamps <self_performance> into the weekly_review event before the context build", async () => {
+    // Explicit -1h timestamps: the window is half-open `[now-7d, now)`, so a
+    // row stamped in the same second as the gather's `now` would be excluded.
+    db.prepare(
+      `INSERT INTO agent_actions (action_type, result, cost_usd, duration_ms, started_at)
+       VALUES ('message.dm', 'success', 0.42, 1200, datetime('now', '-1 hour'))`,
+    ).run();
+    db.prepare(
+      `INSERT INTO notification_log (notification_type, user_reaction, status, created_at)
+       VALUES ('reminder', 'ignored', 'delivered', datetime('now', '-1 hour'))`,
+    ).run();
+    const { runner, router, contextBuilder } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+    const block = builtBlock(contextBuilder);
+    expect(typeof block).toBe("string");
+    expect(block).toContain("<self_performance ");
+    expect(block).toContain('<a t="message.dm"');
+    expect(block).toContain('<n t="reminder"');
+    // The LLM session still ran with the enriched event.
+    expect(router.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces lesson-store utilization rows when stores exist on disk", async () => {
+    mkdirSync(join(contextDir, "policies", "agents", "writer"), {
+      recursive: true,
+    });
+    const lessons = [
+      "# Lessons",
+      "## Lessons",
+      "- [2026-06-01] Lead with blockers. <!-- ev=2 kind=do-more src=behavioral conf=medium last=2026-06-05 -->",
+    ].join("\n");
+    writeFileSync(join(contextDir, CONTEXT_RELATIVE_PATHS.agentLessons), lessons);
+    writeFileSync(
+      join(contextDir, "policies", "agents", "writer", "lessons.md"),
+      lessons,
+    );
+    // Unsafe slug dirs are ignored, mirroring the re-generalization pre-step.
+    mkdirSync(join(contextDir, "policies", "agents", "UNSAFE SLUG"), {
+      recursive: true,
+    });
+    db.prepare(
+      `INSERT INTO agent_actions (action_type, result, started_at)
+       VALUES ('a', 'success', datetime('now', '-1 hour'))`,
+    ).run();
+    const { runner, router, contextBuilder } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+    const block = builtBlock(contextBuilder) as string;
+    expect(block).toContain('<s scope="agent" ');
+    expect(block).toContain('<s scope="agent:writer" ');
+    expect(block).toContain('median_ev="2"');
+    expect(block).not.toContain("UNSAFE");
+  });
+
+  it("ships the weekly_review without the block when the prep throws", async () => {
+    // Any prepare() against the dropped table raises SqliteError inside
+    // gatherSelfPerformanceData; the catch swallows it and stamps nothing.
+    db.prepare("DROP TABLE notification_log").run();
+    const { runner, router, contextBuilder } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await expect(
+      runner.executeDefault(makeRoutineEvent("weekly_review")),
+    ).resolves.toBeUndefined();
+
+    expect(builtBlock(contextBuilder)).toBeUndefined();
+    expect(router.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not stamp the block for non-weekly routines", async () => {
+    db.prepare(
+      `INSERT INTO agent_actions (action_type, result) VALUES ('a', 'success')`,
+    ).run();
+    const { runner, router, contextBuilder } = makeRunner({ db, dataDir });
+    stubExecute(router);
+
+    await runner.executeDefault(makeRoutineEvent("evening_review"));
+
+    expect(builtBlock(contextBuilder)).toBeUndefined();
+  });
+
+  // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.2 / Phase 2 — the Recommend
+  // pre-step shares the Measure gather and runs on the same weekly dispatch.
+  describe("Phase 2 — tuning Recommend pre-step", () => {
+    function builtTuningBlock(contextBuilder: IContextBuilder): unknown {
+      const call = (contextBuilder.build as ReturnType<typeof vi.fn>).mock
+        .calls[0] as [{ data?: Record<string, unknown> }];
+      return call[0].data?.tuningRecommendationsBlock;
+    }
+
+    function insertEmptyFetchRuns(count: number): void {
+      const insert = db.prepare(
+        `INSERT INTO agent_actions (action_type, result, detail, started_at)
+         VALUES ('routine.fetch_window', 'success', json(?), datetime('now', '-1 hour'))`,
+      );
+      for (let i = 0; i < count; i++) {
+        insert.run(
+          JSON.stringify({
+            prePass: {
+              integrationKey: "gmail",
+              status: "success",
+              fetched: 0,
+              posted: 0,
+            },
+          }),
+        );
+      }
+    }
+
+    it("stamps <tuning_recommendations> and persists the pending cycle when a rule fires", async () => {
+      insertEmptyFetchRuns(12); // 100% empty, n >= 10 → R1 fires (240 → 360)
+      const { runner, router, contextBuilder } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      const block = builtTuningBlock(contextBuilder);
+      expect(typeof block).toBe("string");
+      expect(block).toContain("<tuning_recommendations ");
+      expect(block).toContain('key="hourlyCheckPrePassFreshnessMinutes"');
+      expect(block).toContain('proposed="360"');
+      // Phase 3 — `selfTuningEnabled` defaults off → the block advertises
+      // shadow mode to the weekly session.
+      expect(block).toContain('mode="shadow"');
+
+      const cycle = readRuntimeState<{
+        cycleId: string;
+        recommendations: Array<{ key: string }>;
+        verdicts: Record<string, unknown>;
+      }>(db, TUNING_PENDING_CYCLE_STATE_KEY);
+      expect(cycle?.recommendations).toHaveLength(1);
+      expect(cycle?.recommendations[0].key).toBe(
+        "hourlyCheckPrePassFreshnessMinutes",
+      );
+      expect(cycle?.verdicts).toEqual({});
+      // Both blocks ride the same event.
+      expect(builtBlock(contextBuilder)).toContain("<self_performance ");
+    });
+
+    it("overwrites the previous cycle even when no rule fires — single-use ids expire (§3.4)", async () => {
+      writeRuntimeState(db, TUNING_PENDING_CYCLE_STATE_KEY, {
+        cycleId: "2026-06-02",
+        generatedAt: "2026-06-02T05:00:00.000Z",
+        recommendations: [{ id: "2026-06-02:R1:x" }],
+        verdicts: {},
+      });
+      // Some telemetry so the Measure block exists, but nothing rule-worthy.
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, result, started_at)
+         VALUES ('message.dm', 'success', datetime('now', '-1 hour'))`,
+      ).run();
+      const { runner, router, contextBuilder } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      expect(builtTuningBlock(contextBuilder)).toBeUndefined();
+      const cycle = readRuntimeState<{
+        cycleId: string;
+        recommendations: unknown[];
+      }>(db, TUNING_PENDING_CYCLE_STATE_KEY);
+      expect(cycle?.cycleId).not.toBe("2026-06-02");
+      expect(cycle?.recommendations).toEqual([]);
+    });
+
+    it("preserves same-day verdicts across a re-run — judged ids are not reopened", async () => {
+      insertEmptyFetchRuns(12); // R1 fires with a same-day-stable id
+      const todayUtc = new Date().toISOString().slice(0, 10);
+      const r1Id = `${todayUtc}:R1:hourlyCheckPrePassFreshnessMinutes`;
+      const verdict = {
+        verdict: "reject",
+        reason: "travel week — mail volume not representative",
+        recordedAt: `${todayUtc}T10:00:00.000Z`,
+      };
+      writeRuntimeState(db, TUNING_PENDING_CYCLE_STATE_KEY, {
+        cycleId: todayUtc,
+        generatedAt: `${todayUtc}T05:00:00.000Z`,
+        recommendations: [{ id: r1Id, key: "hourlyCheckPrePassFreshnessMinutes" }],
+        verdicts: { [r1Id]: verdict },
+      });
+      const { runner, router } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      const cycle = readRuntimeState<{
+        cycleId: string;
+        verdicts: Record<string, unknown>;
+      }>(db, TUNING_PENDING_CYCLE_STATE_KEY);
+      expect(cycle?.cycleId).toBe(todayUtc);
+      expect(cycle?.verdicts).toEqual({ [r1Id]: verdict });
+    });
+
+    it("advertises mode='live' when selfTuningEnabled is on (Phase 3)", async () => {
+      insertEmptyFetchRuns(12);
+      const { runner, router, contextBuilder } = makeRunner({
+        db,
+        dataDir,
+        configOverrides: { selfTuningEnabled: true },
+      });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      expect(builtTuningBlock(contextBuilder)).toContain('mode="live"');
+    });
+
+    it("does not run for non-weekly routines", async () => {
+      insertEmptyFetchRuns(12);
+      const { runner, router } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("evening_review"));
+
+      expect(
+        readRuntimeState(db, TUNING_PENDING_CYCLE_STATE_KEY),
+      ).toBeNull();
+    });
   });
 });
 

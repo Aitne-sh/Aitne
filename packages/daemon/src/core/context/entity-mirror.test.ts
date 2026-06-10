@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applySchema } from "../../db/schema.js";
@@ -698,6 +698,13 @@ describe("refreshEntityMirrorForPath", () => {
     const abs = join(contextDir, relativePath);
     mkdirSync(join(abs, ".."), { recursive: true });
     writeFileSync(abs, body, "utf-8");
+    // Pin the mtime one second into the past so the lag gauge's
+    // `lag >= 0` branch is deterministic — a fresh write's sub-ms mtime
+    // can land ahead of the Date.now() sample under parallel-fork load,
+    // which intermittently skipped the recordEntityMirrorLag line and
+    // broke the 100% coverage gate.
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(abs, past, past);
     return abs;
   }
 
@@ -805,6 +812,13 @@ describe("startEntityMirrorWatcher onEntityChanged fan-out (followups item 7)", 
     const abs = join(contextDir, relativePath);
     mkdirSync(join(abs, ".."), { recursive: true });
     writeFileSync(abs, body, "utf-8");
+    // Pin the mtime one second into the past so the lag gauge's
+    // `lag >= 0` branch is deterministic — a fresh write's sub-ms mtime
+    // can land ahead of the Date.now() sample under parallel-fork load,
+    // which intermittently skipped the recordEntityMirrorLag line and
+    // broke the 100% coverage gate.
+    const past = new Date(Date.now() - 1_000);
+    utimesSync(abs, past, past);
     return abs;
   }
 

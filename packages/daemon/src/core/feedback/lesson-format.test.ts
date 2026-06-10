@@ -130,6 +130,33 @@ describe("lesson-format", () => {
       expect(lessons[0].text).toBe("real.");
     });
 
+    it("ignores non-indented stray prose after an entry instead of folding it in", () => {
+      // A hand-written note dropped between entries must NOT be absorbed into
+      // the preceding lesson's prose — it would become an injectable standing
+      // directive and get re-serialized permanently on the next consolidation.
+      const body = [
+        "- [2026-06-01] Keep it terse. <!-- ev=2 kind=preference src=explicit conf=high last=2026-06-01 -->",
+        "TODO: review these next week",
+        "- [2026-06-02] Second lesson.",
+        "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-06-02 -->",
+      ].join("\n");
+      const lessons = parseLessonsSection(body);
+      expect(lessons).toHaveLength(2);
+      expect(lessons[0].text).toBe("Keep it terse.");
+      expect(lessons[1].text).toBe("Second lesson.");
+    });
+
+    it("still folds a non-indented trailer comment on its own line", () => {
+      const body = [
+        "- [2026-06-01] Keep it terse.",
+        "<!-- ev=3 kind=preference src=explicit conf=high last=2026-06-03 -->",
+      ].join("\n");
+      const [lesson] = parseLessonsSection(body);
+      expect(lesson.text).toBe("Keep it terse.");
+      expect(lesson.ev).toBe(3);
+      expect(lesson.last).toBe("2026-06-03");
+    });
+
     it("skips an eviction marker instead of folding it into the prior lesson", () => {
       // A re-read of a previously-evicted section must not absorb the marker
       // line into the last lesson's prose.

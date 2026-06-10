@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import type { App } from "@slack/bolt";
 import { EventPriority, createEvent } from "@aitne/shared";
 import type { AttachmentRef, Event } from "@aitne/shared";
-import type { MessageAdapter, OnMessageCallback, OutboundAttachmentRef } from "./types.js";
+import type {
+  AdapterConnectionState,
+  MessageAdapter,
+  OnMessageCallback,
+  OutboundAttachmentRef,
+} from "./types.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
 import { splitOutboundText } from "./outbound-text.js";
@@ -118,6 +123,12 @@ export class SlackAdapter implements MessageAdapter {
     | ((userId: string) => void | Promise<void>)
     | null;
   private app: SlackApp | null = null;
+  /**
+   * True once `app.start()` has resolved (cleared in `stop()`). Gates the
+   * watchdog probe: before the first successful start there is no socket
+   * to assess, and reporting "down" then would trigger pointless restarts.
+   */
+  private startCompleted = false;
   private botUserId: string | null = null;
   private botInfo: SlackBotInfo | null = null;
   private pairingChallenge: SlackPairingChallenge | null = null;
@@ -256,15 +267,53 @@ export class SlackAdapter implements MessageAdapter {
     });
 
     await this.app.start();
+    this.startCompleted = true;
     logger.info({ botUserId: this.botUserId }, "Slack adapter connected (Socket Mode)");
   }
 
   async stop(): Promise<void> {
+    this.startCompleted = false;
     if (this.app) {
       await this.app.stop();
       this.app = null;
     }
     logger.info("Slack adapter disconnected");
+  }
+
+  /**
+   * Live Socket Mode liveness for the adapter watchdog.
+   *
+   * Bolt's `App` keeps its `SocketModeReceiver` private, but the receiver's
+   * `client` (a `@slack/socket-mode` `SocketModeClient`) and the client's
+   * `websocket` (a `SlackWebSocket` with a public `isActive()`) are public
+   * fields — only the first hop needs a cast. `@slack/socket-mode` v2
+   * reconnects on `close` with an UNBOUNDED linear backoff, but a reconnect
+   * chain can still die permanently (`UnrecoverableSocketModeStartError`,
+   * or an exception escaping the recursive retry), and after machine sleep
+   * the ping-pong watchdog may take minutes to notice a dead socket. The
+   * adapter watchdog uses this probe to force a full stop→start cycle when
+   * the socket stays dead.
+   *
+   * Returns "unknown" (watchdog: no action) when the receiver shape is not
+   * what we expect — a Bolt upgrade must degrade to "no watchdog" rather
+   * than to restart loops.
+   */
+  getConnectionState(): AdapterConnectionState {
+    if (!this.app || !this.startCompleted) return "unknown";
+    const receiver = (
+      this.app as unknown as {
+        receiver?: { client?: { websocket?: { isActive?: () => boolean } } };
+      }
+    ).receiver;
+    const websocket = receiver?.client?.websocket;
+    if (!websocket || typeof websocket.isActive !== "function") {
+      return "unknown";
+    }
+    try {
+      return websocket.isActive() ? "ok" : "down";
+    } catch {
+      return "unknown";
+    }
   }
 
   async resolveUserChannel(): Promise<string | null> {

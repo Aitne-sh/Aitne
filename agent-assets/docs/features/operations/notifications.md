@@ -23,7 +23,7 @@ ask_examples:
   - How do I limit how often it notifies me?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-10
 keywords:
   - notification
   - notify
@@ -74,6 +74,14 @@ by quiet hours and rate limits.
 4. It is sent to the operator over `primaryPlatform` (or, when set, the
    exact channels in `defaultNotificationPlatforms`).
 
+Explicit agent notifications (`POST /api/notify`) ride the same gates
+with one difference: inside quiet hours they are **deferred, not
+dropped** — the full message is queued as a scheduled DM that fires
+when the window ends (visible under Schedule), and repeat sends from
+the same agent overnight coalesce into one combined DM. Outside quiet
+hours the per-hour / per-day caps apply; a capped call is rejected
+(`rate_limited`) rather than silently queued, so the agent can adapt.
+
 ### Safety categories always get through
 
 Notifications tagged `security`, `deadline`, `error`, or `critical`
@@ -104,6 +112,8 @@ The agent can also emit a one-off notification via `POST /api/notify`
 - **A notification you expected never arrived:** check the rate-limit
   counters (`maxNotificationsPerHour` / `maxNotificationsPerDay`) and the
   quiet-hours window — a non-safety alert can be suppressed by either.
+  Explicit `/api/notify` messages caught by quiet hours are not lost —
+  look for a pending scheduled DM under Schedule.
   Safety-category alerts (`error`/`critical`/`security`/`deadline`) are
   never suppressed, so a missing one points at delivery/pairing instead.
 - **Too many notifications:** lower the per-hour / per-day caps or widen

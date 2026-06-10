@@ -1688,3 +1688,60 @@ describe("SlackAdapter sendMessage: second attachment has no initial_comment, la
     mockFetch.mockRestore();
   });
 });
+
+describe("SlackAdapter getConnectionState (watchdog probe)", () => {
+  type Internals = { app: unknown; startCompleted: boolean };
+
+  function makeStartedAdapter(receiver: unknown) {
+    const adapter = makeAdapter();
+    const internals = adapter as unknown as Internals;
+    internals.app = { receiver };
+    internals.startCompleted = true;
+    return adapter;
+  }
+
+  it("reports unknown before start() completes", () => {
+    const adapter = makeAdapter();
+    expect(adapter.getConnectionState()).toBe("unknown");
+    // App assigned but start() not yet resolved — still unknown.
+    (adapter as unknown as Internals).app = { receiver: {} };
+    expect(adapter.getConnectionState()).toBe("unknown");
+  });
+
+  it("reports ok while the socket-mode websocket is active", () => {
+    const adapter = makeStartedAdapter({
+      client: { websocket: { isActive: () => true } },
+    });
+    expect(adapter.getConnectionState()).toBe("ok");
+  });
+
+  it("reports down when the socket-mode websocket is dead", () => {
+    const adapter = makeStartedAdapter({
+      client: { websocket: { isActive: () => false } },
+    });
+    expect(adapter.getConnectionState()).toBe("down");
+  });
+
+  it("degrades to unknown when Bolt internals are not introspectable", () => {
+    // A Bolt upgrade that changes the receiver shape must NOT read as
+    // "down" — that would put the watchdog into a restart loop.
+    expect(makeStartedAdapter(undefined).getConnectionState()).toBe("unknown");
+    expect(makeStartedAdapter({}).getConnectionState()).toBe("unknown");
+    expect(
+      makeStartedAdapter({ client: { websocket: {} } }).getConnectionState(),
+    ).toBe("unknown");
+  });
+
+  it("degrades to unknown when isActive() throws", () => {
+    const adapter = makeStartedAdapter({
+      client: {
+        websocket: {
+          isActive: () => {
+            throw new Error("socket gone");
+          },
+        },
+      },
+    });
+    expect(adapter.getConnectionState()).toBe("unknown");
+  });
+});

@@ -32,6 +32,12 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "proactiveForwardChannelTimelineEnabled",
   "proactiveForwardForceFreshSession",
   "feedbackLearningEnabled",
+  // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §6 — Phase 3 actuation gate for the
+  // self-tuning loop. Ships default-false (shadow mode: recommendations are
+  // generated and verdicts recorded, but never applied). Editable so the
+  // owner can opt in from the dashboard once the Phase 2 shadow period
+  // validates recommendation quality.
+  "selfTuningEnabled",
   "feedbackPromotionThreshold",
   "feedbackLessonMaxBytesGlobal",
   "feedbackLessonMaxBytesPerAgent",

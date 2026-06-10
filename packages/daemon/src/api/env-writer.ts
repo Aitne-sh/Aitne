@@ -116,6 +116,9 @@ const NUMERIC_RANGE: Record<string, { min: number; max: number; label: string }>
   // scheduler.ts:buildHourlyCronExpr / shouldFireHourlyTickAt.
   hourlyCheckIntervalMinutes: { min: 1, max: 1440, label: "1–1440 minutes" },
   hourlyCheckMinObservations: { min: 0, max: 1000, label: "0–1000" },
+  // Twin of the runtimeSettingsSchema bound; cap 480 = the self-tuning R1
+  // freshness ladder's top notch (SELF_TUNING_REVIEW_CYCLE_DESIGN.md D2).
+  hourlyCheckPrePassFreshnessMinutes: { min: 0, max: 480, label: "0–480 minutes" },
   gitPollIntervalSeconds: { min: 60, max: 86400, label: "60–86400 seconds" },
   githubPollIntervalSeconds: { min: 60, max: 86400, label: "60–86400 seconds" },
   // 0 disables the observer; 20160 min = 14 days which is already well past

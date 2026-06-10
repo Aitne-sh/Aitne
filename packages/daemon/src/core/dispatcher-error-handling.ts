@@ -49,6 +49,10 @@ import {
 } from "./agent-core.js";
 import { BackendRouterHandledError } from "./backends/backend-router.js";
 import {
+  extractFailureSpendInfo,
+  recordFailureSpendRow,
+} from "./backends/failure-spend.js";
+import {
   consultDelegatedConnectorHealth,
   markSignoutWarned,
   renderSignoutDm,
@@ -206,16 +210,27 @@ export class DispatcherErrorRouter {
 
   async handleError(event: Event, error: Error): Promise<void> {
     logger.error({ event: event.type, error: error.message }, "Event processing error");
-    // Cost visibility for post-hoc budget rejections — Codex / Gemini CLI
-    // run a turn to completion before the daemon's per-turn cap can
-    // reject. The user has already been billed by the provider, so write
-    // a `result='failed'` agent_actions row carrying the actual usage so
-    // the dashboard's cost dials reflect reality. Without this the
-    // success-only audit path (`logAction` in ResultProcessor) silently
-    // drops budget-rejected spend.
-    const quotaForSpend = this.extractQuotaError(error);
-    if (quotaForSpend?.spend) {
-      this.recordPostHocBudgetSpend(event, quotaForSpend, error.message);
+    // Cost visibility for failed turns that already billed the provider —
+    // post-hoc budget rejections (Codex / Gemini run the turn to
+    // completion before the cap can reject; Claude's SDK aborts mid-
+    // stream with a partial-usage snapshot stamped by the core) and
+    // non-quota terminal errors that carried usage (auth-mid-run,
+    // timeout, transport failure). Write a `result='failed'`
+    // agent_actions row per distinct backend failure so the dashboard's
+    // cost dials reflect reality. Without this the success-only audit
+    // path (`logAction` in ResultProcessor) silently drops the spend.
+    // PREPASS_COST_REDUCTION_PLAN.md N1.
+    //
+    // `BackendRouterHandledError` is unwrapped into its per-backend
+    // failures (main + fallback can BOTH have billed); a raw failover
+    // signal is recorded as-is. Pre-N1 this looked only at the top-level
+    // error, so a no-fallback quota kill — which the router wraps —
+    // recorded nothing.
+    for (const failure of this.collectSpendFailures(error)) {
+      const spendInfo = extractFailureSpendInfo(failure);
+      if (spendInfo) {
+        recordFailureSpendRow(this.db, event, spendInfo, error.message);
+      }
     }
     // Defense-in-depth cleanup of the notify-dedup marker — processResult
     // is the primary collection point, but if execution threw before
@@ -283,67 +298,24 @@ export class DispatcherErrorRouter {
   }
 
   /**
-   * Write a `result='failed'` agent_actions row carrying the actual spend
-   * for a turn the backend completed before the daemon's per-turn budget
-   * cap rejected it. Codex / Gemini enforce `max_budget_usd` post-hoc, so
-   * the provider has already billed by the time we land here. Without
-   * this row the dashboard's cost telemetry under-reports real spend by
-   * the size of every budget-rejected turn (in this repo it was a $2.26
-   * morning_routine that left the daily total at $0).
-   *
-   * Best-effort: a logging failure must not mask the original quota error
-   * — we catch and warn instead of rethrowing.
+   * The distinct per-backend failures hiding behind a thrown error.
+   * `BackendRouterHandledError` carries up to two (main + fallback —
+   * both may have billed before failing); any other error is its own
+   * single entry. Identity-deduped because `cause` usually aliases one
+   * of `mainFailure` / `fallbackFailure`.
    */
-  private recordPostHocBudgetSpend(
-    event: Event,
-    quotaError: BackendQuotaError,
-    errorMessage: string,
-  ): void {
-    const spend = quotaError.spend;
-    if (!spend) return;
-    try {
-      const columns: string[] = [
-        "event_id",
-        "action_type",
-        "model_used",
-        "cost_usd",
-        "tokens_input",
-        "tokens_output",
-        "duration_ms",
-        "num_turns",
-        "result",
-        "backend",
-        "cost_source",
-        "error",
-        "completed_at",
-      ];
-      const placeholders = columns.map(() => "?").join(", ");
-      const values: (string | number | null)[] = [
-        event.correlationId,
-        event.type,
-        spend.modelId,
-        spend.costUsd,
-        spend.usage.inputTokens,
-        spend.usage.outputTokens,
-        spend.durationMs,
-        spend.numTurns,
-        "failed",
-        quotaError.backendId,
-        spend.costSource ?? null,
-        errorMessage.slice(0, 4096),
-        new Date().toISOString(),
-      ];
-      this.db
-        .prepare(
-          `INSERT INTO agent_actions (${columns.join(", ")}) VALUES (${placeholders})`,
-        )
-        .run(...values);
-    } catch (err) {
-      logger.warn(
-        { err, eventType: event.type, backendId: quotaError.backendId },
-        "Failed to record post-hoc budget spend in agent_actions",
-      );
+  private collectSpendFailures(error: unknown): unknown[] {
+    if (error instanceof BackendRouterHandledError) {
+      const failures: unknown[] = [error.mainFailure];
+      if (error.fallbackFailure && error.fallbackFailure !== error.mainFailure) {
+        failures.push(error.fallbackFailure);
+      }
+      if (error.cause && !failures.includes(error.cause)) {
+        failures.push(error.cause);
+      }
+      return failures;
     }
+    return [error];
   }
 
   extractQuotaError(error: unknown): BackendQuotaError | null {

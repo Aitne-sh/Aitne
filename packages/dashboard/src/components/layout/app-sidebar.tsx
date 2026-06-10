@@ -51,7 +51,8 @@ type NavItem = {
 
 type NavSection = {
   id: string;
-  label: string;
+  /** Omitted for the top-level (Overview / Chat) group — rendered without a header. */
+  label?: string;
   items: NavItem[];
 };
 
@@ -188,29 +189,32 @@ export function AppSidebar() {
 
   const sections: NavSection[] = [
     {
-      id: "agent",
-      label: "Agent",
+      // Top-level destinations — no section header. Overview is the
+      // "what's happening" surface, Chat is the primary interaction.
+      id: "home",
       items: [
         {
           label: "Overview", href: "/", icon: LayoutDashboard,
           badge: (() => {
             if (collapsed) return undefined;
             if (pendingApprovals > 0) {
-              return <span className="ml-auto h-2 w-2 rounded-full bg-red-500" />;
+              return <span className="ml-auto h-2 w-2 rounded-full bg-destructive" />;
             }
             if (health?.status === "ok") {
-              return <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />;
+              return <span className="ml-auto h-2 w-2 rounded-full bg-success" />;
             }
             return undefined;
           })(),
         },
         { label: "Chat", href: "/chat", icon: MessageSquare },
-        {
-          label: "Agent Log", href: "/activity", icon: History,
-          badge: newEventCount > 0 && !collapsed ? (
-            <SidebarBadge className="bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">{newEventCount}</SidebarBadge>
-          ) : undefined,
-        },
+      ],
+    },
+    {
+      // What the agent does on its own — definitions, timing, and the
+      // browser surface it drives.
+      id: "automation",
+      label: "Automation",
+      items: [
         { label: "Agents", href: "/agents", icon: Bot },
         { label: "Schedule", href: "/schedule", icon: Clock },
         {
@@ -220,10 +224,23 @@ export function AppSidebar() {
           badge:
             !collapsed && awaitingBrowserTaskCount > 0 ? (
               <span
-                className="ml-auto h-2 w-2 rounded-full bg-red-500"
+                className="ml-auto h-2 w-2 rounded-full bg-destructive"
                 aria-label={`${awaitingBrowserTaskCount} browser task(s) need your attention`}
               />
             ) : undefined,
+        },
+      ],
+    },
+    {
+      // What already happened — the audit trail and what it cost.
+      id: "activity",
+      label: "Activity",
+      items: [
+        {
+          label: "Agent Log", href: "/activity", icon: History,
+          badge: newEventCount > 0 && !collapsed ? (
+            <SidebarBadge className="bg-primary/10 text-primary">{newEventCount}</SidebarBadge>
+          ) : undefined,
         },
         {
           label: "Analytics", href: "/analytics", icon: BarChart3,
@@ -299,8 +316,11 @@ export function AppSidebar() {
   };
 
   const renderSection = (section: NavSection, isFirst: boolean) => {
-    // Section collapse only applies when the sidebar itself is expanded (icon-only mode shows everything).
-    const sectionCollapsed = !collapsed && collapsedSections.has(section.id);
+    // Section collapse only applies when the sidebar itself is expanded
+    // (icon-only mode shows everything). Header-less sections (no label)
+    // have no collapse affordance and are always expanded.
+    const sectionCollapsed =
+      !collapsed && section.label !== undefined && collapsedSections.has(section.id);
     const showItems = collapsed || !sectionCollapsed;
     const visibleItems = section.items.filter((item) => !item.hidden);
     if (visibleItems.length === 0) return null;
@@ -317,7 +337,7 @@ export function AppSidebar() {
           !isFirst && collapsed && "mx-1",
         )}
       >
-        {!collapsed && (
+        {!collapsed && section.label !== undefined && (
           <button
             type="button"
             onClick={() => toggleSection(section.id)}
@@ -360,7 +380,7 @@ export function AppSidebar() {
       <div className="flex h-14 items-center justify-between px-3">
         {!collapsed && (
           <div className="min-w-0">
-            <span className="block text-sm font-semibold tracking-tight">{APP_NAME}</span>
+            <span className="block font-display text-[15px] font-semibold tracking-tight">{APP_NAME}</span>
             <span className="block truncate text-[11px] text-muted-foreground">
               {agentDisplayName}
             </span>

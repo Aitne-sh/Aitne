@@ -139,6 +139,17 @@ All three routes are `RiskTier.Autonomous`. `POST /api/feedback` server-restrict
 | Feedback consume | `POST /api/feedback/consume` | `feedback.ts` | `{ids: number[], lessonRef?}` → `{consumed, notFound}`. Marks signals consumed after a consolidation pass. |
 | Feedback lessons | `GET /api/feedback/lessons` | `feedback.ts` | Read-only lesson-store overview for the dashboard — global `agent` store plus every per-agent store on disk, with cap-utilisation metrics. |
 
+### Self-tuning
+
+Both routes are `RiskTier.Autonomous`. The weekly review's Recommend pre-step generates at most 3 bounded recommendations per cycle; verdicts may only reference the single-use ids the daemon generated for the **current** cycle (the pending blob is overwritten — and prior ids expired — every weekly run). Verdicts are always recorded and audited as `agent_actions.action_type='self_tuning.verdict'`, and rejections become `self_critique` feedback signals server-side.
+
+While `selfTuningEnabled=false` (the shipped default) the loop runs in **shadow mode**: nothing is ever actuated and responses carry `shadow: true` with an empty `applied` array. With the flag on (**live mode**), newly-recorded `apply` verdicts actuate per key namespace: config knobs go through the `applyConfigUpdates` chokepoint (bounds enforced there), write a `runtime_state.self_tuning:<key>` ledger entry, audit `self_tuning.applied`, and DM the owner one line with the `!revert tuning` undo hint; `notification:<type>` (R2) applies are recorded as lesson guidance only; `recurring_schedules:<id>` (R4) applies become an owner DM suggestion — never an automatic flip. Retried POSTs are `duplicate` per id and never re-actuate. A daily auto-revert monitor re-measures each applied change after its 7-day verify window and reverts on regression (audit `self_tuning.reverted`, 28-day re-proposal cool-down); clean windows are stamped `self_tuning.verified`.
+
+| Group | Path | Source | Purpose |
+|---|---|---|---|
+| Tuning verdicts | `POST /api/tuning/verdicts` | `tuning.ts` | `{cycleId, verdicts: [{id, verdict: apply\|reject\|defer, reason}]}` → per-id `recorded`/`duplicate`/`conflict` results plus `shadow`, `applied[]`, and `actuationFailures[]`. Idempotent per id (first verdict wins); 400 atomically on any unknown id; 409 on a missing or expired cycle. |
+| Tuning pending | `GET /api/tuning/pending` | `tuning.ts` | The current cycle's recommendations + recorded verdicts, for the owner's validation and the dashboard. `shadow` reflects the live flag. |
+
 ### Docs and wiki
 
 | Group | Path | Source | Purpose |

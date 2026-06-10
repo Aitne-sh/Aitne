@@ -402,6 +402,9 @@ export const WINDOW_QUERIES: Readonly<
   // (Outlook), so a pre-pass row would double-fetch. The dispatcher
   // skips rows whose `(symbol, integration, mode)` cell is undefined
   // (cf. `lookupQuery`); pre-pass only fires for delegated / native.
+  // Plan assembly classifies this pattern as `direct_inline_prefetch`
+  // (N3) — distinct from `no_window_query` (a genuine catalog hole) —
+  // and the runner excludes it from the drop-audit stream.
   cal_morning_7d: {
     google_calendar: {
       delegated:

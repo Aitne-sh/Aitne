@@ -68,6 +68,7 @@ import {
   assertCostWithinMaxBudget,
   assertPromptCostWithinMaxBudget,
   classifyCliFailure,
+  recoverCliFailureSpend,
 } from "./cli-quota-guards.js";
 import {
   auditStreamObservation,
@@ -900,6 +901,7 @@ export class CodexCore implements IAgentCore {
           new Error(
             `Codex reactive stream went idle for ${REACTIVE_IDLE_TIMEOUT_MS}ms (no events from CLI subprocess)`,
           ),
+          this.recoverFailureSpend(usage, actualModelId, numTurns, startMs),
         );
         logger.error(
           { err, eventType: params.eventType, model: params.modelId, durationMs: Date.now() - startMs },
@@ -913,6 +915,7 @@ export class CodexCore implements IAgentCore {
           this.backendId,
           "timeout",
           new Error(`Codex execution exceeded timeout of ${this.config.executeTimeoutMinutes} minutes`),
+          this.recoverFailureSpend(usage, actualModelId, numTurns, startMs),
         );
         logger.error(
           { err, eventType: params.eventType, model: params.modelId, durationMs: Date.now() - startMs },
@@ -973,7 +976,10 @@ export class CodexCore implements IAgentCore {
         ?? firstFailureLine(runResult.stdoutLines);
       if (!sawCompletion || runResult.exitCode !== 0) {
         const failureMsg = combinedFailure ?? "Codex execution did not complete successfully.";
-        const classified = this.classifyFailure(failureMsg);
+        const classified = this.classifyFailure(
+          failureMsg,
+          this.recoverFailureSpend(usage, actualModelId, numTurns, startMs),
+        );
         logger.error(
           { err: classified, eventType: params.eventType, model: params.modelId, exitCode: runResult.exitCode, durationMs: Date.now() - startMs },
           "Codex execute failed",
@@ -1221,13 +1227,38 @@ export class CodexCore implements IAgentCore {
   // Gemini CLI core; the logic lives in `cli-quota-guards.ts` (single source
   // of truth) and each backend passes its own regexes / label. See that
   // module for the full ordering rationale.
-  private classifyFailure(message: string): BackendQuotaError | BackendDecisiveFailure {
+  private classifyFailure(
+    message: string,
+    spend?: import("../agent-core.js").BackendQuotaSpend | null,
+  ): BackendQuotaError | BackendDecisiveFailure {
     return classifyCliFailure({
       backendId: this.backendId,
       message,
       // OpenAI surfaces quota exhaustion as "rate limit" / "usage limit" / "quota".
       rateLimitPattern: /rate limit|usage limit|quota/i,
       authPattern: /unauthorized|forbidden|api key|login/i,
+      ...(spend !== undefined ? { spend } : {}),
+    });
+  }
+
+  /**
+   * PREPASS_COST_REDUCTION_PLAN.md N1 — spend recovered from the failed
+   * run's JSONL usage so terminal errors carry what the provider already
+   * billed. Null when the stream never reported usage.
+   */
+  private recoverFailureSpend(
+    usage: BackendUsage,
+    modelId: string,
+    numTurns: number,
+    startMs: number,
+  ): import("../agent-core.js").BackendQuotaSpend | null {
+    return recoverCliFailureSpend({
+      backendId: this.backendId,
+      priceFetcher: this.priceFetcher,
+      usage,
+      modelId,
+      numTurns,
+      durationMs: Date.now() - startMs,
     });
   }
 

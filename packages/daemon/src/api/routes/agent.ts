@@ -351,6 +351,7 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
     const normalizedPlatforms = platforms ?? (platform ? [platform] : undefined);
     const messageSummary = message.slice(0, 200);
     const originSessionId = parsePositiveIntegerHeader(c.req.header("x-pa-session-id"));
+    const correlationId = c.req.header("x-pa-event-correlation-id");
 
     let dispatchId: string = randomUUID();
     let notificationId: string | number = dispatchId;
@@ -362,7 +363,32 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
         priority: priority ?? "normal",
         notificationType: "agent",
         ...(originSessionId !== null ? { originSessionId } : {}),
+        ...(correlationId ? { correlationId } : {}),
       });
+      // QUIET_HOURS_HARDENING_PLAN.md Phase 1 — quiet-hours deferral. The
+      // message WILL deliver (durable `task_type='dm'` row at the
+      // quiet-hours edge, visible on /schedule), so the event is marked
+      // notified exactly like the sent path: not marking would double-send
+      // once the dispatcher's implicit final-text forward fires.
+      if (result.status === "deferred_quiet_hours") {
+        if (deps.markEventNotified && correlationId) {
+          deps.markEventNotified(correlationId);
+        }
+        return c.json({
+          status: "deferred_quiet_hours",
+          scheduleId: result.scheduleId,
+          deliverAfter: result.deliverAfter,
+        });
+      }
+      // Rate-limited: nothing was sent and nothing was queued — the live
+      // session can adapt (write to today.md, retry later). The event is
+      // deliberately NOT marked notified.
+      if (result.status === "rate_limited") {
+        return c.json(
+          { status: "rate_limited", retryAfter: result.retryAfter },
+          429,
+        );
+      }
       dispatchId = result.dispatchId;
       notificationId = dispatchId;
     } else {
@@ -392,13 +418,11 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
     // Notify-dedup — when the agent's shim auto-attached the correlation
     // header, mark the event so the dispatcher skips the implicit
     // final-text DM forward in processResult. We only mark on the
-    // success branch (sendNotification path); the warn-fallback branch
-    // is daemon-misconfiguration, not user-visible delivery.
-    if (sendNotification && deps.markEventNotified) {
-      const correlationId = c.req.header("x-pa-event-correlation-id");
-      if (correlationId) {
-        deps.markEventNotified(correlationId);
-      }
+    // delivery branches (sent above-the-fold here, deferred earlier); the
+    // warn-fallback branch is daemon-misconfiguration, not user-visible
+    // delivery, and the rate-limited branch never delivers.
+    if (sendNotification && deps.markEventNotified && correlationId) {
+      deps.markEventNotified(correlationId);
     }
 
     return c.json({

@@ -42,6 +42,7 @@ import { createBackendRoutes } from "./routes/backends.js";
 import { createSkillsRoutes } from "./routes/skills.js";
 import { createObservationRoutes } from "./routes/observations.js";
 import { createFeedbackRoutes } from "./routes/feedback.js";
+import { createTuningRoutes } from "./routes/tuning.js";
 import { createSkillCurationRoutes } from "./routes/skill-curation.js";
 import { createProfileQuestionsRoutes } from "./routes/profile-questions.js";
 import { createRecurringScheduleRoutes } from "./routes/recurring-schedules.js";
@@ -163,6 +164,28 @@ export interface MessagingHealthStatus {
   error: string | null;
 }
 
+/**
+ * Outcome of the API-deps `sendNotification` chokepoint
+ * (QUIET_HOURS_HARDENING_PLAN.md Phase 1). Inside quiet hours a
+ * non-critical message is deferred to a durable `task_type='dm'`
+ * schedule row at the quiet-hours edge (never silently dropped);
+ * outside quiet hours the proactive hourly/daily rate limits apply and
+ * a limited message is NOT sent — the live session can adapt.
+ */
+export type SendNotificationResult =
+  | {
+      status: "sent";
+      dispatchId: string;
+      deliveries: { platform: string; channel: string; messageId?: string }[];
+    }
+  | {
+      status: "deferred_quiet_hours";
+      scheduleId: string;
+      /** SQLite-format UTC datetime the deferred DM fires at. */
+      deliverAfter: string;
+    }
+  | { status: "rate_limited"; retryAfter: string | null };
+
 export interface ApiDependencies {
   db: Database.Database;
   config: AgentConfig;
@@ -193,6 +216,7 @@ export interface ApiDependencies {
   isStartupComplete?: () => boolean;
   eventBus?: EventBus;
   getHealthData: () => {
+    /** Seconds since daemon start (see HealthStatus.daemonUptime). */
     uptime: number;
     eventBusSize: number;
     activeSessions: number;
@@ -242,7 +266,13 @@ export interface ApiDependencies {
     priority?: string;
     notificationType?: string;
     originSessionId?: number;
-  }) => Promise<{ dispatchId: string; deliveries: { platform: string; channel: string; messageId?: string }[] }>;
+    /**
+     * Event correlation id of the calling agent session, when known —
+     * lets the quiet-hours gate resolve the owning user-Agent slug so
+     * deferred DMs coalesce per Agent (QUIET_HOURS_HARDENING_PLAN Phase 1).
+     */
+    correlationId?: string;
+  }) => Promise<SendNotificationResult>;
   /**
    * Notify-dedup hook — called by the `/api/notify` route when the request
    * carries an `X-Pa-Event-Correlation-Id` header (auto-injected by
@@ -955,6 +985,7 @@ export function createApp(deps: ApiDependencies): Hono {
   const skillsRoutes = createSkillsRoutes({ config: deps.config });
   const observationRoutes = createObservationRoutes(deps);
   const feedbackRoutes = createFeedbackRoutes(deps);
+  const tuningRoutes = createTuningRoutes(deps);
   const skillCurationRoutes = createSkillCurationRoutes(deps);
   const profileQuestionsRoutes = createProfileQuestionsRoutes(deps);
   const recurringScheduleRoutes = createRecurringScheduleRoutes(deps);
@@ -1034,6 +1065,7 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", skillsRoutes);
   app.route("/api", observationRoutes);
   app.route("/api", feedbackRoutes);
+  app.route("/api", tuningRoutes);
   app.route("/api", skillCurationRoutes);
   app.route("/api", profileQuestionsRoutes);
   app.route("/api", recurringScheduleRoutes);

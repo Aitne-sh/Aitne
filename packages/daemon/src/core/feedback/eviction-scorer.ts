@@ -165,9 +165,13 @@ export function enforceCaps(
   const evicted: Lesson[] = [];
   let keep = sorted;
 
-  // Entry cap first — cheap, and shrinks the byte-cap work.
+  // Entry cap first — cheap, and shrinks the byte-cap work. Reverse the
+  // overflow slice (it comes off the descending-sorted array) so `evicted`
+  // honours its documented lowest-scored-first order; the byte-cap loop
+  // below already pushes lowest-first, so the combined array stays
+  // ascending by score.
   if (keep.length > cap.maxEntries) {
-    evicted.push(...keep.slice(cap.maxEntries));
+    evicted.push(...keep.slice(cap.maxEntries).reverse());
     keep = keep.slice(0, cap.maxEntries);
   }
 

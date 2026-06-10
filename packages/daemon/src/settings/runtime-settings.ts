@@ -305,6 +305,18 @@ export const runtimeSettingsSchema = z.object({
   proactiveForwardChannelTimelineEnabled: z.boolean().default(true),
   proactiveForwardForceFreshSession: z.boolean().default(false),
   feedbackLearningEnabled: z.boolean().default(true),
+  /**
+   * SELF_TUNING_REVIEW_CYCLE_DESIGN.md §6 — actuation gate for the
+   * self-tuning loop's Phase 3 Actuate stage. While `false` (the shipped
+   * default), the loop runs in shadow mode: the weekly Recommend pre-step
+   * still generates `<tuning_recommendations>` and `POST
+   * /api/tuning/verdicts` still records apply/reject/defer verdicts, but
+   * nothing is written through the `applyConfigUpdates` chokepoint.
+   * Whether this ever flips to default-true is conditional on the Phase 2
+   * shadow-period results — a loop that edits spend-affecting knobs
+   * autonomously may reasonably stay opt-in permanently (§8).
+   */
+  selfTuningEnabled: z.boolean().default(false),
   feedbackPromotionThreshold: z.number().int().min(1).max(10).default(2),
   feedbackLessonMaxBytesGlobal: z.number().int().min(1024).max(32768).default(8192),
   feedbackLessonMaxBytesPerAgent: z.number().int().min(512).max(16384).default(4096),
@@ -484,9 +496,13 @@ export const runtimeSettingsSchema = z.object({
    * window guarantees at most one pre-pass per integration per tick
    * while still firing every tick under normal load.
    *
-   * Bounded [0, 240]. `0` disables the freshness gate (pre-pass fires
+   * Bounded [0, 480]. `0` disables the freshness gate (pre-pass fires
    * on every tick); 240 (4h) approximates "only fire when the
-   * heartbeat would have anyway" for cost-minimal deployments.
+   * heartbeat would have anyway" for cost-minimal deployments. The cap
+   * was widened 240 → 480 for the self-tuning R1 ladder
+   * (120/240/360/480 — SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.2 / D2;
+   * a compatible widening, every previously persisted value still
+   * parses). Twin bound: `env-writer.ts:NUMERIC_RANGE`.
    *
    * `forced` runs (`POST /api/agent/run-now`) bypass the gate
    * unconditionally — manual triggers explicitly want a fresh fetch.
@@ -495,7 +511,7 @@ export const runtimeSettingsSchema = z.object({
     .number()
     .int()
     .min(0)
-    .max(240)
+    .max(480)
     .default(30),
   /**
    * Phase 4 auth health probe kill switch — corresponds to
@@ -987,6 +1003,7 @@ export const RUNTIME_SETTING_KEYS = [
   "proactiveForwardChannelTimelineEnabled",
   "proactiveForwardForceFreshSession",
   "feedbackLearningEnabled",
+  "selfTuningEnabled",
   "feedbackPromotionThreshold",
   "feedbackLessonMaxBytesGlobal",
   "feedbackLessonMaxBytesPerAgent",

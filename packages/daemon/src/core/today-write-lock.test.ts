@@ -116,6 +116,32 @@ describe("InMemoryTodayWriteLockManager", () => {
     vi.advanceTimersByTime(1000);
     expect(lock.release(result.lockId)).toBe(false);
   });
+
+  it("expires by wall clock even when timers never fire (machine-sleep simulation)", () => {
+    const lock = new InMemoryTodayWriteLockManager(1000);
+    const result = lock.acquire();
+    if (!result.ok) throw new Error("expected acquire to succeed");
+
+    // Jump the wall clock past the TTL without running any timer callbacks —
+    // this is what waking from machine sleep looks like to the process.
+    vi.setSystemTime(Date.now() + 1001);
+
+    expect(lock.isHeldBy(result.lockId)).toBe(false);
+    expect(lock.getHolder()).toBeNull();
+    const next = lock.acquire();
+    expect(next.ok).toBe(true);
+  });
+
+  it("does not expire before the TTL elapses on the wall clock", () => {
+    const lock = new InMemoryTodayWriteLockManager(1000);
+    const result = lock.acquire();
+    if (!result.ok) throw new Error("expected acquire to succeed");
+
+    vi.setSystemTime(Date.now() + 999);
+
+    expect(lock.isHeldBy(result.lockId)).toBe(true);
+    expect(lock.getHolder()).toBe(result.lockId);
+  });
 });
 
 describe("MigrationLock", () => {
@@ -174,6 +200,20 @@ describe("MigrationLock", () => {
     vi.advanceTimersByTime(5000);
     expect(lock.isHeld()).toBe(false);
     expect(lock.getHolder()).toBeNull();
+  });
+
+  it("expires by wall clock even when timers never fire (machine-sleep simulation)", () => {
+    const lock = new MigrationLock(5000);
+    const result = lock.acquire();
+    if (!result.ok) throw new Error("expected acquire to succeed");
+
+    vi.setSystemTime(Date.now() + 5001);
+
+    expect(lock.isHeld()).toBe(false);
+    expect(lock.getHolder()).toBeNull();
+    expect(lock.release(result.lockId)).toBe(false);
+    const next = lock.acquire();
+    expect(next.ok).toBe(true);
   });
 });
 

@@ -67,6 +67,27 @@ describe("HealthMonitor", () => {
 
     expect(status.dbConnected).toBe(true);
     expect(status.daemonUptime).toBeGreaterThanOrEqual(0);
+    expect(status.lastCheckAt).toBeTruthy();
+  });
+
+  it("reports daemonUptime in seconds, not milliseconds", () => {
+    // Regression pin for the unit bug that made `aitne status` show a
+    // 5-minute-old daemon as "3d 23h": the producer emitted ms while
+    // every consumer (CLI + dashboard formatUptime) divides by 86400 as
+    // if given seconds.
+    const localDeps = createTestDeps({
+      startedAt: new Date(Date.now() - 90_000),
+    });
+    const local = new HealthMonitor(localDeps);
+    const status = local.check();
+    expect(status.daemonUptime).toBeGreaterThanOrEqual(89);
+    expect(status.daemonUptime).toBeLessThan(95);
+    local.stop();
+    rmSync(localDeps.config.dataDir, { recursive: true, force: true });
+  });
+
+  it("returns remaining health status fields", () => {
+    const status = monitor.check();
     expect(status.eventBusSize).toBe(0);
     expect(status.activeSessions).toBe(0);
     expect(status.todaySessions).toBe(0);

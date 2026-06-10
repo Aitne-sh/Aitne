@@ -109,6 +109,7 @@ import {
 } from "../core/dashboard-session-controls.js";
 import { sendSetupWelcomeDm } from "../messaging/setup-welcome-dm.js";
 import { recordProactiveForwardDeliveries } from "../core/channel-timeline.js";
+import { gateOutboundNotification } from "../core/notification-gate.js";
 import {
   createApp,
   type ApiDependencies,
@@ -433,7 +434,52 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
   };
 
   const sendNotification: NonNullable<ApiDependencies["sendNotification"]> =
-    async ({ message, platforms, priority, notificationType, originSessionId }) => {
+    async ({ message, platforms, priority, notificationType, originSessionId, correlationId }) => {
+      // QUIET_HOURS_HARDENING_PLAN.md Phase 1 — this chokepoint used to
+      // wire straight into `messageHub.sendToUser`, letting any
+      // autonomous session DM the owner at 03:00 (finding F1). Gate
+      // order: safety/critical bypass → quiet-hours deferral (durable
+      // `task_type='dm'` row at the quiet-hours edge, coalesced per
+      // origin) → proactive rate limits on the immediate path.
+      const gateVerdict = gateOutboundNotification(db, config, {
+        message,
+        platforms,
+        priority,
+        notificationType,
+        originSessionId,
+        agentId:
+          correlationId !== undefined
+            ? dispatcher.agentIdForCorrelation(correlationId)
+            : null,
+        deferredFrom: "api.notify",
+      });
+      if (gateVerdict.action === "defer") {
+        logger.info(
+          {
+            scheduleId: gateVerdict.scheduleId,
+            deliverAfter: gateVerdict.deliverAfter,
+            coalesced: gateVerdict.coalesced,
+            notificationType: notificationType ?? "agent",
+          },
+          "Outbound notification deferred to quiet-hours end",
+        );
+        return {
+          status: "deferred_quiet_hours",
+          scheduleId: gateVerdict.scheduleId,
+          deliverAfter: gateVerdict.deliverAfter,
+        };
+      }
+      if (gateVerdict.action === "rate_limit") {
+        logger.warn(
+          {
+            retryAfter: gateVerdict.retryAfter,
+            notificationType: notificationType ?? "agent",
+          },
+          "Outbound notification rate-limited — not sent",
+        );
+        return { status: "rate_limited", retryAfter: gateVerdict.retryAfter };
+      }
+
       const dispatchId = randomBytes(16).toString("hex");
       const deliveries = await messageHub.sendToUser(message, platforms, {
         dispatchId,
@@ -479,7 +525,7 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
           notificationType: "proactive_forward",
         });
       }
-      return { dispatchId, deliveries };
+      return { status: "sent", dispatchId, deliveries };
     };
 
   const onIntegrationModeChange = async (

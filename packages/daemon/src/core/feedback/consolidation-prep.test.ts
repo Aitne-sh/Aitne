@@ -238,6 +238,35 @@ describe("consolidation-prep", () => {
       expect(result!.scopeCount).toBe(1);
     });
 
+    it("measures current_bytes against the ## Lessons section — the §6 cap unit", () => {
+      // `current_bytes` and `over_cap` must share one unit: the on-disk
+      // `## Lessons` section body, NOT the whole file. The whole-file measure
+      // contradicted `over_cap` (derived from the section-serialized
+      // `enforceCaps`) in the band where the section fit the cap but the
+      // frontmatter + heading overhead pushed the file past it.
+      const sectionBytes = Buffer.byteLength(
+        AGENT_LESSONS_FILE.split("## Lessons\n")[1],
+        "utf-8",
+      );
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [row({ id: 31, summary: "any" })],
+            existingFileMd: AGENT_LESSONS_FILE,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        opts,
+      );
+      const block = result!.block;
+      expect(block).toContain(`current_bytes="${sectionBytes}"`);
+      expect(sectionBytes).toBeLessThan(
+        Buffer.byteLength(AGENT_LESSONS_FILE, "utf-8"),
+      );
+      expect(block).toContain('over_cap="false"');
+    });
+
     it("renders a lessons scope with no existing file (empty store)", () => {
       const result = buildFeedbackWorksheet(
         [
@@ -419,6 +448,28 @@ describe("consolidation-prep", () => {
       const block = result!.block;
       expect(block).toContain("&lt;b&gt; &amp; &quot;q&quot;");
       expect(block).toContain("…"); // truncated long text
+    });
+
+    it("does not split a surrogate pair at the truncation boundary", () => {
+      // 298 chars then an astral emoji: the 299-char clip would otherwise cut
+      // between the surrogate halves and leave a lone \uD83C in the block.
+      const summary = `${"y".repeat(298)}🎉 and more text past the cap`;
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "user" },
+            signals: [row({ id: 51, scope_type: "user", summary })],
+            existingFileMd: null,
+            caps: null,
+          },
+        ],
+        opts,
+      );
+      const block = result!.block;
+      expect(block).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+      // UTF-8 round-trip is lossless — no U+FFFD replacement chars appear.
+      expect(Buffer.from(block, "utf-8").toString("utf-8")).toBe(block);
+      expect(block).not.toContain("�");
     });
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { IntegrationKey, IntegrationState } from "@aitne/shared";
 import {
   buildAcquisitionPlan,
+  buildAcquisitionPlanAssembly,
   buildAcquisitionTimestamps,
   splitAcquisitionPlanByIntegration,
   substituteAcquisitionTokens,
@@ -1115,4 +1116,141 @@ describe("splitAcquisitionPlanByIntegration", () => {
       });
     });
   });
+});
+
+describe("buildAcquisitionPlanAssembly — drops (PREPASS_COST_REDUCTION_PLAN.md N3)", () => {
+  const ts = buildAcquisitionTimestamps(FIXED_NOW, "UTC", 0);
+  const baseInput = {
+    routine: "routine.morning_routine" as const,
+    agentDay: "2026-05-11",
+    sessionBackend: "claude" as const,
+    accounts: [],
+    timestamps: ts,
+  };
+
+  it("returns the same subPlans as splitAcquisitionPlanByIntegration", () => {
+    const input = {
+      ...baseInput,
+      integrations: {
+        gmail: state({ mode: "native", nativeBackend: "claude" }),
+        notion: state({ mode: "disabled" }),
+      },
+    };
+    const assembly = buildAcquisitionPlanAssembly(input);
+    expect(assembly.subPlans).toEqual(splitAcquisitionPlanByIntegration(input));
+  });
+
+  it("records no_state drops for integrations missing from the snapshot", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: {},
+    });
+    expect(assembly.subPlans).toEqual([]);
+    expect(assembly.drops.length).toBeGreaterThan(0);
+    expect(assembly.drops.every((d) => d.reason === "no_state")).toBe(true);
+  });
+
+  it("records a disabled drop per (window × integration) cell", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: { notion: state({ mode: "disabled" }) },
+    });
+    const notionDrops = assembly.drops.filter((d) => d.integration === "notion");
+    expect(notionDrops.length).toBeGreaterThan(0);
+    expect(notionDrops.every((d) => d.reason === "disabled")).toBe(true);
+  });
+
+  it("records no_binding for delegated mode without a backend binding", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: { gmail: state({ mode: "delegated", delegatedBackend: null }) },
+    });
+    const gmailDrops = assembly.drops.filter((d) => d.integration === "gmail");
+    expect(gmailDrops.length).toBeGreaterThan(0);
+    expect(gmailDrops.every((d) => d.reason === "no_binding")).toBe(true);
+  });
+
+  it("records no_accounts for direct-mode per-account windows with zero accounts", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: { gmail: state({ mode: "direct" }) },
+      accounts: [],
+    });
+    const gmailDrops = assembly.drops.filter((d) => d.integration === "gmail");
+    expect(gmailDrops.length).toBeGreaterThan(0);
+    expect(gmailDrops.some((d) => d.reason === "no_accounts")).toBe(true);
+    // No sub-plan was emitted for gmail — the drop is the only trace.
+    expect(
+      assembly.subPlans.find((p) => p.integrationKey === "gmail"),
+    ).toBeUndefined();
+  });
+
+  it("records unknown_mode for an unrecognized mode string", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: {
+        gmail: state({ mode: "experimental" as unknown as IntegrationState["mode"] }),
+      },
+    });
+    const gmailDrops = assembly.drops.filter((d) => d.integration === "gmail");
+    expect(gmailDrops.length).toBeGreaterThan(0);
+    expect(gmailDrops.every((d) => d.reason === "unknown_mode")).toBe(true);
+  });
+
+  it("records NO drops for an active integration that emits rows", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: { gmail: state({ mode: "native", nativeBackend: "claude" }) },
+    });
+    expect(assembly.subPlans.some((p) => p.integrationKey === "gmail")).toBe(true);
+    expect(assembly.drops.filter((d) => d.integration === "gmail")).toEqual([]);
+  });
+
+  it("records direct_inline_prefetch (NOT no_window_query) for the deliberately-omitted direct cal_morning_7d cell", () => {
+    // WINDOW_QUERIES[cal_morning_7d] intentionally omits the `direct`
+    // cells for both calendar providers — ContextBuilder pre-fetches
+    // those events inline (`<calendar_events_7d>`), so a pre-pass row
+    // would double-fetch. The drop must be classified as the documented
+    // working-as-designed reason, not as a catalog hole.
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: {
+        google_calendar: state({ mode: "direct" }),
+        outlook_calendar: state({ mode: "direct" }),
+      },
+    });
+    const calDrops = assembly.drops.filter(
+      (d) => d.window === "cal_morning_7d",
+    );
+    expect(calDrops).toEqual([
+      {
+        integration: "google_calendar",
+        window: "cal_morning_7d",
+        reason: "direct_inline_prefetch",
+      },
+      {
+        integration: "outlook_calendar",
+        window: "cal_morning_7d",
+        reason: "direct_inline_prefetch",
+      },
+    ]);
+    // The exact-match above also proves no `no_window_query` drop exists
+    // for either (integration, cal_morning_7d) tuple. And no FetchRow /
+    // sub-plan was emitted for the calendar integrations — the drop is
+    // the only trace.
+    expect(
+      assembly.subPlans.find((p) => p.integrationKey === "google_calendar"),
+    ).toBeUndefined();
+    expect(
+      assembly.subPlans.find((p) => p.integrationKey === "outlook_calendar"),
+    ).toBeUndefined();
+  });
+
+  // Note: there is intentionally NO `no_window_query` reachability test.
+  // Every (window, integration) pair reachable through ROUTINE_WINDOWS
+  // carries `delegated` + `native` cells in WINDOW_QUERIES, and the only
+  // missing `direct` cells (cal_morning_7d × both calendars) are the
+  // documented intentional omission now classified as
+  // `direct_inline_prefetch`. `no_window_query` therefore guards future
+  // catalog holes only and is unreachable with today's catalog.
 });

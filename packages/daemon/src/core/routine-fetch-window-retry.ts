@@ -148,10 +148,13 @@ function isFetchFailedWithStatus(
 /**
  * Sentinel error-status strings the runner classifies as deterministic
  * (no point retrying — the next attempt re-emits the same bytes and
- * re-trips the same gate). Centralised so the partial author (who emits
- * these strings into `errors[*].status`), the runner (which interprets
- * them here), and any future telemetry that filters on them all reference
- * the same vocabulary.
+ * re-trips the same gate). The emitting side of the contract is the
+ * agent profile's `fetch-failed` bullet
+ * (`agent-assets/agent-profiles/routine-fetch-window.md`), which
+ * instructs the agent to set `status:"permission-denied"` when its own
+ * permission layer blocked a tool call; the runner interprets the
+ * strings here, and any future telemetry that filters on them
+ * references the same vocabulary.
  *
  * See `RETRY_REASONS.DETERMINISTIC_FAILURE` for the rationale and the
  * specific gates these sentinels are paired with — and for why

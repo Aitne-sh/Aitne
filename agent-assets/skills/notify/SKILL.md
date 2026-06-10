@@ -94,16 +94,17 @@ Notify when **all three** are true: (1) **actionable** or requires awareness, (2
 - **A pending Agent Plan row / scheduled DM is already set to fire
   for this item within the next 2 hours** — let the planned channel
   deliver; don't pre-empt it.
-- **Already delivered this item** — `/api/notify` sends immediately and a `200 {status:"sent"}` is proof of delivery, so do NOT re-post on a 200. Self-throttle via `<today>` `## Agent Log` before firing and log the skip rather than re-posting. (No endpoint quiet-hours or rate cap gates this for you — noise control is your job.)
+- **Already delivered this item** — a `200 {status:"sent"}` is proof of delivery and a `200 {status:"deferred_quiet_hours"}` is proof of queued delivery, so do NOT re-post on either. Self-throttle via `<today>` `## Agent Log` before firing and log the skip rather than re-posting. (The endpoint defers during quiet hours and enforces rate caps, but dedup and noise control are still your job.)
 - **Routine file changes** or **agent internal state** — use Agent Log instead
 - **When in doubt — prefer silence**
 
 ## Priority
 
 **Default to `normal`.** Reserve `high` for 8h-delay-matters. Reserve
-`critical` for 3am-matters. `priority` is metadata recorded in the
-notification log — it does not gate delivery on this endpoint. Full
-per-level table and examples are in the priority reference below.
+`critical` for 3am-matters — it is the only level that bypasses the
+endpoint's quiet-hours deferral and rate caps; everything else is
+metadata recorded in the notification log. Full per-level table,
+examples, and delivery semantics are in the priority reference below.
 
 {{> ref:priority }}
 
@@ -119,4 +120,8 @@ curl -s -X POST http://localhost:8321/api/notify \
   -d '{"message": "Design review starts in 15 minutes.", "priority": "normal"}'
 ```
 Fields: `message` (required, markdown), `priority` (optional: critical/high/normal/low), `platform` (optional, override target) OR `platforms` (optional, array of targets) — mutually exclusive, not both.
-Response: `200 { "status": "sent", "notificationId": "...", "dispatchId": "..." }` = delivered to ≥1 channel; a total delivery failure returns HTTP 500 (not a silent 200-drop). Risk tier: `Autonomous` — the agent decides when to notify; recorded in `notification_log` for the on-demand retrospective.
+Responses:
+- `200 { "status": "sent", "notificationId": "...", "dispatchId": "..." }` = delivered to ≥1 channel; a total delivery failure returns HTTP 500 (not a silent 200-drop).
+- `200 { "status": "deferred_quiet_hours", "scheduleId": "...", "deliverAfter": "..." }` = fired inside the user's quiet hours; queued as a scheduled DM that delivers at `deliverAfter`. Treat as delivered — do NOT re-post. If the item will be stale by then, `DELETE /api/schedule/{scheduleId}` and use `<today>` `## Agent Log` instead.
+- `429 { "status": "rate_limited", "retryAfter": "..." }` = hourly/daily notification cap spent; nothing sent or queued. Don't retry-loop — drop to `<today>` `## Agent Log`.
+`critical` priority bypasses both gates and always sends immediately. Risk tier: `Autonomous` — the agent decides when to notify; recorded in `notification_log` for the on-demand retrospective.

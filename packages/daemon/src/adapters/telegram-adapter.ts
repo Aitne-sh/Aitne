@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import type { Context, Telegraf } from "telegraf";
 import { EventPriority, createEvent } from "@aitne/shared";
 import type { AttachmentRef, Event } from "@aitne/shared";
-import type { MessageAdapter, OnMessageCallback, OutboundAttachmentRef } from "./types.js";
+import type {
+  AdapterConnectionState,
+  MessageAdapter,
+  OnMessageCallback,
+  OutboundAttachmentRef,
+} from "./types.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
 import { filenameForMime, splitOutboundText } from "./outbound-text.js";
@@ -147,6 +152,15 @@ export class TelegramAdapter implements MessageAdapter {
 
   private bot: TelegrafBot | null = null;
   private botInfo: TelegramBotInfo | null = null;
+  /**
+   * Non-null when the long-poll loop has died. telegraf's `launch()`
+   * promise stays pending while polling runs and settles when the loop
+   * exits: it self-retries network errors / 429 / 5xx internally, but any
+   * other failure (401 invalid token, 409 conflicting consumer, an
+   * unexpected throw) kills the loop for good. Without observing that
+   * settlement the daemon would sit "connected" while receiving nothing.
+   */
+  private pollingDeadError: string | null = null;
 
   /** Active pairing challenge (null when pairing isn't in progress). */
   private pairingChallenge: PairingChallenge | null = null;
@@ -271,8 +285,29 @@ export class TelegramAdapter implements MessageAdapter {
       });
     });
 
-    // Start long polling (non-blocking)
-    this.bot.launch({ dropPendingUpdates: true });
+    // Start long polling (non-blocking). The launch() promise settles only
+    // when the poll loop exits — track that settlement so a dead loop is
+    // observable instead of becoming an unhandled rejection with the
+    // adapter silently deaf until daemon restart.
+    this.pollingDeadError = null;
+    const bot = this.bot;
+    bot.launch({ dropPendingUpdates: true }).then(
+      () => {
+        // Resolves on stop() (AbortError path). If we did NOT initiate the
+        // stop, the loop ended on its own — mark the adapter down.
+        if (this.bot === bot) {
+          this.pollingDeadError = "Telegram polling loop exited unexpectedly";
+          logger.error("Telegram polling loop exited unexpectedly");
+        }
+      },
+      (err: unknown) => {
+        if (this.bot === bot) {
+          this.pollingDeadError =
+            err instanceof Error ? err.message : String(err);
+          logger.error({ err }, "Telegram polling loop died");
+        }
+      },
+    );
     logger.info(
       { botUsername: this.botInfo?.username },
       "Telegram adapter connected (Long Polling)",
@@ -294,6 +329,18 @@ export class TelegramAdapter implements MessageAdapter {
 
   async resolveUserChannel(): Promise<string | null> {
     return this.mutableOwnerId;
+  }
+
+  /**
+   * Live long-poll liveness for the adapter watchdog. "ok" means the
+   * polling loop is still running (telegraf retries transient network /
+   * 429 / 5xx failures internally, so an offline laptop stays "ok" and
+   * recovers on its own); "down" means the loop has exited and only a
+   * full stop→start cycle brings messages back.
+   */
+  getConnectionState(): AdapterConnectionState {
+    if (!this.bot) return "unknown";
+    return this.pollingDeadError === null ? "ok" : "down";
   }
 
   async sendMessage(params: {

@@ -14,6 +14,12 @@ const logger = createLogger("health-monitor");
 const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface HealthStatus {
+  /**
+   * Seconds since daemon start. Every consumer of the `/health` `uptime`
+   * field (`bin/aitne.mjs formatUptime`, dashboard `formatUptime`)
+   * formats seconds — this was milliseconds until 2026-06-10, which made
+   * `aitne status` report a minutes-old daemon as days of uptime.
+   */
   daemonUptime: number;
   eventBusSize: number;
   activeSessions: number;
@@ -137,7 +143,7 @@ export class HealthMonitor {
     }
 
     return {
-      daemonUptime: Date.now() - this.startedAt.getTime(),
+      daemonUptime: Math.floor((Date.now() - this.startedAt.getTime()) / 1000),
       eventBusSize: this.eventBus.size,
       activeSessions,
       dbConnected,

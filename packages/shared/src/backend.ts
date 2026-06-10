@@ -51,7 +51,21 @@ export function isRuntimeAvailableBackendId(
   return (RUNTIME_AVAILABLE_BACKEND_IDS as readonly string[]).includes(value);
 }
 
-export type BackendCostSource = "sdk" | "litellm" | "hardcoded";
+/**
+ * Provenance of a turn's `costUsd` figure.
+ *
+ * - `"sdk"` — reported by the backend SDK's terminal result message.
+ * - `"sdk_partial"` — accumulated from per-message SDK stream usage
+ *   before the stream terminated abnormally (budget abort, timeout,
+ *   transport failure). The token counts are real but cover only the
+ *   messages observed before the abort; the dollar figure is estimated
+ *   from those tokens (floored at the per-turn budget cap for
+ *   `max_budget_usd` aborts, where the SDK's own metering already
+ *   crossed the cap). PREPASS_COST_REDUCTION_PLAN.md N1.
+ * - `"litellm"` / `"hardcoded"` — estimated from token counts via the
+ *   LiteLLM price catalog or the registered-model fallback table.
+ */
+export type BackendCostSource = "sdk" | "sdk_partial" | "litellm" | "hardcoded";
 
 /**
  * Per-backend tool/sandbox posture. Shared by the daemon cores

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
+
+// N2 spawn gate — permissive stub so dispatcher construction never hits
+// the real DNS resolver from unit tests (see dispatcher.test.ts).
+vi.mock("./spawn-gates.js", () => ({
+  AutonomousSpawnGate: class {
+    evaluate = async () => ({ skip: false, backends: [] });
+  },
+}));
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

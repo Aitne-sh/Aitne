@@ -1,60 +1,79 @@
 @import "tailwindcss";
+/* Self-hosted variable fonts (bundled at build time — no network at runtime).
+   Instrument Sans carries the UI; Fraunces is the display voice for page
+   titles, the wordmark, and big stat values. CJK content falls through to
+   the platform stacks below. */
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/fraunces";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Non-Latin scripts fall through to the platform gothic stacks in BOTH
+     faces — including the display face. A Latin serif paired with CJK mincho
+     reads mismatched at UI sizes, so display text deliberately shares the
+     sans fallbacks (JP → KR → SC), and any script not named here resolves
+     through the generic `sans-serif` for accurate rendering. */
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", "Apple SD Gothic Neo", "Malgun Gothic", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: "Fraunces Variable", Georgia, "Iowan Old Style", "Times New Roman", "Hiragino Sans", "Yu Gothic UI", "Apple SD Gothic Neo", "Malgun Gothic", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
 
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222 47% 11%);
+  /* Warm-paper light theme with a deep-pine primary. Neutral surfaces sit
+     on a faintly warm background so white cards read as elevated content
+     instead of one undifferentiated sheet. */
+  --color-background: hsl(45 30% 97%);
+  --color-foreground: hsl(228 14% 16%);
   --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222 47% 11%);
+  --color-card-foreground: hsl(228 14% 16%);
   --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(222 47% 11%);
-  --color-primary: hsl(221 83% 53%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(215 25% 93%);
-  --color-secondary-foreground: hsl(222 47% 11%);
-  --color-muted: hsl(210 40% 96%);
-  --color-muted-foreground: hsl(215 16% 47%);
-  --color-accent: hsl(214 32% 89%);
-  --color-accent-foreground: hsl(222 47% 11%);
-  --color-destructive: hsl(0 84% 60%);
+  --color-popover-foreground: hsl(228 14% 16%);
+  --color-primary: hsl(167 50% 25%);
+  --color-primary-foreground: hsl(45 30% 97%);
+  --color-secondary: hsl(45 20% 92%);
+  --color-secondary-foreground: hsl(228 14% 16%);
+  --color-muted: hsl(45 22% 93%);
+  --color-muted-foreground: hsl(228 8% 42%);
+  --color-accent: hsl(45 24% 88%);
+  --color-accent-foreground: hsl(228 14% 16%);
+  --color-destructive: hsl(0 70% 47%);
   --color-destructive-foreground: hsl(0 0% 100%);
-  --color-success: hsl(142 76% 36%);
-  --color-border: hsl(214 32% 91%);
-  --color-input: hsl(214 32% 91%);
-  --color-ring: hsl(221 83% 53%);
-  --color-sidebar: hsl(220 27% 98%);
-  --color-sidebar-foreground: hsl(222 47% 11%);
+  --color-success: hsl(160 84% 27%);
+  --color-warning: hsl(32 80% 42%);
+  --color-border: hsl(42 18% 87%);
+  --color-input: hsl(42 18% 87%);
+  --color-ring: hsl(167 50% 32%);
+  --color-sidebar: hsl(44 28% 94%);
+  --color-sidebar-foreground: hsl(228 14% 16%);
 
   --radius: 0.75rem;
 }
 
 @layer base {
   .dark {
-    --color-background: hsl(222 47% 7%);
-    --color-foreground: hsl(210 40% 96%);
-    --color-card: hsl(222 30% 11%);
-    --color-card-foreground: hsl(210 40% 96%);
-    --color-popover: hsl(222 30% 11%);
-    --color-popover-foreground: hsl(210 40% 96%);
-    --color-primary: hsl(217 91% 60%);
-    /* primary-foreground, destructive, destructive-foreground — identical
-       to light, so omitted: they fall back to the @theme defaults. */
-    --color-secondary: hsl(215 22% 19%);
-    --color-secondary-foreground: hsl(210 40% 96%);
-    --color-muted: hsl(215 20% 16%);
-    --color-muted-foreground: hsl(215 16% 60%);
-    --color-accent: hsl(215 22% 23%);
-    --color-accent-foreground: hsl(210 40% 96%);
-    --color-success: hsl(142 71% 45%);
-    --color-border: hsl(215 20% 20%);
-    --color-input: hsl(215 20% 20%);
-    --color-ring: hsl(217 91% 60%);
-    --color-sidebar: hsl(222 30% 9%);
-    --color-sidebar-foreground: hsl(210 40% 96%);
+    /* Warm charcoal with the same pine undertone — mint primary needs a
+       dark primary-foreground (unlike light mode), so it is overridden here. */
+    --color-background: hsl(195 10% 8%);
+    --color-foreground: hsl(40 18% 92%);
+    --color-card: hsl(195 9% 11%);
+    --color-card-foreground: hsl(40 18% 92%);
+    --color-popover: hsl(195 9% 11%);
+    --color-popover-foreground: hsl(40 18% 92%);
+    --color-primary: hsl(163 38% 58%);
+    --color-primary-foreground: hsl(195 10% 10%);
+    --color-secondary: hsl(195 8% 17%);
+    --color-secondary-foreground: hsl(40 18% 92%);
+    --color-muted: hsl(195 8% 15%);
+    --color-muted-foreground: hsl(40 6% 62%);
+    --color-accent: hsl(195 8% 20%);
+    --color-accent-foreground: hsl(40 18% 92%);
+    --color-destructive: hsl(0 65% 55%);
+    --color-success: hsl(160 55% 45%);
+    --color-warning: hsl(40 75% 55%);
+    --color-border: hsl(195 8% 18%);
+    --color-input: hsl(195 8% 18%);
+    --color-ring: hsl(163 38% 58%);
+    --color-sidebar: hsl(195 10% 6.5%);
+    --color-sidebar-foreground: hsl(40 18% 92%);
   }
 }
 
@@ -64,6 +83,18 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Faint atmospheric washes — primary-tinted from the top-right, warm
+       amber from the top-left — so large empty regions don't read as flat.
+       Both washes derive from theme tokens, so they re-tint in light and
+       dark mode (and any future palette change) without a .dark override. */
+    background-image:
+      radial-gradient(80rem 40rem at 85% -10%, color-mix(in oklab, var(--color-primary) 6%, transparent), transparent 60%),
+      radial-gradient(60rem 30rem at -10% 0%, color-mix(in oklab, var(--color-warning) 5%, transparent), transparent 55%);
+    background-attachment: fixed;
+  }
+  h1,
+  h2 {
+    text-wrap: balance;
   }
 }
 
@@ -173,9 +204,9 @@
   text-decoration: underline;
 }
 /* Docs surface link refinements — scoped via `.docs-prose` so the chat
-   bubble and the context-file viewer keep the simpler primary-blue link
-   style. Default body text colour with a thin underline that brightens
-   to primary on hover, instead of always-on primary blue + dotted. */
+   bubble and the context-file viewer keep the simpler primary-colored
+   link style. Default body text colour with a thin underline that
+   brightens to primary on hover, instead of always-on primary + dotted. */
 .markdown-body.docs-prose a {
   color: var(--color-foreground);
   text-decoration: underline;
@@ -399,7 +430,7 @@
 
 /* Scroll-to highlight flash */
 @keyframes cmdk-flash {
-  0%   { background-color: hsl(217 91% 60% / 0.15); }
+  0%   { background-color: color-mix(in oklab, var(--color-primary) 15%, transparent); }
   100% { background-color: transparent; }
 }
 .cmdk-highlight {

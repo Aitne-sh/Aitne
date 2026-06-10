@@ -155,6 +155,16 @@ workflow; the skill owns the file contract.
         prioritization call this week
       - Concrete system improvement ideas (tighter silence gates, prompt
         adjustments, missing context features)
+
+      Ground this bucket in the `<self_performance>` block when it is
+      present in your context — it carries the objective 7-day evidence
+      (per-routine run/failure/cost rows, fetch-window empty-run rates per
+      integration, hourly-gate stage distribution, per-type notification
+      reaction rates, lesson-store byte pressure, and any applied
+      self-tuning changes in `<tuning_ledger>`). Cite its numbers instead
+      of impressions ("gmail pre-pass 78% empty over 40 runs", not "mail
+      fetching feels wasteful"), and do not re-derive any of them by
+      querying APIs.
 6. Anything that fits the agent-internal bucket MUST NOT land in the
    user-facing file or notification. When in doubt about a line item: "would
    the user act on this, or is it a note about how the agent is doing?" →
@@ -307,14 +317,27 @@ workflow; the skill owns the file contract.
      prompt tweak / schedule adjustment / filter rule. "Improve the filter"
      is not testable; "Add Saturday to Weekend day-type default" is)
    ### Metrics (agent side)
-   - Agent plan rows completed: N
-   - Did-not-fire / failed rows: N
-   - Observations reviewed / ignored: N / N
+   - Routine runs (7d): N total / N failed (prev week: N / N)
+   - Spend (7d): $X (prev week: $Y); top cost: <action_type> $Z
+   - Notifications (7d): N sent / N ignored (prev week sent: N)
    ```
+   **The Metrics numbers are copied, never counted.** The
+   `<self_performance>` block in your context is daemon-computed over
+   `agent_actions` / `notification_log` (SELF_TUNING_REVIEW_CYCLE_DESIGN.md
+   §3.1): take total/failed runs, spend, and the prev-week trend from
+   `<totals>`, the top-cost line from the first `<a>` row of `<actions>`,
+   and sent/ignored from `<totals>`'s `notif_*` attributes. Do not recount
+   via API queries, do not estimate from memory, do not "verify" the block
+   by re-querying — that re-spends the tokens this block exists to save.
+   If the block is absent (fresh install, prep failure), write the single
+   line `- metrics unavailable this week` instead of the three lines;
+   never reconstruct the numbers by hand.
    **Hard limits for this block** (the rollup will warn if exceeded):
      - Total section budget: ≤ 4000 bytes (~1000 tokens)
      - Bullet caps: What worked ≤ 5, What slipped ≤ 5, Improvement ideas ≤ 3
-     - Metrics section: exactly 3 numeric lines, no commentary
+     - Metrics section: exactly 3 numeric lines copied from
+       `<self_performance>` (or the single unavailable-line fallback),
+       no commentary
    If you have more than 5 notable items in one subsection, keep only the
    top 5 by actionable impact and drop the rest. Do not try to fit
    everything — the monthly review synthesizes across weeks and surfaces
@@ -351,6 +374,82 @@ workflow; the skill owns the file contract.
    keys last-write-wins, so your newer append automatically supersedes the
    earlier one within 24 hours. Do not spend tokens trying to locate and
    overwrite the old section in place.
+
+### Phase 3c: Tuning verdicts (only when `<tuning_recommendations>` is present)
+
+9a. If your context contains a `<tuning_recommendations>` block, judge each
+    `<r>` row and submit verdicts. If the block is absent, skip this phase
+    silently — never invent recommendations, never call the endpoint without
+    a block.
+
+    The block is daemon-generated (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.2):
+    each row proposes one bounded change (`current` → `proposed`) to a cost
+    knob, backed by 14-day telemetry in `evidence`. Your job is the one
+    thing the rule table cannot do — apply context the numbers don't show.
+    For each row pick exactly one verdict:
+      - `apply` — the evidence matches your understanding of the period and
+        the change is sensible. Example: mail pre-passes really were mostly
+        empty, nothing unusual about the week.
+      - `reject` — the numbers have a context explanation the rule can't
+        see. Example: notifications were ignored because the user was
+        traveling, not because the type is noise; a schedule failed because
+        an integration was temporarily down and is now fixed.
+      - `defer` — plausible but one more week of data would settle it.
+    Every verdict needs a one-line reason (max 280 chars) grounded in this
+    week's context — the reason is the record the owner reads during the
+    shadow period, so "looks fine" is not a reason.
+
+    A row that already carries a `verdict` attribute was judged by an
+    earlier run of this same cycle (same-day re-run) — do not re-judge or
+    re-submit it; verdict only the rows without one. If every row already
+    has a verdict, skip step 9b entirely.
+
+9b. Submit ALL verdicts in a single call:
+
+    ```
+    POST /api/tuning/verdicts
+    {
+      "cycleId": "<the block's cycle attribute>",
+      "verdicts": [
+        { "id": "<r id verbatim>", "verdict": "apply", "reason": "..." },
+        { "id": "<r id verbatim>", "verdict": "reject", "reason": "..." }
+      ]
+    }
+    ```
+
+    Hard rules:
+      - Use the `id` values from the block **verbatim** — the endpoint
+        accepts only the ids the daemon generated this cycle and 400s on
+        anything else. Do not edit keys, values, or propose your own
+        changes through this endpoint.
+      - The block's `mode` attribute tells you what an `apply` verdict
+        does. `mode="shadow"`: verdicts are recorded, nothing is applied —
+        the response carries `shadow: true` and manual application stays
+        the owner's call. `mode="live"`: the daemon applies config-knob
+        `apply` verdicts immediately through its bounded config chokepoint,
+        DMs the owner one line per applied change (with the
+        `!revert tuning` undo), and auto-reverts on measured regression —
+        so treat `apply` as a real action, not a vote. In BOTH modes, do
+        NOT call `PATCH /api/config` yourself for these knobs — the
+        endpoint is the only path that gets bounds, hysteresis, the
+        ledger, and auto-revert right.
+      - In live mode the response's `applied` array is the daemon's
+        receipt. R2 (`notification:<type>`) applies become lesson guidance
+        only; R4 (`recurring_schedules:<id>`) applies become an owner DM
+        suggestion — neither changes machine config.
+      - Do not post a separate `POST /api/feedback` for rejections — the
+        endpoint records the `self_critique` signal server-side from your
+        reason.
+      - A 409 `cycle_expired` / `no_pending_cycle` means the block is stale
+        (e.g. a re-run after a new cycle was generated): drop the step,
+        note it under journal/agent.md "What slipped on my side", move on.
+      - Never mention recommendations, verdicts, or tuning in the
+        user-facing weekly file or the Phase 4 notification — this is agent
+        mechanics, bound by the same audience rule as Phase 3b. In
+        journal/agent.md, record at most a single count line (e.g.
+        "2 tuning changes applied this week") — the daemon already DM'd
+        each change individually, so per-change detail here would
+        double-notify.
 
 ### Phase 4: Notify (user-facing only)
 10. The notification is a brief, warm end-of-week touchpoint for the USER

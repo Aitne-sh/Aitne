@@ -56,6 +56,46 @@ export type AcquisitionFetchMode =
   | "delegated-cross"
   | "native";
 
+/**
+ * Why a (window × integration) cell was dropped at plan-assembly time —
+ * PREPASS_COST_REDUCTION_PLAN.md N3. Before N3 these drops vanished
+ * without a trace; the runner now writes one `skipped` audit row per
+ * (integration × reason) group so the deferred no-surface streak skip
+ * (R5) and the empty-window backoff (R4) can be sized from data.
+ *
+ *  - `no_state` — integration absent from the `readIntegrations` snapshot.
+ *  - `no_binding` — delegated/native mode with a null backend binding.
+ *  - `disabled` — integration mode is explicitly `disabled`.
+ *  - `unknown_mode` — unrecognized mode string (forward-compat guard).
+ *  - `no_window_query` — `WINDOW_QUERIES` has no cell for the
+ *    (window, integration, mode) tuple where one was expected — a
+ *    genuine catalog hole.
+ *  - `no_accounts` — direct-mode per-account fan-out with zero active
+ *    accounts for the integration.
+ *  - `direct_inline_prefetch` — the catalog *deliberately* omits the
+ *    `direct` cell because the daemon serves that data inline
+ *    (ContextBuilder pre-fetch / REST route) and a pre-pass row would
+ *    double-fetch (cf. `cal_morning_7d` in routine-windows.ts). Working
+ *    as designed, so the runner does NOT write an audit row for it —
+ *    counting it as a drop would pollute the R4/R5 sizing data the N3
+ *    audit stream exists to provide.
+ */
+export type AcquisitionPlanDropReason =
+  | "no_state"
+  | "no_binding"
+  | "disabled"
+  | "unknown_mode"
+  | "no_window_query"
+  | "no_accounts"
+  | "direct_inline_prefetch";
+
+/** One dropped (window × integration) cell. */
+export interface AcquisitionPlanDrop {
+  integration: IntegrationKey;
+  window: WindowSymbol;
+  reason: AcquisitionPlanDropReason;
+}
+
 export interface AcquisitionAccount {
   /**
    * Integration key the account belongs to. Today only `gmail` and
@@ -232,8 +272,8 @@ function resolveFetchMode(
   integration: IntegrationKey,
   state: IntegrationState | undefined,
   sessionBackend: BackendId,
-): AcquisitionFetchMode | null {
-  if (!state) return null;
+): AcquisitionFetchMode | AcquisitionPlanDropReason {
+  if (!state) return "no_state";
   switch (state.mode) {
     case "direct":
       return "direct";
@@ -255,19 +295,34 @@ function resolveFetchMode(
         }
         return "delegated-cross";
       }
-      return null;
+      return "no_binding";
     case "native":
       // Native binding must match the session backend. Otherwise the
       // partial's `mode:native:<key>` block would be filtered out by
       // `applyIntegrationModeFilter` anyway — skip the row to avoid
-      // emitting a `<fetch>` that no branch can handle.
+      // emitting a `<fetch>` that no branch can handle. With
+      // per-integration backend routing (`resolveIntegrationBackend`)
+      // the caller passes the integration's own `nativeBackend` here, so
+      // in practice this branch only drops rows whose binding is null.
       if (state.nativeBackend === sessionBackend) return "native";
-      return null;
+      return "no_binding";
     case "disabled":
-      return null;
+      return "disabled";
     default:
-      return null;
+      return "unknown_mode";
   }
+}
+
+/** Narrow a `resolveFetchMode` result to the fetch-mode side of the union. */
+function isFetchMode(
+  value: AcquisitionFetchMode | AcquisitionPlanDropReason,
+): value is AcquisitionFetchMode {
+  return (
+    value === "direct"
+    || value === "delegated-same"
+    || value === "delegated-cross"
+    || value === "native"
+  );
 }
 
 /**
@@ -294,9 +349,9 @@ function resolveFetchMode(
  *    backend keeps the pre-pass tier predictable.
  *  - `direct`: REST via curl to the daemon — sub-session stays on
  *    `defaultBackend`.
- *  - `disabled` / no state: irrelevant (`resolveFetchMode` returns
- *    `null` and the row is dropped before backend matters); returning
- *    `defaultBackend` is a no-op safety default.
+ *  - `disabled` / no state: irrelevant (`resolveFetchMode` returns a
+ *    drop reason and the row is dropped before backend matters);
+ *    returning `defaultBackend` is a no-op safety default.
  *
  * The function is intentionally `null`-free — every call site benefits
  * from a guaranteed backend so the per-integration spawn path never has
@@ -453,7 +508,16 @@ function renderFetchRow(row: FetchRow): string {
  * monolithic block and the union of per-integration sub-plan blocks
  * carry bit-identical row sequences.
  */
-function collectFetchRows(input: BuildAcquisitionPlanInput): FetchRow[] {
+function collectFetchRows(
+  input: BuildAcquisitionPlanInput,
+  /**
+   * N3 observability hook — invoked once per dropped (window ×
+   * integration) cell with the drop reason. Optional so the render-only
+   * consumers (`buildAcquisitionPlan`, `rebuildSubPlanForBackend`) pay
+   * nothing.
+   */
+  onDrop?: (drop: AcquisitionPlanDrop) => void,
+): FetchRow[] {
   const rows: FetchRow[] = [];
   const specs = ROUTINE_WINDOWS[input.routine];
 
@@ -463,11 +527,11 @@ function collectFetchRows(input: BuildAcquisitionPlanInput): FetchRow[] {
       const state = input.integrations[integration];
       // Per-integration backend resolution. Was: `input.sessionBackend`
       // (single backend for the whole plan), which caused `resolveFetchMode`
-      // to return `null` for native bindings on a different backend —
-      // silently dropping the row. With `resolveIntegrationBackend` the
-      // sub-session is routed to the integration's actual bound backend
-      // (`nativeBackend`, or `delegatedBackend` for userManagedConnector),
-      // and `resolveFetchMode` then matches on the correct backend so the
+      // to drop rows for native bindings on a different backend. With
+      // `resolveIntegrationBackend` the sub-session is routed to the
+      // integration's actual bound backend (`nativeBackend`, or
+      // `delegatedBackend` for userManagedConnector), and
+      // `resolveFetchMode` then matches on the correct backend so the
       // row survives. The runner uses `requiredBackend` (bubbled up via
       // `FetchRow`) to spawn each sub-session on the right backend via
       // `BackendRouter.resolveBinding({ requestedBackendId })`.
@@ -477,10 +541,29 @@ function collectFetchRows(input: BuildAcquisitionPlanInput): FetchRow[] {
         input.sessionBackend,
       );
       const fetchMode = resolveFetchMode(integration, state, requiredBackend);
-      if (fetchMode === null) continue;
+      if (!isFetchMode(fetchMode)) {
+        onDrop?.({ integration, window: spec.window, reason: fetchMode });
+        continue;
+      }
 
       const queryTemplate = lookupQuery(spec.window, integration, fetchMode);
-      if (queryTemplate === undefined) continue;
+      if (queryTemplate === undefined) {
+        // `integrationsForWindow` only yields integrations present in
+        // the catalog for this window, so an undefined template means
+        // the MODE cell is missing. For `direct` that is the documented
+        // intentional pattern (cf. `cal_morning_7d` in
+        // routine-windows.ts): the daemon serves the data inline, so the
+        // pre-pass must not double-fetch. Any other mode is a genuine
+        // catalog hole.
+        onDrop?.({
+          integration,
+          window: spec.window,
+          reason: fetchMode === "direct"
+            ? "direct_inline_prefetch"
+            : "no_window_query",
+        });
+        continue;
+      }
       const query = substituteAcquisitionTokens(queryTemplate, input.timestamps);
 
       // perAccount fan-out is meaningful only in `direct` mode, where the
@@ -501,6 +584,9 @@ function collectFetchRows(input: BuildAcquisitionPlanInput): FetchRow[] {
         const accountRows = input.accounts.filter(
           (a) => a.integration === integration,
         );
+        if (accountRows.length === 0) {
+          onDrop?.({ integration, window: spec.window, reason: "no_accounts" });
+        }
         for (const account of accountRows) {
           rows.push({
             integration,
@@ -651,8 +737,28 @@ export interface AcquisitionSubPlan {
 export function splitAcquisitionPlanByIntegration(
   input: BuildAcquisitionPlanInput,
 ): readonly AcquisitionSubPlan[] {
-  const rows = collectFetchRows(input);
-  if (rows.length === 0) return [];
+  return buildAcquisitionPlanAssembly(input).subPlans;
+}
+
+/**
+ * `splitAcquisitionPlanByIntegration` + the drop trace —
+ * PREPASS_COST_REDUCTION_PLAN.md N3. The fan-out runner consumes this
+ * variant so every (window × integration) cell dropped at plan-assembly
+ * time can be surfaced as a `skipped` audit row instead of vanishing.
+ * Same purity / ordering / row-preservation contract as the wrapper
+ * above.
+ */
+export interface AcquisitionPlanAssembly {
+  subPlans: readonly AcquisitionSubPlan[];
+  drops: readonly AcquisitionPlanDrop[];
+}
+
+export function buildAcquisitionPlanAssembly(
+  input: BuildAcquisitionPlanInput,
+): AcquisitionPlanAssembly {
+  const drops: AcquisitionPlanDrop[] = [];
+  const rows = collectFetchRows(input, (drop) => drops.push(drop));
+  if (rows.length === 0) return { subPlans: [], drops };
 
   // Group rows by integration while keeping insertion order inside each
   // group (the `ROUTINE_WINDOWS` walk order from `collectFetchRows`).
@@ -690,5 +796,5 @@ export function splitAcquisitionPlanByIntegration(
       requiredBackend,
     });
   }
-  return out;
+  return { subPlans: out, drops };
 }

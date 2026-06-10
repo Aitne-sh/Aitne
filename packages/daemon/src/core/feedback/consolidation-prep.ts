@@ -173,10 +173,15 @@ function storeFileAttr(scope: CanonicalScope): string {
   return scopeStoreFile(scope) ?? "";
 }
 
-/** Collapse a one-line excerpt of a signal/lesson for an XML text node. */
+/** Collapse a one-line excerpt of a signal/lesson for an XML text node.
+ *  The clip strips a trailing lone high surrogate so cutting through an
+ *  astral char (emoji) can't leave a U+FFFD in the worksheet. */
 function inline(text: string, max = 300): string {
   const flat = text.replace(/\s+/g, " ").trim();
-  const clipped = flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+  const clipped =
+    flat.length > max
+      ? `${flat.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, "")}…`
+      : flat;
   return xmlEscape(clipped);
 }
 
@@ -244,16 +249,26 @@ function renderLessonsScope(
     : null;
   const existing: Lesson[] = sectionBody ? parseLessonsSection(sectionBody) : [];
 
-  const currentBytes = input.existingFileMd
-    ? Buffer.byteLength(input.existingFileMd, "utf-8")
+  // `current_bytes` measures the on-disk `## Lessons` SECTION body — the
+  // §6 cap unit (`lessonsSectionByteLength` in lesson-format.ts), the same
+  // unit `enforceCaps` below derives `over_cap` from. Measuring the whole
+  // file here while `over_cap` measured the section produced a
+  // self-contradictory tag (and disagreed with the §6 unit the eviction
+  // engine actually controls).
+  const currentBytes = sectionBody
+    ? Buffer.byteLength(sectionBody, "utf-8")
     : 0;
   // Eviction ranking: ascending score → rank 1 = evict-first. The plan
   // (post-dedupe) tells the LLM whether the store is already over cap.
+  // Pass the same half-life the displayed `ranked` scores use so the plan
+  // and the ranking can never derive from two different scorings.
   const plan = enforceCaps(
     existing,
     { maxBytes: input.caps.capBytes, maxEntries: input.caps.maxEntries },
     opts.nowIso,
     { scopeLabel: label },
+    undefined,
+    halfLife,
   );
   const ranked = [...existing].sort(
     (a, b) =>

@@ -119,6 +119,21 @@ import {
   type WorksheetScopeInput,
 } from "./feedback/consolidation-prep.js";
 import {
+  buildSelfPerformanceBlock,
+  gatherSelfPerformanceData,
+  summarizeLessonStoreUtilization,
+  type LessonStoreUtilization,
+} from "./feedback/self-performance-prep.js";
+import {
+  TUNING_PENDING_CYCLE_STATE_KEY,
+  buildTuningRecommendations,
+  createPendingTuningCycle,
+  gatherFailingRecurringSchedules,
+  renderTuningRecommendationsBlock,
+  type PendingTuningCycle,
+} from "./feedback/tuning-recommender.js";
+import { readRuntimeState, writeRuntimeState } from "../db/runtime-state.js";
+import {
   buildRegeneralizationWorksheet,
   type RegeneralizationScopeInput,
 } from "./feedback/regeneralization-prep.js";
@@ -1540,6 +1555,37 @@ export class ScheduledTaskRunner {
         && (effectiveEvent as RoutineEvent).routine === "weekly_review"
       ) {
         this.runWeeklyInterestsReflectionPreHook(effectiveEvent as RoutineEvent);
+        // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.1 + §3.2 / Phases 1–2 —
+        // deterministic Measure + Recommend pre-steps for
+        // `routine.weekly_review`. Run synchronously BEFORE
+        // `contextBuilder.build` so the `<self_performance>` block (7-day
+        // per-routine run/cost/duration aggregates + fetch_window empty-run
+        // rates + hourly-gate stage distribution + notification reaction
+        // breakdown + self-tuning ledger) and the `<tuning_recommendations>`
+        // block (Phase 2 rule-table output for the Phase 3c verdict step)
+        // land in the weekly session's context. Both share one gather pass;
+        // each is independently failure-isolated inside
+        // `prepareSelfTuningBlocks` — a throw is swallowed and the review
+        // still ships. Either block is omitted entirely when empty (no
+        // empty XML in the prompt).
+        const selfTuning = this.prepareSelfTuningBlocks();
+        if (selfTuning.selfPerformanceBlock || selfTuning.tuningRecommendationsBlock) {
+          effectiveEvent = {
+            ...effectiveEvent,
+            data: {
+              ...effectiveEvent.data,
+              ...(selfTuning.selfPerformanceBlock
+                ? { selfPerformanceBlock: selfTuning.selfPerformanceBlock }
+                : {}),
+              ...(selfTuning.tuningRecommendationsBlock
+                ? {
+                    tuningRecommendationsBlock:
+                      selfTuning.tuningRecommendationsBlock,
+                  }
+                : {}),
+            },
+          };
+        }
       }
       const context = await this.contextBuilder.build(effectiveEvent);
       const processKey = resolveProcessKey(effectiveEvent);
@@ -1845,6 +1891,143 @@ export class ScheduledTaskRunner {
     } catch (err) {
       logger.warn({ err }, "Failed to prepare feedback worksheet");
       return null;
+    }
+  }
+
+  /**
+   * SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.1 + §3.2 / Phases 1–2 — the
+   * deterministic Measure + Recommend pre-steps. Computes the 7-day window +
+   * 7-day-prior baseline SQL aggregates over `agent_actions` /
+   * `notification_log` / the `runtime_state.self_tuning:*` ledger, reads each
+   * lesson store's byte pressure (§3.5), and composes the
+   * `<self_performance>` block via the pure
+   * `core/feedback/self-performance-prep.ts` module. The same gathered data
+   * then feeds the Phase 2 rule table (`core/feedback/tuning-recommender.ts`):
+   * the resulting pending cycle is persisted to
+   * `runtime_state.self_tuning.pending_cycle` — overwriting (and thereby
+   * expiring, §3.4 single-use ids) the previous cycle even when this week
+   * produced zero recommendations — and rendered as the
+   * `<tuning_recommendations>` block for the Phase 3c verdict step.
+   *
+   * Either field is `null` when there is nothing to inject or its step threw —
+   * the caller simply skips stamping and the weekly review proceeds
+   * unchanged. The Recommend step is failure-isolated from the Measure step:
+   * a recommender throw never drops the `<self_performance>` block.
+   *
+   * The DB handle + lesson-file FS reads live here (the dispatcher is
+   * coverage-excluded); the byte-deterministic aggregation, rule table, and
+   * rendering live in the pure modules, which are 100% unit-tested. Unlike
+   * the consolidation/re-generalization pre-steps this is NOT gated on
+   * `feedbackLearningEnabled` — it measures core daemon telemetry, not the
+   * lesson loop; nor on `selfTuningEnabled` — that flag gates Phase 3
+   * *actuation* only, while recommendation generation + verdict recording IS
+   * the Phase 2 shadow period (§7). An unreadable lesson store only drops the
+   * `<lesson_stores>` rows / the R5 input, never the whole block.
+   */
+  private prepareSelfTuningBlocks(): {
+    selfPerformanceBlock: string | null;
+    tuningRecommendationsBlock: string | null;
+  } {
+    try {
+      const now = new Date();
+      const data = gatherSelfPerformanceData(this.db, { now });
+
+      const lessonStores: LessonStoreUtilization[] = [];
+      const contextDir = getContextDir(this.config, this.db);
+      const readStoreFile = (rel: string): string | null => {
+        const full = join(contextDir, rel);
+        if (!existsSync(full)) return null;
+        try {
+          return readFileSync(full, "utf-8");
+        } catch (err) {
+          logger.warn(
+            { err, path: rel },
+            "Skipping lesson store in self-performance block — file present but unreadable",
+          );
+          return null;
+        }
+      };
+      const globalMd = readStoreFile(CONTEXT_RELATIVE_PATHS.agentLessons);
+      if (globalMd !== null) {
+        lessonStores.push(
+          summarizeLessonStoreUtilization(
+            "agent",
+            globalMd,
+            this.config.feedbackLessonMaxBytesGlobal,
+          ),
+        );
+      }
+      const agentsDir = join(contextDir, "policies", "agents");
+      if (existsSync(agentsDir)) {
+        for (const entry of readdirSync(agentsDir, { withFileTypes: true })) {
+          if (!entry.isDirectory() || !isSafeAgentSlug(entry.name)) continue;
+          const md = readStoreFile(agentLessonsPath(entry.name));
+          if (md === null) continue;
+          lessonStores.push(
+            summarizeLessonStoreUtilization(
+              `agent:${entry.name}`,
+              md,
+              this.config.feedbackLessonMaxBytesPerAgent,
+            ),
+          );
+        }
+      }
+
+      const selfPerformanceBlock = buildSelfPerformanceBlock(data, {
+        generatedAt: now.toISOString(),
+        lessonStores,
+      });
+
+      // Phase 2 Recommend step — isolated so a recommender failure cannot
+      // cost the weekly session its Measure block.
+      let tuningRecommendationsBlock: string | null = null;
+      try {
+        const recommendations = buildTuningRecommendations({
+          data,
+          knobs: {
+            hourlyCheckPrePassFreshnessMinutes:
+              this.config.hourlyCheckPrePassFreshnessMinutes,
+            hourlyCheckLowSignalPendingCeiling:
+              this.config.hourlyCheckLowSignalPendingCeiling,
+            feedbackLessonMaxBytesGlobal:
+              this.config.feedbackLessonMaxBytesGlobal,
+          },
+          lessonStores,
+          failingSchedules: gatherFailingRecurringSchedules(this.db),
+          now,
+        });
+        // Read the outgoing blob before overwriting: a SAME-day re-run
+        // (manual `!run` / crash retry) regenerates the same cycle id and
+        // ids, and verdicts already recorded against them must survive —
+        // otherwise the re-run session re-verdicts judged ids and
+        // double-posts rejection self_critique signals. A prior-day blob
+        // is ignored inside createPendingTuningCycle (§3.4 expiry).
+        const previousCycle = readRuntimeState<PendingTuningCycle>(
+          this.db,
+          TUNING_PENDING_CYCLE_STATE_KEY,
+        );
+        const cycle = createPendingTuningCycle(
+          recommendations,
+          now.toISOString(),
+          previousCycle,
+        );
+        // Always persist — an empty cycle still expires last week's
+        // single-use verdict ids (§3.4).
+        writeRuntimeState(this.db, TUNING_PENDING_CYCLE_STATE_KEY, cycle);
+        // Phase 3 — the block's `mode` attribute tells the weekly session
+        // whether apply verdicts actuate (`live`) or are recorded only
+        // (`shadow`), so the task-flow never has to guess the flag state.
+        tuningRecommendationsBlock = renderTuningRecommendationsBlock(cycle, {
+          mode: this.config.selfTuningEnabled === true ? "live" : "shadow",
+        });
+      } catch (err) {
+        logger.warn({ err }, "Failed to prepare tuning recommendations");
+      }
+
+      return { selfPerformanceBlock, tuningRecommendationsBlock };
+    } catch (err) {
+      logger.warn({ err }, "Failed to prepare self-performance block");
+      return { selfPerformanceBlock: null, tuningRecommendationsBlock: null };
     }
   }
 
