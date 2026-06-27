@@ -878,7 +878,7 @@ export class OpencodeCore implements IAgentCore {
             params.conversationHistory,
           );
 
-      // docs/design/appendices/opencode-backend.md §4 / Phase 4 — `routine.hourly_check.triage`
+      // docs/design/appendices/opencode-backend.md §4 / Phase 4 — `routine.activity_scan.triage`
       // returns a strict JSON envelope (`{ "action": "log_only" |
       // "escalate", … }`) parsed by `parseStage2Verdict`. opencode's
       // `format: { type: "json_schema", … }` honours the schema with
@@ -1094,7 +1094,7 @@ export class OpencodeCore implements IAgentCore {
         const stopReason = assistantMessage?.finish ?? null;
 
         // Best-effort cleanup of the on-disk opencode session row when we
-        // own the workdir — keeps disk usage bounded under hourly_check.
+        // own the workdir — keeps disk usage bounded under activity_scan.
         // On resume we must never delete: the dispatcher's next turn
         // needs the same session id to resolve to a live server-side
         // history. (`ownsSessionDir` is already false when sessionDir is
@@ -1957,7 +1957,7 @@ function classifyStreamError(
 }
 
 /**
- * docs/design/appendices/opencode-backend.md Phase 4 — Stage 2 hourly-check triage
+ * docs/design/appendices/opencode-backend.md Phase 4 — Stage 2 activity-scan triage
  * schema. Mirrors the `parseStage2Verdict` text contract
  * (`dispatcher-types.ts`): the agent must return exactly
  * `{ "action": "log_only" | "escalate", "reason": string }`. Opencode
@@ -1985,13 +1985,13 @@ export const STAGE2_TRIAGE_JSON_SCHEMA = {
 /**
  * Returns the opencode `format` envelope to apply when a given process
  * key has a strict structured-output contract; null otherwise. v1
- * covers `routine.hourly_check.triage`; future strict-JSON process
+ * covers `routine.activity_scan.triage`; future strict-JSON process
  * keys (e.g. delegated classifiers) extend this map.
  */
 function formatForProcessKey(
   processKey: ProcessKey | undefined,
 ): { type: "json_schema"; schema: object; retryCount: number } | null {
-  if (processKey === "routine.hourly_check.triage") {
+  if (processKey === "routine.activity_scan.triage") {
     return {
       type: "json_schema",
       schema: STAGE2_TRIAGE_JSON_SCHEMA,

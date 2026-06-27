@@ -37,8 +37,8 @@ describe("getInjectionPolicy — §8 declarative table", () => {
     expect(policy.policyFileGlobalMerge).toBe(false);
   });
 
-  it("hourly check and today refresh drop both heavy blocks", () => {
-    for (const key of ["routine.hourly_check", "routine.today_refresh"]) {
+  it("activity scan and today refresh drop both heavy blocks", () => {
+    for (const key of ["routine.activity_scan", "routine.today_refresh"]) {
       const policy = getInjectionPolicy(key);
       expect(policy.alwaysBlocks.size).toBe(0);
       // Redaction is non-negotiable for any vault-write surface — `*`
@@ -81,7 +81,7 @@ describe("getInjectionPolicy — §8 declarative table", () => {
   });
 
   it("returns shared, frozen Set instances for equality stability", () => {
-    const a = getInjectionPolicy("routine.hourly_check");
+    const a = getInjectionPolicy("routine.activity_scan");
     const b = getInjectionPolicy("routine.today_refresh");
     // Both drop heavy blocks → same shared empty set instance.
     expect(a.alwaysBlocks).toBe(b.alwaysBlocks);
@@ -121,8 +121,8 @@ describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
     }
   });
 
-  it("hourly_check gets the slim variant: global + slim, no self", () => {
-    expect(tuple(getAgentLessonsInjection("routine.hourly_check"))).toEqual([
+  it("activity_scan gets the slim variant: global + slim, no self", () => {
+    expect(tuple(getAgentLessonsInjection("routine.activity_scan"))).toEqual([
       true,
       false,
       true,
@@ -146,7 +146,7 @@ describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
       "scheduled.task",
       "routine.today_refresh",
       "routine.fetch_window",
-      "routine.hourly_check.triage",
+      "routine.activity_scan.triage",
       "github.pull_request.opened",
       "git.new_commit",
       "schedule.approaching",
@@ -167,7 +167,7 @@ describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
   });
 
   it("slim always implies global (a slim-only surface would be incoherent)", () => {
-    const hourly = getAgentLessonsInjection("routine.hourly_check");
+    const hourly = getAgentLessonsInjection("routine.activity_scan");
     expect(hourly.slim && hourly.global).toBe(true);
   });
 
@@ -220,7 +220,7 @@ describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
 
   it("agentBound does not change matched surfaces (hourly stays slim, no self)", () => {
     expect(
-      tuple(getAgentLessonsInjection("routine.hourly_check", { agentBound: true })),
+      tuple(getAgentLessonsInjection("routine.activity_scan", { agentBound: true })),
     ).toEqual([true, false, true]);
     expect(
       tuple(getAgentLessonsInjection("message.dm", { agentBound: true })),
@@ -232,7 +232,7 @@ describe("getAgentLessonsInjection — Stage-3 opt-in resolver (§5)", () => {
  * V20 byte-identity regression guard.
  *
  * Plan §15 PR-2 checklist: "For every event type currently in
- * POLICY_KEY_GLOBAL_OPTOUT (Stage B journal author, hourly_check,
+ * POLICY_KEY_GLOBAL_OPTOUT (Stage B journal author, activity_scan,
  * today_refresh, observer events, scheduled.task), snapshot the rendered
  * policy-files output before the consolidation, run the consolidation,
  * snapshot again. The two snapshots must be byte-identical."
@@ -283,13 +283,13 @@ describe("V20 byte-identity guard — resolvePolicyRefs survives consolidation",
   it("narrow routines that opt out of heavy blocks still get the * merge", () => {
     // These were never in POLICY_KEY_GLOBAL_OPTOUT — their resolvePolicyRefs
     // output must match the pre-consolidation behavior.
-    const hourlyPaths = resolvePolicyRefs("routine.hourly_check").map(
+    const hourlyPaths = resolvePolicyRefs("routine.activity_scan").map(
       (r) => r.path,
     );
     expect(hourlyPaths).toEqual([
       "policies/redaction.md",
       "policies/mcp.md",
-      "policies/routines/hourly.md",
+      "policies/routines/activity-scan.md",
     ]);
   });
 

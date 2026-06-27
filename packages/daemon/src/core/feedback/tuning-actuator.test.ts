@@ -40,7 +40,7 @@ function blob(over: Partial<TuningLedgerBlob> = {}): TuningLedgerBlob {
     rule: "R1",
     actuator: "config",
     proposed: 360,
-    recommendation_id: "2026-06-01:R1:hourlyCheckPrePassFreshnessMinutes",
+    recommendation_id: "2026-06-01:R1:activityScanPrePassFreshnessMinutes",
     evidence: "fetch_window 80% empty over 20 runs/14d",
     baselineMetric: null,
     ...over,
@@ -49,10 +49,10 @@ function blob(over: Partial<TuningLedgerBlob> = {}): TuningLedgerBlob {
 
 function configRec(over: Partial<TuningRecommendation> = {}): TuningRecommendation {
   return {
-    id: "2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes",
+    id: "2026-06-09:R1:activityScanPrePassFreshnessMinutes",
     rule: "R1",
     actuator: "config",
-    key: "hourlyCheckPrePassFreshnessMinutes",
+    key: "activityScanPrePassFreshnessMinutes",
     currentValue: 240,
     proposedValue: 360,
     bounds: { min: 120, max: 480 },
@@ -118,7 +118,7 @@ function insertGateRow(
 ): void {
   db.prepare(
     `INSERT INTO agent_actions (action_type, result, detail, started_at)
-     VALUES ('hourly_check.gate', 'success', ?, ?)`,
+     VALUES ('activity_scan.gate', 'success', ?, ?)`,
   ).run(
     detail === null ? null : JSON.stringify(detail),
     formatSqliteDatetime(startedAt),
@@ -344,7 +344,7 @@ describe("auditSelfTuning", () => {
 describe("DM message builders", () => {
   it("buildApplyDmMessage carries the change, evidence, and the undo hint", () => {
     const message = buildApplyDmMessage(configRec(), 240);
-    expect(message).toContain("hourlyCheckPrePassFreshnessMinutes 240 → 360");
+    expect(message).toContain("activityScanPrePassFreshnessMinutes 240 → 360");
     expect(message).toContain("80% empty");
     expect(message).toContain("!revert tuning");
   });
@@ -369,12 +369,12 @@ describe("actuateApplyVerdicts — config namespace", () => {
     });
     const outcome = await actuateApplyVerdicts(deps, [configRec()], NOW);
 
-    expect(calls).toEqual([{ hourlyCheckPrePassFreshnessMinutes: 360 }]);
+    expect(calls).toEqual([{ activityScanPrePassFreshnessMinutes: 360 }]);
     expect(outcome.failures).toEqual([]);
     expect(outcome.applied).toEqual([
       {
-        id: "2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes",
-        key: "hourlyCheckPrePassFreshnessMinutes",
+        id: "2026-06-09:R1:activityScanPrePassFreshnessMinutes",
+        key: "activityScanPrePassFreshnessMinutes",
         rule: "R1",
         mode: "config",
         from: 240,
@@ -383,7 +383,7 @@ describe("actuateApplyVerdicts — config namespace", () => {
     ]);
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored).toMatchObject({
       prev: 240,
@@ -416,15 +416,15 @@ describe("actuateApplyVerdicts — config namespace", () => {
     const deps = makeDeps(db, {
       applyUpdates: async () => ({
         updated: [],
-        errors: { hourlyCheckPrePassFreshnessMinutes: "Value must be 0–480 minutes" },
+        errors: { activityScanPrePassFreshnessMinutes: "Value must be 0–480 minutes" },
       }),
     });
     const outcome = await actuateApplyVerdicts(deps, [configRec()], NOW);
     expect(outcome.applied).toEqual([]);
     expect(outcome.failures).toEqual([
       {
-        id: "2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes",
-        key: "hourlyCheckPrePassFreshnessMinutes",
+        id: "2026-06-09:R1:activityScanPrePassFreshnessMinutes",
+        key: "activityScanPrePassFreshnessMinutes",
         error: "Value must be 0–480 minutes",
       },
     ]);
@@ -450,7 +450,7 @@ describe("actuateApplyVerdicts — config namespace", () => {
     expect(outcome.applied).toHaveLength(1);
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored?.baselineMetric).toBeNull();
   });
@@ -596,10 +596,10 @@ describe("revertAppliedTuningChange", () => {
     const stored = blob(over);
     writeRuntimeState(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
       stored,
     );
-    return { key: "hourlyCheckPrePassFreshnessMinutes", blob: stored };
+    return { key: "activityScanPrePassFreshnessMinutes", blob: stored };
   }
 
   it("restores prev, stamps the ledger, audits, and records the auto signal", async () => {
@@ -612,10 +612,10 @@ describe("revertAppliedTuningChange", () => {
       { trigger: "auto", reason: "novelty arrivals dropped", now: NOW },
     );
     expect(result).toEqual({ ok: true });
-    expect(calls).toEqual([{ hourlyCheckPrePassFreshnessMinutes: 240 }]);
+    expect(calls).toEqual([{ activityScanPrePassFreshnessMinutes: 240 }]);
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored).toMatchObject({
       reverted_at: NOW.toISOString(),
@@ -649,7 +649,7 @@ describe("revertAppliedTuningChange", () => {
       .prepare(`SELECT action_ref FROM feedback_signals`)
       .all() as Array<{ action_ref: string }>;
     expect(refs).toEqual([
-      { action_ref: "hourlyCheckPrePassFreshnessMinutes" },
+      { action_ref: "activityScanPrePassFreshnessMinutes" },
     ]);
     const audits = auditRows(db, "self_tuning.reverted");
     expect(audits[0].trigger).toBe("user");
@@ -667,7 +667,7 @@ describe("revertAppliedTuningChange", () => {
         db,
         applyUpdates: async () => ({
           updated: [],
-          errors: { hourlyCheckPrePassFreshnessMinutes: "out of range" },
+          errors: { activityScanPrePassFreshnessMinutes: "out of range" },
         }),
       },
       entry,
@@ -676,7 +676,7 @@ describe("revertAppliedTuningChange", () => {
     expect(result).toEqual({ ok: false, error: "out of range" });
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored?.reverted_at).toBeUndefined();
     const audits = auditRows(db, "self_tuning.reverted");
@@ -702,7 +702,7 @@ describe("revertAppliedTuningChange", () => {
     const db = makeDb();
     const entry = seedEntry(db);
     db.prepare(`DELETE FROM runtime_state WHERE key = ?`).run(
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     const result = await revertAppliedTuningChange(
       { db, applyUpdates: okApplyUpdates() },
@@ -712,7 +712,7 @@ describe("revertAppliedTuningChange", () => {
     expect(result.ok).toBe(true);
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored?.prev).toBe(240);
     expect(stored?.reverted_at).toBe(NOW.toISOString());

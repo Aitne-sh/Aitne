@@ -99,7 +99,7 @@ function extractCalendarPayload(parsed: CalendarPayload): {
  *    by design (`INTEGRATION_SNAPSHOT_PARTITIONS_BY_MODE[google_calendar].native = []`);
  *    without this second source, native-mode users would silently lose
  *    every 15-minute reminder. Cadence note: native observations refresh
- *    on the hourly_check tick (60-min cadence) so events scheduled with
+ *    on the activity_scan tick (60-min cadence) so events scheduled with
  *    less than ~60 min lead-time may miss their reminder. The 5-min
  *    direct-mode polling cadence does not have this limit.
  *

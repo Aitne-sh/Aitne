@@ -63,7 +63,7 @@ process_keys:
   - routine.evening_review
   - routine.weekly_review
   - routine.monthly_review
-  - routine.hourly_check
+  - routine.activity_scan
   - routine.roadmap_refresh
 config_keys:
   - dayBoundaryHour
@@ -171,7 +171,7 @@ the write-permission whitelist in `packages/daemon/src/api/routes/context/permis
 │   │           └── <slug>.md
 │   └── dossiers/                   Per-flow carry-forward state (agent-owned)
 │       ├── _index.md
-│       └── <flow>.md               One per routine (hourly/morning/evening/…)
+│       └── <flow>.md               One per routine (activity-scan/morning/evening/…)
 │
 └── policies/                       USER-authored config + rules
     ├── _index.md
@@ -192,13 +192,13 @@ the write-permission whitelist in `packages/daemon/src/api/routes/context/permis
     │   └── <slug>.md
     ├── routines/                   Per-cadence checklist rulebooks
     │   ├── _index.md
-    │   ├── hourly.md               Extension checks for routine.hourly_check
+    │   ├── activity-scan.md         Extension checks for routine.activity_scan
     │   ├── morning.md               …for routine.morning_routine
     │   ├── evening.md               …for routine.evening_review
     │   ├── weekly.md                …for routine.weekly_review
     │   ├── monthly.md               …for routine.monthly_review
     │   └── custom/
-    │       └── <slug>.md           User-defined cron routines
+    │       └── <slug>.md           Retired custom routines (inert; migrated to user Agents)
     └── skills/                     User-registered skills (lazy directory)
         └── <slug>/
             └── SKILL.md            Built-in skills stay in agent-assets/skills/ (read-only)
@@ -386,15 +386,19 @@ the built-in steps.
 | File | Cadence | Process key |
 |---|---|---|
 | `_index.md` | — | (navigation) |
-| `hourly.md` | every hour (during active window) | `routine.hourly_check` |
+| `activity-scan.md` | every 2 h default (during active window) | `routine.activity_scan` |
 | `morning.md` | 04:00 daily | `routine.morning_routine` |
 | `evening.md` | evening | `routine.evening_review` |
 | `weekly.md` | Friday | `routine.weekly_review` |
 | `monthly.md` | month-end | `routine.monthly_review` |
-| `custom/<slug>.md` | user cron | `routine.custom.<slug>` |
+| `custom/<slug>.md` | — (retired) | `routine.custom.<slug>` (historical) |
 
-`custom/<slug>.md` is the only routine path that supports `DELETE` —
-when removed, the scheduler unregisters the cron job on the next reload.
+`custom/<slug>.md` files no longer fire — at the first start after the
+upgrade each valid one was converted once into a user Agent at
+`policies/agents/<slug>/agent.md`, and the source was marked inert
+(`enabled: false` + `migrated_to_agent:`; see
+[Custom Routines (Retired)](../features/routines/custom-routines.md)).
+The path still supports `DELETE` so the inert files can be cleaned up.
 
 ---
 
@@ -430,7 +434,7 @@ routine to run without re-scanning the full vault.
 | File | Process key |
 |---|---|
 | `_index.md` | (navigation) |
-| `hourly.md` | `routine.hourly_check` |
+| `activity-scan.md` | `routine.activity_scan` |
 | `morning.md` | `routine.morning_routine`, `routine.morning_routine_today` |
 | `evening.md` | `routine.evening_review` |
 | `weekly.md` | `routine.weekly_review` |
@@ -567,7 +571,7 @@ listed is read-only via the API.
 | `policies/agent-lessons` | `PUT`, `PATCH` (Feedback Learning Loop global lessons store) |
 | `policies/agents/{slug}/{file}` | `PUT`, `PATCH`, `DELETE` (user-authored Agent definitions) |
 | `policies/routines/_index` · `policies/routines/*` | `PUT`, `PATCH` |
-| `policies/routines/custom/*` | `PUT`, `PATCH`, `DELETE` |
+| `policies/routines/custom/*` | `PUT`, `PATCH`, `DELETE` (legacy — files are inert and no longer fire) |
 | `plans/projects/_index` · `plans/projects/*` | `PUT`, `PATCH` |
 | `plans/projects/_active` | `PUT` (the Obsidian Bases view) |
 | `knowledge/repos/{slug}/overview` · `journal/repos/{slug}/{date}` | `PUT`, `PATCH` |

@@ -49,6 +49,12 @@ function writeRoutineFile(
   writeFileSync(join(dir, `${slug}.md`), body, "utf-8");
 }
 
+function writeAgentFile(contextDir: string, slug: string, body: string): void {
+  const dir = join(contextDir, "policies", "agents", slug);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "agent.md"), body, "utf-8");
+}
+
 function writeManagement(contextDir: string, body: string): void {
   const dir = join(contextDir, "policies");
   mkdirSync(dir, { recursive: true });
@@ -228,6 +234,47 @@ describe("collectPolicySnapshots", () => {
     writePolicyFile(contextDir, "morning-finance", POLICY_BODY);
     const snapshots = collectPolicySnapshots(contextDir);
     expect(snapshots[0].cadence).toBeNull();
+  });
+
+  it("reads cadence from the linked Agent's agent.md schedule expression (Agents-hub)", () => {
+    writePolicyFile(contextDir, "morning-finance", POLICY_BODY);
+    writeAgentFile(
+      contextDir,
+      "morning-finance",
+      [
+        "---",
+        "slug: morning-finance",
+        "name: Morning Finance",
+        "description: Scheduled enforcement.",
+        "kind: user",
+        "enabled: true",
+        "schedule:",
+        "  kind: cron",
+        '  expression: "30 6 * * *"',
+        "  timezone: Asia/Tokyo",
+        "backend:",
+        "  process_key: agent.task",
+        "limits:",
+        "  max_budget_usd: 0.2",
+        "---",
+        "",
+        "# Morning Finance",
+      ].join("\n"),
+    );
+    const snapshots = collectPolicySnapshots(contextDir);
+    expect(snapshots[0].cadence).toBe("30 6 * * *");
+  });
+
+  it("prefers the Agent's expression over a leftover legacy routine cron", () => {
+    writePolicyFile(contextDir, "morning-finance", POLICY_BODY);
+    writeRoutineFile(contextDir, "morning-finance", ROUTINE_BODY); // cron 0 7 * * *
+    writeAgentFile(
+      contextDir,
+      "morning-finance",
+      '---\nslug: morning-finance\nschedule:\n  kind: cron\n  expression: "15 8 * * *"\n---\n# X\n',
+    );
+    const snapshots = collectPolicySnapshots(contextDir);
+    expect(snapshots[0].cadence).toBe("15 8 * * *");
   });
 
   it("skips files whose slug does not match filename", () => {

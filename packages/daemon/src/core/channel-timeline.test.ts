@@ -102,7 +102,7 @@ describe("getProactiveForwardType", () => {
 });
 
 describe("isProactiveForwardMetadata", () => {
-  it("is true for proactive_forward / proactive_forward_batched / scheduled_dm", () => {
+  it("is true for proactive_forward / scheduled_dm / task delivery types", () => {
     expect(
       isProactiveForwardMetadata({ notificationType: "proactive_forward" }),
     ).toBe(true);
@@ -113,6 +113,12 @@ describe("isProactiveForwardMetadata", () => {
     ).toBe(true);
     expect(
       isProactiveForwardMetadata({ notificationType: "scheduled_dm" }),
+    ).toBe(true);
+    expect(
+      isProactiveForwardMetadata({ notificationType: "task_result" }),
+    ).toBe(true);
+    expect(
+      isProactiveForwardMetadata({ notificationType: "task_clarification" }),
     ).toBe(true);
   });
 
@@ -138,6 +144,15 @@ describe("formatForwardSuffix", () => {
     expect(
       formatForwardSuffix({ notificationType: "scheduled_dm" }),
     ).toBe(" (scheduled DM dispatched)");
+  });
+
+  it("returns task-delivery suffixes", () => {
+    expect(
+      formatForwardSuffix({ notificationType: "task_result" }),
+    ).toBe(" (background task result delivered)");
+    expect(
+      formatForwardSuffix({ notificationType: "task_clarification" }),
+    ).toBe(" (background task clarification requested)");
   });
 
   it("returns an empty string for non-forward metadata", () => {

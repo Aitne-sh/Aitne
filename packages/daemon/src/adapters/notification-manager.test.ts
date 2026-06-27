@@ -3,6 +3,8 @@ import Database from "better-sqlite3";
 import { createEvent, EventPriority, type Event, type MessageEvent } from "@aitne/shared";
 import { applySchema } from "../db/schema.js";
 import { NotificationManager } from "./notification-manager.js";
+import { findOrCreateActiveChannelSession } from "../core/session-manager.js";
+import { MessageRecorder } from "../core/message-recorder.js";
 import type { MessageHub } from "./message-hub.js";
 import type { AgentConfig } from "../config.js";
 
@@ -46,6 +48,8 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     notionPollIntervalSeconds: 60,
     calendarPollIntervalSeconds: 300,
     apiPort: 8321,
+    ownerActivityIdleThresholdMinutes: 5,
+    autonomousForwardNaturalDelivery: false,
     ...overrides,
   } as unknown as AgentConfig;
 }
@@ -128,6 +132,93 @@ describe("NotificationManager", () => {
       "Hello back!",
       undefined,
     );
+  });
+
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §2.3 / §13 Decision 4 (Phase 4, opt-in)
+  // — an ACTIVE owner's proactive forward routes through the delivery
+  // machinery (weave); idle keeps the verbatim path; flag-off is unchanged.
+  describe("autonomous-forward natural delivery (opt-in)", () => {
+    function markOwnerActive(): void {
+      const session = findOrCreateActiveChannelSession(db, {
+        scope: "owner_dm",
+        scopeKey: "owner",
+        platform: "slack",
+        channelId: "D123",
+      });
+      new MessageRecorder(db).recordMessage({
+        sessionId: session.id,
+        role: "user",
+        platform: "slack",
+        content: "still chatting",
+      });
+    }
+
+    it("flag OFF ⇒ verbatim send, router never called (even when active)", async () => {
+      markOwnerActive();
+      const route = vi.fn().mockResolvedValue(true);
+      mgr = new NotificationManager(mockHub, db, makeConfig({
+        autonomousForwardNaturalDelivery: false,
+      } as Partial<AgentConfig>), { routeAutonomousForwardNaturally: route });
+      await mgr.send("Your cluster grew.", makeRoutineEvent());
+      expect(route).not.toHaveBeenCalled();
+      expect(mockHub.sendToUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("flag ON + owner IDLE ⇒ verbatim send, router never called", async () => {
+      // no recent owner message ⇒ idle
+      const route = vi.fn().mockResolvedValue(true);
+      mgr = new NotificationManager(mockHub, db, makeConfig({
+        autonomousForwardNaturalDelivery: true,
+      } as Partial<AgentConfig>), { routeAutonomousForwardNaturally: route });
+      await mgr.send("Your cluster grew.", makeRoutineEvent());
+      expect(route).not.toHaveBeenCalled();
+      expect(mockHub.sendToUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("flag ON + owner ACTIVE + router accepts ⇒ rerouted, no verbatim send", async () => {
+      markOwnerActive();
+      const route = vi.fn().mockResolvedValue(true);
+      mgr = new NotificationManager(mockHub, db, makeConfig({
+        autonomousForwardNaturalDelivery: true,
+      } as Partial<AgentConfig>), { routeAutonomousForwardNaturally: route });
+      await mgr.send("Your cluster grew.", makeRoutineEvent());
+      expect(route).toHaveBeenCalledTimes(1);
+      expect(route.mock.calls[0][0]).toMatchObject({ content: "Your cluster grew." });
+      expect(mockHub.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it("flag ON + owner ACTIVE + router declines ⇒ falls back to verbatim send", async () => {
+      markOwnerActive();
+      const route = vi.fn().mockResolvedValue(false);
+      mgr = new NotificationManager(mockHub, db, makeConfig({
+        autonomousForwardNaturalDelivery: true,
+      } as Partial<AgentConfig>), { routeAutonomousForwardNaturally: route });
+      await mgr.send("Your cluster grew.", makeRoutineEvent());
+      expect(route).toHaveBeenCalledTimes(1);
+      expect(mockHub.sendToUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("flag ON + ACTIVE + router THROWS ⇒ falls back to verbatim send (does not drop the forward)", async () => {
+      markOwnerActive();
+      const route = vi.fn().mockRejectedValue(new Error("event bus down"));
+      mgr = new NotificationManager(mockHub, db, makeConfig({
+        autonomousForwardNaturalDelivery: true,
+      } as Partial<AgentConfig>), { routeAutonomousForwardNaturally: route });
+      await mgr.send("Your cluster grew.", makeRoutineEvent());
+      expect(route).toHaveBeenCalledTimes(1);
+      expect(mockHub.sendToUser).toHaveBeenCalledTimes(1);
+    });
+
+    it("flag ON + ACTIVE but SAFETY category ⇒ verbatim send, never rerouted", async () => {
+      markOwnerActive();
+      const route = vi.fn().mockResolvedValue(true);
+      mgr = new NotificationManager(mockHub, db, makeConfig({
+        autonomousForwardNaturalDelivery: true,
+      } as Partial<AgentConfig>), { routeAutonomousForwardNaturally: route });
+      await mgr.send("Security alert!", makeRoutineEvent(), { category: "security" });
+      expect(route).not.toHaveBeenCalled();
+      expect(mockHub.sendToUser).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── M4: bounded retry + proactive fallback on reply delivery ──

@@ -106,7 +106,7 @@ clicks leave the daemon.
   containing ≥3 distinct ASINs surface as comparison sessions the
   agent can summarise.
 - **Powers the pre-morning digest** — yesterday's reading and reload
-  patterns feed the morning routine's pre-pass digest.
+  patterns feed the digest the morning routine reads.
 
 ## Privacy and Consent
 
@@ -120,8 +120,8 @@ clicks leave the daemon.
   history file is opened read-only; the daemon never reaches into
   cookies, login sessions, or profile dirs other than the history DB.
 - **Per-browser opt-in.** `browserHistoryBrowserOverrides` lets you
-  enable / disable each detected browser independently and override
-  the DB path for atypical installs.
+  force each detected browser on or off independently
+  (`auto` / `forced-on` / `forced-off`).
 - **Per-category gate.** `browserHistoryCategories` controls which
   visit categories (research / shopping / news / dev / entertainment / …) get
   ingested. Categories you exclude are dropped at ingest time, not
@@ -136,11 +136,13 @@ clicks leave the daemon.
 
 A research cluster qualifies when the combination of meaningful visits,
 foreground time, and distinct domains crosses the thresholds in
-`DEFAULT_OFFER_THRESHOLDS` (tunable via `browserHistoryLifecycle`).
+`DEFAULT_OFFER_THRESHOLDS` (fixed defaults — `browserHistoryLifecycle`
+tunes the poller's check cadence, not these thresholds).
 On each tick the poller evaluates the offer triggers per active cluster
-(`evaluateOfferTriggers`); once the **per-cluster offer rate-limit gate**
-(`gateOfferRateLimit`) approves — this is the 14-day, per-slug offer
-backoff, not the daemon-wide session gate that Phase 9 removed — a
+(`evaluateOfferTriggers`) — this is where the 14-day, per-slug offer
+re-fire window lives — and the **offer rate-limit gate**
+(`gateOfferRateLimit`: daily offer cap, minimum gap between offers,
+quiet hours, and a 30-day decline backoff) must also approve before a
 Two-Option Offer DM is composed by the `routine.research_offer_dm`
 process key.
 
@@ -171,7 +173,7 @@ later tick cannot re-offer the same cluster.
 | Shopping-comparison window scan | Same tick, 7-day lookback | `SHOPPING_COMPARISON_WINDOW_MS` constants |
 | Nightly journal append | Agent-day boundary | `routine.research_cluster_update` (lite tier, one row per active cluster per day) |
 | Weekly reload-memory block | Friday weekly review | `routine.weekly_review` reads `/api/browser-history/reloads/weekly` |
-| Pre-morning digest | Morning routine pre-pass | Yesterday's reading + reloads feed the digest block |
+| Pre-morning digest | Daily, one hour before the agent-day boundary | Yesterday's reading + reloads feed the digest block |
 
 ## When Something Goes Wrong
 
@@ -180,8 +182,10 @@ later tick cannot re-offer the same cluster.
   platform detector might be failing to resolve the user's profile dir.
   The daemon log line will name the candidate paths it tried.
 - **A cluster keeps re-offering.** Check the `lastResearchOfferAt` /
-  `lastWikiOfferAt` columns; the rate-limit gate uses those for the
-  14-day backoff. `!research decline <slug>` stamps both fields.
+  `lastWikiOfferAt` columns; the trigger evaluator uses those for the
+  14-day re-fire window (the rate-limit gate also reads them for its
+  30-day decline backoff). `!research decline <slug>` stamps both
+  fields.
 - **`!checks` is empty.** That's the common case for a quiet day —
   the reload signals are gated to the agent-day, not UTC.
 

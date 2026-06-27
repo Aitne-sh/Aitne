@@ -44,7 +44,7 @@ export default function GitPage() {
           </Link>
         }
       >
-        <p className="mt-1 max-w-2xl text-xs text-amber-700 dark:text-amber-400">
+        <p className="mt-1 max-w-2xl text-xs text-warning">
           Triggers and daily management are still under active testing &mdash;
           expect rough edges and please report bugs.
         </p>

@@ -70,7 +70,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 
 function makeEvent(overrides: Partial<Event> = {}): Event {
   return createEvent({
-    type: "routine.hourly_check",
+    type: "routine.activity_scan",
     source: "test",
     priority: EventPriority.NORMAL,
     ...overrides,
@@ -1182,7 +1182,7 @@ describe("CodexCore", () => {
 
       expect(mockCreateSessionWorkdir).toHaveBeenCalledWith(
         ".",
-        "routine.hourly_check",
+        "routine.activity_scan",
         // CONTEXT_VAULT_REDESIGN_PLAN.md v4 V11 — user skills root is
         // `<contextDir>/policies/skills`. Test config sets dataDir=/tmp/test
         // and uses plain vault mode → contextDir=/tmp/test/context.

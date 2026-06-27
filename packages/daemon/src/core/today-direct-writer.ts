@@ -4,7 +4,7 @@
  * is no subprocess to issue the curl call from. Two operations live here:
  *
  *   1. {@link appendAgentLogLine} — append a single `## Agent Log` bullet.
- *      Used by the three-stage hourly_check gate (cost-reduction-structural
+ *      Used by the three-stage activity_scan gate (cost-reduction-structural
  *      §B) on the stage0_silent / stage2_log_only paths so a "no-op" cron
  *      tick still leaves an audit trail without paying for an LLM session.
  *   2. {@link ensureTodaySkeleton} — seed the canonical empty skeleton when
@@ -47,7 +47,7 @@ export interface AppendAgentLogLineInput {
   /**
    * Bullet text to append, **without** the leading `- ` prefix and
    * without a trailing newline. The writer normalizes both.
-   * Example: `"12:00 [hourly_check] Quiet — 0 obs"`.
+   * Example: `"12:00 [activity_scan] Quiet — 0 obs"`.
    */
   message: string;
   todayWriteLock: TodayWriteLockManager;

@@ -13,8 +13,8 @@ aliases:
 category: concepts
 summary: |
   Routines are the autonomous, scheduled tasks Aitne runs on
-  its own — morning routine, evening review, hourly check, weekly
-  retro, plus any custom routines you define.
+  its own — morning routine, evening review, activity scan, weekly
+  retro, plus any recurring user Agents you define.
 section: routines
 tags:
   - core
@@ -30,7 +30,7 @@ ask_examples:
   - Which routine uses the high tier by default?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - routine
   - routines
@@ -40,18 +40,18 @@ keywords:
   - routine.fetch_window
   - pre-pass
   - dayBoundaryHour
-  - hourly check
+  - activity scan
 related:
   - features/routines/morning-routine
   - features/routines/evening-review
   - features/routines/weekly-review
-  - features/routines/hourly-check
-  - features/routines/custom-routines
+  - features/routines/activity-scan
+  - guides/add-a-custom-routine
   - concepts/process-keys
   - concepts/observations
 ui_anchors:
-  - /connections/routines
-  - /settings/routines
+  - /agents
+  - /agents/activity-scan
 process_keys:
   - routine.morning_routine
   - routine.morning_routine_today
@@ -59,17 +59,18 @@ process_keys:
   - routine.evening_review
   - routine.weekly_review
   - routine.monthly_review
-  - routine.hourly_check
+  - routine.activity_scan
   - routine.today_refresh
   - routine.fetch_window
-  - routine.hourly_check.triage
+  - routine.activity_scan.triage
 config_keys:
   - dayBoundaryHour
-  - hourlyCheckEnabled
-  - hourlyCheckIntervalMinutes
-  - hourlyCheckActiveStartHour
-  - hourlyCheckActiveEndHour
-  - hourlyCheckPrePassFreshnessMinutes
+  - activityScanEnabled
+  - activityScanIntervalMinutes
+  - activityScanActiveStartHour
+  - activityScanActiveEndHour
+  - activityScanPrePassFreshnessMinutes
+  - activityScanStage2Enabled
   - monthlyReviewEnabled
 ---
 
@@ -81,7 +82,7 @@ A routine is a unit of agent work that runs on a schedule, not in
 response to a message. The morning routine fires once per agent day at
 `dayBoundaryHour`; the evening review (18:00 daily), weekly review
 (Friday 19:00), and optional monthly review fire on fixed schedules in
-code; the hourly check coalesces accumulated observations on a
+code; the activity scan coalesces accumulated observations on a
 configurable cadence.
 
 ## Why This Concept Exists
@@ -92,7 +93,7 @@ up without being asked: it builds today, it logs to the journal, it
 files a retro for the week. They are the proactive surface.
 
 Each routine is a single ProcessKey — `routine.morning_routine`,
-`routine.hourly_check`, `routine.weekly_review`, etc. The dispatcher
+`routine.activity_scan`, `routine.weekly_review`, etc. The dispatcher
 treats them as just another event class; the only difference from a
 DM is who fired the event.
 
@@ -108,10 +109,10 @@ DM is who fired the event.
   review once it is past 18:00; weekly review across Fri–Sun). It never
   double-fires a routine that already succeeded.
 - **Tier policy**: **no routine runs the high tier by default.** Every
-  recurring routine — morning, evening, weekly, hourly check —
+  recurring routine — morning, evening, weekly, activity scan —
   defaults to **medium** (Sonnet on Claude). The **lite** (Haiku) tier
   is reserved for the morning routine's Stage B and for mechanical
-  sub-jobs (the hourly-check triage gate and the pre-pass fetcher). The
+  sub-jobs (the activity-scan triage gate and the pre-pass fetcher). The
   only high-tier ProcessKey in the whole system is `delegated_task_heavy`,
   which is opt-in and not a routine. See
   [Backends and Tiers](backends-and-tiers.md).
@@ -140,26 +141,28 @@ DM is who fired the event.
 | `routine.morning_routine_journal` | Stage B of every morning routine (`journal/daily/<yesterday>.md` authoring) | lite |
 | `routine.evening_review` | 18:00 daily (fixed) | medium |
 | `routine.weekly_review` | Friday 19:00 (fixed, one hour after evening review) | medium |
-| `routine.monthly_review` | Last day of month at 18:00, **default off** (`monthlyReviewEnabled`) | medium |
-| `routine.hourly_check` | Every `hourlyCheckIntervalMinutes` (default 60) inside the active window | medium |
+| `routine.monthly_review` | Last day of month at 18:00, **default off** — opt in by enabling the monthly-review agent at `/agents/monthly-review` | medium |
+| `routine.activity_scan` | Every N interval minutes (default 60) inside the active window — cadence set on `/agents/activity-scan` | medium |
 | `routine.today_refresh` | On calendar drift or a dashboard "refresh today" request (not a fixed cron) | medium |
 | `routine.fetch_window` | Spawned before each routine above that needs fresh upstream data | lite |
-| `routine.hourly_check.triage` | Stage 2 gate of every hourly check | lite |
-| `routine.custom.<slug>` | Operator-defined recurrence | medium (override per routine via `backend_tier`) |
+| `routine.activity_scan.triage` | Stage 2 of the activity-scan gate on low-signal ticks — runs only when `activityScanStage2Enabled` is on (default off; disabled ticks escalate straight to the full check) | lite |
+| `routine.custom.<slug>` | Legacy custom-routine recurrence — custom routines are now user Agents created on `/agents`; existing specs were converted at upgrade | medium |
 
 ## Where You See It in the Dashboard
 
-- **Settings → Routines** is where the hourly check active window
-  (`hourlyCheckActiveStartHour` / `hourlyCheckActiveEndHour`), the
-  hourly check cadence (`hourlyCheckIntervalMinutes`), and any custom
-  routines live. Morning, evening, weekly, and monthly fire times are
-  fixed in code and not surfaced here.
-- **Connections → Routines** is the unified view of next-fire times.
+- **Agents** (`/agents`) is the hub: every routine is an agent card
+  showing its schedule, status, and last run. The activity scan's
+  cadence and active window are edited on `/agents/activity-scan`
+  (Definition tab → Cadence card); each routine's rulebook is edited
+  on its Rulebook tab; custom recurring work is a user agent created
+  from the same page's New Agent dialog. Morning, evening, weekly, and
+  monthly fire times are fixed in code and not editable there.
 - **Activity** logs each routine run with its outcome.
 
 ## Related
 
 - [Morning Routine](../features/routines/morning-routine.md)
 - [Evening Review](../features/routines/evening-review.md)
-- [Hourly Check](../features/routines/hourly-check.md)
-- [Custom Routines](../features/routines/custom-routines.md)
+- [Activity Scan](../features/routines/activity-scan.md)
+- [Create a Recurring Agent](../guides/add-a-custom-routine.md)
+- [Custom Routines (Retired)](../features/routines/custom-routines.md)

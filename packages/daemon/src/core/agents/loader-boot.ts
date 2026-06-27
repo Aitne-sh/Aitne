@@ -18,6 +18,8 @@ import {
   type AgentsWatcherHandle,
 } from "./loader-watcher.js";
 import { createRecurringSchedulePort } from "./recurring-schedule-adapter.js";
+import { reconcileConfigGates } from "./config-gate-reconcile.js";
+import { migrateCustomRoutinesToAgents } from "./custom-routine-migration.js";
 import { listAllSkillSlugs } from "../release-assets.js";
 import { resolveUserSkillsRoot } from "../user-skills-root.js";
 
@@ -113,7 +115,27 @@ export function buildAgentLoadOptions(
  */
 export function bootstrapAgents(deps: BootstrapAgentsDeps): BootstrapAgentsResult {
   const opts = buildAgentLoadOptions(deps);
+  // One-time legacy custom-routine conversion (AGENTS_HUB_REDESIGN_PLAN §3).
+  // Runs BEFORE loadAgents so the loader pairs the generated user agent.md
+  // files with recurring_schedules rows in this same boot pass. Never throws
+  // out of boot.
+  try {
+    migrateCustomRoutinesToAgents(deps.db, {
+      contextDir: getContextDir(deps.config, deps.db),
+      userDir: opts.userDir,
+      timezone: resolveTimezone(undefined, deps.config.timezone),
+    });
+  } catch (err) {
+    logger.error({ err }, "Custom-routine migration failed (continuing boot)");
+  }
   const result = loadAgents(deps.db, opts);
+  // One-time legacy gate carry-over (activityScanEnabled / monthlyReviewEnabled
+  // → agents.enabled). Must run AFTER the loader has seeded the rows;
+  // runtime_state-flagged so it never re-applies (AGENTS_HUB_REDESIGN_PLAN §2).
+  reconcileConfigGates(deps.db, {
+    activityScanEnabled: deps.config.activityScanEnabled,
+    monthlyReviewEnabled: deps.config.monthlyReviewEnabled,
+  });
   if (result.invalid.length > 0) {
     logger.warn(
       { count: result.invalid.length, slugs: result.invalid.map((d) => d.slug) },

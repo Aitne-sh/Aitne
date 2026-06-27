@@ -14,6 +14,7 @@ function clarification(
     screenshotKey: null,
     askedAt: 1000,
     deadlineAt: 1000 + 5 * 60 * 1000,
+    deliveredAt: null,
     answer: null,
     answeredAt: null,
     resolved: false,

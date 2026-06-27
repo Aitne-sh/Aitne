@@ -406,6 +406,52 @@ describe("integrations API routes", () => {
     ]);
   });
 
+  it("PATCH /integrations/:key persists Notion routine fetch targets", async () => {
+    writeIntegrations(db, {
+      notion: {
+        mode: "direct",
+        deniedTools: [],
+        lastChangedAt: "2026-04-19T00:00:00Z",
+      },
+    });
+    const app = createIntegrationRoutes(makeDeps(db, dir));
+    const res = await app.request("/integrations/notion", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "direct",
+        fetchTargets: [
+          { label: "Project notes", locator: "https://notion.so/project" },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(readIntegrations(db).notion.fetchTargets).toEqual([
+      { label: "Project notes", locator: "https://notion.so/project" },
+    ]);
+  });
+
+  it("PATCH omitting fetchTargets preserves the stored allowlist", async () => {
+    writeIntegrations(db, {
+      notion: {
+        mode: "direct",
+        fetchTargets: [{ label: "Projects", locator: "https://notion.so/projects" }],
+        deniedTools: [],
+        lastChangedAt: "2026-04-19T00:00:00Z",
+      },
+    });
+    const app = createIntegrationRoutes(makeDeps(db, dir));
+    const res = await app.request("/integrations/notion", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "direct" }),
+    });
+    expect(res.status).toBe(200);
+    expect(readIntegrations(db).notion.fetchTargets).toEqual([
+      { label: "Projects", locator: "https://notion.so/projects" },
+    ]);
+  });
+
   it("PATCH rejects deniedTools entries unknown to the active connector", async () => {
     const app = createIntegrationRoutes(makeDeps(db, dir));
     const res = await app.request("/integrations/notion", {

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import { BACKEND_BADGE_VARIANTS, getBackendShortLabel } from "@/lib/backend-ui";
+import { TodayDrivers } from "@/components/cost/today-drivers";
 
 // recharts is heavy and only mounts after data resolves — code-split it
 // so the synchronous render of CostContent doesn't block the route
@@ -83,6 +84,16 @@ export function CostContent({ enabled = true }: { enabled?: boolean }) {
           ))}
         </div>
       </QueryResult>
+
+      {/* Today's spend drivers — agent-day scoped, independent of the
+          period selector below (which only drives the trend charts). */}
+      {costData?.todayBreakdown && (
+        <TodayDrivers
+          breakdown={costData.todayBreakdown}
+          todayCostUsd={costData.today.costUsd}
+          todaySessions={costData.today.sessions}
+        />
+      )}
 
       {/* Period selector */}
       <div className="flex flex-wrap items-center gap-3">

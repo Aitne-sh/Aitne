@@ -37,15 +37,15 @@ export function FileConflictBanner({
       role="alert"
       aria-live="assertive"
       className={cn(
-        "rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs",
+        "rounded-md border border-warning/50 bg-warning/10 p-3 text-xs",
         className,
       )}
     >
-      <div className="mb-2 flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+      <div className="mb-2 flex items-center gap-2 font-semibold text-warning">
         <AlertTriangle className="h-3.5 w-3.5" />
         File was modified by another process
       </div>
-      <p className="mb-3 text-amber-900/90 dark:text-amber-100/90">
+      <p className="mb-3 text-warning/90">
         The agent or another tab wrote to this file after you started editing.
         Your unsaved draft is preserved — choose how to proceed.
       </p>

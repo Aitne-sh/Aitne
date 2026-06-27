@@ -3,10 +3,10 @@
  *
  * Today only Claude (Anthropic Messages API) is implemented. Codex and
  * Gemini fall back to `unsupported` — the worker translates that into a
- * `summary_status='skipped'` row so the hourly_check skill drops back to
+ * `summary_status='skipped'` row so the activity_scan skill drops back to
  * the legacy fetch-on-doubt pattern. This keeps the summarizer optional
  * — non-Claude operators don't pay for it but also don't get the
- * downstream hourly_check savings until per-backend support lands.
+ * downstream activity_scan savings until per-backend support lands.
  *
  * The client deliberately avoids the agent SDK's session machinery: a
  * one-shot summarizer with no tools doesn't need workdir + skills + MCP

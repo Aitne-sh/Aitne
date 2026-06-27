@@ -1,4 +1,6 @@
 import type Database from "better-sqlite3";
+import { existsSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import { createLogger } from "../logging.js";
 import {
   MIGRATION_ID as CONTEXT_VAULT_MIGRATION_ID,
@@ -512,6 +514,376 @@ export const MIGRATIONS: readonly Migration[] = [
                  AND max_budget_usd >= 0.29 AND max_budget_usd <= 0.31)
             )`,
       ).run();
+    },
+  },
+  {
+    id: "0010-hourly-check-to-activity-scan",
+    description:
+      "(v0.1.10→next) — the 'Hourly Check' built-in is renamed 'Activity "
+      + "Scan' (slug hourly-check→activity-scan, process key "
+      + "routine.hourly_check→routine.activity_scan, settings keys "
+      + "hourlyCheck*→activityScan*). Carries the persisted identity across: "
+      + "(1) agents row id rename preserving enabled / enabled_overridden_at / "
+      + "metadata_json.runtime_window, moving child agent_executions rows "
+      + "first (the FK has no ON UPDATE CASCADE); (2) process_backend_config "
+      + "key rename for the routine + its .triage delegate — the fresh "
+      + "new-key preset row that applySchema seeds moments before this body "
+      + "runs is deleted so the operator's old row (model overrides, budget) "
+      + "wins; (3) settings-table key renames (canonical row wins if both "
+      + "exist); (4) runtime_state self-tuning ledger key renames for the two "
+      + "activity-scan knobs; (5) on-disk vault file renames "
+      + "policies/routines/hourly.md→activity-scan.md and "
+      + "knowledge/dossiers/hourly.md→activity-scan.md — including the "
+      + "pre-restructure root spellings routines/hourly.md and "
+      + "dossiers/hourly.md for Obsidian vaults whose 0004 consent is still "
+      + "pending (+ md_file_snapshots file_path rewrite so restore points "
+      + "follow the file). When agents holds BOTH slugs (mixed-version "
+      + "backup restore) the stale old row is dropped after re-homing its "
+      + "executions — the registry no longer carries it, so nothing else "
+      + "would ever clean it up. Historical "
+      + "agent_actions rows keep their old action_type / agent_id — readers "
+      + "union the legacy values (see db/activity-scan-signals.ts). Each step "
+      + "is independently gated, so a fresh DB (schema.ts already seeds the "
+      + "new names) is a recorded no-op and a re-run finds nothing to do.",
+    up(db, ctx) {
+      // (1) agents row — INSERT-copy → move children → DELETE old. This
+      // order is FK-safe whether or not foreign_keys is ON: the new parent
+      // exists before children point at it, and the old parent has no
+      // children left when it is deleted (its ON DELETE CASCADE finds
+      // nothing).
+      if (tableExists(db, "agents")) {
+        const oldRow = db
+          .prepare("SELECT 1 FROM agents WHERE id = 'hourly-check'")
+          .get();
+        const newRow = db
+          .prepare("SELECT 1 FROM agents WHERE id = 'activity-scan'")
+          .get();
+        if (oldRow && !newRow) {
+          db.prepare(
+            `INSERT INTO agents (
+               id, name, description, source, definition_path,
+               definition_hash, enabled, enabled_overridden_at, process_key,
+               schedule_kind, schedule_expression, schedule_timezone,
+               tags_json, stop_warning_json, recurring_schedule_id,
+               last_execution_id, metadata_json, created_at, updated_at
+             )
+             SELECT
+               'activity-scan', 'Activity Scan', description, source,
+               replace(definition_path, 'hourly-check', 'activity-scan'),
+               definition_hash, enabled, enabled_overridden_at,
+               'routine.activity_scan',
+               schedule_kind, schedule_expression, schedule_timezone,
+               tags_json, stop_warning_json, recurring_schedule_id,
+               last_execution_id, metadata_json, created_at, updated_at
+             FROM agents WHERE id = 'hourly-check'`,
+          ).run();
+          if (tableExists(db, "agent_executions")) {
+            db.prepare(
+              "UPDATE agent_executions SET agent_id = 'activity-scan' WHERE agent_id = 'hourly-check'",
+            ).run();
+          }
+          db.prepare("DELETE FROM agents WHERE id = 'hourly-check'").run();
+        } else if (oldRow && newRow) {
+          // Both rows exist — a DB restored from a mixed-version backup
+          // (or one that briefly ran a post-rename loader before this
+          // migration was recorded). The new row is the live identity the
+          // loader maintains; the old row is stale. Re-home its execution
+          // history, then drop it — the registry no longer carries
+          // 'hourly-check', so nothing would ever clean it up otherwise.
+          if (tableExists(db, "agent_executions")) {
+            db.prepare(
+              "UPDATE agent_executions SET agent_id = 'activity-scan' WHERE agent_id = 'hourly-check'",
+            ).run();
+          }
+          db.prepare("DELETE FROM agents WHERE id = 'hourly-check'").run();
+        }
+      }
+
+      // (2) process_backend_config — the operator's old-key row carries any
+      // model/budget overrides; the new-key row at this point can only be
+      // the preset applySchema seeded microseconds earlier on this same
+      // boot, so deleting it in favour of the renamed old row is lossless.
+      if (tableExists(db, "process_backend_config")) {
+        const keyPairs: ReadonlyArray<readonly [string, string]> = [
+          ["routine.hourly_check", "routine.activity_scan"],
+          ["routine.hourly_check.triage", "routine.activity_scan.triage"],
+        ];
+        for (const [oldKey, newKey] of keyPairs) {
+          const exists = db
+            .prepare(
+              "SELECT 1 FROM process_backend_config WHERE process_key = ?",
+            )
+            .get(oldKey);
+          if (!exists) continue;
+          db.prepare(
+            "DELETE FROM process_backend_config WHERE process_key = ?",
+          ).run(newKey);
+          db.prepare(
+            "UPDATE process_backend_config SET process_key = ? WHERE process_key = ?",
+          ).run(newKey, oldKey);
+        }
+      }
+
+      // (3) settings rows. Literal pairs (a migration is a point-in-time
+      // snapshot — do not import the live alias map). Canonical row wins
+      // when both exist (the operator already wrote the new key via a
+      // post-upgrade PATCH before this migration ran — possible only on
+      // DBs restored from mixed-version backups).
+      if (tableExists(db, "settings")) {
+        const settingPairs: ReadonlyArray<readonly [string, string]> = [
+          ["hourlyCheckEnabled", "activityScanEnabled"],
+          ["hourlyCheckIntervalMinutes", "activityScanIntervalMinutes"],
+          ["hourlyCheckActiveStartHour", "activityScanActiveStartHour"],
+          ["hourlyCheckActiveEndHour", "activityScanActiveEndHour"],
+          ["hourlyCheckMinObservations", "activityScanMinObservations"],
+          ["hourlyCheckStage2Enabled", "activityScanStage2Enabled"],
+          ["hourlyCheckHeartbeatHours", "activityScanHeartbeatHours"],
+          [
+            "hourlyCheckLowSignalPendingCeiling",
+            "activityScanLowSignalPendingCeiling",
+          ],
+          [
+            "hourlyCheckPrePassFreshnessMinutes",
+            "activityScanPrePassFreshnessMinutes",
+          ],
+          ["hourlyObservationCharBudget", "activityScanObservationCharBudget"],
+        ];
+        for (const [oldKey, newKey] of settingPairs) {
+          const oldExists = db
+            .prepare("SELECT 1 FROM settings WHERE key = ?")
+            .get(oldKey);
+          if (!oldExists) continue;
+          const newExists = db
+            .prepare("SELECT 1 FROM settings WHERE key = ?")
+            .get(newKey);
+          if (newExists) {
+            db.prepare("DELETE FROM settings WHERE key = ?").run(oldKey);
+          } else {
+            db.prepare("UPDATE settings SET key = ? WHERE key = ?").run(
+              newKey,
+              oldKey,
+            );
+          }
+        }
+      }
+
+      // (4) self-tuning ledger keys (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4).
+      if (tableExists(db, "runtime_state")) {
+        const ledgerPairs: ReadonlyArray<readonly [string, string]> = [
+          [
+            "self_tuning:hourlyCheckPrePassFreshnessMinutes",
+            "self_tuning:activityScanPrePassFreshnessMinutes",
+          ],
+          [
+            "self_tuning:hourlyCheckLowSignalPendingCeiling",
+            "self_tuning:activityScanLowSignalPendingCeiling",
+          ],
+        ];
+        for (const [oldKey, newKey] of ledgerPairs) {
+          const oldExists = db
+            .prepare("SELECT 1 FROM runtime_state WHERE key = ?")
+            .get(oldKey);
+          if (!oldExists) continue;
+          const newExists = db
+            .prepare("SELECT 1 FROM runtime_state WHERE key = ?")
+            .get(newKey);
+          if (newExists) {
+            db.prepare("DELETE FROM runtime_state WHERE key = ?").run(oldKey);
+          } else {
+            db.prepare("UPDATE runtime_state SET key = ? WHERE key = ?").run(
+              newKey,
+              oldKey,
+            );
+          }
+        }
+      }
+
+      // (5) vault files. Gated per file (old exists, new absent); a vault
+      // that never materialized either file is a no-op. Snapshot paths are
+      // rewritten so `POST /api/context/snapshots/restore` finds the
+      // file's history under its new name.
+      //
+      // The PRE-RESTRUCTURE spellings (`routines/`, `dossiers/` at the
+      // vault root) matter on Obsidian vaults whose 0004 consent is still
+      // pending: `resolveVaultRestructureConsent` filters 0004 out of the
+      // run list but this migration still runs and records. Renaming the
+      // legacy-located files here keeps them aligned, and 0004's
+      // `dir-rename` manifest entries (`routines → policies/routines`,
+      // `dossiers → knowledge/dossiers`) move the renamed files to their
+      // canonical homes when the user eventually consents. Without this,
+      // a deferred-consent vault would keep `routines/hourly.md` forever —
+      // this migration never re-runs once recorded.
+      if (!ctx) {
+        throw new Error(
+          "Migration 0010-hourly-check-to-activity-scan requires MigrationContext (contextDir); caller passed only db.",
+        );
+      }
+      const fileRenames: ReadonlyArray<readonly [string, string]> = [
+        ["policies/routines/hourly.md", "policies/routines/activity-scan.md"],
+        ["knowledge/dossiers/hourly.md", "knowledge/dossiers/activity-scan.md"],
+        ["routines/hourly.md", "routines/activity-scan.md"],
+        ["dossiers/hourly.md", "dossiers/activity-scan.md"],
+      ];
+      for (const [oldRel, newRel] of fileRenames) {
+        const oldAbs = join(ctx.contextDir, oldRel);
+        const newAbs = join(ctx.contextDir, newRel);
+        if (existsSync(oldAbs) && !existsSync(newAbs)) {
+          renameSync(oldAbs, newAbs);
+        }
+        if (tableExists(db, "md_file_snapshots")) {
+          db.prepare(
+            "UPDATE md_file_snapshots SET file_path = ? WHERE file_path = ?",
+          ).run(newRel, oldRel);
+        }
+      }
+    },
+  },
+  {
+    id: "0011-research-clusters-journal-enqueue-stamp",
+    description:
+      "RESEARCH_CLUSTER_COST_FIX_PLAN.md F1 (v0.1.10→next) — add the "
+      + "nullable `journal_update_enqueued_on` column (TEXT, local "
+      + "agent-day 'YYYY-MM-DD') to `browser_research_clusters`. The "
+      + "day-boundary fan-out stamps it BEFORE enqueueing "
+      + "`routine.research_cluster_update`, so a replayed day-boundary "
+      + "callback (wake catch-up fires on every detected sleep gap >= 5 "
+      + "min — every macOS maintenance DarkWake) can no longer re-enqueue "
+      + "the same cluster within one agent day (the 2026-06-11 incident "
+      + "fired ~25 runs in ~5h for one cluster). Fresh installs get the "
+      + "column from the schema.ts CREATE; this ALTER covers pre-existing "
+      + "tables and is gated on columnExists so a fresh DB is a recorded "
+      + "no-op.",
+    up(db) {
+      // Empty-DB safety: columnExists returns false for a missing table,
+      // so without this short-circuit a bare :memory: test DB would
+      // attempt the ALTER and throw. The runner still records the id.
+      if (!tableExists(db, "browser_research_clusters")) return;
+      if (
+        !columnExists(
+          db,
+          "browser_research_clusters",
+          "journal_update_enqueued_on",
+        )
+      ) {
+        db.exec(
+          "ALTER TABLE browser_research_clusters ADD COLUMN journal_update_enqueued_on TEXT",
+        );
+      }
+    },
+  },
+  {
+    id: "0012-research-budget-bump",
+    description:
+      "RESEARCH_CLUSTER_COST_FIX_PLAN.md F3 (v0.1.10→next) — raise the "
+      + "per-turn budget ceilings for `routine.research_cluster_update` "
+      + "($0.05→$0.50) and `routine.research_offer_dm` ($0.02→$0.15) for "
+      + "upgrading installs still on the seeded defaults. The SDK budget "
+      + "check only fires between turns, and a cold-prompt-cache run "
+      + "writes the full session prefix (~$0.13-0.30 observed on Haiku) "
+      + "before the check can abort — the old caps killed every cold run "
+      + "AFTER the money was spent, so the cluster journal was never "
+      + "written (46 runs, zero context writes). Must ship with the F1 "
+      + "enqueue stamp (migration 0011): with dedup alone the once-"
+      + "nightly run is always cold → always over the old cap → the "
+      + "feature stays dead. Backend-aware: applyDefaultPresets stores "
+      + "post-hoc-scaled budgets and the lite factor for codex/gemini is "
+      + "2.5, so the OLD defaults are $0.05/$0.13 (cluster_update) and "
+      + "$0.02/$0.05 (offer_dm) and the NEW values are the bases scaled "
+      + "the same way → $0.50/$1.25 and $0.15/$0.38. Fresh installs get "
+      + "the new values from the schema seed (cluster_update) + the "
+      + "envelope-overrides map (offer_dm has no seed row). Gated so it "
+      + "ONLY moves preset rows still in the OLD per-backend band — "
+      + "operator-pinned rows (updated_by='user') and rows already at a "
+      + "custom value are left untouched. Idempotent: after the bump no "
+      + "row sits in the old band, and the recorded id short-circuits a "
+      + "re-run anyway.",
+    up(db) {
+      // Empty-DB safety (e.g. the runner's own unit tests run on a bare
+      // :memory: db): if applySchema never ran, the table is absent — the
+      // runner still records the id so a later boot does not re-evaluate.
+      if (!tableExists(db, "process_backend_config")) return;
+      // Literals are point-in-time snapshots of base x lite factor
+      // (2.5 for codex/gemini, 1 for claude/opencode), mirroring the
+      // 0006/0009 template: 0.05 x 2.5 = 0.13 (2-decimal rounded),
+      // 0.50 x 2.5 = 1.25, 0.02 x 2.5 = 0.05, 0.15 x 2.5 = 0.38. The
+      // ±0.01 bands tolerate float dust without clobbering a row
+      // already moved to a custom value.
+      db.prepare(
+        `UPDATE process_backend_config
+            SET max_budget_usd = CASE
+              WHEN main_backend IN ('codex', 'gemini') THEN 1.25
+              ELSE 0.5
+            END
+          WHERE process_key = 'routine.research_cluster_update'
+            AND updated_by = 'preset'
+            AND (
+              (main_backend IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.12 AND max_budget_usd <= 0.14)
+              OR (main_backend NOT IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.04 AND max_budget_usd <= 0.06)
+            )`,
+      ).run();
+      db.prepare(
+        `UPDATE process_backend_config
+            SET max_budget_usd = CASE
+              WHEN main_backend IN ('codex', 'gemini') THEN 0.38
+              ELSE 0.15
+            END
+          WHERE process_key = 'routine.research_offer_dm'
+            AND updated_by = 'preset'
+            AND (
+              (main_backend IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.04 AND max_budget_usd <= 0.06)
+              OR (main_backend NOT IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.01 AND max_budget_usd <= 0.03)
+            )`,
+      ).run();
+    },
+  },
+  {
+    id: "0013-browser-task-delivery-timestamps",
+    description:
+      "BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 — add delivered_at recovery "
+      + "keys for browser_task reports and browser_task_clarifications so "
+      + "task.delivery can recover without double-sending.",
+    up(db) {
+      if (
+        tableExists(db, "browser_task")
+        && !columnExists(db, "browser_task", "delivered_at")
+      ) {
+        db.exec("ALTER TABLE browser_task ADD COLUMN delivered_at INTEGER");
+      }
+      if (
+        tableExists(db, "browser_task_clarifications")
+        && !columnExists(db, "browser_task_clarifications", "delivered_at")
+      ) {
+        db.exec(
+          "ALTER TABLE browser_task_clarifications ADD COLUMN delivered_at INTEGER",
+        );
+      }
+    },
+  },
+  {
+    id: "0014-background-task-significance-criteria",
+    description:
+      "BACKGROUND_TASK_RUNNER_DESIGN.md Phase 4 — add the nullable "
+      + "`significance_criteria` column (TEXT, JSON array of concrete "
+      + "conditions) to `background_task` for the if_significant criteria "
+      + "DSL (§4.3). The DM agent writes structured criteria at spawn; the "
+      + "worker checks each against its result and sets notify accordingly. "
+      + "Fresh installs get the column from the schema.ts CREATE body; this "
+      + "ALTER covers pre-existing tables and is gated on columnExists so a "
+      + "fresh DB (and a re-boot) is a recorded no-op.",
+    up(db) {
+      // Empty-DB safety: columnExists returns false for a missing table,
+      // so without this short-circuit a bare :memory: test DB would
+      // attempt the ALTER and throw. The runner still records the id.
+      if (!tableExists(db, "background_task")) return;
+      if (!columnExists(db, "background_task", "significance_criteria")) {
+        db.exec(
+          "ALTER TABLE background_task ADD COLUMN significance_criteria TEXT",
+        );
+      }
     },
   },
 ];

@@ -16,7 +16,7 @@ issues warrant prompt awareness even when the user is mid-task.
 
 1. **Default: DM at `high` priority.** Security alerts surface
    vulnerabilities the user is unlikely to discover on their own. Do not
-   wait for the hourly check.
+   wait for the activity scan.
 
 2. **Stay silent only when** the same alert already triggered a DM
    within the past 24 hours (check by `notificationId` in observations

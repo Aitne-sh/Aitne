@@ -23,7 +23,7 @@ ask_examples:
   - What does pressing "?" do in the dashboard?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-10
 keywords:
   - shortcut
   - hotkey
@@ -65,7 +65,7 @@ regardless of where focus sits.
 ## Examples
 
 - Press `Cmd+K`, type "timezone", and hit Enter to jump straight to the
-  Timezone field on `/settings/schedule`.
+  Timezone field on `/settings/hours`.
 - On any screen, press `?` to ask a question about what you are looking
   at; the help slide-over opens pre-scoped to that page's doc.
 - While drafting a message in `/chat`, press `Cmd+Enter` to send without

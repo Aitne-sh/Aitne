@@ -45,7 +45,7 @@ const CIRCUIT_BACKOFF_MULTIPLIER = 4;
 
 /**
  * Default active-hours window for delegated-sync cadences. Mirrors Hourly
- * Check defaults (`hourlyCheckActiveStartHour=4`, `hourlyCheckActiveEndHour=24`)
+ * Check defaults (`activityScanActiveStartHour=4`, `activityScanActiveEndHour=24`)
  * so the two schedules align unless an operator overrides one or the other.
  * See `docs/design/appendices/delegated-sync-opt-in.md`.
  *
@@ -153,7 +153,7 @@ interface DelegatedSyncRuntimeConfig {
   /**
    * Shared active-hours window applied to every cadence. Local-time hours
    * in the daemon's `timezone`; `[startHour, endHour)`. When unset, defaults
-   * to `[4, 24)` to mirror the Hourly Check window.
+   * to `[4, 24)` to mirror the Activity Scan window.
    */
   activeStartHour?: number;
   activeEndHour?: number;
@@ -413,7 +413,7 @@ const CALENDAR_24H_CADENCE: DelegatedSyncCadenceDefinition = {
  *   - Window is the last 7 days. Reconcile keys by `(integration,
  *     window_key)` so the partition is wide enough that a recent thread
  *     with a fresh reply doesn't drop out and falsely emit `deleted`. The
- *     LLM hourly check still post-filters to "last hour" inside its own
+ *     LLM activity scan still post-filters to "last hour" inside its own
  *     decision flow; this cadence's job is structural diff, not selection.
  *   - `query="newer_than:7d"` Gmail search operator. `pageSize` /
  *     `max_results` / `maxResults` differs by backend (Claude / Codex /
@@ -424,7 +424,7 @@ const GMAIL_INBOX_7D_CADENCE: DelegatedSyncCadenceDefinition = {
   windowKey: "inbox:7d",
   displayName: "Gmail — inbox (last 7 days)",
   description:
-    "Polls thread-level changes in the last 7 days of inbox. Surfaces new threads and replies for the hourly check.",
+    "Polls thread-level changes in the last 7 days of inbox. Surfaces new threads and replies for the activity scan.",
   defaultIntervalSeconds: 30 * 60,
   softFloorSeconds: 15 * 60,
   maxResults: 25,
@@ -448,7 +448,7 @@ const GMAIL_INBOX_7D_CADENCE: DelegatedSyncCadenceDefinition = {
  *     and lets reconcile + the per-page `lastEditedTime` payload + the
  *     Notion normalizer's `inWindow` predicate sort out true churn.
  *   - The window's `created_date_range.start_date` arg is per the same
- *     date format the hourly_check prompt uses (`YYYY-MM-DD`), to mirror
+ *     date format the activity_scan prompt uses (`YYYY-MM-DD`), to mirror
  *     what the LLM-driven path was already producing — connectors uniformly
  *     accept that.
  */
@@ -717,11 +717,11 @@ export class DelegatedSyncWorker implements Observer {
    * Native rows are skipped by `backendForCadence` returning null — their
    * observations come from the in-turn `routine.fetch_window` pre-pass
    * instead, see `docs/design/appendices/native-integration-mode.md`
-   * §"Polling, observers, and the hourly-check threshold".
+   * §"Polling, observers, and the activity-scan threshold".
    *
    * Why this exists: when every cadence is disabled (the post-Phase-9
    * default), Gmail / Notion observations would otherwise dry up entirely
-   * — the delegated `routine.hourly_check` task flow's Step 0a / 0c rely
+   * — the delegated `routine.activity_scan` task flow's Step 0a / 0c rely
    * on `mail:lifecycle` / `notion:<db>` rows the worker writes server-
    * side, and the agent prompt is explicitly told NOT to call the
    * gmail / notion `/reconcile` route directly (would poison the worker's
@@ -730,7 +730,7 @@ export class DelegatedSyncWorker implements Observer {
    * opted into a per-cadence schedule.
    *
    * Active-hours are NOT consulted: this method runs only because the
-   * hourly check itself fired, which already passed `hourlyCheckActive*`
+   * activity scan itself fired, which already passed `activityScanActive*`
    * gating. The cadence-side `activeStartHour` / `activeEndHour` window
    * applies only to the worker's own 60 s tick.
    *
@@ -743,10 +743,10 @@ export class DelegatedSyncWorker implements Observer {
    * circuit-breaker) and surfaced through the next `getStatus()` snapshot;
    * this method does not throw.
    */
-  async runDisabledCadencesForHourlyCheck(): Promise<void> {
+  async runDisabledCadencesForActivityScan(): Promise<void> {
     if (this.tickRunning) {
       logger.debug(
-        "Skipping hourly-check delegated refresh — worker tick already in flight",
+        "Skipping activity-scan delegated refresh — worker tick already in flight",
       );
       return;
     }
@@ -1338,7 +1338,7 @@ export function resolveActiveHours(
 /**
  * `true` when `now` falls inside `[startHour, endHour)` in the daemon's
  * configured timezone. `endHour=24` is exclusive — i.e. covers up to
- * 23:59:59. Mirrors the semantics of Hourly Check's window so an operator
+ * 23:59:59. Mirrors the semantics of Activity Scan's window so an operator
  * who already understands one understands the other.
  */
 export function isWithinActiveHours(

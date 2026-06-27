@@ -81,7 +81,7 @@ async function main() {
         prompt: PROMPT,
         context: "",
         event: {
-          type: "routine.hourly_check",
+          type: "routine.activity_scan",
           source: "smoke",
           priority: 1,
           timestamp: new Date(),

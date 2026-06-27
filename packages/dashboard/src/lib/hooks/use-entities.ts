@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { Domain, EntityType } from "@aitne/shared";
 import { api } from "@/lib/api-client";
 
@@ -43,6 +43,10 @@ export function useEntitiesBySource(source: string | null, limit = 100) {
       api.get<EntitiesBySourceResponse>("/entities", { source: source!, limit }),
     enabled: !!source,
     staleTime: 30_000,
+    // Keep the previous source's entities on screen while a newly selected
+    // source loads, so the results pane doesn't flash a skeleton and reset
+    // its scroll on each source switch.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -67,6 +71,10 @@ export function useEntitiesByDomainTypeDate(args: {
       }),
     enabled,
     staleTime: 30_000,
+    // Keep the current results on screen while a new domain/type/date/query
+    // loads, so the results pane doesn't flash a skeleton and reset its
+    // scroll on each filter change.
+    placeholderData: keepPreviousData,
   });
 }
 

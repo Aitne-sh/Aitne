@@ -14,10 +14,14 @@ import {
   isAgentTaskEvent,
   isScheduledEvent,
   isScheduledBrowserTaskEvent,
+  isScheduledBackgroundTaskEvent,
   isScheduledDmEvent,
+  isTaskDeliveryEvent,
   isKnowledgeImportEvent,
   parseSqliteUtcMs,
   type ScheduledBrowserTaskEvent,
+  type ScheduledBackgroundTaskEvent,
+  type TaskDeliveryAsset,
 } from "@aitne/shared";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -53,6 +57,7 @@ import type { TodayWriteLockManager } from "./today-write-lock.js";
 import type { RoadmapWriteLockManager } from "./roadmap-write-lock.js";
 import type { AgentWriteTracker } from "../safety/agent-write-tracker.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
+import type { OutboundAttachmentRef } from "../adapters/types.js";
 import type { VoiceTranscriber } from "../services/voice/transcriber.js";
 import type { AgentExecutionTracker } from "./agents/agent-execution-tracker.js";
 import type { AgentExecutionTrigger } from "../db/agent-executions-store.js";
@@ -86,10 +91,10 @@ import {
   type IAuditLogger,
   type BangCommandDetail,
   type DailyWriteAuditDetail,
-  type TriggerHourlyCheckSkipReason,
+  type TriggerActivityScanSkipReason,
   type SetupMode,
-  type TriggerHourlyCheckOptions,
-  type TriggerHourlyCheckResult,
+  type TriggerActivityScanOptions,
+  type TriggerActivityScanResult,
   type InFlightExecutionInfo,
 } from "./dispatcher-types.js";
 export {
@@ -106,26 +111,26 @@ export type {
   IAuditLogger,
   BangCommandDetail,
   DailyWriteAuditDetail,
-  TriggerHourlyCheckSkipReason,
+  TriggerActivityScanSkipReason,
   SetupMode,
-  TriggerHourlyCheckOptions,
-  TriggerHourlyCheckResult,
+  TriggerActivityScanOptions,
+  TriggerActivityScanResult,
   InFlightExecutionInfo,
 };
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import { DispatcherErrorRouter } from "./dispatcher-error-handling.js";
 import { ResultProcessor } from "./dispatcher-result-processor.js";
-import { HourlyCheckCoordinator } from "./dispatcher-hourly-check.js";
-import type { QueueMorningRoutineWake } from "./dispatcher-hourly-check.js";
+import { ActivityScanCoordinator } from "./dispatcher-activity-scan.js";
+import type { QueueMorningRoutineWake } from "./dispatcher-activity-scan.js";
 import { morningRoutineRanToday } from "../bootstrap/schedule-helpers.js";
 
 /**
  * Routine names that depend on `routine.morning_routine` having completed
  * successfully for the current agent-day. The pre-routine gate in
  * `dispatch()` enqueues a morning_routine wake and skips the dependent
- * routine when the predicate trips — hourly_check is gated separately
- * inside `HourlyCheckCoordinator.trigger` because it has its own entry
- * point (`triggerHourlyCheck`) before any event hits the bus.
+ * routine when the predicate trips — activity_scan is gated separately
+ * inside `ActivityScanCoordinator.trigger` because it has its own entry
+ * point (`triggerActivityScan`) before any event hits the bus.
  */
 const REVIEW_ROUTINES_REQUIRING_MORNING = new Set<string>([
   "evening_review",
@@ -146,6 +151,10 @@ import {
   SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS,
 } from "./dispatcher-scheduled-tasks.js";
 import { MessageHandler } from "./dispatcher-message-handler.js";
+import {
+  TASK_DELIVERY_GATE_KEYS,
+  handleTaskDeliveryInsideGate,
+} from "./dispatcher-task-delivery.js";
 
 export { SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS };
 
@@ -227,6 +236,16 @@ export class EventDispatcher {
     | import("../services/browser-task/browser-task-runner.js").BrowserTaskNotifier
     | null = null;
   /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §4.2 — the dispatcher routes
+   * `scheduled.background_task` events to this runner. Wired at startup
+   * from `bootstrap/event-pipeline.ts` via `setBackgroundTaskRunner`.
+   * Null when the runner factory has not landed — the dispatch branch
+   * flips the row to `failed (runner_unavailable)` so it doesn't park.
+   */
+  private backgroundTaskRunner:
+    | import("../services/background-task/background-task-runner.js").BackgroundTaskRunner
+    | null = null;
+  /**
    * Current setup mode — scope-agnostic flag that survives internal
    * direct-message session refresh (day boundary, stale flag, etc). Previously this
    * was a `Map<sessionId, mode>` keyed by `conversation_sessions.id`, but the
@@ -251,42 +270,42 @@ export class EventDispatcher {
    *  keep their own lane. SCHEDULED-DM-IMPLEMENTATION-PLAN §3.6 — also
    *  used by `scheduled.dm` to acquire BOTH owner-facing scopes in
    *  lex-sorted (deadlock-free) order. */
-  private readonly sessionGates = new SessionGateRegistry();
+  private readonly sessionGates: SessionGateRegistry;
   /** Dedup guard: timestamp of the last roadmap_refresh emission */
   private lastRoadmapRefreshEmitMs = 0;
   private morningRoutineInProgress = false;
-  private hourlyCheckInProgress = false;
+  private activityScanInProgress = false;
   /**
    * Wall-clock timestamp (ms since epoch) of the most recent flip of
-   * `hourlyCheckInProgress` to `true`, or `null` when the flag is false.
+   * `activityScanInProgress` to `true`, or `null` when the flag is false.
    *
-   * Paired with `HOURLY_CHECK_FLAG_MAX_AGE_MS` to break the silent-stall
+   * Paired with `ACTIVITY_SCAN_FLAG_MAX_AGE_MS` to break the silent-stall
    * pattern where the flag is set true at enqueue time but the matching
    * `dispatchSafe` finally never runs — currently possible when the
    * EventBus evicts/drops the queued routine event under `put()` pressure
    * (heap-js drops the lowest-priority entry silently when `heap.size() >=
    * maxSize=1000`). Without the timestamp the flag stays `true` until
    * process restart and every subsequent hourly tick short-circuits with
-   * `hourly_check_in_progress`.
+   * `activity_scan_in_progress`.
    *
-   * Read side (`isHourlyCheckInProgress` callback below) checks the age
+   * Read side (`isActivityScanInProgress` callback below) checks the age
    * and auto-clears when it exceeds the bound, surfacing the recovery via
    * a warn log so the operator sees the EventBus pressure event.
    */
-  private hourlyCheckInProgressAt: number | null = null;
+  private activityScanInProgressAt: number | null = null;
   /**
-   * Upper bound for how long `hourlyCheckInProgress=true` can plausibly
+   * Upper bound for how long `activityScanInProgress=true` can plausibly
    * be valid before we treat it as stuck and force-clear.
    *
-   * Sized generously above the realistic Stage-3 hourly_check ceiling
-   * (fetch_window pre-pass ~30–60 s + Sonnet hourly_check session
+   * Sized generously above the realistic Stage-3 activity_scan ceiling
+   * (fetch_window pre-pass ~30–60 s + Sonnet activity_scan session
    * ~1–3 min) so a slow but normal run is never falsely cleared. Sized
    * well below an entire agent-day so a stuck flag recovers within a
    * single hourly cron cycle's worst case (default cadence 60 min).
    * The 30-minute window is comfortably outside any plausible "still
    * running" interpretation and inside one full hourly slot.
    */
-  private static readonly HOURLY_CHECK_FLAG_MAX_AGE_MS = 30 * 60 * 1000;
+  private static readonly ACTIVITY_SCAN_FLAG_MAX_AGE_MS = 30 * 60 * 1000;
   /**
    * P22 §3.4 — wired by `index.ts` after the daemon's data dir + skills root
    * are known. Returns a `{runId, runToken, workdirPath, targetSkills}` tuple
@@ -322,12 +341,25 @@ export class EventDispatcher {
    *  dispatcher skips attachment staging + outbound collection. */
   private attachmentStore: AttachmentStore | null = null;
 
+  /** Injected lazily via `setTaskDeliveryAssetResolver` — optional.
+   *  Resolves a task's deliverable assets (browser-task screenshots +
+   *  worker-written files) to outbound attachments for the `task.delivery`
+   *  idle + active branches (the ingest hook is constructed after this
+   *  dispatcher, so it is wired post-construction like the attachment
+   *  store). When null, task-delivery DMs are text-only. */
+  private taskDeliveryAssetResolver:
+    | ((
+        platform: string,
+        assets: readonly TaskDeliveryAsset[],
+      ) => Promise<readonly OutboundAttachmentRef[]>)
+    | null = null;
+
   /** Injected lazily via `setDelegatedSyncRefresh` — optional. When null,
-   *  hourly check fires without first refreshing delegated-mode snapshots,
+   *  activity scan fires without first refreshing delegated-mode snapshots,
    *  matching the pre-Phase-9 behaviour. Wired in production when at
    *  least one integration is in delegated mode. See
    *  `docs/design/appendices/delegated-sync-opt-in.md` and the worker's
-   *  `runDisabledCadencesForHourlyCheck` method. */
+   *  `runDisabledCadencesForActivityScan` method. */
   private delegatedSyncRefresh: (() => Promise<void>) | null = null;
 
   /**
@@ -349,7 +381,7 @@ export class EventDispatcher {
    * Injected lazily via `setEventBroadcaster` — optional. When wired, the
    * dispatcher emits `routine_started` / `routine_completed` SSE events at
    * the `dispatchSafe` chokepoint so the dashboard can render real-time
-   * progress for autonomous routines (morning_routine, hourly_check,
+   * progress for autonomous routines (morning_routine, activity_scan,
    * roadmap_refresh, evening/weekly/monthly reviews, etc.).
    *
    * Failure to broadcast is non-fatal: the throw is swallowed and logged
@@ -431,14 +463,14 @@ export class EventDispatcher {
    */
   private readonly resultProcessor: ResultProcessor;
   /**
-   * Phase D-2 coordinator: owns `triggerHourlyCheck` and the
+   * Phase D-2 coordinator: owns `triggerActivityScan` and the
    * cost-reduction-structural §B three-stage gate. Borrows live
-   * accessors for the dispatcher's `hourlyCheckInProgress` flag so the
+   * accessors for the dispatcher's `activityScanInProgress` flag so the
    * pre-existing C1 atomic check-and-set semantics survive the split.
    */
   /**
    * docs/design/appendices/routine-data-acquisition.md Phase 4 / D1 — shared pre-pass
-   * runner for `routine.fetch_window`. Injected into HourlyCheckCoordinator
+   * runner for `routine.fetch_window`. Injected into ActivityScanCoordinator
    * (D3), MorningRoutineRunner (D2), and ScheduledTaskRunner (D4) so
    * every routine that has rows in `ROUTINE_WINDOWS` gets the same
    * fetcher session ahead of its parent dispatch. Pure helper, no
@@ -462,7 +494,7 @@ export class EventDispatcher {
    */
   private readonly spawnGateSkipAuditAt = new Map<string, number>();
   private static readonly SPAWN_GATE_SKIP_AUDIT_THROTTLE_MS = 10 * 60 * 1000;
-  private readonly hourlyCheck: HourlyCheckCoordinator;
+  private readonly activityScan: ActivityScanCoordinator;
   /**
    * Phase D-2 coordinator: owns morning-routine execution end-to-end
    * (lock acquisition, prompt-variant selection, retry chain, today.md
@@ -510,7 +542,9 @@ export class EventDispatcher {
     private readonly services?: ServiceRegistry,
     private readonly roadmapWriteLock?: RoadmapWriteLockManager,
     private readonly writeTracker?: AgentWriteTracker,
+    sessionGates?: SessionGateRegistry,
   ) {
+    this.sessionGates = sessionGates ?? new SessionGateRegistry();
     this.reactiveSem = new Semaphore(config.maxReactiveSessions);
     this.autonomousSem = new Semaphore(config.maxConcurrentSessions);
     const messageColumns = new Set(
@@ -545,7 +579,7 @@ export class EventDispatcher {
         this.agentExecutionTracker?.recordOutcome(event.correlationId, outcome),
     });
     // docs/design/appendices/routine-data-acquisition.md Phase 4 / D1 — shared pre-pass
-    // runner consumed by HourlyCheckCoordinator (D3), MorningRoutineRunner
+    // runner consumed by ActivityScanCoordinator (D3), MorningRoutineRunner
     // (D2), and ScheduledTaskRunner.executeDefault (D4). Constructed
     // before all three so it can be injected as a dep rather than
     // lazily resolved.
@@ -573,7 +607,7 @@ export class EventDispatcher {
       // skips its pre-pass progress emits cleanly.
       getEventBroadcaster: () => this.eventBroadcaster,
     });
-    this.hourlyCheck = new HourlyCheckCoordinator({
+    this.activityScan = new ActivityScanCoordinator({
       db: this.db,
       config: this.config,
       eventBus: this.eventBus,
@@ -584,29 +618,29 @@ export class EventDispatcher {
       prompt: this.prompt,
       fetchWindowRunner: this.fetchWindowRunner,
       getDelegatedSyncRefresh: () => this.delegatedSyncRefresh,
-      setHourlyCheckInProgress: (value) => {
-        this.hourlyCheckInProgress = value;
-        this.hourlyCheckInProgressAt = value ? Date.now() : null;
+      setActivityScanInProgress: (value) => {
+        this.activityScanInProgress = value;
+        this.activityScanInProgressAt = value ? Date.now() : null;
       },
-      isHourlyCheckInProgress: () => {
-        if (!this.hourlyCheckInProgress) return false;
-        // Stale-flag recovery — see `hourlyCheckInProgressAt` doc-comment.
+      isActivityScanInProgress: () => {
+        if (!this.activityScanInProgress) return false;
+        // Stale-flag recovery — see `activityScanInProgressAt` doc-comment.
         // The branch fires only when an enqueued event never reached
         // `dispatchSafe`'s finally (EventBus eviction is the realistic
         // cause; a future code path that forgets to reset the flag would
         // also self-heal here within one cron cycle).
-        if (this.hourlyCheckInProgressAt !== null) {
-          const ageMs = Date.now() - this.hourlyCheckInProgressAt;
-          if (ageMs > EventDispatcher.HOURLY_CHECK_FLAG_MAX_AGE_MS) {
+        if (this.activityScanInProgressAt !== null) {
+          const ageMs = Date.now() - this.activityScanInProgressAt;
+          if (ageMs > EventDispatcher.ACTIVITY_SCAN_FLAG_MAX_AGE_MS) {
             logger.warn(
               {
                 ageMs,
-                maxAgeMs: EventDispatcher.HOURLY_CHECK_FLAG_MAX_AGE_MS,
+                maxAgeMs: EventDispatcher.ACTIVITY_SCAN_FLAG_MAX_AGE_MS,
               },
-              "hourlyCheckInProgress flag exceeded max age — auto-clearing (likely EventBus drop or missed dispatchSafe finally)",
+              "activityScanInProgress flag exceeded max age — auto-clearing (likely EventBus drop or missed dispatchSafe finally)",
             );
-            this.hourlyCheckInProgress = false;
-            this.hourlyCheckInProgressAt = null;
+            this.activityScanInProgress = false;
+            this.activityScanInProgressAt = null;
             return false;
           }
         }
@@ -727,7 +761,7 @@ export class EventDispatcher {
       diagnoseTodayMdState: () => this.scheduledTasks.diagnoseTodayMdState(),
       isRoadmapStale: () => this.isRoadmapStale(),
       emitRoadmapRefresh: (source) => this.emitRoadmapRefresh(source),
-      triggerHourlyCheck: (source) => this.triggerHourlyCheck(source),
+      triggerActivityScan: (source) => this.triggerActivityScan(source),
       pipelineOrchestrator,
     });
     this.scheduledTasks = new ScheduledTaskRunner({
@@ -771,6 +805,8 @@ export class EventDispatcher {
       getBangCommandRegistry: () => this.bangCommandRegistry,
       getPurchaseHandler: () => this.purchaseHandler,
       getFinalConfirmHandler: () => this.finalConfirmHandler,
+      getBackgroundTaskRunner: () => this.backgroundTaskRunner,
+      getBrowserTaskRunner: () => this.browserTaskRunner,
       getCurrentSetupMode: () => this.currentSetupMode,
       beginSetupMode: (mode) => this.beginSetupMode(mode),
       lookupCustomBangCommandForEvent: (event) =>
@@ -870,6 +906,20 @@ export class EventDispatcher {
   }
 
   /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §4.2 — wire the generic
+   * background-task runner so the `scheduled.background_task` dispatch
+   * branch can hand fire-time events to it. Pairs with the
+   * `event-pipeline.ts` `createBackgroundTaskRunner` factory call.
+   */
+  setBackgroundTaskRunner(
+    runner:
+      | import("../services/background-task/background-task-runner.js").BackgroundTaskRunner
+      | null,
+  ): void {
+    this.backgroundTaskRunner = runner;
+  }
+
+  /**
    * BROWSER_TASK_REDESIGN_PLAN.md §7 — wire the terminal-state DM
    * emitter used by the `scheduled.browser_task` failure paths (see
    * `browserTaskTerminalNotifier` field doc). `event-pipeline.ts` passes
@@ -906,6 +956,20 @@ export class EventDispatcher {
     this.attachmentStore = store;
   }
 
+  /** BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 (delivery assets) — inject the
+   *  asset resolver used by the `task.delivery` idle + active branches to
+   *  attach a task's deliverable files (screenshots, PDF/PPTX/PNG/docs)
+   *  inline. Wired post-construction because the underlying
+   *  dashboard-ingest hook is built after this dispatcher. */
+  setTaskDeliveryAssetResolver(
+    resolver: (
+      platform: string,
+      assets: readonly TaskDeliveryAsset[],
+    ) => Promise<readonly OutboundAttachmentRef[]>,
+  ): void {
+    this.taskDeliveryAssetResolver = resolver;
+  }
+
   /** Inject the local-Whisper voice transcriber. Optional — when unset,
    *  inbound audio attachments are passed to the backend with a path-only
    *  reference (the pre-feature behaviour). */
@@ -915,7 +979,7 @@ export class EventDispatcher {
 
   /**
    * Inject the delegated-sync refresh callback. Called from
-   * `triggerHourlyCheck` before the gate decision so any cadence the
+   * `triggerActivityScan` before the gate decision so any cadence the
    * operator left opted-OUT (post-Phase-9 default) populates fresh
    * Gmail / Notion observations the agent can then consume.
    *
@@ -925,7 +989,7 @@ export class EventDispatcher {
    * dispatcher holding a stale reference.
    *
    * Pass `null` to detach (e.g. when no delegated integration exists).
-   * The hourly check then proceeds without a refresh — equivalent to the
+   * The activity scan then proceeds without a refresh — equivalent to the
    * pre-injection behaviour.
    */
   setDelegatedSyncRefresh(fn: (() => Promise<void>) | null): void {
@@ -934,7 +998,7 @@ export class EventDispatcher {
 
   /**
    * Wire the scheduler's `queueMorningRoutineWake` so the pre-routine
-   * gate (hourly_check + evening/weekly/monthly review) can self-recover
+   * gate (activity_scan + evening/weekly/monthly review) can self-recover
    * after a missed 04:00 cron fire. Wired once in `index.ts` after both
    * the dispatcher and scheduler are constructed; passing `null` detaches.
    * When unset, the gate logs a warning and still skips the dependent
@@ -1202,7 +1266,7 @@ export class EventDispatcher {
   /**
    * Enter setup mode. Called from `POST /setup/start` so the warm gate
    * engages the moment the user opens the dashboard setup flow — before any
-   * agent turn runs — so concurrent hourly_check / morning routine / scheduled
+   * agent turn runs — so concurrent activity_scan / morning routine / scheduled
    * wake work cannot race with the setup conversation. Persisted to
    * `runtime_state` so the flag survives daemon restart.
    */
@@ -1272,8 +1336,8 @@ export class EventDispatcher {
     if (this.morningRoutineInProgress) {
       executions.push({ kind: "routine", key: "morning_routine" });
     }
-    if (this.hourlyCheckInProgress) {
-      executions.push({ kind: "routine", key: "hourly_check" });
+    if (this.activityScanInProgress) {
+      executions.push({ kind: "routine", key: "activity_scan" });
     }
     const runningTasks = this.db
       .prepare(
@@ -1294,7 +1358,7 @@ export class EventDispatcher {
   }
 
   /**
-   * Gate for autonomous background work (cron routines, hourly_check,
+   * Gate for autonomous background work (cron routines, activity_scan,
    * scheduled wake tasks, startup catchup, calendar-poller reactive events).
    *
    * Two layers:
@@ -1392,7 +1456,7 @@ export class EventDispatcher {
   /**
    * Check whether this autonomous event should be skipped because the daily
    * autonomous cost cap has been exceeded. Uses priority-based degradation:
-   * hourly_check (lowest priority, skipped first) → roadmap_refresh →
+   * activity_scan (lowest priority, skipped first) → roadmap_refresh →
    * evening_review → morning_routine (highest, last to be cut).
    *
    * Lower-priority events are skipped at 100% of cap; higher-priority events
@@ -1419,7 +1483,7 @@ export class EventDispatcher {
       ? (event as RoutineEvent).routine
       : null;
     const thresholds: Record<string, number> = {
-      hourly_check: 1.0,      // skipped first (at 100% of cap)
+      activity_scan: 1.0,      // skipped first (at 100% of cap)
       roadmap_refresh: 1.2,   // skipped at 120%
       evening_review: 1.5,    // skipped at 150%
       morning_routine: 2.0,   // last to be cut (only at 200%)
@@ -1499,15 +1563,15 @@ export class EventDispatcher {
   }
 
   /**
-   * Public entry point. Delegates to the HourlyCheckCoordinator.
+   * Public entry point. Delegates to the ActivityScanCoordinator.
    * The dispatcher keeps the wrapper because tests + the cron entry
-   * call `dispatcher.triggerHourlyCheck(source, opts)` directly.
+   * call `dispatcher.triggerActivityScan(source, opts)` directly.
    */
-  async triggerHourlyCheck(
+  async triggerActivityScan(
     source: string,
-    options: TriggerHourlyCheckOptions = {},
-  ): Promise<TriggerHourlyCheckResult> {
-    return this.hourlyCheck.trigger(source, options);
+    options: TriggerActivityScanOptions = {},
+  ): Promise<TriggerActivityScanResult> {
+    return this.activityScan.trigger(source, options);
   }
 
 
@@ -1524,7 +1588,7 @@ export class EventDispatcher {
    *
    * Public (not private) because Phase 4's `AuthHealthMonitor.checkAll()`
    * shares the same skip-while-morning-routine-active invariant as the
-   * hourly check, and injects this method as an option so a probe tick
+   * activity scan, and injects this method as an option so a probe tick
    * running concurrently with morning routine can no-op cleanly. See
    * `docs/design/09-safety-cost.md` §9.5.4.
    */
@@ -1645,7 +1709,7 @@ export class EventDispatcher {
 
         // Autonomous daily cost cap — safety net distinct from removed Phase 9
         // maxDailyCostUsd (which blanket-blocked all sessions including DMs).
-        // Reactive sessions always pass. Degradation priority: hourly_check is
+        // Reactive sessions always pass. Degradation priority: activity_scan is
         // skipped first, morning_routine last.
         if (this.shouldSkipForCostCap(event)) {
           this.releaseClaimedSchedule(event);
@@ -1748,9 +1812,9 @@ export class EventDispatcher {
       }
       await this.errorRouter.handleError(event, err as Error);
     } finally {
-      if (isRoutineEvent(event) && event.routine === "hourly_check") {
-        this.hourlyCheckInProgress = false;
-        this.hourlyCheckInProgressAt = null;
+      if (isRoutineEvent(event) && event.routine === "activity_scan") {
+        this.activityScanInProgress = false;
+        this.activityScanInProgressAt = null;
       }
     }
   }
@@ -1846,7 +1910,7 @@ export class EventDispatcher {
         }
         await this.scheduledTasks.executeSkillCurationRoutine(event);
       } else {
-        // hourly_check, evening_review, weekly_review, monthly_review
+        // activity_scan, evening_review, weekly_review, monthly_review
         // Tier is resolved from process-key defaults by BackendRouter.
         await this.scheduledTasks.executeDefault(event);
       }
@@ -1900,6 +1964,22 @@ export class EventDispatcher {
           await this.scheduledTasks.executeScheduledTask(event);
         },
       );
+    } else if (isTaskDeliveryEvent(event)) {
+      await this.runWithSessionGates([...TASK_DELIVERY_GATE_KEYS], async () => {
+        await handleTaskDeliveryInsideGate(
+          {
+            db: this.db,
+            config: this.config,
+            notificationMgr: this.notificationMgr,
+            executeScheduledTask: (scheduledEvent) =>
+              this.scheduledTasks.executeScheduledTask(scheduledEvent),
+            ...(this.taskDeliveryAssetResolver
+              ? { resolveAssets: this.taskDeliveryAssetResolver }
+              : {}),
+          },
+          event,
+        );
+      });
     } else if (isAgentTaskEvent(event)) {
       // scheduled.task — no gate, retains existing parallel-execution
       // behavior. (scheduled.dm subtype is handled above.)
@@ -1910,8 +1990,64 @@ export class EventDispatcher {
       // `dispatcher-scheduled-browser-task.ts` owns the decision
       // logic; here we wire it into the agent_schedule lifecycle.
       await this.handleScheduledBrowserTaskDispatch(event);
+    } else if (isScheduledBackgroundTaskEvent(event)) {
+      // BACKGROUND_TASK_RUNNER_DESIGN.md §4.2 — fire-time row creation +
+      // runner handoff, wired into the agent_schedule lifecycle exactly
+      // like scheduled.browser_task.
+      await this.handleScheduledBackgroundTaskDispatch(event);
     } else {
       await this.scheduledTasks.executeDefault(event);
+    }
+  }
+
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §4.2 — dispatch branch for
+   * `scheduled.background_task`. Defers to `handleScheduledBackgroundTask`
+   * (validation + row creation + runner handoff) and translates the
+   * outcome into the `agent_schedule.status` write.
+   */
+  private async handleScheduledBackgroundTaskDispatch(
+    event: ScheduledBackgroundTaskEvent,
+  ): Promise<void> {
+    const { handleScheduledBackgroundTask } = await import(
+      "./dispatcher-scheduled-background-task.js"
+    );
+    const outcome = await handleScheduledBackgroundTask(
+      { db: this.db, runner: this.backgroundTaskRunner },
+      event,
+    );
+    const succeeded =
+      outcome.kind === "dispatched" || outcome.kind === "row_already_exists";
+    this.db
+      .prepare(
+        "UPDATE agent_schedule SET status = ? WHERE id = ? AND status = 'running'",
+      )
+      .run(succeeded ? "completed" : "failed", event.scheduleId);
+    if (!succeeded) {
+      try {
+        this.db
+          .prepare(
+            `INSERT INTO agent_actions
+               (action_type, detail, result, started_at, completed_at)
+             VALUES (?, ?, 'failure', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          )
+          .run(
+            "background_task.scheduled_dispatch_failed",
+            JSON.stringify({
+              scheduleId: event.scheduleId,
+              kind: outcome.kind,
+              ...("taskId" in outcome ? { taskId: outcome.taskId } : {}),
+              ...("reason" in outcome ? { reason: outcome.reason } : {}),
+            }),
+          );
+      } catch (auditErr) {
+        /* c8 ignore start -- defensive */
+        logger.warn(
+          { err: auditErr, scheduleId: event.scheduleId, kind: outcome.kind },
+          "failed to record background_task.scheduled_dispatch_failed audit row",
+        );
+        /* c8 ignore stop */
+      }
     }
   }
 

@@ -28,7 +28,7 @@ ask_examples:
   - How do I see what tools the agent is allowed to use?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - safety
   - safe mode
@@ -44,7 +44,7 @@ related:
   - features/operations/approvals
   - reference/disallowed-tools
 ui_anchors:
-  - /settings/advanced
+  - /settings/safety
   - /settings/models
 config_keys:
   - disallowedTools
@@ -86,9 +86,12 @@ disallowed-tools floor.
   workspace-write sandbox, the Gemini whitelist TOML, and the OpenCode
   permission block.
 - **Allow mode**: the looser posture. SDK bypass, sandbox off, minimal
-  TOML. The absolute-block layer still holds in Allow mode, so the
-  destructive-ops floor never opens. Set independently per backend, so
-  one backend can run Allow while the others stay Safe.
+  TOML. The absolute-block layer still holds in Allow mode on Claude,
+  Gemini, and OpenCode — Codex is the documented exception: its Allow
+  mode is a binary sandbox-off switch with no hook layer the daemon can
+  attach the block list to, so the dashboard warns you before you flip
+  it. Set independently per backend, so one backend can run Allow while
+  the others stay Safe.
 - **Absolute block**: the unconditional layer. `ALWAYS_DISALLOWED_TOOLS`
   in `src/safety/always-disallowed.ts`. Cannot be widened by skills,
   by config, or by allow-mode.
@@ -120,13 +123,14 @@ absolute-block layer and Approve tier are where the agent is actually stopped.
 
 ## Where You See It in the Dashboard
 
-- **Settings → Advanced** holds the `disallowedTools` and
+- **Settings → Safety** holds the `disallowedTools` and
   `allowedToolsOverride` tool-policy lists.
 - **Settings → Models & Cost** holds the per-backend Safe / Allow
   **Execution Mode** switch (you can also set it in the setup wizard).
 - **Activity** logs every absolute-blocked tool call as
   `action_type='blocked_absolute'`.
-- **Approvals** is where Approve-tier actions queue when they fire.
+- The **Overview** page shows an approval card where Approve-tier
+  actions queue when they fire.
 
 ## Related
 

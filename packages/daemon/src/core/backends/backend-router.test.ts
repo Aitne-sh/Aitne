@@ -2361,8 +2361,8 @@ describe("BackendRouter", () => {
       ).run(JSON.stringify(payload));
     }
 
-    /** Pin routine.hourly_check (the process key gmail touches). */
-    function pinHourlyCheck(
+    /** Pin routine.activity_scan (the process key gmail touches). */
+    function pinActivityScan(
       mainBackend: "claude" | "codex",
       fallbackBackend: "claude" | "codex" | "gemini" | null,
     ) {
@@ -2380,22 +2380,22 @@ describe("BackendRouter", () => {
         `UPDATE process_backend_config
            SET main_backend = ?, main_model = ?,
                fallback_backend = ?, fallback_model = ?
-         WHERE process_key = 'routine.hourly_check'`,
+         WHERE process_key = 'routine.activity_scan'`,
       ).run(mainBackend, mainModel, fallbackBackend, fallbackModel);
     }
 
-    function hourlyCheckEvent() {
-      return { ...makeDmEvent(), type: "routine.hourly_check", platform: "cron" };
+    function activityScanEvent() {
+      return { ...makeDmEvent(), type: "routine.activity_scan", platform: "cron" };
     }
 
     it("drops fallback when nativeBackend != fallback.backendId", () => {
       applySchema(db);
       setGmailNative("claude");
-      pinHourlyCheck("claude", "gemini");
+      pinActivityScan("claude", "gemini");
 
       const router = new BackendRouter(db, makeConfig(), [makeCore()]);
-      const binding = router.resolveBinding(hourlyCheckEvent(), {
-        processKey: "routine.hourly_check",
+      const binding = router.resolveBinding(activityScanEvent(), {
+        processKey: "routine.activity_scan",
       });
 
       // gmail.nativeBackend=claude, fallback=gemini → gate fires, fallback
@@ -2406,11 +2406,11 @@ describe("BackendRouter", () => {
     it("keeps fallback when nativeBackend matches fallback.backendId", () => {
       applySchema(db);
       setGmailNative("claude");
-      pinHourlyCheck("codex", "claude");
+      pinActivityScan("codex", "claude");
 
       const router = new BackendRouter(db, makeConfig(), [makeCore()]);
-      const binding = router.resolveBinding(hourlyCheckEvent(), {
-        processKey: "routine.hourly_check",
+      const binding = router.resolveBinding(activityScanEvent(), {
+        processKey: "routine.activity_scan",
       });
 
       // gmail.nativeBackend=claude, fallback=claude → gate silent, fallback
@@ -2443,11 +2443,11 @@ describe("BackendRouter", () => {
       applySchema(db);
       // No settings.integrations row at all — `readIntegrations` returns
       // every key disabled.
-      pinHourlyCheck("claude", "gemini");
+      pinActivityScan("claude", "gemini");
 
       const router = new BackendRouter(db, makeConfig(), [makeCore()]);
-      const binding = router.resolveBinding(hourlyCheckEvent(), {
-        processKey: "routine.hourly_check",
+      const binding = router.resolveBinding(activityScanEvent(), {
+        processKey: "routine.activity_scan",
       });
 
       expect(binding.fallback?.backendId).toBe("gemini");
@@ -2601,6 +2601,192 @@ describe("BackendRouter", () => {
         )
         .get();
       expect(audit).toBeUndefined();
+    });
+  });
+
+  describe("built-in Agent override layer (AGENT_DEFINITIONS runtime wiring)", () => {
+    function insertAgentRow(
+      id: string,
+      source: "builtin" | "user",
+      snapshot: Record<string, unknown> | null,
+      metadataJson?: string,
+    ): void {
+      db.prepare(
+        `INSERT INTO agents (
+           id, name, source, definition_path, definition_hash,
+           schedule_kind, schedule_timezone, metadata_json, created_at, updated_at
+         ) VALUES (?, ?, ?, '/tmp/agents/x/agent.md', 'hash', 'cron', 'UTC', ?, 0, 0)`,
+      ).run(
+        id,
+        id,
+        source,
+        metadataJson ?? JSON.stringify(snapshot ? { override_snapshot: snapshot } : {}),
+      );
+    }
+
+    function makeAgentEvent(agentId?: string): Event {
+      const ev = createEvent({
+        type: "routine.activity_scan",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      if (agentId) ev.data.agentId = agentId;
+      return ev;
+    }
+
+    it("applies a snapshot tier override as the requested tier", () => {
+      applySchema(db);
+      insertAgentRow("activity-scan", "builtin", { "backend.tier": "high" });
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      const without = router.resolveBinding(makeAgentEvent(), {
+        processKey: "routine.activity_scan",
+      });
+      const withOverride = router.resolveBinding(makeAgentEvent("activity-scan"), {
+        processKey: "routine.activity_scan",
+      });
+
+      expect(without.resolvedTier).not.toBe("high");
+      expect(withOverride.resolvedTier).toBe("high");
+    });
+
+    it("applies a snapshot (model, backend_id) pin as a hard override", () => {
+      applySchema(db);
+      insertAgentRow("activity-scan", "builtin", {
+        "backend.model": DEFAULT_CLAUDE_MEDIUM_MODEL,
+        "backend.backend_id": "claude",
+      });
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      const binding = router.resolveBinding(makeAgentEvent("activity-scan"), {
+        processKey: "routine.activity_scan",
+      });
+
+      expect(binding.main.backendId).toBe("claude");
+      expect(binding.main.modelId).toBe(DEFAULT_CLAUDE_MEDIUM_MODEL);
+      expect(binding.fallback).toBeNull();
+    });
+
+    it("applies snapshot limit overrides onto the resolved binding", () => {
+      applySchema(db);
+      insertAgentRow("activity-scan", "builtin", {
+        "limits.max_turns": 7,
+        "limits.max_budget_usd": 0.05,
+      });
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      const binding = router.resolveBinding(makeAgentEvent("activity-scan"), {
+        processKey: "routine.activity_scan",
+      });
+
+      expect(binding.main.maxTurns).toBe(7);
+      expect(binding.main.maxBudgetUsd).toBe(0.05);
+    });
+
+    it("skips the agent override wholesale when the caller passes any routing option", () => {
+      applySchema(db);
+      insertAgentRow("activity-scan", "builtin", {
+        "backend.tier": "high",
+        "backend.model": DEFAULT_CLAUDE_MEDIUM_MODEL,
+        "backend.backend_id": "claude",
+        "limits.max_turns": 7,
+      });
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      // Explicit tier (run-now hint / morning-retry clamp): agent tier,
+      // model pin, AND limit overrides all skipped.
+      const tierBinding = router.resolveBinding(makeAgentEvent("activity-scan"), {
+        processKey: "routine.activity_scan",
+        requestedTier: "lite",
+      });
+      const tierBaseline = router.resolveBinding(makeAgentEvent(), {
+        processKey: "routine.activity_scan",
+        requestedTier: "lite",
+      });
+      expect(tierBinding).toEqual(tierBaseline);
+      expect(tierBinding.resolvedTier).toBe("lite");
+      expect(tierBinding.main.maxTurns).not.toBe(7);
+
+      // Explicit backend pin (fetch-window pre-pass shape — it resolves
+      // against the agentId-stamped PARENT event): nothing leaks, the
+      // binding is identical to an unstamped resolve.
+      const pinned = router.resolveBinding(makeAgentEvent("activity-scan"), {
+        processKey: "routine.activity_scan",
+        requestedBackendId: "claude",
+        requestedModelId: DEFAULT_CLAUDE_LITE_MODEL,
+      });
+      const pinnedBaseline = router.resolveBinding(makeAgentEvent(), {
+        processKey: "routine.activity_scan",
+        requestedBackendId: "claude",
+        requestedModelId: DEFAULT_CLAUDE_LITE_MODEL,
+      });
+      expect(pinned).toEqual(pinnedBaseline);
+      expect(pinned.main.modelId).toBe(DEFAULT_CLAUDE_LITE_MODEL);
+      expect(pinned.main.maxTurns).not.toBe(7);
+    });
+
+    it("drops a model pin to a disabled backend but keeps tier/limit overrides", () => {
+      applySchema(db); // seeds backends: claude enabled=1, codex enabled=0
+      insertAgentRow("activity-scan", "builtin", {
+        "backend.model": "gpt-5.4",
+        "backend.backend_id": "codex",
+        "backend.tier": "high",
+        "limits.max_turns": 9,
+      });
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      const binding = router.resolveBinding(makeAgentEvent("activity-scan"), {
+        processKey: "routine.activity_scan",
+      });
+
+      // Pin dropped (codex is disabled) → routing stays on the default
+      // backend; the tier + limit overrides still apply.
+      expect(binding.main.backendId).toBe("claude");
+      expect(binding.resolvedTier).toBe("high");
+      expect(binding.main.maxTurns).toBe(9);
+
+      // Pin-only snapshot to a disabled backend → whole override inert.
+      insertAgentRow("pin-only", "builtin", {
+        "backend.model": "gpt-5.4",
+        "backend.backend_id": "codex",
+      });
+      const pinOnly = router.resolveBinding(makeAgentEvent("pin-only"), {
+        processKey: "routine.activity_scan",
+      });
+      const baseline = router.resolveBinding(makeAgentEvent(), {
+        processKey: "routine.activity_scan",
+      });
+      expect(pinOnly).toEqual(baseline);
+    });
+
+    it("ignores user-source rows and events without an agentId stamp", () => {
+      applySchema(db);
+      insertAgentRow("my-user-agent", "user", { "backend.tier": "high" });
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      const userAgent = router.resolveBinding(makeAgentEvent("my-user-agent"), {
+        processKey: "routine.activity_scan",
+      });
+      const unstamped = router.resolveBinding(makeAgentEvent(), {
+        processKey: "routine.activity_scan",
+      });
+
+      expect(userAgent.resolvedTier).toBe(unstamped.resolvedTier);
+      expect(userAgent.resolvedTier).not.toBe("high");
+    });
+
+    it("survives a missing row, corrupt metadata_json, and an empty snapshot", () => {
+      applySchema(db);
+      insertAgentRow("corrupt", "builtin", null, "{not json");
+      insertAgentRow("empty", "builtin", {});
+      const router = new BackendRouter(db, makeConfig(), [makeCore()]);
+
+      for (const id of ["corrupt", "empty", "missing-row"]) {
+        const binding = router.resolveBinding(makeAgentEvent(id), {
+          processKey: "routine.activity_scan",
+        });
+        expect(binding.main.backendId).toBe("claude");
+      }
     });
   });
 });

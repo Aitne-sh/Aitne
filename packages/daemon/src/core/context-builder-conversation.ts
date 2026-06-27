@@ -116,6 +116,39 @@ export function renderRecentDmActivityBlock(
     .join("\n");
 }
 
+export type OwnerDmActivityState = "active" | "idle";
+
+/**
+ * BACKGROUND_TASK_RUNNER_DESIGN.md §2.6 — deterministic activity branch
+ * for task.delivery. Unlike `renderRecentDmActivityBlock`, this returns a
+ * programmatic active/idle decision and must stay model-free.
+ */
+export function classifyOwnerDmActivity(
+  deps: ConversationDeps,
+  nowMs = Date.now(),
+): OwnerDmActivityState {
+  const thresholdMinutes = Math.max(
+    1,
+    deps.config.ownerActivityIdleThresholdMinutes,
+  );
+  const row = deps.db
+    .prepare(
+      `SELECT MAX(m.timestamp) AS ts
+         FROM messages m
+         JOIN conversation_sessions s ON m.session_id = s.id
+        WHERE s.scope IN (?, ?)
+          AND m.role = 'user'`,
+    )
+    .get(OWNER_DM_SCOPE, DASHBOARD_CHAT_SCOPE) as
+    | { ts: string | null }
+    | undefined;
+  if (!row?.ts) return "idle";
+  const lastInboundMs = parseSqliteUtcMs(row.ts);
+  return nowMs - lastInboundMs <= thresholdMinutes * 60_000
+    ? "active"
+    : "idle";
+}
+
 /**
  * SCHEDULED-DM-IMPLEMENTATION-PLAN §5.7 — return the last `limit`
  * owner-facing messages across BOTH `owner_dm` and `dashboard_chat`
@@ -405,7 +438,7 @@ function resolveOtherDmScope(
 /**
  * Record an `agent_actions.proactive_forward_injected` row so the
  * dashboard's audit log shows when a proactive forward (e.g. scheduled
- * DM, hourly-check notification) was re-presented as conversation
+ * DM, activity-scan notification) was re-presented as conversation
  * history. Both runtime call sites (`getConversationHistoryForEvent`
  * and `renderResumeCatchupContext`) live in this file; the export is
  * kept only for the direct unit-test peer in

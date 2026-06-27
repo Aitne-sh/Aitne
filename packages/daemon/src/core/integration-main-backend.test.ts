@@ -152,6 +152,26 @@ describe("cascadeNativeBindingsOnMainSwitch (§11.4)", () => {
     expect(stateAfter.google_calendar.mode).toBe("disabled");
   });
 
+  it("preserves fetchTargets across the native→disabled flip", () => {
+    writeIntegrations(db, {
+      notion: {
+        mode: "native",
+        nativeBackend: "claude",
+        fetchTargets: [{ label: "Projects", locator: "https://notion.so/projects" }],
+        deniedTools: [],
+        lastChangedAt: "2026-05-11T00:00:00Z",
+      },
+    });
+
+    cascadeNativeBindingsOnMainSwitch(db, "codex");
+
+    const stateAfter = readIntegrations(db);
+    expect(stateAfter.notion.mode).toBe("disabled");
+    expect(stateAfter.notion.fetchTargets).toEqual([
+      { label: "Projects", locator: "https://notion.so/projects" },
+    ]);
+  });
+
   it("leaves native rows whose nativeBackend matches the new main untouched", () => {
     writeIntegrations(db, {
       gmail: {

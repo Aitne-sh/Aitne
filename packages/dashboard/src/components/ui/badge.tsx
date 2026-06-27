@@ -7,11 +7,15 @@ const badgeVariants = cva(
     variants: {
       variant: {
         default: "bg-primary/10 text-primary",
-        blue: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+        // Status hues derive from the theme tokens (theme-aware, so no
+        // dark: twins). Variant names stay color-flavored for call-site
+        // stability; only the definitions are token-based.
+        blue: "bg-primary/10 text-primary",
+        teal: "bg-teal-50 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
         purple: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
-        green: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
-        red: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300",
-        amber: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+        green: "bg-success/10 text-success",
+        red: "bg-destructive/10 text-destructive",
+        amber: "bg-warning/10 text-warning",
         orange: "bg-orange-50 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
         pink: "bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-300",
         gray: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",

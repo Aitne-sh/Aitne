@@ -334,7 +334,7 @@ export function BackendsStep({ onNext, onBack }: BackendsStepProps) {
       )}
       {cascadeNotice && (
         <p
-          className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100"
+          className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning"
           role="status"
         >
           {cascadeNotice}
@@ -444,7 +444,7 @@ function ExecutionModeSection({
               />
               Per-backend overrides
               {divergent && (
-                <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                   mixed
                 </span>
               )}
@@ -578,7 +578,7 @@ function BackendOverrideRow({
         </div>
       </div>
       {showCodexAllowWarning && (
-        <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+        <p className="mt-2 flex items-start gap-1.5 text-[11px] text-warning">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
             Codex Allow runs sandbox-off; the daemon&apos;s absolute-block

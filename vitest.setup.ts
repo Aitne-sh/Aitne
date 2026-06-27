@@ -1,6 +1,27 @@
 import { afterEach, vi } from "vitest";
 
 /**
+ * Pin the test process to UTC so time-sensitive assertions are deterministic
+ * regardless of the developer's machine timezone.
+ *
+ * CI runs in UTC, and several suites construct `Z`-suffixed ISO instants and
+ * then assert on the *local-time* projection (e.g. `repository-management-docs`
+ * derives "today" from a `now: new Date("…T18:00:00Z")`, and
+ * `integration-card.logic`'s `formatRecentCallTimestamp` compares calendar
+ * days via `Date.getDate()`). Those hold only when the runtime TZ is UTC — on
+ * an `Asia/Tokyo` machine an 18:00Z instant rolls into the next calendar day
+ * and the assertions flip. `context-builder.test.ts` already sets `TZ=UTC`
+ * locally for the same reason; this hoists that intent to the whole suite.
+ *
+ * Node re-reads `process.env.TZ` at runtime, so setting it here — at setup-file
+ * module load, before any test file's `Date` calls — takes effect. Per-test
+ * `process.env.TZ` overrides (and their restores) still work on top of this.
+ * `PA_TEST_TZ` lets a developer reproduce a TZ-specific bug without editing
+ * this file.
+ */
+process.env.TZ = process.env.PA_TEST_TZ ?? "UTC";
+
+/**
  * Global per-test cleanup safety net.
  *
  * Why: `vitest.config.ts` caps `maxForks` to keep RAM in check, which packs

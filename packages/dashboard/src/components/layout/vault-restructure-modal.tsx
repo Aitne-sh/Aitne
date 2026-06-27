@@ -146,11 +146,11 @@ export function VaultRestructureModal({ enabled }: { enabled: boolean }) {
 
         {showRestart && (
           <div className="space-y-3 text-sm">
-            <div className="flex items-start gap-2 rounded-md border border-green-200 bg-green-50 p-3 text-green-900 dark:border-green-900 dark:bg-green-950 dark:text-green-100">
+            <div className="flex items-start gap-2 rounded-md border border-success/40 bg-success/10 p-3 text-success">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
               <p className="text-xs">
                 Your consent is saved. Run{" "}
-                <code className="rounded bg-green-100 px-1 dark:bg-green-900">
+                <code className="rounded bg-success/15 px-1">
                   aitne restart
                 </code>{" "}
                 in your terminal (or stop and start the daemon) to apply the

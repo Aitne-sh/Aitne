@@ -22,9 +22,9 @@ function CallRow({ call }: { call: McpToolCallEntry }) {
       <span
         className={
           call.ok === true
-            ? "text-green-600 dark:text-green-400 shrink-0"
+            ? "text-success shrink-0"
             : call.ok === false
-              ? "text-red-500 dark:text-red-400 shrink-0"
+              ? "text-destructive shrink-0"
               : "text-muted-foreground shrink-0"
         }
         aria-label={call.ok === true ? "success" : call.ok === false ? "error" : "invocation recorded"}
@@ -39,7 +39,7 @@ function CallRow({ call }: { call: McpToolCallEntry }) {
           </span>
         )}
         {call.error && (
-          <p className="text-red-500 dark:text-red-400 text-[10px] truncate">{call.error}</p>
+          <p className="text-destructive text-[10px] truncate">{call.error}</p>
         )}
       </div>
       <div className="flex flex-col items-end shrink-0 tabular-nums text-[10px] text-muted-foreground">

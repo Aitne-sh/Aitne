@@ -109,12 +109,12 @@ describe("missingDelegatedVariants", () => {
     writeFileSync(join(workspace, relPath), "placeholder\n", "utf-8");
   }
 
-  it("DELEGATED-MODE-V2 §4.1.1 — gmail × claude: same-backend resolves to null (no skill body), so only the cross-backend variants for codex / gemini sessions are required, plus the hourly_check task-flow for all three session backends", () => {
+  it("DELEGATED-MODE-V2 §4.1.1 — gmail × claude: same-backend resolves to null (no skill body), so only the cross-backend variants for codex / gemini sessions are required, plus the activity_scan task-flow for all three session backends", () => {
     writeVariant("agent-assets/skills/mail/SKILL.delegated.codex.md");
     writeVariant("agent-assets/skills/mail/SKILL.delegated.gemini.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.claude.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.codex.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.gemini.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.claude.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.codex.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.gemini.md");
     const result = missingDelegatedVariants(workspace, "gmail", "claude");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
@@ -122,19 +122,19 @@ describe("missingDelegatedVariants", () => {
   it("DELEGATED-MODE-V2 §4.1.1 — gmail × codex: same-backend (codex) resolves null; cross-backend variants for claude / gemini sessions are required", () => {
     writeVariant("agent-assets/skills/mail/SKILL.delegated.claude.md");
     writeVariant("agent-assets/skills/mail/SKILL.delegated.gemini.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.claude.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.codex.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.gemini.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.claude.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.codex.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.gemini.md");
     const result = missingDelegatedVariants(workspace, "gmail", "codex");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
 
-  it("DELEGATED-MODE-V2 §4.1.1 — google_calendar × claude needs external-services {codex, gemini} variants + hourly_check {claude, codex, gemini} variants", () => {
+  it("DELEGATED-MODE-V2 §4.1.1 — google_calendar × claude needs external-services {codex, gemini} variants + activity_scan {claude, codex, gemini} variants", () => {
     writeVariant("agent-assets/skills/external-services/SKILL.delegated.codex.md");
     writeVariant("agent-assets/skills/external-services/SKILL.delegated.gemini.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.claude.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.codex.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.delegated.gemini.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.claude.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.codex.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.delegated.gemini.md");
     const result = missingDelegatedVariants(workspace, "google_calendar", "claude");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
@@ -151,9 +151,9 @@ describe("missingDelegatedVariants", () => {
     // selectTaskFlowVariantSuffix returns `delegated.<sessionBackend>` for
     // every session backend when any touched integration is delegated.
     expect(result.taskFlows.sort()).toEqual([
-      join(taskFlowsRoot, "routine.hourly_check.delegated.claude.md"),
-      join(taskFlowsRoot, "routine.hourly_check.delegated.codex.md"),
-      join(taskFlowsRoot, "routine.hourly_check.delegated.gemini.md"),
+      join(taskFlowsRoot, "routine.activity_scan.delegated.claude.md"),
+      join(taskFlowsRoot, "routine.activity_scan.delegated.codex.md"),
+      join(taskFlowsRoot, "routine.activity_scan.delegated.gemini.md"),
     ].sort());
   });
 
@@ -165,9 +165,9 @@ describe("missingDelegatedVariants", () => {
       join(skillsRoot, "notion", "SKILL.delegated.gemini.md"),
     ].sort());
     expect(result.taskFlows.sort()).toEqual([
-      join(taskFlowsRoot, "routine.hourly_check.delegated.claude.md"),
-      join(taskFlowsRoot, "routine.hourly_check.delegated.codex.md"),
-      join(taskFlowsRoot, "routine.hourly_check.delegated.gemini.md"),
+      join(taskFlowsRoot, "routine.activity_scan.delegated.claude.md"),
+      join(taskFlowsRoot, "routine.activity_scan.delegated.codex.md"),
+      join(taskFlowsRoot, "routine.activity_scan.delegated.gemini.md"),
     ].sort());
   });
 });
@@ -247,27 +247,27 @@ describe("missingNativeVariants", () => {
     writeFileSync(join(workspace, relPath), "placeholder\n", "utf-8");
   }
 
-  it("§5.4.1 — gmail × claude: native binding requires only the SKILL.native.claude.md skill variant + the routine.hourly_check.native.claude.md task-flow variant; other session backends resolve to `disabled` and need no file", () => {
+  it("§5.4.1 — gmail × claude: native binding requires only the SKILL.native.claude.md skill variant + the routine.activity_scan.native.claude.md task-flow variant; other session backends resolve to `disabled` and need no file", () => {
     // Native is always same-backend by construction. A claude binding
     // therefore only needs the variant authored for claude sessions —
     // codex / gemini sessions land on `disabled` per §5.4.1's safety
     // degrade and need no file.
     writeVariant("agent-assets/skills/mail/SKILL.native.claude.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.native.claude.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.native.claude.md");
     const result = missingNativeVariants(workspace, "gmail", "claude");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
 
   it("§5.4.1 — gmail × codex: native binding requires the codex variant only", () => {
     writeVariant("agent-assets/skills/mail/SKILL.native.codex.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.native.codex.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.native.codex.md");
     const result = missingNativeVariants(workspace, "gmail", "codex");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
 
   it("§5.4.1 — gmail × gemini: native binding requires the gemini variant only", () => {
     writeVariant("agent-assets/skills/mail/SKILL.native.gemini.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.native.gemini.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.native.gemini.md");
     const result = missingNativeVariants(workspace, "gmail", "gemini");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
@@ -278,20 +278,20 @@ describe("missingNativeVariants", () => {
       join(skillsRoot, "mail", "SKILL.native.claude.md"),
     ]);
     expect(result.taskFlows).toEqual([
-      join(taskFlowsRoot, "routine.hourly_check.native.claude.md"),
+      join(taskFlowsRoot, "routine.activity_scan.native.claude.md"),
     ]);
   });
 
-  it("§5.4.1 — google_calendar × codex: native binding requires the external-services native.codex.md skill + hourly_check.native.codex.md task-flow", () => {
+  it("§5.4.1 — google_calendar × codex: native binding requires the external-services native.codex.md skill + activity_scan.native.codex.md task-flow", () => {
     writeVariant("agent-assets/skills/external-services/SKILL.native.codex.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.native.codex.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.native.codex.md");
     const result = missingNativeVariants(workspace, "google_calendar", "codex");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });
 
   it("§5.4.1 — notion × gemini: native binding requires only the gemini variant (gemini ships a user-installed Notion MCP descriptor)", () => {
     writeVariant("agent-assets/skills/notion/SKILL.native.gemini.md");
-    writeVariant("agent-assets/task-flows/routine.hourly_check.native.gemini.md");
+    writeVariant("agent-assets/task-flows/routine.activity_scan.native.gemini.md");
     const result = missingNativeVariants(workspace, "notion", "gemini");
     expect(result).toEqual({ skills: [], taskFlows: [] });
   });

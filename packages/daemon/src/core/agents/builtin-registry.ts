@@ -31,8 +31,8 @@ import type { ProcessKey, StopWarning } from "@aitne/shared";
 
 /**
  * Resolves a built-in's cron expression from the live `dayBoundaryHour`
- * config. `null` for the interval-gated `hourly-check`, whose cadence is a
- * runtime window (`buildHourlyCronExpr(intervalMinutes, activeStart,
+ * config. `null` for the interval-gated `activity-scan`, whose cadence is a
+ * runtime window (`buildActivityScanCronExpr(intervalMinutes, activeStart,
  * activeEnd)`), not a fixed expression — the loader's drift check is a no-op
  * for a `null` resolver (§5.5.1).
  */
@@ -40,8 +40,8 @@ export type CronExpressionResolver = (config: { dayBoundaryHour: number }) => st
 
 /**
  * How `setupRecurringJobs` fires a built-in. NB: a non-null `processKey` does
- * NOT imply `emit_routine`/`queue_wake` — `hourly-check` carries
- * `routine.hourly_check` yet fires via `in_process_callback`.
+ * NOT imply `emit_routine`/`queue_wake` — `activity-scan` carries
+ * `routine.activity_scan` yet fires via `in_process_callback`.
  *
  *   - `emit_routine`  — `emitRoutine(routine, data?)` puts a `routine.<name>`
  *     event on the bus. `data` is the fixed payload the scheduler passes; the
@@ -51,7 +51,7 @@ export type CronExpressionResolver = (config: { dayBoundaryHour: number }) => st
  *     baked literal would be wrong).
  *   - `queue_wake`    — `queueMorningRoutineWake(...)` enqueues a durable wake
  *     row instead of a transient event (morning-routine only).
- *   - `in_process_callback` — a typed daemon callback (`onHourlyCheck`,
+ *   - `in_process_callback` — a typed daemon callback (`onActivityScan`,
  *     `onRoadmapMaintenance`, `onContextIndexReconcile`); the last two are
  *     no-LLM passes with `processKey: null`.
  */
@@ -59,6 +59,37 @@ export type BuiltinSchedulerFn =
   | { kind: "emit_routine"; routine: string; data?: Record<string, unknown> }
   | { kind: "queue_wake"; routine: string }
   | { kind: "in_process_callback"; callbackName: string };
+
+/**
+ * Hub grouping for the `/agents` dashboard (AGENTS_HUB_REDESIGN_PLAN.md §1).
+ * Built-ins declare one of the three operational categories; user Agents are
+ * implicitly `"user"` at the API layer (not a registry value).
+ *
+ *   - `synthesis`   — routines that write the user-facing synthesis surfaces
+ *     (today.md, journals, reviews).
+ *   - `monitoring`  — interval watchers that triage observations and surface
+ *     activity proactively.
+ *   - `maintenance` — mechanical / background upkeep passes.
+ */
+export const AGENT_CATEGORIES = ["synthesis", "monitoring", "maintenance"] as const;
+export type AgentCategory = (typeof AGENT_CATEGORIES)[number];
+
+/**
+ * A context-vault policy file a built-in reads at prompt-assembly time —
+ * its editable "rulebook" surface (AGENTS_HUB_REDESIGN_PLAN.md §1 / §4.2).
+ * The dashboard's per-agent Rulebook tab renders one editor per entry,
+ * loading/saving through the context API chokepoint (`/api/context/<path>`);
+ * the vault stays the storage, this is declaration only. Paths are the
+ * canonical class-prefixed form (`context-paths.ts`).
+ */
+export interface AgentPolicyFile {
+  /** Canonical vault-relative path, e.g. `policies/routines/morning.md`. */
+  path: string;
+  /** Short editor-card title, e.g. "Morning rulebook". */
+  label: string;
+  /** One-liner explaining what the file controls. */
+  description: string;
+}
 
 export interface BuiltinAgentRegistryEntry {
   /** Kebab-case slug; also the `agents.id` and the `agent.md` directory name. */
@@ -75,7 +106,7 @@ export interface BuiltinAgentRegistryEntry {
   description: string;
   /**
    * Cron with `{dayBoundaryHour}` / `{dayBoundaryHour-1}` resolved from live
-   * config, or `null` for the runtime-window `hourly-check` (§5.5.1).
+   * config, or `null` for the runtime-window `activity-scan` (§5.5.1).
    */
   cronExpression: CronExpressionResolver | null;
   /**
@@ -98,6 +129,14 @@ export interface BuiltinAgentRegistryEntry {
   stopWarning: StopWarning;
   /** The mechanism `setupRecurringJobs` uses to fire this slug. */
   schedulerFn: BuiltinSchedulerFn;
+  /** Hub grouping for the `/agents` dashboard (see `AGENT_CATEGORIES`). */
+  category: AgentCategory;
+  /**
+   * The vault policy files this built-in reads at prompt-assembly time —
+   * surfaced as its Rulebook tab. Empty for built-ins with no editable
+   * rulebook (no-LLM passes, sweeps).
+   */
+  policyFiles: readonly AgentPolicyFile[];
 }
 
 /**
@@ -130,6 +169,28 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
         "Re-enable from /agents/morning-routine. The next firing catches up with a broader observation window.",
     },
     schedulerFn: { kind: "queue_wake", routine: "morning_routine" },
+    category: "synthesis",
+    // journal-format / journal-export hang off morning-routine because the
+    // morning pipeline is their only consumer (task-flows
+    // `routine.morning_routine_{today,journal}` + the morning composers —
+    // verified 2026-06-10, AGENTS_HUB_REDESIGN_PLAN.md §1).
+    policyFiles: [
+      {
+        path: "policies/routines/morning.md",
+        label: "Morning rulebook",
+        description: "Checks and rules injected into the morning routine prompt.",
+      },
+      {
+        path: "policies/journal-format.md",
+        label: "Journal format",
+        description: "Template and voice rules for the daily journal synthesis.",
+      },
+      {
+        path: "policies/journal-export.md",
+        label: "Journal export rules",
+        description: "Redaction and inclusion rules applied when journal content is exported.",
+      },
+    ],
   },
   {
     slug: "evening-review",
@@ -150,6 +211,14 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
         "Re-enable from /agents/evening-review. Resumes on the next 18:00 firing.",
     },
     schedulerFn: { kind: "emit_routine", routine: "evening_review" },
+    category: "synthesis",
+    policyFiles: [
+      {
+        path: "policies/routines/evening.md",
+        label: "Evening rulebook",
+        description: "Checks and rules injected into the evening review prompt.",
+      },
+    ],
   },
   {
     slug: "weekly-review",
@@ -170,6 +239,14 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
         "Re-enable from /agents/weekly-review. Resumes on the next Friday 19:00 firing.",
     },
     schedulerFn: { kind: "emit_routine", routine: "weekly_review" },
+    category: "synthesis",
+    policyFiles: [
+      {
+        path: "policies/routines/weekly.md",
+        label: "Weekly rulebook",
+        description: "Checks and rules injected into the weekly review prompt.",
+      },
+    ],
   },
   {
     slug: "monthly-review",
@@ -189,35 +266,52 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
       ],
       dependent_agents: [],
       reactivation_hint:
-        "Monthly review is opt-in (monthlyReviewEnabled, default off). Re-enable from /agents/monthly-review.",
+        "Monthly review is opt-in (off by default). Enable from /agents/monthly-review.",
     },
     schedulerFn: { kind: "emit_routine", routine: "monthly_review" },
+    category: "synthesis",
+    policyFiles: [
+      {
+        path: "policies/routines/monthly.md",
+        label: "Monthly rulebook",
+        description: "Checks and rules injected into the monthly review prompt.",
+      },
+    ],
   },
   {
-    slug: "hourly-check",
-    name: "Hourly Check",
+    slug: "activity-scan",
+    name: "Activity Scan",
     description:
       "Triages pending observations and proactively surfaces new mail / calendar / git / notion activity each interval within active hours.",
-    // Runtime-window cadence — `buildHourlyCronExpr(...)` owns the expression,
+    // Runtime-window cadence — `buildActivityScanCronExpr(...)` owns the expression,
     // so the registry resolver is `null` and the loader's drift check skips
     // this slug (§5.5.1). The Phase 4 YAML still carries a self-documenting
     // literal to satisfy the schema's `cron → expression` refinement.
     cronExpression: null,
-    processKey: "routine.hourly_check",
-    // Agent-enabled defaults true; the feature's real opt-in is the scheduler's
-    // `hourlyCheckEnabled` config gate, which is ANDed on top at fire time.
+    processKey: "routine.activity_scan",
+    // `agents.enabled` is the single on/off switch (AGENTS_HUB_REDESIGN_PLAN.md
+    // §2 — the legacy `activityScanEnabled` config gate was unified into it; a
+    // one-time boot reconcile carries an operator's old `false` forward).
     defaultEnabled: true,
     stopWarning: {
       level: "high",
       services_lost: [
-        "Hourly observation triage",
+        "Periodic observation triage",
         "Proactive surfacing of new mail / calendar / git / notion activity",
       ],
       dependent_agents: [],
       reactivation_hint:
-        "Re-enable from /agents/hourly-check. Resumes on the next interval tick within active hours.",
+        "Re-enable from /agents/activity-scan. Resumes on the next interval tick within active hours.",
     },
-    schedulerFn: { kind: "in_process_callback", callbackName: "onHourlyCheck" },
+    schedulerFn: { kind: "in_process_callback", callbackName: "onActivityScan" },
+    category: "monitoring",
+    policyFiles: [
+      {
+        path: "policies/routines/activity-scan.md",
+        label: "Activity scan rulebook",
+        description: "Checks and rules injected into the activity scan prompt.",
+      },
+    ],
   },
   {
     slug: "user-profile-sweep-morning",
@@ -243,6 +337,8 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
       routine: "user_profile_sweep",
       data: { phase: "morning" },
     },
+    category: "maintenance",
+    policyFiles: [],
   },
   {
     slug: "user-profile-sweep-evening",
@@ -268,6 +364,8 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
       routine: "user_profile_sweep",
       data: { phase: "evening" },
     },
+    category: "maintenance",
+    policyFiles: [],
   },
   {
     slug: "roadmap-maintenance",
@@ -293,6 +391,8 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
       kind: "in_process_callback",
       callbackName: "onRoadmapMaintenance",
     },
+    category: "maintenance",
+    policyFiles: [],
   },
   {
     slug: "context-index-reconcile",
@@ -318,6 +418,8 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
       kind: "in_process_callback",
       callbackName: "onContextIndexReconcile",
     },
+    category: "maintenance",
+    policyFiles: [],
   },
   {
     slug: "skill-curation",
@@ -341,6 +443,8 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
     // `cadence` (daily/weekly/monthly) is read from the DB at fire time, so it
     // is intentionally absent from `data` here — see BuiltinSchedulerFn.
     schedulerFn: { kind: "emit_routine", routine: "skill_curation" },
+    category: "maintenance",
+    policyFiles: [],
   },
 ];
 
@@ -371,15 +475,15 @@ export function isBuiltinAgentSlug(slug: string): boolean {
 
 /**
  * The live config a runtime-window built-in's cadence is resolved from. Today
- * the only runtime-window built-in is `hourly-check`, whose firing window is
- * `buildHourlyCronExpr(intervalMinutes, activeStart, activeEnd)` — so the three
- * `hourlyCheck*` fields are all that's needed. A narrow shape (not the whole
+ * the only runtime-window built-in is `activity-scan`, whose firing window is
+ * `buildActivityScanCronExpr(intervalMinutes, activeStart, activeEnd)` — so the three
+ * `activityScan*` fields are all that's needed. A narrow shape (not the whole
  * `AgentConfig`) keeps this module pure / coverage-friendly.
  */
 export interface RuntimeWindowCadenceConfig {
-  hourlyCheckIntervalMinutes: number;
-  hourlyCheckActiveStartHour: number;
-  hourlyCheckActiveEndHour: number;
+  activityScanIntervalMinutes: number;
+  activityScanActiveStartHour: number;
+  activityScanActiveEndHour: number;
 }
 
 /**
@@ -404,8 +508,8 @@ export interface IntervalCadence {
  *
  * A built-in is "runtime-window" iff its registry `cronExpression` resolver is
  * `null` — the documented marker (§5.5.1) that its cadence is owned by
- * `buildHourlyCronExpr` from live config, not a baked cron. Today `hourly-check`
- * is the sole such entry, so the mapping reads the `hourlyCheck*` config. A
+ * `buildActivityScanCronExpr` from live config, not a baked cron. Today `activity-scan`
+ * is the sole such entry, so the mapping reads the `activityScan*` config. A
  * second runtime-window built-in would need its own branch here — the
  * `cronExpression === null` gate plus this comment keep that requirement
  * visible. Pure: the caller supplies the live config (read at request time so a
@@ -418,8 +522,8 @@ export function resolveRuntimeWindowCadence(
   const entry = getBuiltinRegistryEntry(slug);
   if (!entry || entry.cronExpression !== null) return null;
   return {
-    interval_minutes: config.hourlyCheckIntervalMinutes,
-    active_start_hour: config.hourlyCheckActiveStartHour,
-    active_end_hour: config.hourlyCheckActiveEndHour,
+    interval_minutes: config.activityScanIntervalMinutes,
+    active_start_hour: config.activityScanActiveStartHour,
+    active_end_hour: config.activityScanActiveEndHour,
   };
 }

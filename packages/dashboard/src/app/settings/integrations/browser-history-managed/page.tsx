@@ -34,23 +34,24 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { BrowserTaskHostnameDenylistCard } from "@/components/settings/browser-task-hostname-denylist-card";
 import { api } from "@/lib/api-client";
+import { formatTimestamp } from "@/lib/utils";
+import {
+  AUTOMATION_SITES_QUERY_KEY,
+  MANAGED_STATUS_QUERY_KEY,
+  useAutomationSites,
+  useManagedStatus,
+} from "@/lib/hooks/use-managed-chromium";
 
-const STATUS_QUERY_KEY = ["browser-history-managed-status"] as const;
+// useManagedStatus / useAutomationSites (and their query keys) are shared
+// with the /browser hub — see lib/hooks/use-managed-chromium.ts
+// (BROWSER_HUB_CONSOLIDATION_DESIGN.md). Keys are unchanged, so the
+// invalidations below keep hitting the same cache entries.
+const STATUS_QUERY_KEY = MANAGED_STATUS_QUERY_KEY;
+const SITES_QUERY_KEY = AUTOMATION_SITES_QUERY_KEY;
 const SETUP_QUERY_KEY = ["browser-history-managed-setup-status"] as const;
-const SITES_QUERY_KEY = ["browser-automation-sites"] as const;
 const INSTALL_STATUS_QUERY_KEY = [
   "managed-chromium-install-status",
 ] as const;
-
-function useManagedStatus(refetchIntervalMs?: number) {
-  return useQuery({
-    queryKey: STATUS_QUERY_KEY,
-    queryFn: () =>
-      api.get<ManagedChromiumStatusResponse>("/browser-history/managed/status"),
-    refetchInterval: refetchIntervalMs ?? false,
-    staleTime: 5_000,
-  });
-}
 
 function useSetupStatus(enabled: boolean) {
   return useQuery({
@@ -62,20 +63,6 @@ function useSetupStatus(enabled: boolean) {
     refetchInterval: enabled ? 2_000 : false,
     enabled,
     staleTime: 1_000,
-  });
-}
-
-/** B-2.5 — list of registered per-site auth profiles. Refetched
- *  alongside the master managed-Chromium status so per-site state
- *  changes propagate without a hard reload. */
-function useSites(enabled: boolean) {
-  return useQuery({
-    queryKey: SITES_QUERY_KEY,
-    queryFn: () =>
-      api.get<BrowserAutomationSitesResponse>("/browser-automation/sites"),
-    refetchInterval: enabled ? 15_000 : false,
-    enabled,
-    staleTime: 5_000,
   });
 }
 
@@ -127,7 +114,7 @@ export default function ManagedChromiumPage() {
   // sandbox primitives are shared with the master sign-in, so the
   // per-site UI is hidden until that prerequisite is satisfied.
   const sitesEnabled = data?.state === "ready";
-  const sitesQuery = useSites(Boolean(sitesEnabled));
+  const sitesQuery = useAutomationSites(Boolean(sitesEnabled));
 
   // Install state — auto-ramps cadence to 1 s when downloading.
   const installStatusQuery = useInstallStatus();
@@ -426,11 +413,11 @@ function InstallChromiumPanel({
   return (
     <div className="mt-3 space-y-2">
       {state === "completed" ? (
-        <div className="inline-flex items-center gap-2 rounded-md bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <div className="inline-flex items-center gap-2 rounded-md bg-success/10 px-3 py-1.5 text-sm text-success">
           <CheckCircle2 className="h-4 w-4" />
           Chromium installed
           {status?.binaryPath ? (
-            <code className="ml-1 text-xs text-emerald-900/70 dark:text-emerald-300/70">
+            <code className="ml-1 text-xs text-success/70">
               {shortPath(status.binaryPath)}
             </code>
           ) : null}
@@ -453,7 +440,7 @@ function InstallChromiumPanel({
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-blue-500 transition-[width] duration-500"
+              className="h-full rounded-full bg-primary transition-[width] duration-500"
               style={{ width: `${Math.max(2, percent)}%` }}
               aria-label={`Install progress ${percent}%`}
             />
@@ -480,7 +467,7 @@ function InstallChromiumPanel({
               : "Download Chromium (~150 MiB)"}
           </Button>
           {state === "failed" && status?.errorMessage ? (
-            <span className="text-xs text-red-700">{status.errorMessage}</span>
+            <span className="text-xs text-destructive">{status.errorMessage}</span>
           ) : null}
         </div>
       )}
@@ -506,7 +493,7 @@ function B4SubpageCard() {
       <CardHeader className="items-start">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-4 w-4 text-amber-700 dark:text-amber-300" />
+            <ShieldAlert className="h-4 w-4 text-warning" />
             <CardTitle className="text-base">
               Experimental purchase confirmations (B-4)
             </CardTitle>
@@ -640,7 +627,7 @@ function ConsentCard({
     <Card tone="warning">
       <CardHeader>
         <div className="flex items-center gap-2">
-          <ShieldAlert className="h-5 w-5 text-amber-700 dark:text-amber-300" />
+          <ShieldAlert className="h-5 w-5 text-warning" />
           <CardTitle className="text-base">
             Consent required to enable Browser Automation
           </CardTitle>
@@ -656,7 +643,7 @@ function ConsentCard({
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-md border border-border bg-background/60 p-3 dark:bg-background/30">
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-warning">
               <ShieldAlert className="h-3.5 w-3.5" /> Risk
             </div>
             <p className="mt-1.5">
@@ -667,7 +654,7 @@ function ConsentCard({
             </p>
           </div>
           <div className="rounded-md border border-border bg-background/60 p-3 dark:bg-background/30">
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-success">
               <ShieldCheck className="h-3.5 w-3.5" /> Mitigations
             </div>
             <p className="mt-1.5">
@@ -764,11 +751,11 @@ function StatusCard({
         <Row label="Sandbox" value={sandboxLabel} />
         <Row
           label="Last successful check"
-          value={status.lastCheckAt ? formatTime(status.lastCheckAt) : "Never"}
+          value={formatTimestamp(status.lastCheckAt, "Never")}
         />
         <Row
           label="Last sync (History mtime)"
-          value={status.lastSyncAt ? formatTime(status.lastSyncAt) : "Never"}
+          value={formatTimestamp(status.lastSyncAt, "Never")}
         />
         <Row
           label="Consecutive failures"
@@ -776,7 +763,7 @@ function StatusCard({
         />
         <Row
           label="Paused until"
-          value={status.pausedUntil ? formatTime(status.pausedUntil) : "—"}
+          value={formatTimestamp(status.pausedUntil)}
         />
         <Row
           label="Chromium binary"
@@ -811,7 +798,7 @@ function BootstrapCard({
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <Clock3 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          <Clock3 className="h-5 w-5 text-primary" />
           <CardTitle className="text-base">Sign-in in progress</CardTitle>
         </div>
       </CardHeader>
@@ -908,7 +895,7 @@ function ActionCard({
         <Button
           size="sm"
           variant="outline"
-          className="border-red-500 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+          className="border-destructive text-destructive hover:bg-destructive/10"
           onClick={onDisconnect}
           disabled={disconnectPending}
         >
@@ -936,10 +923,6 @@ function ActionCard({
       </p>
     </Card>
   );
-}
-
-function formatTime(ms: number): string {
-  return new Date(ms).toLocaleString();
 }
 
 /**
@@ -1079,7 +1062,7 @@ function SiteCard({
             {site.sessionMaxAgeDays} d
             {site.accountLabel ? ` · ${site.accountLabel}` : ""}
             {site.connectedAt
-              ? ` · connected ${formatTime(site.connectedAt)}`
+              ? ` · connected ${formatTimestamp(site.connectedAt)}`
               : ""}
           </div>
         </div>
@@ -1087,7 +1070,7 @@ function SiteCard({
       </div>
 
       {site.state === "bootstrap_running" && (
-        <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+        <div className="mt-3 rounded-md border border-primary/40 bg-primary/10 p-3 text-xs text-primary">
           <div className="flex items-center gap-2 font-medium">
             <Clock3 className="h-3.5 w-3.5" /> Sign-in window open
           </div>
@@ -1158,7 +1141,7 @@ function SiteCard({
           <Button
             size="sm"
             variant="outline"
-            className="border-red-500 text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/40"
+            className="border-destructive text-destructive hover:bg-destructive/10"
             onClick={() => disconnectMutation.mutate()}
             disabled={disconnectMutation.isPending}
           >

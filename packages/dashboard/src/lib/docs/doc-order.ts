@@ -3,7 +3,7 @@
  * Prev/Next neighbors footer (bottom of the content pane).
  *
  * Without a single source of truth here the two surfaces drift: the
- * operator scrolls down to a "Next: Hourly Check" link that doesn't
+ * operator scrolls down to a "Next: Activity Scan" link that doesn't
  * match the order they see in the tree on the left.
  */
 

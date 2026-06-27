@@ -180,6 +180,47 @@ describe("browser history API routes", () => {
   // wiki note, it calls this endpoint to advance the column. Without
   // this stamp, the templated `wiki_summary_offer` would re-fire 14
   // days later despite a wiki already existing on disk.
+  // RESEARCH_CLUSTER_COST_FIX_PLAN rev5 — each delta bucket is stamped
+  // `complete`; the current (still-accumulating) agent day is the only
+  // `false`. The append-only research journal must skip incomplete
+  // buckets, or a wake-catch-up run firing mid-day freezes an
+  // undercounted day entry forever.
+  describe("GET /browser-history/research-clusters/:slug/delta — complete stamps", () => {
+    it("marks past agent days complete:true and the current agent day complete:false", async () => {
+      db.prepare(
+        `INSERT INTO browser_research_clusters (
+           slug, root_task_id, display_name, started_at, last_activity_at,
+           visits_total, meaningful_visits_total, meaningful_foreground_sec_total,
+           distinct_meaningful_domains, status
+         ) VALUES ('quantum-mechanics', 7, 'Quantum mechanics', 0, 0, 0, 0, 0, 0, 'active')`,
+      ).run();
+      const insertVisit = db.prepare(
+        `INSERT INTO browser_visits
+           (ts, browser, url_hash, domain, category, meaningful,
+            foreground_sec, root_task_id)
+         VALUES (?, 'chrome', ?, ?, 'research', 1, 60, 7)`,
+      );
+      const now = Date.now();
+      // Agent-day boundaries are 24h apart, so `now − 24h` always lands in
+      // the previous agent day regardless of where "now" sits in the day.
+      insertVisit.run(now - 24 * 60 * 60 * 1000, "h1", "arxiv.org");
+      insertVisit.run(now, "h2", "scholar.google.com");
+
+      const res = await makeApp(db).request(
+        "/api/browser-history/research-clusters/quantum-mechanics/delta",
+      );
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        days: Array<{ date: string; complete: boolean }>;
+      };
+      expect(body.days).toHaveLength(2);
+      // Oldest-first ordering, completed yesterday before in-progress today.
+      expect(body.days[0].date < body.days[1].date).toBe(true);
+      expect(body.days[0].complete).toBe(true);
+      expect(body.days[1].complete).toBe(false);
+    });
+  });
+
   describe("POST /browser-history/research-clusters/:slug/wiki-written", () => {
     function seedCluster(db: Database.Database, slug: string): void {
       db.prepare(

@@ -11,7 +11,7 @@ import {
 } from "../feedback/tuning-actuator.js";
 import { BangArgError, BangCommandRegistry, revertTuningCommand } from "./index.js";
 
-const KEY = "hourlyCheckPrePassFreshnessMinutes";
+const KEY = "activityScanPrePassFreshnessMinutes";
 
 function makeAudit(): IAuditLogger {
   return {
@@ -66,7 +66,7 @@ describe("!revert tuning", () => {
     config = {
       timezone: "UTC",
       dayBoundaryHour: 4,
-      hourlyCheckPrePassFreshnessMinutes: 360,
+      activityScanPrePassFreshnessMinutes: 360,
       feedbackLearningEnabled: true,
     } as AgentConfig;
   });
@@ -117,7 +117,7 @@ describe("!revert tuning", () => {
     expect(notify.mock.calls[0][0]).toContain(
       "No applied self-tuning change to revert",
     );
-    expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(360);
+    expect(config.activityScanPrePassFreshnessMinutes).toBe(360);
   });
 
   it("reverts the most recent applied config change through the chokepoint", async () => {
@@ -126,7 +126,7 @@ describe("!revert tuning", () => {
     await revertTuningCommand.handler(ctx(notify), undefined);
 
     // Live config mutated back and the settings row persisted.
-    expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(240);
+    expect(config.activityScanPrePassFreshnessMinutes).toBe(240);
     const persisted = db
       .prepare(`SELECT value_json FROM settings WHERE key = ?`)
       .get(KEY) as { value_json: string } | undefined;
@@ -158,7 +158,7 @@ describe("!revert tuning", () => {
     const notify = vi.fn().mockResolvedValue(undefined);
     await revertTuningCommand.handler(ctx(notify), undefined);
     expect(notify.mock.calls[0][0]).toContain(`Could not revert ${KEY}`);
-    expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(360);
+    expect(config.activityScanPrePassFreshnessMinutes).toBe(360);
     const stored = readRuntimeState<TuningLedgerBlob>(db, ledgerStateKey(KEY));
     expect(stored?.reverted_at).toBeUndefined();
   });

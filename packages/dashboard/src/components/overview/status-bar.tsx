@@ -46,7 +46,7 @@ function Segment({
 
 /**
  * Single status strip at the top of the Overview — replaces the previous
- * pair of stat cards. Three segments: agent state, next hourly check
+ * pair of stat cards. Three segments: agent state, next activity scan
  * (with the manual trigger), and today's spend. Everything that needs
  * deeper inspection links out from the cards below instead of being
  * duplicated here.
@@ -118,7 +118,8 @@ export function StatusBar({
       </Segment>
 
       <Segment label="Today">
-        <p className="font-display text-xl font-semibold tracking-tight tabular-nums text-foreground">
+        {/* No tabular-nums: Fraunces ships no `tnum` feature (see CardValue). */}
+        <p className="font-display text-xl font-semibold tracking-tight text-foreground">
           {health ? formatCurrency(health.todayCostUsd) : "—"}
         </p>
         <p className="text-xs text-muted-foreground">

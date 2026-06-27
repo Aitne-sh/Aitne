@@ -200,7 +200,7 @@ describe("recordTaskHeaderInProgress + completeTaskHeader", () => {
       backendId: "claude",
       modelId: "claude-haiku-4-5",
       parentEventId: "evt-3",
-      parentProcessKey: "hourly_check",
+      parentProcessKey: "activity_scan",
       startedAt: "2026-05-10T00:00:00Z",
       detail: { integrationKey: "gmail" },
     });

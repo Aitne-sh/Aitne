@@ -1,5 +1,9 @@
 import type Database from "better-sqlite3";
 import type { AgentKind, ScheduleKind, StopWarning } from "@aitne/shared";
+import {
+  parseRuntimeWindowOverride,
+  type RuntimeWindowOverride,
+} from "../core/agents/activity-scan-cadence.js";
 
 /**
  * Agents store — durable identity layer for the Agent Definitions feature
@@ -40,6 +44,13 @@ export interface AgentMetadata {
   last_error?: string;
   /** Built-in field-level edits that must survive `npm i -g` (§6.4.1). */
   override_snapshot?: Record<string, unknown>;
+  /**
+   * Runtime-window cadence overrides for `activity-scan` (interval / active
+   * hours / observation threshold) — AGENTS_HUB_REDESIGN_PLAN.md §2. Written
+   * by `PATCH /api/agents/:slug` (`schedule_window`), preserved by the loader
+   * like `override_snapshot`, resolved by `core/agents/activity-scan-cadence.ts`.
+   */
+  runtime_window?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -419,6 +430,83 @@ export function getOverrideSnapshot(
     .get(slug);
   if (!row) return {};
   return parseMetadata(row.metadata_json).override_snapshot ?? {};
+}
+
+/**
+ * Read just the `enabled` flag for a slug, with a caller-supplied fallback for
+ * a missing row (pass the registry's `defaultEnabled` for built-ins). Cheap
+ * single-column read for fire-time / catch-up gates outside the scheduler's
+ * cached `isAgentEnabledForFiring` path.
+ */
+export function getAgentEnabled(
+  db: Database.Database,
+  slug: string,
+  fallback: boolean,
+): boolean {
+  try {
+    const row = db
+      .prepare<[string], { enabled: number }>("SELECT enabled FROM agents WHERE id = ?")
+      .get(slug);
+    return row ? row.enabled === 1 : fallback;
+  } catch {
+    // Defensive: a DB without the agents table (minimal test fixtures,
+    // pre-applySchema boot edge) behaves like a missing row.
+    return fallback;
+  }
+}
+
+/**
+ * Read the sanitized runtime-window override (`metadata_json.runtime_window`)
+ * for a slug. Returns `{}` when the Agent is missing or carries no override,
+ * so callers can hand the result straight to `resolveActivityScanCadence`.
+ */
+export function getRuntimeWindow(
+  db: Database.Database,
+  slug: string,
+): RuntimeWindowOverride {
+  try {
+    const row = db
+      .prepare<[string], { metadata_json: string }>(
+        "SELECT metadata_json FROM agents WHERE id = ?",
+      )
+      .get(slug);
+    if (!row) return {};
+    return parseRuntimeWindowOverride(parseMetadata(row.metadata_json).runtime_window);
+  } catch {
+    // Defensive: a DB without the agents table (minimal test fixtures,
+    // pre-applySchema boot edge) behaves like a missing row.
+    return {};
+  }
+}
+
+/**
+ * Replace the runtime-window override, preserving every other `metadata_json`
+ * key. An empty override removes the `runtime_window` key entirely (all fields
+ * back on the config fallback). Returns the updated DTO, or `null` when no row
+ * matches.
+ */
+export function setRuntimeWindow(
+  db: Database.Database,
+  slug: string,
+  window: RuntimeWindowOverride,
+  now: number = Date.now(),
+): AgentDTO | null {
+  const row = db
+    .prepare<[string], { metadata_json: string }>(
+      "SELECT metadata_json FROM agents WHERE id = ?",
+    )
+    .get(slug);
+  if (!row) return null;
+  const metadata = parseMetadata(row.metadata_json);
+  if (Object.keys(window).length === 0) {
+    delete metadata.runtime_window;
+  } else {
+    metadata.runtime_window = window as Record<string, unknown>;
+  }
+  db.prepare(
+    "UPDATE agents SET metadata_json = ?, updated_at = ? WHERE id = ?",
+  ).run(JSON.stringify(metadata), now, slug);
+  return getAgent(db, slug);
 }
 
 /**

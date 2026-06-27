@@ -73,7 +73,7 @@ import {
 
 const baseLogger = createLogger("agents-loader");
 
-/** A built-in whose registry `cronExpression` is `null` (hourly-check) still
+/** A built-in whose registry `cronExpression` is `null` (activity-scan) still
  *  needs a schema-valid `schedule.expression` when synthesised from the
  *  registry. The loader never schedules from it (the runtime window owns the
  *  cadence, §5.5.1); this literal is self-documenting only and drift-free
@@ -445,6 +445,12 @@ function nextMetadata(
   if (prior.override_snapshot !== undefined) {
     meta.override_snapshot = prior.override_snapshot;
   }
+  // Runtime-window cadence overrides (activity-scan interval / active hours /
+  // observation gate) are operator state exactly like override_snapshot — they
+  // must survive every loader re-run and `npm i -g`.
+  if (prior.runtime_window !== undefined) {
+    meta.runtime_window = prior.runtime_window;
+  }
   const priorVersion =
     typeof prior.version_counter === "number" ? prior.version_counter : 0;
   meta.version_counter = hashChanged ? priorVersion + 1 : Math.max(priorVersion, 1);
@@ -805,8 +811,10 @@ function autoImportOrphans(
  * Render the subset of an `AgentDefinition` worth persisting to an auto-imported
  * `agent.md` frontmatter. Schema defaults (limits/tools/on_error) are omitted
  * to keep the generated file readable; they re-populate on the next parse.
+ * Exported for the custom-routine migration, which materialises user Agents
+ * through the same shape (AGENTS_HUB_REDESIGN_PLAN.md §3).
  */
-function definitionToFrontmatter(def: AgentDefinition): Record<string, unknown> {
+export function definitionToFrontmatter(def: AgentDefinition): Record<string, unknown> {
   // Auto-import always builds a cron schedule with a resolved expression +
   // timezone, so both are emitted unconditionally (no dead-branch guards).
   const backend: Record<string, unknown> = { process_key: def.backend.process_key };

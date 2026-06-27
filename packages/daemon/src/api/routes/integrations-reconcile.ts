@@ -216,7 +216,7 @@ export function createIntegrationReconcileRoutes(
  * callers bypass the route and write any window key directly. Plan §6.0
  * defense layer 2.
  *
- * Calendar-only by design (post-Phase-5 review): the LLM hourly_check
+ * Calendar-only by design (post-Phase-5 review): the LLM activity_scan
  * Step 0b fetches the same `[now-15min, now+60min)` and `[now, now+24h)`
  * windows the daemon's `delegated-sync-worker` uses for `primary:imminent`
  * and `primary:24h`, so an LLM POST and a worker POST land in the same
@@ -230,7 +230,7 @@ export function createIntegrationReconcileRoutes(
  * `reconcile.ts:319-345`). The fix is to keep gmail/notion authoring
  * inside the daemon worker only; the LLM consumes drift signals via
  * `GET /api/observations`. The corresponding Step 0a / 0c blocks of
- * `routine.hourly_check.delegated.<backend>.md` were rewritten to
+ * `routine.activity_scan.delegated.<backend>.md` were rewritten to
  * forbid the POST and document the rationale; this allowlist is the
  * defense-in-depth backstop that catches a future overlay rewrite that
  * silently re-introduces the LLM call.

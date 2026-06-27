@@ -59,18 +59,28 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   // egress-denylist.ts (which the framework no longer ships). Empty
   // by default; operators add entries via Dashboard /settings/browser.
   "browserTaskHostnameDenylist",
-  "hourlyCheckEnabled", "hourlyCheckIntervalMinutes",
-  "hourlyCheckActiveStartHour", "hourlyCheckActiveEndHour", "hourlyCheckMinObservations",
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §6 — generic background-task runner.
+  "backgroundTaskMaxConcurrent",
+  "backgroundTaskClarificationTtlMinutes",
+  "backgroundTaskPendingQueueTimeoutMinutes",
+  "backgroundTaskDigestCadenceHours",
+  // Phase 4 — brief-dedup window + resume-across-restart toggle.
+  "backgroundTaskDedupWindowMinutes",
+  "backgroundTaskResumeAcrossRestart",
+  // Phase 4 — opt-in: route autonomous forwards through the delivery machinery.
+  "autonomousForwardNaturalDelivery",
+  "activityScanEnabled", "activityScanIntervalMinutes",
+  "activityScanActiveStartHour", "activityScanActiveEndHour", "activityScanMinObservations",
   // cost-reduction-structural §B — three-stage gate knobs.
-  // (`hourlyCheckGateMode` was removed in
+  // (`activityScanGateMode` was removed in
   // HOURLY_CHECK_GATE_REDESIGN_PLAN.md Phase 4 — the gate now has a
   // single execution path.)
-  "hourlyCheckStage2Enabled", "hourlyCheckHeartbeatHours",
-  "hourlyCheckLowSignalPendingCeiling",
+  "activityScanStage2Enabled", "activityScanHeartbeatHours",
+  "activityScanLowSignalPendingCeiling",
   // HOURLY_CHECK_GATE_REDESIGN_PLAN.md §3.4 — minutes between pre-pass
   // spawns for the same integration. `harvestForGate` skips pre-pass
   // when `runtime_state.pre_pass_last_run:<key>` is within this window.
-  "hourlyCheckPrePassFreshnessMinutes",
+  "activityScanPrePassFreshnessMinutes",
   "authProbeDisabled", "authPreflightFreshnessMs",
   "maxNotificationsPerHour", "maxNotificationsPerDay",
   "quietHoursStart", "quietHoursEnd", "batchIntervalMinutes", "primaryPlatform",
@@ -84,6 +94,11 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "opencodeExecutionPermissionMode",
   "opencodeBaseUrl",
   "opencodeServerUsername",
+  // Keep-awake posture (macOS `caffeinate` held for the daemon's lifetime).
+  // "ac" (default) inhibits system sleep only on AC power; "always" adds
+  // idle-sleep inhibition on battery; "off" restores OS-managed sleep.
+  // See packages/daemon/src/core/sleep-inhibitor.ts for the rationale.
+  "preventSleepMode",
   "externalObsidianVaultPath", "externalObsidianVaultName",
   // SETUP-FLOW-REDESIGN-PLAN §6.3 — kill switch for the external-vault
   // branch of `ObsidianWatcher`. Editable so the Notes step's "Watch for
@@ -105,6 +120,7 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   // SCHEDULED-DM-IMPLEMENTATION-PLAN §3.6.1 / §6.6.1 — max delay budget
   // for scheduled.dm gate-acquisition before the briefing is dropped.
   "maxBriefingDelayMinutes",
+  "ownerActivityIdleThresholdMinutes",
   "gitPollIntervalSeconds", "gitPushOverdueMinutes", "gitProjectUpdateDebounceMinutes",
   "notionPollIntervalSeconds", "calendarPollIntervalSeconds",
   "gmailPollIntervalSeconds",
@@ -126,7 +142,7 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "mailIdleFallbackRecoveryMinutes",
   "mailMaxMessagesPerPoll",
   "mailAuthFailureRetryHours",
-  "hourlyObservationCharBudget",
+  "activityScanObservationCharBudget",
   // docs/design/appendices/pre-pass-fan-out.md §6 — retry, concurrency, and budget knobs.
   "prePassMaxAttemptsPerIntegration",
   "prePassBackoffMs",
@@ -192,6 +208,11 @@ export const RESTART_REQUIRED_KEY_TUPLE = [
   "whatsappEnabled", "whatsappOwnerPhone", "whatsappAuthDir",
   "notionDatabaseIds",
   "gmailPollIntervalSeconds",
+  // The sleep inhibitor spawns its `caffeinate` child once at boot
+  // (index.ts) with the mode captured at construction; a runtime PATCH
+  // updates config storage but does not restart the child. Surface that
+  // honestly via the restart-required badge.
+  "preventSleepMode",
   // DelegatedProbeObserver (DELEGATED-MODE-V2 §7.1) captures `intervalMs`
   // at construction time and registers a single setInterval — a hot PATCH
   // updates `config.delegatedProbeIntervalMinutes` but the timer keeps

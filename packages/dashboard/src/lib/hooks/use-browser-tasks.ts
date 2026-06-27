@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
@@ -184,6 +185,10 @@ export function useBrowserTasks(filter?: BrowserTaskListFilter) {
         | undefined;
       return data && hasNonTerminal(data.tasks) ? 5_000 : 30_000;
     },
+    // Keep the current list on screen while a new filter loads — otherwise
+    // the key change clears data, QueryResult collapses to a skeleton, and
+    // the page scrolls to the top on every state/site filter change.
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -9,7 +9,7 @@ aliases:
 category: features
 summary: |
   Watch an Obsidian vault for new and changed notes. Changes record
-  observations the hourly check consumes; the agent can also read
+  observations the activity scan consumes; the agent can also read
   notes on demand.
 section: integrations
 tags:
@@ -24,7 +24,7 @@ ask_examples:
   - Why didn't the agent see my new note?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-11
 keywords:
   - obsidian
   - vault
@@ -32,10 +32,10 @@ keywords:
   - obsidian observer
 related:
   - features/integrations/notion
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - concepts/observations
 ui_anchors:
-  - /connections/knowledge
+  - /connections/notes
 config_keys:
   - externalObsidianVaultPath
   - externalObsidianVaultName
@@ -46,7 +46,7 @@ config_keys:
 # Obsidian
 
 Point Aitne at your Obsidian vault directory; new and changed notes
-record observations the hourly check consumes. The agent can read and
+record observations the activity scan consumes. The agent can read and
 write vault notes through the `external-services` skill.
 
 Reads and writes go through the Obsidian app's CLI — the Obsidian app
@@ -72,18 +72,18 @@ its own output.
 Continuously — the watcher runs as long as the daemon is up and a vault
 path is configured (`externalObsidianWatch=true`). Saves are debounced
 by `obsidianDebounceSeconds` before an observation is recorded; the
-[hourly check](../routines/hourly-check.md) later consumes those
+[activity scan](../routines/activity-scan.md) later consumes those
 observations.
 
 ## Where in the Dashboard
 
-- **Connections → Knowledge** to point at the vault directory.
+- **Connections → Notes** to point at the vault directory.
 
 ## Configuration
 
 | Setting | Default | Notes |
 |---|---|---|
-| `externalObsidianVaultPath` | unset | Vault directory; set in Connections → Knowledge. |
+| `externalObsidianVaultPath` | unset | Vault directory; set in Connections → Notes. |
 | `externalObsidianWatch` | true | Set false to keep the path but stop recording changes (large-vault churn control). |
 | `obsidianDebounceSeconds` | 5 | How long to wait after a save before recording. |
 

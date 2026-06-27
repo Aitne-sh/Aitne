@@ -16,8 +16,10 @@ import { rewriteCharacterBlock } from "./skills-compiler-cli-renderer.js";
 import { setWikiWorkspaceTokenResolver } from "./skills-compiler-tree.js";
 import {
   loadFetchWindowSystemPrompt,
+  loadResearchClusterUpdateSystemPrompt,
   resetFetchWindowSystemPromptForTest,
-} from "./fetch-window-prompt-loader.js";
+  resetSlimSystemPromptsForTest,
+} from "./slim-system-prompt-loader.js";
 import { APP_NAME, type BackendId } from "@aitne/shared";
 
 
@@ -359,7 +361,7 @@ function extractSkillSection(instruction: string, slug: string): string {
 /**
  * Cross-backend prose coverage — docs/design/appendices/routine-data-acquisition.md
  * Phase 3 R4 deleted the
- * `routine.hourly_check.delegated.<sessionBackend>.md` variant files
+ * `routine.activity_scan.delegated.<sessionBackend>.md` variant files
  * along with their `native.<sessionBackend>` siblings. The
  * cross-backend / same-backend split prose lives in the
  * `_partials/<kind>-acquire.<integration>.md` partials now: the
@@ -370,15 +372,15 @@ function extractSkillSection(instruction: string, slug: string): string {
  * session backend + the integration's `delegatedBackend` binding —
  * exactly what the deleted variants encoded by filename. This
  * replacement suite pins the equivalent contract against the rendered
- * `routine.hourly_check` body across the matrix that used to be the
+ * `routine.activity_scan` body across the matrix that used to be the
  * variant files.
  */
-describe("hourly_check main session is wire-surface agnostic (Phase 4 D3)", () => {
+describe("activity_scan main session is wire-surface agnostic (Phase 4 D3)", () => {
   // docs/design/appendices/routine-data-acquisition.md Phase 4 D3 — the dispatcher
   // pre-pass (`routine.fetch_window`) now owns the integration wire
-  // surface for hourly_check. The main session reads observations and
+  // surface for activity_scan. The main session reads observations and
   // is agnostic to (mode, backend) routing — the per-cell prose lives
-  // in the pre-pass session's prompt, not in `routine.hourly_check.md`.
+  // in the pre-pass session's prompt, not in `routine.activity_scan.md`.
   // The substitute coverage below pins the contract that the main
   // session body never embeds the partials and never references the
   // delegation proxy directly, regardless of (session, mode → backend)
@@ -387,10 +389,10 @@ describe("hourly_check main session is wire-surface agnostic (Phase 4 D3)", () =
   //   - `routine-task-flow-includes.test.ts` (pre-pass include resolution)
   //   - `routine-acquisition-plan.test.ts` (mode-resolution semantics)
   for (const sessionBackend of ["claude", "codex"] as const) {
-    it(`routine.hourly_check (session=${sessionBackend}, gmail+calendar+notion delegated to ${sessionBackend}) main session reads observations + has no embedded wire surface`, async () => {
+    it(`routine.activity_scan (session=${sessionBackend}, gmail+calendar+notion delegated to ${sessionBackend}) main session reads observations + has no embedded wire surface`, async () => {
       const { getTaskFlow } = await import("./prompts.js");
       const ts = "2026-05-11T00:00:00.000Z";
-      const flow = getTaskFlow("routine.hourly_check", sessionBackend, {
+      const flow = getTaskFlow("routine.activity_scan", sessionBackend, {
         gmail: { mode: "delegated", delegatedBackend: sessionBackend, deniedTools: [], lastChangedAt: ts },
         google_calendar: { mode: "delegated", delegatedBackend: sessionBackend, deniedTools: [], lastChangedAt: ts },
         notion: { mode: "delegated", delegatedBackend: sessionBackend, deniedTools: [], lastChangedAt: ts },
@@ -407,11 +409,11 @@ describe("hourly_check main session is wire-surface agnostic (Phase 4 D3)", () =
       expect(flow).not.toContain("/api/integrations/google_calendar/exec");
     });
 
-    it(`routine.hourly_check (session=${sessionBackend}, gmail+calendar+notion delegated to the OTHER backend) main session stays agnostic of cross-backend routing`, async () => {
+    it(`routine.activity_scan (session=${sessionBackend}, gmail+calendar+notion delegated to the OTHER backend) main session stays agnostic of cross-backend routing`, async () => {
       const { getTaskFlow } = await import("./prompts.js");
       const otherBackend = sessionBackend === "claude" ? "codex" : "claude";
       const ts = "2026-05-11T00:00:00.000Z";
-      const flow = getTaskFlow("routine.hourly_check", sessionBackend, {
+      const flow = getTaskFlow("routine.activity_scan", sessionBackend, {
         gmail: { mode: "delegated", delegatedBackend: otherBackend, deniedTools: [], lastChangedAt: ts },
         google_calendar: { mode: "delegated", delegatedBackend: otherBackend, deniedTools: [], lastChangedAt: ts },
         notion: { mode: "delegated", delegatedBackend: otherBackend, deniedTools: [], lastChangedAt: ts },
@@ -427,10 +429,10 @@ describe("hourly_check main session is wire-surface agnostic (Phase 4 D3)", () =
     });
   }
 
-  it("routine.hourly_check (session=gemini, gmail+calendar+notion delegated to claude) main session stays agnostic — pre-pass owns the cross-backend proxy", async () => {
+  it("routine.activity_scan (session=gemini, gmail+calendar+notion delegated to claude) main session stays agnostic — pre-pass owns the cross-backend proxy", async () => {
     const { getTaskFlow } = await import("./prompts.js");
     const ts = "2026-05-11T00:00:00.000Z";
-    const flow = getTaskFlow("routine.hourly_check", "gemini", {
+    const flow = getTaskFlow("routine.activity_scan", "gemini", {
       gmail: { mode: "delegated", delegatedBackend: "claude", deniedTools: [], lastChangedAt: ts },
       google_calendar: { mode: "delegated", delegatedBackend: "claude", deniedTools: [], lastChangedAt: ts },
       notion: { mode: "delegated", delegatedBackend: "claude", deniedTools: [], lastChangedAt: ts },
@@ -1533,6 +1535,153 @@ describe("materializeSessionBundle — routine.fetch_window CLI slim path (Phase
   });
 });
 
+/**
+ * RESEARCH_CLUSTER_COST_FIX_PLAN.md F4 — the slim CLI materializer generalizes
+ * to `routine.research_cluster_update`: write the slim system-prompt body as
+ * AGENTS.md / GEMINI.md (byte-identical to the Claude SDK systemPrompt) and
+ * copy the key's `browser-history` + `context` skill bundle (NOT the fetch
+ * window's `observations`). Cross-backend parity per the §3 constraint; the
+ * key is claude-pinned in practice, so this path is insurance, but it must
+ * not regress or diverge from the loader.
+ */
+describe("materializeSessionBundle — routine.research_cluster_update CLI slim path (F4)", () => {
+  const repoRoot = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "..",
+  );
+  let sessionDir: string;
+
+  beforeEach(() => {
+    sessionDir = mkdtempSync(join(tmpdir(), "pa-research-slim-"));
+    // Drop the per-template cache so a stray earlier test cannot leak a
+    // different repoRoot's body into the byte-equality assertions.
+    resetSlimSystemPromptsForTest();
+  });
+
+  afterEach(() => {
+    rmSync(sessionDir, { recursive: true, force: true });
+  });
+
+  for (const { backendId, instructionFile, cliRoot } of [
+    { backendId: "codex" as const, instructionFile: "AGENTS.md", cliRoot: ".codex" },
+    { backendId: "gemini" as const, instructionFile: "GEMINI.md", cliRoot: ".gemini" },
+  ]) {
+    it(`writes the slim F4 template as ${instructionFile} for ${backendId}`, () => {
+      const compiler = new SkillsCompiler(repoRoot);
+      compiler.materializeSessionBundle({
+        backendId,
+        sessionDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      const slim = loadResearchClusterUpdateSystemPrompt();
+      const instruction = readFileSync(join(sessionDir, instructionFile), "utf-8");
+      expect(instruction).toBe(slim);
+      // Sanity anchor so a template drift that still byte-matched the loader
+      // (e.g. both edited to a fetch-window body) would still trip.
+      expect(instruction).toMatch(/routine\.research_cluster_update journal session/);
+    });
+
+    it(`copies the browser-history + context skills (and NOT observations) to ${cliRoot}/skills/ for ${backendId}`, () => {
+      const compiler = new SkillsCompiler(repoRoot);
+      compiler.materializeSessionBundle({
+        backendId,
+        sessionDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      const cliSkillsRoot = join(sessionDir, cliRoot, "skills");
+      expect(existsSync(join(cliSkillsRoot, "browser-history", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(cliSkillsRoot, "context", "SKILL.md"))).toBe(true);
+      // The fetch_window slim skill must NOT bleed into this key's bundle.
+      expect(existsSync(join(cliSkillsRoot, "observations"))).toBe(false);
+    });
+
+    it(`omits wide-path scaffolding + skill-index from the slim ${instructionFile} for ${backendId}`, () => {
+      const compiler = new SkillsCompiler(repoRoot);
+      compiler.materializeSessionBundle({
+        backendId,
+        sessionDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      const instruction = readFileSync(join(sessionDir, instructionFile), "utf-8");
+      expect(instruction).not.toContain("## Behavioral rules");
+      expect(instruction).not.toContain("## Daemon API Usage");
+      expect(instruction).not.toContain("## Skills");
+      expect(instruction).not.toMatch(/^# \w+ (AGENTS|GEMINI)\.md/);
+      expect(instruction).not.toContain("<skill-index>");
+      expect(instruction).not.toContain("<!-- skill-index:start -->");
+      // Slim sections survive.
+      expect(instruction).toContain("## Operating principles");
+      expect(instruction).toContain("## Boundaries");
+    });
+
+    it(`prunes stale wide-path skill dirs on re-materialization (${backendId})`, () => {
+      const compiler = new SkillsCompiler(repoRoot);
+      // Wide DM pass leaves `mail` behind.
+      compiler.materializeSessionBundle({ backendId, sessionDir, eventType: "message.received.dm" });
+      const cliSkillsRoot = join(sessionDir, cliRoot, "skills");
+      expect(existsSync(join(cliSkillsRoot, "mail"))).toBe(true);
+      // Slim research pass narrows to its bundle and prunes the rest.
+      compiler.materializeSessionBundle({
+        backendId,
+        sessionDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      expect(existsSync(join(cliSkillsRoot, "browser-history", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(cliSkillsRoot, "context", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(cliSkillsRoot, "mail"))).toBe(false);
+    });
+  }
+
+  for (const backendId of ["codex", "gemini"] as const) {
+    it(`materializeSessionBundle reports the browser-history + context bundle on the slim ${backendId} path`, () => {
+      const compiler = new SkillsCompiler(repoRoot);
+      const result = compiler.materializeSessionBundle({
+        backendId,
+        sessionDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      expect(result.skills).toEqual(["browser-history", "context"]);
+    });
+  }
+
+  it("emits a body byte-identical to the loader across codex and gemini (single-source-of-truth)", () => {
+    const compiler = new SkillsCompiler(repoRoot);
+    const codexDir = mkdtempSync(join(tmpdir(), "pa-research-codex-"));
+    const geminiDir = mkdtempSync(join(tmpdir(), "pa-research-gemini-"));
+    try {
+      compiler.materializeSessionBundle({
+        backendId: "codex",
+        sessionDir: codexDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      compiler.materializeSessionBundle({
+        backendId: "gemini",
+        sessionDir: geminiDir,
+        eventType: "routine.research_cluster_update",
+        processKey: "routine.research_cluster_update",
+      });
+      const slim = loadResearchClusterUpdateSystemPrompt();
+      const codexBody = readFileSync(join(codexDir, "AGENTS.md"), "utf-8");
+      const geminiBody = readFileSync(join(geminiDir, "GEMINI.md"), "utf-8");
+      expect(codexBody).toBe(slim);
+      expect(geminiBody).toBe(slim);
+      expect(codexBody).toBe(geminiBody);
+    } finally {
+      rmSync(codexDir, { recursive: true, force: true });
+      rmSync(geminiDir, { recursive: true, force: true });
+    }
+  });
+});
+
 
 describe("materializeOpencodeSession — Phase 4 workdir layout", () => {
   let workspace: string;
@@ -2377,7 +2526,7 @@ describe("OpenCode AGENTS.md never carries <skill-index> across manifests (U12)"
     "message.received",
     "routine.morning_routine",
     "routine.evening_review",
-    "routine.hourly_check",
+    "routine.activity_scan",
   ] as const;
 
   it.each(EVENTS)(

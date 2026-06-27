@@ -37,7 +37,7 @@ keywords:
   - regenerate today
 related:
   - features/routines/morning-routine
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - concepts/agent-day
   - troubleshooting/auth-failed
   - troubleshooting/quota-exhausted
@@ -52,7 +52,7 @@ config_keys:
 context_files:
   - state/today.md
 ui_anchors:
-  - /settings/routines
+  - /agents/morning-routine
   - /activity
 ---
 
@@ -115,9 +115,9 @@ Give it a few minutes, or restart the daemon, before digging deeper.
    the routine still "belongs to" yesterday — see
    [Agent Day](../concepts/agent-day.md).
 
-Note: the morning routine takes priority over the hourly check, not the
-other way around. The hourly check skips itself while the morning
-routine is active, so a running hourly check never blocks the morning
+Note: the morning routine takes priority over the activity scan, not the
+other way around. The activity scan skips itself while the morning
+routine is active, so a running activity scan never blocks the morning
 routine.
 
 ## Diagnostic Steps
@@ -125,8 +125,8 @@ routine.
 1. `aitne status` — is the daemon up?
 2. `/activity` — is there a row for `routine.morning_routine`? An error
    outcome points to a backend failure (cause 2 or 3).
-3. `/settings/routines` — the routine list shows the next scheduled
-   fire and recent runs.
+3. `/agents` — the morning-routine card shows its schedule, status,
+   and last run; open `/agents/morning-routine` for recent executions.
 4. `aitne logs` — search for `morning_routine` to see the trigger,
    any fallback, and retry scheduling.
 
@@ -152,5 +152,5 @@ synthesis immediately.
 ## Related
 
 - [Morning Routine](../features/routines/morning-routine.md)
-- [Hourly Check](../features/routines/hourly-check.md)
+- [Activity Scan](../features/routines/activity-scan.md)
 - [Agent Day](../concepts/agent-day.md)

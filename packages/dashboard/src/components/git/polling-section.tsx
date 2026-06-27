@@ -152,7 +152,7 @@ export function PollingSection({ repo }: { repo: RepositoryDTO }) {
           poll more frequently — costs more rate budget on the GitHub side.
         </p>
         {saveError && (
-          <p className="text-xs text-red-700 dark:text-red-300">{saveError}</p>
+          <p className="text-xs text-destructive">{saveError}</p>
         )}
       </div>
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  browserHistoryClusterDeltaEntrySchema,
   browserHistoryClusterDetailSchema,
   browserHistoryLifecycleConfigSchema,
   cleanupInterestsReflectionRequestSchema,
@@ -7,6 +8,41 @@ import {
   refreshInterestsReflectionResponseSchema,
   weeklyInterestsSummaryResponseSchema,
 } from "./browser-history-schemas.js";
+
+// RESEARCH_CLUSTER_COST_FIX_PLAN rev5 — the delta route stamps each
+// bucket with `complete` so the append-only research journal can skip
+// the still-accumulating current agent day. Required, not optional: a
+// missing stamp would silently strip on `.parse` and reopen the
+// partial-day-freeze bug.
+describe("browserHistoryClusterDeltaEntrySchema.complete", () => {
+  const base = {
+    date: "2026-06-10",
+    meaningfulVisits: 3,
+    meaningfulForegroundSec: 120,
+    newDomains: ["arxiv.org"],
+  };
+
+  it("accepts both complete and in-progress buckets", () => {
+    expect(
+      browserHistoryClusterDeltaEntrySchema.safeParse({
+        ...base,
+        complete: true,
+      }).success,
+    ).toBe(true);
+    expect(
+      browserHistoryClusterDeltaEntrySchema.safeParse({
+        ...base,
+        complete: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects an entry without the complete stamp", () => {
+    expect(
+      browserHistoryClusterDeltaEntrySchema.safeParse(base).success,
+    ).toBe(false);
+  });
+});
 
 describe("browserHistoryClusterDetailSchema.rootTaskId", () => {
   const base = {

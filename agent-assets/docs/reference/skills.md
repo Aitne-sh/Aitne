@@ -59,13 +59,16 @@ related:
 Aitne ships a fixed set of built-in skills the agent loads per session. Most
 are always available; a few are **conditional** — loaded only when a gating
 flag is set (`gmail-lifestyle`, `managed-tasks`) or only for a specific event
-type (`browser-task`, on owner DMs). The table below is the canonical roster.
+type (`browser-task` / `background-task` / `background-task-reply`, on owner
+DMs). The table below is the canonical roster.
 
 | Slug | Purpose |
 |---|---|
 | `agent-actions` | Self-report structured metadata (dayType, anomalies, inbox stats, files-touched) into the session's own `agent_actions` row so daemon-side consumers read structured data instead of parsing prose. Loaded near the end of morning-routine / dispatcher sessions. |
 | `agent-create` | Register a durable, named recurring Agent that fires on a cron cadence via `POST /api/agents`. For ongoing autonomous work (not one-time reminders → `schedule`, not background app-data fetches → `managed-tasks`). Conditional skill loaded on owner DMs / mentions when the message looks like a recurring-work request (gated by `agentCreateActiveForDm`). |
 | `attach` | Attach a generated or downloaded file to the agent's reply when the user expects a file artifact. |
+| `background-task` | Hand a long-running / open-ended task (deep research, a multi-repo CI audit, "monitor X over time", a bulk compile) to the detached background runner via `POST /api/background-task`. Composes a self-contained brief, sets the notification policy (`always` / `if_significant` / `silent`), POSTs, acks, and ends the turn; reads `GET /api/background-task/:id` for follow-up detail. Loaded on `message.received.dm` + `message.received.dm_first`. |
+| `background-task-reply` | Relay the owner's natural-language answer to a background task that parked on a clarifying question (`awaiting_user`) into a structured `POST /api/background-task/:id/clarify` call. No-op unless a task is parked and the conversation shows the question was asked. Loaded on `message.received.dm`. |
 | `browser-history` | Read normalised browser activity through `/api/browser-history/*`. Used by research-cluster journal updates, accept-path dispatches, owner pulls of shopping / reload traces, and the morning research summary. Never reads browser SQLite or profile dirs directly. |
 | `browser-history-respond` | Bridge the owner's natural-language reply to a research-offer DM ("dig deeper" / "summarise") into a structured `/api/browser-history/offers/<slug>/{accept,decline}` call. |
 | `browser-task` | Drive managed Chromium for open-ended browser tasks the user describes in DM. POSTs to `/api/browser-task` with a natural-language description; relays sub-agent clarifications back through DM. Loaded only on `message.received.dm`. |
@@ -84,7 +87,7 @@ type (`browser-task`, on owner DMs). The table below is the canonical roster.
 | `roadmap` | Read / write `plans/roadmap.md` (cross-request write lock). |
 | `schedule` | Schedule future agent wake-ups and DMs via the daemon (writes `agent_schedule` and `recurring_schedules` rows). |
 | `scheduled-managed-task` | Surface and act on Managed Tasks that are due now. |
-| `today` | Read or write `state/today.md` — morning routines, hourly checks, DMs that need a today snapshot. |
+| `today` | Read or write `state/today.md` — morning routines, activity scans, DMs that need a today snapshot. |
 | `user-interview` | Manage the profile-interview queue at `state/profile-questions.md`; ask one question at a time. |
 | `user-profile` | Record user facts — identity, people, work, expertise, habits, goals — into the `identity/*` slices (`profile.md`, `people.md`, `work.md`, …). |
 | `wiki-*` | Build and maintain the personal wiki workspace — `!ingest` / `!compile` / `!ask` / `!lint` / `!trace` / `!connect`. Split into per-process sub-skills under `agent-assets/skills/wiki/` (`wiki-vault-rules`, `wiki-ingest`, `wiki-compile`, `wiki-ask`, `wiki-lint`, `wiki-trace`, `wiki-connect`, `wiki-graduate`), each loaded for its matching `wiki.*` ProcessKey. |

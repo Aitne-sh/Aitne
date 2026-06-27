@@ -60,8 +60,8 @@ context_files:
 
 # Mail
 
-Connect one or more mailboxes (Gmail, Outlook, Yahoo, iCloud, or any
-IMAP server) and Aitne polls them, classifies incoming threads, and
+Connect one or more mailboxes (Gmail, Outlook, Yahoo, or iCloud) and
+Aitne polls them, classifies incoming threads, and
 lets the agent search / label / read via the `mail` skill. Search is
 local — backed by SQLite FTS5 — so the agent doesn't need to round-trip
 the provider for every query.
@@ -69,8 +69,8 @@ the provider for every query.
 ## What It Does
 
 - **Read & search** existing threads (FTS5-backed local index).
-- **Classify** incoming messages — does this need owner attention,
-  is it a marketing list, is it a receipt.
+- **Classify** incoming messages — is it a travel booking, a receipt
+  attachment, a Kindle notebook export.
 - **Label** threads so the operator and the agent agree on triage state.
 - **Surface** the small set of mail items in the morning routine that
   actually need owner action.
@@ -81,15 +81,15 @@ yourself. Direct send (`POST /mail/:account/messages/send`) is *not*
 blocked — it is classified as an autonomous action, so the daemon does
 not DM you for approval first. The agent only sends directly when it
 judges you'd clearly want it to, and it tells you afterward; during the
-hourly check the `mail` skill is hard read-only (no sending, drafting,
+activity scan the `mail` skill is hard read-only (no sending, drafting,
 labeling, or filing).
 
 ## When It Runs / How It Is Triggered
 
 - In `direct` mode a poller pulls new messages on a cadence. Gmail uses
-  `gmailPollIntervalSeconds` (default 600); IMAP-backed accounts (Yahoo,
-  iCloud, generic IMAP) use `mailPollIntervalSeconds` (default 180).
-  Adjust both under **Settings → Advanced**.
+  `gmailPollIntervalSeconds` (default 600); all other accounts (Outlook,
+  Yahoo, iCloud) use `mailPollIntervalSeconds` (default 180).
+  The Gmail cadence is adjustable under **Settings → Infrastructure**.
 - The morning routine reads the labeled queue and decides which need
   surfacing.
 - Reactive turns (you DM "what's in my mail?") use the `mail` skill on
@@ -97,17 +97,17 @@ labeling, or filing).
 
 ## Integration Modes
 
-Mail supports all four integration modes
-(`direct | delegated | native | disabled`); each provider may sit in a
-different mode.
+Gmail and Outlook support all four integration modes
+(`direct | delegated | native | disabled`); each may sit in a
+different mode. Yahoo and iCloud have no integration-registry entry —
+they are direct-only by design.
 
 | Provider | Direct | Delegated | Native | Notes |
 |---|---|---|---|---|
-| Gmail | ✓ | ✓ | ✓ (descriptor-driven) | Native mode uses Google's official Gmail MCP connector on the main backend; the connector POSTs observations back via `/api/observations`. |
+| Gmail | ✓ | ✓ | ✓ (descriptor-driven) | Native mode uses the main backend's own Gmail MCP connector (Claude's hosted connector, the Codex apps connector, or Gemini's google-workspace extension); the backend POSTs observations back via `/api/observations`. |
 | Outlook | ✓ | ✓ | ✓ (user-managed) | Native mode requires you to install your own MCP / skill harness on the main backend (`userManagedConnector: true`); the probe synthesises a user-managed result and skips the missing-variant gate. |
-| Yahoo | ✓ | ✓ | — | IMAP transport. No native MCP variant. |
-| iCloud | ✓ | ✓ | — | IMAP transport. No native MCP variant. |
-| Generic IMAP | ✓ | ✓ | — | IMAP transport. No native MCP variant. |
+| Yahoo | ✓ | — | — | IMAP transport. Direct-only; never enters the delegated surface. |
+| iCloud | ✓ | — | — | IMAP transport. Direct-only; never enters the delegated surface. |
 
 Mode flips run through the §14.7 live probe + the per-key
 `runtime_state.integration_flip_lock:<key>`. Changing the main
@@ -120,18 +120,20 @@ mode lifecycle.
 
 - New threads land in the local `mail_messages_index` table
   (FTS-indexed via `fts_mail_messages`).
-- Classification labels are written via the provider API.
+- Labels/tags are written via the provider API when the agent applies
+  them (`POST /mail/:account/messages/:id/tags`).
 - A short "mail" section in `state/today.md` when items qualified.
 
 ## Where in the Dashboard
 
 - **Connections → Mail** is the per-account configuration: providers,
-  credentials, polling, label setup.
+  credentials, per-account active toggles, and the Gmail classification
+  model.
 
 ## Configuration
 
 Per account you choose a provider kind (`gmail` / `outlook` / `yahoo` /
-`icloud`) plus credentials, label conventions, and polling interval. You
+`icloud`) plus credentials and an optional display label. You
 pick the kind, not the transport — Yahoo and iCloud connect over IMAP
 under the hood, but that is an implementation detail. The set of enabled
 providers is `enabledMailProviders` (default `["gmail"]`).
@@ -140,8 +142,8 @@ providers is `enabledMailProviders` (default `["gmail"]`).
 
 - An **auth failure** points at expired credentials. The dashboard's
   auth-health card flips to a warning. See [Auth Failed](../../troubleshooting/auth-failed.md).
-- A **classifier that misses** a sender consistently — add a manual
-  label rule on `/connections/mail`.
+- A **classifier that misses** consistently — switch the model behind
+  it via the Gmail Classification Model card on `/connections/mail`.
 
 ## Related
 

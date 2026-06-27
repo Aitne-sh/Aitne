@@ -11,10 +11,16 @@ allowed-tools:
 > **Refusal directive — read first.** Gmail is in `native` mode bound to
 > Gemini. Do **NOT** call any of:
 >
-> - `POST /api/integrations/gmail/exec` (returns `410` with
->   `X-Integration-Mode: native`)
-> - `POST /api/integrations/gmail/reconcile` (410)
 > - `/api/mail/<gmail-account-id>/*` (per-account 410)
+> - `POST /api/integrations/gmail/exec`
+> - `POST /api/integrations/gmail/reconcile`
+>
+> In native mode `POST /api/integrations/gmail/exec` returns **409
+> `mode_mismatch`** (the handler rejects non-delegated mode);
+> `.../reconcile` is not mode-gated at all. Do not call either — use the
+> native connector. The 410 + `X-Integration-Mode: native` refusal
+> contract applies ONLY to the integration's own data routes
+> (the per-account `/api/mail/<gmail-account-id>/*` paths).
 >
 > Reach Gmail through the in-session Gmail connector your harness
 > exposes (typically Gemini CLI's `google-workspace` extension or a
@@ -148,8 +154,8 @@ flipped during the lock window (§11.3.1) — stop and re-read
 
 ## Decision rules
 
-- **Hourly check is read-only** — inherits the constraint from
-  `routine.hourly_check.native.gemini.md`.
+- **Activity scan is read-only** — inherits the constraint from
+  `routine.activity_scan.native.gemini.md`.
 - **Prefer drafts over send.** The create-draft capability is
   autonomous; send / send-draft need explicit user OK.
 - **Replies preserve the RFC-2822 chain.** Pin `inReplyTo` /

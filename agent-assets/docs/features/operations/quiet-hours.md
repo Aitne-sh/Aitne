@@ -39,7 +39,7 @@ related:
   - features/routines/morning-routine
   - concepts/agent-day
 ui_anchors:
-  - /settings/schedule
+  - /settings/hours
 config_keys:
   - quietHoursStart
   - quietHoursEnd
@@ -117,12 +117,15 @@ timezone) before sending. The window may wrap midnight — the default
 
 ## Where in the Dashboard
 
-**Settings → Schedule** holds `quietHoursStart` and `quietHoursEnd`,
-shown as a red arc on the same 24-hour ring (dial) as the hourly-check
-active window — drag the handles to adjust either band. There is **no
-overlap validation** — quiet hours and the
-active window are allowed to overlap, and the morning routine fires
-regardless of where the bands sit.
+**Settings → Hours & Notifications** (`/settings/hours`) holds
+`quietHoursStart` and `quietHoursEnd`, shown as a red arc on the same
+24-hour ring (dial) as the activity-scan active window — drag the red
+handles to adjust quiet hours. The active-window band is read-only on
+this page; the activity scan owns its hours, edited from **Agents →
+Activity Scan** (`/agents/activity-scan`). There is **no overlap
+validation** — quiet hours and the active window are allowed to
+overlap, and the morning routine fires regardless of where the bands
+sit.
 
 ## Configuration
 

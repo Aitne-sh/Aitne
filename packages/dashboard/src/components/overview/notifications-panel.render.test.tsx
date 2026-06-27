@@ -128,7 +128,7 @@ describe("NotificationsPanelBody", () => {
     expect(connection).not.toContain("Open settings<");
 
     // /settings/* — top-level settings, including subpages like
-    // /settings/advanced and /settings/backends.
+    // /settings/danger-zone and /settings/backends.
     const settings = render(
       <NotificationsPanelBody
         alerts={[
@@ -137,12 +137,12 @@ describe("NotificationsPanelBody", () => {
             severity: "error",
             title: "T",
             dismissable: false,
-            href: "/settings/advanced",
+            href: "/settings/danger-zone",
           }),
         ]}
       />,
     );
-    expect(settings).toContain("href=\"/settings/advanced\"");
+    expect(settings).toContain("href=\"/settings/danger-zone\"");
     expect(settings).toContain("Open settings");
 
     // Unknown prefix — fall back to a generic verb so we never label

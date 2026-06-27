@@ -134,7 +134,7 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "roadmap",
     "management-policy",
   ],
-  "routine.hourly_check": [
+  "routine.activity_scan": [
     "context",
     "today",
     "observations",
@@ -267,6 +267,14 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // (no prior research offer to respond to) — that exclusion does
     // not generalise.
     "browser-task",
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 — DM-driven entry
+    // point to hand a long-running / open-ended task to the detached
+    // background runner. Loaded for the first DM too: the user's literal
+    // first message ("research X for me", "audit my repos") is exactly
+    // the spawn surface. The `background-task-reply` clarify skill is
+    // correctly absent here — no prior task can be parked on the very
+    // first DM of a session — exactly as `browser-history-respond` is.
+    "background-task",
   ],
   "message.received.dm": [
     "context",
@@ -312,6 +320,20 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // the agent simply does not call its endpoints when the user's
     // request doesn't ask for a browser task.
     "browser-task",
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 — the generic
+    // long-running-task surface. `background-task` teaches the DM agent
+    // to compose a self-contained brief, set the notification policy,
+    // POST + ack + end the turn, and read `GET /:id` for follow-up
+    // detail. `background-task-reply` is the narrow clarify-relay (mirror
+    // of `browser-history-respond`) that translates the owner's answer to
+    // a parked task's question into `POST /:id/clarify`. Loaded for
+    // `message.received.dm` (which `message.dm` + `dashboard.chat`
+    // inherit via PROCESS_TO_EVENT_TYPE). The reply skill is NOT on
+    // `message.received.dm_first` (no task can be parked on a session's
+    // first DM). No conditional gate: both skill bodies no-op when their
+    // endpoints have nothing to act on, and the in-context cost is small.
+    "background-task",
+    "background-task-reply",
   ],
   // ── Task events ──
   "schedule.approaching": [
@@ -572,6 +594,13 @@ export const ALL_SKILLS = [
   // `browser-history-managed` skill that fronted the frozen workflow
   // registry was retired alongside the route + routines in Phase 6.
   "browser-task",
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 — generic detached
+  // long-task surface. `background-task` (spawn) loads on
+  // `message.received.dm` + `message.received.dm_first`;
+  // `background-task-reply` (clarify relay) loads on `message.received.dm`
+  // only. Both are DM-agent-exclusive, like browser-task.
+  "background-task",
+  "background-task-reply",
   // Scheduling split — `/schedule` is one-shot only; recurring tasks are
   // Agents. This skill teaches the DM agent to author a detailed recurring
   // Agent (`POST /api/agents`) when the user asks for an ongoing cadence.
@@ -588,7 +617,7 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
   "routine.evening_review": "routine.evening_review",
   "routine.weekly_review": "routine.weekly_review",
   "routine.monthly_review": "routine.monthly_review",
-  "routine.hourly_check": "routine.hourly_check",
+  "routine.activity_scan": "routine.activity_scan",
   "routine.roadmap_refresh": "routine.roadmap_refresh",
   "routine.today_refresh": "routine.today_refresh",
   "routine.user_profile_sweep": "routine.user_profile_sweep",
@@ -953,6 +982,54 @@ export function resolveSkillManifestForProcess(
   return resolveSkillManifest(
     PROCESS_TO_EVENT_TYPE[processKey] ?? processKey,
     opts,
+  );
+}
+
+/**
+ * Event-type / process-key families whose sessions do NOT receive the
+ * owner's user-authored skill library (`<contextDir>/policies/skills/`).
+ *
+ * User skills are general assistant extensions the owner writes for their
+ * conversational agent; `syncAllUserSkills` provisions them into a session
+ * workdir ON TOP of the process key's built-in manifest. Narrow-persona
+ * sessions run under dedicated profiles with tight, purpose-built manifests
+ * — dumping the full user-skill library into them is pure cold-start cost +
+ * attention dilution and never load-bearing (their work is fully covered by
+ * the built-in bundle, and the wiki/research skills are themselves
+ * built-ins, not user-authored).
+ *
+ * Excluded families:
+ *   - `wiki.*`             — the wiki-agent persona (ingest_url / compile /
+ *                            ask / lint / trace / connect).
+ *   - `routine.research_*` — the browser-history research routines
+ *                            (cluster_update / offer_dm / dispatch /
+ *                            wiki_summary).
+ *
+ * Everything else (the conversational DM agent, DM-tone scheduled sessions,
+ * the daily/weekly/monthly routines, setup, knowledge import, git/github
+ * observers, scheduled tasks) keeps the prior "every user skill, every
+ * session" behaviour.
+ */
+export const USER_SKILL_EXCLUDED_PREFIXES: readonly string[] = [
+  "wiki.",
+  "routine.research_",
+];
+
+/**
+ * Whether a session for `eventTypeOrProcessKey` should be provisioned with
+ * the owner's user-authored skills. Keyed on the SAME string the skill
+ * manifest resolves against (`processKey ?? eventType`) so the gate and the
+ * built-in manifest agree on what a session is.
+ *
+ * Gates the `syncAllUserSkills` call at every materialisation chokepoint
+ * (`createSessionWorkdir`, `ensureSessionWorkdir`, and the backend-fallback
+ * re-materialiser). See `USER_SKILL_EXCLUDED_PREFIXES`.
+ */
+export function eventTypeAcceptsUserSkills(
+  eventTypeOrProcessKey: string,
+): boolean {
+  return !USER_SKILL_EXCLUDED_PREFIXES.some((prefix) =>
+    eventTypeOrProcessKey.startsWith(prefix),
   );
 }
 

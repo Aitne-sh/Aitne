@@ -17,7 +17,7 @@ This file governs how the agent uses attached Model Context Protocol
   issue, a posted message, an edited doc).
 - Failures are loggable events. On repeated MCP call failures, the agent
   appends to `journal/agent.md` and surfaces the pattern at the next
-  hourly check.
+  activity scan.
 - Scope to the active task. MCP calls unrelated to the current flow's
   stated goal are skipped.
 

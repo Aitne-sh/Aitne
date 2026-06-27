@@ -67,8 +67,8 @@ describe("aggregateAlerts", () => {
       id: "system.context.missing",
       severity: "error",
       dismissable: false,
-      // Recovery action is "Reinstall context" under /settings/advanced.
-      href: "/settings/advanced",
+      // Recovery action is "Reinstall context" under /settings/danger-zone.
+      href: "/settings/danger-zone",
     });
     expect(alerts[0].title).toContain("4 context files");
     expect(alerts[0].description).toContain("and 1 more");
@@ -456,8 +456,8 @@ describe("aggregateAlerts", () => {
       id: "config.templates.pending",
       severity: "warning",
       dismissable: true,
-      // Acceptance path: "Reinstall context" under /settings/advanced.
-      href: "/settings/advanced",
+      // Acceptance path: "Reinstall context" under /settings/danger-zone.
+      href: "/settings/danger-zone",
     });
     expect(alerts[0].title).toContain("2 template upgrades");
   });

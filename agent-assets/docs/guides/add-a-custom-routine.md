@@ -1,46 +1,54 @@
 ---
 schema_version: 1
 slug: guides/add-a-custom-routine
-title: Add a Custom Routine
+title: Create a Recurring Agent
 id: add-a-custom-routine
 aliases:
+  - recurring agent
+  - new agent
+  - user agent
   - custom routine
-  - user-defined routine
   - add a routine
   - scheduled task
 category: guides
 summary: |
-  Define a new autonomous routine — slug, cron expression, model tier, and
-  budget cap — via /settings/routines. The form writes a vault file at
-  policies/routines/custom/<slug>.md; saving it registers the cron job.
+  Make the agent run a prompt you write on a schedule you pick by
+  creating a user Agent — via the "New Agent" form on /agents or
+  POST /api/agents. The Markdown body (the prompt) becomes the task
+  prompt for every run; runs appear on the Agent's detail page.
 section: add-a-custom-routine
 tags:
   - guides
+  - agents
   - routines
   - scheduler
   - autonomous
   - core
 status: stable
 ask_examples:
-  - How do I add a custom routine?
-  - What can a custom routine do?
+  - How do I create a recurring agent?
   - How do I schedule the agent to run on a cron?
+  - How do I add a custom routine?
+  - Where do I see my agent's runs?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-10
 keywords:
-  - custom routine
-  - schedule
+  - recurring agent
+  - new agent
   - cron
+  - schedule
   - recurrence
-  - backend_tier
-  - process_key
+  - task prompt
+  - agent.task
 ui_anchors:
-  - /settings/routines
+  - /agents
 api_endpoints:
-  - PUT /api/context/*
+  - POST /api/agents
+  - GET /api/agents/{slug}/executions
+  - POST /api/agents/{slug}/run-now
 context_files:
-  - policies/routines/custom/<slug>.md
+  - policies/agents/<slug>/agent.md
 related:
   - features/routines/custom-routines
   - concepts/routines
@@ -48,76 +56,122 @@ related:
   - concepts/backends-and-tiers
 ---
 
-# Add a Custom Routine
+# Create a Recurring Agent
 
 ## Goal
 
-Make the agent fire a particular kind of work on a schedule you pick.
+Make the agent fire a particular kind of work on a schedule you pick —
+as a user **Agent** you can watch, tune, and toggle from `/agents`.
 
 ## Prerequisites
 
 - Daemon running.
 
-## Steps
+## Steps (dashboard)
 
-1. Open `/settings/routines` (the older `/connections/routines` URL
-   redirects here).
-2. Click **Add**. The "New custom routine" dialog opens.
-3. Fill the form:
-   - **Slug** — lowercase kebab-case, 1–64 chars, no leading/trailing
-     hyphen (e.g. `tuesday-notion-sweep`). It becomes the ProcessKey
-     `routine.custom.<slug>` and the file name
-     `policies/routines/custom/<slug>.md`.
-   - **Cron expression** — standard 5-field cron in the daemon's
-     timezone (e.g. `0 11 * * 2` for 11:00 every Tuesday). The dialog
-     previews the next three fire times.
-   - **Backend tier** — `lite` (Haiku), `medium` (Sonnet), or `high`
-     (Opus). Default is `medium`. Custom routines have no concrete
-     model picker; the tier is written to the file's `backend_tier`
-     frontmatter, and the BackendRouter resolves the actual model at
-     fire time. (See [Backends and tiers](../concepts/backends-and-tiers.md).)
-   - **Max budget (USD)** — per-execute cap (default `0.05`; must be a
-     positive number).
-   - **Description** — optional free text. It becomes the body of the
-     generated vault file, above an empty `## Checks` section seeded
-     with a `### First check` placeholder. Edit the file later on the
-     same page to flesh out the check list.
-4. Click **Create**. The dashboard writes the vault file via the
-   context API (`PUT /api/context/policies/routines/custom/<slug>`).
-   Because the file ships with `enabled: true` and a `cron:` field,
-   saving it registers (or refreshes) the cron job, and the next-fire
-   timestamp appears in the routine list.
+1. Open **Agents** (`/agents`) and click **New Agent**.
+2. Fill the form:
+   - **Name** — the human label in the agents list (e.g. "Daily
+     Digest").
+   - **ID** — lowercase kebab-case slug. It becomes the URL
+     (`/agents/<id>`) and the definition file
+     `policies/agents/<id>/agent.md`. Must not collide with an
+     existing Agent (built-in slugs are reserved too).
+   - **Schedule** — pick a frequency (hourly / daily / weekly /
+     monthly) and its fields, e.g. weekly on Tuesday at 11:00. An
+     optional toggle defers runs that land inside your quiet hours.
+   - **Backend engine / Model tier** — `lite` (Haiku-class), `medium`
+     (Sonnet-class), or `high` (Opus-class). See
+     [Backends and tiers](../concepts/backends-and-tiers.md).
+   - **Limits** — max turns, max budget (USD) per run, and timeout
+     (minutes).
+   - **Task prompt** — what the agent should do on each run. This text
+     becomes the Markdown body of `agent.md` and is the prompt the
+     agent receives every time it fires.
+   - An **Advanced (YAML)** toggle reveals the raw `agent.md` editor
+     for long-tail fields the form doesn't expose (tags, tools,
+     success criteria, error handling).
+3. Save. The dashboard writes `policies/agents/<slug>/agent.md`
+   through the context vault and opens the new Agent's detail page;
+   the daemon imports the file without a restart.
 
-The generated file looks roughly like this:
+## Steps (API)
 
-```yaml
----
-type: rule
-slug: tuesday-notion-sweep
-cron: "0 11 * * 2"
-process_key: routine.custom.tuesday-notion-sweep
-enabled: true
-backend_tier: medium
-max_budget_usd: 0.05
----
+`POST /api/agents` is the programmatic counterpart:
+
+```bash
+curl -X POST http://localhost:8321/api/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slug": "tuesday-notion-sweep",
+    "name": "Tuesday Notion Sweep",
+    "description": "Weekly Notion inbox cleanup",
+    "schedule": { "kind": "cron", "expression": "0 11 * * 2" },
+    "backend": { "tier": "medium" },
+    "limits": { "max_budget_usd": 0.10 },
+    "prompt": "- Review my Notion inbox for items older than a week.\n- File or archive each one.\n- DM me a one-paragraph summary."
+  }'
 ```
 
-To stop a routine without deleting it, set `enabled: false` in the
-file and save — that unregisters the cron job.
+- **`prompt` becomes the Agent's task prompt** — it is stored as the
+  Markdown body of `agent.md` and sent to the agent on every run.
+- **`schedule`** takes one of two forms: a raw 5-field cron
+  (`{ "kind": "cron", "expression": "0 11 * * 2" }`, interpreted in
+  the daemon's timezone unless `schedule.timezone` is set) or a
+  structured rule (`{ "kind": "recurring", "recurrence": { "frequency":
+  "weekly", "daysOfWeek": ["tuesday"], "time": "11:00" } }`).
+  `/agents` is recurring-only — a one-time task belongs on
+  `POST /api/schedule` instead.
+- **`backend.tier`** is optional; omitted, the Agent inherits the
+  `agent.task` process default (medium). `backend.process_key`
+  defaults to `agent.task` — you don't need to set it.
+- **`limits`** defaults: 20 turns, $0.25 per run, 10-minute timeout.
+- Success returns `201 { "status": "created", "slug": ... }`. A taken
+  slug returns `409 slug_collision`; validation failures return `400`
+  with a field-level `issues` list.
+
+## Where to See Runs
+
+- **`/agents`** lists every Agent with its schedule, enable toggle,
+  7-day metrics, and last run.
+- **`/agents/<slug>`** is the detail page: the full definition, recent
+  execution history with results and cost, and a **Run now** button
+  (`POST /api/agents/<slug>/run-now`).
+- **Activity** logs each run alongside everything else the agent does.
+- Programmatically: `GET /api/agents/<slug>/executions`.
 
 ## Verification
 
-- Wait for the cron to fire; check Activity for the row tagged
-  `routine.custom.<slug>`.
+- Click **Run now** on the detail page (or wait for the schedule); an
+  execution row should appear with its result and cost.
 
 ## If It Fails
 
-- A cron that resolves to "never" (or is otherwise invalid): the
-  dialog shows the preview error and refuses to save it.
-- A prompt that hits the absolute-block guardrails: the routine fires
-  but the offending tool call is logged as `blocked_absolute` in the
+- `409 slug_collision` — pick a different ID; built-in Agent slugs are
+  reserved.
+- `400 invalid_definition` — fix the fields listed in `issues`.
+- `400 one_shot_not_supported` — `/agents` is recurring-only; use
+  `POST /api/schedule` for one-time work.
+- A prompt that hits the absolute-block guardrails: the run fires but
+  the offending tool call is logged as `blocked_absolute` in the
   action log.
+
+## Migrating From Custom Routines
+
+The legacy custom-routine format —
+`policies/routines/custom/<slug>.md` files with `cron:` frontmatter
+and a `## Checks` body — is retired and those files no longer fire.
+At the first daemon start after the upgrade, each valid file was
+converted **once** into a user Agent with the same cron, tier, budget,
+and enabled state; the `## Checks` body became the Agent's task
+prompt, and the source file was kept but marked inert
+(`enabled: false` plus a `migrated_to_agent: <slug>` marker). See
+[Custom Routines (Retired)](../features/routines/custom-routines.md)
+for collision and invalid-file handling.
 
 ## Related
 
-- [Custom Routines](../features/routines/custom-routines.md)
+- [Custom Routines (Retired)](../features/routines/custom-routines.md)
+- [Routines](../concepts/routines.md)
+- [ProcessKeys](../concepts/process-keys.md)
+- [Backends and tiers](../concepts/backends-and-tiers.md)

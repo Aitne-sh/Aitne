@@ -465,7 +465,7 @@ describe("DelegatedSyncWorker", () => {
   });
 
   // docs/design/appendices/native-integration-mode.md §"Polling,
-  // observers, and the hourly-check threshold" — the cadence worker
+  // observers, and the activity-scan threshold" — the cadence worker
   // only iterates delegated rows. Native observations land via the
   // in-turn routine.fetch_window pre-pass, not this worker. Calling
   // the invoker on a native row would be rejected by §3.3 anyway
@@ -510,7 +510,7 @@ describe("DelegatedSyncWorker", () => {
 
     // Native rows do NOT count toward the worker stand-up predicate —
     // the worker has no role in native mode (see appendix §"Polling,
-    // observers, and the hourly-check threshold"). The seeded fixture
+    // observers, and the activity-scan threshold"). The seeded fixture
     // has only `google_calendar` as delegated; flipping that one to
     // native via the override leaves no delegated integration, so the
     // predicate must report false.
@@ -2036,7 +2036,7 @@ describe("DelegatedSyncWorker.runCadenceNow", () => {
 
   // Run Now on a native row rejects with `integration_not_synchronizable`
   // — the cadence worker has no role in native mode (appendix §"Polling,
-  // observers, and the hourly-check threshold"). The dashboard renders
+  // observers, and the activity-scan threshold"). The dashboard renders
   // this as an inert chip; the user must rely on the in-turn
   // `routine.fetch_window` pre-pass for native observations.
   it("rejects native rows with integration_not_synchronizable", async () => {
@@ -2062,9 +2062,9 @@ describe("DelegatedSyncWorker.runCadenceNow", () => {
   });
 });
 
-// ── runDisabledCadencesForHourlyCheck (hourly-check-driven refresh) ───────
+// ── runDisabledCadencesForActivityScan (activity-scan-driven refresh) ───────
 
-describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
+describe("DelegatedSyncWorker.runDisabledCadencesForActivityScan", () => {
   let db: Database.Database;
 
   beforeEach(() => {
@@ -2079,7 +2079,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
   it("fires opted-OUT cadences once even outside active hours", async () => {
     // Mirrors the production scenario: gmail / notion delegated, every
     // cadence left default-OFF, cadence-side active hours [9, 17) — but
-    // the hourly check fired at 03:00, which proves the hourly-check-
+    // the activity scan fired at 03:00, which proves the activity-scan-
     // driven refresh ignores cadence active-hours.
     writeIntegrations(db, {
       gmail: {
@@ -2104,7 +2104,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       cadences: [__delegatedSyncWorkerTestExports.GMAIL_INBOX_7D_CADENCE],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).toHaveBeenCalledTimes(1);
   });
@@ -2131,7 +2131,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       cadences: [__delegatedSyncWorkerTestExports.GMAIL_INBOX_7D_CADENCE],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).not.toHaveBeenCalled();
   });
@@ -2153,7 +2153,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       cadences: [__delegatedSyncWorkerTestExports.GMAIL_INBOX_7D_CADENCE],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).not.toHaveBeenCalled();
   });
@@ -2177,12 +2177,12 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       cadences: [__delegatedSyncWorkerTestExports.GMAIL_INBOX_7D_CADENCE],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).not.toHaveBeenCalled();
   });
 
-  // Regression for the bug where every hourly check produced a failed
+  // Regression for the bug where every activity scan produced a failed
   // `integration_drift_sync` audit row for native integrations: the
   // pre-fix code resolved a native backend through `backendForCadence`
   // and then `DelegatedBackendInvoker.resolvePreconditions` rejected it
@@ -2207,7 +2207,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       cadences: [__delegatedSyncWorkerTestExports.GMAIL_INBOX_7D_CADENCE],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).not.toHaveBeenCalled();
     const auditRows = db
@@ -2247,7 +2247,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       ],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).toHaveBeenCalledTimes(1);
     const call = (invoker.invoke as ReturnType<typeof vi.fn>).mock.calls[0][0];
@@ -2292,7 +2292,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       ],
     });
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
     expect(invoker.invoke).toHaveBeenCalledTimes(2);
     expect(maxInflight).toBe(2);
@@ -2323,9 +2323,9 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
     const inflight = worker.tick({ force: true });
     await Promise.resolve(); // Yield so tick() grabs the mutex.
 
-    await worker.runDisabledCadencesForHourlyCheck();
+    await worker.runDisabledCadencesForActivityScan();
 
-    // Only the first invoke (from tick) should have fired; the hourly-check
+    // Only the first invoke (from tick) should have fired; the activity-scan
     // refresh saw `tickRunning=true` and bailed.
     expect(invoker.invoke).toHaveBeenCalledTimes(1);
 
@@ -2351,7 +2351,7 @@ describe("DelegatedSyncWorker.runDisabledCadencesForHourlyCheck", () => {
       cadences: [__delegatedSyncWorkerTestExports.GMAIL_INBOX_7D_CADENCE],
     });
 
-    await expect(worker.runDisabledCadencesForHourlyCheck()).resolves.toBeUndefined();
+    await expect(worker.runDisabledCadencesForActivityScan()).resolves.toBeUndefined();
     const status = worker.getStatus(NOW);
     expect(status.cadences["gmail:inbox:7d"].failureCount).toBe(1);
     expect(status.cadences["gmail:inbox:7d"].lastError).toContain("gmail offline");

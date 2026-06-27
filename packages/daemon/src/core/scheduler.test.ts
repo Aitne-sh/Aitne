@@ -3,10 +3,10 @@ import cron from "node-cron";
 import {
   AgentScheduler,
   buildBrowserHistoryPreMorningDigestCronExpr,
-  buildHourlyCronExpr,
+  buildActivityScanCronExpr,
   buildUserProfileSweepMorningCronExpr,
   ROADMAP_MAINTENANCE_CRON_EXPR,
-  shouldFireHourlyTickAt,
+  shouldFireActivityScanTickAt,
   USER_PROFILE_SWEEP_EVENING_CRON_EXPR,
 } from "./scheduler.js";
 import { EventBus } from "./event-bus.js";
@@ -1090,7 +1090,7 @@ describe("AgentScheduler", () => {
         `INSERT INTO agent_schedule
            (scheduled_for, task_type, task_description, task_context, status)
          VALUES ('1970-01-01 00:00:00', 'wake', 'old pre-boundary wake',
-                 json('{"routine":"morning_routine","source":"old","postCatchupRoutines":[],"postCatchupHourlyCheck":false,"importance":"low"}'),
+                 json('{"routine":"morning_routine","source":"old","postCatchupRoutines":[],"postCatchupActivityScan":false,"importance":"low"}'),
                  'pending')`,
       )
       .run();
@@ -1130,7 +1130,7 @@ describe("AgentScheduler", () => {
         `INSERT INTO agent_schedule
            (scheduled_for, task_type, task_description, task_context, status)
          VALUES (?, 'wake', 'future retry',
-                 json('{"routine":"morning_routine","retryCount":1,"source":"retry","postCatchupRoutines":[],"postCatchupHourlyCheck":false,"importance":"low"}'),
+                 json('{"routine":"morning_routine","retryCount":1,"source":"retry","postCatchupRoutines":[],"postCatchupActivityScan":false,"importance":"low"}'),
                  'pending')`,
       )
       .run(futureScheduledFor);
@@ -1150,11 +1150,11 @@ describe("AgentScheduler", () => {
   it("merges deferred catchup metadata into an existing morning wake", () => {
     const first = scheduler.queueMorningRoutineWake("catchup", {
       postCatchupRoutines: ["evening_review"],
-      postCatchupHourlyCheck: false,
+      postCatchupActivityScan: false,
     });
     const second = scheduler.queueMorningRoutineWake("restart", {
       postCatchupRoutines: ["weekly_review", "evening_review"],
-      postCatchupHourlyCheck: true,
+      postCatchupActivityScan: true,
     });
 
     expect(first.inserted).toBe(true);
@@ -1164,7 +1164,7 @@ describe("AgentScheduler", () => {
       .prepare(
         `SELECT
            json_extract(task_context, '$.source') AS source,
-           json_extract(task_context, '$.postCatchupHourlyCheck') AS hourly,
+           json_extract(task_context, '$.postCatchupActivityScan') AS hourly,
            json_extract(task_context, '$.postCatchupRoutines') AS routines
          FROM agent_schedule
          WHERE json_extract(task_context, '$.routine') = 'morning_routine'`,
@@ -1194,16 +1194,16 @@ describe("AgentScheduler", () => {
     expect(normalized <= nowUtc).toBe(true);
   });
 
-  // ── Phase 9: hourly check cron ──
+  // ── Phase 9: activity scan cron ──
 
-  describe("hourly check cron", () => {
-    it("registers the hourly cron when hourlyCheckEnabled is true", () => {
+  describe("activity scan cron", () => {
+    it("registers the hourly cron (cadence resolved from agent row / config fallback)", () => {
       const config = {
         ...setup.config,
-        hourlyCheckEnabled: true,
-        hourlyCheckIntervalMinutes: 60,
-        hourlyCheckActiveStartHour: 4,
-        hourlyCheckActiveEndHour: 24,
+        activityScanEnabled: true,
+        activityScanIntervalMinutes: 60,
+        activityScanActiveStartHour: 4,
+        activityScanActiveEndHour: 24,
       } as unknown as AgentConfig;
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       s.start();
@@ -1217,29 +1217,28 @@ describe("AgentScheduler", () => {
       s.stop();
     });
 
-    it("does not register the hourly cron when disabled", () => {
+    it("registers the hourly cron even when the legacy activityScanEnabled=false (agent row owns the gate)", () => {
+      // AGENTS_HUB_REDESIGN_PLAN §2 — the job is registered unconditionally;
+      // `agents.enabled` (fire-time isAgentEnabledForFiring) is the single
+      // switch, so the legacy config gate no longer suppresses registration.
       const config = {
         ...setup.config,
-        hourlyCheckEnabled: false,
+        activityScanEnabled: false,
       } as unknown as AgentConfig;
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       s.start();
       const jobs = (s as unknown as { cronJobs: unknown[] }).cronJobs;
-      // 9 jobs: morning routine, evening review, morning sweep, evening
-      // sweep, roadmap maintenance, weekly review, monthly review,
-      // context-index reconciler, browser-history pre-morning digest
-      // (hourly is disabled).
-      expect(jobs.length).toBe(9);
+      expect(jobs.length).toBe(10);
       s.stop();
     });
 
     it("reloadCrons stops the old jobs before registering new ones (no multi-register)", () => {
       const config = {
         ...setup.config,
-        hourlyCheckEnabled: true,
-        hourlyCheckIntervalMinutes: 60,
-        hourlyCheckActiveStartHour: 4,
-        hourlyCheckActiveEndHour: 24,
+        activityScanEnabled: true,
+        activityScanIntervalMinutes: 60,
+        activityScanActiveStartHour: 4,
+        activityScanActiveEndHour: 24,
       } as unknown as AgentConfig;
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       s.start();
@@ -1250,7 +1249,7 @@ describe("AgentScheduler", () => {
       s.stop();
     });
 
-    it("reloadCrons picks up a new hourlyCheckIntervalMinutes immediately (PATCH /api/config hot-apply)", () => {
+    it("reloadCrons picks up a new activityScanIntervalMinutes immediately (PATCH /api/config hot-apply)", () => {
       // The dashboard PATCH path mutates the live `config` object via
       // `Object.assign(config, runtimeUpdates)` and then fires
       // `onScheduleConfigChanged` → `reloadCrons`. This test stands in
@@ -1260,10 +1259,10 @@ describe("AgentScheduler", () => {
       // daemon restart.
       const config = {
         ...setup.config,
-        hourlyCheckEnabled: true,
-        hourlyCheckIntervalMinutes: 60,
-        hourlyCheckActiveStartHour: 4,
-        hourlyCheckActiveEndHour: 24,
+        activityScanEnabled: true,
+        activityScanIntervalMinutes: 60,
+        activityScanActiveStartHour: 4,
+        activityScanActiveEndHour: 24,
       } as unknown as AgentConfig;
       const scheduleSpy = vi.spyOn(cron, "schedule");
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
@@ -1273,7 +1272,7 @@ describe("AgentScheduler", () => {
       expect(firstExprs).not.toContain("* 4-23 * * *");
 
       // Simulate the mutation `applyConfigUpdates` performs in place.
-      config.hourlyCheckIntervalMinutes = 120;
+      config.activityScanIntervalMinutes = 120;
       scheduleSpy.mockClear();
       s.reloadCrons();
       const secondExprs = scheduleSpy.mock.calls.map((c) => c[0] as string);
@@ -1283,19 +1282,19 @@ describe("AgentScheduler", () => {
       scheduleSpy.mockRestore();
     });
 
-    it("hourly check callback is invoked when the hourly tick fires outside dayBoundaryHour", () => {
+    it("activity scan callback is invoked when the hourly tick fires outside dayBoundaryHour", () => {
       const config = {
         ...setup.config,
-        hourlyCheckEnabled: true,
-        hourlyCheckIntervalMinutes: 60,
-        hourlyCheckActiveStartHour: 4,
-        hourlyCheckActiveEndHour: 24,
+        activityScanEnabled: true,
+        activityScanIntervalMinutes: 60,
+        activityScanActiveStartHour: 4,
+        activityScanActiveEndHour: 24,
         dayBoundaryHour: 4,
       } as unknown as AgentConfig;
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       // Callback wiring is what run-now and /api/agent/run-now rely on.
       let called = 0;
-      s.setHourlyCheckCallback(async (source) => {
+      s.setActivityScanCallback(async (source) => {
         called++;
         expect(source).toBe("cron");
       });
@@ -1311,7 +1310,7 @@ describe("AgentScheduler", () => {
   // expression tracks `dayBoundaryHour`; the evening expression is
   // fixed at 17:50 because Evening Review's cron is fixed at 18:00.
   // The cron expressions themselves are pure functions of config — asserted
-  // directly (same pattern as `buildHourlyCronExpr`), which is stabler than
+  // directly (same pattern as `buildActivityScanCronExpr`), which is stabler than
   // spying on `cron.schedule` (ESM default-import interop across module
   // boundaries produces two different object references).
   describe("user-profile sweep crons", () => {
@@ -1465,28 +1464,35 @@ describe("AgentScheduler", () => {
     });
   });
 
-  // ── Monthly review kill switch (pre-release default OFF) ──
+  // ── Monthly review switch (pre-release default OFF) ──
   //
   // The monthly cron is always registered (the job count tests above
-  // depend on it), but the callback consults `config.monthlyReviewEnabled`
-  // at fire time. A runtime PATCH that flips the flag therefore takes
-  // effect on the next month-end without restart.
+  // depend on it); the fire-time switch is the monthly-review AGENT row's
+  // `enabled` via `isAgentEnabledForFiring` (AGENTS_HUB_REDESIGN_PLAN §2 —
+  // the legacy `monthlyReviewEnabled` config gate was unified into it). A
+  // dashboard toggle therefore takes effect on the next month-end without
+  // restart.
   //
   // The cron expression `"0 18 * * *"` is shared between `evening_review`
   // and `monthly_review`, so we can't pick the monthly job by its
   // expression alone. Instead each test invokes every `"0 18 * * *"`
   // callback under a month-end fake clock and asserts on the aggregate
   // set of routine types enqueued — robust against future cron
-  // re-ordering, and unambiguous about which routine the flag controls.
-  describe("monthly review kill switch", () => {
+  // re-ordering, and unambiguous about which routine the switch controls.
+  describe("monthly review agent-enabled switch", () => {
     function invokeAllSixPmCronsAndCollectEnqueued(
       monthlyReviewEnabled: boolean,
     ): string[] {
       const s = new AgentScheduler(setup.eventBus, setup.db, {
         ...setup.config,
         timezone: "UTC",
-        monthlyReviewEnabled,
       } as unknown as AgentConfig);
+      // Stub of the loader's AgentEnabledCache: every built-in enabled
+      // except (optionally) monthly-review.
+      s.setAgentEnabledCache({
+        isEnabled: (slug: string) =>
+          slug === "monthly-review" ? monthlyReviewEnabled : true,
+      } as unknown as Parameters<typeof s.setAgentEnabledCache>[0]);
       const captured: Array<{ expr: string; fn: () => void }> = [];
       vi.spyOn(cron, "schedule").mockImplementation((expr, fn) => {
         captured.push({ expr, fn: fn as () => void });
@@ -1516,15 +1522,15 @@ describe("AgentScheduler", () => {
       return enqueued;
     }
 
-    it("does NOT emit monthly_review when monthlyReviewEnabled=false even on a month-end fire", () => {
+    it("does NOT emit monthly_review when the agent row is disabled, even on a month-end fire", () => {
       const enqueued = invokeAllSixPmCronsAndCollectEnqueued(false);
-      // evening_review still fires (the flag is monthly-only); monthly
+      // evening_review still fires (the switch is monthly-only); monthly
       // must NOT appear in the enqueued set.
       expect(enqueued).toContain("routine.evening_review");
       expect(enqueued).not.toContain("routine.monthly_review");
     });
 
-    it("emits monthly_review when monthlyReviewEnabled=true on a month-end fire", () => {
+    it("emits monthly_review when the agent row is enabled on a month-end fire", () => {
       const enqueued = invokeAllSixPmCronsAndCollectEnqueued(true);
       expect(enqueued).toContain("routine.monthly_review");
       // evening_review continues to fire alongside it (independent cron).
@@ -1652,86 +1658,86 @@ describe("AgentScheduler", () => {
 
 // ── Pure-function cron expression builder ──
 
-describe("buildHourlyCronExpr", () => {
+describe("buildActivityScanCronExpr", () => {
   it("builds '0 4-23 * * *' for hourly interval 60", () => {
-    expect(buildHourlyCronExpr(60, 4, 24)).toBe("0 4-23 * * *");
+    expect(buildActivityScanCronExpr(60, 4, 24)).toBe("0 4-23 * * *");
   });
 
   it("builds '0,30 4-23 * * *' for 30-minute interval", () => {
-    expect(buildHourlyCronExpr(30, 4, 24)).toBe("0,30 4-23 * * *");
+    expect(buildActivityScanCronExpr(30, 4, 24)).toBe("0,30 4-23 * * *");
   });
 
   it("builds '0,20,40 4-23 * * *' for 20-minute interval", () => {
-    expect(buildHourlyCronExpr(20, 4, 24)).toBe("0,20,40 4-23 * * *");
+    expect(buildActivityScanCronExpr(20, 4, 24)).toBe("0,20,40 4-23 * * *");
   });
 
   it("builds '0,15,30,45 4-23 * * *' for 15-minute interval", () => {
-    expect(buildHourlyCronExpr(15, 4, 24)).toBe("0,15,30,45 4-23 * * *");
+    expect(buildActivityScanCronExpr(15, 4, 24)).toBe("0,15,30,45 4-23 * * *");
   });
 
   it("uses single-hour format when startHour === endHour - 1", () => {
     // endHour is exclusive, so start=4, end=5 means only hour 4
-    expect(buildHourlyCronExpr(60, 4, 5)).toBe("0 4 * * *");
-    expect(buildHourlyCronExpr(30, 10, 11)).toBe("0,30 10 * * *");
+    expect(buildActivityScanCronExpr(60, 4, 5)).toBe("0 4 * * *");
+    expect(buildActivityScanCronExpr(30, 10, 11)).toBe("0,30 10 * * *");
   });
 
   it("builds a shorter hour range for 9-18 business hours", () => {
-    expect(buildHourlyCronExpr(60, 9, 18)).toBe("0 9-17 * * *");
+    expect(buildActivityScanCronExpr(60, 9, 18)).toBe("0 9-17 * * *");
   });
 
   it("handles single-hour range when startHour equals endHour", () => {
     // Edge case: start === end → endHour = Math.max(start, end - 1) = start
-    expect(buildHourlyCronExpr(60, 4, 4)).toBe("0 4 * * *");
+    expect(buildActivityScanCronExpr(60, 4, 4)).toBe("0 4 * * *");
   });
 
   it("falls back to a minute-tick cron for non-divisor intervals", () => {
     // 7 doesn't divide 60 evenly — emit `* <hours> * * *` and rely on
-    // shouldFireHourlyTickAt to gate inside the callback.
-    expect(buildHourlyCronExpr(7, 4, 24)).toBe("* 4-23 * * *");
-    expect(buildHourlyCronExpr(45, 0, 24)).toBe("* 0-23 * * *");
+    // shouldFireActivityScanTickAt to gate inside the callback.
+    expect(buildActivityScanCronExpr(7, 4, 24)).toBe("* 4-23 * * *");
+    expect(buildActivityScanCronExpr(45, 0, 24)).toBe("* 0-23 * * *");
   });
 
   it("falls back to a minute-tick cron for intervals greater than 60", () => {
     // 90 minutes → fires at midnight, 01:30, 03:00, ... locally; cron has
     // no native expression for that cadence so we tick every minute and
     // gate.
-    expect(buildHourlyCronExpr(90, 4, 24)).toBe("* 4-23 * * *");
-    expect(buildHourlyCronExpr(120, 9, 18)).toBe("* 9-17 * * *");
+    expect(buildActivityScanCronExpr(90, 4, 24)).toBe("* 4-23 * * *");
+    expect(buildActivityScanCronExpr(120, 9, 18)).toBe("* 9-17 * * *");
   });
 });
 
-describe("shouldFireHourlyTickAt", () => {
+describe("shouldFireActivityScanTickAt", () => {
   it("always returns true for divisors of 60 (gating handled by cron)", () => {
     // activeStartHour is irrelevant for divisors — the cron expression
     // itself only ticks on the firing minutes, so the gate just needs to
     // wave them through.
-    expect(shouldFireHourlyTickAt(10, 17, 60, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(10, 23, 30, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(10, 1, 15, 0)).toBe(true);
+    expect(shouldFireActivityScanTickAt(10, 17, 60, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(10, 23, 30, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(10, 1, 15, 0)).toBe(true);
   });
 
   it("anchors arbitrary intervals at activeStartHour", () => {
     // 90-minute cadence with start=4: fires at 4:00, 5:30, 7:00, 8:30,
     // 10:00, 11:30, 13:00, 14:30, ..., 22:00, 23:30.
-    expect(shouldFireHourlyTickAt(4, 0, 90, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(5, 30, 90, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(7, 0, 90, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(8, 30, 90, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(22, 0, 90, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(23, 30, 90, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(4, 0, 90, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(5, 30, 90, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(7, 0, 90, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(8, 30, 90, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(22, 0, 90, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(23, 30, 90, 4)).toBe(true);
     // Off-cadence minutes do not fire.
-    expect(shouldFireHourlyTickAt(4, 30, 90, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(5, 0, 90, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(6, 30, 90, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(4, 30, 90, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(5, 0, 90, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(6, 30, 90, 4)).toBe(false);
   });
 
   it("handles 7-minute cadence anchored at activeStartHour=4", () => {
     // From minute 240 (4:00): 240, 247, 254, 261, ...
-    expect(shouldFireHourlyTickAt(4, 0, 7, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(4, 7, 7, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(5, 3, 7, 4)).toBe(true); // 303-240=63=9*7
-    expect(shouldFireHourlyTickAt(4, 5, 7, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(5, 0, 7, 4)).toBe(false); // 300-240=60, 60%7=4
+    expect(shouldFireActivityScanTickAt(4, 0, 7, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(4, 7, 7, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(5, 3, 7, 4)).toBe(true); // 303-240=63=9*7
+    expect(shouldFireActivityScanTickAt(4, 5, 7, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(5, 0, 7, 4)).toBe(false); // 300-240=60, 60%7=4
   });
 
   it("regression: interval = 1440 (one day) fires at activeStartHour", () => {
@@ -1739,40 +1745,40 @@ describe("shouldFireHourlyTickAt", () => {
     // point at 00:00, which sits outside the typical 4–24 active window
     // and so never fired. With activeStartHour anchor, it fires at the
     // start of the window once per day, regardless of where that is.
-    expect(shouldFireHourlyTickAt(4, 0, 1440, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(0, 0, 1440, 0)).toBe(true);
-    expect(shouldFireHourlyTickAt(9, 0, 1440, 9)).toBe(true);
-    expect(shouldFireHourlyTickAt(4, 1, 1440, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(5, 0, 1440, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(4, 0, 1440, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(0, 0, 1440, 0)).toBe(true);
+    expect(shouldFireActivityScanTickAt(9, 0, 1440, 9)).toBe(true);
+    expect(shouldFireActivityScanTickAt(4, 1, 1440, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(5, 0, 1440, 4)).toBe(false);
     // With start=0, the slot lands at 0:00 — 4:00 is NOT a fire time.
-    expect(shouldFireHourlyTickAt(4, 0, 1440, 0)).toBe(false);
+    expect(shouldFireActivityScanTickAt(4, 0, 1440, 0)).toBe(false);
   });
 
   it("regression: interval near window length still fires once per day", () => {
     // 720-min (12h) interval, start=4: fires at 4:00 and 16:00.
-    expect(shouldFireHourlyTickAt(4, 0, 720, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(16, 0, 720, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(10, 0, 720, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(4, 0, 720, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(16, 0, 720, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(10, 0, 720, 4)).toBe(false);
     // 1080-min (18h) interval, start=4: fires at 4:00 and 22:00.
-    expect(shouldFireHourlyTickAt(4, 0, 1080, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(22, 0, 1080, 4)).toBe(true);
-    expect(shouldFireHourlyTickAt(13, 0, 1080, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(4, 0, 1080, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(22, 0, 1080, 4)).toBe(true);
+    expect(shouldFireActivityScanTickAt(13, 0, 1080, 4)).toBe(false);
   });
 
   it("regression: interval > 60 (e.g. 120) fires every N minutes anchored at activeStartHour", () => {
     // 120-min (2h) interval, start=4: fires at 4:00, 6:00, 8:00, ... 22:00.
     const fireHours = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22];
     for (const h of fireHours) {
-      expect(shouldFireHourlyTickAt(h, 0, 120, 4)).toBe(true);
+      expect(shouldFireActivityScanTickAt(h, 0, 120, 4)).toBe(true);
     }
     // Off-cycle hours within the active window must not fire.
     for (const h of [5, 7, 9, 11, 13, 15, 17, 19, 21, 23]) {
-      expect(shouldFireHourlyTickAt(h, 0, 120, 4)).toBe(false);
+      expect(shouldFireActivityScanTickAt(h, 0, 120, 4)).toBe(false);
     }
     // Non-zero minutes within a fire-hour must not fire.
-    expect(shouldFireHourlyTickAt(6, 30, 120, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(8, 1, 120, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(8, 59, 120, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(6, 30, 120, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(8, 1, 120, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(8, 59, 120, 4)).toBe(false);
   });
 
   it("does not falsely fire when called before activeStartHour", () => {
@@ -1780,8 +1786,8 @@ describe("shouldFireHourlyTickAt", () => {
     // but if anything ever invokes the gate at e.g. 3:00 with start=4,
     // the (h*60+m - anchor + 1440) % 1440 wrap must keep the offset
     // non-negative so we don't incorrectly return true.
-    expect(shouldFireHourlyTickAt(3, 0, 90, 4)).toBe(false);
-    expect(shouldFireHourlyTickAt(0, 0, 90, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(3, 0, 90, 4)).toBe(false);
+    expect(shouldFireActivityScanTickAt(0, 0, 90, 4)).toBe(false);
   });
 });
 
@@ -1810,10 +1816,10 @@ describe("AgentScheduler additional coverage", () => {
     });
   });
 
-  describe("setHourlyCheckCallback", () => {
-    it("registers and stores the hourly check callback", () => {
+  describe("setActivityScanCallback", () => {
+    it("registers and stores the activity scan callback", () => {
       const cb = vi.fn().mockResolvedValue(undefined);
-      scheduler.setHourlyCheckCallback(cb);
+      scheduler.setActivityScanCallback(cb);
       // The callback is later invoked by the hourly cron
     });
   });
@@ -1833,11 +1839,11 @@ describe("AgentScheduler additional coverage", () => {
       }).logGateBlock.bind(s);
 
       // First call should log (set lastGateBlockLoggedAt)
-      logGateBlock("test_reason", { cron: "hourly_check" });
+      logGateBlock("test_reason", { cron: "activity_scan" });
 
       // Immediately calling again should NOT log (within 5 min window)
       // We can't easily verify the log call, but ensure no error
-      logGateBlock("test_reason", { cron: "hourly_check" });
+      logGateBlock("test_reason", { cron: "activity_scan" });
 
       s.stop();
     });
@@ -2626,6 +2632,18 @@ describe("morning self-heal tick", () => {
   });
 
   it("queues a wake row with the full day-open sequence when the boundary cron fire was swallowed", async () => {
+    // Disable the activity-scan AGENT row (the post-redesign switch —
+    // AGENTS_HUB_REDESIGN_PLAN §2) so nothing rides along on the wake row.
+    setup.db.exec(
+      `CREATE TABLE IF NOT EXISTS agents (
+         id TEXT PRIMARY KEY,
+         enabled INTEGER NOT NULL DEFAULT 1,
+         metadata_json TEXT NOT NULL DEFAULT '{}'
+       )`,
+    );
+    setup.db
+      .prepare("INSERT OR REPLACE INTO agents (id, enabled) VALUES ('activity-scan', 0)")
+      .run();
     const dayBoundary = vi.fn().mockResolvedValue(undefined);
     const s = makeScheduler();
     s.setDayBoundaryCallback(dayBoundary);
@@ -2643,14 +2661,14 @@ describe("morning self-heal tick", () => {
       routine: string;
       source: string;
       postCatchupRoutines: string[];
-      postCatchupHourlyCheck: boolean;
+      postCatchupActivityScan: boolean;
     };
     expect(ctx.routine).toBe("morning_routine");
     expect(ctx.source).toBe("missed_cron_selfheal");
-    // 10:00 UTC is before the 18:00 review slot and the hourly check is
+    // 10:00 UTC is before the 18:00 review slot and the activity scan is
     // disabled in the test config — nothing rides along today.
     expect(ctx.postCatchupRoutines).toEqual([]);
-    expect(ctx.postCatchupHourlyCheck).toBe(false);
+    expect(ctx.postCatchupActivityScan).toBe(false);
     s.stop();
   });
 

@@ -109,7 +109,7 @@ describe("management-policy SKILL.md — workflow structure (plan §4.4.1)", () 
     // 5.4 as a no-op for the agent so it doesn't race the reconciler.
     const text = body(readSkill());
     const dossierIdx = text.indexOf("5.1 Create the dossier");
-    const routineIdx = text.indexOf("5.2 Create the custom routine");
+    const routineIdx = text.indexOf("5.2 Create the execution Agent");
     const policyIdx = text.indexOf("5.3 Create the policy file");
     const noopIdx = text.indexOf("5.4 _(no manual step required)_");
     expect(dossierIdx).toBeGreaterThan(-1);
@@ -169,13 +169,16 @@ describe("management-policy SKILL.md — pause / resume / remove (plan §4.6)", 
     expect(text).toMatch(/^### Remove/m);
   });
 
-  it("pause flow flips both policy.status AND linked routine.enabled", () => {
+  it("pause flow flips both policy.status AND the linked Agent's enabled", () => {
     // Decision §1.1.4 — pause = pause linked things. A pause that only
-    // touches the policy file leaves the cron job firing.
+    // touches the policy file leaves the scheduled Agent firing.
+    // (Agents-hub redesign: the vehicle is PATCH /api/agents, not the
+    // legacy routine file's frontmatter.)
     const text = body(readSkill());
     const pauseSection = text.split(/^### Pause/m)[1].split(/^### Resume/m)[0];
     expect(pauseSection).toMatch(/status:\s*paused/);
-    expect(pauseSection).toMatch(/enabled:\s*false/);
+    expect(pauseSection).toMatch(/PATCH \/api\/agents\/<slug>/);
+    expect(pauseSection).toMatch(/"enabled":\s*false/);
     expect(pauseSection).toMatch(/_index/);
   });
 
@@ -185,8 +188,10 @@ describe("management-policy SKILL.md — pause / resume / remove (plan §4.6)", 
     const text = body(readSkill());
     const removeSection = text.split(/^### Remove/m)[1] ?? "";
     expect(removeSection).toMatch(/status:\s*removed/);
-    // The routine file IS deleted (DELETE is whitelisted on policies/routines/custom/*).
-    expect(removeSection).toMatch(/DELETE\s+\/api\/context\/policies\/routines\/custom/);
+    // The linked Agent IS removed (hard delete mirrors the old
+    // routine-file delete — Agents-hub redesign).
+    expect(removeSection).toMatch(/DELETE\s+\/api\/agents\/<slug>/);
+    expect(removeSection).toMatch(/"keep_history":\s*false/);
   });
 
   it("documents best-effort fan-out semantics, not transactional", () => {
@@ -205,7 +210,10 @@ describe("management-policy SKILL.md — API surface (plan §11)", () => {
     // time.
     const text = body(readSkill());
     expect(text).toMatch(/\/api\/context\/policies\/management-captures\//);
-    expect(text).toMatch(/\/api\/context\/policies\/routines\/custom\//);
+    // Scheduling vehicle is the Agents API (Agents-hub redesign) — the
+    // legacy routines/custom context path must no longer be instructed.
+    expect(text).toMatch(/POST \/api\/agents/);
+    expect(text).not.toMatch(/PUT \/api\/context\/policies\/routines\/custom\//);
     expect(text).toMatch(/\/api\/context\/knowledge\/dossiers\//);
     expect(text).toMatch(/\/api\/context\/policies\/management-captures\/_index/);
   });

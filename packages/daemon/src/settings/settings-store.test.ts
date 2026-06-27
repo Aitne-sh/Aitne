@@ -73,13 +73,13 @@ describe("SettingsStore", () => {
     const store = createSettingsStore(db);
     store.setMany({
       executeTimeoutMinutes: 120,
-      hourlyCheckEnabled: false,
+      activityScanEnabled: false,
       defaultNotificationPlatforms: ["slack", "telegram"],
     });
 
     expect(store.getAll()).toMatchObject({
       executeTimeoutMinutes: 120,
-      hourlyCheckEnabled: false,
+      activityScanEnabled: false,
       defaultNotificationPlatforms: ["slack", "telegram"],
     });
   });
@@ -101,6 +101,38 @@ describe("SettingsStore", () => {
 
     store.delete("executeTimeoutMinutes");
     expect(store.get("executeTimeoutMinutes")).toBeNull();
+  });
+
+  // v0.1.10 → v0.1.11 rename: rows persisted under the legacy `hourlyCheck*`
+  // names must read under the canonical `activityScan*` key on the first
+  // post-upgrade boot, BEFORE migration 0010 has rewritten them
+  // (loadPersistedSettings runs ahead of runMigrations).
+  it("reads a legacy hourlyCheck* row under its canonical activityScan* key", () => {
+    db.prepare("INSERT INTO settings (key, value_json) VALUES (?, ?)").run(
+      "hourlyCheckPrePassFreshnessMinutes",
+      "240",
+    );
+    const store = createSettingsStore(db);
+    expect(store.getAll().activityScanPrePassFreshnessMinutes).toBe(240);
+  });
+
+  it("never lets a legacy row shadow an existing canonical row", () => {
+    const put = db.prepare("INSERT INTO settings (key, value_json) VALUES (?, ?)");
+    // Legacy row inserted FIRST so the SELECT yields it before the canonical
+    // row — the canonical value must still win.
+    put.run("hourlyCheckIntervalMinutes", "60");
+    put.run("activityScanIntervalMinutes", "90");
+    const store = createSettingsStore(db);
+    expect(store.getAll().activityScanIntervalMinutes).toBe(90);
+  });
+
+  it("drops a legacy row whose canonical value arrived earlier in the scan", () => {
+    const put = db.prepare("INSERT INTO settings (key, value_json) VALUES (?, ?)");
+    // Canonical first, legacy second — the aliased duplicate is skipped.
+    put.run("activityScanHeartbeatHours", "8");
+    put.run("hourlyCheckHeartbeatHours", "4");
+    const store = createSettingsStore(db);
+    expect(store.getAll().activityScanHeartbeatHours).toBe(8);
   });
 
   it("setMany is a no-op when no valid runtime setting keys are provided", () => {
@@ -222,7 +254,7 @@ describe("getRuntimeSettingsDefaults", () => {
     const defaults = getRuntimeSettingsDefaults();
     expect(defaults.executeTimeoutMinutes).toBe(60);
     expect(defaults.agentDisplayName).toBe(DEFAULT_AGENT_DISPLAY_NAME);
-    expect(defaults.hourlyCheckEnabled).toBe(true);
+    expect(defaults.activityScanEnabled).toBe(true);
     expect(defaults.disallowedTools).toBeInstanceOf(Array);
   });
 });

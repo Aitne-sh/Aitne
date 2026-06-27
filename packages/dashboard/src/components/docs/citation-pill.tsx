@@ -30,7 +30,7 @@ export function CitationPill({ slug, anchor, onClick }: CitationPillProps) {
     return (
       <span
         title={`Citation refers to a missing doc: ${slug}`}
-        className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-baseline text-[11px] text-amber-900 line-through decoration-amber-700/40 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-200"
+        className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-1.5 py-0.5 align-baseline text-[11px] text-warning line-through decoration-warning/40"
       >
         <AlertCircle className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />
         <span className="truncate">{slug}</span>
@@ -57,8 +57,7 @@ export function CitationPill({ slug, anchor, onClick }: CitationPillProps) {
         // parent `<aside>` exposes horizontal scroll. The inner
         // `<span class="truncate">` handles the ellipsis once max-width
         // clamps the pill.
-        "mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 align-baseline text-[11px] text-blue-900 transition hover:bg-blue-100",
-        "dark:border-blue-900/40 dark:bg-blue-950/40 dark:text-blue-200",
+        "mx-0.5 inline-flex max-w-full items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0.5 align-baseline text-[11px] text-primary transition hover:bg-primary/15",
       )}
     >
       <FileText className="h-3 w-3 shrink-0 opacity-80" aria-hidden="true" />

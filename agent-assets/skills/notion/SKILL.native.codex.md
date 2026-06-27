@@ -110,8 +110,8 @@ Surface the choice to the user before issuing.
 
 ## 4. Decision rules
 
-- **Hourly check is read-only** — inherits the constraint from
-  `routine.hourly_check.native.codex.md`.
+- **Activity scan is read-only** — inherits the constraint from
+  `routine.activity_scan.native.codex.md`.
 - **Mass-update — ask first.** Batch page-creation can take up to 100
   pages; page-move and page-update batches can touch many rows.
   Summarise and confirm anything >~10 pages.

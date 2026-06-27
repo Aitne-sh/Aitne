@@ -9,6 +9,7 @@ import {
   isScheduledDmEvent,
   isScheduledBrowserTaskEvent,
   isScheduledEvent,
+  isTaskDeliveryEvent,
 } from "./types.js";
 
 describe("createEvent", () => {
@@ -161,6 +162,18 @@ describe("type guards", () => {
     expect(isScheduledBrowserTaskEvent(browserTask)).toBe(true);
     expect(isScheduledBrowserTaskEvent(dm)).toBe(false);
     expect(isScheduledBrowserTaskEvent(task)).toBe(false);
+  });
+
+  it("isTaskDeliveryEvent matches task.delivery and is not scheduled", () => {
+    const delivery = createEvent({
+      type: "task.delivery",
+      source: "browser_task",
+      priority: EventPriority.HIGH,
+    });
+    expect(isTaskDeliveryEvent(delivery)).toBe(true);
+    expect(isScheduledEvent(delivery)).toBe(false);
+    expect(isAgentTaskEvent(delivery)).toBe(false);
+    expect(isScheduledDmEvent(delivery)).toBe(false);
   });
 
   it("isAgentTaskEvent does NOT match scheduled.browser_task", () => {

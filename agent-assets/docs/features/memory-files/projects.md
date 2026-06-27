@@ -56,8 +56,8 @@ project's lifetime.
 
 - Captures the project's purpose, status, links, and recent decisions
   in a single durable note.
-- Surfaces in the morning routine while the project is active and the
-  roadmap has Preparation Timeline rows pointing at it.
+- Surfaces in the morning routine while the project is active (its
+  `state` is not `archived`).
 - Becomes the canonical reference the agent quotes from in DMs.
 
 ## File Shape
@@ -99,8 +99,9 @@ Read on demand. Written when the operator asks the agent to remember
 something project-specific, or when a DM expresses project intent
 (create, update status, mark done).
 
-The agent never edits files on disk — it has no `Edit`/`Write` tools.
-All project writes go through the context API:
+The agent cannot edit context files on disk — a pre-write hook blocks
+`Edit`/`Write` anywhere inside the context vault. All project writes go
+through the context API:
 
 - `GET /api/context/list/projects` — discover existing project files.
 - `PUT /api/context/plans/projects/<slug>` — create or fully replace.

@@ -135,9 +135,11 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
   // they know the value is now a no-op instead of silently dropping
   // their override. The runtime-settings Zod schema would otherwise
   // ignore the unknown key without any signal.
+  // Reads the LEGACY env name on purpose — the warning exists for operators
+  // who still carry the pre-redesign variable in their .env.
   if (env("HOURLY_CHECK_GATE_MODE") !== undefined) {
     console.warn(
-      "[config] PA_HOURLY_CHECK_GATE_MODE is set but no longer honoured — the hourly_check gate now has a single execution path (see HOURLY_CHECK_GATE_REDESIGN_PLAN.md Phase 4). Remove the env var to silence this warning.",
+      "[config] PA_HOURLY_CHECK_GATE_MODE is set but no longer honoured — the activity_scan gate now has a single execution path (see HOURLY_CHECK_GATE_REDESIGN_PLAN.md Phase 4). Remove the env var to silence this warning.",
     );
   }
   const parsed = runtimeSettingsSchema.parse({
@@ -192,31 +194,53 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     // at fire time so the flag takes effect on the next month-end without
     // restart.
     monthlyReviewEnabled: parseBooleanOrDefault(env("MONTHLY_REVIEW_ENABLED"), false),
-    hourlyCheckEnabled: parseBooleanOrDefault(env("HOURLY_CHECK_ENABLED"), true),
-    hourlyCheckIntervalMinutes: parseNumberOrDefault(env("HOURLY_CHECK_INTERVAL_MINUTES"), 60),
-    hourlyCheckActiveStartHour: parseNumberOrDefault(env("HOURLY_CHECK_ACTIVE_START_HOUR"), 4),
-    hourlyCheckActiveEndHour: parseNumberOrDefault(env("HOURLY_CHECK_ACTIVE_END_HOUR"), 24),
-    hourlyCheckMinObservations: parseNumberOrDefault(env("HOURLY_CHECK_MIN_OBSERVATIONS"), 1),
-    hourlyCheckStage2Enabled: parseBooleanOrDefault(
-      env("HOURLY_CHECK_STAGE2_ENABLED"),
-      false,
+    // The `?? env("HOURLY_CHECK_*")` fallbacks honour the pre-rename env
+    // names (the agent was "Hourly Check" until v0.1.11) — drop them after
+    // a deprecation window alongside LEGACY_RUNTIME_SETTING_KEY_ALIASES.
+    activityScanEnabled: parseBooleanOrDefault(
+      env("ACTIVITY_SCAN_ENABLED") ?? env("HOURLY_CHECK_ENABLED"),
+      true,
     ),
-    hourlyCheckHeartbeatHours: parseNumberOrDefault(
-      env("HOURLY_CHECK_HEARTBEAT_HOURS"),
+    // Default 120 (every 2 hours) — see ACTIVITY_SCAN_CADENCE_DEFAULTS.
+    activityScanIntervalMinutes: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_INTERVAL_MINUTES") ?? env("HOURLY_CHECK_INTERVAL_MINUTES"),
+      120,
+    ),
+    activityScanActiveStartHour: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_ACTIVE_START_HOUR") ?? env("HOURLY_CHECK_ACTIVE_START_HOUR"),
       4,
     ),
-    hourlyCheckLowSignalPendingCeiling: parseNumberOrDefault(
-      env("HOURLY_CHECK_LOW_SIGNAL_PENDING_CEILING"),
+    activityScanActiveEndHour: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_ACTIVE_END_HOUR") ?? env("HOURLY_CHECK_ACTIVE_END_HOUR"),
+      24,
+    ),
+    activityScanMinObservations: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_MIN_OBSERVATIONS") ?? env("HOURLY_CHECK_MIN_OBSERVATIONS"),
+      1,
+    ),
+    activityScanStage2Enabled: parseBooleanOrDefault(
+      env("ACTIVITY_SCAN_STAGE2_ENABLED") ?? env("HOURLY_CHECK_STAGE2_ENABLED"),
+      false,
+    ),
+    activityScanHeartbeatHours: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_HEARTBEAT_HOURS") ?? env("HOURLY_CHECK_HEARTBEAT_HOURS"),
+      4,
+    ),
+    activityScanLowSignalPendingCeiling: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_LOW_SIGNAL_PENDING_CEILING")
+        ?? env("HOURLY_CHECK_LOW_SIGNAL_PENDING_CEILING"),
       0,
     ),
-    hourlyCheckPrePassFreshnessMinutes: parseNumberOrDefault(
-      env("HOURLY_CHECK_PRE_PASS_FRESHNESS_MINUTES"),
+    activityScanPrePassFreshnessMinutes: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_PRE_PASS_FRESHNESS_MINUTES")
+        ?? env("HOURLY_CHECK_PRE_PASS_FRESHNESS_MINUTES"),
       30,
     ),
     authProbeDisabled: parseBooleanOrDefault(env("AUTH_PROBE_DISABLED"), false),
     authPreflightFreshnessMs: parseNumberOrDefault(env("AUTH_PREFLIGHT_FRESHNESS_MS"), 600000),
     schedulePollIntervalSeconds: parseNumberOrDefault(env("SCHEDULE_POLL_INTERVAL_SECONDS"), 5),
     maxBriefingDelayMinutes: parseNumberOrDefault(env("MAX_BRIEFING_DELAY_MINUTES"), 30),
+    ownerActivityIdleThresholdMinutes: parseNumberOrDefault(env("OWNER_ACTIVITY_IDLE_THRESHOLD_MINUTES"), 5),
     maxNotificationsPerHour: parseNumberOrDefault(env("MAX_NOTIFICATIONS_PER_HOUR"), 3),
     maxNotificationsPerDay: parseNumberOrDefault(env("MAX_NOTIFICATIONS_PER_DAY"), 12),
     quietHoursStart: envOrDefault("QUIET_HOURS_START", "22:00"),
@@ -263,7 +287,7 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     githubPollIntervalSeconds: parseNumberOrDefault(env("GITHUB_POLL_INTERVAL_SECONDS"), 1800),
     // Matches calendar/git poller cadence. Previously 60s, but 3 databases
     // × 1440 polls/day ≈ 4320 API calls/day was excessive when the only
-    // downstream consumer is hourly_check. Override with
+    // downstream consumer is activity_scan. Override with
     // PA_NOTION_POLL_INTERVAL_SECONDS if you need closer to real-time
     // Notion sync (at the cost of API quota). If you raise this beyond
     // ~10 min, also raise `NOTION_WRITE_TTL_MS` in `api/routes/notion.ts`
@@ -282,7 +306,10 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     mailIdleFallbackRecoveryMinutes: parseNumberOrDefault(env("MAIL_IDLE_FALLBACK_RECOVERY_MINUTES"), 60),
     mailMaxMessagesPerPoll: parseNumberOrDefault(env("MAIL_MAX_MESSAGES_PER_POLL"), 20),
     mailAuthFailureRetryHours: parseNumberOrDefault(env("MAIL_AUTH_FAILURE_RETRY_HOURS"), 6),
-    hourlyObservationCharBudget: parseNumberOrDefault(env("HOURLY_OBSERVATION_CHAR_BUDGET"), 8000),
+    activityScanObservationCharBudget: parseNumberOrDefault(
+      env("ACTIVITY_SCAN_OBSERVATION_CHAR_BUDGET") ?? env("HOURLY_OBSERVATION_CHAR_BUDGET"),
+      8000,
+    ),
     prePassMaxAttemptsPerIntegration: parseNumberOrDefault(env("PRE_PASS_MAX_ATTEMPTS_PER_INTEGRATION"), 3),
     prePassBackoffMs: parseJsonOrDefault<number[]>(
       env("PRE_PASS_BACKOFF_MS"),
@@ -340,6 +367,9 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     // installs pre-seed them.
     primaryLanguage: envOrDefault("PRIMARY_LANGUAGE", "en"),
     vaultMode: (env("VAULT_MODE") as "obsidian" | "plain" | undefined) ?? "plain",
+    // Keep-awake posture (macOS caffeinate); see core/sleep-inhibitor.ts.
+    preventSleepMode:
+      (env("PREVENT_SLEEP_MODE") as "off" | "ac" | "always" | undefined) ?? "ac",
   });
 
   return normalizeRuntimeSettings(parsed);

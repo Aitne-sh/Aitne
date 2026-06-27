@@ -102,7 +102,7 @@ export interface AuthHealthMonitorOptions {
   now?: () => Date;
   /**
    * Injected morning-routine gate — returning `true` causes `checkAll()`
-   * to short-circuit without probing. Mirrors the existing hourly-check
+   * to short-circuit without probing. Mirrors the existing activity-scan
    * gate (§3.2 of the design doc) so probe DMs never collide with the
    * morning routine. In production, index.ts wires this to
    * `dispatcher.isMorningRoutineActive()`. Tests may pass a fake.
@@ -529,7 +529,7 @@ export class AuthHealthMonitor {
    * overlapping cron ticks (e.g. a slow probe still running when the
    * next hour fires) serialize without queueing stacks of probes. The
    * field is set atomically before any `await` to avoid the
-   * microtask-scheduling race that bit `Dispatcher.hourlyCheckInProgress`
+   * microtask-scheduling race that bit `Dispatcher.activityScanInProgress`
    * pre-C1 fix (see `dispatcher.ts`).
    */
   private checkAllInFlight: Promise<void> | null = null;

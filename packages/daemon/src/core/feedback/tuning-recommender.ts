@@ -61,7 +61,7 @@ export const TUNING_HYSTERESIS_DAYS = 14;
 export const TUNING_REVERT_COOLDOWN_DAYS = 28;
 
 // ── R1 (pre-pass freshness) ─────────────────────────────────────────────────
-export const R1_KNOB = "hourlyCheckPrePassFreshnessMinutes";
+export const R1_KNOB = "activityScanPrePassFreshnessMinutes";
 export const R1_EMPTY_RATE_STEP_UP = 0.7;
 export const R1_EMPTY_RATE_STEP_DOWN = 0.2;
 export const R1_MIN_RUNS = 10;
@@ -89,7 +89,7 @@ export const R2_MIN_SENT = 5;
 export const SELF_TUNING_NOTIFICATION_TYPE = "self_tuning";
 
 // ── R3 (hourly-gate tightening) ─────────────────────────────────────────────
-export const R3_KNOB = "hourlyCheckLowSignalPendingCeiling";
+export const R3_KNOB = "activityScanLowSignalPendingCeiling";
 export const R3_LOW_NOVELTY_SHARE = 0.5;
 /** Minimum stage-3 escalations over 14d before the share is meaningful. */
 export const R3_MIN_STAGE3 = 4;
@@ -166,8 +166,8 @@ export interface FailingRecurringSchedule {
 }
 
 export interface TuningKnobValues {
-  hourlyCheckPrePassFreshnessMinutes: number;
-  hourlyCheckLowSignalPendingCeiling: number;
+  activityScanPrePassFreshnessMinutes: number;
+  activityScanLowSignalPendingCeiling: number;
   feedbackLessonMaxBytesGlobal: number;
 }
 
@@ -371,7 +371,7 @@ function ruleR1(
   const empty = combined.reduce((n, r) => n + r.empty, 0);
   const rate = empty / runs;
 
-  const current = knobs.hourlyCheckPrePassFreshnessMinutes;
+  const current = knobs.activityScanPrePassFreshnessMinutes;
   let proposed: number | null = null;
   if (rate > R1_EMPTY_RATE_STEP_UP) {
     proposed = stepUpNotch(R1_FRESHNESS_NOTCHES, current);
@@ -464,7 +464,7 @@ function ruleR3(
   if (gate.stage3LowSignalLowNovelty / gate.stage3 <= R3_LOW_NOVELTY_SHARE) {
     return null;
   }
-  const current = knobs.hourlyCheckLowSignalPendingCeiling;
+  const current = knobs.activityScanLowSignalPendingCeiling;
   const proposed = stepUpNotch(R3_CEILING_NOTCHES, current);
   if (proposed === null) return null;
   return {
@@ -481,7 +481,7 @@ function ruleR3(
     ),
     estWeeklySavingUsd: round4(
       (gate.stage3LowSignalLowNovelty / 2) *
-        avgCostPerRun(data, "routine.hourly_check"),
+        avgCostPerRun(data, "routine.activity_scan"),
     ),
   };
 }

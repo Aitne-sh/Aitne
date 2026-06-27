@@ -265,14 +265,14 @@ describe("ContextBuilder", () => {
       writeFileSync(join(contextDir, "state", "today.md"), "# Today\nseed");
     });
 
-    it("omits <user> and <management_rules> for routine.hourly_check", async () => {
+    it("omits <user> and <management_rules> for routine.activity_scan", async () => {
       const event = {
         ...createEvent({
-          type: "routine.hourly_check",
+          type: "routine.activity_scan",
           source: "cron",
           priority: EventPriority.NORMAL,
         }),
-        routine: "hourly_check",
+        routine: "activity_scan",
       } as RoutineEvent;
       const context = await builder.build(event);
       expect(context).not.toContain("<user>");
@@ -678,7 +678,7 @@ describe("ContextBuilder", () => {
       .slice(0, 19);
     db.prepare(
       `INSERT INTO agent_actions (action_type, trigger, result, started_at)
-       VALUES ('routine.hourly_check', 'autonomous', 'success', ?)`,
+       VALUES ('routine.activity_scan', 'autonomous', 'success', ?)`,
     ).run(actionTs);
     db.prepare(
       `INSERT INTO messages (role, content, platform, timestamp)
@@ -701,7 +701,7 @@ describe("ContextBuilder", () => {
     const context = await builder.build(event);
 
     expect(context).toContain("<yesterday_agent_actions>");
-    expect(context).toContain("routine.hourly_check");
+    expect(context).toContain("routine.activity_scan");
     expect(context).toContain("<yesterday_messages>");
     expect(context).toContain("Need to follow up with Alex");
     expect(context).toContain("<yesterday_dm_conversation_log>");
@@ -788,7 +788,7 @@ describe("ContextBuilder", () => {
     });
 
     it("omits <previous_week> for non-morning routine events", async () => {
-      // Other routines (evening_review, hourly_check, …) do not consume
+      // Other routines (evening_review, activity_scan, …) do not consume
       // the previous-week digest — they have their own context
       // surfaces. Plant a valid weekly file to prove the helper is
       // only invoked from the morning_routine branch.
@@ -800,7 +800,7 @@ describe("ContextBuilder", () => {
         ["# x", "", "## Next Week Focus", "- A"].join("\n"),
       );
 
-      for (const routine of ["evening_review", "hourly_check"] as const) {
+      for (const routine of ["evening_review", "activity_scan"] as const) {
         const event = {
           ...createEvent({
             type: `routine.${routine}`,
@@ -825,7 +825,7 @@ describe("ContextBuilder", () => {
     const routineTypes: RoutineEvent["routine"][] = [
       "morning_routine",
       "evening_review",
-      "hourly_check",
+      "activity_scan",
       "weekly_review",
       "monthly_review",
       "roadmap_refresh",
@@ -880,7 +880,7 @@ describe("ContextBuilder", () => {
   });
 
   it("injects <untrusted_content> for every routine event (mode-independent)", async () => {
-    for (const routine of ["morning_routine", "hourly_check", "evening_review"] as const) {
+    for (const routine of ["morning_routine", "activity_scan", "evening_review"] as const) {
       const event = {
         ...createEvent({
           type: `routine.${routine}`,
@@ -1653,7 +1653,7 @@ describe("ContextBuilder", () => {
         expect(context).toContain(`<integration_modes`);
         expect(context).toContain(`gmail="delegated"`);
         // DELEGATED-MODE-V2-DESIGN.md §5.4 — delegated keys also surface
-        // `<key>_delegated_to="<backend>"` so the hourly_check delegated
+        // `<key>_delegated_to="<backend>"` so the activity_scan delegated
         // variants can pick same-backend native MCP vs cross-backend proxy
         // per integration without reading integrations.md.
         expect(context).toContain(`gmail_delegated_to="codex"`);
@@ -2849,10 +2849,10 @@ describe("ContextBuilder", () => {
     });
 
     it("emits both blocks side-by-side when both are present (no-op for production, defensive contract for fetcher's reassemble path)", async () => {
-      const plan = `<acquisition-plan routine="hourly_check" agent_day="2026-05-11"></acquisition-plan>`;
-      const report = `<fetch_report routine="hourly_check" agent_day="2026-05-11" status="skipped" fetched="0" posted="0" duplicates="0" />`;
+      const plan = `<acquisition-plan routine="activity_scan" agent_day="2026-05-11"></acquisition-plan>`;
+      const report = `<fetch_report routine="activity_scan" agent_day="2026-05-11" status="skipped" fetched="0" posted="0" duplicates="0" />`;
       const event = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "cron",
         priority: EventPriority.NORMAL,
         data: { acquisitionPlanBlock: plan, fetchReportBlock: report },
@@ -2922,7 +2922,7 @@ describe("ContextBuilder", () => {
   // the task-flow's Phase 3c verdict step.
   describe("self-tuning Phase 2 — tuning recommendations injection", () => {
     it("injects <tuning_recommendations> when event.data.tuningRecommendationsBlock is a string", async () => {
-      const block = `<tuning_recommendations cycle="2026-06-09" count="1" mode="shadow" verdict_endpoint="POST /api/tuning/verdicts">\n  <r id="2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes" rule="R1" actuator="config" key="hourlyCheckPrePassFreshnessMinutes" current="240" proposed="360" bounds="120..480" evidence="fetch_window 80% empty over 20 runs/14d" />\n</tuning_recommendations>`;
+      const block = `<tuning_recommendations cycle="2026-06-09" count="1" mode="shadow" verdict_endpoint="POST /api/tuning/verdicts">\n  <r id="2026-06-09:R1:activityScanPrePassFreshnessMinutes" rule="R1" actuator="config" key="activityScanPrePassFreshnessMinutes" current="240" proposed="360" bounds="120..480" evidence="fetch_window 80% empty over 20 runs/14d" />\n</tuning_recommendations>`;
       const event = createEvent({
         type: "routine.weekly_review",
         source: "cron",
@@ -2948,7 +2948,7 @@ describe("ContextBuilder", () => {
   // the pre-pass fetcher. The session has no causal dependency on the
   // wide-path always-injected blocks, so the builder short-circuits them.
   describe("routine.fetch_window slim context (Phase 2)", () => {
-    const acquisitionPlanBlock = `<acquisition-plan routine="hourly_check" agent_day="2026-05-14">\n  <fetch integration="gmail" mode="direct" window="inbox_today" account="me" query="?since=2026-05-14T00:00:00.000Z" />\n</acquisition-plan>`;
+    const acquisitionPlanBlock = `<acquisition-plan routine="activity_scan" agent_day="2026-05-14">\n  <fetch integration="gmail" mode="direct" window="inbox_today" account="me" query="?since=2026-05-14T00:00:00.000Z" />\n</acquisition-plan>`;
 
     function makeFetchWindowEvent(data: Record<string, unknown> = {}): RoutineEvent {
       return {
@@ -3080,24 +3080,24 @@ describe("ContextBuilder", () => {
     });
 
     it("falls through to the wide path for a sibling routine event (regression guard)", async () => {
-      // hourly_check is a routine event with routine !== "fetch_window";
+      // activity_scan is a routine event with routine !== "fetch_window";
       // it must still receive `<routine_protocol>` + the small
       // structured metadata blocks (`<agent_identity>`,
       // `<current_time>`, …). It does NOT receive `<user>` /
       // `<management_rules>` — those are opted out per
       // `resolveAlwaysInjectionPolicy`; the dedicated absence test
-      // (`omits <user> and <management_rules> for routine.hourly_check`)
+      // (`omits <user> and <management_rules> for routine.activity_scan`)
       // covers that contract, this case only guards that the slim
       // fetch_window branch did not accidentally swallow sibling
       // routines.
       writeFileSync(join(contextDir, "state", "today.md"), "# Today\nseed");
       const event = {
         ...createEvent({
-          type: "routine.hourly_check",
+          type: "routine.activity_scan",
           source: "cron",
           priority: EventPriority.NORMAL,
         }),
-        routine: "hourly_check",
+        routine: "activity_scan",
       } as RoutineEvent;
       const context = await builder.build(event);
       expect(context).toContain("<routine_protocol>");
@@ -3198,11 +3198,11 @@ describe("ContextBuilder", () => {
       writeLessons();
       const event = {
         ...createEvent({
-          type: "routine.hourly_check",
+          type: "routine.activity_scan",
           source: "cron",
           priority: EventPriority.NORMAL,
         }),
-        routine: "hourly_check",
+        routine: "activity_scan",
       } as RoutineEvent;
       const context = await builder.build(event);
       expect(context).toContain("<agent_lessons>");
@@ -3346,16 +3346,16 @@ describe("ContextBuilder", () => {
       expect(context).not.toContain('scope="self"');
     });
 
-    it("does NOT inject the self block on hourly_check (self:false) even when bound", async () => {
-      writeSelfLessons("hourly-check");
+    it("does NOT inject the self block on activity_scan (self:false) even when bound", async () => {
+      writeSelfLessons("activity-scan");
       const event = {
         ...createEvent({
-          type: "routine.hourly_check",
+          type: "routine.activity_scan",
           source: "cron",
           priority: EventPriority.NORMAL,
-          data: { agentId: "hourly-check" },
+          data: { agentId: "activity-scan" },
         }),
-        routine: "hourly_check",
+        routine: "activity_scan",
       } as RoutineEvent;
       const context = await builder.build(event);
       expect(context).not.toContain('scope="self"');

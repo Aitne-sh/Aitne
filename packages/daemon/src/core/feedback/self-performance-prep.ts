@@ -17,7 +17,7 @@
  *     has no process_key column; `action_type` carries the routine identity),
  *     the `routine.fetch_window` empty-run rate per integration (from the
  *     fan-out audit rows' `detail.prePass` payload the runner persists), the
- *     `hourly_check.gate` stage distribution (from `buildGateAuditDetail`'s
+ *     `activity_scan.gate` stage distribution (from `buildGateAuditDetail`'s
  *     historical per-tick rows), per-notification-type `user_reaction`
  *     breakdowns (the first reader of the column `signal-detector.ts`
  *     populates), and the `runtime_state.self_tuning:*` ledger.
@@ -58,7 +58,7 @@ export const SELF_TUNING_LEDGER_PREFIX = "self_tuning:";
 export const FETCH_WINDOW_ACTION_TYPE = "routine.fetch_window";
 
 /** Per-tick gate audit rows (`buildGateAuditDetail` payload in `detail`). */
-export const HOURLY_GATE_ACTION_TYPE = "hourly_check.gate";
+export const ACTIVITY_SCAN_GATE_ACTION_TYPE = "activity_scan.gate";
 
 export interface ActionTypeStats {
   actionType: string;
@@ -86,7 +86,7 @@ export interface HourlyGateStats {
   stage0: number;
   /**
    * Lite-triage ticks that stayed silent. The writer persists the alias
-   * `stage2_log_only` verbatim (`dispatcher-hourly-check.ts:logGateAuditRow`
+   * `stage2_log_only` verbatim (`dispatcher-activity-scan.ts:logGateAuditRow`
    * overrides `stage_reached` with the applied decision, and a Stage-2 tick
    * only ever settles to log_only-silent or stage3); a bare `stage2` is
    * accepted defensively but never occurs in production rows.
@@ -329,7 +329,7 @@ function gatherGate(
       `SELECT detail, result FROM agent_actions
         WHERE action_type = ? AND started_at >= ? AND started_at < ?`,
     )
-    .all(HOURLY_GATE_ACTION_TYPE, fromUtc, toUtc) as GateRow[];
+    .all(ACTIVITY_SCAN_GATE_ACTION_TYPE, fromUtc, toUtc) as GateRow[];
 
   const stats: HourlyGateStats = {
     ticks: rows.length,
@@ -357,7 +357,7 @@ function gatherGate(
     if (stage !== "stage3") continue;
     // Min-observations-floor short-circuit: the gate verdict said stage3
     // but no session ran (`resultOverride: "skipped"` in
-    // dispatcher-hourly-check.ts). Count as a tick only.
+    // dispatcher-activity-scan.ts). Count as a tick only.
     if (row.result === "skipped") continue;
     stats.stage3 += 1;
     // R3 waste evidence — autonomous low-signal-fallback escalations only.

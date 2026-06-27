@@ -68,6 +68,18 @@ export interface BangCommandContext {
   ) => Promise<void>;
   enqueueWikiEvent?: (event: Event) => Promise<void>;
   /**
+   * Per-task `!stop <id>` cancel hooks (BACKGROUND_TASK_RUNNER_DESIGN.md
+   * Phase 4). Wired from the dispatcher's live runner instances, which
+   * hold the in-memory worker handles the abort needs to reach. Optional
+   * so bang-command unit fixtures (and lite installs without a runner)
+   * can omit them — the `!stop` handler tells the owner the runner is
+   * unavailable rather than silently dropping the request. Return `true`
+   * when an abort/terminal-transition was issued, `false` when the task
+   * was already gone.
+   */
+  cancelBackgroundTask?: (taskId: string, reason: string) => Promise<boolean>;
+  cancelBrowserTask?: (taskId: string, reason: string) => Promise<boolean>;
+  /**
    * BROWSER_HISTORY_INTEGRATION_PLAN P3 — wire-through for the
    * `!research accept` / `!research wiki` paths. The bang handler
    * constructs an Event via `createResearchCommandEvent` and the

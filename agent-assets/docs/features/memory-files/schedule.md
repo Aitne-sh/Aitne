@@ -29,7 +29,7 @@ ask_examples:
   - How do I change which sections the daily journal includes?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-10
 keywords:
   - daily journal
   - diary
@@ -43,6 +43,7 @@ related:
   - concepts/agent-day
 ui_anchors:
   - /schedule
+  - /agents/morning-routine?tab=rulebook
 process_keys:
   - routine.morning_routine_journal
 context_files:
@@ -122,7 +123,8 @@ do not rewrite them.
 The daily journal does **not** appear on the Schedule page — that page
 shows the scheduler's wake-ups and recurring routines, not these files.
 
-- **Journal settings (`/settings/journal`)** is where you shape the
+- **The morning-routine agent's Rulebook tab
+  (`/agents/morning-routine?tab=rulebook`)** is where you shape the
   output: the Format and Export rule files control which sections
   appear, the voice, the required frontmatter, and the redaction /
   inclusion rules applied on every synthesis run. Edits take effect on
@@ -132,7 +134,8 @@ shows the scheduler's wake-ups and recurring routines, not these files.
 
 There is nothing to configure on the files themselves; they are a
 side effect of the morning routine. To change *what* gets written, edit
-the journal Format and Export rules at `/settings/journal`.
+the journal Format and Export rules on the morning-routine agent's
+Rulebook tab (`/agents/morning-routine?tab=rulebook`).
 
 Retention is unlimited — old files accumulate. A manual prune
 (`rm ~/.personal-agent/context/journal/daily/2025-*.md`) is safe.

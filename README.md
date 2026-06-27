@@ -30,7 +30,7 @@ Aitne is a daemon on your laptop, connected to your calendar, mail (Gmail / Outl
 
 - **04:00 — Morning routine.** Aitne reads everything that landed overnight (mail, GitHub activity, calendar changes, vault updates) and writes `today.md` — sample below.
 - **Morning — Brief.** The plan lands in your DMs as a short summary.
-- **Through the day — Nudges.** Meeting reminders, hourly background checks for the things you care about (eval results, PR review requests, new mail). DMs only when there's something worth your attention.
+- **Through the day — Nudges.** Meeting reminders, periodic background checks (default: every 2 hours) for the things you care about (eval results, PR review requests, new mail). DMs only when there's something worth your attention.
 - **Evening — Review.** Aitne writes a daily journal: what got done, what slipped, one observation about the week.
 
 You steer it through natural-language DMs ("skip morning routine on Sundays", "ping me when the overnight job finishes") and bang commands (`!cost`, `!ask`, `!ingest`).
@@ -75,7 +75,7 @@ Agent Notes
 Agent Log
  04:12 Morning Routine completed — today.md drafted from 23 raw signals
  07:02 Sent morning brief to Slack DM (4 priorities, 2 timing alerts)
- 12:38 Hourly check: 1 new GitHub review request, 0 calendar changes
+ 12:38 Activity scan: 1 new GitHub review request, 0 calendar changes
  18:00 Evening Review completed — 3 of 5 tasks closed; 2 carried to tomorrow
 
 Handoff
@@ -199,7 +199,7 @@ flowchart LR
 Two execution paths run in parallel:
 
 - **Reactive path** — owner DMs/mentions, cron routines (morning / evening / weekly), calendar approach events. Event → priority heap → dispatcher → backend session.
-- **Polling path** — observers for Git, GitHub, Obsidian, Notion, Calendar, Mail write to an `observations` table without spawning sessions. An hourly cron triages those observations through a lite-tier session, then escalates to a full Sonnet-class session only if something is worth surfacing.
+- **Polling path** — observers for Git, GitHub, Obsidian, Notion, Calendar, Mail write to an `observations` table without spawning sessions. A periodic cron (the activity scan, default every 2 hours) triages those observations through a lite-tier session, then escalates to a full Sonnet-class session only if something is worth surfacing.
 
 A pre-pass `routine.fetch_window` session runs before each routine, fanning out per-account fetches (mail, calendar, Notion) into the `observations` table so the main session reads from a single source.
 
@@ -269,7 +269,7 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 <summary><b>Agents you can define and schedule</b></summary>
 
 - Every routine is a first-class **Agent** — an identity with a YAML config + Markdown brief, editable at `:8322/agents`
-- The built-in routines (morning routine, evening review, hourly check, …) ship as **System** agents — can't be deleted, but can be stopped with a warning
+- The built-in routines (morning routine, evening review, activity scan, …) ship as **System** agents — can't be deleted, but can be stopped with a warning
 - Define your own recurring **work** agents (daily / weekly / monthly) — from the dashboard form or just by DMing the agent ("summarize my open PRs every Monday at 9")
 - Pin a backend, model, and tier per agent; see per-agent cost, success rate, and run history; fire any agent on demand
 - One-shot wake-ups ("remind me at 3pm"), pre-composed scheduled DMs, and recurring briefings — all quiet-hours-aware
@@ -308,7 +308,7 @@ Every mode change goes through a live capability probe and a per-key flip lock.
 <details>
 <summary><b>Self-management via natural language</b></summary>
 
-- "Don't run hourly checks on weekends" — patches the cron window
+- "Don't run activity scans on weekends" — patches the cron window
 - "Remember my partner's birthday is March 14" — appends to `identity/profile.md`
 - "I prefer concise replies — no preamble" — updates the agent's `character` field
 - "Email me a summary every Friday at 5pm" — creates a recurring schedule
@@ -366,7 +366,7 @@ Four independent layers, designed so the bottom layer holds even when upper laye
 3. **Daemon API risk tiers** — `Autonomous` / `ReadSensitive` (X-Read-Token) / `Approve` (Bearer token)
 4. **Absolute-block layer** — recursive deletes, `sudo`, pipe-to-shell, secret-file reads/writes, Anthropic-cloud managed-agent tools — hard-denied in **both** modes regardless of overrides
 
-Plus: localhost-only API, webhook HMAC verification, no automated financial transactions, no automated social posting, single-owner adapter filtering, hourly auth-health monitoring with auto-recovery.
+Plus: localhost-only API, webhook HMAC verification, no automated financial transactions, no automated social posting, single-owner adapter filtering, periodic auth-health monitoring with auto-recovery.
 
 ---
 
@@ -377,11 +377,11 @@ Plus: localhost-only API, webhook HMAC verification, no automated financial tran
 | `maxConcurrentSessions` (autonomous) | 3 | Hard semaphore |
 | `maxReactiveSessions` (DMs) | 2 | Hard semaphore |
 | `executeTimeoutMinutes` | 60 | Per-execute watchdog |
-| `autonomousDailyCostCapUsd` | `null` | Priority-based skipping: `hourly_check` at 100%, `roadmap_refresh` at 120%, `evening_review` at 150%, `morning_routine` at 200%. Reactive DMs are not gated. |
+| `autonomousDailyCostCapUsd` | `null` | Priority-based skipping: `activity_scan` at 100%, `roadmap_refresh` at 120%, `evening_review` at 150%, `morning_routine` at 200%. Reactive DMs are not gated. |
 | `autonomousMonthlyCostCapUsd` | `null` | Alert + warn surface |
 | Per-ProcessKey `maxBudgetUsd` | per-row | Hard cap per execute |
 
-Typical day for an active user: **~$0.50** (morning routine + briefing + 2× hourly check + 1 DM + evening review, all on Sonnet 4.6). Quota exhaustion is detected, dedupe-notified once per 2-hour window, and retried on the next tick.
+Typical day for an active user: **~$0.50** (morning routine + briefing + 2× activity scan + 1 DM + evening review, all on Sonnet 4.6). Quota exhaustion is detected, dedupe-notified once per 2-hour window, and retried on the next tick.
 
 ---
 

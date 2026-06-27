@@ -202,7 +202,7 @@ export function ExecutionModeSettingsCard({
                 />
                 Advanced — per-backend overrides
                 {divergent && (
-                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                  <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                     mixed
                   </span>
                 )}
@@ -355,7 +355,7 @@ function BackendOverrideRow({
         </div>
       </div>
       {showCodexAllowWarning && (
-        <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+        <p className="mt-2 flex items-start gap-1.5 text-[11px] text-warning">
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
             Codex Allow disables the daemon&apos;s absolute-block layer
@@ -386,7 +386,7 @@ function BackendOverrideRow({
  */
 function CodexAllowCaveat() {
   return (
-    <span className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+    <span className="mt-3 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <span className="space-y-1">
         <span className="block">

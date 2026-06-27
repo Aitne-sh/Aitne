@@ -157,7 +157,7 @@ describe("bootstrap/db createWikiTokenResolver", () => {
     const resolver = createWikiTokenResolver(db);
     expect(resolver("morning_routine", undefined)).toBeNull();
     expect(resolver("message.dm", undefined)).toBeNull();
-    expect(resolver("hourly_check", "default")).toBeNull();
+    expect(resolver("activity_scan", "default")).toBeNull();
   });
 
   it("returns the named workspace when present", () => {

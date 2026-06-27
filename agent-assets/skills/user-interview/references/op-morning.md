@@ -8,7 +8,7 @@ description: Operation 1 — pick a profile-interview question during Morning Ro
 
 Run this only inside `routine.morning_routine` (and its split
 variants `routine.morning_routine_today`). DM handlers, scheduled.dm
-briefings, and hourly checks do not run this operation — they use
+briefings, and activity scans do not run this operation — they use
 Operation 2 / 3 / 4 instead.
 
 ```

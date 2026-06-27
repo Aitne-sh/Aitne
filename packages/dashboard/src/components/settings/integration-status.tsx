@@ -86,7 +86,7 @@ function FileUploadButton({
           <Upload className="h-3.5 w-3.5 mr-1" />
           {uploading ? "Uploading..." : label}
         </Button>
-        {configured && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+        {configured && <CheckCircle2 className="h-4 w-4 text-success" />}
       </div>
       {result && (
         <Alert variant={result.type === "success" ? "success" : "error"}>
@@ -172,7 +172,7 @@ function GoogleCard({ status }: { status: GoogleIntegrationStatus | undefined })
       className={cn(
         "rounded-lg border p-4 sm:col-span-2",
         status?.connected
-          ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30"
+          ? "border-success/40 bg-success/5"
           : "border-border",
       )}
     >
@@ -193,20 +193,20 @@ function GoogleCard({ status }: { status: GoogleIntegrationStatus | undefined })
           <div className="flex items-center gap-1.5 text-xs">
             <span className={cn(
               "inline-block h-2 w-2 rounded-full",
-              calendarStatus?.connected ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600",
+              calendarStatus?.connected ? "bg-success" : "bg-gray-300 dark:bg-gray-600",
             )} />
             <span className="text-muted-foreground">Calendar</span>
-            <span className={calendarStatus?.connected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+            <span className={calendarStatus?.connected ? "text-success" : "text-muted-foreground"}>
               {calendarStatus?.connected ? "Active" : "Inactive"}
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-xs">
             <span className={cn(
               "inline-block h-2 w-2 rounded-full",
-              gmailStatus?.connected ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600",
+              gmailStatus?.connected ? "bg-success" : "bg-gray-300 dark:bg-gray-600",
             )} />
             <span className="text-muted-foreground">Gmail</span>
-            <span className={gmailStatus?.connected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+            <span className={gmailStatus?.connected ? "text-success" : "text-muted-foreground"}>
               {gmailStatus?.connected ? "Active" : "Not yet implemented"}
             </span>
           </div>
@@ -240,7 +240,7 @@ function GoogleCard({ status }: { status: GoogleIntegrationStatus | undefined })
               <ExternalLink className="h-3.5 w-3.5 mr-1" />
               {authorizing ? "Waiting..." : tokenDone ? "Re-authorize" : "Authorize with Google"}
             </Button>
-            {tokenDone && <CheckCircle2 className="inline-block ml-2 h-4 w-4 text-emerald-500" />}
+            {tokenDone && <CheckCircle2 className="inline-block ml-2 h-4 w-4 text-success" />}
             {authError && (
               <Alert variant="error" className="mt-1">
                 {authError}
@@ -301,7 +301,7 @@ function IntegrationCard({
       className={cn(
         "rounded-lg border p-4",
         isConnected
-          ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30"
+          ? "border-success/40 bg-success/5"
           : "border-border",
       )}
     >
@@ -434,7 +434,7 @@ function NotionCard({ status }: { status: IntegrationStatus | undefined }) {
       className={cn(
         "rounded-lg border p-4",
         status?.connected
-          ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30"
+          ? "border-success/40 bg-success/5"
           : "border-border",
       )}
     >
@@ -479,7 +479,7 @@ function NotionCard({ status }: { status: IntegrationStatus | undefined }) {
             {savingKey ? "..." : "Save"}
           </Button>
           {(keySaved || isKeyConfigured) && (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
           )}
         </div>
         {keyError && <Alert variant="error">{keyError}</Alert>}
@@ -521,7 +521,7 @@ function NotionCard({ status }: { status: IntegrationStatus | undefined }) {
                   type="button"
                   onClick={() => handleRemove(label)}
                   disabled={saving}
-                  className="text-muted-foreground hover:text-red-500 shrink-0"
+                  className="text-muted-foreground hover:text-destructive shrink-0"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

@@ -1,8 +1,15 @@
 /**
  * `!report` — recent agent failures, grouped by `(action_type, backend)`.
  *
- * Source: structured query over `agent_actions(result='failed')` rather
- * than a log-file scan. See spec §6.4 (`!report`) for the rationale.
+ * Source: structured query over `agent_actions` rows with
+ * `result IN ('failed','partial') AND error IS NOT NULL` rather than a
+ * log-file scan. See spec §6.4 (`!report`) for the rationale.
+ * `partial` joined the set with RESEARCH_CLUSTER_COST_FIX_PLAN F5: a
+ * session that ends cleanly but fails its post-run outcome check (e.g.
+ * `journal_write_missing`) is exactly the silent breakage `!report`
+ * exists to surface. The `error IS NOT NULL` guard keeps benign
+ * partial rows (wiki-bridge `candidate_logged` / `deduplicated`, which
+ * carry no error) out of the report.
  */
 import type Database from "better-sqlite3";
 import { redactSensitiveString } from "@aitne/shared";
@@ -38,7 +45,7 @@ const REPORT_SQL = `
       MIN(started_at) AS first_seen,
       MAX(started_at) AS last_seen
     FROM agent_actions
-    WHERE result = 'failed'
+    WHERE result IN ('failed', 'partial')
       AND started_at >= datetime('now', '-7 days')
       AND error IS NOT NULL
     GROUP BY backend, action_type
@@ -47,7 +54,7 @@ const REPORT_SQL = `
     ON latest.action_type = g.action_type
    AND COALESCE(latest.backend, 'claude') = COALESCE(g.backend, 'claude')
    AND latest.started_at = g.last_seen
-   AND latest.result = 'failed'
+   AND latest.result IN ('failed', 'partial')
    AND latest.error IS NOT NULL
   GROUP BY g.backend, g.action_type
   ORDER BY g.n DESC, g.last_seen DESC
@@ -68,7 +75,7 @@ function queryReport(db: Database.Database): {
          COUNT(DISTINCT COALESCE(backend, 'claude') || '|' || action_type) AS groups,
          COUNT(*) AS total
        FROM agent_actions
-       WHERE result = 'failed'
+       WHERE result IN ('failed', 'partial')
          AND started_at >= datetime('now', '-7 days')
          AND error IS NOT NULL`,
     )
@@ -127,6 +134,7 @@ export const reportCommand: BangCommand = {
   describe: "Agent errors over the past 7 days.",
   details: [
     "Summarizes recent failed agent actions by action type and backend.",
+    "Includes partial runs that failed a post-run outcome check.",
     "Samples are redacted before sending to messaging surfaces.",
     "Does not invoke an LLM.",
   ],

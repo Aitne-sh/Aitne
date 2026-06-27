@@ -109,7 +109,7 @@ const EMPTY_USAGE: BackendUsage = {
  * The delegated path already had this guard (see the `runDelegatedTool`
  * wiring lower in this file); the reactive path needs it explicitly
  * because a single hung subprocess can pin a session for the full
- * executeTimeoutMinutes wall-clock, blocking morning-routine / hourly-check
+ * executeTimeoutMinutes wall-clock, blocking morning-routine / activity-scan
  * dispatch downstream.
  */
 const REACTIVE_IDLE_TIMEOUT_MS = 5 * 60 * 1000;

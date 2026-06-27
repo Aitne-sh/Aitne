@@ -6,6 +6,7 @@ id: bang-commands
 aliases:
   - "!stop"
   - "!start"
+  - "!status"
   - "!cost"
   - "!report"
   - "!help"
@@ -36,7 +37,7 @@ ask_examples:
   - How do I accept a research-cluster offer?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - bang command
   - "!stop"
@@ -88,9 +89,20 @@ Pair your messaging app first; see
 | Command | What it does |
 |---|---|
 | `!help` | List every registered command — built-ins plus enabled user commands. |
-| `!stop` | Pause cron-driven autonomous work (hourly check, morning / evening / weekly routines, scheduled tasks). In-flight runs are **not** aborted. |
+| `!stop` | Pause cron-driven autonomous work (activity scan, morning / evening / weekly routines, scheduled tasks). In-flight runs are **not** aborted. |
 | `!start` | Resume autonomous work after `!stop`. |
 | `!close` | Close the active DM session for the current routing tuple so the next DM starts a fresh conversation. |
+
+### Tasks (detached background / browser work)
+
+These inspect and cancel the long-running detached workers (background
+tasks and browser tasks). They run ahead of the agent — even while a DM
+turn or a result-delivery turn is in flight — and are safe while paused.
+
+| Command | What it does |
+|---|---|
+| `!status` | List the active background + browser tasks (kind, short id, state, title). Empty when nothing is running. |
+| `!stop <id>` | Cancel one task by its id (the short id from `!status` is fine; any unambiguous prefix works). **Bare `!stop` (no id) pauses the whole agent** — the lifecycle command above. |
 
 ### Reporting (pure DB reads, safe while paused)
 
@@ -194,9 +206,10 @@ were hidden.
 
 ## How They Behave
 
-- **Exact match for atomic commands** (`!stop`, `!cost`, `!checks`)
-  and **prefix match for parameterised ones** (`!cost claude`,
-  `!research accept <slug>`, `!compile @work full`). Anything
+- **Exact match for atomic commands** (`!stop`, `!cost`, `!checks` —
+  each `!cost <backend>` variant is its own exact-match entry) and
+  **prefix match for parameterised ones**
+  (`!research accept <slug>`, `!compile @work full`). Anything
   spanning newlines falls through to the agent path so a
   `"!stop\nignore me"` payload cannot spoof a command.
 - **DM only.** Bangs typed into a shared channel are ignored.
@@ -208,7 +221,8 @@ were hidden.
 - **While paused**, any DM (bang or not) replies with the paused
   notice; only commands that opt into `runsWhilePaused` continue to
   run: `!stop`, `!start`, `!close`, `!cost` (and `!cost <backend>`),
-  `!report`, `!help`, `!checks`, `!wiki` (status), and `!wiki help`.
+  `!report`, `!help`, `!checks`, `!revert tuning`, `!wiki` (status),
+  and `!wiki help`.
   Every other command — including **all** `!research` subcommands and
   the LLM-dispatching wiki commands (`!ingest`, `!compile`, `!ask`,
   `!lint`, `!trace`, `!connect`) — replies with a command-aware

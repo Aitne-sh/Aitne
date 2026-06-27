@@ -32,7 +32,7 @@ import {
 //      `{integration_partial}` placeholder (no inline includes), and
 //      `renderPartialForFanOut` produces the correct mode-filtered
 //      branch for every (integration, mode) cell in the matrix.
-//   4. The `routine.hourly_check.{delegated,native}.{claude,codex,gemini}.md`
+//   4. The `routine.activity_scan.{delegated,native}.{claude,codex,gemini}.md`
 //      variant files (R4) are deleted; `selectTaskFlowVariantSuffix`
 //      still resolves a suffix but `loadFlowVariant` falls through to
 //      the base file.
@@ -138,7 +138,7 @@ const MAIN_ROUTINE_EXPECTATIONS: readonly MainRoutineExpectation[] = [
     requiredMarkers: ["/api/observations", "<fetch_report"],
   },
   {
-    routine: "routine.hourly_check",
+    routine: "routine.activity_scan",
     requiredMarkers: ["/api/observations", "<fetch_report>"],
   },
   {
@@ -339,21 +339,21 @@ describe("docs/design/appendices/pre-pass-fan-out.md Phase 4 — renderPartialFo
   });
 });
 
-// docs/design/appendices/routine-data-acquisition.md Phase 3 R4 — `routine.hourly_check`
+// docs/design/appendices/routine-data-acquisition.md Phase 3 R4 — `routine.activity_scan`
 // variant files for `delegated.<be>` and `native.<be>` are deleted; the
 // base file inherits the partial-include mechanism for all modes. The
 // suffix resolver still returns a non-base suffix when a delegated /
 // native integration is touched, but `loadFlowVariant` falls through
 // to the base file (`prompts.ts:152-158`). The test below pins the
 // deletion so a future revert is caught.
-describe("Phase 3 R4 — hourly_check variants deleted", () => {
+describe("Phase 3 R4 — activity_scan variants deleted", () => {
   const DELETED = [
-    "routine.hourly_check.delegated.claude.md",
-    "routine.hourly_check.delegated.codex.md",
-    "routine.hourly_check.delegated.gemini.md",
-    "routine.hourly_check.native.claude.md",
-    "routine.hourly_check.native.codex.md",
-    "routine.hourly_check.native.gemini.md",
+    "routine.activity_scan.delegated.claude.md",
+    "routine.activity_scan.delegated.codex.md",
+    "routine.activity_scan.delegated.gemini.md",
+    "routine.activity_scan.native.claude.md",
+    "routine.activity_scan.native.codex.md",
+    "routine.activity_scan.native.gemini.md",
   ];
 
   for (const filename of DELETED) {

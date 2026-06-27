@@ -34,6 +34,7 @@ import {
   nowInTimezone,
   parseSqliteUtcMs,
   type BackendId,
+  type IntegrationFetchTarget,
   type IntegrationKey,
   type IntegrationState,
 } from "@aitne/shared";
@@ -72,6 +73,8 @@ export type AcquisitionFetchMode =
  *    genuine catalog hole.
  *  - `no_accounts` — direct-mode per-account fan-out with zero active
  *    accounts for the integration.
+ *  - `no_fetch_targets` — Notion routine fetches require an explicit
+ *    user allowlist so the pre-pass cannot scan the whole workspace.
  *  - `direct_inline_prefetch` — the catalog *deliberately* omits the
  *    `direct` cell because the daemon serves that data inline
  *    (ContextBuilder pre-fetch / REST route) and a pre-pass row would
@@ -87,6 +90,7 @@ export type AcquisitionPlanDropReason =
   | "unknown_mode"
   | "no_window_query"
   | "no_accounts"
+  | "no_fetch_targets"
   | "direct_inline_prefetch";
 
 /** One dropped (window × integration) cell. */
@@ -468,6 +472,7 @@ interface FetchRow {
   accountId?: string;
   label?: string;
   query: string;
+  fetchTargets?: readonly IntegrationFetchTarget[];
   /**
    * Backend the sub-session for this row's integration must spawn on.
    * Computed by `resolveIntegrationBackend` from the integration's mode +
@@ -491,6 +496,11 @@ function renderFetchRow(row: FetchRow): string {
   }
   if (row.label !== undefined) {
     parts.push(`label="${xmlAttr(row.label)}"`);
+  }
+  // `collectFetchRows` only attaches a non-empty allowlist (empty drops
+  // the row with `no_fetch_targets`), so defined ⇒ renderable.
+  if (row.fetchTargets !== undefined) {
+    parts.push(`targets='${xmlQueryAttr(JSON.stringify(row.fetchTargets))}'`);
   }
   // Single-quote delimiter on `query=` — see `xmlQueryAttr` rationale.
   parts.push(`query='${xmlQueryAttr(row.query)}'`);
@@ -525,6 +535,13 @@ function collectFetchRows(
     const integrations = integrationsForWindow(spec.window);
     for (const integration of integrations) {
       const state = input.integrations[integration];
+      // Notion rows carry the user's fetch-target allowlist (undefined
+      // for every other integration). Resolved up here — before the mode
+      // guards — but the empty-allowlist drop stays AFTER them, so a
+      // disabled / unbound Notion row keeps its mode-derived drop reason
+      // and `no_fetch_targets` means exactly "active but unconfigured".
+      const fetchTargets =
+        integration === "notion" ? (state?.fetchTargets ?? []) : undefined;
       // Per-integration backend resolution. Was: `input.sessionBackend`
       // (single backend for the whole plan), which caused `resolveFetchMode`
       // to drop rows for native bindings on a different backend. With
@@ -565,6 +582,10 @@ function collectFetchRows(
         continue;
       }
       const query = substituteAcquisitionTokens(queryTemplate, input.timestamps);
+      if (fetchTargets !== undefined && fetchTargets.length === 0) {
+        onDrop?.({ integration, window: spec.window, reason: "no_fetch_targets" });
+        continue;
+      }
 
       // perAccount fan-out is meaningful only in `direct` mode, where the
       // daemon stores per-account OAuth tokens and polls each. In
@@ -595,6 +616,7 @@ function collectFetchRows(
             accountId: account.accountId,
             label: account.label,
             query,
+            fetchTargets,
             requiredBackend,
           });
         }
@@ -604,6 +626,7 @@ function collectFetchRows(
           mode: fetchMode,
           window: spec.window,
           query,
+          fetchTargets,
           requiredBackend,
         });
       }

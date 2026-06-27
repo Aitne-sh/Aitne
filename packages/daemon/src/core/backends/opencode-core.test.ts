@@ -219,14 +219,14 @@ function makeExecuteParams(
 ): AgentExecuteParams {
   // Use a non-message event so `buildExecutionPrompt` skips the
   // MessageEvent branch — the test exercises the core, not the prompt
-  // composition. `routine.hourly_check` is a `RoutineEvent` so the
+  // composition. `routine.activity_scan` is a `RoutineEvent` so the
   // prompt utility's branch reads `event.routine`, which is undefined
   // here and gracefully skipped.
   return {
     prompt: "What is 2+2?",
     context: "",
     event: {
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: 1 as 1 | 2 | 3,
       timestamp: new Date("2026-05-14T00:00:00Z"),
@@ -1467,7 +1467,7 @@ describe("OpencodeCore.runDelegatedTask — Phase 4 (ephemeral isolation)", () =
   });
 });
 
-describe("OpencodeCore — routine.hourly_check.triage json_schema", () => {
+describe("OpencodeCore — routine.activity_scan.triage json_schema", () => {
   it("threads format into prompt body and reads info.structured back", async () => {
     let capturedBody: unknown = null;
     const client = {
@@ -1524,7 +1524,7 @@ describe("OpencodeCore — routine.hourly_check.triage json_schema", () => {
     const core = new OpencodeCore(makeConfig(), new AgentWriteTracker(), manager);
     const result = await core.execute(
       makeExecuteParams({
-        processKey: "routine.hourly_check.triage",
+        processKey: "routine.activity_scan.triage",
       }),
     );
     // The dispatcher's parseStage2Verdict reads result.output as text;
@@ -1594,7 +1594,7 @@ describe("OpencodeCore — routine.hourly_check.triage json_schema", () => {
     await expect(
       core.execute(
         makeExecuteParams({
-          processKey: "routine.hourly_check.triage",
+          processKey: "routine.activity_scan.triage",
         }),
       ),
     ).rejects.toBeInstanceOf(BackendDecisiveFailure);

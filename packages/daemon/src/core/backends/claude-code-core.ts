@@ -69,8 +69,9 @@ import {
 import { ALWAYS_DISALLOWED_TOOLS } from "../../safety/always-disallowed.js";
 import {
   loadFetchWindowSystemPrompt,
+  loadSlimSystemPrompt,
   resetFetchWindowSystemPromptForTest,
-} from "../fetch-window-prompt-loader.js";
+} from "../slim-system-prompt-loader.js";
 import { CliPathCache } from "./cli-utils.js";
 import {
   extractSilentApiErrors,
@@ -169,36 +170,58 @@ const logger = createLogger("claude-code-core");
 const CLAUDE_SDK_SETTING_SOURCES: readonly SettingSource[] = ["user", "project"];
 
 /**
- * `routine.fetch_window` is a short, lite-tier pre-pass with high
- * per-session prompt-cache write cost (docs/design/appendices/fetch-window-cost-reduction.md
- * §1). The full `preset: "claude_code"` system prompt drags in ~30 K tokens
- * of built-in tool descriptions, the skills index, the memory-system docs,
- * and tone/style guidance — none of which the fetcher uses. Phase 1
- * replaces the preset with a fully custom systemPrompt string for this
- * one process key (SDK 0.2.98 has no `presetOptions` granularity to drop
- * sub-sections of the preset, so a string prompt is the only lever).
- *
- * Phase 1.5 promotes the same template to a single source of truth across
- * backends: the loader lives in `core/fetch-window-prompt-loader.ts` so the
- * `SkillsCompiler` can write the same body verbatim into Codex / Gemini
- * instruction files (AGENTS.md / GEMINI.md) without a cross-backend
- * import. The agent profile (`agent-assets/agent-profiles/routine-fetch-window.md`)
- * and the task-flow body still ship their operational rules — the system
- * prompt only sets the broad stance, and the SDK still loads the per-cwd
- * CLAUDE.md the SkillsCompiler materializes per session.
+ * Slim, lite-tier process keys swap the verbose `preset: "claude_code"`
+ * system prompt (~30 K tokens of built-in tool descriptions, the skills
+ * index, the memory-system docs, and tone/style guidance the key never
+ * uses) for a tight custom systemPrompt string. SDK 0.2.98 has no
+ * `presetOptions` granularity to drop sub-sections of the preset, so a
+ * string prompt is the only lever. `buildSystemPrompt` resolves membership
+ * through the shared registry in `core/slim-system-prompt-loader.ts`
+ * (`loadSlimSystemPrompt`) — the SAME loader the `SkillsCompiler` uses to
+ * write the byte-identical body into Codex / Gemini AGENTS.md / GEMINI.md,
+ * so adding a slim key is a one-line registry edit that wires both backends.
+ * Per-key agent profiles + task-flow bodies still ship the operational
+ * rules; the slim system prompt only sets the broad stance, and the SDK
+ * still loads the per-cwd CLAUDE.md the SkillsCompiler materializes.
+ *   - `routine.fetch_window` — docs/design/appendices/fetch-window-cost-reduction.md
+ *     Phase 1 / 1.5.
+ *   - `routine.research_cluster_update` — RESEARCH_CLUSTER_COST_FIX_PLAN.md F4.
  */
-// Typed as `ProcessKey` (not the inferred string literal) so that if
-// `ProcessKey` is ever narrowed in @aitne/shared/process-key.ts — e.g. the
-// pre-pass is renamed — this declaration is the compile error, not a
-// silently-dead branch in `buildSystemPrompt`.
-const FETCH_WINDOW_PROCESS_KEY: ProcessKey = "routine.fetch_window";
 
 /**
- * Test-only surface: lets `claude-code-core.test.ts` exercise the
- * fetch_window prompt loader without reaching into module internals via
- * `as any` casts. Re-exports the shared loader (now hoisted to
- * `core/fetch-window-prompt-loader.ts`) so the existing test import path
- * keeps working after Phase 1.5's hoist.
+ * Slim keys whose Claude SDK session ALSO sheds the daemon user's `~/.claude`
+ * scope: `settingSources` drops to `["project"]` and `strictMcpConfig` is
+ * forced on. On a dev machine the `"user"` source pulls in the user's plugin
+ * SKILL.md tree (~178 files) + the ~25 K-token user-scope claude.ai MCP
+ * connector schemas (`mcp__claude_ai_*`) into EVERY session's prompt-cache
+ * prefix (RESEARCH_CLUSTER_COST_FIX_PLAN.md RC4). Dropping it is pure win
+ * for a key that reaches no integration through those connectors.
+ *
+ * This is a STRICT SUBSET of the slim-system-prompt keys, NOT the same set:
+ * a key only qualifies when it serves NO native-mode integration. In native
+ * integration mode the fetcher reaches Gmail / Calendar / Notion precisely
+ * through the user-scope claude.ai connectors, so `routine.fetch_window` keeps
+ * `["user", "project"]` and is deliberately ABSENT here even though it has a
+ * slim system prompt. `routine.research_cluster_update` only ever curls the
+ * daemon's own browser-history + context REST API (no claude.ai connector),
+ * so shedding the user scope cannot starve it.
+ *
+ * `strictMcpConfig` is defense-in-depth on top of the `settingSources` drop:
+ * it shuts out any settings-file-sourced MCP server, while the daemon's own
+ * servers (including the in-process `aitne-observations` server) are passed
+ * programmatically via `options.mcpServers` (`composeMcpServers`) which
+ * `strictMcpConfig` does not touch. Typed `ReadonlySet<ProcessKey>` so a
+ * key rename in @aitne/shared lights up at the literal below.
+ */
+const USER_SCOPE_SHED_PROCESS_KEYS: ReadonlySet<ProcessKey> = new Set<ProcessKey>([
+  "routine.research_cluster_update",
+]);
+
+/**
+ * Test-only surface: lets `claude-code-core.test.ts` exercise the slim
+ * prompt loader without reaching into module internals via `as any` casts.
+ * Re-exports the shared loaders (hoisted to `core/slim-system-prompt-loader.ts`)
+ * so the existing fetch_window test import path keeps working.
  */
 export const _testInternals = {
   loadFetchWindowSystemPrompt,
@@ -368,7 +391,7 @@ export class ClaudeCodeCore implements IAgentCore {
      * Shared AgentWriteTracker. When present, the Write/Edit PreToolUse hook
      * pre-marks vault-scoped writes so the ObsidianWatcher attributes the
      * resulting chokidar event to `actor='agent'` instead of `'user'`. Without
-     * this wiring, the hourly_check dispatcher would re-discover the agent's
+     * this wiring, the activity_scan dispatcher would re-discover the agent's
      * own vault writes every cycle and loop.
      */
     private readonly writeTracker?: AgentWriteTracker,
@@ -567,26 +590,27 @@ export class ClaudeCodeCore implements IAgentCore {
         append: string;
         excludeDynamicSections: boolean;
       } {
-    // docs/design/appendices/fetch-window-cost-reduction.md Phase 1 — `routine.fetch_window`
-    // pays the full preset prompt cost on every fan-out (~30 K cache_create
-    // tokens per session, see §1.2). The fetcher does not use Skill / Read /
-    // Write / Edit / Glob / Grep / Task / WebFetch / WebSearch / NotebookEdit
-    // / EnterPlanMode / ScheduleWakeup, the memory-system documentation, or
-    // the skills index — every byte of preset for those is wasted cache
-    // creation amortized over only ~3 turns. Replace the preset with a
-    // small custom string for this one process key. Operational rules
-    // (acquisition-plan iteration, observations POST contract, hard
-    // guardrails) still ship via the per-cwd CLAUDE.md the SkillsCompiler
-    // materializes from `agent-assets/agent-profiles/routine-fetch-window.md`
-    // and the task-flow body in `agent-assets/task-flows/routine.fetch_window.md`.
+    // Slim process keys (RESEARCH_CLUSTER_COST_FIX_PLAN.md F4 generalizes the
+    // fetch-window-cost-reduction.md Phase 1 precedent) pay the full preset
+    // prompt cost on every dispatch (~30 K cache_create tokens per session).
+    // These keys never use Skill / Read / Write / Edit / Glob / Grep / Task /
+    // WebFetch / WebSearch / NotebookEdit / EnterPlanMode / ScheduleWakeup,
+    // the memory-system documentation, or the skills index — every byte of
+    // preset for those is wasted cache creation amortized over only a few
+    // turns. Replace the preset with a small custom string sourced from the
+    // shared registry (`core/slim-system-prompt-loader.ts`); the SkillsCompiler
+    // materializes the byte-identical body into AGENTS.md / GEMINI.md for CLI
+    // parity. Operational rules still ship via the per-cwd CLAUDE.md profile +
+    // task-flow body the SkillsCompiler materializes per session.
     //
     // Trade-off — `excludeDynamicSections` is a no-op when systemPrompt is
     // a string (per SDK 0.2.98 docs: "Has no effect when systemPrompt is a
     // string (custom prompt)"), but the entire string IS byte-stable
     // across sessions, so the prompt-cache prefix is naturally cacheable
     // on the same axis without needing the flag.
-    if (processKey === FETCH_WINDOW_PROCESS_KEY) {
-      return loadFetchWindowSystemPrompt();
+    const slimSystemPrompt = loadSlimSystemPrompt(processKey);
+    if (slimSystemPrompt !== null) {
+      return slimSystemPrompt;
     }
 
     // Character is NOT appended here — Phase 2 of the Character feature
@@ -618,6 +642,35 @@ export class ClaudeCodeCore implements IAgentCore {
       // This flag only helps same-type back-to-back sessions.
       excludeDynamicSections: true,
     };
+  }
+
+  /**
+   * Resolve the SDK `settingSources` for a session. Returns `["project"]`
+   * for `USER_SCOPE_SHED_PROCESS_KEYS` (dropping the daemon user's `~/.claude`
+   * scope — plugin SKILL.md tree + claude.ai connector schemas — from the
+   * prompt-cache prefix) and the default `["user", "project"]` otherwise. A
+   * fresh array per call: the SDK option type is mutable `SettingSource[]`.
+   *
+   * Applied at both `query()` sites (`executeOnce`, `executeResumeOnce`).
+   * Resume carries no `processKey` (it is always a reactive DM continuation,
+   * never a slim routine), so it always resolves to the full default.
+   */
+  private resolveSettingSources(processKey?: ProcessKey): SettingSource[] {
+    if (processKey !== undefined && USER_SCOPE_SHED_PROCESS_KEYS.has(processKey)) {
+      return ["project"];
+    }
+    return [...CLAUDE_SDK_SETTING_SOURCES];
+  }
+
+  /**
+   * Whether to force `strictMcpConfig` for a session — true exactly for the
+   * `USER_SCOPE_SHED_PROCESS_KEYS`, as defense-in-depth on top of the
+   * `settingSources` drop (shuts out settings-file-sourced MCP servers; the
+   * daemon's own servers are passed programmatically and unaffected). Resume
+   * carries no `processKey`, so it never qualifies.
+   */
+  private resolveStrictMcpConfig(processKey?: ProcessKey): boolean {
+    return processKey !== undefined && USER_SCOPE_SHED_PROCESS_KEYS.has(processKey);
   }
 
   /**
@@ -745,7 +798,7 @@ export class ClaudeCodeCore implements IAgentCore {
       // ALWAYS_DISALLOWED_TOOLS layer still applies.
       //
       // An EMPTY array (`[]`) is a deliberate "no tools" clamp — used by
-      // `routine.hourly_check.triage` (JSON-only triage spawn) and Stage B
+      // `routine.activity_scan.triage` (JSON-only triage spawn) and Stage B
       // of the morning-routine pipeline (daily-journal-daemon-write.md §3
       // corollary). A pre-2026-05-24 version of this gate required
       // `length > 0`, which silently fell through to the default `dontAsk`
@@ -829,7 +882,14 @@ export class ClaudeCodeCore implements IAgentCore {
             const mcpServers = this.composeMcpServers(mcp.claudeMcpServers);
             return mcpServers ? { mcpServers } : {};
           })(),
-          settingSources: [...CLAUDE_SDK_SETTING_SOURCES],
+          // RESEARCH_CLUSTER_COST_FIX_PLAN.md F4 — `USER_SCOPE_SHED_PROCESS_KEYS`
+          // drop to `["project"]` (+ `strictMcpConfig`) to shed the daemon
+          // user's `~/.claude` scope from the prompt-cache prefix; all other
+          // keys keep `["user", "project"]`.
+          settingSources: this.resolveSettingSources(params.processKey),
+          ...(this.resolveStrictMcpConfig(params.processKey)
+            ? { strictMcpConfig: true as const }
+            : {}),
           // When the per-execute clamp is active we already swapped Allow
           // mode back to strict `dontAsk` + an explicit allowedTools list.
           // The PreToolUse hooks must follow the same posture: keeping
@@ -974,7 +1034,11 @@ export class ClaudeCodeCore implements IAgentCore {
           const mcpServers = this.composeMcpServers(mcp.claudeMcpServers);
           return mcpServers ? { mcpServers } : {};
         })(),
-        settingSources: [...CLAUDE_SDK_SETTING_SOURCES],
+        // Resume is always a reactive DM continuation (no `processKey`), so
+        // `resolveSettingSources()` returns the full `["user", "project"]`;
+        // routed through the helper for a single source of truth with the
+        // execute path (RESEARCH_CLUSTER_COST_FIX_PLAN.md F4).
+        settingSources: this.resolveSettingSources(),
         hooks: this.getSecurityHooks(allowMode),
         includePartialMessages: !!streamCallbacks,
         ...this.buildAdvisorSettings(),

@@ -110,8 +110,8 @@ function store(
 }
 
 const DEFAULT_KNOBS: TuningKnobValues = {
-  hourlyCheckPrePassFreshnessMinutes: 240,
-  hourlyCheckLowSignalPendingCeiling: 0,
+  activityScanPrePassFreshnessMinutes: 240,
+  activityScanLowSignalPendingCeiling: 0,
   feedbackLessonMaxBytesGlobal: 8192,
 };
 
@@ -307,7 +307,7 @@ describe("tuning-recommender", () => {
     it("does not step past the 480 cap", () => {
       const recs = recommend({
         data: emptyMail(20, 16),
-        knobs: { ...DEFAULT_KNOBS, hourlyCheckPrePassFreshnessMinutes: 480 },
+        knobs: { ...DEFAULT_KNOBS, activityScanPrePassFreshnessMinutes: 480 },
       });
       expect(recs).toEqual([]);
     });
@@ -315,7 +315,7 @@ describe("tuning-recommender", () => {
     it("does not step below the 120 floor", () => {
       const recs = recommend({
         data: emptyMail(20, 2),
-        knobs: { ...DEFAULT_KNOBS, hourlyCheckPrePassFreshnessMinutes: 120 },
+        knobs: { ...DEFAULT_KNOBS, activityScanPrePassFreshnessMinutes: 120 },
       });
       expect(recs).toEqual([]);
     });
@@ -422,7 +422,7 @@ describe("tuning-recommender", () => {
           gate: { ...emptyGate(), ...over },
           actions: [
             action({
-              actionType: "routine.hourly_check",
+              actionType: "routine.activity_scan",
               runs: 10,
               costUsd: 1.0,
             }),
@@ -484,7 +484,7 @@ describe("tuning-recommender", () => {
         }),
         knobs: {
           ...DEFAULT_KNOBS,
-          hourlyCheckLowSignalPendingCeiling:
+          activityScanLowSignalPendingCeiling:
             R3_CEILING_NOTCHES[R3_CEILING_NOTCHES.length - 1],
         },
       });

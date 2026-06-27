@@ -13,7 +13,8 @@ category: features
 summary: |
   identity/profile.md is the agent's stable profile of the operator — role,
   focus areas, preferences, names of important people. The agent reads it
-  on every session and appends only with the operator's permission.
+  on every session and silently appends durable facts the operator states
+  in DMs.
 section: memory-files
 tags:
   - memory
@@ -26,7 +27,7 @@ ask_examples:
   - Will the agent change my profile without asking?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - user profile
   - identity/profile.md
@@ -54,8 +55,8 @@ context_files:
 
 ## In One Sentence
 
-A stable, mostly hand-edited profile of you — the agent reads it
-every session and appends only with explicit permission.
+A stable profile of you — the agent reads it every session and
+silently appends durable facts you state in DMs.
 
 ## What It Does
 
@@ -76,9 +77,12 @@ every session and appends only with explicit permission.
 ## When It Runs / How It Is Triggered
 
 - **Read continuously** — loaded at the start of every session.
-- **Written** only when you say "remember that…" in a DM, or during
-  the profile sweep routine (`routine.user_profile_sweep`), which
-  routes captured facts into the appropriate `identity/*.md` slice.
+- **Written** silently, in the same turn, when you state a durable
+  fact about yourself in a DM ("remember that…", "I'm a…", "my
+  manager is…"), and during the profile sweep routine
+  (`routine.user_profile_sweep`), which catches facts the DM-time
+  capture missed and routes them into the appropriate
+  `identity/*.md` slice.
 
 The agent never edits these files directly. It writes through the
 daemon's context API — for example
@@ -101,8 +105,9 @@ To tell the agent a durable fact about yourself, just say it in a DM:
 
 > remember that my manager is Priya and we sync every Monday at 10am
 
-The agent appends a line to the relevant slice (here `identity/people.md`)
-after confirming, and recalls it in future sessions.
+The agent silently appends a line to the relevant slice (here
+`identity/people.md`) in the same turn, and recalls it in future
+sessions.
 
 ## When Something Goes Wrong
 

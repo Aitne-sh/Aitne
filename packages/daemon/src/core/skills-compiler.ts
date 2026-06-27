@@ -31,7 +31,7 @@ import {
 import { applyCharacterBlockRewrite, buildCharacterBlock } from "./character-block.js";
 import { applyOutputLanguagePointerRewrite } from "./output-language-policy.js";
 import { createLogger } from "../logging.js";
-import { loadFetchWindowSystemPrompt } from "./fetch-window-prompt-loader.js";
+import { loadSlimSystemPrompt } from "./slim-system-prompt-loader.js";
 import { substituteIntegrationRoutingTables } from "./management-md.js";
 import type { MailAccount } from "../services/mail/provider.js";
 import {
@@ -81,19 +81,45 @@ import {
 // their own peer loggers; the test suite spies on those.
 const logger = createLogger("skills-compiler");
 
-// docs/design/appendices/fetch-window-cost-reduction.md Phase 1.5 — single shared constant
-// for the pre-pass process key. Typed as `ProcessKey` (not the inferred
-// string literal) so a rename in `@aitne/shared/process-key.ts` lights up
-// here rather than silently dead-branching the slim materializer.
-const FETCH_WINDOW_PROCESS_KEY: ProcessKey = "routine.fetch_window";
+// Per-slim-key CLI skill bundle copied into the slim Codex / Gemini session
+// (RESEARCH_CLUSTER_COST_FIX_PLAN.md F4 generalizes fetch-window-cost-reduction.md
+// Phase 1.5). The slim materializer writes the slim system-prompt body — the
+// SAME template the Claude SDK gets, via the shared `slim-system-prompt-loader`
+// registry — as AGENTS.md / GEMINI.md and copies ONLY these skill dirs; the
+// wide manifest's other slugs are restated by the task-flow / user prompt, so
+// inlining them would re-bloat the session.
+//
+// Keys MUST mirror `SLIM_SYSTEM_PROMPT_LOADERS` (drift-guarded by a unit test):
+// a slim system prompt with no CLI skill set — or vice versa — is a wiring bug.
+// Typed `Partial<Record<ProcessKey, …>>` so a key rename in
+// `@aitne/shared/process-key.ts` lights up here rather than dead-branching.
+//   - routine.fetch_window — the `observations` SKILL.md is the
+//     `/api/observations/batch` POST contract and the fetcher's only
+//     structural assertion; the integration partial the runner inlines covers
+//     the rest (`mail` / `notion` / `external-services` / `attach` dropped).
+//   - routine.research_cluster_update — `browser-history` (the
+//     `/api/browser-history/*` curl surface) + `context` (the research-journal
+//     write path); the task-flow inlines the endpoints + journal template.
+export const SLIM_CLI_SKILL_SETS: Partial<Record<ProcessKey, readonly string[]>> = {
+  "routine.fetch_window": ["observations"],
+  "routine.research_cluster_update": ["browser-history", "context"],
+};
 
-// Single skill kept in the slim fetch_window CLI session: the
-// `observations` SKILL.md is the POST contract for
-// `/api/observations/batch` and the fetcher's only structural assertion.
-// The other skills the wide path inlines (`mail`, `notion`,
-// `external-services`, `attach`) are already restated by the integration
-// partial the runner inlines into the user prompt.
-const FETCH_WINDOW_SLIM_SKILL = "observations";
+/**
+ * The slim process key for this session, or null when it is not a slim key.
+ * Accepts the `processKey ?? eventType` union the CLI materializer threads
+ * (an event-type string that is not a registered ProcessKey simply misses the
+ * `in` check). Keyed off `SLIM_CLI_SKILL_SETS`, which the drift guard pins to
+ * `SLIM_SYSTEM_PROMPT_LOADERS`.
+ */
+function slimCliKeyFor(
+  processKeyOrEvent: ProcessKey | string | undefined,
+): ProcessKey | null {
+  if (processKeyOrEvent === undefined) return null;
+  return processKeyOrEvent in SLIM_CLI_SKILL_SETS
+    ? (processKeyOrEvent as ProcessKey)
+    : null;
+}
 
 interface SessionPromptBundleParams {
   backendId: BackendId;
@@ -416,17 +442,19 @@ export class SkillsCompiler {
       );
     }
 
-    // docs/design/appendices/fetch-window-cost-reduction.md Phase 1.5 — the slim
-    // CLI materializer drops every manifest skill except `observations`.
-    // The Claude path is wide for fetch_window today (Phase 1 swaps only
-    // the system prompt, not the workdir layout). Report what was
-    // actually written so log lines / callers see truth, not the
-    // manifest's pre-narrow list.
-    const effectiveSkills =
+    // fetch-window-cost-reduction.md Phase 1.5 / RESEARCH_CLUSTER_COST_FIX_PLAN.md
+    // F4 — the slim CLI materializer drops every manifest skill except the
+    // key's `SLIM_CLI_SKILL_SETS` bundle. The Claude path stays wide today
+    // (Phase 1/F4 swap only the system prompt + settingSources, not the
+    // workdir layout). Report what was actually written so log lines /
+    // callers see truth, not the manifest's pre-narrow list.
+    const slimCliKey =
       params.backendId !== "claude"
-      && (params.processKey ?? params.eventType) === FETCH_WINDOW_PROCESS_KEY
-        ? [FETCH_WINDOW_SLIM_SKILL]
-        : skills;
+        ? slimCliKeyFor(params.processKey ?? params.eventType)
+        : null;
+    const effectiveSkills = slimCliKey
+      ? [...(SLIM_CLI_SKILL_SETS[slimCliKey] ?? [])]
+      : skills;
     return { profile: profileName, skills: effectiveSkills };
   }
 
@@ -980,98 +1008,105 @@ export class SkillsCompiler {
 
   /**
    * docs/design/appendices/skills-unification.md Phase 1 item 15 — the slim path does NOT
-   * emit a `<skill-index>` block or the skill-discovery preamble. The
-   * fetch_window system prompt is a self-contained operational contract
-   * (one-window-one-curl, no sub-tasks, exactly-one JSON-on-stdout) and
-   * the only skill copied (`observations`) is referenced inline by the
-   * runner-emitted user prompt. Adding the index would mis-signal the
-   * fetcher to scan for skills before executing the acquisition plan.
+   * emit a `<skill-index>` block or the skill-discovery preamble. The slim
+   * system prompt is a self-contained operational contract and its copied
+   * skills are referenced inline by the dispatched user prompt / task-flow.
+   * Adding the index would mis-signal the agent to scan for skills before
+   * executing its mechanical task.
    *
-   * docs/design/appendices/fetch-window-cost-reduction.md Phase 1.5 — slim instruction-file
-   * materializer for `routine.fetch_window` on Codex / Gemini CLI.
+   * fetch-window-cost-reduction.md Phase 1.5 / RESEARCH_CLUSTER_COST_FIX_PLAN.md
+   * F4 — slim instruction-file materializer for a `SLIM_CLI_SKILL_SETS` process
+   * key on Codex / Gemini CLI.
    *
-   * Mirrors the Claude SDK's Phase 1 systemPrompt swap (the same
-   * `agent-assets/system-prompts/routine-fetch-window.md` template is the
-   * single source of truth): write the slim body verbatim as AGENTS.md /
-   * GEMINI.md and copy only the `observations` skill — the
-   * `/api/observations/batch` POST contract is the fetcher's sole
-   * structural assertion. The integration partial inlined by the runner
-   * (`routine-fetch-window-runner.ts:reassemblePrompt`) covers the
-   * per-attempt call shape, so `mail` / `notion` / `external-services` /
-   * `attach` skill bodies are deliberately omitted.
+   * Mirrors the Claude SDK's slim-systemPrompt swap (the same
+   * `agent-assets/system-prompts/<key>.md` template is the single source of
+   * truth, read through the shared `loadSlimSystemPrompt` registry): write the
+   * slim body verbatim as AGENTS.md / GEMINI.md and copy only the key's
+   * `SLIM_CLI_SKILL_SETS` bundle — the wide manifest's other slugs are restated
+   * by the dispatched user prompt / task-flow, so their bodies are omitted.
    *
-   * No safety preamble / character / behavioral-rules / daemon-API
-   * sections — the slim template restates the only rules the fetcher
-   * needs (localhost-only curl, no sub-tasks, no context writes, no
-   * notify, JSON-on-stdout-and-exit). The destructive-action policy layer
-   * (absolute-block list, Codex sandbox, Gemini admin TOML) still applies
-   * unchanged at runtime.
+   * No safety preamble / character / behavioral-rules / daemon-API sections —
+   * the slim template restates the only rules the session needs. The
+   * destructive-action policy layer (absolute-block list, Codex sandbox,
+   * Gemini admin TOML) still applies unchanged at runtime.
    *
    * The `<mcp-servers>` section is appended downstream by
    * `services/mcp/session-materializer.ts:appendMcpSection` exactly as on
-   * the wide path — Phase 3's allowlist filter, when it lands, will scope
-   * that section without further changes here.
+   * the wide path.
    */
-  private materializeFetchWindowCliSession(
+  private materializeSlimCliSession(
     sessionDir: string,
     backendId: Exclude<BackendId, "claude">,
+    processKey: ProcessKey,
   ): void {
+    const skillSlugs = SLIM_CLI_SKILL_SETS[processKey];
+    // Defensive: the caller only diverts registered slim keys, but guard so a
+    // future divert bug fails loud rather than writing an empty session.
+    if (skillSlugs === undefined) return;
+    const slim = loadSlimSystemPrompt(processKey);
+    if (slim === null) return; // Unreachable for registered keys; satisfies the type.
     mkdirSync(sessionDir, { recursive: true });
-    const slim = loadFetchWindowSystemPrompt();
     writeFileSync(
       join(sessionDir, cliInstructionFileName(backendId)),
       slim,
       "utf-8",
     );
 
-    // Copy ONLY the `observations` skill dir. The wide path's prune step
-    // is replaced by an explicit single-slug list — `pruneStaleBuiltinSkillDirs`
+    // Copy ONLY the key's slim skill dirs. The wide path's prune step is
+    // replaced by the explicit slug list — `pruneStaleBuiltinSkillDirs`
     // removes any other built-in skill dir that a prior re-materialization
     // (e.g. a fallback-driven wide path on the same workdir) may have left.
     const cliSkillsRoot = cliSkillsDirName(backendId);
-    if (cliSkillsRoot === null) return; // Claude-only — fetch_window slim runs on Claude SDK natively.
+    if (cliSkillsRoot === null) return; // Claude-only — slim keys run on Claude SDK natively.
     const skillsRoot = this.getSourceSkillsRoot();
     const destSkillsRoot = join(sessionDir, cliSkillsRoot, "skills");
     mkdirSync(destSkillsRoot, { recursive: true });
-    pruneStaleBuiltinSkillDirs(destSkillsRoot, skillsRoot, [FETCH_WINDOW_SLIM_SKILL]);
+    pruneStaleBuiltinSkillDirs(destSkillsRoot, skillsRoot, [...skillSlugs]);
+    for (const slug of skillSlugs) {
+      this.copySlimSkillDir(destSkillsRoot, skillsRoot, slug, backendId);
+    }
+  }
 
-    const src = resolveBuiltinSkillDir(skillsRoot, FETCH_WINDOW_SLIM_SKILL);
+  /**
+   * Copy one built-in skill dir into a slim CLI session, applying the same
+   * adaptation pipeline the wide CLI path runs (brand tokens, partial /
+   * reference includes, integration-mode filter, tool-deny prose, curation
+   * anchors). Frontmatter stays intact (skills-unification.md §R6). A
+   * no-op when the source SKILL.md is absent.
+   */
+  private copySlimSkillDir(
+    destSkillsRoot: string,
+    skillsRoot: string,
+    slug: string,
+    backendId: Exclude<BackendId, "claude">,
+  ): void {
+    const src = resolveBuiltinSkillDir(skillsRoot, slug);
     const skillMdPath = join(src, "SKILL.md");
     if (!existsSync(skillMdPath)) return;
-    const destDir = join(destSkillsRoot, FETCH_WINDOW_SLIM_SKILL);
+    const destDir = join(destSkillsRoot, slug);
     cpSync(src, destDir, { recursive: true });
     substituteBrandTokensInDir(destDir);
-    // No `substituteWikiWorkspaceTokensInDir` — fetch_window never touches
-    // wiki workspace state, and the resolver is a no-op for non-wiki
-    // process keys anyway.
+    // No `substituteWikiWorkspaceTokensInDir` — no slim key touches wiki
+    // workspace state, and the resolver is a no-op for non-wiki keys anyway.
     let adapted = substituteBrandTokens(readFileSync(skillMdPath, "utf-8"));
-    // observations/SKILL.md ships no `{{> base }}` or `{{> ref:* }}`
-    // directives today, but run the resolvers anyway so a future curation
+    // Run the partial / reference resolvers even on bodies that ship no
+    // `{{> base }}` / `{{> ref:* }}` directives today, so a future curation
     // edit cannot silently drop content. Idempotent on plain content.
     adapted = substituteBrandTokens(renderPartialIncludes(adapted, join(src, "SKILL.base.md")));
     adapted = substituteBrandTokens(renderReferenceIncludes(adapted, src));
-    // Mode-conditional filter — observations/SKILL.md carries
-    // `<!-- mode:<predicate>:notion -->` markers (lines 273-345 today)
-    // because the source / consume contract differs across `direct` /
-    // `delegated-same` / `delegated-cross` / `native` / `disabled`. The
-    // wide path applies this filter at `materializeCliSession`; the
-    // slim path must match so the agent doesn't get every mode's prose
-    // for every integration. Idempotent on bodies that lack markers.
+    // Mode-conditional filter — skills (e.g. observations/SKILL.md) carry
+    // `<!-- mode:<predicate>:<integration> -->` markers because the
+    // source / consume contract differs across `direct` / `delegated-same` /
+    // `delegated-cross` / `native` / `disabled`. The wide path applies this
+    // at `materializeCliSession`; the slim path must match so the agent
+    // doesn't get every mode's prose. Idempotent on bodies that lack markers.
     adapted = applyIntegrationModeFilter(adapted, this.integrations, backendId);
-    // Tool-deny policy stays in force — even though the fetcher is fed a
-    // narrow allowlist, the soft-enforcement prose lands in the body
-    // BEFORE the CLI frontmatter strip so it's not lost.
-    adapted = applyAllDeniedToolsForSkill(
-      adapted,
-      FETCH_WINDOW_SLIM_SKILL,
-      backendId,
-      this.integrations,
-    );
-    // docs/design/appendices/skills-unification.md Phase 1 §R6 — frontmatter stays intact
-    // across all backends. `adaptSkillForCli` is gone; the source body's
-    // YAML preamble flows through verbatim.
+    // Tool-deny policy stays in force — even with a narrow allowlist, the
+    // soft-enforcement prose lands in the body BEFORE the CLI frontmatter
+    // strip so it's not lost.
+    adapted = applyAllDeniedToolsForSkill(adapted, slug, backendId, this.integrations);
     writeFileSync(join(destDir, "SKILL.md"), adapted, "utf-8");
-    this.spliceCurationAnchorsInSkill(destDir, FETCH_WINDOW_SLIM_SKILL);
+    this.spliceCurationAnchorsInSkill(destDir, slug);
   }
 
   private materializeCliSession(
@@ -1083,13 +1118,14 @@ export class SkillsCompiler {
     profileBodyOverride: string | null,
     wikiWorkspaceName: string | undefined,
   ): void {
-    // docs/design/appendices/fetch-window-cost-reduction.md Phase 1.5 — divert
-    // `routine.fetch_window` to a slim materializer that mirrors the
-    // Claude SDK's Phase 1 systemPrompt swap. Custom bang commands cannot
-    // reach this branch (they bind to `messaging.custom_command`), so
+    // fetch-window-cost-reduction.md Phase 1.5 / RESEARCH_CLUSTER_COST_FIX_PLAN.md
+    // F4 — divert a slim process key to the slim materializer that mirrors the
+    // Claude SDK's slim-systemPrompt swap. Custom bang commands cannot reach
+    // this branch (they bind to `messaging.custom_command`), so
     // `profileBodyOverride` is intentionally NOT forwarded.
-    if (processKey === FETCH_WINDOW_PROCESS_KEY) {
-      this.materializeFetchWindowCliSession(sessionDir, backendId);
+    const slimKey = slimCliKeyFor(processKey);
+    if (slimKey) {
+      this.materializeSlimCliSession(sessionDir, backendId, slimKey);
       return;
     }
     // docs/design/appendices/skills-unification.md Phase 1 — directory-based skill delivery.

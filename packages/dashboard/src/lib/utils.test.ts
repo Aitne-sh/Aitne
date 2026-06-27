@@ -1,11 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   formatAmount,
   formatAmountWithPeriod,
+  formatApiError,
+  formatBytes,
+  formatCurrency,
   formatDate,
+  formatDuration,
+  formatAbsoluteTime,
+  formatRelativeTime,
+  formatShortDateTime,
+  formatUptime,
+  formatRelativeMs,
+  formatTimestamp,
   formatTokenCount,
   formatTokens,
   niceAxisMax,
+  truncate,
 } from "./utils";
 
 describe("formatAmount", () => {
@@ -47,6 +58,15 @@ describe("formatAmountWithPeriod", () => {
   });
 });
 
+describe("formatCurrency", () => {
+  it("formats nullish, tiny positive, and normal USD values", () => {
+    expect(formatCurrency(null)).toBe("$0.00");
+    expect(formatCurrency(undefined)).toBe("$0.00");
+    expect(formatCurrency(0.005)).toBe("<$0.01");
+    expect(formatCurrency(1.2)).toBe("$1.20");
+  });
+});
+
 describe("formatDate", () => {
   it("formats ISO date string to yyyy-MM-dd", () => {
     expect(formatDate("2026-04-12T10:30:00Z")).toBe("2026-04-12");
@@ -56,6 +76,52 @@ describe("formatDate", () => {
     // parseUtcDate appends Z, then format extracts date in UTC
     const result = formatDate("2026-04-12 10:30:00");
     expect(result).toBe("2026-04-12");
+  });
+});
+
+describe("formatDuration", () => {
+  it("renders missing or invalid durations as unavailable", () => {
+    expect(formatDuration(null)).toBe("—");
+    expect(formatDuration(undefined)).toBe("—");
+    expect(formatDuration(Number.NaN)).toBe("—");
+  });
+
+  it("formats millisecond, second, and minute durations", () => {
+    expect(formatDuration(999)).toBe("999ms");
+    expect(formatDuration(1500)).toBe("1.5s");
+    expect(formatDuration(65_000)).toBe("1m 5s");
+  });
+});
+
+describe("formatUptime", () => {
+  it("formats day, hour, and minute buckets", () => {
+    expect(formatUptime(2 * 86_400 + 3 * 3_600 + 4 * 60)).toBe("2d 3h 4m");
+    expect(formatUptime(3 * 3_600 + 4 * 60)).toBe("3h 4m");
+    expect(formatUptime(4 * 60)).toBe("4m");
+  });
+});
+
+describe("formatShortDateTime", () => {
+  it("formats a Date value as compact month-day time", () => {
+    expect(formatShortDateTime(new Date(2026, 3, 12, 10, 30, 0))).toBe("04-12 10:30");
+  });
+});
+
+describe("formatAbsoluteTime", () => {
+  it("formats Date values as full local timestamps", () => {
+    expect(formatAbsoluteTime(new Date(2026, 3, 12, 10, 30, 5))).toBe(
+      "2026-04-12 10:30:05",
+    );
+  });
+});
+
+describe("formatRelativeTime", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("formats elapsed time relative to now", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-12T10:30:00Z"));
+    expect(formatRelativeTime("2026-04-12T10:25:00Z")).toBe("5 minutes ago");
   });
 });
 
@@ -138,5 +204,76 @@ describe("niceAxisMax", () => {
 
   it("ignores non-finite values", () => {
     expect(niceAxisMax([NaN, Infinity, 2.0])).toBe(2.5);
+  });
+});
+
+describe("formatTimestamp", () => {
+  it("renders the empty label for nullish or zero values", () => {
+    expect(formatTimestamp(null)).toBe("—");
+    expect(formatTimestamp(undefined)).toBe("—");
+    expect(formatTimestamp(0)).toBe("—");
+    expect(formatTimestamp(null, "Never")).toBe("Never");
+  });
+
+  it("formats ISO strings and epoch milliseconds via toLocaleString", () => {
+    const iso = "2026-06-10T12:34:56Z";
+    expect(formatTimestamp(iso)).toBe(new Date(iso).toLocaleString());
+    const ms = Date.UTC(2026, 5, 10, 12, 34, 56);
+    expect(formatTimestamp(ms)).toBe(new Date(ms).toLocaleString());
+  });
+
+  it("returns an unparseable string as-is", () => {
+    expect(formatTimestamp("not-a-date")).toBe("not-a-date");
+  });
+
+  it("renders an invalid numeric timestamp as the empty label", () => {
+    expect(formatTimestamp(Infinity, "Never")).toBe("Never");
+  });
+});
+
+describe("formatRelativeMs", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("buckets elapsed time into m/h/d suffixes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-10T12:00:00Z"));
+    const now = Date.now();
+    expect(formatRelativeMs(now + 5_000)).toBe("just now"); // future-safe
+    expect(formatRelativeMs(now - 30_000)).toBe("just now");
+    expect(formatRelativeMs(now - 5 * 60_000)).toBe("5m ago");
+    expect(formatRelativeMs(now - 3 * 3_600_000)).toBe("3h ago");
+    expect(formatRelativeMs(now - 2 * 86_400_000)).toBe("2d ago");
+  });
+});
+
+describe("formatBytes", () => {
+  it("scales through B / KB / MB / GB", () => {
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(2048)).toBe("2.0 KB");
+    expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
+    expect(formatBytes(3 * 1024 * 1024 * 1024)).toBe("3.0 GB");
+  });
+});
+
+describe("truncate", () => {
+  it("returns short strings unchanged", () => {
+    expect(truncate("abc", 5)).toBe("abc");
+    expect(truncate("abcde", 5)).toBe("abcde");
+  });
+
+  it("caps at max characters including the ellipsis", () => {
+    expect(truncate("abcdef", 5)).toBe("abcd…");
+    expect(truncate("abcdef", 5)).toHaveLength(5);
+  });
+});
+
+describe("formatApiError", () => {
+  it("uses the Error message when present", () => {
+    expect(formatApiError(new Error("boom"))).toBe("boom");
+  });
+
+  it("falls back for non-Error throwables", () => {
+    expect(formatApiError("nope")).toBe("Request failed");
+    expect(formatApiError(undefined)).toBe("Request failed");
   });
 });

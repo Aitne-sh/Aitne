@@ -45,7 +45,7 @@ import { scoreLesson } from "./eviction-scorer.js";
 
 /**
  * Hard inject-time byte cap for the slim hourly notify-discipline variant (§6
- * table: "slim notify-discipline subset injected to hourly_check · hard 2048 at
+ * table: "slim notify-discipline subset injected to activity_scan · hard 2048 at
  * inject"). Exported so the builder and tests share one constant.
  */
 export const AGENT_LESSONS_SLIM_CAP_BYTES = 2048;

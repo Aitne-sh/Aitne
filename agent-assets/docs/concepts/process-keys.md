@@ -10,7 +10,7 @@ aliases:
 category: concepts
 summary: |
   A ProcessKey is the agent's dispatch identity for one kind of work
-  ("morning routine", "DM", "hourly check"). The router resolves it
+  ("morning routine", "DM", "activity scan"). The router resolves it
   to a backend + tier binding; the manifest map resolves it to skills.
 section: process-keys
 tags:
@@ -51,9 +51,9 @@ process_keys:
   - routine.morning_routine_today
   - routine.morning_routine_journal
   - routine.evening_review
-  - routine.hourly_check
+  - routine.activity_scan
   - routine.fetch_window
-  - routine.hourly_check.triage
+  - routine.activity_scan.triage
   - message.dm
   - message.mention
   - dashboard.chat
@@ -95,7 +95,7 @@ those subsystems.
   autonomous.
 - **DEFAULT_PROCESS_TIERS**: the per-key default model size — `lite`
   (Haiku-class), `medium` (Sonnet-class), or `high` (Opus-class).
-  Unknown keys (including `routine.custom.<slug>`) default to `medium`.
+  Unknown keys default to `medium`.
 - **TIER_LOCKED_PROCESS_KEYS**: keys whose tier is hard-locked and
   cannot be overridden by an operator pin. Today this is just
   `dashboard.docs_qa`, locked to `medium`.
@@ -109,17 +109,18 @@ those subsystems.
   — `routine.morning_routine_today` (Stage A, today.md, medium) and
   `routine.morning_routine_journal` (Stage B, daily journal, lite). Also
   `routine.evening_review`, `routine.weekly_review`,
-  `routine.hourly_check`, `routine.roadmap_refresh`,
+  `routine.activity_scan`, `routine.roadmap_refresh`,
   `routine.today_refresh`, `routine.user_profile_sweep`.
   `routine.morning_routine_initial` was retired (2026-05-16) — the
   first-run branch now routes through `routine.morning_routine`.
 - **Routine sub-jobs** (lite tier, dispatcher-spawned, not user-facing):
   `routine.fetch_window` (pre-pass mail/calendar/Notion fetcher that
   runs before each main routine and POSTs observations) and
-  `routine.hourly_check.triage` (Stage 2 escalate-vs-log-only gate
-  inside the hourly check).
-- **Custom routines:** `routine.custom.<slug>` (kebab-case slug;
-  defaults to medium tier).
+  `routine.activity_scan.triage` (Stage 2 escalate-vs-log-only gate
+  inside the activity scan).
+- **Custom routines (retired):** `routine.custom.<slug>` appears only
+  in historical Activity rows — operator-defined recurring work now
+  runs as user Agents under `agent.task`.
 - **Messaging:** `message.dm`, `message.mention`
 - **Dashboard:** `dashboard.chat`, `dashboard.docs_qa`
 - **Scheduled / external:** `agent.task` (recurring schedules),

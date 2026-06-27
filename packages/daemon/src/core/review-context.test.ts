@@ -38,7 +38,7 @@ describe("review-context", () => {
   });
 
   it("maps routine ProcessKeys to the expected dossier flow", () => {
-    expect(resolveReviewFlow("routine.hourly_check")?.flow).toBe("hourly");
+    expect(resolveReviewFlow("routine.activity_scan")?.flow).toBe("activity-scan");
     // `routine.morning_routine_initial` retired by Phase 7 (2026-05-16);
     // the first-run branch resolves through `routine.morning_routine_today`
     // (Stage A) which inherits the morning dossier.
@@ -63,7 +63,7 @@ describe("review-context", () => {
       "| Path | Purpose | Review flows | Last touched |",
       "|---|---|---|---|",
       "| `plans/projects/foo.md` | Foo state | hourly, weekly | 2026-04-21 |",
-      "| `knowledge/dossiers/hourly.md` | Hourly state | hourly | 2026-04-21 |",
+      "| `knowledge/dossiers/activity-scan.md` | Hourly state | hourly | 2026-04-21 |",
     ].join("\n"));
 
     expect(rows).toEqual([
@@ -74,7 +74,7 @@ describe("review-context", () => {
         lastTouched: "2026-04-21",
       },
       {
-        path: "knowledge/dossiers/hourly.md",
+        path: "knowledge/dossiers/activity-scan.md",
         purpose: "Hourly state",
         reviewFlows: "hourly",
         lastTouched: "2026-04-21",
@@ -92,27 +92,67 @@ describe("review-context", () => {
         "|---|---|---|---|",
         "| `plans/projects/foo.md` | Foo project | hourly, weekly | 2026-04-21 |",
         "| `plans/projects/monthly.md` | Monthly only | monthly | 2026-04-21 |",
-        "| `knowledge/dossiers/hourly.md` | Hourly state | hourly | 2026-04-21 |",
+        "| `knowledge/dossiers/activity-scan.md` | Hourly state | hourly | 2026-04-21 |",
       ].join("\n"),
     );
     writeFileSync(join(contextDir, "plans", "projects","foo.md"), "# Foo\n");
     writeFileSync(join(contextDir, "plans", "projects","monthly.md"), "# Monthly\n");
     writeFileSync(
-      join(contextDir, "knowledge", "dossiers","hourly.md"),
+      join(contextDir, "knowledge", "dossiers","activity-scan.md"),
       "# Hourly Dossier\n",
     );
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
     });
 
     expect(blocks.map((block) => block.path)).toEqual([
       "_index.md",
       "plans/projects/foo.md",
-      "knowledge/dossiers/hourly.md",
+      "knowledge/dossiers/activity-scan.md",
     ]);
+
+    // The legacy "hourly" token matches ONLY the activity-scan flow — a row
+    // tagged with it must not leak into other flows' review context.
+    const eveningBlocks = loadReviewContextBlocks({
+      contextDir,
+      processKey: "routine.evening_review",
+      flags: BOTH_FLAGS_ON,
+    });
+    expect(eveningBlocks.map((block) => block.path)).not.toContain(
+      "plans/projects/foo.md",
+    );
+  });
+
+  it("matches an index row whose flow token equals the queried flow exactly", () => {
+    // Direct token match (not "all", not the legacy "hourly" alias): a row
+    // tagged plainly with "weekly" must surface for the weekly_review flow.
+    writeFileSync(
+      join(contextDir, "_index.md"),
+      [
+        "# Context Index",
+        "",
+        "| Path | Purpose | Review flows | Last touched |",
+        "|---|---|---|---|",
+        "| `plans/projects/weekly-only.md` | Weekly state | weekly | 2026-04-21 |",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(contextDir, "plans", "projects", "weekly-only.md"),
+      "# Weekly\n",
+    );
+
+    const blocks = loadReviewContextBlocks({
+      contextDir,
+      processKey: "routine.weekly_review",
+      flags: BOTH_FLAGS_ON,
+    });
+
+    expect(blocks.map((block) => block.path)).toContain(
+      "plans/projects/weekly-only.md",
+    );
   });
 
   it("renders the dossier in a dedicated XML-style block", () => {
@@ -162,18 +202,18 @@ describe("review-context", () => {
     );
     writeFileSync(join(contextDir, "plans", "projects","foo.md"), "# Foo\n");
     writeFileSync(
-      join(contextDir, "knowledge", "dossiers","hourly.md"),
+      join(contextDir, "knowledge", "dossiers","activity-scan.md"),
       "# Hourly Dossier\n",
     );
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: { useReviewDossiers: true, useContextIndex: false },
     });
 
     expect(blocks.map((b) => b.kind)).toEqual(["dossier"]);
-    expect(blocks[0].path).toBe("knowledge/dossiers/hourly.md");
+    expect(blocks[0].path).toBe("knowledge/dossiers/activity-scan.md");
   });
 
   it("honors the shared prompt-injection budget threaded from the caller", () => {
@@ -189,7 +229,7 @@ describe("review-context", () => {
     );
     writeFileSync(join(contextDir, "plans", "projects","foo.md"), "# Foo\n");
     writeFileSync(
-      join(contextDir, "knowledge", "dossiers","hourly.md"),
+      join(contextDir, "knowledge", "dossiers","activity-scan.md"),
       "# Hourly\n",
     );
 
@@ -201,7 +241,7 @@ describe("review-context", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       budget,
     });
@@ -212,7 +252,7 @@ describe("review-context", () => {
 
   it("accounts review-context usage against the shared budget", () => {
     writeFileSync(
-      join(contextDir, "knowledge", "dossiers","hourly.md"),
+      join(contextDir, "knowledge", "dossiers","activity-scan.md"),
       "# Hourly\n",
     );
 
@@ -221,7 +261,7 @@ describe("review-context", () => {
 
     loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: { useReviewDossiers: true, useContextIndex: false },
       budget,
     });
@@ -403,7 +443,7 @@ describe("renderReviewContextBlocks", () => {
     // Covers the `blocks.length === 0` truthy branch on line 238 with a
     // valid flowConfig — distinct from the no-flow case above.
     expect(
-      renderReviewContextBlocks("routine.hourly_check", []),
+      renderReviewContextBlocks("routine.activity_scan", []),
     ).toBe("");
   });
 });
@@ -428,7 +468,7 @@ describe("appendReviewContextBlocks", () => {
     // `if (!rendered) return basePrompt;` branch fires (line 276).
     const result = appendReviewContextBlocks("base prompt", {
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
     });
     expect(result).toBe("base prompt");
@@ -436,12 +476,12 @@ describe("appendReviewContextBlocks", () => {
 
   it("appends the rendered block when context exists", () => {
     writeFileSync(
-      join(contextDir, "knowledge", "dossiers","hourly.md"),
+      join(contextDir, "knowledge", "dossiers","activity-scan.md"),
       "# Hourly dossier\n",
     );
     const result = appendReviewContextBlocks("base prompt", {
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
     });
     expect(result.startsWith("base prompt\n")).toBe(true);
@@ -479,7 +519,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
     const seen: string[] = [];
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       statFile: (p) => {
         seen.push(p);
@@ -506,7 +546,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       statFile: (p) =>
         p.endsWith("huge.md")
@@ -531,7 +571,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       // statFile reports a small size so we get past the stat gate, but
       // readFile returns a huge string so the in-memory check fires.
@@ -559,7 +599,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       statFile: (p) => {
         if (p.endsWith("throws.md")) throw new Error("io fail");
@@ -589,7 +629,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
     });
 
@@ -618,7 +658,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       statFile: () => ({ size: indexContent.length }),
       readFile: (p) =>
@@ -649,7 +689,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       statFile: () => ({ size: 100 }),
       readFile: () => "x",
@@ -675,7 +715,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
       statFile: () => ({ size: 50 }),
       readFile: (p) =>
@@ -741,7 +781,7 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
     });
     const row = blocks.find((b) => b.path === "plans/projects/noPurpose.md");
@@ -756,21 +796,21 @@ describe("loadReviewContextBlocks — file size and injection guards", () => {
         "",
         "| Path | Purpose | Review flows | Last touched |",
         "|---|---|---|---|",
-        "| `knowledge/dossiers/hourly.md` | hourly state | hourly | x |",
+        "| `knowledge/dossiers/activity-scan.md` | hourly state | hourly | x |",
         "| `_index.md` | self-ref | hourly | x |",
       ].join("\n"),
     );
-    writeFileSync(join(contextDir, "knowledge", "dossiers","hourly.md"), "# H\n");
+    writeFileSync(join(contextDir, "knowledge", "dossiers","activity-scan.md"), "# H\n");
 
     const blocks = loadReviewContextBlocks({
       contextDir,
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
       flags: BOTH_FLAGS_ON,
     });
     // The dossier appears once via the dossier branch — not duplicated
     // by the index loop.
     const dossierAppearances = blocks.filter(
-      (b) => b.path === "knowledge/dossiers/hourly.md",
+      (b) => b.path === "knowledge/dossiers/activity-scan.md",
     );
     expect(dossierAppearances).toHaveLength(1);
     expect(dossierAppearances[0].kind).toBe("dossier");

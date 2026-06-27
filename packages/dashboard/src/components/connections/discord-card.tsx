@@ -127,7 +127,7 @@ export function DiscordCard() {
             </Button>
           </div>
           {botInfo && (
-            <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+            <p className="text-xs text-success flex items-center gap-2">
               ✓ Bot: <code className="font-mono">{botInfo.username}</code>
               {botInfo.avatarUrl && (
                 /* eslint-disable-next-line @next/next/no-img-element */

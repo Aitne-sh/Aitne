@@ -7,7 +7,9 @@ import {
   expireClarification,
   getClarification,
   listClarificationsForTask,
+  listUndeliveredClarifications,
   listOverdueClarifications,
+  markClarificationDelivered,
   resolveClarification,
   type CreateClarificationInput,
 } from "./browser-task-clarifications-store.js";
@@ -56,6 +58,7 @@ describe("createClarification", () => {
       contextSummary: "two options on screen",
       askedAt: 1000,
       deadlineAt: 1000 + CLARIFICATION_TTL_MS,
+      deliveredAt: null,
       answer: null,
       answeredAt: null,
       resolved: false,
@@ -65,6 +68,33 @@ describe("createClarification", () => {
 
   it("returns null from getClarification for an unknown id", () => {
     expect(getClarification(db, "nope")).toBeNull();
+  });
+});
+
+describe("delivery recovery helpers", () => {
+  it("lists unresolved awaiting_user clarifications until delivered_at is set", () => {
+    const row = createClarification(db, input());
+    expect(listUndeliveredClarifications(db, 1500).map((r) => r.id)).toEqual([
+      row.id,
+    ]);
+    const marked = markClarificationDelivered(db, row.id, 1600);
+    expect(marked?.deliveredAt).toBe(1600);
+    expect(listUndeliveredClarifications(db, 1700)).toEqual([]);
+  });
+
+  it("does not list expired or resolved clarifications", () => {
+    createClarification(db, input({ id: "expired", askedAt: 0 }));
+    createClarification(db, input({ id: "resolved", askedAt: 1000 }));
+    resolveClarification(db, {
+      id: "resolved",
+      answer: "large",
+      answeredAt: 1500,
+    });
+    expect(
+      listUndeliveredClarifications(db, CLARIFICATION_TTL_MS + 1).map(
+        (r) => r.id,
+      ),
+    ).toEqual([]);
   });
 });
 

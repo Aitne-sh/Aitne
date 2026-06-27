@@ -126,11 +126,19 @@ export function createBrowserHistoryRoutes(deps: ApiDependencies): Hono {
       agentDayBoundary(deps),
       { dayLimit: 31 },
     );
+    // RESEARCH_CLUSTER_COST_FIX_PLAN rev5 — stamp each bucket with
+    // whether its agent day has ended. The current agent day's bucket is
+    // still accumulating (a day-boundary or wake-catch-up run fires
+    // mid-day, so the bucket only covers visits up to "now"); consumers
+    // that persist day entries (the append-only research journal) must
+    // skip incomplete buckets or they freeze an undercounted day forever.
+    // ISO agent-day strings compare lexically = chronologically.
+    const today = todayKey(deps);
     return c.json(
       browserHistoryClusterDeltaResponseSchema.parse({
         slug,
         generatedAt: new Date().toISOString(),
-        days,
+        days: days.map((day) => ({ ...day, complete: day.date < today })),
       }),
     );
   });

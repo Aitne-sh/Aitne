@@ -72,7 +72,7 @@ function HighlightedSnippet({ html }: { html: string }) {
     const text = parts[i].replace(/<[^>]*>/g, "");
     if (!text) continue;
     elements.push(
-      inMark ? <mark key={i} className="bg-yellow-200 dark:bg-yellow-800 rounded-sm px-0.5">{text}</mark> : text,
+      inMark ? <mark key={i} className="bg-warning/15 rounded-sm px-0.5">{text}</mark> : text,
     );
   }
   return <>{elements}</>;
@@ -690,7 +690,7 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
                     )}
                   </span>
                   {savedFlash && (
-                    <span className="flex items-center gap-1 font-medium text-emerald-600 dark:text-emerald-400">
+                    <span className="flex items-center gap-1 font-medium text-success">
                       <CheckCircle2 className="h-3 w-3" />
                       Saved
                     </span>
@@ -771,7 +771,7 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
 
               {/* Sensitive file warning */}
               {isEditing && selectedPath && SENSITIVE_FILES[selectedPath] && (
-                <div className="mb-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+                <div className="mb-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                   <span>
                     This file (

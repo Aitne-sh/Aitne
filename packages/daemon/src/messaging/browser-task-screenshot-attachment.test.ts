@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { OutboundAttachmentRef } from "../adapters/types.js";
 import {
+  buildPathAttachment,
   buildStoreAttachment,
   buildTraceAttachment,
   resolveScreenshotAttachment,
@@ -121,6 +122,96 @@ describe("buildStoreAttachment", () => {
   it("returns null when the ingest hook throws a non-Error value", async () => {
     const ingest = vi.fn().mockRejectedValue("boom");
     expect(await buildStoreAttachment("/data", ingest, PNG_KEY)).toBeNull();
+  });
+});
+
+describe("buildPathAttachment", () => {
+  let dir: string;
+  let pdfPath: string;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "bt-asset-"));
+    pdfPath = join(dir, "Q3-report.pdf");
+    await writeFile(pdfPath, Buffer.from([1, 2, 3, 4, 5]));
+  });
+
+  afterAll(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("returns a native file ref with mime-from-extension for messaging platforms", async () => {
+    const ref = await buildPathAttachment({
+      platform: "telegram",
+      absPath: pdfPath,
+      filename: "Q3-report.pdf",
+    });
+    expect(ref).not.toBeNull();
+    expect(ref!.path).toBe(pdfPath);
+    expect(ref!.originalFilename).toBe("Q3-report.pdf");
+    expect(ref!.mimeType).toBe("application/pdf");
+    expect(ref!.sizeBytes).toBe(5);
+  });
+
+  it("falls back to octet-stream for an unknown extension", async () => {
+    const ref = await buildPathAttachment({
+      platform: "telegram",
+      absPath: pdfPath,
+      filename: "weird.qqq",
+    });
+    expect(ref!.mimeType).toBe("application/octet-stream");
+  });
+
+  it("returns null when the file is missing on disk", async () => {
+    const ref = await buildPathAttachment({
+      platform: "slack",
+      absPath: join(dir, "nope.pdf"),
+      filename: "nope.pdf",
+    });
+    expect(ref).toBeNull();
+  });
+
+  it("ingests via the dashboard hook for the dashboard platform", async () => {
+    const storeRef: OutboundAttachmentRef = {
+      id: "store-pdf",
+      path: "/data/attachments/store-pdf/Q3-report.pdf",
+      originalFilename: "Q3-report.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 5,
+    };
+    const ingest = vi.fn().mockResolvedValue(storeRef);
+    const ref = await buildPathAttachment({
+      platform: "dashboard",
+      absPath: pdfPath,
+      filename: "Q3-report.pdf",
+      ingestOutboundImage: ingest,
+    });
+    expect(ref).toBe(storeRef);
+    expect(ingest).toHaveBeenCalledWith({
+      absPath: pdfPath,
+      mimeType: "application/pdf",
+      originalFilename: "Q3-report.pdf",
+    });
+  });
+
+  it("returns null for the dashboard platform when no ingest hook is wired", async () => {
+    const ref = await buildPathAttachment({
+      platform: "dashboard",
+      absPath: pdfPath,
+      filename: "Q3-report.pdf",
+    });
+    expect(ref).toBeNull();
+  });
+
+  it("returns null when the dashboard ingest hook throws", async () => {
+    const ingest = vi.fn().mockRejectedValue(new Error("store offline"));
+    const ref = await buildPathAttachment({
+      platform: "dashboard",
+      absPath: pdfPath,
+      filename: "Q3-report.pdf",
+      ingestOutboundImage: ingest,
+    });
+    expect(ref).toBeNull();
+    expect(ingest).toHaveBeenCalledOnce();
   });
 });
 

@@ -8,8 +8,8 @@ aliases:
   - notion integration
 category: features
 summary: |
-  Watch a Notion database (or a curated set of pages) for changes.
-  Changes record observations consumed by the hourly check.
+  Watch one or more configured Notion databases for changes.
+  Changes record observations consumed by the activity scan.
 section: integrations
 tags:
   - integrations
@@ -21,9 +21,10 @@ ask_examples:
   - How do I connect Notion?
   - Will Notion notify me on every page change?
   - What does Notion native mode do?
+  - Why are my Notion routine fetches skipped?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-11
 keywords:
   - notion
   - page
@@ -33,11 +34,11 @@ keywords:
   - integration modes
 related:
   - features/integrations/obsidian
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - concepts/delegated-mode
   - concepts/observations
 ui_anchors:
-  - /connections/knowledge
+  - /connections/notes
 config_keys:
   - notionPollIntervalSeconds
 api_endpoints:
@@ -47,8 +48,8 @@ api_endpoints:
 
 # Notion
 
-Aitne polls a configured Notion database or page set, records an
-observation on change, and the hourly check decides whether anything
+Aitne polls the configured Notion databases, records an
+observation on change, and the activity scan decides whether anything
 warrants surfacing. The agent can also read pages on demand through
 the `notion` skill.
 
@@ -66,10 +67,10 @@ modes the poller does not run — see Integration Modes below.
 ## Integration Modes
 
 Notion supports all four integration modes (`direct` / `delegated` /
-`native` / `disabled`), selected from **Connections → Knowledge**.
+`native` / `disabled`), selected from **Connections → Notes**.
 
 - **`direct`** — the daemon polls Notion itself, records change
-  observations, and the hourly check consumes them.
+  observations, and the activity scan consumes them.
 - **`delegated`** — a delegated-sync worker runs on opt-in cadences;
   observations are recorded the same way but on a different
   schedule (see [Delegated Mode](../../concepts/delegated-mode.md)).
@@ -86,10 +87,30 @@ Notion supports all four integration modes (`direct` / `delegated` /
 Switching modes requires the integration flip-lock probe to pass
 (connector reachable, capabilities reported). See `POST /api/integrations/notion/probe`.
 
+## Routine Fetch Targets
+
+Autonomous routine fetches (the `routine.fetch_window` pre-pass that
+feeds the morning routine and activity scan) are limited to an explicit
+allowlist of pages you configure under **Connections → Notes →
+Routine fetch targets**. This prevents the agent from searching the
+whole workspace on every pass — workspace-wide scans were the dominant
+cost driver before the allowlist existed.
+
+- Each target is a Notion page URL, page ID, or page title. Prefer a
+  URL or ID; titles are matched best-effort and can be ambiguous.
+- **Until at least one target is listed, routine Notion fetches are
+  skipped entirely** (recorded as a `plan_drop:no_fetch_targets` skip in
+  the activity log). On-demand reads in DMs are unaffected.
+- Routine passes fetch at most 10 targets per window; extra entries are
+  skipped each pass.
+- The allowlist applies in every mode (`direct` / `delegated` /
+  `native`) and survives mode switches and main-backend changes.
+
 ## Where in the Dashboard
 
-- **Connections → Knowledge** holds the integration token, target
-  databases, and the mode picker.
+- **Connections → Notes** holds the integration token, target
+  databases, the routine fetch target allowlist, and the mode picker.
+  The same Notion settings body appears in the setup wizard's Notes step.
 
 ## Configuration
 
@@ -103,6 +124,9 @@ Switching modes requires the integration flip-lock probe to pass
   ≥ 300 seconds.
 - "No observations" in `native` mode is expected — observations flow
   only when the main backend POSTs them during a session.
+- Routine fetches silently absent? Check that **Routine fetch targets**
+  is non-empty — an empty allowlist skips Notion in every routine pass
+  (the activity log shows `plan_drop:no_fetch_targets`).
 
 ## Related
 

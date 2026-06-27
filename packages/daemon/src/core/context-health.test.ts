@@ -75,7 +75,7 @@ function seedValidVault(contextDir: string): void {
     validFrontmatter("index", "shared", "Routines"),
   );
   write(
-    CONTEXT_RELATIVE_PATHS.routines.hourly,
+    CONTEXT_RELATIVE_PATHS.routines.activityScan,
     contextDir,
     validFrontmatter("rule", "shared", "Hourly"),
   );
@@ -206,7 +206,7 @@ describe("buildContextHealthReport", () => {
     seedValidVault(contextDir);
     const bigBody = "a".repeat(POLICY_FILE_MAX_BYTES + 512);
     write(
-      CONTEXT_RELATIVE_PATHS.routines.hourly,
+      CONTEXT_RELATIVE_PATHS.routines.activityScan,
       contextDir,
       `# Big routine\n${bigBody}`,
     );
@@ -214,7 +214,7 @@ describe("buildContextHealthReport", () => {
     const report = buildContextHealthReport(contextDir);
 
     const warning = report.sizeWarnings.find(
-      (issue) => issue.path === CONTEXT_RELATIVE_PATHS.routines.hourly,
+      (issue) => issue.path === CONTEXT_RELATIVE_PATHS.routines.activityScan,
     );
     expect(warning).toBeDefined();
     expect(warning?.bytes).toBeGreaterThan(POLICY_FILE_MAX_BYTES);

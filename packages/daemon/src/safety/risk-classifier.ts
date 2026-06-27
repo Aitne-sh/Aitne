@@ -300,6 +300,31 @@ const API_RISK: Record<string, RiskTier> = {
   "POST /api/browser-task/{*}/clarify": RiskTier.Autonomous,
   "POST /api/browser-task/{*}/cancel": RiskTier.Autonomous,
 
+  // ── Background Task (BACKGROUND_TASK_RUNNER_DESIGN.md §7) ──
+  // Generic detached long-task surface, cloned from browser-task and
+  // classified to the same posture. The only production callers are the
+  // DM-agent `background-task` / `background-task-reply` skills and the
+  // morning-briefing session, whose curl shim carries `x-read-token`
+  // (sufficient for ReadSensitive, never enough for Approve). The same
+  // loopback / sec-fetch / channel-attestation defenses as browser-task
+  // apply, and every dispatched task surfaces to the user via DM — no
+  // covert dispatch path.
+  //   - POST (spawn) + clarify + cancel are Autonomous, matching the
+  //     sibling agent-driven write paths (design §7: "same posture as
+  //     /api/browser-task").
+  //   - The list + detail reads stay ReadSensitive (NOT Autonomous):
+  //     the artifact (`report` / `brief` / `draft` / `significance`)
+  //     carries personal research / audit content, exactly the reason
+  //     browser-task's reads are ReadSensitive. Reachable from the agent
+  //     sessions that need them because their curl carries the read
+  //     token (cf. GET /api/observations, also ReadSensitive, which the
+  //     briefing already calls).
+  "POST /api/background-task": RiskTier.Autonomous,
+  "GET /api/background-task": RiskTier.ReadSensitive,
+  "GET /api/background-task/{*}": RiskTier.ReadSensitive,
+  "POST /api/background-task/{*}/clarify": RiskTier.Autonomous,
+  "POST /api/background-task/{*}/cancel": RiskTier.Autonomous,
+
   "/api/setup": RiskTier.Approve,
   "POST /api/setup/redetect-browsers": RiskTier.Approve,
   // Management Mode Phase 2 — migration endpoint. Redundant with the
@@ -714,7 +739,7 @@ const API_RISK: Record<string, RiskTier> = {
   "POST /api/delegated-sync/cadences/": RiskTier.Approve,
 
   // INTEGRATION-DRIFT-DETECTION-PLAN.md §6.0 — drift-detection chokepoint.
-  // Autonomous: the agent's hourly_check delegated variant POSTs the
+  // Autonomous: the agent's activity_scan delegated variant POSTs the
   // result of its connector fetch to compute a structural diff. Defense
   // layers (window-key allowlist + per-call audit row) live inside the
   // handler. Daemon-internal callers (CalendarPoller, DelegatedSyncWorker)

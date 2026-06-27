@@ -346,7 +346,7 @@ function recordCoalescedObservation(
     // novelty_score populated. Without this, coalesced inserts only get
     // summarized via the daemon-startup reclaim sweep — a row that lands
     // mid-run sits at `summary_status='pending'` forever and the
-    // hourly_check skill is forced into the legacy fetch-on-doubt path.
+    // activity_scan skill is forced into the legacy fetch-on-doubt path.
     if (inserted) notifyObservationSummarizer(inserted.id);
     return 1;
   }
@@ -381,7 +381,7 @@ function recordCoalescedObservation(
   // summary describes obsolete content. Reset the summarizer-owned columns
   // to mirror `recordObservation`'s UPSERT on payload change — without
   // this, `summary_text` / `novelty_score` linger from the prior payload
-  // and the hourly_check skill consumes a stale summary as if it were
+  // and the activity_scan skill consumes a stale summary as if it were
   // current (`summary_status='done'` with `summaryStale=false`).
   db.prepare(
     `UPDATE observations

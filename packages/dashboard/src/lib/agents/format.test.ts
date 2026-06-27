@@ -78,7 +78,7 @@ describe("describeCron", () => {
     expect(describeCron("30 */3 * * *")).toBe("Every 3h at :30");
     expect(describeCron("0 * * * *")).toBe("Hourly");
     expect(describeCron("20 * * * *")).toBe("Hourly at :20");
-    // Interval within a bounded active window (hourly-check placeholder shape).
+    // Interval within a bounded active window (activity-scan placeholder shape).
     expect(describeCron("*/30 4-23 * * *")).toBe("Every 30m, 04:00–24:00");
     expect(describeCron("* 9-17 * * *")).toBe("Every minute, 09:00–18:00");
   });
@@ -167,7 +167,7 @@ describe("describeSchedule", () => {
   });
 
   it("prefers the resolved runtime-window interval over the placeholder cron", () => {
-    // hourly-check: stored placeholder cron + the real config-driven cadence.
+    // activity-scan: stored placeholder cron + the real config-driven cadence.
     expect(
       describeSchedule({
         kind: "cron",

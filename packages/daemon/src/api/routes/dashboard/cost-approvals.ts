@@ -159,6 +159,11 @@ export function aggregateByBilledModel(
     .sort((a, b) => b.total_cost - a.total_cost);
 }
 
+// Today's spend-driver list is intentionally capped: beyond the top 15 the
+// rows are long-tail noise (the by-process panel covers aggregate share),
+// and an uncapped list would grow unbounded on chatty days.
+const TODAY_TOP_ACTIONS_LIMIT = 15;
+
 // `bucketExpr` takes a single shift-modifier parameter (e.g. "+300 minutes")
 // so each query binds it explicitly — see COST_QUERIES for the rationale.
 const COST_PERIOD_SPECS = {
@@ -247,6 +252,72 @@ export function registerCostApprovalsRoutes(app: Hono, deps: ApiDependencies): v
       )
       .get(bounds.start, bounds.end) as { cost: number; sessions: number };
 
+    // ── Today's spend drivers ──
+    // All scoped to the same agent-day bounds as the Today card so the
+    // numbers reconcile: Σ byEventType.total_cost === today.costUsd.
+    // The windowed byEventType above answers "what cost money this month";
+    // these answer "what is costing money *right now*" — the question the
+    // owner asks when the Today card looks unexpectedly high.
+    const todayTopActions = db
+      .prepare(
+        `SELECT id, event_id, action_type, trigger, model_used, model_usage_json, cost_usd,
+                tokens_input, tokens_output,
+                cache_creation_tokens, cache_read_tokens,
+                duration_ms, num_turns,
+                result, detail, started_at, completed_at, error
+           FROM agent_actions
+          WHERE datetime(started_at) >= ? AND datetime(started_at) < ?
+            AND cost_usd IS NOT NULL AND cost_usd > 0
+          ORDER BY cost_usd DESC, datetime(started_at) DESC
+          LIMIT ${TODAY_TOP_ACTIONS_LIMIT}`,
+      )
+      .all(bounds.start, bounds.end);
+    const todayByEventType = db
+      .prepare(
+        `SELECT action_type as event_type,
+                SUM(cost_usd) as total_cost,
+                COUNT(*) as session_count
+           FROM agent_actions
+          WHERE datetime(started_at) >= ? AND datetime(started_at) < ?
+            AND cost_usd IS NOT NULL
+          GROUP BY action_type
+          ORDER BY total_cost DESC`,
+      )
+      .all(bounds.start, bounds.end);
+    const todayByTrigger = db
+      .prepare(
+        `SELECT COALESCE(trigger, 'unknown') as trigger,
+                SUM(cost_usd) as total_cost,
+                COUNT(*) as session_count
+           FROM agent_actions
+          WHERE datetime(started_at) >= ? AND datetime(started_at) < ?
+            AND cost_usd IS NOT NULL
+          GROUP BY 1
+          ORDER BY total_cost DESC`,
+      )
+      .all(bounds.start, bounds.end);
+    const todayTokens = db
+      .prepare(
+        `SELECT COALESCE(SUM(tokens_input), 0) as input,
+                COALESCE(SUM(tokens_output), 0) as output,
+                COALESCE(SUM(cache_read_tokens), 0) as cacheRead,
+                COALESCE(SUM(cache_creation_tokens), 0) as cacheCreation
+           FROM agent_actions
+          WHERE datetime(started_at) >= ? AND datetime(started_at) < ?
+            AND cost_usd IS NOT NULL`,
+      )
+      .get(bounds.start, bounds.end);
+    const todayFailed = db
+      .prepare(
+        `SELECT COALESCE(SUM(cost_usd), 0) as cost,
+                COUNT(*) as sessions
+           FROM agent_actions
+          WHERE datetime(started_at) >= ? AND datetime(started_at) < ?
+            AND cost_usd IS NOT NULL
+            AND result = 'failed'`,
+      )
+      .get(bounds.start, bounds.end) as { cost: number; sessions: number };
+
     return c.json({
       period,
       today: { costUsd: today.cost, sessions: today.sessions },
@@ -255,6 +326,13 @@ export function registerCostApprovalsRoutes(app: Hono, deps: ApiDependencies): v
       byEventType,
       byBackend,
       byBackendPeriod,
+      todayBreakdown: {
+        topActions: todayTopActions,
+        byEventType: todayByEventType,
+        byTrigger: todayByTrigger,
+        tokens: todayTokens,
+        failed: { costUsd: todayFailed.cost, sessions: todayFailed.sessions },
+      },
     });
   });
 

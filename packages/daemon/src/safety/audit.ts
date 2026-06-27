@@ -112,6 +112,20 @@ export class AuditLogger implements IAuditLogger {
     trigger: "reactive" | "autonomous";
     backend?: AgentResult["backendId"];
     costSource?: AgentResult["costSource"];
+    /**
+     * Terminal result override (default `"success"`). `"partial"` records a
+     * session that ended cleanly but failed a post-run outcome check
+     * (RESEARCH_CLUSTER_COST_FIX_PLAN F5). `"partial"` is a legal
+     * `agent_actions.result` value (schema CHECK). Hard errors use
+     * `logError` instead.
+     */
+    result?: "success" | "partial";
+    /**
+     * Outcome-failure marker written to `agent_actions.error` when paired
+     * with `result:"partial"` (F5: `'journal_write_missing'`). Omitted on a
+     * plain success so the column stays NULL (legacy row shape).
+     */
+    error?: string;
     contextUpdated?: boolean;
     advisorCallCount?: number;
     /**
@@ -158,6 +172,8 @@ export class AuditLogger implements IAuditLogger {
       trigger,
       backend,
       costSource,
+      result = "success",
+      error,
       contextUpdated = false,
       advisorCallCount = 0,
       dmFreshness,
@@ -193,7 +209,7 @@ export class AuditLogger implements IAuditLogger {
         usage.outputTokens,
         durationMs,
         numTurns,
-        "success",
+        result,
       ];
 
       if (this.hasCacheCreationTokensColumn) {
@@ -254,6 +270,16 @@ export class AuditLogger implements IAuditLogger {
       if (resolvedAgentId !== null) {
         columns.splice(columns.length - 2, 0, "agent_id");
         values.splice(values.length, 0, resolvedAgentId);
+      }
+      // RESEARCH_CLUSTER_COST_FIX_PLAN F5 — persist the outcome-failure
+      // marker for a run downgraded to `result:"partial"`. Spliced like
+      // every other optional column (at `columns.length - 2`, appended to
+      // `values`) so the lockstep invariant the in_progress UPSERT loop
+      // relies on (`columns.length - 2 === values.length`) holds. A plain
+      // success omits it, leaving the column NULL (legacy row shape).
+      if (error !== undefined) {
+        columns.splice(columns.length - 2, 0, "error");
+        values.splice(values.length, 0, error);
       }
       const detailPayload: Record<string, unknown> = {};
       // STAGE-C-DM-FRESHNESS-PLAN §Task 4 — persist DM freshness telemetry

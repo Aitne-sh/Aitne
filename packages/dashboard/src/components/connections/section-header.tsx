@@ -37,10 +37,10 @@ export function ConnectionsSectionHeader({
               className={cn(
                 "text-xs font-medium tabular-nums",
                 allHealthy
-                  ? "text-emerald-600 dark:text-emerald-400"
+                  ? "text-success"
                   : noneHealthy
                     ? "text-muted-foreground"
-                    : "text-amber-600 dark:text-amber-400",
+                    : "text-warning",
               )}
             >
               {healthy}/{total} connected
@@ -53,7 +53,7 @@ export function ConnectionsSectionHeader({
         <p className="max-w-3xl text-sm text-muted-foreground">{description}</p>
       )}
       {attention && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
+        <p className="text-xs text-warning">
           {attention}
         </p>
       )}

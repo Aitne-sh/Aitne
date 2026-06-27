@@ -153,7 +153,7 @@ export function ManagedTasksCard({
         <div
           className={
             overSoftWarning
-              ? "text-xs font-medium text-amber-600"
+              ? "text-xs font-medium text-warning"
               : "text-xs text-muted-foreground"
           }
           title={
@@ -683,7 +683,7 @@ function EditManagedTaskSheetContent({
                 <span
                   className={
                     row.result === "success"
-                      ? "text-emerald-500"
+                      ? "text-success"
                       : row.result === "failed"
                         ? "text-destructive"
                         : "text-muted-foreground"

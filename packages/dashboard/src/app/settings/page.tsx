@@ -19,6 +19,7 @@ import {
   EditableField,
 } from "@/components/settings/editors";
 import { ManagementModeSection } from "@/components/settings/management-mode-section";
+import { VaultHealthCard } from "@/components/connections/vault-health-card";
 import {
   CHARACTER_MAX_LENGTH,
   CharacterEditor,
@@ -184,7 +185,7 @@ function PrimaryLanguageEditor({
     <div
       className={cn(
         "py-1.5",
-        modified && "border-l-2 border-blue-500 pl-2 -ml-1 rounded",
+        modified && "border-l-2 border-primary pl-2 -ml-1 rounded",
       )}
       data-config-key="primaryLanguage"
     >
@@ -193,7 +194,7 @@ function PrimaryLanguageEditor({
           <p className="text-sm text-muted-foreground inline-flex items-center gap-1.5">
             Primary Language
             {modified && (
-              <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              <span className="text-[10px] font-medium text-primary">
                 modified
               </span>
             )}
@@ -227,7 +228,7 @@ function PrimaryLanguageEditor({
             className="max-w-[240px]"
           />
           {customInvalid && (
-            <p className="text-xs text-red-500">
+            <p className="text-xs text-destructive">
               Use a BCP-47 tag like <code>en-US</code> or <code>zh-Hans</code>.
             </p>
           )}
@@ -295,6 +296,13 @@ export default function ProfileSettingsPage() {
       </ConfigSection>
 
       <ManagementModeSection />
+
+      {/* Primary-vault health lives next to the control that relocates the
+          vault (Notes IA rename 2026-06 — it used to sit on the
+          Connections → Knowledge page, away from the migration dialog). */}
+      <section id="vault-health" className="scroll-mt-4">
+        <VaultHealthCard />
+      </section>
     </>
   );
 }

@@ -90,8 +90,8 @@ You can change the times, disable any of them, or add your own.
 
 → [Morning Routine](../features/routines/morning-routine.md) ·
 [Evening Review](../features/routines/evening-review.md) ·
-[Hourly Check](../features/routines/hourly-check.md) ·
-[Custom Routines](../features/routines/custom-routines.md)
+[Activity Scan](../features/routines/activity-scan.md) ·
+[Create a Recurring Agent](../guides/add-a-custom-routine.md)
 
 ### Reach you through a messenger
 
@@ -117,7 +117,7 @@ Pairing is one-time per channel.
 
 When you connect an integration, the agent polls it on a schedule and
 records anything that looks relevant as an
-[observation](../concepts/observations.md). The hourly routine then
+[observation](../concepts/observations.md). The activity scan then
 decides what (if anything) is worth telling you about.
 
 - [Mail](../features/integrations/mail.md) — Gmail, Outlook, Yahoo,

@@ -64,7 +64,7 @@ export function RecentEventsCard() {
                   {formatAbsoluteTime(event.started_at)} ({formatRelativeTime(event.started_at)})
                 </TooltipContent>
               </Tooltip>
-              <Badge variant={typeColor as "blue" | "green" | "amber" | "gray"} className="shrink-0">
+              <Badge variant={typeColor as "blue" | "green" | "amber" | "gray" | "teal"} className="shrink-0">
                 {event.action_type.split(".").pop()}
               </Badge>
               {modelColor && modelColor !== "gray" && (

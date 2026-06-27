@@ -35,6 +35,7 @@ function makeRow(overrides: Partial<BrowserTaskRow> = {}): BrowserTaskRow {
     createdAt: 1_700_000_000_000,
     startedAt: null,
     finishedAt: null,
+    deliveredAt: null,
     ...overrides,
   };
 }

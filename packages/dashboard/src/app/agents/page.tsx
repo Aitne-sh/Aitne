@@ -2,8 +2,22 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Bot, Plus, AlertTriangle, ArrowUpDown, Settings2 } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Bot,
+  CalendarDays,
+  CalendarRange,
+  Clock,
+  ListTree,
+  Map as MapIcon,
+  Plus,
+  Sparkles,
+  Sunrise,
+  Sunset,
+  UserCog,
+  type LucideIcon,
+} from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,11 +31,9 @@ import {
   DEFAULT_FILTER_STATE,
   filterAgents,
   partitionByValidity,
-  sortAgents,
   type AgentListFilterState,
-  type AgentSortKey,
-  type SortDirection,
 } from "@/lib/agents/list-view";
+import { groupByCategory, type AgentCategoryGroup } from "@/lib/agents/categories";
 import {
   describeSchedule,
   formatActiveHours,
@@ -30,7 +42,7 @@ import {
   formatPercent,
   kindLabel,
 } from "@/lib/agents/format";
-import { cn } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import type { AgentListItem } from "@/lib/agents/types";
 
 const KIND_FILTERS: { value: AgentListFilterState["kind"]; label: string }[] = [
@@ -49,46 +61,35 @@ const CADENCE_FILTERS: { value: AgentListFilterState["cadence"]; label: string }
   { value: "scheduled", label: "Scheduled" },
 ];
 
-interface Column {
-  key: AgentSortKey;
-  label: string;
-  className?: string;
-}
-const COLUMNS: Column[] = [
-  { key: "name", label: "Name" },
-  { key: "kind", label: "Kind" },
-  { key: "schedule", label: "Schedule" },
-  { key: "status", label: "Status" },
-  { key: "last", label: "Last run" },
-  { key: "errorRate", label: "Err%" },
-  { key: "cost", label: "$/exec" },
-];
+/** Per-slug icon for the built-ins; user Agents and unknown slugs get Bot. */
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  "morning-routine": Sunrise,
+  "evening-review": Sunset,
+  "weekly-review": CalendarRange,
+  "monthly-review": CalendarDays,
+  "activity-scan": Activity,
+  "user-profile-sweep-morning": UserCog,
+  "user-profile-sweep-evening": UserCog,
+  "roadmap-maintenance": MapIcon,
+  "context-index-reconcile": ListTree,
+  "skill-curation": Sparkles,
+};
 
 export default function AgentsPage() {
   useAgentLiveRefresh();
   const running = useRunningAgents();
-  const router = useRouter();
   const { data, isLoading, isError, error, refetch } = useAgents({ include_invalid: true });
 
   const [filters, setFilters] = useState<AgentListFilterState>(DEFAULT_FILTER_STATE);
-  const [sortKey, setSortKey] = useState<AgentSortKey>("last");
-  const [sortDir, setSortDir] = useState<SortDirection>("desc");
 
-  const { invalid, visible } = useMemo(() => {
+  const { invalid, groups } = useMemo(() => {
     const all = data?.agents ?? [];
     const { invalid, valid } = partitionByValidity(all);
     const filtered = filterAgents(valid, filters);
-    return { invalid, visible: sortAgents(filtered, sortKey, sortDir) };
-  }, [data?.agents, filters, sortKey, sortDir]);
+    return { invalid, groups: groupByCategory(filtered) };
+  }, [data?.agents, filters]);
 
-  const toggleSort = (key: AgentSortKey) => {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "last" ? "desc" : "asc");
-    }
-  };
+  const visibleCount = groups.reduce((n, g) => n + g.items.length, 0);
 
   return (
     <div className="space-y-6 p-6">
@@ -96,9 +97,10 @@ export default function AgentsPage() {
         title="Agents"
         description={
           <>
-            Every Agent that exists — shipped <strong>System</strong> routines (morning routine,
-            reviews, hourly check, …) and your own <strong>User</strong> Agents — with its schedule,
-            status, and recent health. This is the identity view; the{" "}
+            Everything that runs on your behalf lives here — the shipped{" "}
+            <strong>System</strong> routines (synthesis, monitoring, maintenance) and your own{" "}
+            <strong>User</strong> Agents, each with its schedule, rulebook, limits, and recent
+            health. The{" "}
             <Link href="/schedule" className="underline underline-offset-2 hover:text-foreground">
               queue view
             </Link>{" "}
@@ -121,12 +123,12 @@ export default function AgentsPage() {
       {invalid.length > 0 && (
         <div className="space-y-2">
           <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTriangle className="h-4 w-4 text-warning" />
             Needs attention
           </h2>
           {invalid.map((agent) => (
             <Link key={agent.slug} href={`/agents/${agent.slug}`} className="block">
-              <Alert variant="warning" className="hover:bg-amber-100/60 dark:hover:bg-amber-950/60">
+              <Alert variant="warning" className="hover:bg-warning/15">
                 <div className="flex items-center gap-2">
                   <span className="font-medium">{agent.slug}</span>
                   <Badge variant={agent.kind === "builtin" ? "blue" : "gray"}>
@@ -172,11 +174,7 @@ export default function AgentsPage() {
           ))}
         </div>
         <Separator orientation="vertical" className="h-6" />
-        <div
-          className="flex flex-wrap gap-1"
-          role="group"
-          aria-label="Filter by cadence"
-        >
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by cadence">
           {CADENCE_FILTERS.map((f) => (
             <Button
               key={f.value}
@@ -186,7 +184,7 @@ export default function AgentsPage() {
               aria-pressed={filters.cadence === f.value}
               title={
                 f.value === "interval"
-                  ? "Agents that fire every N minutes/hours (e.g. hourly check)"
+                  ? "Agents that fire every N minutes/hours (e.g. activity scan)"
                   : f.value === "scheduled"
                     ? "Agents that fire at a fixed daily/weekly time"
                     : undefined
@@ -213,44 +211,13 @@ export default function AgentsPage() {
         onRetry={() => refetch()}
         skeleton={<TableSkeleton rows={6} />}
       >
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-left" aria-label="Agents">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                {COLUMNS.map((col) => (
-                  <th key={col.key} className="px-3 py-2 text-xs font-medium text-muted-foreground">
-                    <button
-                      type="button"
-                      onClick={() => toggleSort(col.key)}
-                      className="inline-flex items-center gap-1 hover:text-foreground"
-                      aria-label={`Sort by ${col.label}`}
-                    >
-                      {col.label}
-                      <ArrowUpDown
-                        className={cn(
-                          "h-3 w-3",
-                          sortKey === col.key ? "text-foreground" : "text-muted-foreground/40",
-                        )}
-                      />
-                    </button>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((agent) => (
-                <AgentRow
-                  key={agent.slug}
-                  agent={agent}
-                  running={running.has(agent.slug)}
-                  onClick={() => router.push(`/agents/${agent.slug}`)}
-                />
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-8">
+          {groups.map((group) => (
+            <CategorySection key={group.category} group={group} running={running} />
+          ))}
         </div>
 
-        {visible.length === 0 && (
+        {visibleCount === 0 && (
           <EmptyState
             icon={Bot}
             title="No agents match"
@@ -262,66 +229,118 @@ export default function AgentsPage() {
   );
 }
 
-function AgentRow({
-  agent,
+function CategorySection({
+  group,
   running,
-  onClick,
 }: {
-  agent: AgentListItem;
-  running: boolean;
-  onClick: () => void;
+  group: AgentCategoryGroup;
+  running: ReadonlySet<string>;
 }) {
   return (
-    <tr
-      className="cursor-pointer border-b border-border hover:bg-muted/30"
-      onClick={onClick}
+    <section aria-label={group.meta.label} className="space-y-3">
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">{group.meta.label}</h2>
+        <p className="text-xs text-muted-foreground">{group.meta.description}</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {group.items.map((agent) => (
+          <AgentCard key={agent.slug} agent={agent} running={running.has(agent.slug)} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Dot color for the last execution result — semantic tokens only. */
+function resultDotClass(result: string | null | undefined): string {
+  switch (result) {
+    case "success":
+      return "bg-success";
+    case "error":
+    case "timeout":
+      return "bg-destructive";
+    case "skipped":
+      return "bg-muted-foreground/50";
+    default:
+      return "bg-muted-foreground/30";
+  }
+}
+
+function AgentCard({ agent, running }: { agent: AgentListItem; running: boolean }) {
+  // Property-access lookup (not a call) — the static-components lint rule
+  // accepts this idiom (mirrors settings-navigation's `item.icon`).
+  const Icon = AGENT_ICONS[agent.slug] ?? Bot;
+  const scheduleText = agent.schedule.interval
+    ? `${formatIntervalEvery(agent.schedule.interval)}${
+        formatActiveHours(agent.schedule.interval)
+          ? `, ${formatActiveHours(agent.schedule.interval)}`
+          : ""
+      }`
+    : describeSchedule(agent.schedule);
+  const last = agent.last_execution;
+  const hasMetrics = agent.metrics_7d.executions > 0;
+
+  return (
+    <Link
+      href={`/agents/${agent.slug}`}
+      className={cn(
+        "group flex flex-col gap-3 rounded-xl border border-border bg-card p-4 transition-colors",
+        "hover:border-primary/40 hover:bg-muted/30",
+        !agent.enabled && "opacity-70",
+      )}
+      aria-label={`${agent.name} — ${agent.enabled ? "enabled" : "disabled"}`}
     >
-      <td className="px-3 py-2 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-foreground">{agent.name}</span>
-          <code className="text-xs text-muted-foreground">{agent.slug}</code>
-        </div>
-      </td>
-      <td className="px-3 py-2">
-        {agent.kind === "builtin" ? (
-          <Badge variant="blue">
-            <Settings2 className="mr-1 h-3 w-3" /> System
-          </Badge>
-        ) : (
-          <Badge variant="gray">User</Badge>
-        )}
-      </td>
-      <td className="px-3 py-2 text-xs text-muted-foreground">
-        {agent.schedule.interval ? (
-          // Runtime-window Agent: interval on top, active-hours window below.
-          <span className="flex flex-col leading-tight">
-            <span className="text-foreground">{formatIntervalEvery(agent.schedule.interval)}</span>
-            {formatActiveHours(agent.schedule.interval) && (
-              <span>{formatActiveHours(agent.schedule.interval)}</span>
-            )}
-          </span>
-        ) : (
-          describeSchedule(agent.schedule)
-        )}
-      </td>
-      <td className="px-3 py-2">
-        <span className="flex items-center gap-1.5 text-sm">
-          {running && (
-            <span
-              className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500"
-              aria-label="executing"
-            />
+      <div className="flex items-start gap-3">
+        <span
+          className={cn(
+            "mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+            agent.enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
           )}
-          <Badge variant={agent.enabled ? "green" : "gray"}>{agent.enabled ? "ON" : "OFF"}</Badge>
+        >
+          <Icon className="h-4.5 w-4.5" aria-hidden />
         </span>
-      </td>
-      <td className="px-3 py-2 text-xs text-muted-foreground">
-        {agent.last_execution?.started_at
-          ? new Date(agent.last_execution.started_at).toLocaleString()
-          : "—"}
-      </td>
-      <td className="px-3 py-2 text-sm tabular-nums">{formatPercent(agent.metrics_7d.error_rate)}</td>
-      <td className="px-3 py-2 text-sm tabular-nums">{formatCostUsd(agent.metrics_7d.avg_cost_usd)}</td>
-    </tr>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate font-medium text-foreground">{agent.name}</span>
+            {running && (
+              <span
+                className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-success"
+                aria-label="executing"
+              />
+            )}
+          </div>
+          <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+            {agent.description || agent.slug}
+          </p>
+        </div>
+        <Badge variant={agent.enabled ? "green" : "gray"} className="shrink-0">
+          {agent.enabled ? "ON" : "OFF"}
+        </Badge>
+      </div>
+
+      <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <Clock className="h-3 w-3 shrink-0" aria-hidden />
+          <span className="truncate">{scheduleText}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-3 tabular-nums">
+          <span className="inline-flex items-center gap-1.5" title="Last run">
+            <span
+              className={cn("h-1.5 w-1.5 rounded-full", resultDotClass(last?.result))}
+              aria-hidden
+            />
+            {last?.started_at ? formatRelativeTime(last.started_at) : "never"}
+          </span>
+          {hasMetrics && (
+            <>
+              <span title="7-day error rate">{formatPercent(agent.metrics_7d.error_rate)}</span>
+              <span title="Average cost per execution (7d)">
+                {formatCostUsd(agent.metrics_7d.avg_cost_usd)}
+              </span>
+            </>
+          )}
+        </span>
+      </div>
+    </Link>
   );
 }

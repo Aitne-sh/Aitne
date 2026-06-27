@@ -50,6 +50,7 @@ export interface BrowserTaskRow {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  deliveredAt: number | null;
 }
 
 interface BrowserTaskDbRow {
@@ -69,6 +70,7 @@ interface BrowserTaskDbRow {
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
+  delivered_at: number | null;
 }
 
 function fromDbRow(row: BrowserTaskDbRow): BrowserTaskRow {
@@ -100,6 +102,7 @@ function fromDbRow(row: BrowserTaskDbRow): BrowserTaskRow {
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    deliveredAt: row.delivered_at,
   };
 }
 
@@ -127,8 +130,8 @@ export function createBrowserTask(
         originating_channel, schedule_row_id, require_final_confirm,
         state, outcome_detail, report, effective_allowlist_regex,
         blocked_requests_count, extract_chars_total,
-        created_at, started_at, finished_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, 0, 0, ?, NULL, NULL)`,
+        created_at, started_at, finished_at, delivered_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, 0, 0, ?, NULL, NULL, NULL)`,
   ).run(
     input.id,
     input.description,
@@ -157,7 +160,7 @@ export function getBrowserTask(
               originating_channel, schedule_row_id, require_final_confirm,
               state, outcome_detail, report, effective_allowlist_regex,
               blocked_requests_count, extract_chars_total,
-              created_at, started_at, finished_at
+              created_at, started_at, finished_at, delivered_at
          FROM browser_task
         WHERE id = ?`,
     )
@@ -195,7 +198,7 @@ export function listBrowserTasks(
                       originating_channel, schedule_row_id, require_final_confirm,
                       state, outcome_detail, report, effective_allowlist_regex,
                       blocked_requests_count, extract_chars_total,
-                      created_at, started_at, finished_at
+                      created_at, started_at, finished_at, delivered_at
                  FROM browser_task
                ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
                ORDER BY created_at DESC
@@ -329,6 +332,43 @@ export function markTerminal(
       input.id,
     );
   return result.changes > 0 ? getBrowserTask(db, input.id) : null;
+}
+
+export function markBrowserTaskDelivered(
+  db: Database.Database,
+  id: string,
+  deliveredAt: number,
+): BrowserTaskRow | null {
+  const result = db
+    .prepare(
+      `UPDATE browser_task
+          SET delivered_at = COALESCE(delivered_at, ?)
+        WHERE id = ?`,
+    )
+    .run(deliveredAt, id);
+  return result.changes > 0 ? getBrowserTask(db, id) : null;
+}
+
+export function listUndeliveredBrowserTaskReports(
+  db: Database.Database,
+  limit = 20,
+): readonly BrowserTaskRow[] {
+  const rows = db
+    .prepare<[number], BrowserTaskDbRow>(
+      `SELECT id, description, site_key, extra_allowed_hosts_json,
+              originating_channel, schedule_row_id, require_final_confirm,
+              state, outcome_detail, report, effective_allowlist_regex,
+              blocked_requests_count, extract_chars_total,
+              created_at, started_at, finished_at, delivered_at
+         FROM browser_task
+        WHERE state = 'completed'
+          AND report IS NOT NULL
+          AND delivered_at IS NULL
+        ORDER BY finished_at ASC, created_at ASC
+        LIMIT ?`,
+    )
+    .all(limit);
+  return rows.map(fromDbRow);
 }
 
 /** Increment the per-task CDP-blocked counter. Atomic. */

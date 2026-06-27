@@ -3,7 +3,7 @@
  *
  * docs/design/appendices/routine-data-acquisition.md §6.1.1 + docs/design/appendices/pre-pass-fan-out.md
  * — every routine dispatcher (morning_routine, today_refresh,
- * hourly_check, evening / weekly / monthly review) calls this runner
+ * activity_scan, evening / weekly / monthly review) calls this runner
  * immediately before dispatching the parent session. The runner:
  *
  *  1. Reads the per-routine plan from `ROUTINE_WINDOWS` and the current
@@ -27,7 +27,7 @@
  *  4. The caller grafts the block into the **parent** routine event's
  *     `event.data.fetchReportBlock`. ContextBuilder injects it verbatim
  *     into the parent session's prompt (mirrors the `<gate_decision>`
- *     pattern used by hourly_check Stage 3).
+ *     pattern used by activity_scan Stage 3).
  *
  * Failure-mode contract (docs/design/appendices/pre-pass-fan-out.md §5):
  *
@@ -203,7 +203,7 @@ export interface RoutineFetchWindowResult {
 /**
  * HOURLY_CHECK_GATE_REDESIGN_PLAN.md §3.4 — caller options for `run()`.
  *
- * The hourly_check coordinator passes `integrationKeyFilter` to restrict
+ * The activity_scan coordinator passes `integrationKeyFilter` to restrict
  * the fan-out to the subset of integrations whose freshness window has
  * elapsed. Morning_routine / evening_review / weekly_review call
  * `run()` without options so they fetch every integration the routine
@@ -327,7 +327,7 @@ function buildPrePassDaemonRestPatterns(
 ): readonly string[] {
   const root = `http://localhost:${apiPort}/api`;
   // Observations WRITE surface — the only write the pre-pass performs (GET
-  // reads of pending observations live in the hourly-check session, never
+  // reads of pending observations live in the activity-scan session, never
   // here). For Claude the structured MCP tool
   // `mcp__aitne-observations__submit_observations` (added by
   // `composePrePassAllowedTools`) is the ONLY sanctioned write path, so we
@@ -1377,7 +1377,7 @@ export class RoutineFetchWindowRunner {
     this.logPlanAssemblyDrops(parentEvent, key, planContext.drops);
 
     // HOURLY_CHECK_GATE_REDESIGN_PLAN.md §3.4 — when the caller is the
-    // hourly_check coordinator, the freshness gate restricts pre-pass to
+    // activity_scan coordinator, the freshness gate restricts pre-pass to
     // a subset of integrations. `integrationKeyFilter` is honoured here
     // (before fan-out) so the runner only spawns sub-sessions for stale
     // integrations.
@@ -2110,7 +2110,7 @@ export class RoutineFetchWindowRunner {
     // timestamp on every successful integration completion. The
     // coordinator's `harvestForGate` reads this key to suppress
     // redundant pre-pass spawns within the configured freshness window
-    // (default 30 min). Shared across morning_routine / hourly_check /
+    // (default 30 min). Shared across morning_routine / activity_scan /
     // evening_review / weekly_review / today_refresh by construction:
     // the runner has no notion of parent routine.
     //

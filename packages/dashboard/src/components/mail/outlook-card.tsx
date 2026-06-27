@@ -249,7 +249,7 @@ export function OutlookCard({ accounts, enabledKinds, focusAccountId }: OutlookC
                     right.
                   </li>
                 </ul>
-                <p className="mt-1 rounded-md border border-amber-400/60 bg-amber-400/10 px-2 py-1 text-amber-700 dark:text-amber-300">
+                <p className="mt-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-warning">
                   ⚠ Trap #1: if you leave <code>Web</code> selected, Microsoft
                   will later return <code>Authorization failed: server_error</code>.
                   Use the Public client/native option.
@@ -269,7 +269,7 @@ export function OutlookCard({ accounts, enabledKinds, focusAccountId }: OutlookC
                 <strong>Allow public client flows</strong>, flip the toggle to{" "}
                 <strong>Yes</strong>, then click <strong>Save</strong> at the
                 top of the page.
-                <p className="mt-1 rounded-md border border-amber-400/60 bg-amber-400/10 px-2 py-1 text-amber-700 dark:text-amber-300">
+                <p className="mt-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-warning">
                   ⚠ Trap #2: this toggle is off by default. Without it sign-in
                   also fails with <code>server_error</code>.
                 </p>
@@ -534,14 +534,14 @@ function Step({
         (disabled
           ? "border-border opacity-50"
           : completed
-            ? "border-emerald-300 dark:border-emerald-800"
+            ? "border-success/40"
             : "border-border")
       }
     >
       <p className="text-xs font-semibold text-foreground mb-2">
         Step {index}: {title}
         {completed && (
-          <span className="ml-2 text-emerald-600 dark:text-emerald-400">✓</span>
+          <span className="ml-2 text-success">✓</span>
         )}
       </p>
       {children}

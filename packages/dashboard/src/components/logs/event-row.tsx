@@ -13,7 +13,7 @@ interface EventRowProps {
 }
 
 export function EventRow({ event, onClick }: EventRowProps) {
-  const typeColor = (EVENT_TYPE_COLORS[event.action_type] ?? "gray") as "blue" | "green" | "gray" | "purple" | "amber";
+  const typeColor = (EVENT_TYPE_COLORS[event.action_type] ?? "gray") as "blue" | "green" | "gray" | "purple" | "amber" | "teal";
   const resultColor = (RESULT_COLORS[event.result] ?? "gray") as "green" | "red" | "amber" | "gray";
   // Prefer the actually-billed model from modelUsage over the requested
   // model_used — the SDK can route opus-4-7 → opus-4-6[1m] silently, and the

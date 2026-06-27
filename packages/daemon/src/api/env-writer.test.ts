@@ -108,11 +108,11 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     dmStalenessStrict: false,
     authProbeDisabled: false,
     authPreflightFreshnessMs: 600000,
-    hourlyCheckEnabled: true,
-    hourlyCheckIntervalMinutes: 60,
-    hourlyCheckActiveStartHour: 4,
-    hourlyCheckActiveEndHour: 24,
-    hourlyCheckMinObservations: 1,
+    activityScanEnabled: true,
+    activityScanIntervalMinutes: 60,
+    activityScanActiveStartHour: 4,
+    activityScanActiveEndHour: 24,
+    activityScanMinObservations: 1,
     schedulePollIntervalSeconds: 5,
     dayBoundaryHour: 4,
     timezone: "",
@@ -245,54 +245,54 @@ describe("applyConfigUpdates", () => {
     });
   });
 
-  describe("hourlyCheckIntervalMinutes range validation", () => {
+  describe("activityScanIntervalMinutes range validation", () => {
     it("accepts 1 (minimum boundary — high-frequency check)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 1 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 1 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckIntervalMinutes).toBe(1);
+      expect(config.activityScanIntervalMinutes).toBe(1);
     });
 
     it("accepts 7 (non-divisor of 60, formerly rejected)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 7 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 7 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckIntervalMinutes).toBe(7);
+      expect(config.activityScanIntervalMinutes).toBe(7);
     });
 
     it("accepts 45 (non-divisor of 60, formerly rejected)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 45 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 45 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckIntervalMinutes).toBe(45);
+      expect(config.activityScanIntervalMinutes).toBe(45);
     });
 
     it("accepts 60 (default)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 60 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 60 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckIntervalMinutes).toBe(60);
+      expect(config.activityScanIntervalMinutes).toBe(60);
     });
 
     it("accepts 90 (>60, cost-saving cadence)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 90 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 90 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckIntervalMinutes).toBe(90);
+      expect(config.activityScanIntervalMinutes).toBe(90);
     });
 
     it("accepts 1440 (maximum boundary — one day)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 1440 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 1440 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckIntervalMinutes).toBe(1440);
+      expect(config.activityScanIntervalMinutes).toBe(1440);
     });
 
     it("rejects 0 (below minimum)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 0 });
-      expect(result.errors).toHaveProperty("hourlyCheckIntervalMinutes");
-      expect(config.hourlyCheckIntervalMinutes).toBe(60);
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 0 });
+      expect(result.errors).toHaveProperty("activityScanIntervalMinutes");
+      expect(config.activityScanIntervalMinutes).toBe(60);
     });
 
     it("rejects 1441 (above maximum)", async () => {
@@ -300,80 +300,80 @@ describe("applyConfigUpdates", () => {
       // minutes-since-midnight, which cannot represent multi-day cadence.
       // Operators wanting weekly cadence should use weekly_review.
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckIntervalMinutes: 1441 });
-      expect(result.errors).toHaveProperty("hourlyCheckIntervalMinutes");
-      expect(config.hourlyCheckIntervalMinutes).toBe(60);
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanIntervalMinutes: 1441 });
+      expect(result.errors).toHaveProperty("activityScanIntervalMinutes");
+      expect(config.activityScanIntervalMinutes).toBe(60);
     });
   });
 
-  describe("hourlyCheckActive hours", () => {
+  describe("activityScanActive hours", () => {
     it("accepts startHour 0 and endHour 24", async () => {
       const config = makeConfig();
       const result = await applyConfigUpdates(config, settingsStore, {
-        hourlyCheckActiveStartHour: 0,
-        hourlyCheckActiveEndHour: 24,
+        activityScanActiveStartHour: 0,
+        activityScanActiveEndHour: 24,
       });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckActiveStartHour).toBe(0);
-      expect(config.hourlyCheckActiveEndHour).toBe(24);
+      expect(config.activityScanActiveStartHour).toBe(0);
+      expect(config.activityScanActiveEndHour).toBe(24);
     });
 
     it("rejects startHour 24", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckActiveStartHour: 24 });
-      expect(result.errors).toHaveProperty("hourlyCheckActiveStartHour");
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanActiveStartHour: 24 });
+      expect(result.errors).toHaveProperty("activityScanActiveStartHour");
     });
 
     it("rejects endHour 0", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckActiveEndHour: 0 });
-      expect(result.errors).toHaveProperty("hourlyCheckActiveEndHour");
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanActiveEndHour: 0 });
+      expect(result.errors).toHaveProperty("activityScanActiveEndHour");
     });
 
     it("rejects endHour 25", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckActiveEndHour: 25 });
-      expect(result.errors).toHaveProperty("hourlyCheckActiveEndHour");
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanActiveEndHour: 25 });
+      expect(result.errors).toHaveProperty("activityScanActiveEndHour");
     });
   });
 
-  describe("hourlyCheckMinObservations", () => {
+  describe("activityScanMinObservations", () => {
     it("accepts 0", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckMinObservations: 0 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanMinObservations: 0 });
       expect(result.errors).toEqual({});
-      expect(config.hourlyCheckMinObservations).toBe(0);
+      expect(config.activityScanMinObservations).toBe(0);
     });
 
     it("accepts the upper boundary (1000)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckMinObservations: 1000 });
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanMinObservations: 1000 });
       expect(result.errors).toEqual({});
     });
 
     it("rejects negative values", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckMinObservations: -1 });
-      expect(result.errors).toHaveProperty("hourlyCheckMinObservations");
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanMinObservations: -1 });
+      expect(result.errors).toHaveProperty("activityScanMinObservations");
     });
   });
 
-  describe("hourlyCheckEnabled (boolean)", () => {
+  describe("activityScanEnabled (boolean)", () => {
     it("accepts true and false", async () => {
       const config = makeConfig();
-      const off = await applyConfigUpdates(config, settingsStore, { hourlyCheckEnabled: false });
+      const off = await applyConfigUpdates(config, settingsStore, { activityScanEnabled: false });
       expect(off.errors).toEqual({});
-      expect(config.hourlyCheckEnabled).toBe(false);
-      const on = await applyConfigUpdates(config, settingsStore, { hourlyCheckEnabled: true });
+      expect(config.activityScanEnabled).toBe(false);
+      const on = await applyConfigUpdates(config, settingsStore, { activityScanEnabled: true });
       expect(on.errors).toEqual({});
-      expect(config.hourlyCheckEnabled).toBe(true);
+      expect(config.activityScanEnabled).toBe(true);
     });
 
     it("rejects non-boolean values (type mismatch)", async () => {
       const config = makeConfig();
-      const result = await applyConfigUpdates(config, settingsStore, { hourlyCheckEnabled: "yes" });
-      expect(result.errors).toHaveProperty("hourlyCheckEnabled");
-      expect(result.errors.hourlyCheckEnabled).toMatch(/type mismatch/i);
+      const result = await applyConfigUpdates(config, settingsStore, { activityScanEnabled: "yes" });
+      expect(result.errors).toHaveProperty("activityScanEnabled");
+      expect(result.errors.activityScanEnabled).toMatch(/type mismatch/i);
     });
   });
 
@@ -382,34 +382,34 @@ describe("applyConfigUpdates", () => {
       const config = makeConfig();
       const result = await applyConfigUpdates(config, settingsStore, {
         executeTimeoutMinutes: 90,
-        hourlyCheckIntervalMinutes: 30,
-        hourlyCheckMinObservations: 3,
+        activityScanIntervalMinutes: 30,
+        activityScanMinObservations: 3,
       });
       expect(result.updated).toEqual(
         expect.arrayContaining([
           "executeTimeoutMinutes",
-          "hourlyCheckIntervalMinutes",
-          "hourlyCheckMinObservations",
+          "activityScanIntervalMinutes",
+          "activityScanMinObservations",
         ]),
       );
       expect(result.errors).toEqual({});
       expect(config.executeTimeoutMinutes).toBe(90);
-      expect(config.hourlyCheckIntervalMinutes).toBe(30);
-      expect(config.hourlyCheckMinObservations).toBe(3);
+      expect(config.activityScanIntervalMinutes).toBe(30);
+      expect(config.activityScanMinObservations).toBe(3);
     });
 
     it("applies valid fields even if one sibling is invalid", async () => {
       const config = makeConfig();
       const result = await applyConfigUpdates(config, settingsStore, {
         executeTimeoutMinutes: 120,
-        // 0 is below the hourlyCheckIntervalMinutes minimum of 1.
-        hourlyCheckIntervalMinutes: 0,
+        // 0 is below the activityScanIntervalMinutes minimum of 1.
+        activityScanIntervalMinutes: 0,
       });
       expect(result.updated).toContain("executeTimeoutMinutes");
-      expect(result.updated).not.toContain("hourlyCheckIntervalMinutes");
-      expect(result.errors).toHaveProperty("hourlyCheckIntervalMinutes");
+      expect(result.updated).not.toContain("activityScanIntervalMinutes");
+      expect(result.errors).toHaveProperty("activityScanIntervalMinutes");
       expect(config.executeTimeoutMinutes).toBe(120);
-      expect(config.hourlyCheckIntervalMinutes).toBe(60);
+      expect(config.activityScanIntervalMinutes).toBe(60);
     });
 
     it("rolls back runtime persistence when a mixed update fails during .env write", async () => {

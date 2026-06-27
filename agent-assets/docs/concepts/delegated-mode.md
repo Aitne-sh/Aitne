@@ -115,9 +115,9 @@ MCP); the difference is who polls (no one, for `native`).
 
 The setup tax for direct mode (OAuth client setup in a vendor console, then
 JSON download, then keychain seeding) is the single biggest blocker for
-non-technical operators. Every supported backend — Claude Code, Codex,
-Gemini CLI — already ships first-party connectors to Gmail, Calendar,
-Drive, and more. When the operator is signed into claude.ai or ChatGPT,
+non-technical operators. Claude Code, Codex, and Gemini CLI all ship
+first-party connectors to Gmail, Calendar, Drive, and more (OpenCode
+ships none). When the operator is signed into claude.ai or ChatGPT,
 the agent can reach those services through the backend's own MCP tools,
 zero daemon credentials required.
 
@@ -139,9 +139,9 @@ that case the daemon spawns the other backend per call.
   `/exec` proxy (cross-backend).
 - **`native`** — daemon holds nothing AND runs no poller. The main
   backend's MCP connector reaches the integration on-demand within the
-  agent's own turn (DM, hourly_check, routine pre-pass). The agent
+  agent's own turn (DM, activity_scan, routine pre-pass). The agent
   POSTs results to `/api/observations/batch` so the rest of the
-  observation pipeline (summarizer, hourly check) still operates. See
+  observation pipeline (summarizer, activity scan) still operates. See
   `docs/design/appendices/native-integration-mode.md` for the full
   spec, including the per-key `runtime_state.integration_flip_lock:<key>`
   drain protocol.
@@ -193,10 +193,10 @@ When you pick `delegated`, also pick `delegatedBackend`:
   is your preferred DM driver (e.g. Claude).
 
 When you pick `native`, `nativeBackend` is fixed to your main DM
-backend. Flipping the main backend re-targets every `native` row; rows
-whose new `nativeBackend` has no descriptor connector for the
-integration (e.g. `gmail` native on a backend that doesn't ship a Gmail
-connector) cascade to `disabled` and the operator gets a DM.
+backend. Flipping the main backend never re-targets `native` rows:
+every row whose `nativeBackend` no longer matches the new main backend
+cascades to `disabled` and the operator gets a DM — re-enabling
+requires an explicit re-flip (with its live probe) on the new backend.
 
 ## Concrete Examples
 
@@ -226,7 +226,7 @@ curl -X POST http://localhost:8321/api/integrations/gmail/exec \
 ```
 
 The daemon spawns a Codex subprocess with the `proxy.md` profile, the
-task-mode planner picks `_search_emails` from the registered
+task-mode planner picks `search_emails` from the registered
 `capabilityTools`, runs it, and returns a structured `{messages:[…]}`
 conforming to `outputSchema`.
 
@@ -283,8 +283,9 @@ the agent consults at session-init. It is rendered as a Markdown table:
 The "Backend" column surfaces whichever binding is active for the row —
 `delegatedBackend` for `delegated`, `nativeBackend` for `native`. For
 `direct` and `disabled` rows it is `—`. The "Sub-tier" column annotates
-delegated Gmail rows (`draft-only` for Claude, `full-auto` for Codex)
-and is `—` for everything else. The file also includes the per-backend
+delegated Gmail rows (`draft-only` for Claude, `full-auto` for Codex);
+other delegated rows show `full`, and non-delegated rows show `—`. The
+file also includes the per-backend
 connector support matrix and the `deniedTools` block; both are rendered
 by `renderManagementMd` (`packages/daemon/src/core/management-md.ts`).
 

@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { HeartPulse, History, Inbox } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
+import { formatApiError, formatTimestamp } from "@/lib/utils";
 import type {
   WikiFileResponse,
   WikiIndexResponse,
@@ -128,22 +129,6 @@ function useWikiLog(workspace: string, enabled: boolean) {
     error: isMissingFile ? null : error,
     entries,
   };
-}
-
-function formatApiError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "Request failed";
-}
-
-function formatTimestamp(iso: string): string {
-  try {
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleString();
-  } catch {
-    return iso;
-  }
 }
 
 export default function WikiTimelinePage() {

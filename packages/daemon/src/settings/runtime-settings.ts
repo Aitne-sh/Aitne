@@ -17,6 +17,7 @@ import {
   isNotificationDestinationPlatform,
 } from "../messaging/constants.js";
 import { ALWAYS_DISALLOWED_TOOLS } from "../safety/always-disallowed.js";
+import { PREVENT_SLEEP_MODES } from "../core/sleep-inhibitor.js";
 
 /**
  * The secret-exfiltration / credential-tampering subset of the absolute-block
@@ -374,9 +375,13 @@ export const runtimeSettingsSchema = z.object({
   // poor in the current shape; the routine stays in-tree as a concept
   // pending the Mirror+Prune redesign (one trend observation + aged
   // carry-over kill/keep decisions, scoped to feed day-1-of-month
-  // morning_routine). Re-enable by setting `PA_MONTHLY_REVIEW_ENABLED=true`
-  // or PATCH /api/config — the scheduler reads the live flag at fire time
-  // so the flip takes effect on the next month-end without restart.
+  // morning_routine).
+  //
+  // DEPRECATED (Agents-hub redesign, AGENTS_HUB_REDESIGN_PLAN.md §2): the
+  // monthly-review AGENT row's `enabled` is the single switch now — enable
+  // from /agents/monthly-review. This key stays parseable so previously
+  // persisted values survive (a one-time boot reconcile carries a `true`
+  // onto the agent row); the scheduler no longer reads it.
   monthlyReviewEnabled: z.boolean().default(false),
   /**
    * BROWSER_TASK_REDESIGN_PLAN.md §5.1 — global concurrency cap for the
@@ -440,31 +445,118 @@ export const runtimeSettingsSchema = z.object({
     .array(z.string().min(1).max(253))
     .max(500)
     .default([]),
-  hourlyCheckEnabled: z.boolean().default(true),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §10.3 — global concurrency cap for
+   * the generic background-task runner. Each worker is a fresh SDK
+   * session (no resident browser), so the ceiling is cost/quota driven
+   * rather than RAM driven. Range [1, 5], default 3.
+   */
+  backgroundTaskMaxConcurrent: z.number().int().min(1).max(5).default(3),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §6 / §10.6 — clarification TTL. A
+   * parked background task waits this long for the owner's `ask_user`
+   * reply before the housekeeping tick transitions it to `timeout`. No
+   * browser resource is held while parked, so the default is far longer
+   * than browser-task's fixed 5 min. Range [5, 1440] minutes, default 60.
+   */
+  backgroundTaskClarificationTtlMinutes: z
+    .number()
+    .int()
+    .min(5)
+    .max(1440)
+    .default(60),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §10.3 — safety valve for a task that
+   * sits `pending` behind the concurrency cap too long. After this many
+   * minutes a queued task transitions to `timeout` (fail-loud). Range
+   * [5, 180], default 120 (background tasks queue longer than browser
+   * tasks because they run longer). The reused slot-manager sweep
+   * (`clampPendingQueueTimeoutMinutes`) caps at 180, so the range matches.
+   */
+  backgroundTaskPendingQueueTimeoutMinutes: z
+    .number()
+    .int()
+    .min(5)
+    .max(180)
+    .default(120),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §10.5 — cadence (hours) of the
+   * filed-results digest ("filed N background results since yesterday").
+   * Consumed by the Phase 3 digest surface; the setting lands here so the
+   * runtime schema parses it on upgrade. Range [1, 168], default 24.
+   */
+  backgroundTaskDigestCadenceHours: z
+    .number()
+    .int()
+    .min(1)
+    .max(168)
+    .default(24),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §10.3 / Phase 4 — brief-dedup window
+   * (minutes). A `POST /api/background-task` whose `brief` + `tier` exactly
+   * match a still-relevant task (not a FAIL terminal) created within this
+   * window collapses onto that task instead of spawning a second worker —
+   * the runaway fan-out guard (a replayed trigger POSTing the same brief
+   * many times in minutes). Range [0, 1440]; `0` disables dedup. Default 10.
+   */
+  backgroundTaskDedupWindowMinutes: z
+    .number()
+    .int()
+    .min(0)
+    .max(1440)
+    .default(10),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §10.2 / Phase 4 — true mid-flight
+   * resume across a daemon restart. When `true`, a non-terminal task that
+   * captured an SDK session id (`backend_session_id`) is resumed via
+   * `query({resume})` on boot (warm session, no re-work); resume failures
+   * fall back to re-dispatch-from-brief. When `false`, every non-terminal
+   * task is re-dispatched from its (self-contained) brief — the v1 floor.
+   * Default `true`.
+   */
+  backgroundTaskResumeAcrossRestart: z.boolean().default(true),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §2.3 / §13 Decision 4 (Phase 4,
+   * opt-in) — when `true`, a routine autonomous forward to the owner DM is
+   * routed through the task-delivery gate + activity-branch machinery: an
+   * active owner gets a woven delivery turn (the real DM agent weaves the
+   * forward into the live conversation) instead of a verbatim dump; an idle
+   * owner gets the verbatim send (as today). Default `false` — the design
+   * deliberately scoped rev3 to task delivery only; this opens the same
+   * machinery to autonomous forwards for operators who want it.
+   */
+  autonomousForwardNaturalDelivery: z.boolean().default(false),
+  // DEPRECATED (Agents-hub redesign, AGENTS_HUB_REDESIGN_PLAN.md §2): the
+  // activity-scan AGENT row's `enabled` is the single switch now (a one-time
+  // boot reconcile carries a persisted `false` onto the agent row). The
+  // cadence keys below remain the per-field FALLBACK under the agent row's
+  // `runtime_window` overrides (core/agents/activity-scan-cadence.ts) — edit the
+  // cadence from /agents/activity-scan, not here.
+  activityScanEnabled: z.boolean().default(true),
   // Any positive integer in [1, 1440] minutes (1 minute up to 24 hours).
-  // Despite the "hourly" name, the operator can dial this anywhere in that
-  // range to balance observation latency against quota burn. The cadence
-  // is anchored to `hourlyCheckActiveStartHour` (see
-  // shouldFireHourlyTickAt in scheduler.ts), so the first fire of each
+  // The shipped default is 120 (every 2 hours); the operator can dial this
+  // anywhere in that range to balance observation latency against quota
+  // burn. The cadence is anchored to `activityScanActiveStartHour` (see
+  // shouldFireActivityScanTickAt in scheduler.ts), so the first fire of each
   // agent-day lands at the start of the active window. The upper bound
   // is 1440 because the modulo gate runs against minutes-since-midnight,
   // which cannot represent multi-day cadence — operators wanting weekly
   // or monthly cadence should use the dedicated review routines.
-  hourlyCheckIntervalMinutes: z
+  activityScanIntervalMinutes: z
     .number()
     .int()
-    .min(1, { message: "PA_HOURLY_CHECK_INTERVAL_MINUTES must be >= 1" })
-    .max(1440, { message: "PA_HOURLY_CHECK_INTERVAL_MINUTES must be <= 1440 (one day)" })
-    .default(60),
-  hourlyCheckActiveStartHour: z.number().int().min(0).max(23).default(4),
-  hourlyCheckActiveEndHour: z.number().int().min(1).max(24).default(24),
-  hourlyCheckMinObservations: z.number().int().nonnegative().default(1),
+    .min(1, { message: "PA_ACTIVITY_SCAN_INTERVAL_MINUTES must be >= 1" })
+    .max(1440, { message: "PA_ACTIVITY_SCAN_INTERVAL_MINUTES must be <= 1440 (one day)" })
+    .default(120),
+  activityScanActiveStartHour: z.number().int().min(0).max(23).default(4),
+  activityScanActiveEndHour: z.number().int().min(1).max(24).default(24),
+  activityScanMinObservations: z.number().int().nonnegative().default(1),
   /**
    * cost-reduction-structural §B — flag for the optional Stage 2 lite-tier
    * triage. Default `false` so cost remains bounded to Stage 0/1 + Stage 3
    * until shadow telemetry justifies the lite triage budget.
    */
-  hourlyCheckStage2Enabled: z.boolean().default(false),
+  activityScanStage2Enabled: z.boolean().default(false),
   /**
    * cost-reduction-structural §B — heartbeat window for the gate. Even on
    * a string of quiet ticks, the gate force-runs Stage 2 (or Stage 3 if
@@ -472,7 +564,7 @@ export const runtimeSettingsSchema = z.object({
    * exercised end-to-end and a signal misclassification can't trap the
    * routine in `stage0_silent` indefinitely.
    */
-  hourlyCheckHeartbeatHours: z.number().int().min(1).max(48).default(4),
+  activityScanHeartbeatHours: z.number().int().min(1).max(48).default(4),
   /**
    * cost-reduction-structural §B — pending-observation ceiling under
    * which low-signal cases still route to Stage 0 silent. The default 0
@@ -480,7 +572,7 @@ export const runtimeSettingsSchema = z.object({
    * Stage 2 / Stage 3); operators who notice the gate over-escalating on
    * journal noise can dial this up.
    */
-  hourlyCheckLowSignalPendingCeiling: z
+  activityScanLowSignalPendingCeiling: z
     .number()
     .int()
     .nonnegative()
@@ -489,12 +581,13 @@ export const runtimeSettingsSchema = z.object({
   /**
    * HOURLY_CHECK_GATE_REDESIGN_PLAN.md §3.4 — minimum minutes between
    * pre-pass spawns for the same integration. The `harvestForGate`
-   * step in `HourlyCheckCoordinator.trigger` reads
+   * step in `ActivityScanCoordinator.trigger` reads
    * `runtime_state.pre_pass_last_run:<integrationKey>` and skips
    * pre-pass when the prior successful run is more recent than this
-   * window. Default 30 — the cron interval is 60 min, so a 30-min
-   * window guarantees at most one pre-pass per integration per tick
-   * while still firing every tick under normal load.
+   * window. Default 30 — comfortably below the default 120-min scan
+   * interval, so a default install runs the pre-pass on every tick;
+   * the gate only bites when an operator dials the interval down or
+   * another routine's pre-pass ran recently.
    *
    * Bounded [0, 480]. `0` disables the freshness gate (pre-pass fires
    * on every tick); 240 (4h) approximates "only fire when the
@@ -507,7 +600,7 @@ export const runtimeSettingsSchema = z.object({
    * `forced` runs (`POST /api/agent/run-now`) bypass the gate
    * unconditionally — manual triggers explicitly want a fresh fetch.
    */
-  hourlyCheckPrePassFreshnessMinutes: z
+  activityScanPrePassFreshnessMinutes: z
     .number()
     .int()
     .min(0)
@@ -541,6 +634,13 @@ export const runtimeSettingsSchema = z.object({
    * /api/config; tunable per user's tolerance for chatty mornings.
    */
   maxBriefingDelayMinutes: z.number().int().nonnegative().default(30),
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §2.6 — deterministic branch used by
+   * task.delivery to decide whether a finished task should be woven into
+   * an active owner conversation or sent as a standalone draft. Reads the
+   * most recent inbound owner DM across messaging + dashboard scopes.
+   */
+  ownerActivityIdleThresholdMinutes: z.number().int().min(1).max(60).default(5),
 
   maxNotificationsPerHour: z.number().int().positive().default(3),
   maxNotificationsPerDay: z.number().int().positive().default(12),
@@ -595,6 +695,20 @@ export const runtimeSettingsSchema = z.object({
     .url()
     .default("http://127.0.0.1:4096"),
   opencodeServerUsername: z.string().min(1).default("opencode"),
+
+  /**
+   * Keep-awake posture while the daemon runs (macOS only; no-op elsewhere).
+   * Every daemon timer freezes during host sleep, so a sleeping laptop
+   * turns the 04:00 day-boundary flow into hours of wake-catchup replays
+   * riding macOS maintenance DarkWakes — with cold prompt caches making
+   * each replay ~10× the normal cost. `"ac"` (default) holds a
+   * `caffeinate -s` assertion: system sleep is inhibited only while on AC
+   * power, so battery drain stays impossible. `"always"` adds `-i` (idle
+   * sleep inhibited on battery too); `"off"` restores OS-managed sleep.
+   * Lid-close sleep is NOT overridden (that needs root). Read once at
+   * boot — see RESTART_REQUIRED_KEY_TUPLE.
+   */
+  preventSleepMode: z.enum(PREVENT_SLEEP_MODES).default("ac"),
 
   obsidianDebounceSeconds: z.number().positive().default(5.0),
 
@@ -729,7 +843,7 @@ export const runtimeSettingsSchema = z.object({
   mailIdleFallbackRecoveryMinutes: z.number().int().positive().default(60),
   mailMaxMessagesPerPoll: z.number().int().min(1).max(100).default(20),
   mailAuthFailureRetryHours: z.number().int().positive().default(6),
-  hourlyObservationCharBudget: z.number().int().positive().default(8000),
+  activityScanObservationCharBudget: z.number().int().positive().default(8000),
 
   /**
    * docs/design/appendices/pre-pass-fan-out.md §6 — retry and budget controls for the
@@ -767,7 +881,7 @@ export const runtimeSettingsSchema = z.object({
   /**
    * cost-reduction-structural §A — observation summarizer kill switch +
    * tunables. The summarizer runs out-of-band: when disabled, observation
-   * rows stay `summary_status='pending'` and hourly_check falls back to
+   * rows stay `summary_status='pending'` and activity_scan falls back to
    * the legacy fetch-on-doubt pattern (no regression in correctness; only
    * loss of cost savings).
    */
@@ -794,7 +908,7 @@ export const runtimeSettingsSchema = z.object({
    * Safety net for autonomous session cost. When set, the dispatcher skips
    * autonomous sessions whose cumulative daily cost exceeds this cap.
    * Reactive sessions (DMs, mentions) always pass through.
-   * Degradation priority: hourly_check → roadmap_refresh → evening_review →
+   * Degradation priority: activity_scan → roadmap_refresh → evening_review →
    * morning_routine (last to be cut).
    * Distinct from the removed Phase 9 `maxDailyCostUsd` which blanket-blocked
    * all sessions including reactive DMs — see p9-polling-pivot.md.
@@ -866,7 +980,7 @@ export const runtimeSettingsSchema = z.object({
    * Voice transcription opt-in (see docs/design/appendices/voice-transcription.md).
    * Default `false`: inbound audio attachments pass through as file paths
    * without local Whisper inference, and no model weights are downloaded.
-   * Flipping to `true` from `/settings/advanced` triggers a one-time model
+   * Flipping to `true` from `/settings/infrastructure` triggers a one-time model
    * download via `POST /api/voice/install`; the daemon auto-restarts on
    * success so the transcriber initializes with the flag observed.
    */
@@ -1018,19 +1132,27 @@ export const RUNTIME_SETTING_KEYS = [
   "browserTaskPendingQueueTimeoutMinutes",
   "browserTaskRespectQuietHours",
   "browserTaskHostnameDenylist",
-  "hourlyCheckEnabled",
-  "hourlyCheckIntervalMinutes",
-  "hourlyCheckActiveStartHour",
-  "hourlyCheckActiveEndHour",
-  "hourlyCheckMinObservations",
-  "hourlyCheckStage2Enabled",
-  "hourlyCheckHeartbeatHours",
-  "hourlyCheckLowSignalPendingCeiling",
-  "hourlyCheckPrePassFreshnessMinutes",
+  "backgroundTaskMaxConcurrent",
+  "backgroundTaskClarificationTtlMinutes",
+  "backgroundTaskPendingQueueTimeoutMinutes",
+  "backgroundTaskDigestCadenceHours",
+  "backgroundTaskDedupWindowMinutes",
+  "backgroundTaskResumeAcrossRestart",
+  "autonomousForwardNaturalDelivery",
+  "activityScanEnabled",
+  "activityScanIntervalMinutes",
+  "activityScanActiveStartHour",
+  "activityScanActiveEndHour",
+  "activityScanMinObservations",
+  "activityScanStage2Enabled",
+  "activityScanHeartbeatHours",
+  "activityScanLowSignalPendingCeiling",
+  "activityScanPrePassFreshnessMinutes",
   "authProbeDisabled",
   "authPreflightFreshnessMs",
   "schedulePollIntervalSeconds",
   "maxBriefingDelayMinutes",
+  "ownerActivityIdleThresholdMinutes",
   "maxNotificationsPerHour",
   "maxNotificationsPerDay",
   "quietHoursStart",
@@ -1046,6 +1168,7 @@ export const RUNTIME_SETTING_KEYS = [
   "opencodeExecutionPermissionMode",
   "opencodeBaseUrl",
   "opencodeServerUsername",
+  "preventSleepMode",
   "obsidianDebounceSeconds",
   "gitPollIntervalSeconds",
   "gitPushOverdueMinutes",
@@ -1071,7 +1194,7 @@ export const RUNTIME_SETTING_KEYS = [
   "mailIdleFallbackRecoveryMinutes",
   "mailMaxMessagesPerPoll",
   "mailAuthFailureRetryHours",
-  "hourlyObservationCharBudget",
+  "activityScanObservationCharBudget",
   "prePassMaxAttemptsPerIntegration",
   "prePassBackoffMs",
   "prePassRetryEscalationTier",
@@ -1118,3 +1241,30 @@ const _assertRuntimeSettingCoverage: MissingEditableRuntimeKeys extends never ? 
 export function isRuntimeSettingKey(value: string): value is RuntimeSettingKey {
   return runtimeSettingKeySet.has(value);
 }
+
+/**
+ * v0.1.10 → v0.1.11: the "Hourly Check" agent became "Activity Scan" and its
+ * settings keys moved from `hourlyCheck*` / `hourlyObservationCharBudget` to
+ * `activityScan*`. Migration `0010-hourly-check-to-activity-scan` renames the
+ * persisted `settings` rows, but `loadPersistedSettings` runs BEFORE
+ * `runMigrations` (the merge is load-bearing for `getContextDir`, see
+ * bootstrap/db.ts), so on the first post-upgrade boot the rows still carry the
+ * legacy names when they are parsed. This map lets the settings store read
+ * them under the canonical key for that one boot (and tolerates DBs restored
+ * from old backups). Drop after a deprecation window once the migration has
+ * been in the wild for a few releases.
+ */
+export const LEGACY_RUNTIME_SETTING_KEY_ALIASES: Readonly<
+  Record<string, RuntimeSettingKey>
+> = {
+  hourlyCheckEnabled: "activityScanEnabled",
+  hourlyCheckIntervalMinutes: "activityScanIntervalMinutes",
+  hourlyCheckActiveStartHour: "activityScanActiveStartHour",
+  hourlyCheckActiveEndHour: "activityScanActiveEndHour",
+  hourlyCheckMinObservations: "activityScanMinObservations",
+  hourlyCheckStage2Enabled: "activityScanStage2Enabled",
+  hourlyCheckHeartbeatHours: "activityScanHeartbeatHours",
+  hourlyCheckLowSignalPendingCeiling: "activityScanLowSignalPendingCeiling",
+  hourlyCheckPrePassFreshnessMinutes: "activityScanPrePassFreshnessMinutes",
+  hourlyObservationCharBudget: "activityScanObservationCharBudget",
+} as const;

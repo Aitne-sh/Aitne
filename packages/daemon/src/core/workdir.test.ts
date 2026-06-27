@@ -68,7 +68,7 @@ describe("getProfileForEvent", () => {
   });
 
   it("returns routine for hourly observation checks", () => {
-    expect(getProfileForEvent("routine.hourly_check")).toBe("routine");
+    expect(getProfileForEvent("routine.activity_scan")).toBe("routine");
   });
 
   it("returns observer for approaching events and task for scheduled tasks", () => {
@@ -163,8 +163,8 @@ describe("getSkillsForEvent", () => {
     expect(skills).toHaveLength(4);
   });
 
-  it("returns specific skills for routine.hourly_check", () => {
-    const skills = getSkillsForEvent("routine.hourly_check");
+  it("returns specific skills for routine.activity_scan", () => {
+    const skills = getSkillsForEvent("routine.activity_scan");
     expect(skills).toContain("context");
     expect(skills).toContain("today");
     expect(skills).toContain("observations");
@@ -216,7 +216,11 @@ describe("getSkillsForEvent", () => {
     // (DM-driven entry to the open-ended browser sub-agent) → 28.
     // Scheduling split adds `agent-create` (author a recurring Agent when the
     // user asks for an ongoing cadence; `/schedule` is one-shot only) → 29.
-    expect(skills).toHaveLength(29);
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 adds `background-task`
+    // (spawn) + `background-task-reply` (clarify relay) → 31.
+    expect(skills).toHaveLength(31);
+    expect(skills).toContain("background-task");
+    expect(skills).toContain("background-task-reply");
     expect(skills).toContain("agent-create");
     expect(skills).toContain("context");
     expect(skills).toContain("today");
@@ -267,7 +271,7 @@ describe("getSkillsForEvent", () => {
       // which exercises every skill the legacy initial bundle did.
       "routine.morning_routine", "routine.morning_routine_today", "routine.morning_routine_journal",
       "routine.evening_review", "routine.weekly_review", "routine.monthly_review",
-      "routine.hourly_check", "routine.roadmap_refresh",
+      "routine.activity_scan", "routine.roadmap_refresh",
       "message.received", "message.received.dm_first", "message.received.dm",
       "schedule.approaching", "scheduled.task",
       "setup.initial", "setup.update",
@@ -374,8 +378,8 @@ describe("createSessionWorkdir", () => {
     expect(content).toContain("Safety Invariants");
   });
 
-  it("copies routine profile for routine.hourly_check", () => {
-    const sessionDir = createSessionWorkdir(fakeProjectRoot, "routine.hourly_check");
+  it("copies routine profile for routine.activity_scan", () => {
+    const sessionDir = createSessionWorkdir(fakeProjectRoot, "routine.activity_scan");
     createdDirs.push(sessionDir);
 
     const content = readFileSync(join(sessionDir, "CLAUDE.md"), "utf-8");
@@ -454,9 +458,9 @@ describe("createSessionWorkdir", () => {
   });
 
   it("generates GEMINI.md for Gemini backend", () => {
-    const sessionDir = createSessionWorkdir(fakeProjectRoot, "routine.hourly_check", undefined, {
+    const sessionDir = createSessionWorkdir(fakeProjectRoot, "routine.activity_scan", undefined, {
       backendId: "gemini",
-      processKey: "routine.hourly_check",
+      processKey: "routine.activity_scan",
     });
     createdDirs.push(sessionDir);
 
@@ -608,7 +612,7 @@ describe("createSessionWorkdir", () => {
   it("handles missing profile gracefully (no CLAUDE.md created)", () => {
     rmSync(join(fakeProjectRoot, "agent-assets", "agent-profiles", "routine.md"));
 
-    const sessionDir = createSessionWorkdir(fakeProjectRoot, "routine.hourly_check");
+    const sessionDir = createSessionWorkdir(fakeProjectRoot, "routine.activity_scan");
     createdDirs.push(sessionDir);
 
     expect(existsSync(join(sessionDir, "CLAUDE.md"))).toBe(false);
@@ -653,6 +657,54 @@ describe("createSessionWorkdir", () => {
     );
     createdDirs.push(sessionDir);
     expect(existsSync(join(sessionDir, ".claude", "skills", "user-profile", "SKILL.md"))).toBe(true);
+  });
+
+  it("does NOT provision user skills into narrow-persona sessions (wiki / research)", () => {
+    // Plant a user skill, then materialise a wiki.compile and a
+    // routine.research_dispatch session. Both run dedicated personas with
+    // tight built-in manifests; the owner's general skill library must not
+    // land there (neither the `.claude/skills/` tree nor the `skills/` docs
+    // layer). See `eventTypeAcceptsUserSkills`.
+    const userSkillsDir = join(tmpdir(), `pa-user-skills-narrow-${Date.now()}`);
+    const userSkillDir = join(userSkillsDir, "my-digest");
+    mkdirSync(userSkillDir, { recursive: true });
+    writeFileSync(
+      join(userSkillDir, "SKILL.md"),
+      `---\nname: my-digest\ndescription: "User digest"\n---\n\n# Body\n`,
+    );
+
+    try {
+      for (const key of ["wiki.compile", "routine.research_dispatch"] as const) {
+        const sessionDir = createSessionWorkdir(
+          fakeProjectRoot,
+          key,
+          userSkillsDir,
+          { processKey: key },
+        );
+        createdDirs.push(sessionDir);
+
+        expect(
+          existsSync(join(sessionDir, ".claude", "skills", "my-digest", "SKILL.md")),
+        ).toBe(false);
+        expect(
+          existsSync(join(sessionDir, "skills", "my-digest", "SKILL.md")),
+        ).toBe(false);
+      }
+
+      // Control: a conversational session with the SAME library DOES get it,
+      // proving the absence above is the gate, not a planting mistake.
+      const dmDir = createSessionWorkdir(
+        fakeProjectRoot,
+        "message.received",
+        userSkillsDir,
+      );
+      createdDirs.push(dmDir);
+      expect(
+        existsSync(join(dmDir, ".claude", "skills", "my-digest", "SKILL.md")),
+      ).toBe(true);
+    } finally {
+      rmSync(userSkillsDir, { recursive: true, force: true });
+    }
   });
 
   it("does not let user skills clobber built-ins on name collision", () => {
@@ -821,6 +873,46 @@ describe("ensureSessionWorkdir", () => {
     const dir = ensureSessionWorkdir(fakeProjectRoot, fakeDataDir, 101, "message.received");
     expect(existsSync(dir)).toBe(true);
     expect(existsSync(join(dir, ".claude", "skills", "user-profile", "SKILL.md"))).toBe(true);
+  });
+
+  it("does NOT copy user skills into a narrow-persona persistent workdir (wiki / research)", () => {
+    // Same library, same dataDir as the DM test above — but a wiki.compile
+    // session (and a research_dispatch session) must skip it. See
+    // `eventTypeAcceptsUserSkills`.
+    const userSkillDir = join(
+      fakeDataDir,
+      "context",
+      "policies",
+      "skills",
+      "my-digest",
+    );
+    mkdirSync(userSkillDir, { recursive: true });
+    writeFileSync(
+      join(userSkillDir, "SKILL.md"),
+      `---\nname: my-digest\ndescription: "User digest"\n---\n\n# Body\n`,
+    );
+
+    const wikiDir = ensureSessionWorkdir(
+      fakeProjectRoot,
+      fakeDataDir,
+      110,
+      "wiki.compile",
+      { processKey: "wiki.compile" },
+    );
+    expect(
+      existsSync(join(wikiDir, ".claude", "skills", "my-digest", "SKILL.md")),
+    ).toBe(false);
+
+    const researchDir = ensureSessionWorkdir(
+      fakeProjectRoot,
+      fakeDataDir,
+      111,
+      "routine.research_dispatch",
+      { processKey: "routine.research_dispatch" },
+    );
+    expect(
+      existsSync(join(researchDir, ".claude", "skills", "my-digest", "SKILL.md")),
+    ).toBe(false);
   });
 
   it("fallback simulation: ensureBackendMaterialized + syncAllUserSkills populates user skills in fallback dir", () => {
@@ -2103,8 +2195,8 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
     expectedProfileHeading: "# Routine Agent",
   },
   {
-    processKey: "routine.hourly_check",
-    eventType: "routine.hourly_check",
+    processKey: "routine.activity_scan",
+    eventType: "routine.activity_scan",
     expectedSkills: [
       "context",
       "today",
@@ -2176,6 +2268,12 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       // BROWSER_TASK_REDESIGN_PLAN.md §10 / Phase 5 — DM-driven entry
       // point to the open-ended browser-task surface.
       "browser-task",
+      // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 — generic detached
+      // long-task spawn + the clarify-relay. Both are unconditional on
+      // `message.received.dm`, so the conservative-include matrix carries
+      // them like browser-task.
+      "background-task",
+      "background-task-reply",
       // NB: `agent-create` is conditionally loaded (recurring-work cadence +
       // verb in the message) — the matrix passes no message text, so it is
       // correctly dropped here. Its conditional gate is tested in

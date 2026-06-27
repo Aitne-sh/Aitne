@@ -10,6 +10,23 @@ For every `<fetch integration="notion" ...>` row in `<acquisition-plan>`,
 take the branch below that matches the row's `mode` attribute. Notion rows
 do not fan out per account — the dispatcher emits one row per workspace.
 
+Every Notion row MUST carry a `targets='[...]'` attribute. Treat it as the
+user's allowlist of pages / notes the routine may inspect:
+
+- Parse it as a JSON array of `{ "label": "...", "locator": "..." }`.
+- `locator` may be a Notion page URL, page id, database item id, or page
+  title. Prefer direct fetch by URL/id when the connector supports it. For a
+  title locator, search only that exact title with the smallest supported
+  page size and choose at most one best match.
+- Never browse or page through the whole workspace. Do not use
+  `start_cursor` for routine acquisition.
+- Fetch at most one page per target and at most 10 pages per row. If more
+  than 10 targets are present, process the first 10 and append
+  `{"type":"target-cap","integration":"notion","cap":10}` to `errors`.
+- After resolving targets, apply the row's time window cutoff
+  (`updated_24h` / `updated_1h`) client-side and submit only pages whose
+  `last_edited_time` is inside the window.
+
 Submit every returned page — for a whole window in **one** call — via the
 `mcp__aitne-observations__submit_observations` MCP tool when it is in your
 allowed tools (preferred — the structured MCP transport carries
@@ -56,18 +73,23 @@ Cap each batch at 200 entries — split the window into multiple
 `submit_observations` (or POST) calls if the upstream returns more than that.
 
 <!-- mode:direct:notion -->
-GET `http://localhost:8321/api/notion/search<query>` where `<query>` is
-the literal `query` attribute of the `<fetch>` row (e.g.
-`?page_size=50&sort=descending` or `?page_size=20&sort=descending`).
-The route accepts `q`, `type`, `sort` (`ascending` / `descending`),
-`page_size` (≤100), `start_cursor` — it has NO time filter, so do the
-window cutoff client-side. The daemon returns `{ "results": [...] }`
-sorted by `last_edited_time` descending; filter to entries whose
-`last_edited_time` is at or after the window the `<fetch>` row's
-window symbol implies (`updated_24h` → today's agent-day start,
-`updated_1h` → the current hour boundary), then map every surviving
-page into the `observations[]` array of a single `submit_observations`
-MCP tool call (or `POST /api/observations/batch` fallback).
+Resolve each allowlisted target against the daemon API — never the
+`query` attribute's whole-window search shape:
+
+- URL / id locator — extract the page id (the trailing 32-hex run of a
+  Notion URL; dashed UUID form also accepted) and GET
+  `http://localhost:8321/api/notion/pages/<id>?markdown=false`. The
+  `markdown=false` flag returns metadata only (`lastEditedTime`, title,
+  parent, url) without page content — the routine never needs the body.
+- Title locator — GET
+  `http://localhost:8321/api/notion/search?q=<title>&page_size=3&sort=descending`
+  and keep at most the single best title match.
+
+Do not pass `start_cursor` and do not issue an unfiltered
+`/api/notion/search` call. Filter resolved pages by the row's window
+symbol and map every surviving page into the `observations[]` array of a
+single `submit_observations` MCP tool call (or
+`POST /api/observations/batch` fallback).
 <!-- /mode:direct:notion -->
 
 <!-- mode:delegated-same:notion -->
@@ -75,9 +97,10 @@ The connector is bound to your own session backend. Use the in-session
 connector surface your skills document for Notion; the `<fetch>` row's
 `query` attribute carries the catalog's `delegated` form
 (e.g. `last_edited_time>=<iso>`). Translate it into the args your bound
-surface accepts. The Notion MCP `notion-search` tool caps `page_size`
-at **25** — page through with `start_cursor` if the window needs more.
-POST every returned page as specified above.
+surface accepts, but restrict work to the `targets` allowlist. The Notion MCP
+`notion-search` tool caps `page_size` at **25** — use `page_size=3` for title
+resolution and never page through with `start_cursor`. POST every returned
+allowlisted page as specified above.
 <!-- /mode:delegated-same:notion -->
 
 <!-- mode:delegated-cross:notion -->
@@ -88,7 +111,7 @@ body (substitute the row's `query` into `task`):
 
 ```json
 {
-  "task": "Search Notion for pages with last_edited_time matching <query>. Return id, title, last_edited, parent, url for each page. Up to 50 pages.",
+  "task": "Resolve only the allowlisted Notion targets whose last_edited_time matches <query>. Return id, title, last_edited, parent, url for each page. Up to 10 pages. Do not paginate.",
   "outputSchema": {
     "type": "object",
     "required": ["pages"],
@@ -114,16 +137,19 @@ body (substitute the row's `query` into `task`):
 }
 ```
 
-Map all items in `result.pages[]` into a single `submit_observations`
-MCP tool call (or `POST /api/observations/batch` fallback).
+Include the parsed target allowlist in `task` and instruct the delegated
+backend to resolve only those pages, up to 10 pages total and with no
+pagination. Map all items in `result.pages[]` into a single
+`submit_observations` MCP tool call (or `POST /api/observations/batch`
+fallback).
 <!-- /mode:delegated-cross:notion -->
 
 <!-- mode:native:notion -->
 The connector is bound natively to your own session backend. Use the
 in-session connector surface your skills document — same call shape as
-`delegated-same`. The Notion MCP `notion-search` tool caps `page_size`
-at **25** — page through with `start_cursor` if the window needs more.
-The daemon does not proxy. POST every returned page as specified above.
+`delegated-same`. Restrict work to the `targets` allowlist, use `page_size=3`
+for title resolution, and never page through with `start_cursor`. The daemon
+does not proxy. POST every returned allowlisted page as specified above.
 <!-- /mode:native:notion -->
 
 <!-- mode:disabled:notion -->

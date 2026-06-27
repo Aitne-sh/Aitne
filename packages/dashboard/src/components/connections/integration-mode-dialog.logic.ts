@@ -69,7 +69,7 @@ export function directToDelegatedLosses(
       },
       {
         message:
-          "15-minute imminent-event alerts are unavailable — the agent learns about new events on the next hourly check.",
+          "15-minute imminent-event alerts are unavailable — the agent learns about new events on the next activity scan.",
         reversible: true,
       },
     );
@@ -83,7 +83,7 @@ export function directToDelegatedLosses(
     losses.push(
       {
         message:
-          "Notion poller stops observing database edits. Recent-edit awareness shifts from per-poll to inline notion-search inside the hourly check, with reduced recall on less-typed databases.",
+          "Notion poller stops observing database edits. Recent-edit awareness shifts from per-poll to inline notion-search inside the activity scan, with reduced recall on less-typed databases.",
         reversible: true,
       },
       {
@@ -299,7 +299,7 @@ export function toNativeImpacts(
 
   if (fromMode === "direct") {
     out.push({
-      message: `The daemon's background poller for ${name} stops. The agent fetches via ${toBackend}'s native connector during DM and hourly_check turns instead.`,
+      message: `The daemon's background poller for ${name} stops. The agent fetches via ${toBackend}'s native connector during DM and activity_scan turns instead.`,
       reversible: true,
     });
     out.push({
@@ -322,7 +322,7 @@ export function toNativeImpacts(
 
   if (fromMode === "delegated") {
     out.push({
-      message: `The delegated-sync worker stops ticking on its cadence. Observations land at hourly_check granularity instead, fetched by the main DM session itself.`,
+      message: `The delegated-sync worker stops ticking on its cadence. Observations land at activity_scan granularity instead, fetched by the main DM session itself.`,
       reversible: true,
     });
     out.push({
@@ -333,7 +333,7 @@ export function toNativeImpacts(
 
   if (fromMode === "disabled") {
     out.push({
-      message: `The integration becomes reachable from hourly_check and DM again — currently it is silent. No background poller runs; the agent fetches in-turn.`,
+      message: `The integration becomes reachable from activity_scan and DM again — currently it is silent. No background poller runs; the agent fetches in-turn.`,
       reversible: true,
     });
   }

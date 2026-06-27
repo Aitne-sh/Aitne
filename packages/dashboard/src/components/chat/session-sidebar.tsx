@@ -119,7 +119,7 @@ export function SessionSidebar({
           <div className="flex items-center gap-2">
             <span className={cn(
               "h-2 w-2 shrink-0 rounded-full",
-              currentSessionInfo ? "bg-emerald-500 animate-pulse" : "bg-gray-400",
+              currentSessionInfo ? "bg-success animate-pulse" : "bg-gray-400",
             )} />
             <span className="text-sm font-medium text-foreground">Current Session</span>
           </div>
@@ -142,7 +142,7 @@ export function SessionSidebar({
           <Button
             variant="outline"
             size="sm"
-            className="mt-1.5 w-full text-xs border-green-400 text-green-600 hover:bg-green-50 hover:text-green-700 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-950 dark:hover:text-green-300"
+            className="mt-1.5 w-full text-xs border-success/40 text-success hover:bg-success/10 hover:text-success"
             onClick={onEndSession}
           >
             <Square className="mr-1.5 h-3 w-3" />
@@ -160,7 +160,7 @@ export function SessionSidebar({
             <button
               type="button"
               onClick={onDismissDeleteError}
-              className="ml-2 rounded p-0.5 text-red-600 hover:bg-red-100 dark:text-red-300 dark:hover:bg-red-900"
+              className="ml-2 rounded p-0.5 text-destructive hover:bg-destructive/10"
               aria-label="Dismiss error"
             >
               <X className="h-3 w-3" />
@@ -178,7 +178,7 @@ export function SessionSidebar({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-2 text-[10px] text-muted-foreground hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950 dark:hover:text-red-300"
+            className="h-6 px-2 text-[10px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             onClick={onCleanAll}
             disabled={deleteInFlight}
             title="Delete all past sessions"
@@ -257,7 +257,7 @@ export function SessionSidebar({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950 dark:hover:text-red-300"
+                    className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     disabled={deleteInFlight}
                     onClick={(event) => {
                       event.stopPropagation();

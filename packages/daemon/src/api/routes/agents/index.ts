@@ -10,9 +10,11 @@ import {
   deleteAgent,
   getAgent,
   getOverrideSnapshot,
+  getRuntimeWindow,
   listAgents,
   setEnabled,
   setOverrideSnapshot,
+  setRuntimeWindow,
   type AgentListFilter,
 } from "../../../db/agents-store.js";
 import {
@@ -31,7 +33,14 @@ import {
 import { loadEffectiveDefinition } from "../../../core/agents/effective-definition.js";
 import { loadAgents } from "../../../core/agents/loader.js";
 import { buildAgentLoadOptions } from "../../../core/agents/loader-boot.js";
-import { resolveRuntimeWindowCadence } from "../../../core/agents/builtin-registry.js";
+import {
+  getBuiltinRegistryEntry,
+  resolveRuntimeWindowCadence,
+} from "../../../core/agents/builtin-registry.js";
+import {
+  mergeRuntimeWindow,
+  resolveActivityScanCadence,
+} from "../../../core/agents/activity-scan-cadence.js";
 import {
   buildDetail,
   buildListItem,
@@ -54,6 +63,21 @@ import {
 
 const logger = createLogger("agents-api");
 
+/**
+ * v0.1.10 → v0.1.11: the `hourly-check` built-in became `activity-scan`.
+ * Old URLs (`/api/agents/hourly-check`, bookmarks, in-flight skills) keep
+ * working for one deprecation window — same in-process normalization
+ * pattern as `context-vault-aliases.ts` (never an HTTP redirect, so
+ * `curl -X PATCH` without `-L` keeps working). Remove after a minor release.
+ */
+const LEGACY_AGENT_SLUG_ALIASES: Readonly<Record<string, string>> = {
+  "hourly-check": "activity-scan",
+};
+
+function normalizeSlug(raw: string): string {
+  return LEGACY_AGENT_SLUG_ALIASES[raw] ?? raw;
+}
+
 /** Per-Agent 7d-metrics cache (§9.1 — "cached in-memory for 60 seconds"). */
 const METRICS_TTL_MS = 60_000;
 
@@ -69,16 +93,37 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
   const { db, config } = deps;
   const dayBoundaryHour = config.dayBoundaryHour;
 
-  // Live interval cadence for a runtime-window built-in (hourly-check), or null
-  // for every other Agent. Reads `config` at call time — `applyConfigUpdates`
-  // mutates it in place (Object.assign), so a runtime interval/active-hours
-  // change via PATCH /api/config is reflected here without a daemon restart.
-  const cadenceFor = (slug: string) =>
-    resolveRuntimeWindowCadence(slug, {
-      hourlyCheckIntervalMinutes: config.hourlyCheckIntervalMinutes,
-      hourlyCheckActiveStartHour: config.hourlyCheckActiveStartHour,
-      hourlyCheckActiveEndHour: config.hourlyCheckActiveEndHour,
+  // Live interval cadence for a runtime-window built-in (activity-scan), or null
+  // for every other Agent. The agent row's `runtime_window` overrides win;
+  // the legacy `activityScan*` config keys are the per-field fallback
+  // (AGENTS_HUB_REDESIGN_PLAN §2). Read at call time so a PATCH is reflected
+  // immediately.
+  const cadenceFor = (slug: string) => {
+    const resolved = resolveActivityScanCadence(getRuntimeWindow(db, "activity-scan"), config);
+    return resolveRuntimeWindowCadence(slug, {
+      activityScanIntervalMinutes: resolved.intervalMinutes,
+      activityScanActiveStartHour: resolved.activeStartHour,
+      activityScanActiveEndHour: resolved.activeEndHour,
     });
+  };
+
+  // Runtime-window block for the detail envelope — only for the
+  // runtime-window built-in (registry cron resolver === null).
+  const scheduleWindowFor = (slug: string) => {
+    const entry = getBuiltinRegistryEntry(slug);
+    if (!entry || entry.cronExpression !== null) return null;
+    const overrides = getRuntimeWindow(db, slug);
+    const resolved = resolveActivityScanCadence(overrides, config);
+    return {
+      overrides: overrides as Record<string, number>,
+      resolved: {
+        interval_minutes: resolved.intervalMinutes,
+        active_start_hour: resolved.activeStartHour,
+        active_end_hour: resolved.activeEndHour,
+        min_observations: resolved.minObservations,
+      },
+    };
+  };
 
   const readDefinitionFile = (path: string): string | null => {
     try {
@@ -219,7 +264,7 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
 
   // ── GET /agents/:slug (§9.2) ────────────────────────────────────────────
   app.get("/agents/:slug", (c) => {
-    const slug = c.req.param("slug");
+    const slug = normalizeSlug(c.req.param("slug"));
     const dto = getAgent(db, slug);
     if (!dto) return c.json({ error: "agent_not_found", slug }, 404);
 
@@ -236,13 +281,14 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
       metrics30d: metricsWindow(db, slug, 30),
       byErrorKind7d: byErrorKind(db, slug, 7),
       intervalCadence: cadenceFor(slug),
+      scheduleWindow: scheduleWindowFor(slug),
     });
     return c.json(detail);
   });
 
   // ── GET /agents/:slug/executions (§9.3) ─────────────────────────────────
   app.get("/agents/:slug/executions", (c) => {
-    const slug = c.req.param("slug");
+    const slug = normalizeSlug(c.req.param("slug"));
     if (!getAgent(db, slug)) return c.json({ error: "agent_not_found", slug }, 404);
 
     const limitRaw = Number.parseInt(c.req.query("limit") ?? "25", 10);
@@ -263,7 +309,7 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
 
   // ── POST /agents/:slug/run-now (§9.4) ───────────────────────────────────
   app.post("/agents/:slug/run-now", async (c) => {
-    const slug = c.req.param("slug");
+    const slug = normalizeSlug(c.req.param("slug"));
     const dto = getAgent(db, slug);
     if (!dto) return c.json({ error: "agent_not_found", slug }, 404);
 
@@ -356,7 +402,7 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
 
   // ── PATCH /agents/:slug (§9.5) ──────────────────────────────────────────
   app.patch("/agents/:slug", async (c) => {
-    const slug = c.req.param("slug");
+    const slug = normalizeSlug(c.req.param("slug"));
     const dto = getAgent(db, slug);
     if (!dto) return c.json({ error: "agent_not_found", slug }, 404);
 
@@ -379,6 +425,15 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
     }
 
     const now = Date.now();
+    // Validate the schedule_window merge BEFORE applying anything so a bad
+    // window can't leave a half-applied PATCH (enabled flipped, window 400d).
+    let mergedWindow: ReturnType<typeof mergeRuntimeWindow> | undefined;
+    if (plan.scheduleWindow !== undefined) {
+      mergedWindow = mergeRuntimeWindow(getRuntimeWindow(db, slug), plan.scheduleWindow, config);
+      if (!mergedWindow.ok) {
+        return c.json({ error: mergedWindow.error, field: mergedWindow.field }, 400);
+      }
+    }
     if (plan.setEnabled !== undefined) {
       setEnabled(db, slug, plan.setEnabled, now, now);
       deps.agentEnabledCache?.invalidate();
@@ -407,6 +462,19 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
         reset: plan.overrideReset,
       });
     }
+    if (mergedWindow?.ok) {
+      setRuntimeWindow(db, slug, mergedWindow.value, now);
+      recordAudit("agent.schedule_window_changed", slug, {
+        window: mergedWindow.value,
+        cadence_changed: mergedWindow.cadenceChanged,
+      });
+      // Interval / active-hours edits change the registered cron expression;
+      // rebuild live (same mechanism the dashboard config PATCH used for the
+      // legacy keys). min_observations is fire-time-only — no rebuild.
+      if (mergedWindow.cadenceChanged) {
+        deps.onScheduleConfigChanged?.();
+      }
+    }
     if (plan.stripped.length > 0) {
       logger.info({ slug, stripped: plan.stripped }, "PATCH /agents stripped read-only fields");
     }
@@ -418,7 +486,7 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
 
   // ── DELETE /agents/:slug (§9.6) ─────────────────────────────────────────
   app.delete("/agents/:slug", async (c) => {
-    const slug = c.req.param("slug");
+    const slug = normalizeSlug(c.req.param("slug"));
     const dto = getAgent(db, slug);
     if (!dto) return c.json({ error: "agent_not_found", slug }, 404);
 

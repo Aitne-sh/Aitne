@@ -55,8 +55,8 @@ recorded reason — "every morning, run my finance app and log the
 balance to a finance dossier", "from now on whenever X happens, do
 Y" — switch to the `management-policy` skill instead. It creates a
 `policies/management-captures/<slug>.md` that captures the WHY alongside the cadence
-(via `policies/routines/custom/<slug>.md`) so the rule survives a context
-reset. When the cadence is all that matters and there is no intent to
+(scheduled via a linked recurring Agent, `POST /api/agents`) so the rule
+survives a context reset. When the cadence is all that matters and there is no intent to
 record, create the recurring work/DM per the "Recurring" section below.
 
 ## DM vs Agent Task
@@ -111,6 +111,15 @@ Pick `tier` (`lite` / `medium` / `high`) by default — backend-neutral cost kno
 ## Budget
 - **Max 5 wake-ups per execution.** Consolidate into a single briefing task if more.
 - **Morning Routine batches all day's wake-ups at once.** Other events schedule only immediate needs.
+
+## Lock-step on PATCH / DELETE
+
+Agent Plan rows and schedule entries move together in both directions.
+When a schedule you PATCH or DELETE backs an `## Agent Plan` row in
+<today>, update that row in the same turn — today skill §"Agent Plan
+revision — cancel / amend" (flip + `(cancelled: <reason>)`, or re-time
+the row) — and append the Agent Log line. A schedule edit without the
+row edit leaves a plan that lies.
 
 ---
 

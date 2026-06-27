@@ -54,6 +54,7 @@ import {
 import {
   createInitialSlotState,
   decideAcquire,
+  decideCancel,
   decidePark,
   decideRelease,
   decideUnpark,
@@ -82,6 +83,16 @@ const logger = createLogger("browser-task-runner");
  */
 function slotSiteKeyForRow(row: BrowserTaskRow): string {
   return row.siteKey ?? `__open__:${row.id}`;
+}
+
+/** True when the slot manager already tracks `taskId` as an active
+ *  occupant (acquired a slot), even if the DB row still reads `pending`
+ *  in the narrow acquire→markRunning window. Mirrors the route helper. */
+function slotManagerHasActive(state: SlotState, taskId: string): boolean {
+  for (const entry of state.active.values()) {
+    if (entry.taskId === taskId) return true;
+  }
+  return false;
 }
 
 /**
@@ -727,14 +738,55 @@ export function createBrowserTaskRunner(
       // landing in that window is silently dropped and the SDK runs
       // anyway, burning turns / cost.
       //
-      // Other non-terminal states are deliberately excluded: `pending`
-      // is route-handled (decideCancel removes the FIFO entry) and the
-      // parked states (`awaiting_user`/`final_confirm`) always have a
-      // tracked handle, so they take the `handle` branch above. Recording
-      // a pending-abort for a `pending` row would leak the map entry —
-      // nothing ever consumes it (`runDriverFromPending` only drains it
-      // after `prepareDriverHandle`, which a pending row never reaches).
+      // The parked states (`awaiting_user`/`final_confirm`) always have a
+      // tracked handle, so they take the `handle` branch above.
       pendingAborts.set(taskId, reason || "cancel");
+    } else if (row.state === "pending") {
+      // Queued behind the concurrency cap (or in the narrow acquire→
+      // markRunning window). The HTTP `/cancel` route handles `pending`
+      // itself, but `!stop <id>` (Phase 4) calls `cancel()` directly — so
+      // the runner must own this state too, or the bang path reports a
+      // false "Stopping…" while the task keeps running.
+      if (slotManagerHasActive(deps.slotStateRef.state, taskId)) {
+        // `tryAcquire` already promoted the task (slot active) but
+        // `markRunning` hasn't flipped the DB row yet — `decideCancel`
+        // would throw on an active occupant. Record the abort intent like
+        // the running case; the handle registered at `runDriverFromPending`
+        // fires it before the SDK loop begins (and drains the map entry,
+        // so it does not leak).
+        pendingAborts.set(taskId, reason || "cancel");
+      } else {
+        // Genuinely queued — drop the FIFO entry and write the terminal
+        // directly (no slot was held, so no release cascade). Mirrors the
+        // route's `isPending` path and the background runner.
+        try {
+          deps.slotStateRef.state = decideCancel(
+            deps.slotStateRef.state,
+            taskId,
+          ).state;
+        } catch (err) {
+          /* c8 ignore start -- defensive: slot promoted between the check and here */
+          logger.warn(
+            { err, taskId },
+            "decideCancel on pending row failed (continuing)",
+          );
+          /* c8 ignore stop */
+        }
+        const finishedAt = now();
+        const terminal = markTerminal(deps.db, {
+          id: taskId,
+          state: "cancelled",
+          outcomeDetail: `cancelled_in_queue:${reason}`,
+          report: null,
+          finishedAt,
+        });
+        emitter.emitFromRow(terminal, finishedAt);
+        logger.info(
+          { taskId, reason },
+          "browser-task cancel (pending → cancelled)",
+        );
+        return true;
+      }
     }
     if (handle) {
       // Cancel any pending lite-final-confirm tokens issued by this

@@ -9,6 +9,7 @@ import {
 } from "@/lib/hooks/use-books";
 import { EmptyState } from "@/components/shared/empty-state";
 import { QueryResult, TableSkeleton, CardSkeleton } from "@/components/shared/query-result";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,12 +33,6 @@ interface ImportOutcome {
   kind: "success" | "error";
   message: string;
 }
-
-const STATUS_COLORS: Record<string, "blue" | "green" | "gray"> = {
-  reading: "blue",
-  completed: "green",
-  abandoned: "gray",
-};
 
 function renderStars(rating: number | null): string {
   if (!rating) return "—";
@@ -140,21 +135,21 @@ export default function ReadingPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardStatLabel>Currently Reading</CardStatLabel>
-              <BookOpen className="h-4 w-4 text-blue-500" />
+              <BookOpen className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardValue>{readingCount}</CardValue>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardStatLabel>Completed</CardStatLabel>
-              <Library className="h-4 w-4 text-green-500" />
+              <Library className="h-4 w-4 text-success" />
             </CardHeader>
             <CardValue>{completedCount}</CardValue>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardStatLabel>Total Highlights</CardStatLabel>
-              <Bookmark className="h-4 w-4 text-amber-500" />
+              <Bookmark className="h-4 w-4 text-warning" />
             </CardHeader>
             <CardValue>{(summaryData?.totalHighlights ?? 0).toLocaleString()}</CardValue>
           </Card>
@@ -218,11 +213,9 @@ export default function ReadingPage() {
                         <td className="py-2 px-3 font-medium">{book.title}</td>
                         <td className="py-2 px-3 text-muted-foreground">{book.author ?? "—"}</td>
                         <td className="text-center py-2 px-3">
-                          <Badge variant={STATUS_COLORS[book.status] ?? "gray"}>
-                            {book.status}
-                          </Badge>
+                          <StatusBadge status={book.status} />
                         </td>
-                        <td className="text-center py-2 px-3 text-amber-500">
+                        <td className="text-center py-2 px-3 text-warning">
                           {renderStars(book.rating)}
                         </td>
                         <td className="text-right py-2 px-3">{book.highlightCount}</td>
@@ -274,7 +267,7 @@ export default function ReadingPage() {
                 <div className="space-y-3">
                   {highlights.map((h: ReadingHighlightRow) => (
                     <Card key={h.id} className="p-4">
-                      <blockquote className="text-sm border-l-2 border-amber-500 pl-3 italic">
+                      <blockquote className="text-sm border-l-2 border-warning pl-3 italic">
                         {h.content}
                       </blockquote>
                       <div className="flex gap-4 mt-2 text-xs text-muted-foreground">

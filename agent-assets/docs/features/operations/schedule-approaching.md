@@ -72,7 +72,7 @@ integration mode:
 - **`native` mode** — the daemon does not poll, so it reads
   `observations` rows instead. These are posted by the agent's
   native-mode `routine.fetch_window` pre-pass. Because that pre-pass
-  refreshes on the hourly-check tick (~60-minute cadence), events
+  refreshes on the activity-scan tick (~60-minute cadence), events
   scheduled with less than ~60 minutes of lead time may miss their
   reminder. Direct mode (5-minute poll) does not have this limit.
 
@@ -94,7 +94,7 @@ If a reminder you expected never arrived:
 - Check the integration mode. Reminders fire in `direct`, `delegated`,
   and `native` modes; only `disabled` mode suppresses them entirely.
 - In `native` mode, short-notice events (< ~60 min lead time) can be
-  missed because observations refresh on the hourly-check cadence.
+  missed because observations refresh on the activity-scan cadence.
 
 ## Related
 

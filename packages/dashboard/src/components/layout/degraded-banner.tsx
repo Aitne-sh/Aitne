@@ -21,7 +21,7 @@ export function DegradedBanner() {
   return (
     <div
       role="alert"
-      className="flex items-center gap-2 border-b border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
+      className="flex items-center gap-2 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
     >
       <AlertTriangle className="h-4 w-4 shrink-0" />
       <div className="flex-1 min-w-0">
@@ -33,13 +33,13 @@ export function DegradedBanner() {
           </>
         )}
         {". "}
-        <span className="text-red-700/80 dark:text-red-300/80">
+        <span className="text-destructive/80">
           {bodyFor(degraded.reason)}
         </span>
       </div>
       <Link
         href="/settings#management-mode"
-        className="shrink-0 rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 hover:bg-red-100 dark:border-red-800 dark:bg-red-900 dark:text-red-100"
+        className="shrink-0 rounded border border-destructive/40 bg-background px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
       >
         Open Management Mode
       </Link>

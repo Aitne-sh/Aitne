@@ -90,8 +90,8 @@ is accepted only when:
 
 - The entry's retention window has elapsed (see the **retention**
   reference loaded by the skill body), OR
-- The operator passes the `X-Operator-Bypass: 1` header (dashboard
-  flows only; never set this from an agent curl).
+- The operator passes the `X-Roadmap-Validation: off` header
+  (dashboard flows only; never set this from an agent curl).
 
 A removal before the retention window permits it returns:
 
@@ -101,6 +101,11 @@ A removal before the retention window permits it returns:
 
 Do not blind-retry this — wait out the window or use the operator
 bypass from a dashboard flow.
+
+`X-Roadmap-Validation: off` is roadmap-scoped — it only takes effect
+when `path = plans/roadmap` — and it disables **all** roadmap content
+validation: the transition guard, the duplicate-id check, **and** the
+retention window. It is not a retention-only escape hatch.
 
 ## Body submission
 

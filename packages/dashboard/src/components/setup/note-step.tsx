@@ -6,6 +6,7 @@ import { ArrowLeft, FolderSymlink, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DirectoryPickerField } from "@/components/directory-picker-field";
 import { IntegrationCard } from "@/components/connections/integration-card";
+import { NotionDirectSettingsBody } from "@/components/connections/notion-card";
 import { api, ApiError } from "@/lib/api-client";
 import { useConfig } from "@/lib/hooks/use-config";
 import {
@@ -109,7 +110,9 @@ export function NoteStep({ onNext, onBack }: NoteStepProps) {
     >
       <div className="w-full max-w-2xl mx-auto space-y-6">
         {/* Notion card — registry-driven; mode toggle + direct API key body. */}
-        <IntegrationCard integrationKey="notion" />
+        <IntegrationCard integrationKey="notion">
+          <NotionDirectSettingsBody />
+        </IntegrationCard>
 
         <div className="rounded-xl border border-border bg-card p-5 text-left space-y-4">
           <div>
@@ -154,7 +157,7 @@ export function NoteStep({ onNext, onBack }: NoteStepProps) {
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400 text-center">
+          <p className="text-sm text-destructive text-center">
             {error}
           </p>
         )}

@@ -172,7 +172,7 @@ export interface MorningPipelineOrchestratorDeps {
    * morning-routine-optimization.md Phase 6 — ⑥ AgentJournalAppender
    * needs the safety write-tracker so the journal's atomic write does
    * not get tagged as a user-actor change by the obsidian / git
-   * observers (which would re-trigger the hourly check on the agent's
+   * observers (which would re-trigger the activity scan on the agent's
    * own output). The context-index reconciler is intentionally NOT
    * threaded here: `journal/agent.md` is not in the indexable set, so
    * the chokidar fallback path covers it without an explicit hint.
@@ -565,7 +565,7 @@ export class MorningRoutinePipelineOrchestrator {
    * (audit's internal try/catch swallowed a real SQLite error AND
    * `processResult`'s notification path threw too), the parent-audit
    * emitter will return `stage_a_row_missing` and the pre-routine gate
-   * stays unfired for the day — that day's hourly_check / evening_review
+   * stays unfired for the day — that day's activity_scan / evening_review
    * are skipped with `morning_routine_pending_for_today`, but
    * `MAX_RETRIES`-bounded `scheduleMorningRetry` does NOT loop on this
    * shape because today.md health is independent. The day's automation
@@ -1326,7 +1326,7 @@ export class MorningRoutinePipelineOrchestrator {
           // could still call `Write` on `daily/<date>.md` directly —
           // bypassing the daemon-side `DailyJournalComposer` chokepoint
           // and racing it. Mirrors the precedent at
-          // `dispatcher-hourly-check.ts:1003` (`routine.hourly_check.triage`).
+          // `dispatcher-activity-scan.ts:1003` (`routine.activity_scan.triage`).
           //
           // Activation requires the clamp gate in `claude-code-core.ts`
           // to honour an empty array as "no tools" — fixed in the same

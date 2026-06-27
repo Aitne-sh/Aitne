@@ -14,10 +14,16 @@ Base URL: `http://localhost:8321`. All daemon calls via `curl -s` with
 > **Refusal directive — read first.** Google Calendar is in `native`
 > mode bound to Claude. Do **NOT** call any of:
 >
-> - `POST /api/integrations/google_calendar/exec` (returns `410` with
->   `X-Integration-Mode: native`)
-> - `POST /api/integrations/google_calendar/reconcile` (410)
 > - `/api/calendar/*` (route-prefix 410 in native mode)
+> - `POST /api/integrations/google_calendar/exec`
+> - `POST /api/integrations/google_calendar/reconcile`
+>
+> In native mode `POST /api/integrations/google_calendar/exec` returns
+> **409 `mode_mismatch`** (the handler rejects non-delegated mode);
+> `.../reconcile` is not mode-gated at all. Do not call either — use the
+> native connector. The 410 + `X-Integration-Mode: native` refusal
+> contract applies ONLY to the integration's own data routes
+> (`/api/calendar/*`).
 >
 > Reach Google Calendar through the in-session Google Calendar
 > connector your harness exposes. Your tool menu lists every available
@@ -128,13 +134,13 @@ The suggest-time capability is read-only and exempt from the confirm dance.
 - All-day events use `YYYY-MM-DD` with no offset.
 - Be explicit which shape the destructive-confirm plan describes.
 
-### Imminent-event reminders (hourly_check)
+### Imminent-event reminders (activity_scan)
 
 Native mode replaces the daemon-side
 `POST /api/integrations/google_calendar/reconcile` POST that delegated
 mode uses. In native mode, the agent itself drives the imminent-window
 fetch every hour and POSTs each materialised event to
-`/api/observations`. The hourly_check native variant's Step 0b spells
+`/api/observations`. The activity_scan native variant's Step 0b spells
 out the exact shape; this skill describes the call surface.
 
 Free-busy queries are composed locally — the suggest-time capability
@@ -238,7 +244,7 @@ session's integration state.
 
 ## Persisting Calendar observations from native fetches
 
-When the hourly_check native flow's Step 0b fetches imminent-window
+When the activity_scan native flow's Step 0b fetches imminent-window
 events, POST each materialised event to `/api/observations` so
 subsequent runs can dedup. The daemon computes `contentHash`
 server-side via `@aitne/shared/observations-hash` — pass
@@ -268,7 +274,7 @@ curl -s -X POST http://localhost:8321/api/observations \
 window (§11.3.1) — stop and re-read `<integration_modes>`.
 
 The two-fetch pattern (imminent 15-min + 24-hour drift detection)
-documented in `routine.hourly_check.native.claude.md` is the canonical
+documented in `routine.activity_scan.native.claude.md` is the canonical
 shape; this skill describes the per-call surface, not the orchestration.
 
 ---

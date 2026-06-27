@@ -47,6 +47,10 @@ import {
   recordFailureSpendRow,
 } from "./failure-spend.js";
 import type { AuthTelemetry } from "./auth-telemetry.js";
+import {
+  extractAgentRouteOverride,
+  type AgentRouteOverride,
+} from "../agents/agent-route-override.js";
 
 const logger = createLogger("backend-router");
 
@@ -57,7 +61,7 @@ const logger = createLogger("backend-router");
  */
 const PROCESS_MAX_TURNS: Partial<Record<string, number>> = {
   "routine.morning_routine": 50,   // avg 17.7, max observed 35 — 300 was 8.5x max
-  "routine.hourly_check": 30,      // P90=25, pad for complex observation sets
+  "routine.activity_scan": 30,      // P90=25, pad for complex observation sets
   "routine.roadmap_refresh": 25,   // single observed run was 13 turns
   "message.dm": 35,                // most <15, allow long conversations
   // Setup is high-tier (Opus / gpt-5.4 / Pro — Codex collapses high to
@@ -144,7 +148,7 @@ export interface RouterExecuteParams {
    * Concretely: if `requestedTier` is passed and the pinned model's registry
    * tier does NOT match, `resolveBinding` will swap in a canonical model for
    * the requested tier on the same backend (e.g. Pro preset pins
-   * `routine.hourly_check` to Sonnet; `requestedTier: "heavy"` swaps to
+   * `routine.activity_scan` to Sonnet; `requestedTier: "heavy"` swaps to
    * `claude-opus-4-8`). This is the ONLY path through which the three
    * explicit-Opus escape hatches (dashboard chat picker, agent_schedule.model,
    * `/api/agent/run-now {requestedModel}`) can reach Opus on Pro plan.
@@ -303,6 +307,7 @@ export class BackendRouter implements IAgentRouter {
   private readonly cores: Partial<Record<BackendId, IAgentCore>>;
   private readonly hasProcessConfigTable: boolean;
   private readonly hasBackendDefaultsTable: boolean;
+  private readonly hasAgentsTable: boolean;
   private readonly notificationDedup = new Map<string, number>();
 
   constructor(
@@ -318,6 +323,7 @@ export class BackendRouter implements IAgentRouter {
     ) as Partial<Record<BackendId, IAgentCore>>;
     this.hasProcessConfigTable = this.hasTable("process_backend_config");
     this.hasBackendDefaultsTable = this.hasTable("backend_global_defaults");
+    this.hasAgentsTable = this.hasTable("agents");
   }
 
   async execute(
@@ -764,6 +770,162 @@ export class BackendRouter implements IAgentRouter {
   }
 
   resolveBinding(
+    event: Event,
+    options?: {
+      processKey?: ProcessKey;
+      requestedTier?: ProcessModelTier;
+      requestedBackendId?: BackendId;
+      requestedModelId?: string;
+    },
+  ): ResolvedBackendRoute {
+    // Built-in Agent override layer (AGENT_DEFINITIONS_DESIGN.md §6.4.1
+    // runtime wiring). When the firing resolved to a built-in Agent whose
+    // operator saved tier / model / limit overrides on the Definition tab,
+    // fold them in UNDER caller-explicit options:
+    //
+    //   caller-explicit (chat picker, run-now hint, fetch-window backend pin)
+    //     > agent override snapshot
+    //       > process_backend_config / process-key defaults
+    //
+    // A caller that passes ANY routing option (tier, backend, or model)
+    // keeps full control and the agent override is skipped WHOLESALE —
+    // routing AND limits. The explicit-caller cases are all envelopes the
+    // caller owns deliberately: run-now / !checks model hints, the
+    // dashboard pickers, the morning-retry medium clamp (a cost cap that
+    // must not be re-widened by an agent override), and the fetch-window
+    // pre-pass — whose budget sizing + attempt-1 binding resolve against
+    // the PARENT routine event (stamped with `agentId`) plus a
+    // `requestedBackendId` pin, so a limits-always rule would leak the
+    // Agent's envelope into its pre-pass sub-sessions while retries
+    // (resolved against unstamped fetcher events) stayed clean.
+    //
+    // With no caller routing intent, the agent's model pin wins over its
+    // own tier (a concrete model is the more specific standing
+    // instruction) and the limit overrides are applied onto the resolved
+    // main + fallback bindings.
+    const agentOverride = this.loadAgentRouteOverride(event);
+    if (agentOverride) {
+      const callerRouted =
+        options?.requestedTier !== undefined
+        || options?.requestedBackendId !== undefined
+        || options?.requestedModelId !== undefined;
+      if (!callerRouted) {
+        const merged = {
+          ...options,
+          ...(agentOverride.tier ? { requestedTier: agentOverride.tier } : {}),
+          ...(agentOverride.modelId && agentOverride.backendId
+            ? {
+                requestedBackendId: agentOverride.backendId,
+                requestedModelId: agentOverride.modelId,
+              }
+            : {}),
+        };
+        return this.applyAgentLimitOverrides(
+          this.resolveBindingCore(event, merged),
+          agentOverride,
+        );
+      }
+    }
+    return this.resolveBindingCore(event, options);
+  }
+
+  /**
+   * Read the firing Agent's routing override. `event.data.agentId` is
+   * stamped by `Dispatcher.beginAgentExecution` for every firing that
+   * resolves to an Agent (and propagates to morning Stage A/B via the
+   * parent-data spread); reactive DMs and pre-pass fan-out sub-events carry
+   * no stamp and resolve to `null` here. User Agents are excluded — their
+   * tier / backend / model already arrive as explicit event hints from the
+   * materialised schedule row.
+   */
+  private loadAgentRouteOverride(event: Event): AgentRouteOverride | null {
+    if (!this.hasAgentsTable) return null;
+    const agentId = (event.data as { agentId?: unknown } | undefined)?.agentId;
+    if (typeof agentId !== "string" || agentId.length === 0) return null;
+    let row: { source: string; metadata_json: string | null } | undefined;
+    try {
+      row = this.db
+        .prepare<[string], { source: string; metadata_json: string | null }>(
+          "SELECT source, metadata_json FROM agents WHERE id = ? LIMIT 1",
+        )
+        .get(agentId);
+    } catch (err) {
+      logger.warn({ err, agentId }, "agent override lookup failed; ignoring");
+      return null;
+    }
+    if (!row || row.source !== "builtin" || !row.metadata_json) return null;
+    let override: AgentRouteOverride | null;
+    try {
+      const metadata = JSON.parse(row.metadata_json) as {
+        override_snapshot?: unknown;
+      };
+      override = extractAgentRouteOverride(metadata.override_snapshot);
+    } catch {
+      // Corrupt metadata_json must never take routing down with it.
+      return null;
+    }
+    // Standing-pin drift guard: the dashboard dropdown only offers enabled
+    // backends at SAVE time, but an agent override persists across later
+    // backend disables. A pin to a now-disabled backend would fail the
+    // firing on every cron tick (hard override drops the fallback), so
+    // drop the pin — tier/limit overrides survive. The chat picker has no
+    // such guard because its pin lives for a single user-initiated turn.
+    if (override?.backendId && this.isBackendDisabled(override.backendId)) {
+      logger.warn(
+        { agentId, backendId: override.backendId, modelId: override.modelId },
+        "agent model pin targets a disabled backend; ignoring the pin",
+      );
+      const stripped: AgentRouteOverride = {
+        ...override,
+        modelId: null,
+        backendId: null,
+      };
+      return stripped.tier === null
+        && stripped.maxTurns === null
+        && stripped.maxBudgetUsd === null
+        ? null
+        : stripped;
+    }
+    return override;
+  }
+
+  /** True only when an explicit `backends` row says `enabled = 0`. A missing
+   *  row or table stays permissive — matches the resolver's existing trust
+   *  posture for `process_backend_config` backends. */
+  private isBackendDisabled(backendId: BackendId): boolean {
+    try {
+      const row = this.db
+        .prepare<[string], { enabled: number }>(
+          "SELECT enabled FROM backends WHERE id = ? LIMIT 1",
+        )
+        .get(backendId);
+      return row !== undefined && row.enabled === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Apply the Agent's per-execution limit overrides onto a resolved route. */
+  private applyAgentLimitOverrides(
+    route: ResolvedBackendRoute,
+    override: AgentRouteOverride,
+  ): ResolvedBackendRoute {
+    if (override.maxTurns === null && override.maxBudgetUsd === null) {
+      return route;
+    }
+    const applyTo = (binding: ResolvedBackendBinding): ResolvedBackendBinding => ({
+      ...binding,
+      maxTurns: override.maxTurns ?? binding.maxTurns,
+      maxBudgetUsd: override.maxBudgetUsd ?? binding.maxBudgetUsd,
+    });
+    return {
+      ...route,
+      main: applyTo(route.main),
+      fallback: route.fallback ? applyTo(route.fallback) : null,
+    };
+  }
+
+  private resolveBindingCore(
     event: Event,
     options?: {
       processKey?: ProcessKey;

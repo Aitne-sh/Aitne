@@ -1238,17 +1238,17 @@ describe("aggregatePrePassMetrics", () => {
   it("emits stable, sorted output (snapshots are byte-comparable across runs)", () => {
     const snap = aggregatePrePassMetrics(
       [
-        attempt({ pcid: "p3", routine: "routine.hourly_check", integration: "notion" }),
+        attempt({ pcid: "p3", routine: "routine.activity_scan", integration: "notion" }),
         attempt({ pcid: "p1", routine: "routine.morning_routine", integration: "gmail" }),
         attempt({ pcid: "p2", routine: "routine.morning_routine", integration: "google_calendar" }),
       ],
       30,
       "2026-05-13T00:00:00.000Z",
     );
-    // Sorted by routine, then integration. routine.hourly_check < routine.morning_routine.
+    // Sorted by routine, then integration. routine.activity_scan < routine.morning_routine.
     const order = snap.chainsByStatus.map((b) => `${b.routine}/${b.integrationKey}`);
     expect(order).toEqual([
-      "routine.hourly_check/notion",
+      "routine.activity_scan/notion",
       "routine.morning_routine/gmail",
       "routine.morning_routine/google_calendar",
     ]);
@@ -1546,7 +1546,7 @@ describe("MetricsCollector.collectPrePassMetrics", () => {
     insertPrePassRow(
       {
         parentCorrelationId: "p2",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         attempt: 1,
         status: "success",
@@ -1588,7 +1588,7 @@ describe("MetricsCollector.collectPrePassMetrics", () => {
     insertPrePassRow(
       {
         parentCorrelationId: "p2",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         attempt: 1,
         status: "success",
@@ -1604,7 +1604,7 @@ describe("MetricsCollector.collectPrePassMetrics", () => {
     insertPrePassRow(
       {
         parentCorrelationId: "p3",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "google_calendar",
         attempt: 1,
         status: "success",

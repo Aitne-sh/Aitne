@@ -115,7 +115,7 @@ export function ConnectionCard({
       {/* Error from health API — suppressed during in-progress connecting state so
           transient auth/pairing messages don't render as red errors. */}
       {error && status !== "connecting" && (
-        <p className="mb-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="mb-2 text-xs text-destructive">{error}</p>
       )}
 
       {/* Metadata */}

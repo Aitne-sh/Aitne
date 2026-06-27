@@ -33,7 +33,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { cn, formatAbsoluteTime } from "@/lib/utils";
+import { cn, formatAbsoluteTime, formatBytes } from "@/lib/utils";
 
 function statusTone(status: ContextHealthReport["status"]) {
   if (status === "ok") return "success" as const;
@@ -53,11 +53,6 @@ function statusIcon(status: ContextHealthReport["status"]) {
   if (status === "ok") return CheckCircle2;
   if (status === "warning") return AlertTriangle;
   return XCircle;
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 interface IssueGroupProps {
@@ -124,7 +119,7 @@ function MissingIssueRow({
 function FrontmatterIssueRow({ issue }: { issue: ContextFrontmatterIssue }) {
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
         <div className="truncate font-mono text-xs text-foreground">{issue.path}</div>
         <div className="text-xs text-muted-foreground">{issue.message}</div>
@@ -136,7 +131,7 @@ function FrontmatterIssueRow({ issue }: { issue: ContextFrontmatterIssue }) {
 function SizeIssueRow({ issue }: { issue: ContextSizeIssue }) {
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
         <div className="truncate font-mono text-xs text-foreground">{issue.path}</div>
         <div className="text-xs text-muted-foreground">
@@ -150,7 +145,7 @@ function SizeIssueRow({ issue }: { issue: ContextSizeIssue }) {
 function IndexIssueRow({ issue }: { issue: ContextIndexLinkIssue }) {
   return (
     <div className="flex items-start gap-3 px-3 py-2 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
         <div className="truncate font-mono text-xs text-foreground">{issue.source}</div>
         <div className="text-xs text-muted-foreground">
@@ -232,9 +227,9 @@ export function VaultHealthCard() {
             <StatusIcon
               className={cn(
                 "h-4 w-4",
-                data.status === "ok" && "text-emerald-600 dark:text-emerald-400",
-                data.status === "warning" && "text-amber-600 dark:text-amber-400",
-                data.status === "error" && "text-red-600 dark:text-red-400",
+                data.status === "ok" && "text-success",
+                data.status === "warning" && "text-warning",
+                data.status === "error" && "text-destructive",
               )}
             />
             <span className="text-foreground">

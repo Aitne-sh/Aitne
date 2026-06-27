@@ -64,7 +64,7 @@ export function CharacterEditor({
             overCap
               ? "font-semibold text-destructive"
               : atCap
-                ? "text-amber-600"
+                ? "text-warning"
                 : "text-muted-foreground",
           )}
         >

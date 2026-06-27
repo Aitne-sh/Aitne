@@ -286,21 +286,21 @@ function StaleRuleBanner({ warnings }: { warnings: McpStaleRuleWarning[] }) {
   const disabled = warnings.filter((w) => w.severity === "disabled");
   const unknown = warnings.filter((w) => w.severity === "unknown");
   return (
-    <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs">
-      <div className="mb-1 flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+    <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+      <div className="mb-1 flex items-center gap-2 font-semibold text-warning">
         <AlertTriangle className="h-3.5 w-3.5" />
         Rules reference {warnings.length} server{warnings.length === 1 ? "" : "s"} that
         {warnings.length === 1 ? " is" : " are"} not currently active
       </div>
       {disabled.length > 0 && (
-        <p className="mt-1 flex items-start gap-1.5 text-amber-900/90 dark:text-amber-100/90">
+        <p className="mt-1 flex items-start gap-1.5 text-warning/90">
           <PowerOff className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
             <span className="font-medium">Disabled:</span>{" "}
             {disabled.map((w) => (
               <code
                 key={w.id}
-                className="mx-0.5 rounded bg-amber-500/20 px-1 py-0.5"
+                className="mx-0.5 rounded bg-warning/15 px-1 py-0.5"
               >
                 {w.id}
               </code>
@@ -310,14 +310,14 @@ function StaleRuleBanner({ warnings }: { warnings: McpStaleRuleWarning[] }) {
         </p>
       )}
       {unknown.length > 0 && (
-        <p className="mt-1 flex items-start gap-1.5 text-amber-900/90 dark:text-amber-100/90">
+        <p className="mt-1 flex items-start gap-1.5 text-warning/90">
           <HelpCircle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>
             <span className="font-medium">Unknown:</span>{" "}
             {unknown.map((w) => (
               <code
                 key={w.id}
-                className="mx-0.5 rounded bg-amber-500/20 px-1 py-0.5"
+                className="mx-0.5 rounded bg-warning/15 px-1 py-0.5"
               >
                 {w.id}
               </code>

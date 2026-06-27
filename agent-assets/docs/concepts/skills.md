@@ -100,7 +100,8 @@ visible to the model.
 ## Concrete Examples
 
 - `today` — read and rewrite `state/today.md`.
-- `schedule` — produce per-date schedule files from the calendar.
+- `schedule` — register future wake-ups, reminders, and recurring
+  tasks via `/api/schedule`.
 - `mail` — search and label messages via the daemon's mail proxy.
 - `docs-search` — read-only fetch over the docs corpus, used only by
   `dashboard.docs_qa`.
@@ -124,11 +125,12 @@ seed payload immediately.
 The optimizer agent runs in an isolated workdir with a tightly
 scoped toolset (`Bash(curl http://localhost:8321/api/skill-curation/*)`,
 `Read`) and an auto-revert safety net: each cadence cycle the daemon
-re-checks recently-applied overlays, and any section that has
-accumulated *more* drift signal weight after the overlay was applied
-than before is rolled back automatically and frozen for two cycles to
-stop thrashing. This is the only roll-back path — there is no
-per-proposal approve/reject API, just the on/off toggle.
+re-checks recently-applied overlays, and any section that keeps
+accumulating drift signal weight after the overlay was applied
+(crossing a fixed regression threshold) is rolled back automatically
+and frozen for two cycles to stop thrashing. This is the only
+roll-back path — there is no per-proposal approve/reject API, just
+the on/off toggle.
 
 Skill curation is **off by default**. The master toggle, curation
 cadence, manual-run trigger, and the per-skill exclusion list are all
@@ -136,8 +138,8 @@ surfaced at **Settings → Self-learning** (`/settings/self-learning`).
 
 ## Where You See It in the Dashboard
 
-- **Knowledge → Skills** lists every skill, its description, and the
-  events it loads for.
+- **Knowledge → Skills** lists every skill, its description, and its
+  `allowed-tools`.
 - **Connections → MCP** is where MCP servers (which surface as tools
   inside skills) attach.
 - **Settings → Self-learning (`/settings/self-learning`)** is where

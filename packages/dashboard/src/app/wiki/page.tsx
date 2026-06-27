@@ -29,6 +29,7 @@ import {
   PlusCircle,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api-client";
+import { formatApiError, formatTimestamp } from "@/lib/utils";
 import type { WikiFileResponse, WikiIndexResponse } from "@/lib/api-types";
 import {
   useWikiWorkspaces,
@@ -48,22 +49,6 @@ import { Spinner } from "@/components/ui/spinner";
 
 const WIKI_READ_PROCESS_KEY = "wiki.ask";
 const RECENT_ACTIVITY_LIMIT = 8;
-
-function formatTimestamp(iso: string): string {
-  try {
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) return iso;
-    return date.toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-function formatApiError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "Request failed";
-}
 
 export default function WikiPage() {
   const workspacesQuery = useWikiWorkspaces();
@@ -188,7 +173,7 @@ export default function WikiPage() {
               Last ingest
             </dt>
             <dd className="text-foreground">
-              {workspace.lastIngestAt ? formatTimestamp(workspace.lastIngestAt) : "—"}
+              {formatTimestamp(workspace.lastIngestAt)}
             </dd>
           </div>
           <div className="space-y-1">
@@ -196,7 +181,7 @@ export default function WikiPage() {
               Last compile
             </dt>
             <dd className="text-foreground">
-              {workspace.lastCompileAt ? formatTimestamp(workspace.lastCompileAt) : "—"}
+              {formatTimestamp(workspace.lastCompileAt)}
             </dd>
           </div>
         </dl>

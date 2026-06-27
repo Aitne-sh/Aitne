@@ -122,9 +122,9 @@ function detectContextFilesMissing(inputs: AlertInputs): Alert[] {
       severity: "error",
       title: `${sorted.length} context file${sorted.length === 1 ? "" : "s"} missing`,
       description: `Missing: ${sorted.slice(0, 3).join(", ")}${sorted.length > 3 ? `, and ${sorted.length - 3} more` : ""}. The agent cannot read or write these until they are recreated.`,
-      // Recovery: "Reinstall context" on /settings/advanced (tarball
+      // Recovery: "Reinstall context" on /settings/danger-zone (tarball
       // backup + re-seed from templates on next restart).
-      href: "/settings/advanced",
+      href: "/settings/danger-zone",
       source: "system",
       dismissable: false,
       detectedAt: iso(inputs.now),
@@ -182,8 +182,8 @@ function detectTemplateUpgrades(inputs: AlertInputs): Alert[] {
       severity: "warning",
       title: `${count} template upgrade${count === 1 ? "" : "s"} pending`,
       description: "Newer template versions ship with this release. Review and merge to pick up format changes.",
-      // Acceptance path: "Reinstall context" on /settings/advanced.
-      href: "/settings/advanced",
+      // Acceptance path: "Reinstall context" on /settings/danger-zone.
+      href: "/settings/danger-zone",
       source: "config",
       dismissable: true,
       detectedAt: iso(inputs.now),
@@ -265,7 +265,7 @@ function detectAuthHealth(inputs: AlertInputs): Alert[] {
         severity: "error",
         title: `${b.id} CLI not found on PATH`,
         description: "Install the CLI or disable this backend so it doesn't get scheduled.",
-        href: "/settings/backends",
+        href: "/settings/models",
         source: "auth",
         dismissable: false,
         detectedAt: iso(inputs.now),
@@ -284,7 +284,7 @@ function detectAuthHealth(inputs: AlertInputs): Alert[] {
       description: b.lastError
         ? `Last error: ${b.lastError}.`
         : "Re-authenticate to resume sessions on this backend.",
-      href: "/settings/backends",
+      href: "/settings/models",
       source: "auth",
       dismissable: false,
       detectedAt: iso(inputs.now),

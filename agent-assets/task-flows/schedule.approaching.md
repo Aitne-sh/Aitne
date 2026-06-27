@@ -54,11 +54,11 @@ the user could not see by glancing at their calendar app.
       `calendar:*` is treated as a literal asterisk character and
       matches zero rows.
 
-   2. **`pending=false`** — `routine.hourly_check` consumes
+   2. **`pending=false`** — `routine.activity_scan` consumes
       `actor=user` observations every hour, and calendar mutations
       are tagged `actor='user'` (`calendar-poller.ts:210-212`). A
       `pending=true` query would miss any reschedule older than the
-      latest hourly tick.
+      latest activity-scan tick.
 
    3. **`since=<UTC_24H_AGO>`** — pass the timestamp 24 hours before
       the `utc=` attribute on the `<current_time>` block in your

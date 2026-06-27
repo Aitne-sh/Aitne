@@ -545,7 +545,7 @@ describe("GET /metrics/pre-pass", () => {
     insertPrePassRow(
       {
         parentCorrelationId: "p2",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         attempt: 1,
         status: "success",
@@ -555,7 +555,7 @@ describe("GET /metrics/pre-pass", () => {
     insertPrePassRow(
       {
         parentCorrelationId: "p3",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "google_calendar",
         attempt: 1,
         status: "success",

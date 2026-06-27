@@ -11,16 +11,23 @@ allowed-tools:
 > **Refusal directive — read first.** Gmail is in `native` mode bound to
 > Claude. Do **NOT** call any of:
 >
-> - `POST /api/integrations/gmail/exec` (returns `410` with
->   `X-Integration-Mode: native`)
-> - `POST /api/integrations/gmail/reconcile` (410)
 > - `/api/mail/<gmail-account-id>/*` (per-account 410 inside the mail
 >   handler; the daemon returns `{"error":"integration_native"}`)
+> - `POST /api/integrations/gmail/exec`
+> - `POST /api/integrations/gmail/reconcile`
+>
+> In native mode `POST /api/integrations/gmail/exec` returns **409
+> `mode_mismatch`** (the handler rejects non-delegated mode);
+> `.../reconcile` is not mode-gated at all. Do not call either — use the
+> native connector. The 410 + `X-Integration-Mode: native` refusal
+> contract applies ONLY to the integration's own data routes
+> (the per-account `/api/mail/<gmail-account-id>/*` paths).
 >
 > Reach Gmail through the in-session Gmail connector your harness exposes.
 > Your tool menu lists every available tool at session start — pick the
-> Gmail one. The 410 is a contract, not an outage — the route gate
-> enforces native-mode exclusivity per `INTEGRATION_NATIVE_MODE_DESIGN.md`
+> Gmail one. The per-account 410 on `/api/mail/<gmail-account-id>/*` is a
+> contract, not an outage — the mail handler enforces native-mode
+> exclusivity for the data routes per `INTEGRATION_NATIVE_MODE_DESIGN.md`
 > §9.
 
 To confirm Gmail's current binding, read the `<integration_modes>`
@@ -98,7 +105,7 @@ unchanged for non-Gmail accounts.
 
 ## Persisting observations from native fetches
 
-When you fetch Gmail data during a routine (e.g. `routine.hourly_check`'s
+When you fetch Gmail data during a routine (e.g. `routine.activity_scan`'s
 Step 0a), POST each materialised thread to the daemon's
 `/api/observations` endpoint so subsequent runs can dedup. The daemon
 computes `contentHash` server-side via
@@ -127,7 +134,7 @@ curl -s -X POST http://localhost:8321/api/observations \
 `actor` MUST be `"agent"` or `"system"` — the server rejects `"user"`
 (user-authored observations arrive through the vault / mail watchers,
 never this route). The `source` value follows the `"<integrationKey>:<scope>"`
-convention so the hourly_check consumer's
+convention so the activity_scan consumer's
 `source_prefix=gmail:` filter matches.
 
 `/api/observations` is **never** native-gated — it is the chokepoint the
@@ -138,9 +145,9 @@ window (§11.3.1) with HTTP 409; on 409 stop and re-read
 
 ## Decision rules
 
-- **Hourly check is read-only.** Native variants inherit the
+- **Activity scan is read-only.** Native variants inherit the
   "External services are read-only this hour" constraint from
-  `routine.hourly_check.native.<backend>.md`. No drafts, labels,
+  `routine.activity_scan.native.<backend>.md`. No drafts, labels,
   archives during the hourly pass — the morning / evening / DM
   flows are the write paths.
 - **Prefer drafts over send.** Hosted Gmail connectors typically expose

@@ -65,13 +65,14 @@ PUT / PATCH / archive per the API Reference below.
 ## Snapshot files — weekly / monthly / policies / routines
 
 Weekly and monthly review snapshots, the user-controlled `policies/*.md`
-policy files, the built-in `policies/routines/<cadence>.md` rulebooks, custom
-routines under `policies/routines/custom/`, and the agent-private
+policy files, the built-in `policies/routines/<cadence>.md` rulebooks, legacy
+custom-routine files under `policies/routines/custom/` (inert — converted to
+Agents at the Agents-hub redesign), and the agent-private
 `journal/agent.md` all have stable per-file conventions (writer event,
 verb, frontmatter, retention) documented in the snapshot-files
 reference below.
 
-DM handlers and Hourly Checks should generally not write these files
+DM handlers and Activity Scans should generally not write these files
 — the cadence-matching routine is the right writer.
 
 {{> ref:snapshot-files }}

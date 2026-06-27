@@ -14,7 +14,9 @@ import { SAFETY_CATEGORIES } from "../core/notification-gate.js";
 import type { SignalDetector } from "../core/signal-detector.js";
 import type { MessageHub } from "./message-hub.js";
 import { MessageDeliveryError } from "./message-hub.js";
+import type { OutboundAttachmentRef } from "./types.js";
 import { recordProactiveForwardDeliveries } from "../core/channel-timeline.js";
+import { classifyOwnerDmActivity } from "../core/context-builder-conversation.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("notification-manager");
@@ -83,6 +85,24 @@ export interface NotificationManagerOptions {
    * `setTimeout(...).unref()` so the timer never blocks daemon shutdown.
    */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §2.3 / §13 Decision 4 (Phase 4,
+   * opt-in) — router that hands a proactive autonomous forward to the
+   * task-delivery gate + activity-branch machinery so the REAL DM agent
+   * weaves it into the live conversation. Only invoked when the owner is
+   * active AND `config.autonomousForwardNaturalDelivery` is on; returns
+   * `true` when it enqueued the weave (this `deliverProactive` then
+   * returns without the verbatim send), `false` to fall through to the
+   * verbatim path. Wired from the event bus in bootstrap; absent in tests.
+   * The IDLE path is never rerouted — it keeps the richer verbatim
+   * delivery (multi-destination fan-out, notification_log telemetry,
+   * batching cooldown) unchanged.
+   */
+  routeAutonomousForwardNaturally?: (input: {
+    content: string;
+    event: import("@aitne/shared").Event;
+    originSessionId?: number;
+  }) => Promise<boolean>;
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -150,6 +170,11 @@ export class NotificationManager implements INotificationManager {
   private readonly replyRetryAttempts: number;
   private readonly replyRetryBackoffBaseMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly routeAutonomousForwardNaturally?: (input: {
+    content: string;
+    event: Event;
+    originSessionId?: number;
+  }) => Promise<boolean>;
 
   constructor(
     private readonly messageHub: MessageHub,
@@ -171,6 +196,7 @@ export class NotificationManager implements INotificationManager {
       options.replyRetryBackoffBaseMs ?? DEFAULT_REPLY_RETRY_BACKOFF_BASE_MS,
     );
     this.sleep = options.sleep ?? defaultSleep;
+    this.routeAutonomousForwardNaturally = options.routeAutonomousForwardNaturally;
   }
 
   /** Set the SignalDetector for implicit feedback tracking. */
@@ -216,6 +242,7 @@ export class NotificationManager implements INotificationManager {
       destinationMode?: DestinationMode;
       originSessionId?: number;
       replyTo?: MessageReplyTarget;
+      attachments?: readonly OutboundAttachmentRef[];
     },
   ): Promise<void> {
     const priority = options?.priority ?? this.inferPriority(event);
@@ -238,6 +265,7 @@ export class NotificationManager implements INotificationManager {
         event,
         priority,
         options.replyTo,
+        options.attachments,
       );
       if (delivered) return;
       logger.info(
@@ -364,16 +392,30 @@ export class NotificationManager implements INotificationManager {
     event: Event,
     priority: string,
     target: MessageReplyTarget,
+    attachments?: readonly OutboundAttachmentRef[],
   ): Promise<boolean> {
     const dispatchId = randomUUID();
     const summary = truncateSummary(message);
     try {
-      const delivery = await this.messageHub.sendToPlatform(
-        target.platform,
-        target.channel,
-        message,
-        target.threadId ?? undefined,
-      );
+      // Keep the no-attachment call shape identical to the historical
+      // 4-arg form so existing adapters/tests that assert the exact send
+      // signature are unaffected; only widen to 5 args when media is
+      // present (the task-delivery idle screenshot path).
+      const delivery =
+        attachments && attachments.length > 0
+          ? await this.messageHub.sendToPlatform(
+              target.platform,
+              target.channel,
+              message,
+              target.threadId ?? undefined,
+              [...attachments],
+            )
+          : await this.messageHub.sendToPlatform(
+              target.platform,
+              target.channel,
+              message,
+              target.threadId ?? undefined,
+            );
       this.logNotificationRows({
         dispatchId,
         event,
@@ -439,6 +481,37 @@ export class NotificationManager implements INotificationManager {
     const isSafety = this.isSafetyCategory(category, priority);
     const dispatchId = randomUUID();
     const summary = truncateSummary(message);
+
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §2.3 / §13 Decision 4 (Phase 4,
+    // opt-in) — when the owner is ACTIVE mid-conversation, hand a
+    // non-safety, non-batched proactive forward to the delivery machinery
+    // so the real DM agent weaves it into the live thread instead of this
+    // verbatim dump. The IDLE path is deliberately left on the richer
+    // verbatim delivery below (multi-destination fan-out + telemetry +
+    // batching), so this only changes the active case. The router enqueues
+    // the weave and returns true; a false (no owner-DM channel / disabled)
+    // falls through to the unchanged verbatim path.
+    if (
+      !isSafety
+      && !fromBatch
+      && this.config.autonomousForwardNaturalDelivery
+      && this.routeAutonomousForwardNaturally
+      && classifyOwnerDmActivity({ db: this.db, config: this.config }) === "active"
+    ) {
+      try {
+        const routed = await this.routeAutonomousForwardNaturally({
+          content: message,
+          event,
+          ...(originSessionId !== undefined ? { originSessionId } : {}),
+        });
+        if (routed) return;
+      } catch (err) {
+        logger.warn(
+          { err, eventType: event.type },
+          "autonomous-forward natural delivery routing threw; falling back to verbatim proactive send",
+        );
+      }
+    }
 
     if (!isSafety && this.isQuietHours()) {
       this.logNotificationRows({

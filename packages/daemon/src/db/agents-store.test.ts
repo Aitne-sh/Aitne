@@ -7,10 +7,12 @@ import {
   disableOneShotAfterFire,
   getAgent,
   getOverrideSnapshot,
+  getRuntimeWindow,
   listAgents,
   setEnabled,
   setLastExecutionId,
   setOverrideSnapshot,
+  setRuntimeWindow,
   upsertAgent,
   type AgentUpsertInput,
 } from "./agents-store.js";
@@ -335,6 +337,71 @@ describe("agents-store", () => {
 
     it("returns null when setting a snapshot on a missing agent", () => {
       expect(setOverrideSnapshot(db, "ghost", { a: 1 })).toBeNull();
+    });
+  });
+
+  describe("runtime window (activity-scan cadence overrides)", () => {
+    it("returns {} for a missing agent or one without an override", () => {
+      expect(getRuntimeWindow(db, "ghost")).toEqual({});
+      upsertAgent(db, fullInput());
+      expect(getRuntimeWindow(db, "deploy-watch")).toEqual({});
+    });
+
+    it("round-trips a window while preserving sibling metadata keys", () => {
+      upsertAgent(
+        db,
+        fullInput({
+          metadata: {
+            version_counter: 3,
+            override_snapshot: { "backend.tier": "high" },
+          },
+        }),
+        1000,
+      );
+      const dto = setRuntimeWindow(
+        db,
+        "deploy-watch",
+        { interval_minutes: 30, min_observations: 2 },
+        2000,
+      );
+      expect(dto).not.toBeNull();
+      expect(dto!.updatedAt).toBe(2000);
+      expect(getRuntimeWindow(db, "deploy-watch")).toEqual({
+        interval_minutes: 30,
+        min_observations: 2,
+      });
+      const md = getAgent(db, "deploy-watch")!.metadata;
+      expect(md.version_counter).toBe(3);
+      expect(md.override_snapshot).toEqual({ "backend.tier": "high" });
+    });
+
+    it("sanitizes garbage fields on read", () => {
+      upsertAgent(
+        db,
+        fullInput({
+          metadata: {
+            runtime_window: { interval_minutes: 9999, active_start_hour: 9, junk: true },
+          },
+        }),
+      );
+      expect(getRuntimeWindow(db, "deploy-watch")).toEqual({ active_start_hour: 9 });
+    });
+
+    it("removes the runtime_window key when set to an empty object", () => {
+      upsertAgent(
+        db,
+        fullInput({
+          metadata: { version_counter: 1, runtime_window: { interval_minutes: 15 } },
+        }),
+      );
+      setRuntimeWindow(db, "deploy-watch", {});
+      const md = getAgent(db, "deploy-watch")!.metadata;
+      expect(md.runtime_window).toBeUndefined();
+      expect(md.version_counter).toBe(1);
+    });
+
+    it("returns null when setting a window on a missing agent", () => {
+      expect(setRuntimeWindow(db, "ghost", { interval_minutes: 10 })).toBeNull();
     });
   });
 

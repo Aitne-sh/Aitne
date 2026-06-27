@@ -25,7 +25,7 @@ export const CONFIGURABLE_PROCESS_KEYS = [
   // Re-enable path: Mirror+Prune redesign — see the header note in
   // agent-assets/task-flows/routine.monthly_review.md.
   "routine.monthly_review",
-  "routine.hourly_check",
+  "routine.activity_scan",
   "message.dm",
   "message.mention",
   "dashboard.chat",
@@ -82,13 +82,13 @@ export const CONFIGURABLE_PROCESS_KEYS = [
   "observation.summarize",
   // cost-reduction-structural §B — Stage 2 lite-tier triage that decides
   // log_only vs. escalate before the dispatcher spawns the full Stage 3
-  // hourly_check session. Same delegation rationale as
+  // activity_scan session. Same delegation rationale as
   // `observation.summarize`: the operator may pin a different lite model
   // per backend, and `applyDefaultPresets` re-seeds the row when the
   // main-backend switch fires.
-  "routine.hourly_check.triage",
+  "routine.activity_scan.triage",
   // docs/design/appendices/routine-data-acquisition.md §6.2 — pre-pass fetcher that the
-  // routine dispatchers (morning / today_refresh / hourly_check / evening /
+  // routine dispatchers (morning / today_refresh / activity_scan / evening /
   // weekly / monthly) spawn before the main routine session. Lite tier
   // (Haiku-class) by default; reads an `<acquisition-plan>` block of
   // (integration, mode, window) tuples and POSTs each fetched item to
@@ -173,6 +173,15 @@ export const CONFIGURABLE_PROCESS_KEYS = [
   // `allowedToolsOverride` is the per-execute envelope enforcement; both
   // are Claude-SDK-only features).
   "browser_task",
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §6 — generic detached-task worker
+  // dispatched from `POST /api/background-task` (DM-driven or scheduler).
+  // A fresh Claude-only SDK session drives the three-tool `aitne-task`
+  // MCP envelope (read_memory / ask_user / finish) + WebSearch/WebFetch.
+  // Configurable so the schema-seed envelope (medium tier, 40 turns,
+  // $2.00) cascades through `applyDefaultPresets` on a main-backend
+  // switch; the budget resolver refuses non-Claude bindings outright
+  // (the SDK query loop is Claude-only).
+  "background_task",
 ] as const;
 
 const DEFAULT_PROCESS_KEYS = [
@@ -260,7 +269,7 @@ const processKeySet = new Set<string>(ALL_PROCESS_KEYS);
 //     contract and tolerate the lower instruction-following capability of
 //     a lite-tier model in exchange for an order-of-magnitude lower cost.
 //   - `medium` — Sonnet-class. Default for owner-in-the-loop main agent
-//     work (DMs, mentions, dashboard chat, hourly check, daily/weekly/
+//     work (DMs, mentions, dashboard chat, activity scan, daily/weekly/
 //     monthly reviews, scheduled DM tasks, agent.task). Also the tier
 //     that absorbs structured routines whose output is template-driven.
 //   - `high` — Opus-class. Reserved for one-shot generative work whose
@@ -311,7 +320,7 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   "routine.evening_review": "medium",
   "routine.weekly_review": "medium",
   "routine.monthly_review": "medium",
-  "routine.hourly_check": "medium",
+  "routine.activity_scan": "medium",
   "routine.roadmap_refresh": "medium",
   "routine.today_refresh": "medium",
   // User-profile sweep is a short summarization + routing pass over the
@@ -334,7 +343,7 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   "schedule.approaching": "medium",
   // Integration drift / calendar / mail / github / git observer-fired
   // tasks are short-shape probes — lite tier is sufficient and keeps the
-  // hourly-check cadence's per-call cost negligible.
+  // activity-scan cadence's per-call cost negligible.
   "integration_drift_sync": "lite",
   "calendar.change": "lite",
   "setup": "medium",
@@ -399,7 +408,7 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   // cost-reduction-structural §B — Stage 2 triage call. Strict JSON-only
   // output, ~2K input / ~50 output. Lite tier so the gate's "escalate vs
   // log only" decision pays a fraction of a Stage 3 medium-tier session.
-  "routine.hourly_check.triage": "lite",
+  "routine.activity_scan.triage": "lite",
   // docs/design/appendices/routine-data-acquisition.md §6.2 / P3 — mechanical fetch.
   // Lite tier (Haiku-class) is the right ceiling for fan-out window
   // queries that POST observations; the main routine session reads the
@@ -424,6 +433,10 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   // lock-step with the §5 envelope so a future widening keeps both in
   // sync. Operators can pin lite/high per-row from /settings/models.
   "browser_task": "medium",
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §6 — Sonnet by default; the row's
+  // tier (lite/medium/high) selects the turn/budget/timeout envelope.
+  // Operators can pin a model per-row from /settings/models.
+  "background_task": "medium",
 };
 
 export function isProcessKey(value: string): value is KnownProcessKey {

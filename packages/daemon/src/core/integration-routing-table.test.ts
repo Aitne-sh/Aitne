@@ -9,7 +9,7 @@ import { defaultIntegrationsMap } from "@aitne/shared";
 /**
  * INTEGRATION_NATIVE_MODE_DESIGN.md §6.5.2 / §7.3 — routing-table renderer
  * tests. The full table is read-only audit prose; the actionable table
- * drives the hourly_check / DM task-flow iteration.
+ * drives the activity_scan / DM task-flow iteration.
  */
 
 function withState(overrides: Partial<IntegrationsRecord>): IntegrationsRecord {

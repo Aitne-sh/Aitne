@@ -17,7 +17,14 @@ import {
   type OverrideFieldKey,
   type OverrideValues,
 } from "@/lib/agents/builtin-override";
+import {
+  MODEL_DEFAULT_VALUE,
+  modelOverrideFromSelection,
+  modelOverrideSelectState,
+} from "@/lib/agents/model-override-picker";
+import { buildPickerGroups, encodeSelection } from "@/components/chat/chat-model-picker.logic";
 import { usePatchAgent, useSaveUserAgent } from "@/lib/hooks/use-agents";
+import { useBackends } from "@/lib/hooks/use-backends";
 import type { AgentDetailResponse, AgentDefinition } from "@/lib/agents/types";
 
 /**
@@ -84,7 +91,7 @@ export function UserAgentYamlEditor({
         onChange={(e) => setDraft(e.target.value)}
         spellCheck={false}
         aria-label="Agent definition YAML"
-        className={cn(EDITOR_TEXTAREA_CLASS, !validation.ok && "border-red-400/60")}
+        className={cn(EDITOR_TEXTAREA_CLASS, !validation.ok && "border-destructive/60")}
       />
 
       {!validation.ok && (
@@ -142,6 +149,16 @@ export function BuiltinOverrideForm({ detail, definition, onSaved }: BuiltinOver
   const original = useMemo(() => extractOverrideValues(definition), [definition]);
   const [values, setValues] = useState<OverrideValues>(original);
   const patch = usePatchAgent();
+  const backends = useBackends();
+
+  const pickerGroups = useMemo(
+    () => buildPickerGroups(backends.data?.backends ?? []),
+    [backends.data],
+  );
+  const modelSelect = useMemo(
+    () => modelOverrideSelectState(values, pickerGroups),
+    [values, pickerGroups],
+  );
 
   const overridden = useMemo(
     () => new Set(overriddenFieldKeys(detail.row.override_snapshot)),
@@ -158,6 +175,16 @@ export function BuiltinOverrideForm({ detail, definition, onSaved }: BuiltinOver
   const setValue = (key: OverrideFieldKey, value: OverrideValues[OverrideFieldKey]) =>
     setValues((prev) => ({ ...prev, [key]: value }));
 
+  const setModelSelection = (selectValue: string) => {
+    const next = modelOverrideFromSelection(selectValue);
+    if (!next) return;
+    setValues((prev) => ({
+      ...prev,
+      "backend.model": next.model,
+      "backend.backend_id": next.backendId,
+    }));
+  };
+
   const save = () => {
     patch.mutate(
       { slug: detail.row.slug, body },
@@ -166,8 +193,12 @@ export function BuiltinOverrideForm({ detail, definition, onSaved }: BuiltinOver
   };
 
   const resetField = (key: OverrideFieldKey) => {
+    // The model pin is stored as a (model, backend_id) pair — clearing one
+    // without the other would leave a dangling half-override.
+    const keys: OverrideFieldKey[] =
+      key === "backend.model" ? ["backend.model", "backend.backend_id"] : [key];
     patch.mutate(
-      { slug: detail.row.slug, body: buildOverrideResetBody([key]) },
+      { slug: detail.row.slug, body: buildOverrideResetBody(keys) },
       { onSuccess: () => onSaved?.() },
     );
   };
@@ -175,10 +206,10 @@ export function BuiltinOverrideForm({ detail, definition, onSaved }: BuiltinOver
   return (
     <div className="space-y-4">
       <Alert variant="info">
-        System Agent definitions are read-only. You can record tier / model / limit overrides
-        below, but in v1 built-in routing is governed by <code>process_backend_config</code> — set a
-        built-in&apos;s tier and model under <strong>Settings → Models</strong>. Overrides saved here
-        are stored on the Agent but do not yet change how it runs.
+        A System Agent&apos;s definition (schedule, prompt, tools) is read-only, but the
+        tier / model / limit overrides below <strong>apply to its runs</strong>: they take
+        precedence over the per-process defaults from <strong>Settings → Models</strong>
+        {" "}(<code>process_backend_config</code>) starting with the next execution.
       </Alert>
 
       <div className="space-y-4">
@@ -221,16 +252,42 @@ export function BuiltinOverrideForm({ detail, definition, onSaved }: BuiltinOver
               )}
 
               {field.kind === "model" && (
-                <input
+                <select
                   id={`field-${field.key}`}
-                  type="text"
-                  value={fieldDisplay(value)}
-                  placeholder="(tier default)"
-                  onChange={(e) =>
-                    setValue(field.key, e.target.value.trim() === "" ? null : e.target.value)
-                  }
-                  className="h-8 w-72 rounded-md border border-border bg-background px-2 font-mono text-sm"
-                />
+                  value={modelSelect.value}
+                  onChange={(e) => setModelSelection(e.target.value)}
+                  className="h-8 w-80 rounded-md border border-border bg-background px-2 font-mono text-sm"
+                >
+                  <option value={MODEL_DEFAULT_VALUE}>(tier default)</option>
+                  {modelSelect.legacyOption && (
+                    <option value={modelSelect.legacyOption.value} disabled>
+                      {modelSelect.legacyOption.label}
+                    </option>
+                  )}
+                  {pickerGroups.map((group) => (
+                    <optgroup
+                      key={group.backendId}
+                      label={
+                        group.authBlocked
+                          ? `${group.label} (auth ${group.authStatus})`
+                          : group.label
+                      }
+                    >
+                      {group.models.map((model) => (
+                        <option
+                          key={model.modelId}
+                          value={encodeSelection({
+                            backendId: group.backendId,
+                            modelId: model.modelId,
+                          })}
+                          disabled={group.authBlocked}
+                        >
+                          {model.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
               )}
 
               {(field.kind === "int" || field.kind === "number") && (
@@ -260,7 +317,7 @@ export function BuiltinOverrideForm({ detail, definition, onSaved }: BuiltinOver
               )}
 
               <p className="text-xs text-muted-foreground">{field.help}</p>
-              {err && <p className="text-xs text-red-500">{err}</p>}
+              {err && <p className="text-xs text-destructive">{err}</p>}
             </div>
           );
         })}

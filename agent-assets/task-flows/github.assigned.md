@@ -20,7 +20,7 @@ in-flight work**.
 
 1. **Default: DM at `high` priority.** GitHub assignment is an explicit
    request for the user's attention from a human. The default is to
-   surface it within the hour, not wait for the hourly check.
+   surface it within the hour, not wait for the activity scan.
 
 2. **Stay silent only when**:
    - `state/today.md` `## Agent Plan` already references this assignment.

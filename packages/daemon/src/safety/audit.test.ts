@@ -61,13 +61,118 @@ describe("AuditLogger", () => {
     expect(row.context_updated).toBe(1);
   });
 
+  // RESEARCH_CLUSTER_COST_FIX_PLAN F5 — outcome-failure override on the
+  // success path. A clean session that failed a post-run outcome check
+  // settles as `partial` / `<error>` instead of a misleading `success`.
+  it("defaults result to 'success' with NULL error when the override is omitted", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.research_cluster_update",
+      source: "browser_history.cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.logAction({
+      event,
+      model: "claude-haiku-4-5",
+      costUsd: 0.03,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "autonomous",
+    });
+    const row = db
+      .prepare("SELECT result, error FROM agent_actions LIMIT 1")
+      .get() as { result: string; error: string | null };
+    expect(row.result).toBe("success");
+    expect(row.error).toBeNull();
+  });
+
+  it("records result='partial' + error when the override is supplied", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.research_cluster_update",
+      source: "browser_history.cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.logAction({
+      event,
+      model: "claude-haiku-4-5",
+      costUsd: 0.03,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "autonomous",
+      result: "partial",
+      error: "journal_write_missing",
+    });
+    const row = db
+      .prepare("SELECT result, error FROM agent_actions LIMIT 1")
+      .get() as { result: string; error: string | null };
+    expect(row.result).toBe("partial");
+    expect(row.error).toBe("journal_write_missing");
+  });
+
+  it("settles an in_progress row to partial + error via the UPSERT path (no duplicate row)", () => {
+    const audit = new AuditLogger(db);
+    const event = createEvent({
+      type: "routine.research_cluster_update",
+      source: "browser_history.cron",
+      priority: EventPriority.NORMAL,
+    });
+    audit.insertInProgressRow({
+      correlationId: event.correlationId,
+      actionType: event.type,
+      trigger: "autonomous",
+    });
+    audit.logAction({
+      event,
+      model: "claude-haiku-4-5",
+      costUsd: 0.03,
+      usage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      },
+      modelUsage: {},
+      durationMs: 250,
+      numTurns: 1,
+      trigger: "autonomous",
+      result: "partial",
+      error: "journal_write_missing",
+    });
+    const rows = db
+      .prepare(
+        "SELECT result, error FROM agent_actions WHERE event_id = ? AND action_type = ?",
+      )
+      .all(event.correlationId, event.type) as Array<{
+        result: string;
+        error: string | null;
+      }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].result).toBe("partial");
+    expect(rows[0].error).toBe("journal_write_missing");
+  });
+
   it("persists backend metadata when migrated schema is present", () => {
     const dataDir = mkdtempSync(join(tmpdir(), "pa-audit-"));
     try {
       applySchema(db);
       const audit = new AuditLogger(db);
       const event = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "cron",
         priority: EventPriority.NORMAL,
       });
@@ -118,7 +223,7 @@ describe("AuditLogger", () => {
   it("logSkip records a skipped event with reason", () => {
     const audit = new AuditLogger(db);
     const event = createEvent({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: EventPriority.NORMAL,
     });
@@ -136,7 +241,7 @@ describe("AuditLogger", () => {
         trigger: string;
       };
 
-    expect(row.action_type).toBe("routine.hourly_check");
+    expect(row.action_type).toBe("routine.activity_scan");
     expect(row.result).toBe("skipped");
     expect(row.error).toBe("no_observations");
     expect(row.trigger).toBe("autonomous");
@@ -300,7 +405,7 @@ describe("AuditLogger", () => {
       priority: EventPriority.HIGH,
     });
     const skippedEvent = createEvent({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: EventPriority.NORMAL,
     });
@@ -341,7 +446,7 @@ describe("AuditLogger", () => {
       2,
       expect.objectContaining({
         id: 2,
-        action_type: "routine.hourly_check",
+        action_type: "routine.activity_scan",
         result: "skipped",
         error: "no_observations",
       }),
@@ -399,7 +504,7 @@ describe("AuditLogger", () => {
     brokenDb.close();
 
     const event = createEvent({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: EventPriority.NORMAL,
     });
@@ -989,7 +1094,7 @@ describe("AuditLogger", () => {
       trigger: "autonomous",
       prePass: {
         parentCorrelationId: "parent-corr-minimal",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "google_calendar",
         attempt: 1,
         maxAttempts: 1,
@@ -1027,7 +1132,7 @@ describe("AuditLogger", () => {
       failureKind: "agent-execute-failed",
       prePass: {
         parentCorrelationId: "parent-corr-fb",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "notion",
         attempt: 2,
         maxAttempts: 2,
@@ -1068,7 +1173,7 @@ describe("AuditLogger", () => {
       failureKind: "agent-execute-failed",
       prePass: {
         parentCorrelationId: "parent-corr-1",
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         attempt: 1,
         maxAttempts: 1,
@@ -1091,7 +1196,7 @@ describe("AuditLogger", () => {
     expect(parsed.failureKind).toBe("agent-execute-failed");
     expect(parsed.prePass).toMatchObject({
       parentCorrelationId: "parent-corr-1",
-      parentRoutine: "routine.hourly_check",
+      parentRoutine: "routine.activity_scan",
       integrationKey: "gmail",
       attempt: 1,
       status: "failed",

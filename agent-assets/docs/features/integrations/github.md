@@ -29,7 +29,7 @@ ask_examples:
   - Where do I add a GitHub repo to watch?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - github
   - issue
@@ -63,7 +63,7 @@ context_files:
 
 The daemon polls GitHub via the local `gh` CLI: review requests, CI
 failures on the default branch, security alerts, and assignments
-become DMs; everything else is recorded for the hourly check.
+become DMs; everything else is recorded for the activity scan.
 
 ## What It Does
 
@@ -77,16 +77,21 @@ become DMs; everything else is recorded for the hourly check.
   to the workflow-runs side; the notifications poll always runs at the
   global cadence.
 - **DMs the user** on the four high-priority triggers below; quieter
-  signals are coalesced into the hourly check summary.
+  signals are coalesced into the activity scan summary.
 
 The agent never auto-comments, auto-merges, or pushes.
 
 ## High-priority events
 
-The agent will DM the user (priority `high`, can break quiet hours
-depending on your notify-skill settings) on:
+The agent will DM the user (priority `high`; during quiet hours the DM
+is deferred until they end rather than dropped — only `critical`
+safety messages break through) on:
 
-- A teammate or bot **requested your review** on a PR.
+- A teammate or bot **requested your review** on a PR — only when it
+  looks time-sensitive (release-blocker keywords in the title, or the
+  repo is already on your `state/today.md` plan or an active roadmap
+  milestone); otherwise it's noted in `state/today.md` and coalesced
+  into the activity scan.
 - You were **assigned** to an issue or PR.
 - A **Dependabot or code-scanning security alert** fired on a watched
   repository.
@@ -144,7 +149,9 @@ Watched repos are no longer config keys. The old `gitRepos` /
 cutover — repos now live in the `repositories` table and are managed on
 **Connections → Repositories**. Per-repo polling cadence is set on
 **My Life → Git** and overrides the global interval for that repo's
-workflow-runs poll.
+workflow-runs poll. The global interval is the floor — a per-repo
+cadence longer than it slows that repo down, while a shorter one
+still polls at the global tick.
 
 ## When Something Goes Wrong
 
@@ -173,24 +180,25 @@ need a daemon-spawned poller's bookkeeping.
 - **direct** — the daemon's `GitHubPoller` runs as described above.
   Use this when you want the daemon to own the poll schedule and to
   emit DMs without the main backend having to wake up.
-- **delegated** — the delegated-sync worker invokes the chosen
-  backend's read-only `gh` CLI surface on opt-in cadences (see
-  [Delegated Mode](../../concepts/delegated-mode.md) and
-  `docs/design/appendices/delegated-sync-opt-in.md`). The daemon
+- **delegated** — a dedicated Git/GitHub cron queues a lite-tier
+  `git.lifecycle.poll` task on the `gitPollIntervalSeconds` cadence
+  (default hourly); that session uses the chosen backend's read-only
+  `gh` CLI surface (see
+  [Delegated Mode](../../concepts/delegated-mode.md)). The daemon
   poller stays off; the lite-tier delegated session takes the polling
   cost.
-- **disabled** — neither the poller nor the delegated worker runs;
+- **disabled** — neither the poller nor the delegated cron runs;
   the integration is silent.
 
 Pick the mode from the GitHub card on **Connections → Repositories**.
 Mode changes go through the standard `PATCH /api/integrations/github`
-flip-lock so the poller and the delegated worker never run
+flip-lock so the poller and the delegated cron never run
 simultaneously.
 
 ## Related
 
 - [Git](git.md) — local repo file watcher (separate observer).
-- [Hourly Check](../routines/hourly-check.md) — the consumer of
+- [Activity Scan](../routines/activity-scan.md) — the consumer of
   non-DM-priority observations.
 - [Delegated Mode](../../concepts/delegated-mode.md) — how the
   `delegated` mode polls without a daemon poller.

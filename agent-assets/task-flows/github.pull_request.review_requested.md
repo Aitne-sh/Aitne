@@ -9,7 +9,7 @@ Notification ID: {event_data[notificationId]}
 
 A teammate (or bot) has requested your review on this PR. The poller has
 already recorded an observation; this session decides whether to DM the
-user now or stay silent and let the hourly check coalesce it later.
+user now or stay silent and let the activity scan coalesce it later.
 
 ### Decision Framework
 
@@ -20,7 +20,7 @@ of being missed**.
 
 1. **Default: do NOT DM.** Append a heads-up to today.md
    `## Agent Notes` per the context skill, citing the repository, PR
-   title, and URL. The hourly check will surface the request in its next
+   title, and URL. The activity scan will surface the request in its next
    coalesced summary if still open.
 
 2. **DM at `high` priority** if any of the following hold:

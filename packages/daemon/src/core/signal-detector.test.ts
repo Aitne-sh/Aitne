@@ -252,7 +252,7 @@ describe("SignalDetector", () => {
     db.prepare(
       `INSERT INTO notification_log (
          dispatch_id, notification_type, platform, delivery_channel, content_summary, status
-       ) VALUES ('dispatch-neg', 'routine.hourly_check', 'slack', 'C1', 'noisy alert', 'delivered')`,
+       ) VALUES ('dispatch-neg', 'routine.activity_scan', 'slack', 'C1', 'noisy alert', 'delivered')`,
     ).run();
     const d = createDetectorWithDb(db);
     d.trackNotification("dispatch-neg:slack", "slack", "noisy alert");
@@ -274,7 +274,7 @@ describe("SignalDetector", () => {
     db.prepare(
       `INSERT INTO notification_log (
          dispatch_id, notification_type, platform, delivery_channel, content_summary, status
-       ) VALUES ('dispatch-pos', 'routine.hourly_check', 'slack', 'C1', 'useful alert', 'delivered')`,
+       ) VALUES ('dispatch-pos', 'routine.activity_scan', 'slack', 'C1', 'useful alert', 'delivered')`,
     ).run();
     const d = createDetectorWithDb(db);
     d.trackNotification("dispatch-pos:slack", "slack", "useful alert");
@@ -308,7 +308,7 @@ describe("SignalDetector", () => {
     db.prepare(
       `INSERT INTO notification_log (
          dispatch_id, notification_type, platform, delivery_channel, content_summary, status
-       ) VALUES ('dispatch-3', 'routine.hourly_check', 'slack', 'C1', 'possible alert', 'delivered')`,
+       ) VALUES ('dispatch-3', 'routine.activity_scan', 'slack', 'C1', 'possible alert', 'delivered')`,
     ).run();
     const d = createDetectorWithDb(db);
     d.trackNotification("dispatch-3:slack", "slack", "possible alert");

@@ -201,7 +201,7 @@ export function EditableField({
 
   return (
     <div
-      className={`py-1.5 group cursor-pointer rounded px-1 -mx-1 hover:bg-muted/50 transition-colors${modified ? " border-l-2 border-blue-500 pl-2" : ""}`}
+      className={`py-1.5 group cursor-pointer rounded px-1 -mx-1 hover:bg-muted/50 transition-colors${modified ? " border-l-2 border-primary pl-2" : ""}`}
       data-config-key={configKey}
       onClick={() => setEditing(true)}
     >
@@ -212,7 +212,7 @@ export function EditableField({
         </span>
         <div className="flex items-center gap-1.5">
           {modified && (
-            <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400">
+            <span className="text-[10px] font-medium text-primary">
               modified
             </span>
           )}
@@ -299,14 +299,14 @@ export function EditableBooleanField({
   };
 
   return (
-    <div className={`py-1.5 group${modified ? " border-l-2 border-blue-500 pl-2 -ml-1 rounded" : ""}`} data-config-key={configKey}>
+    <div className={`py-1.5 group${modified ? " border-l-2 border-primary pl-2 -ml-1 rounded" : ""}`} data-config-key={configKey}>
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-muted-foreground inline-flex items-center gap-1.5">
             {label}
             {showRestart && <RestartRequiredBadge />}
             {modified && (
-              <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              <span className="text-[10px] font-medium text-primary">
                 modified
               </span>
             )}
@@ -427,12 +427,12 @@ export function EditableArrayField({
   };
 
   return (
-    <div className={`py-2${modified ? " border-l-2 border-blue-500 pl-2 -ml-1 rounded" : ""}`} data-config-key={configKey}>
+    <div className={`py-2${modified ? " border-l-2 border-primary pl-2 -ml-1 rounded" : ""}`} data-config-key={configKey}>
       <p className="text-sm text-muted-foreground mb-2 inline-flex items-center gap-1.5">
         {label}
         {showRestart && <RestartRequiredBadge />}
         {modified && (
-          <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400">
+          <span className="text-[10px] font-medium text-primary">
             modified
           </span>
         )}

@@ -154,7 +154,7 @@ describe("built-in agent.md files — per-slug contract", () => {
         expect(validateCronExpression(resolved)).toBeNull();
 
         if (entry.cronExpression === null) {
-          // Runtime-window builtin (hourly-check): the registry resolver is
+          // Runtime-window builtin (activity-scan): the registry resolver is
           // null and the loader's drift check is a no-op (§5.5.1). The YAML
           // literal is self-documenting only and must not be scheduled from.
           expect(checkCronDrift(resolved, null)).toBeNull();

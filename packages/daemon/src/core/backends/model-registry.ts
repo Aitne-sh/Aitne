@@ -12,7 +12,7 @@ import type {
  *
  * Tier semantics (see `BackendModelTier` in shared/backend.ts):
  *   - `LITE`   — delegated proxy + observer-fired short-shape tasks.
- *   - `MEDIUM` — main agent surfaces (DM, routines, hourly check, reviews).
+ *   - `MEDIUM` — main agent surfaces (DM, routines, activity scan, reviews).
  *   - `HIGH`   — heavy reasoning (advisor, knowledge import, generative one-shots).
  *
  * Sources of truth for the alias → API ID mapping:
@@ -27,7 +27,7 @@ export const DEFAULT_CLAUDE_MEDIUM_MODEL = "claude-sonnet-4-6";
 export const DEFAULT_CLAUDE_HIGH_MODEL = "claude-opus-4-8";
 
 // Codex (gpt-5.4-mini is the lite-tier pick; gpt-5.4 is the medium-tier
-// default — morning_routine / hourly_check / evening_review run on this.
+// default — morning_routine / activity_scan / evening_review run on this.
 // gpt-5.5 and gpt-5.5-chat-latest are the flagship reasoning models and
 // stay registered at high tier as selectable opt-ins, but the seeded
 // default for Codex's high tier is also gpt-5.4: gpt-5.5 carries Opus-
@@ -44,7 +44,7 @@ export const DEFAULT_CODEX_HIGH_MODEL = "gpt-5.4";
 // medium-tier flash equivalent left. `gemini-3.1-pro-preview` is priced in
 // the Sonnet band — $0.002/$0.012 per 1k in/out under 200k context, ~2/3
 // the cost of Sonnet 4.6 — so it serves as the "main agent work" pick for
-// every medium-tier surface (morning_routine, message.dm, hourly_check,
+// every medium-tier surface (morning_routine, message.dm, activity_scan,
 // evening / weekly / monthly review). High tier collapses onto the same
 // model via `SEED_HIGH_TIER_OVERRIDE` below: there's no Opus-priced Google
 // flagship worth defaulting to, and operators who genuinely want
@@ -286,7 +286,7 @@ const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
     displayName: "GPT-5.4",
     // Promoted from `high` to `medium` after gpt-5.5 shipped: gpt-5.4 is
     // priced ~half of gpt-5.5 for the same context shapes, and the
-    // medium-tier routines (morning_routine / hourly_check /
+    // medium-tier routines (morning_routine / activity_scan /
     // evening_review / message.dm) do not benefit from gpt-5.5's
     // deeper reasoning enough to justify the cost. gpt-5.4 is ALSO the
     // seeded default for codex's high tier via `SEED_HIGH_TIER_OVERRIDE`

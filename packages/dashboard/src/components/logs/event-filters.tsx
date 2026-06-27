@@ -89,14 +89,14 @@ export function EventFilters(props: EventFiltersProps) {
         className={cn(
           "flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
           props.live
-            ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+            ? "bg-success/15 text-success"
             : "bg-muted text-muted-foreground",
         )}
       >
         <span
           className={cn(
             "h-2 w-2 rounded-full",
-            props.live ? "bg-emerald-500 animate-pulse" : "bg-gray-400",
+            props.live ? "bg-success animate-pulse" : "bg-gray-400",
           )}
         />
         Live

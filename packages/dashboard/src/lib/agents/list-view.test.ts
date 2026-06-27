@@ -13,6 +13,7 @@ function item(overrides: Partial<AgentListItem>): AgentListItem {
     name: "X",
     description: "",
     kind: "user",
+    category: "user",
     enabled: true,
     tags: [],
     schedule: { kind: "cron", expression: "0 9 * * *", timezone: "UTC" },
@@ -66,7 +67,7 @@ describe("filterAgents", () => {
     const cadenceItems = [
       // Runtime-window built-in: structured interval present.
       item({
-        slug: "hourly-check",
+        slug: "activity-scan",
         schedule: {
           kind: "cron",
           expression: "0 4-23 * * *",
@@ -80,7 +81,7 @@ describe("filterAgents", () => {
       item({ slug: "poller", schedule: { kind: "cron", expression: "*/30 * * * *", timezone: "UTC" } }),
     ];
     expect(filterAgents(cadenceItems, filter({ cadence: "interval" })).map((i) => i.slug)).toEqual([
-      "hourly-check",
+      "activity-scan",
       "poller",
     ]);
     expect(filterAgents(cadenceItems, filter({ cadence: "scheduled" })).map((i) => i.slug)).toEqual([

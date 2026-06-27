@@ -929,7 +929,7 @@ describe("Observations API routes", () => {
 
     // 2026-05 cost-spike fix: the legacy `{ error: "validation_error" }`
     // body gave the agent zero signal about which field was wrong, so
-    // a single Stage-3 hourly_check burned 8 retries on this endpoint
+    // a single Stage-3 activity_scan burned 8 retries on this endpoint
     // ($0.58, 25 turns). The contract below guarantees every 400 carries
     // an `issues` array naming the offending field, an `expectedShape`,
     // and a concrete `example` the agent can copy-paste.

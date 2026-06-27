@@ -80,7 +80,7 @@ function FileUploadButton({
           <Upload className="h-3.5 w-3.5 mr-1" />
           {uploading ? "Uploading..." : label}
         </Button>
-        {configured && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+        {configured && <CheckCircle2 className="h-4 w-4 text-success" />}
       </div>
       {result && (
         <Alert variant={result.type === "success" ? "success" : "error"}>
@@ -201,20 +201,20 @@ export function GoogleCard() {
           <div className="flex items-center gap-1.5 text-xs">
             <span className={cn(
               "inline-block h-2 w-2 rounded-full",
-              calendarStatus?.connected ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600",
+              calendarStatus?.connected ? "bg-success" : "bg-gray-300 dark:bg-gray-600",
             )} />
             <span className="text-muted-foreground">Calendar</span>
-            <span className={calendarStatus?.connected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+            <span className={calendarStatus?.connected ? "text-success" : "text-muted-foreground"}>
               {calendarStatus?.connected ? "Active" : "Inactive"}
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-xs">
             <span className={cn(
               "inline-block h-2 w-2 rounded-full",
-              gmailStatus?.connected ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600",
+              gmailStatus?.connected ? "bg-success" : "bg-gray-300 dark:bg-gray-600",
             )} />
             <span className="text-muted-foreground">Gmail</span>
-            <span className={gmailStatus?.connected ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}>
+            <span className={gmailStatus?.connected ? "text-success" : "text-muted-foreground"}>
               {gmailStatus?.connected ? "Active" : "Not yet implemented"}
             </span>
           </div>
@@ -246,7 +246,7 @@ export function GoogleCard() {
               <ExternalLink className="h-3.5 w-3.5 mr-1" />
               {authorizing ? "Waiting..." : tokenDone ? "Re-authorize" : "Authorize with Google"}
             </Button>
-            {tokenDone && <CheckCircle2 className="inline-block ml-2 h-4 w-4 text-emerald-500" />}
+            {tokenDone && <CheckCircle2 className="inline-block ml-2 h-4 w-4 text-success" />}
             {authError && (
               <Alert variant="error" className="mt-1">{authError}</Alert>
             )}

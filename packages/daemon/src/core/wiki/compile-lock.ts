@@ -12,7 +12,7 @@
  *     time. The lock is held until the dispatcher releases it via
  *     `releaseWikiCompileLock` in `executeDefault`'s `finally` block.
  *   - The lock is purely in-process; that matches the dispatcher's
- *     existing concurrency invariants (`hourlyCheckInProgress`,
+ *     existing concurrency invariants (`activityScanInProgress`,
  *     `morningRoutineActive` are also in-memory flags). A second
  *     daemon process would not see the lock — but the daemon is
  *     single-process by design.

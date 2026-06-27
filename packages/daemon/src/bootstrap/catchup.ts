@@ -29,7 +29,7 @@ import { createLogger } from "../logging.js";
 import {
   getDueCatchupRoutines,
   hasFreshAgentDayTodayMd,
-  shouldCatchUpHourlyCheck,
+  shouldCatchUpActivityScan,
 } from "./schedule-helpers.js";
 
 const logger = createLogger("daemon-bootstrap-catchup");
@@ -37,7 +37,7 @@ const logger = createLogger("daemon-bootstrap-catchup");
 export interface StartupCatchupResult {
   postMessagingRoadmapRefresh: boolean;
   postMessagingRoutines: string[];
-  postMessagingHourlyCheck: boolean;
+  postMessagingActivityScan: boolean;
 }
 
 export async function runCatchup(
@@ -60,7 +60,7 @@ export async function runCatchup(
     return {
       postMessagingRoadmapRefresh: false,
       postMessagingRoutines: [],
-      postMessagingHourlyCheck: false,
+      postMessagingActivityScan: false,
     };
   }
 
@@ -98,7 +98,7 @@ export async function runCatchup(
     agentDayEndUtc,
     now,
   );
-  const needsHourlyCheckCatchup = shouldCatchUpHourlyCheck(
+  const needsActivityScanCatchup = shouldCatchUpActivityScan(
     db,
     config,
     now,
@@ -122,7 +122,7 @@ export async function runCatchup(
         priority: EventPriority.HIGH,
         data: {
           postCatchupRoutines: dueCatchupRoutines,
-          postCatchupHourlyCheck: needsHourlyCheckCatchup,
+          postCatchupActivityScan: needsActivityScanCatchup,
           deferPostMorningCatchupsUntilStartupReady: true,
         },
       }),
@@ -137,14 +137,14 @@ export async function runCatchup(
       return {
         postMessagingRoadmapRefresh: false,
         postMessagingRoutines: [],
-        postMessagingHourlyCheck: false,
+        postMessagingActivityScan: false,
       };
     }
 
     return {
       postMessagingRoadmapRefresh: isRoadmapStale(contextDir),
       postMessagingRoutines: dueCatchupRoutines,
-      postMessagingHourlyCheck: needsHourlyCheckCatchup,
+      postMessagingActivityScan: needsActivityScanCatchup,
     };
   }
 
@@ -156,7 +156,7 @@ export async function runCatchup(
   return {
     postMessagingRoadmapRefresh: false,
     postMessagingRoutines: dueCatchupRoutines,
-    postMessagingHourlyCheck: needsHourlyCheckCatchup,
+    postMessagingActivityScan: needsActivityScanCatchup,
   };
 }
 
@@ -174,9 +174,9 @@ export async function runPostMessagingCatchup(
     await processRoutineCatchup(dispatcher, routine);
   }
 
-  if (catchup.postMessagingHourlyCheck) {
-    logger.info("Triggering hourly_check catchup after messaging startup");
-    await dispatcher.triggerHourlyCheck("catchup_startup", { force: false });
+  if (catchup.postMessagingActivityScan) {
+    logger.info("Triggering activity_scan catchup after messaging startup");
+    await dispatcher.triggerActivityScan("catchup_startup", { force: false });
   }
 }
 
@@ -188,7 +188,7 @@ export async function processRoutineCatchup(
     ...createEvent({
       type: `routine.${routine}`,
       source: "catchup",
-      priority: routine === "hourly_check" ? EventPriority.NORMAL : EventPriority.HIGH,
+      priority: routine === "activity_scan" ? EventPriority.NORMAL : EventPriority.HIGH,
     }),
     routine,
   } as RoutineEvent);

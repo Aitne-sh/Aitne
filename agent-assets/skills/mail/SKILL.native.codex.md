@@ -11,15 +11,22 @@ allowed-tools:
 > **Refusal directive — read first.** Gmail is in `native` mode bound to
 > Codex. Do **NOT** call any of:
 >
-> - `POST /api/integrations/gmail/exec` (returns `410` with
->   `X-Integration-Mode: native`)
-> - `POST /api/integrations/gmail/reconcile` (410)
 > - `/api/mail/<gmail-account-id>/*` (per-account 410)
+> - `POST /api/integrations/gmail/exec`
+> - `POST /api/integrations/gmail/reconcile`
+>
+> In native mode `POST /api/integrations/gmail/exec` returns **409
+> `mode_mismatch`** (the handler rejects non-delegated mode);
+> `.../reconcile` is not mode-gated at all. Do not call either — use the
+> native connector. The 410 + `X-Integration-Mode: native` refusal
+> contract applies ONLY to the integration's own data routes
+> (the per-account `/api/mail/<gmail-account-id>/*` paths).
 >
 > Reach Gmail through the in-session Gmail connector your harness
 > exposes. Your tool menu lists every available tool at session start —
-> pick the Gmail one. The 410 is a contract, not an outage — the route
-> gate enforces native-mode exclusivity per
+> pick the Gmail one. The per-account 410 on
+> `/api/mail/<gmail-account-id>/*` is a contract, not an outage — the
+> mail handler enforces native-mode exclusivity for the data routes per
 > `INTEGRATION_NATIVE_MODE_DESIGN.md` §9.
 
 To confirm the binding, read `<integration_modes>` (carries
@@ -140,9 +147,9 @@ during a mode flip per §11.3.1), stop and re-read `<integration_modes>`
 
 ## Decision rules
 
-- **Hourly check is read-only** — inherits the constraint from
-  `routine.hourly_check.native.codex.md`. No sends, archives, label
-  writes during hourly.
+- **Activity scan is read-only** — inherits the constraint from
+  `routine.activity_scan.native.codex.md`. No sends, archives, label
+  writes during the scan.
 - **Prefer drafts over send.** The create-draft capability is
   autonomous; the send / send-draft capabilities require explicit user
   OK.

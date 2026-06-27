@@ -195,7 +195,7 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
     // regression that re-emits agent telemetry into the user-facing
     // journal surfaces here.
     expect(skeleton).not.toMatch(/^## Actions$/m);
-    expect(skeleton).not.toContain("hourly_check: ");
+    expect(skeleton).not.toContain("activity_scan: ");
   });
 
   it("appendMorningRoutineJournalEntry emits the Step-9 byte-shape the current task-flow produces", async () => {
@@ -214,7 +214,7 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
     // H2 line. `pnpm audit` parses each `- <field>:` line; do not
     // reorder or rename without updating audit.
     //
-    // `seedPipelineRows` inserts 19 hourly_check rows
+    // `seedPipelineRows` inserts 19 activity_scan rows
     // (`for h = 5..23 { ... }`) plus the Stage A
     // `routine.morning_routine_today` row inside the agent-day
     // window — total 20 actions across 2 distinct types. The Stage B
@@ -226,7 +226,7 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
         "- Day-type: weekday",
         "- Journal: daily/2026-05-14.md (16 lines, 3 projects referenced)",
         "- Inbox: 4 files triaged, 4 moved to scratch, 1 DM-confirmations sent",
-        "- Actions: 19 total (hourly_check: 19)",
+        "- Actions: 19 total (activity_scan: 19)",
         "- Checks from routines/morning.md: water bottle filled, calendar synced",
         "- Anomalies / skipped steps: pre-pass partial (gmail)",
         "",
@@ -288,7 +288,7 @@ describe("morning-routine pipeline golden fixture (Phase 2)", () => {
  *   - 1 Stage A row with full Stage A metadata (dayType, anomalies,
  *     inboxStats, morningChecks).
  *   - 1 Stage B row carrying the success terminal state.
- *   - A handful of hourly_check / evening_review rows to give the
+ *   - A handful of activity_scan / evening_review rows to give the
  *     skeleton builder non-zero Actions counts.
  *   - User+assistant messages so messages_handled > 0.
  */
@@ -321,7 +321,7 @@ function seedPipelineRows(db: Database.Database): void {
     db.prepare(
       `INSERT INTO agent_actions
          (action_type, result, started_at, completed_at)
-       VALUES ('hourly_check', 'success', ?, ?)`,
+       VALUES ('activity_scan', 'success', ?, ?)`,
     ).run(
       `2026-05-14 ${String(h).padStart(2, "0")}:00:00`,
       `2026-05-14 ${String(h).padStart(2, "0")}:01:00`,

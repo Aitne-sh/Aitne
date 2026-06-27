@@ -92,25 +92,54 @@ function consumeSelfWrite(absPath: string): boolean {
 
 // ── Render ─────────────────────────────────────────────────────────────────
 
-// Ownership note: this frontmatter emits `owner: daemon`. The file is a
-// daemon-rendered snapshot of `settings.integrations_json`; the Dashboard
-// (Settings → Connections) is the canonical edit surface. Hand-edits are
-// still parsed by chokidar as a break-glass path for resilience, but the
-// file is not advertised as user-editable. See §14.3 of
+// Frontmatter contract. `policies/integrations.md` lives inside the vault
+// under the `policies/` authority class, so it MUST satisfy the vault
+// frontmatter validator (`context-frontmatter.ts`): `type: rule`,
+// `owner ∈ {agent, shared, user}`, and an ISO `updated` date. Before the
+// CONTEXT_VAULT_REDESIGN restructure this file lived at the un-validated
+// `~/.personal-agent/integrations.md`, so it shipped a bespoke
+// daemon-snapshot frontmatter (`owner: daemon`, no `type`/`updated`). The
+// restructure moved it under `policies/` and added the generic `policies/`
+// validation, but this renderer was never reconciled — leaving every
+// install's file flagged "frontmatter requires `type`" by Vault Health.
+//
+// `owner` is `shared` because the file is a daemon-rendered snapshot of
+// `settings.integrations_json` that the user may also hand-edit (chokidar
+// reconciles edits back into the DB) — the same mixed authority as
+// `policies/management.md`. The Dashboard (Settings → Connections) remains
+// the canonical edit surface. See §14.3 of
 // docs/design/14-integration-delegation.md.
-const FRONTMATTER = `---
-file: integrations.md
-purpose: per-integration access-mode configuration
-owner: daemon
+//
+// `updated` is derived from the most recent `lastChangedAt` across all
+// integration rows (truncated to a calendar date) so the render stays a
+// pure function of DB state: booting re-renders byte-identical output until
+// a mode actually changes, preserving the idempotency contract above.
+const FRONTMATTER_FALLBACK_UPDATED = "2026-04-17";
+
+function renderFrontmatter(integrations: IntegrationsRecord): string {
+  let latest = "";
+  for (const key of INTEGRATION_KEYS) {
+    const ts = integrations[key].lastChangedAt;
+    if (ts > latest) latest = ts;
+  }
+  const updated = /^\d{4}-\d{2}-\d{2}/.test(latest)
+    ? latest.slice(0, 10)
+    : FRONTMATTER_FALLBACK_UPDATED;
+  return `---
+type: rule
+slug: integrations
+owner: shared
+updated: ${updated}
 schema_version: 1
 ---
 `;
+}
 
 const MODES_SECTION = `## Modes
 
 - **direct** — daemon holds credentials and polls; full feature set; setup required.
 - **delegated** — daemon proxies a separate backend connector on a cadence; reduced features; zero setup.
-- **native** — main backend's own native MCP / connector reaches the integration on-demand within the same DM / hourly_check turn; no daemon polling and no daemon-side proxy.
+- **native** — main backend's own native MCP / connector reaches the integration on-demand within the same DM / activity_scan turn; no daemon polling and no daemon-side proxy.
 - **disabled** — integration off.
 `;
 
@@ -184,15 +213,22 @@ export function renderNoteSourcesSection(
     notionLine = "disabled";
   } else if (notion.mode === "delegated" && notion.delegatedBackend) {
     notionLine = `enabled (delegated via ${notion.delegatedBackend})`;
+  } else if (notion.mode === "native" && notion.nativeBackend) {
+    notionLine = `enabled (native via ${notion.nativeBackend})`;
   } else {
     notionLine = "enabled (direct)";
   }
+  const notionTargets = (notion.fetchTargets ?? []).map((target) => target.label);
+  const notionTargetsLine = notionTargets.length > 0
+    ? notionTargets.join(", ")
+    : "—";
   return [
     "## Note Sources",
     "",
     "<!-- Auto-generated. Edit settings via Dashboard → Settings → Note. Hand-edits are overwritten on next render. -->",
     `- Obsidian vault (personal): ${obsidianLine}`,
     `- Notion: ${notionLine}`,
+    `- Notion routine fetch targets: ${notionTargetsLine}`,
     "",
   ].join("\n");
 }
@@ -284,7 +320,7 @@ function renderToolDenySection(integrations: IntegrationsRecord): string {
 /**
  * INTEGRATION_NATIVE_MODE_DESIGN.md §7.3 — render the full per-session
  * routing table that the per-backend instruction file (`CLAUDE.md` /
- * `AGENTS.md` / `GEMINI.md`) and the hourly_check / DM task-flow files
+ * `AGENTS.md` / `GEMINI.md`) and the activity_scan / DM task-flow files
  * substitute in for the `<integration-routing-table>` placeholder.
  *
  * Always renders every registered integration, even when all rows are
@@ -318,7 +354,7 @@ export function renderIntegrationRoutingTable(
  * `native` rows; `disabled` rows are filtered out entirely so the
  * task-flow's "for each integration" loop has zero iterations for them.
  *
- * This is what the hourly_check and DM task-flow files iterate over;
+ * This is what the activity_scan and DM task-flow files iterate over;
  * the full {@link renderIntegrationRoutingTable} is for the instruction
  * file's read-only audit summary.
  */
@@ -484,7 +520,7 @@ export function renderManagementMd(
   },
 ): string {
   return [
-    FRONTMATTER,
+    renderFrontmatter(integrations),
     "# Integration Management\n",
     MODES_SECTION,
     renderCurrentStateTable(integrations),
@@ -841,6 +877,7 @@ function mergeParsedIntoDb(
     if (semanticChange) {
       merged[key] = {
         ...next,
+        fetchTargets: prev.fetchTargets ?? [],
         lastChangedAt: new Date().toISOString(),
       };
     }

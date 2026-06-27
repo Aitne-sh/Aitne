@@ -1,6 +1,11 @@
 "use client";
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useMutation,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type {
   BooksResponse,
@@ -24,6 +29,10 @@ export function useBooks(filters?: {
         offset: filters?.offset ?? 0,
       }),
     staleTime: 30_000,
+    // Keep the current table on screen while a new status filter loads —
+    // otherwise the key change clears data, QueryResult collapses to a
+    // skeleton, and the page scrolls to the top on every filter change.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -36,6 +45,10 @@ export function useBookHighlights(bookId: number | null, limit?: number) {
       }),
     enabled: bookId !== null,
     staleTime: 30_000,
+    // Keep the previous book's highlights on screen while the newly
+    // selected book loads, so the panel doesn't flash a skeleton and
+    // bounce the scroll on each row click.
+    placeholderData: keepPreviousData,
   });
 }
 

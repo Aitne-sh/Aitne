@@ -59,7 +59,7 @@ export function PrimaryPlatformField({
         <label className="text-sm font-medium">
           Fallback Primary Platform
           {modified && (
-            <span className="ml-2 text-xs text-amber-600">(unsaved)</span>
+            <span className="ml-2 text-xs text-warning">(unsaved)</span>
           )}
         </label>
         {defaultValue !== undefined && (

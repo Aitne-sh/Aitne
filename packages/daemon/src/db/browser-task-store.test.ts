@@ -11,7 +11,9 @@ import {
   incrementBlockedRequests,
   incrementExtractChars,
   listBrowserTasks,
+  listUndeliveredBrowserTaskReports,
   markAwaitingUser,
+  markBrowserTaskDelivered,
   markFinalConfirm,
   markRunning,
   markRunningFromParked,
@@ -76,6 +78,7 @@ describe("createBrowserTask + getBrowserTask", () => {
       createdAt: 1000,
       startedAt: null,
       finishedAt: null,
+      deliveredAt: null,
     });
     expect(getBrowserTask(db, "task-1")).toEqual(row);
   });
@@ -93,6 +96,26 @@ describe("createBrowserTask + getBrowserTask", () => {
 
   it("returns null for an unknown id", () => {
     expect(getBrowserTask(db, "nope")).toBeNull();
+  });
+});
+
+describe("delivery recovery helpers", () => {
+  it("lists completed report rows until delivered_at is set", () => {
+    createBrowserTask(db, seedInput({ id: "done", createdAt: 1000 }));
+    createBrowserTask(db, seedInput({ id: "pending", createdAt: 500 }));
+    markTerminal(db, {
+      id: "done",
+      state: "completed",
+      outcomeDetail: null,
+      report: "all set",
+      finishedAt: 2000,
+    });
+    expect(listUndeliveredBrowserTaskReports(db).map((r) => r.id)).toEqual([
+      "done",
+    ]);
+    const marked = markBrowserTaskDelivered(db, "done", 3000);
+    expect(marked?.deliveredAt).toBe(3000);
+    expect(listUndeliveredBrowserTaskReports(db)).toEqual([]);
   });
 });
 

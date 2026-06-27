@@ -18,7 +18,7 @@
  *
  * Backpressure: when the queue depth exceeds `queueDepthLimit` the
  * worker drops new arrivals to `summary_status='skipped'` directly,
- * skipping the LLM call. The hourly_check skill falls back to legacy
+ * skipping the LLM call. The activity_scan skill falls back to legacy
  * fetch-on-doubt for those rows.
  */
 
@@ -163,7 +163,7 @@ export class ObservationSummarizerWorker implements Observer {
    * Public entry — invoked by the recordObservation hook. Drops new
    * arrivals to `summary_status='skipped'` directly when the in-memory
    * queue is over capacity. The DB row's `summary_status` reflects the
-   * actual state so hourly_check can route accordingly.
+   * actual state so activity_scan can route accordingly.
    *
    * `bypassBackpressure` is reserved for the startup reclaim sweep where
    * the rows are already in DB-pending state — applying backpressure
@@ -295,7 +295,7 @@ export class ObservationSummarizerWorker implements Observer {
 
     if (!result.ok) {
       // auth_missing is a user-config issue, not a per-row failure. Mark
-      // the row 'skipped' so the hourly_check fallback path picks it up
+      // the row 'skipped' so the activity_scan fallback path picks it up
       // (same posture as `unsupported_backend`) and warn at most once
       // per cooldown window so a missing ANTHROPIC_API_KEY does not spam
       // the log with one entry per pending observation.
@@ -308,7 +308,7 @@ export class ObservationSummarizerWorker implements Observer {
               backend: this.client.backendId,
               model: this.client.modelId,
               cooldownMs: ObservationSummarizerWorker.AUTH_MISSING_WARN_COOLDOWN_MS,
-              hint: "Set ANTHROPIC_API_KEY in env or store it via the dashboard. Pending rows are being marked 'skipped' and the hourly_check fallback path will read them directly.",
+              hint: "Set ANTHROPIC_API_KEY in env or store it via the dashboard. Pending rows are being marked 'skipped' and the activity_scan fallback path will read them directly.",
             },
             "Summarizer LLM auth missing — falling back to skip, future warnings suppressed within cooldown",
           );

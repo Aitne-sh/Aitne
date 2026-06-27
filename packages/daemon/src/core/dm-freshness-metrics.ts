@@ -103,7 +103,7 @@ export interface DmFreshnessAggregate {
    * `agent_log_lag_minutes=0` by construction (the snapshot is built at
    * dispatch time), so including them would drag the percentile toward 0
    * and hide the cohort the plan §6 acceptance threshold targets
-   * ("p95 ≤ 60 — i.e. resumed turns are typically within an hourly_check
+   * ("p95 ≤ 60 — i.e. resumed turns are typically within an activity_scan
    * cadence of session start"). When `resumedTurns === 0`, both
    * percentiles are 0 — there is no lag to report.
    */

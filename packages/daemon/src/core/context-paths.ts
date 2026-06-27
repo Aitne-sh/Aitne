@@ -66,7 +66,7 @@ export const CONTEXT_RELATIVE_PATHS = {
 
   routines: {
     index: "policies/routines/_index.md",
-    hourly: "policies/routines/hourly.md",
+    activityScan: "policies/routines/activity-scan.md",
     morning: "policies/routines/morning.md",
     evening: "policies/routines/evening.md",
     weekly: "policies/routines/weekly.md",

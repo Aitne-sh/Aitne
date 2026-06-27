@@ -1,5 +1,5 @@
-import type { AgentDefinition, AgentTier } from "@aitne/shared";
-import { AGENT_TIERS, OVERRIDE_EDIT_PATHS } from "@aitne/shared";
+import type { AgentDefinition, AgentTier, BackendId } from "@aitne/shared";
+import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS } from "@aitne/shared";
 
 /**
  * Built-in override merge (AGENT_DEFINITIONS_DESIGN.md §6.4.1).
@@ -64,6 +64,10 @@ function isAgentTier(value: unknown): value is AgentTier {
   return typeof value === "string" && (AGENT_TIERS as readonly string[]).includes(value);
 }
 
+function isBackendIdValue(value: unknown): value is BackendId {
+  return typeof value === "string" && (BACKEND_IDS as readonly string[]).includes(value);
+}
+
 function isPositiveInt(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
@@ -99,6 +103,11 @@ function applyOverridePath(
       // model. An empty string is neither (matches the schema's `.min(1)`).
       if (value === null || (typeof value === "string" && value.length > 0)) {
         def.backend.model = value;
+      }
+      break;
+    case "backend.backend_id":
+      if (value === null || isBackendIdValue(value)) {
+        def.backend.backend_id = value;
       }
       break;
     case "limits.max_turns":

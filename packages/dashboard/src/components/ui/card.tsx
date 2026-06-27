@@ -8,12 +8,11 @@ const cardVariants = cva(
     variants: {
       tone: {
         default: "border-border bg-card",
-        warning:
-          "border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/30",
-        success:
-          "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/30",
-        error:
-          "border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/30",
+        // Theme-token tints — the /5 wash keeps tinted cards close to the
+        // plain card surface; light/dark handled by the tokens themselves.
+        warning: "border-warning/40 bg-warning/5",
+        success: "border-success/40 bg-success/5",
+        error: "border-destructive/40 bg-destructive/5",
       },
       interactive: {
         true: "transition-shadow duration-150 hover:shadow-[0_4px_6px_rgb(0_0_0/0.06)]",
@@ -62,11 +61,14 @@ export function CardStatLabel({
   );
 }
 
+// No `tabular-nums` here: the display face (Fraunces Variable) ships no `tnum`
+// feature ("liga"/"rvrn"/"kern" only, verified via fontkit), so the utility was
+// an inert no-op. Stat figures render with Fraunces' proportional digits.
 export function CardValue({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={cn(
-        "font-display text-3xl font-semibold tracking-tight tabular-nums text-foreground",
+        "font-display text-3xl font-semibold tracking-tight text-foreground",
         className,
       )}
       {...props}

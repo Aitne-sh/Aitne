@@ -48,10 +48,10 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
       );
     }
 
-    if (!deps.triggerHourlyCheck) {
+    if (!deps.triggerActivityScan) {
       return respondWithAgentError(c, 503, [
-        composeIssue("agent.hourly_check_unavailable", {
-          field: "triggerHourlyCheck",
+        composeIssue("agent.activity_scan_unavailable", {
+          field: "triggerActivityScan",
           received: "<unavailable>",
         }),
       ]);
@@ -66,7 +66,7 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
       ? body.reason.trim()
       : "api";
     // Default to `force: true` for manual runs — the user explicitly asked
-    // us to check now, so bypass the `hourlyCheckMinObservations` threshold.
+    // us to check now, so bypass the `activityScanMinObservations` threshold.
     // Callers may pass `{ force: false }` to respect the threshold (e.g.,
     // for a gentle cron-style "check if anything is pending" ping).
     const force = body.force === undefined ? true : body.force === true;
@@ -96,7 +96,7 @@ export function createAgentRoutes(deps: ApiDependencies): Hono {
       }
     }
 
-    const result = await deps.triggerHourlyCheck(`manual:${reason}`, {
+    const result = await deps.triggerActivityScan(`manual:${reason}`, {
       force,
       ...(requestedModel ? { requestedModel } : {}),
     });

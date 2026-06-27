@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { SkillsCompiler } from "./skills-compiler.js";
-import { resetFetchWindowSystemPromptForTest } from "./fetch-window-prompt-loader.js";
+import { resetFetchWindowSystemPromptForTest } from "./slim-system-prompt-loader.js";
 import type { BackendId } from "@aitne/shared";
 
 // FILE_SPLIT_PLAN_SKILLS_COMPILER.md §7 + §11 — Golden snapshot test.

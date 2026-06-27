@@ -198,11 +198,11 @@ function morningEvent(over: Partial<RoutineEvent> = {}): RoutineEvent {
 function hourlyEvent(over: Partial<RoutineEvent> = {}): RoutineEvent {
   return {
     ...createEvent({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: EventPriority.NORMAL,
     }),
-    routine: "hourly_check",
+    routine: "activity_scan",
     data: {},
     ...over,
   } as RoutineEvent;
@@ -356,7 +356,7 @@ describe("renderFetchReportBlock", () => {
         ],
         skipped: false,
       },
-      { routine: "routine.hourly_check", agentDay: "2026-05-11" },
+      { routine: "routine.activity_scan", agentDay: "2026-05-11" },
     );
     expect(block).toContain(
       '<error type="no-surface" integration="outlook_mail" account="me" />',
@@ -1172,6 +1172,7 @@ describe("RoutineFetchWindowRunner.run — fan-out coordinator (docs/design/appe
       notion: integrationState({
         mode: "delegated",
         delegatedBackend: "claude",
+        fetchTargets: [{ label: "Projects", locator: "https://notion.so/projects" }],
       }),
     });
 
@@ -2643,7 +2644,7 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
     expect(context).toMatchObject({
       failureKind: "binding-resolve-failed",
       prePass: {
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         attempt: 1,
         maxAttempts: 1,
@@ -2704,7 +2705,7 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
       failureKind: "global-budget-cap",
       backendId: "claude",
       prePass: {
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         status: "failed",
         retryReason: "global-budget-cap",
@@ -2762,7 +2763,7 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
       failureKind: "budget-cap",
       backendId: "claude",
       prePass: {
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         status: "failed",
         retryReason: "budget-cap",
@@ -2798,7 +2799,7 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
       failureKind: "context-build-failed",
       backendId: "claude",
       prePass: {
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         status: "failed",
         willRetry: false,
@@ -2830,7 +2831,7 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
       backendId: "claude",
       modelId: "claude-haiku-4-5",
       prePass: {
-        parentRoutine: "routine.hourly_check",
+        parentRoutine: "routine.activity_scan",
         integrationKey: "gmail",
         status: "failed",
         willRetry: false,
@@ -3091,6 +3092,43 @@ describe("RoutineFetchWindowRunner — N2 spawn gate + N1 failure spend + N3 dro
     );
   });
 
+  it("drops Notion with plan_drop:no_fetch_targets when the allowlist is empty", async () => {
+    // Active Notion without a configured fetch-target allowlist must not
+    // spawn a sub-session (the pre-pass would otherwise scan the whole
+    // workspace) — and the skip must be visible in the N3 audit stream so
+    // the silent absence of Notion observations is diagnosable.
+    seedIntegrations(db, {
+      gmail: integrationState({ mode: "direct" }),
+      notion: integrationState({ mode: "direct" }),
+    });
+    const { router, execute } = makeRouter();
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [seedMailAccount()],
+    });
+    const { report } = await runner.run(morningEvent());
+
+    expect(report.status).toBe("success");
+    // gmail spawns; notion must not.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(audit.logSkip).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      "plan_drop:no_fetch_targets",
+      "autonomous",
+      expect.objectContaining({
+        prePass: expect.objectContaining({
+          parentRoutine: "routine.morning_routine",
+          integrationKey: "notion",
+          skipReason: "no_fetch_targets",
+        }),
+      }),
+    );
+  });
+
   it("writes zero plan_drop audit rows when every drop is direct_inline_prefetch", async () => {
     // All five morning_routine integrations active in `direct` mode: the
     // mail + notion windows emit rows, and the ONLY drops are the two
@@ -3102,7 +3140,10 @@ describe("RoutineFetchWindowRunner — N2 spawn gate + N1 failure spend + N3 dro
       outlook_mail: integrationState({ mode: "direct" }),
       google_calendar: integrationState({ mode: "direct" }),
       outlook_calendar: integrationState({ mode: "direct" }),
-      notion: integrationState({ mode: "direct" }),
+      notion: integrationState({
+        mode: "direct",
+        fetchTargets: [{ label: "Projects", locator: "https://notion.so/projects" }],
+      }),
     });
     const { router, execute } = makeRouter();
     const audit = makeAudit();

@@ -64,7 +64,7 @@ export function ErrorSummary({ errors, days }: ErrorSummaryProps) {
 
       {errors.length === 0 ? (
         <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          <CheckCircle2 className="h-4 w-4 text-success" />
           No errors in the last {days} days
         </div>
       ) : (

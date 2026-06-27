@@ -10,7 +10,7 @@ aliases:
   - receipt files
 category: features
 summary: |
-  A SQLite-backed log of receipt and invoice attachments the Gmail
+  A SQLite-backed log of receipt and invoice attachments the mail
   observer detects, plus an export path that saves them into the
   operator's external Obsidian vault for tax / reimbursement tracking.
 section: lifestyle
@@ -27,7 +27,7 @@ ask_examples:
   - What receipts haven't I saved yet?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - receipt
   - invoice
@@ -50,20 +50,21 @@ related:
 
 ## In One Sentence
 
-Receipts are PDF / image attachments the Gmail observer detects while
-scanning your mail; their metadata lives in the `receipts` SQLite
-table, and the agent can save the original file into your external
-Obsidian vault on request.
+Receipts are attachments (typically PDFs or images) the mail observer
+detects while scanning your mail; their metadata lives in the
+`receipts` SQLite table, and the agent can save the original file into
+your external Obsidian vault on request.
 
 ## How Detection Works
 
-The Gmail observer scans travel-booking emails for PDF / image
-attachments and retains other generic documents it finds. Each detected
+The mail observer scans travel-booking emails across every connected
+mail account and records each attachment it finds. Each detected
 attachment inserts a row into the `receipts` table, keyed uniquely on
 `(account_id, provider_msg_id, attachment_id)` so re-scans are
 idempotent. Columns:
 
-- `category` — `document` or `travel` (nullable until classified)
+- `category` — `travel` at detection time; reclassify to `document`
+  via PATCH (nullable on legacy rows)
 - `provider_msg_id`, `attachment_id`, `account_id` — locate the source
   attachment in the unified mail registry
 - `filename`, `mime_type`, `size_bytes` — attachment metadata
@@ -105,7 +106,7 @@ is documented in
 
 ## Configuration
 
-Detection runs as part of the Gmail observer; see
+Detection runs as part of the mail observer; see
 [Mail](../integrations/mail.md). The save target follows the external
 vault convention `receipts/YYYY/MM/<merchant>-<date>.<ext>`.
 

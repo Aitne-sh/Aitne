@@ -61,7 +61,7 @@ detail lives one click deeper under Conversations.
 
 Activity is the unified view of:
 
-- **Routines**: morning, evening, weekly, hourly fires.
+- **Routines**: morning, evening, weekly, activity-scan fires.
 - **Reactive sessions**: DMs, dashboard chat, mentions.
 - **Background actions**: notifications sent, mail labeled, schedule
   files written.

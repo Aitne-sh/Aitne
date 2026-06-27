@@ -6,7 +6,8 @@ description: "Writes the monthly synthesis note and month-end retrospective on t
 kind: builtin
 version: 1
 # OFF by default pre-release (§2.1, frozen). Do not flip without owner sign-off.
-# The scheduler additionally gates firing on `config.monthlyReviewEnabled`.
+# `agents.enabled` is the single switch (the legacy `monthlyReviewEnabled`
+# config gate was unified into it — AGENTS_HUB_REDESIGN_PLAN.md §2).
 enabled: false
 tags: [routine, monthly, journal, opt-in]
 
@@ -42,7 +43,7 @@ stop_warning:
     - "Monthly synthesis note"
     - "Month-end retrospective"
   dependent_agents: []
-  reactivation_hint: "Monthly review is opt-in (monthlyReviewEnabled, default off). Re-enable from /agents/monthly-review."
+  reactivation_hint: "Monthly review is opt-in (off by default). Enable from /agents/monthly-review."
 ---
 
 # Monthly Review
@@ -50,6 +51,6 @@ stop_warning:
 Built-in routine — the execution prompt lives in the task-flow, not here.
 See `agent-assets/task-flows/routine.monthly_review.md`.
 
-Disabled by default pre-release: the scheduler consults
-`config.monthlyReviewEnabled` (default `false`) before firing, and this
-definition ships `enabled: false`.
+Disabled by default pre-release: this definition ships `enabled: false`, and
+`agents.enabled` is the single firing switch (the legacy
+`monthlyReviewEnabled` config gate was unified into it).

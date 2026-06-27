@@ -1,4 +1,4 @@
-import type { CustomRoutineParseError } from "../custom-routine-scheduler.js";
+import type { CustomRoutineParseError } from "../custom-routines.js";
 
 /**
  * Pure validators for routine rulebooks and `.base` YAML files.

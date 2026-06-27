@@ -1,6 +1,6 @@
 ---
 name: today
-description: Load for any event that reads or writes today.md — morning routines, hourly checks, DMs, scheduled tasks. Owns the day-type filter, Agent Plan contract, Agent Log/Notes schema, schedule.approaching format, and Morning Routine lock.
+description: Load for any event that reads or writes today.md — morning routines, activity scans, DMs, scheduled tasks. Owns the day-type filter, Agent Plan contract, Agent Log/Notes schema, schedule.approaching format, and Morning Routine lock.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -68,6 +68,14 @@ Derivation, focus-dimension mapping, and downstream focus-filter usage —
 needed only when the Morning Routine writes line 2 — are in the
 **today-skeleton** reference.
 
+Line 2 is not frozen for the day: when the user declares a day-shape
+change ("taking the afternoon off", "sick today"), the DM handler
+updates the matching focus value(s) in place — exact format above,
+English keywords. PATCH targets sections only and cannot reach line 2:
+GET `/api/context/state/today`, edit line 2 alone, PUT the full
+document straight back. Fire-time filters then suppress or re-admit
+whole categories; never hand-edit individual rows for a focus change.
+
 ## Sections and entry formats
 
 The per-section update matrix (when/mode/who-writes) and the
@@ -99,10 +107,18 @@ below: execute, append Agent Log entry, read-then-flip the row to
 `[x]` with annotation, retry on `state/today.md` lock, surface missing-row
 state.
 
-DM handlers and hourly checks do not flip Agent Plan rows — read the
-reference only if your event type is in its applicability list.
+DM handlers and activity scans never flip rows for execution outcomes —
+their only row write is the cancel / amend revision below.
 
 {{> ref:agent-plan-lifecycle }}
+
+## Agent Plan revision — cancel / amend before fire time
+
+When a pending row's premise dies or its time must change before it
+fires, the session that detects it — DM handlers and activity scans
+included — revises schedule + row + Agent Log in the same turn:
+
+{{> ref:agent-plan-revision }}
 
 ## Agent Log format
 

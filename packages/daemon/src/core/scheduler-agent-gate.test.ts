@@ -59,7 +59,7 @@ describe("scheduler agent enabled-gate", () => {
       timezone: "UTC",
       schedulePollIntervalSeconds: 3600,
       monthlyReviewEnabled: false,
-      hourlyCheckEnabled: false,
+      activityScanEnabled: false,
       quietHoursStart: "00:00",
       quietHoursEnd: "00:00",
       browserTaskRespectQuietHours: true,

@@ -68,14 +68,14 @@ describe("task-flow override layer (P5)", () => {
   });
 
   it("variant filenames respect the same user-override layer", () => {
-    // The Claude delegated variant for hourly_check is a real bundled file.
+    // The Claude delegated variant for activity_scan is a real bundled file.
     writeOverride(
-      "routine.hourly_check.delegated.claude",
+      "routine.activity_scan.delegated.claude",
       "# USER-OVERRIDE-MARKER\nClaude delegated override",
     );
     // Pass `claude` + a `gmail: delegated` integration state so the variant
-    // resolver picks `routine.hourly_check.delegated.claude.md`.
-    const flow = getTaskFlow("routine.hourly_check", "claude", {
+    // resolver picks `routine.activity_scan.delegated.claude.md`.
+    const flow = getTaskFlow("routine.activity_scan", "claude", {
       gmail: {
         mode: "delegated",
         delegatedBackend: "claude",

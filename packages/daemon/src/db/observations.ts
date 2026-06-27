@@ -196,7 +196,7 @@ export function recordObservation(
     // excluded.change_type` actually corrects the stored row. Otherwise
     // a daemon write first recorded as actor='user'/'unknown' (before
     // AgentWriteTracker/isMarked flipped it) would stay mis-attributed
-    // and hourly_check would count it as user activity.
+    // and activity_scan would count it as user activity.
     if (
       existingHash === incomingHash &&
       existing.actor === actor &&
@@ -548,7 +548,7 @@ export function getSummaryStatusCounts(
 /**
  * Distribution of `novelty_score` values across pending observations
  * with `summary_status='done'`. Drives the dashboard novelty-histogram
- * card and the hourly_check fetch-rate evaluation.
+ * card and the activity_scan fetch-rate evaluation.
  */
 export function getNoveltyDistribution(
   db: Database.Database,
@@ -629,7 +629,7 @@ export function updateObservationSummary(
 /**
  * Count pending observations that are older than `olderThanDays`.
  *
- * Pending observations are intentionally never auto-deleted (the hourly_check
+ * Pending observations are intentionally never auto-deleted (the activity_scan
  * dispatcher is the only consumer; silently dropping them would hide
  * operational bugs). However, if a row stays pending for many days it usually
  * indicates that the dispatcher is consistently below threshold or otherwise

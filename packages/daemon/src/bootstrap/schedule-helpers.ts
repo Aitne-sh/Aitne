@@ -21,6 +21,8 @@ import {
 } from "@aitne/shared";
 import type { AgentConfig } from "../config.js";
 import { hasActionInWindow } from "../core/schedule-maintenance.js";
+import { getAgentEnabled, getRuntimeWindow } from "../db/agents-store.js";
+import { resolveActivityScanCadence } from "../core/agents/activity-scan-cadence.js";
 
 /**
  * Days of week on which the boot-time catchup will fire an unrun
@@ -103,12 +105,11 @@ export function getDueCatchupRoutines(
     }
   }
 
-  // Monthly catchup is gated by the same kill switch as the scheduler
-  // cron (see scheduler.ts comment block). Default OFF pre-release until
-  // the Mirror+Prune redesign; operators opt in via
-  // PA_MONTHLY_REVIEW_ENABLED or PATCH /api/config.
+  // Monthly catchup is gated by the same switch as the scheduler cron:
+  // the monthly-review AGENT row's `enabled` (default OFF pre-release until
+  // the Mirror+Prune redesign; operators opt in from /agents/monthly-review).
   if (
-    config.monthlyReviewEnabled &&
+    getAgentEnabled(db, "monthly-review", false) &&
     tomorrowLocal.day === 1 &&
     !hasActionInWindow(db, "routine.monthly_review", agentDayStartUtc, agentDayEndUtc)
   ) {
@@ -120,11 +121,11 @@ export function getDueCatchupRoutines(
 
 /**
  * Decide whether the boot sequence should immediately fire one
- * catch-up `routine.hourly_check` (because the cron callback never ran
+ * catch-up `routine.activity_scan` (because the cron callback never ran
  * for the current slot — typically because the host was asleep / the
  * daemon was stopped during the slot window).
  *
- * Slot math mirrors `shouldFireHourlyTickAt` in `scheduler.ts` so the
+ * Slot math mirrors `shouldFireActivityScanTickAt` in `scheduler.ts` so the
  * catch-up always lands on the same slot the cron would have fired at.
  *
  * **Wrap-around active hours are NOT supported.** The active-hours
@@ -144,36 +145,40 @@ export function getDueCatchupRoutines(
  * config-write time, or (b) split the window into two non-wrap
  * ranges in the same call site that consumes them.
  */
-export function shouldCatchUpHourlyCheck(
+export function shouldCatchUpActivityScan(
   db: Database.Database,
   config: AgentConfig,
   now: Date,
 ): boolean {
-  if (!config.hourlyCheckEnabled) {
+  // `agents.enabled` on the activity-scan row is the single on/off switch
+  // (AGENTS_HUB_REDESIGN_PLAN.md §2); cadence comes from the row's
+  // runtime_window with the legacy config keys as fallback.
+  if (!getAgentEnabled(db, "activity-scan", true)) {
     return false;
   }
+  const cadence = resolveActivityScanCadence(getRuntimeWindow(db, "activity-scan"), config);
 
   const tz = config.timezone || undefined;
   const local = nowInTimezone(tz, now);
   if (
-    local.hours < config.hourlyCheckActiveStartHour ||
-    local.hours >= config.hourlyCheckActiveEndHour ||
+    local.hours < cadence.activeStartHour ||
+    local.hours >= cadence.activeEndHour ||
     local.hours === config.dayBoundaryHour
   ) {
     return false;
   }
 
-  // Slot anchors to `activeStartHour`, mirroring shouldFireHourlyTickAt
+  // Slot anchors to `activeStartHour`, mirroring shouldFireActivityScanTickAt
   // in scheduler.ts so the catch-up function picks the same slot the
   // cron callback would have fired at. The earlier branch already
   // returned false when local.hours < activeStartHour, so the offset is
   // always non-negative here.
-  const anchorMinutes = config.hourlyCheckActiveStartHour * 60;
+  const anchorMinutes = cadence.activeStartHour * 60;
   const offsetFromAnchor =
     local.hours * 60 + local.minutes - anchorMinutes;
   const slotOffsetFromAnchor =
-    Math.floor(offsetFromAnchor / config.hourlyCheckIntervalMinutes) *
-    config.hourlyCheckIntervalMinutes;
+    Math.floor(offsetFromAnchor / cadence.intervalMinutes) *
+    cadence.intervalMinutes;
   const slotMinutesSinceMidnight = anchorMinutes + slotOffsetFromAnchor;
   const dayStartUtc = getAgentDayBoundsUtc(tz, 0, now).start;
   const slotStartMs =
@@ -182,7 +187,7 @@ export function shouldCatchUpHourlyCheck(
 
   return !hasActionInWindow(
     db,
-    "routine.hourly_check",
+    "routine.activity_scan",
     slotStartUtc,
     formatSqliteDatetime(now),
   );
@@ -216,7 +221,7 @@ export function hasFreshAgentDayTodayMd(
 
 /**
  * Did `routine.morning_routine` complete successfully within the current
- * agent-day window? Used by the pre-routine gate that fronts hourly_check
+ * agent-day window? Used by the pre-routine gate that fronts activity_scan
  * and the review routines (evening / weekly / monthly) so they refuse to
  * run before the day has been properly opened.
  *
@@ -328,10 +333,10 @@ export interface StalledMorningRoutineWake {
  * without producing a successful `agent_actions` row. Returns the
  * offending row's metadata if stalled, null when the system is healthy.
  *
- * Pairs with `queueMorningRoutineWake` + the hourly-check pre-routine
+ * Pairs with `queueMorningRoutineWake` + the activity-scan pre-routine
  * gate. The dedup that keeps `queueMorningRoutineWake` from re-inserting
  * means a stuck wake row leaves the system in a silent freeze — the gate
- * skips `routine.hourly_check`, `routine.evening_review`, etc. forever
+ * skips `routine.activity_scan`, `routine.evening_review`, etc. forever
  * without surfacing to the user. This helper is the externally visible
  * signal the watchdog uses to break the silence.
  *

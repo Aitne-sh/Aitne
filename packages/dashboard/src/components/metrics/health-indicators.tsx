@@ -34,19 +34,19 @@ function StatusDot({ level }: { level: KpiLevel }) {
       <span
         className={`inline-block h-2 w-2 rounded-full ${
           level === "good"
-            ? "bg-emerald-500"
+            ? "bg-success"
             : level === "warn"
-              ? "bg-amber-500"
-              : "bg-red-500"
+              ? "bg-warning"
+              : "bg-destructive"
         }`}
       />
       <span
         className={
           level === "good"
-            ? "text-emerald-500"
+            ? "text-success"
             : level === "warn"
-              ? "text-amber-500"
-              : "text-red-500"
+              ? "text-warning"
+              : "text-destructive"
         }
       >
         {LEVEL_LABELS[level]}

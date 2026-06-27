@@ -854,7 +854,7 @@ function DelegatedDetails({
                   )}
                 >
                   {row.present ? (
-                    <Check className="h-3 w-3 text-emerald-500" />
+                    <Check className="h-3 w-3 text-success" />
                   ) : (
                     <X className="h-3 w-3 text-muted-foreground" />
                   )}
@@ -978,7 +978,7 @@ function NativeDetails({
           <code className="rounded bg-muted px-1 py-0.5 font-mono">
             {backend ?? "?"}
           </code>
-          &apos;s connector during DM and hourly_check turns. The daemon
+          &apos;s connector during DM and activity_scan turns. The daemon
           does not poll, does not proxy, and does not store{" "}
           {descriptor.displayName} credentials. Destructive operations still
           require user confirmation via the absolute-block layer.
@@ -1063,7 +1063,7 @@ function NativeDetails({
                   )}
                 >
                   {row.present ? (
-                    <Check className="h-3 w-3 text-emerald-500" />
+                    <Check className="h-3 w-3 text-success" />
                   ) : (
                     <X className="h-3 w-3 text-muted-foreground" />
                   )}
@@ -1317,7 +1317,7 @@ function RecentProxyCallsTable({
           <span className="text-muted-foreground/70">
             ({calls.length}
             {hasFailures && (
-              <span className="ml-1 text-amber-600 dark:text-amber-400">
+              <span className="ml-1 text-warning">
                 · failures
               </span>
             )}
@@ -1399,7 +1399,7 @@ function RecentProxyCallsTable({
                         </Badge>
                       ) : (
                         <span
-                          className="text-amber-700 dark:text-amber-300"
+                          className="text-warning"
                           title={call.errorMessage ?? undefined}
                         >
                           {call.errorClass ?? call.result ?? "failed"}

@@ -312,8 +312,8 @@ export function BackendApiKeyPanel({
           role="status"
           className={`flex items-start gap-2 rounded-md border p-2 text-xs ${
             feedback.kind === "success"
-              ? "border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400"
-              : "border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-400"
+              ? "border-success/30 bg-success/5 text-success"
+              : "border-destructive/30 bg-destructive/5 text-destructive"
           }`}
         >
           {feedback.kind === "success" ? (
@@ -565,7 +565,7 @@ function ProviderForm({
     case "azure-openai":
       return (
         <div className="space-y-2">
-          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-[11px] text-amber-700 dark:text-amber-400">
+          <div className="rounded-md border border-warning/40 bg-warning/5 p-2 text-[11px] text-warning">
             <strong>Deployment-name alignment required.</strong> The daemon
             spawns codex with <code>--model &lt;id&gt;</code> from the
             process-routing registry, which Codex treats as the Azure

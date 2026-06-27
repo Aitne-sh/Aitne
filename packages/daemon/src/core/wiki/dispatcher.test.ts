@@ -85,7 +85,7 @@ describe("createWikiCommandEvent / readEventReplyTarget", () => {
     // Defensive: a non-message Event passed as sourceEvent should not
     // produce a reply_target — the routing fields are MessageEvent-only.
     const routineEvent: Event = createEvent({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: EventPriority.NORMAL,
     });

@@ -1,10 +1,10 @@
 ---
 kind: reference
 name: policy-workflow
-description: Step 5.1-5.4 dossier → routine → policy file → auto-index fan-out, with curl recipes and rollback ordering.
+description: Step 5.1-5.4 dossier → Agent → policy file → auto-index fan-out, with curl recipes and rollback ordering.
 ---
 
-# Step 5 fan-out — dossier → routine → policy file → auto-index
+# Step 5 fan-out — dossier → Agent → policy file → auto-index
 
 Each step gates the next. If step `N` fails, attempt to roll back
 steps `N-1 … 1` in reverse before reporting the failure to the user.
@@ -24,18 +24,29 @@ Skip this step if `linked.dossier` is not set or the dossier already
 exists. The dossier file is data only — no harm if it ends up empty
 when the rest of the flow rolls back.
 
-## 5.2 Create the custom routine (only if scheduling is needed)
+## 5.2 Create the execution Agent (only if scheduling is needed)
 
 ```bash
-curl -sS -X PUT http://localhost:8321/api/context/policies/routines/custom/<slug> \
+curl -sS -X POST http://localhost:8321/api/agents \
   -H 'Content-Type: application/json' \
   -d @- <<'JSON'
-{"content":"---\ntype: rule\nslug: <slug>\nprocess_key: routine.custom.<slug>\ncron: \"0 7 * * *\"\nbackend_tier: light\nmax_budget_usd: 0.20\nenabled: true\n---\n# <Title>\n\n## Checks\n\n### <step label>\n**Action**: …\n"}
+{
+  "slug": "<slug>",
+  "name": "<Title>",
+  "description": "Scheduled enforcement for management policy <slug>.",
+  "schedule": { "kind": "cron", "expression": "0 7 * * *" },
+  "backend": { "tier": "lite" },
+  "limits": { "max_budget_usd": 0.20 },
+  "prompt": "# <Title>\n\n## Checks\n\n### <step label>\n**Action**: …"
+}
 JSON
 ```
 
-The route's `onCustomRoutinesChanged` hook reloads the cron scheduler
-automatically — no separate reload call.
+The `prompt` becomes the Agent's task body verbatim; the daemon writes the
+user-visible `policies/agents/<slug>/agent.md` and pairs the recurring
+schedule row itself — no reload call needed. A 409 means the slug is taken
+(go back to Step 2 dedup); a 400 `invalid_definition` returns the failing
+field — surface it verbatim.
 
 Skip this step if the policy is purely passive (e.g. "from now on,
 when the user mentions X in DM, also …"). The policy file itself
@@ -68,11 +79,13 @@ needed.
 
 The `linked:` mapping uses nested YAML for human / LLM readability.
 The daemon's frontmatter validator does not parse nested keys, but
-the **policy-index reconciler does** — it reads `linked.routine` to
-populate the cadence column (by reading the routine file's `cron`
-field) and `linked.dossier` for the dossier column. Keep the slug
-values aligned with the filenames you created at 5.1 / 5.2 so the
-reconciler can resolve them.
+the **policy-index reconciler does** — it reads `linked.routine` (the
+Agent slug; field name kept from the pre-Agents era) to populate the
+cadence column (from `policies/agents/<slug>/agent.md`'s schedule
+expression, falling back to a legacy `policies/routines/custom/<slug>.md`
+cron) and `linked.dossier` for the dossier column. Keep the slug values
+aligned with what you created at 5.1 / 5.2 so the reconciler can
+resolve them.
 
 ## 5.4 _(no manual step required)_
 
@@ -91,7 +104,7 @@ reconciler's last-run record lives at `runtime_state` key
 | Failure at | Roll back |
 |---|---|
 | 5.2 | undo 5.1 — the dossier path does **not** accept `DELETE` (`knowledge/dossiers/*` is PUT/PATCH only; a `DELETE` returns `403 context.write_forbidden`). If you created it new, PUT it to empty content / `status: removed`; an empty dossier is harmless (per 5.1). Leave a pre-existing dossier untouched. |
-| 5.3 | undo 5.2 (PUT routines file back to `enabled: false` and the next reconcile clears the cron job; or `DELETE` if you created it new — `policies/routines/custom/*` is DELETE-whitelisted), then undo 5.1 as above |
+| 5.3 | undo 5.2 — `DELETE /api/agents/<slug>` with `{"keep_history": false}` (you created it new at 5.2, so a hard delete leaves no orphan), then undo 5.1 as above |
 | 5.4 | none required — there is no manual 5.4. If the reconciler does not pick the change up within ~30 s, surface the diagnostics record (`runtime_state` key above) to the user rather than rolling back. |
 
 If any rollback step itself fails, **report the partial state to the

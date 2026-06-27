@@ -737,7 +737,7 @@ describe("Daemon API", () => {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: "---\ntype: rule\nslug: hourly\n---\n# Hourly\n\n## Checks\n\n",
+          content: "---\ntype: rule\nslug: activity-scan\n---\n# Activity Scan\n\n## Checks\n\n",
         }),
       });
       expect(putRes.status).toBe(200);

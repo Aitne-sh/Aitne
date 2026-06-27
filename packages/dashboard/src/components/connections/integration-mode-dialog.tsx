@@ -303,7 +303,7 @@ export function DialogBody({ action, descriptor, gmailAccountCount }: DialogBody
         <ul className="space-y-1.5 text-sm">
           {losses.map((l, i) => (
             <li key={i} className="flex items-start gap-2">
-              <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+              <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
               <span className="text-muted-foreground">{l.message}</span>
             </li>
           ))}
@@ -396,7 +396,7 @@ export function DialogBody({ action, descriptor, gmailAccountCount }: DialogBody
           <p className="mt-1 text-xs text-muted-foreground">
             We run a live capability probe before committing the flip so a
             missing connector capability surfaces here, not at the next
-            DM / hourly_check turn.
+            DM / activity_scan turn.
           </p>
         </Alert>
         {multi && <Alert variant="warning">{multi}</Alert>}
@@ -404,17 +404,17 @@ export function DialogBody({ action, descriptor, gmailAccountCount }: DialogBody
         {/* §11.6 / §14.4 cost delta. Rendered as a typical-range chip —
             the §16 open question 0 captures the follow-up to compute a
             measurement-driven estimate per integration. */}
-        <div className="rounded-md border border-amber-300/60 bg-amber-50/60 p-3 text-xs dark:border-amber-700/50 dark:bg-amber-950/30">
-          <p className="font-medium text-amber-800 dark:text-amber-200">
+        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+          <p className="font-medium text-warning">
             Estimated cost shift (typical workload)
           </p>
-          <p className="mt-1 text-amber-900/80 dark:text-amber-100/80">
+          <p className="mt-1 text-warning/80">
             From {cost.fromLabel}{" "}
-            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900/50">
+            <code className="rounded bg-warning/15 px-1 py-0.5 font-mono text-[11px]">
               ≈ {formatDailyUsd(cost.fromDailyUsd)}/day
             </code>{" "}
             → native MCP on {action.toBackend}{" "}
-            <code className="rounded bg-amber-100 px-1 py-0.5 font-mono text-[11px] dark:bg-amber-900/50">
+            <code className="rounded bg-warning/15 px-1 py-0.5 font-mono text-[11px]">
               ≈ {formatDailyUsd(cost.toDailyUsd)}/day
             </code>
             {cost.multiplier !== null && (
@@ -425,7 +425,7 @@ export function DialogBody({ action, descriptor, gmailAccountCount }: DialogBody
             )}
             .
           </p>
-          <p className="mt-1 text-[11px] text-amber-900/70 dark:text-amber-100/70">
+          <p className="mt-1 text-[11px] text-warning/70">
             Marginal ~${cost.yearlyDeltaUsd}/year per integration at typical
             volume. Native is recommended when the alternative is leaving the
             integration disabled — not as a free upgrade from delegated.
@@ -441,7 +441,7 @@ export function DialogBody({ action, descriptor, gmailAccountCount }: DialogBody
               <li key={i} className="flex items-start gap-2">
                 <span
                   className={`mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
-                    impact.reversible ? "bg-amber-500" : "bg-red-500"
+                    impact.reversible ? "bg-warning" : "bg-destructive"
                   }`}
                 />
                 <span className="text-muted-foreground">{impact.message}</span>
@@ -484,7 +484,7 @@ export function DialogBody({ action, descriptor, gmailAccountCount }: DialogBody
       <Alert variant="warning">
         <p className="text-sm">
           The agent loses awareness of {descriptor.displayName}. No background
-          poller, no in-turn fetch — the hourly check and DM flow drop the
+          poller, no in-turn fetch — the activity scan and DM flow drop the
           integration from their actionable steps. Re-enabling is one click; no
           data is destroyed.
         </p>

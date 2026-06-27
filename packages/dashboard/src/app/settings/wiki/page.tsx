@@ -36,7 +36,7 @@ import { PageHeader as BasePageHeader } from "@/components/ui/page-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { useSaveConfig } from "@/lib/hooks/use-save-config";
-import { formatCurrency } from "@/lib/utils";
+import { formatApiError, formatCurrency, formatTimestamp } from "@/lib/utils";
 import { WIKI_PROCESS_KEYS } from "@aitne/shared";
 
 const WIKI_LANGUAGE_OPTIONS: Array<{ tag: string; label: string }> = [
@@ -112,22 +112,6 @@ function draftsEqual(a: WikiDraft, b: WikiDraft): boolean {
   );
 }
 
-function formatApiError(error: unknown): string {
-  if (error instanceof ApiError) return error.message;
-  return error instanceof Error ? error.message : "Request failed";
-}
-
-function formatTimestamp(iso: string | null): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
 function WikiLanguageField({
   value,
   onChange,
@@ -176,7 +160,7 @@ function WikiLanguageField({
             placeholder="e.g. zh-Hans or pt-BR"
           />
           {customInvalid && (
-            <p className="text-xs text-red-500">
+            <p className="text-xs text-destructive">
               Use a BCP-47 tag like <code>en-US</code> or <code>zh-Hans</code>.
             </p>
           )}
@@ -643,8 +627,8 @@ function ArchivedState({
     <Card>
       <CardHeader className="items-start">
         <div className="flex items-start gap-3">
-          <div className="rounded-full bg-amber-100 p-2 dark:bg-amber-950/60">
-            <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-500" />
+          <div className="rounded-full bg-warning/15 p-2">
+            <AlertTriangle className="h-5 w-5 text-warning" />
           </div>
           <div>
             <CardTitle>This wiki is archived</CardTitle>
@@ -705,7 +689,7 @@ function ArchivedState({
           variant="outline"
           onClick={onDelete}
           disabled={deletePending}
-          className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40"
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
         >
           <Trash2 className="h-4 w-4" />
           Remove registration
@@ -1154,10 +1138,10 @@ function DangerZone({
   onDelete: () => void;
 }) {
   return (
-    <Card className="border-red-200 dark:border-red-900/50">
+    <Card className="border-destructive/40">
       <CardHeader className="items-start">
         <div>
-          <CardTitle className="text-red-700 dark:text-red-400">Danger zone</CardTitle>
+          <CardTitle className="text-destructive">Danger zone</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             Stop or remove the <code>{workspaceName}</code> wiki. Files on
             disk are kept in both cases.
@@ -1181,8 +1165,8 @@ function DangerZone({
             Archive workspace
           </Button>
         </div>
-        <div className="rounded-lg border border-red-200 p-3 dark:border-red-900/50">
-          <h4 className="text-sm font-semibold text-red-700 dark:text-red-400">Remove registration</h4>
+        <div className="rounded-lg border border-destructive/40 p-3">
+          <h4 className="text-sm font-semibold text-destructive">Remove registration</h4>
           <p className="mt-1 text-xs text-muted-foreground">
             Deletes the daemon&rsquo;s record only. The folder on disk is
             preserved — re-add it later if you change your mind.
@@ -1190,7 +1174,7 @@ function DangerZone({
           <Button
             variant="outline"
             size="sm"
-            className="mt-3 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/40"
+            className="mt-3 text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={onDelete}
             disabled={deletePending}
           >

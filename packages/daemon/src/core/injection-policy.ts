@@ -104,7 +104,7 @@ const DEFAULT_POLICY: InjectionPolicy = {
  *    redaction-aware wikilinks. Also drops the `*` policy-file merge
  *    because the lite-tier skill bundle never invokes MCP; the redaction
  *    policy is re-declared inline.
- *  - **Hourly check** (`routine.hourly_check`) — task-flow §"Execution
+ *  - **Activity scan** (`routine.activity_scan`) — task-flow §"Execution
  *    budget" explicitly tells the agent NOT to read roadmap / projects /
  *    user files unless an observation warrants it.
  *  - **Today refresh** (`routine.today_refresh`) — dashboard-triggered
@@ -134,10 +134,10 @@ export function getInjectionPolicy(eventOrProcessKey: string): InjectionPolicy {
     };
   }
 
-  // Narrow routines (hourly check, today refresh) — drop both heavy
+  // Narrow routines (activity scan, today refresh) — drop both heavy
   // blocks. `*` policy merge is preserved (redaction.md is non-negotiable).
   if (
-    eventOrProcessKey === "routine.hourly_check" ||
+    eventOrProcessKey === "routine.activity_scan" ||
     eventOrProcessKey === "routine.today_refresh"
   ) {
     return {
@@ -189,13 +189,13 @@ export function getInjectionPolicy(eventOrProcessKey: string): InjectionPolicy {
  *    global agent-operating behaviour — notification discipline, filter
  *    quality). Phase 3 consumer: `ContextBuilder`.
  *  - `slim`   — use the hard-2048-byte, top-N-by-score variant on the hourly
- *    notify turn (§6). Only `routine.hourly_check` sets it. Implies `global`.
+ *    notify turn (§6). Only `routine.activity_scan` sets it. Implies `global`.
  *  - `self`   — eligible for the per-agent `policies/agents/<slug>/lessons.md`
  *    block (scope `agent:<slug>`). **Phase 4 consumer.** The builder reads it
  *    next to `<agent_identity>` and gates it on a resolved, path-safe slug
  *    stamped onto `event.data.agentId` at the dispatch site — `self === true`
  *    here means "this surface *may* carry self lessons"; an actual injection
- *    additionally requires the run to be bound to an Agent. `hourly_check`
+ *    additionally requires the run to be bound to an Agent. `activity_scan`
  *    keeps `self: false` so the slim notify turn never carries a second block.
  *
  * **Surface keying is grounded in the real event-type strings build() sees,
@@ -210,7 +210,7 @@ export function getInjectionPolicy(eventOrProcessKey: string): InjectionPolicy {
  *    no notifications — injecting lessons there would be wasted bytes against
  *    the §0 cost constraint. So Stage A is keyed, the umbrella and Stage B are
  *    not.
- *  - `routine.hourly_check` is the escalated Stage-3 LLM/notify turn (gate
+ *  - `routine.activity_scan` is the escalated Stage-3 LLM/notify turn (gate
  *    Layers 1–3 are code and build no prompt), so the slim block bites exactly
  *    where the notify decision is made. The `.triage` lite classification is
  *    intentionally excluded.
@@ -292,7 +292,7 @@ export function getAgentLessonsInjection(
       return LESSONS_DM_REVIEW;
 
     // Hourly notify turn — slim, hard-capped notification-discipline variant.
-    case "routine.hourly_check":
+    case "routine.activity_scan":
       return LESSONS_HOURLY;
 
     // Defined-agent task execution (§5 "Defined-agent execution"). A bare

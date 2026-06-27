@@ -5,6 +5,7 @@ import {
   applyBrowserHistoryRetention,
   browserHistoryProfileCursorKey,
   bumpClusterAgentSummaryRevision,
+  claimClusterJournalEnqueue,
   clearClusterOfferStamps,
   deletePendingOffer,
   deletePendingOffersForCluster,
@@ -684,12 +685,16 @@ describe("browser-history-store P2 helpers", () => {
       ).run(slug, rootTaskId, slug, lastActivityAt, lastActivityAt, status);
     }
 
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const TODAY = "2026-06-11";
+    const YESTERDAY = "2026-06-10";
+
     it("returns only active clusters with recent activity, capped at limit", () => {
       const now = Date.now();
       rawSeed("fresh", 33, "active", now - 10_000);
       rawSeed("stale", 35, "active", now - 10 * 86_400_000);
       rawSeed("muted", 37, "muted", now - 10_000);
-      const out = listClustersNeedingUpdate(db, 24 * 60 * 60 * 1000, now, 25);
+      const out = listClustersNeedingUpdate(db, DAY_MS, now, 25, TODAY);
       expect(out.map((r) => r.slug)).toEqual(["fresh"]);
     });
 
@@ -698,8 +703,78 @@ describe("browser-history-store P2 helpers", () => {
       for (let i = 0; i < 5; i += 1) {
         rawSeed(`row-${i}`, 100 + i, "active", now - (i + 1) * 1000);
       }
-      const out = listClustersNeedingUpdate(db, 24 * 60 * 60 * 1000, now, 2);
+      const out = listClustersNeedingUpdate(db, DAY_MS, now, 2, TODAY);
       expect(out).toHaveLength(2);
+    });
+
+    it("excludes a cluster already enqueued for today's agent day", () => {
+      const now = Date.now();
+      rawSeed("done-today", 41, "active", now - 10_000);
+      claimClusterJournalEnqueue(db, "done-today", TODAY);
+      const out = listClustersNeedingUpdate(db, DAY_MS, now, 25, TODAY);
+      expect(out).toEqual([]);
+    });
+
+    it("includes a cluster whose stamp is from an earlier agent day", () => {
+      const now = Date.now();
+      rawSeed("done-yesterday", 43, "active", now - 10_000);
+      claimClusterJournalEnqueue(db, "done-yesterday", YESTERDAY);
+      const out = listClustersNeedingUpdate(db, DAY_MS, now, 25, TODAY);
+      expect(out.map((r) => r.slug)).toEqual(["done-yesterday"]);
+    });
+  });
+
+  describe("claimClusterJournalEnqueue", () => {
+    function rawSeed(slug: string, rootTaskId: number): void {
+      db.prepare(
+        `INSERT INTO browser_research_clusters
+           (slug, root_task_id, display_name, started_at, last_activity_at,
+            visits_total, meaningful_visits_total, meaningful_foreground_sec_total,
+            distinct_meaningful_domains, status)
+         VALUES (?, ?, ?, 1, 1, 1, 1, 120, 1, 'active')`,
+      ).run(slug, rootTaskId, slug);
+    }
+
+    function stampOf(slug: string): string | null {
+      return (
+        db
+          .prepare(
+            `SELECT journal_update_enqueued_on AS stamp
+               FROM browser_research_clusters WHERE slug = ?`,
+          )
+          .get(slug) as { stamp: string | null }
+      ).stamp;
+    }
+
+    it("claims a NULL-stamped cluster and reports the claim", () => {
+      rawSeed("plain", 51);
+      expect(stampOf("plain")).toBeNull();
+      expect(claimClusterJournalEnqueue(db, "plain", "2026-06-11")).toBe(true);
+      expect(stampOf("plain")).toBe("2026-06-11");
+    });
+
+    it("refuses a same-day re-claim (atomic — the loser of a race skips)", () => {
+      rawSeed("dup", 52);
+      expect(claimClusterJournalEnqueue(db, "dup", "2026-06-11")).toBe(true);
+      // A concurrent day-boundary fire claiming the same day loses.
+      expect(claimClusterJournalEnqueue(db, "dup", "2026-06-11")).toBe(false);
+      expect(stampOf("dup")).toBe("2026-06-11");
+    });
+
+    it("claims forward but refuses to regress (monotonic)", () => {
+      rawSeed("mono", 53);
+      expect(claimClusterJournalEnqueue(db, "mono", "2026-06-11")).toBe(true);
+      // A stale replay carrying an older agent-day must not regress.
+      expect(claimClusterJournalEnqueue(db, "mono", "2026-06-10")).toBe(false);
+      expect(stampOf("mono")).toBe("2026-06-11");
+      expect(claimClusterJournalEnqueue(db, "mono", "2026-06-12")).toBe(true);
+      expect(stampOf("mono")).toBe("2026-06-12");
+    });
+
+    it("is a no-op for an unknown slug and reports no claim", () => {
+      expect(claimClusterJournalEnqueue(db, "no-such-cluster", "2026-06-11")).toBe(
+        false,
+      );
     });
   });
 

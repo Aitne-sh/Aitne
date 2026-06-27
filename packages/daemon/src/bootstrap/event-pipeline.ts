@@ -96,6 +96,8 @@ import { markContextChanged } from "../core/dashboard-session-controls.js";
 // Core / dispatcher chain
 import type { EventBus } from "../core/event-bus.js";
 import { EventDispatcher } from "../core/dispatcher.js";
+import { SessionGateRegistry } from "../core/session-gate.js";
+import { enqueueUndeliveredBrowserTaskDeliveries } from "../core/dispatcher-task-delivery.js";
 import { SignalDetector } from "../core/signal-detector.js";
 import { ContextBuilder } from "../core/context-builder.js";
 import { getTaskFlow, initTaskFlows } from "../core/prompts.js";
@@ -143,6 +145,7 @@ import {
   type RefreshDmSessionWorkdirsResult,
 } from "../core/workdir.js";
 import { validateBuiltinSkillSourceTree } from "../core/skills-compiler-variants.js";
+import { eventTypeAcceptsUserSkills } from "../core/skills-manifest.js";
 
 // Audit / safety / messaging
 import { AuditLogger } from "../safety/audit.js";
@@ -341,6 +344,21 @@ export interface BootstrapEventPipelineResult {
   readonly browserTaskRunner: import(
     "../services/browser-task/browser-task-runner.js"
   ).BrowserTaskRunner;
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §4 — generic background-task runner +
+   * shared slot state. The runner + route layer hold THIS instance so a
+   * cancel-while-pending and a runner-side promote race on one value.
+   */
+  readonly backgroundTaskSlotStateRef: import(
+    "../services/background-task/background-task-runner.js"
+  ).BackgroundTaskSlotStateRef;
+  readonly backgroundTaskRunner: import(
+    "../services/background-task/background-task-runner.js"
+  ).BackgroundTaskRunner;
+  /** 30 s housekeeping tick — clarification-deadline + pending-queue
+   *  timeout + delivery recovery sweep for background tasks. Cleared on
+   *  graceful shutdown. */
+  readonly backgroundTaskHousekeepingTimer: NodeJS.Timeout;
 }
 
 /**
@@ -450,7 +468,35 @@ export async function createEventPipeline(
   // row whose flush timer didn't fire (process killed) would otherwise
   // linger forever and confuse the dashboard's notification feed.
   NotificationManager.closeStaleBatchedRows(db);
-  const notificationManager = new NotificationManager(messageHub, db, config);
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §2.3 / §13 Decision 4 (Phase 4, opt-in)
+  // — router that hands an ACTIVE-owner proactive forward to the
+  // task-delivery gate so the real DM agent weaves it into the live thread.
+  // Only invoked by `deliverProactive` when the owner is active AND
+  // `autonomousForwardNaturalDelivery` is on (default off). Resolves the
+  // owner's default DM channel as the weave target; no channel ⇒ returns
+  // false and the verbatim path runs unchanged.
+  const { createAutonomousForwardDeliveryEvent: makeAutonomousForwardEvent } =
+    await import("../core/dispatcher-task-delivery.js");
+  const { selectDefaultOwnerChannel: resolveOwnerDmChannel } = await import(
+    "../messaging/owner-channels.js"
+  );
+  const { channelRef: ownerChannelRef } = await import(
+    "../db/browser-automation-purchase-primary-channels-store.js"
+  );
+  const notificationManager = new NotificationManager(messageHub, db, config, {
+    routeAutonomousForwardNaturally: async ({ content, event }) => {
+      const owner = resolveOwnerDmChannel(db);
+      if (!owner) return false;
+      await eventBus.put(
+        makeAutonomousForwardEvent({
+          content,
+          originatingChannel: ownerChannelRef(owner.platform, owner.channelId),
+          correlationId: event.correlationId ?? null,
+        }),
+      );
+      return true;
+    },
+  });
   const authTelemetry = new AuthTelemetry(db);
 
   const makeAuthNotifier = (source: string): AuthHealthNotifier => ({
@@ -517,7 +563,13 @@ export async function createEventPipeline(
         db,
         messageText ?? null,
       );
-      syncAllUserSkills(sessionDir, resolveUserSkillsRoot(config));
+      // Narrow-persona keys (wiki.* / routine.research_*) run a tight
+      // built-in manifest and never call a user skill — skip the owner's
+      // library on the fallback re-materialise too, matching the primary
+      // workdir path. See `eventTypeAcceptsUserSkills`.
+      if (eventTypeAcceptsUserSkills(processKey ?? eventType)) {
+        syncAllUserSkills(sessionDir, resolveUserSkillsRoot(config));
+      }
     },
   );
 
@@ -642,6 +694,7 @@ export async function createEventPipeline(
 
   // ── Signal detector + dispatcher ──────────────────────────────────────
   const signalDetector = new SignalDetector(config, { db });
+  const sessionGates = new SessionGateRegistry();
 
   const dispatcher = new EventDispatcher(
     eventBus,
@@ -658,6 +711,7 @@ export async function createEventPipeline(
     services,
     roadmapWriteLock,
     writeTracker,
+    sessionGates,
   );
 
   notificationManager.setSignalDetector(signalDetector);
@@ -830,7 +884,7 @@ export async function createEventPipeline(
   // re-registration when an integration mode flips. When no delegated
   // integration is present, the worker is null and the call is a no-op.
   dispatcher.setDelegatedSyncRefresh(async () => {
-    await delegatedSyncWorker?.runDisabledCadencesForHourlyCheck();
+    await delegatedSyncWorker?.runDisabledCadencesForActivityScan();
   });
 
   // ── Delegated probe observer (DELEGATED-MODE-V2 §7.1) ────────────────
@@ -889,6 +943,45 @@ export async function createEventPipeline(
       return null;
     }
   };
+
+  // BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 (delivery assets) — the
+  // `task.delivery` idle + active branches attach a task's deliverable
+  // files inline: browser-task trace screenshots (resolved by key) and
+  // worker-produced output files like PDF / PPTX / PNG (resolved by path).
+  // The dispatcher owns delivery but has no messageHub / trace-store
+  // access, so we inject this resolver → outbound attachment refs (native
+  // file for messaging adapters, ingested store ref for the dashboard).
+  // Best-effort — unresolvable assets (retention drop, missing file,
+  // unknown type) are dropped; the text draft still sends.
+  {
+    const { resolveScreenshotAttachment, buildPathAttachment } = await import(
+      "../messaging/browser-task-screenshot-attachment.js"
+    );
+    dispatcher.setTaskDeliveryAssetResolver(async (platform, assets) => {
+      const resolved = await Promise.all(
+        assets.map((asset) => {
+          if (asset.screenshotKey) {
+            return resolveScreenshotAttachment({
+              platform,
+              key: asset.screenshotKey,
+              paDataDir: config.dataDir,
+              ingestOutboundImage: ingestBrowserTaskScreenshot,
+            });
+          }
+          if (asset.path) {
+            return buildPathAttachment({
+              platform,
+              absPath: asset.path,
+              filename: asset.filename,
+              ingestOutboundImage: ingestBrowserTaskScreenshot,
+            });
+          }
+          return Promise.resolve(null);
+        }),
+      );
+      return resolved.filter((a): a is NonNullable<typeof a> => a !== null);
+    });
+  }
 
   // ── Phase B-4 purchase handler ────────────────────────────────────────
   // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.3 / §13 step 50.
@@ -1085,9 +1178,8 @@ export async function createEventPipeline(
     config.browserTaskMaxConcurrent,
   );
   const browserTaskMcpNotifier = createBrowserTaskMcpNotifier({
-    messageHub,
-    paDataDir: config.dataDir,
-    ingestOutboundImage: ingestBrowserTaskScreenshot,
+    eventBus,
+    db,
   });
   const browserTaskHostProfile = createBrowserTaskHostProfile();
   // Hoisted out of the `createBrowserTaskRunner({ notifier: ... })` arg
@@ -1202,6 +1294,71 @@ export async function createEventPipeline(
   // after the user issued it.
   dispatcher.setBrowserTaskTerminalNotifier(browserTaskTerminalNotifier);
 
+  // ── Background-task runner (BACKGROUND_TASK_RUNNER_DESIGN.md §4) ───────
+  // Generic detached-task worker. Shares the proven slot manager (via a
+  // synthetic per-task key so tasks contend only on the global cap) and
+  // the gated `task.delivery` boundary. The worker is a plain SDK session
+  // (no Playwright). The delivery enqueuer wraps the `task.delivery` event
+  // factories + the event bus so the runner stays free of any core import.
+  const {
+    createBackgroundTaskRunner,
+    createBackgroundTaskSlotStateRef,
+  } = await import("../services/background-task/background-task-runner.js");
+  const {
+    createBackgroundTaskTransitionEmitter:
+      createBackgroundTaskTransitionEmitterAtBoot,
+  } = await import(
+    "../services/background-task/background-task-transition-events.js"
+  );
+  const {
+    createBackgroundTaskResultDeliveryEvent,
+    createBackgroundTaskClarificationDeliveryEvent,
+    enqueueUndeliveredBackgroundTaskDeliveries,
+  } = await import("../core/dispatcher-task-delivery.js");
+  const backgroundTaskSlotStateRef = createBackgroundTaskSlotStateRef(
+    config.backgroundTaskMaxConcurrent,
+  );
+  const backgroundTaskTransitionEmitter =
+    createBackgroundTaskTransitionEmitterAtBoot(eventBroadcaster);
+  const backgroundTaskDeliveryEnqueuer = {
+    async enqueueResult(input: {
+      taskId: string;
+      originatingChannel: string | null;
+      title: string;
+      draft: string;
+      report: string;
+    }): Promise<void> {
+      await eventBus.put(createBackgroundTaskResultDeliveryEvent(input));
+    },
+    async enqueueClarification(input: {
+      taskId: string;
+      originatingChannel: string | null;
+      title: string;
+      clarificationId: string;
+      question: string;
+      contextSummary: string | null;
+    }): Promise<void> {
+      await eventBus.put(createBackgroundTaskClarificationDeliveryEvent(input));
+    },
+  };
+  const backgroundTaskRunner = createBackgroundTaskRunner({
+    db,
+    slotStateRef: backgroundTaskSlotStateRef,
+    transitionEmitter: backgroundTaskTransitionEmitter,
+    deliveryEnqueuer: backgroundTaskDeliveryEnqueuer,
+    resumeAcrossRestart: config.backgroundTaskResumeAcrossRestart,
+    driver: {
+      db,
+      paDataDir: config.dataDir,
+      workspaceDir: config.workspaceDir,
+      contextDir: getContextDir(config),
+      clarificationTtlMs:
+        config.backgroundTaskClarificationTtlMinutes * 60_000,
+      transitionEmitter: backgroundTaskTransitionEmitter,
+    },
+  });
+  dispatcher.setBackgroundTaskRunner(backgroundTaskRunner);
+
   // ── Browser-task deadline scanner tick ────────────────────────────────
   // BROWSER_TASK_REDESIGN_PLAN.md §5 ask_user "Deadline enforcement" +
   // §5.1 pending-queue timeout safety valve. Single 30 s tick handles
@@ -1267,6 +1424,7 @@ export async function createEventPipeline(
           expiredPending: sweep.expired,
           nowMs: now,
         });
+        await sweepDeliveryRecovery(now);
         if (actions.length === 0) return;
 
         for (const action of actions) {
@@ -1361,6 +1519,20 @@ export async function createEventPipeline(
       }
     }
 
+    async function sweepDeliveryRecovery(nowMs: number): Promise<void> {
+      const count = await enqueueUndeliveredBrowserTaskDeliveries({
+        db,
+        eventBus,
+        nowMs,
+      });
+      if (count > 0) {
+        logger.debug(
+          { count },
+          "browser-task delivery recovery enqueued task.delivery events",
+        );
+      }
+    }
+
     async function sendDeadlineDm(
       ref: string | null,
       text: string,
@@ -1393,7 +1565,180 @@ export async function createEventPipeline(
     // Allow the daemon to exit cleanly if every other timer has unrefed;
     // a 30 s tick is housekeeping, not load-bearing for liveness.
     if (typeof timer.unref === "function") timer.unref();
+    void tick();
     return timer;
+  })();
+
+  // ── Background-task housekeeping tick ──────────────────────────────────
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §6 / §10.2 — one 30 s tick that:
+  //   1. transitions overdue clarifications (resolved=0 AND deadline_at <
+  //      now) to `timeout` via the runner (releases the slot + synthesizes
+  //      a fail-loud artifact + enqueues delivery);
+  //   2. sweeps pending-queue timeouts (a task that sat behind the
+  //      concurrency cap too long);
+  //   3. runs the delivery recovery sweep (re-enqueue `task.delivery` for
+  //      completed notify=true artifacts whose DM was lost, + undelivered
+  //      open clarifications).
+  // Best-effort + idempotent: per-row failures log and continue; the
+  // runner's `expireForDeadline` is a no-op on already-terminal rows.
+  const backgroundTaskHousekeepingTimer = await (async () => {
+    const {
+      listOverdueClarifications,
+      expireClarification,
+    } = await import("../db/background-task-clarifications-store.js");
+    const { sweepPendingTimeouts } = await import(
+      "../services/browser-task/browser-task-slots.js"
+    );
+    const TICK_MS = 30_000;
+
+    async function tick(): Promise<void> {
+      try {
+        const nowMs = Date.now();
+        // (1) clarification deadlines
+        for (const clar of listOverdueClarifications(db, nowMs)) {
+          try {
+            expireClarification(db, clar.id, nowMs);
+            await backgroundTaskRunner.expireForDeadline(
+              clar.taskId,
+              "clarification_deadline",
+            );
+          } catch (err) {
+            logger.warn(
+              { err, taskId: clar.taskId },
+              "background-task clarification-deadline action failed (continuing)",
+            );
+          }
+        }
+        // (2) pending-queue timeouts
+        const sweep = sweepPendingTimeouts(
+          backgroundTaskSlotStateRef.state,
+          nowMs,
+          config.backgroundTaskPendingQueueTimeoutMinutes,
+        );
+        backgroundTaskSlotStateRef.state = sweep.state;
+        for (const expired of sweep.expired) {
+          try {
+            await backgroundTaskRunner.expireForDeadline(
+              expired.taskId,
+              "queue_timeout",
+              expired.waitedMs,
+            );
+          } catch (err) {
+            logger.warn(
+              { err, taskId: expired.taskId },
+              "background-task queue-timeout action failed (continuing)",
+            );
+          }
+        }
+        // (3) delivery recovery
+        const count = await enqueueUndeliveredBackgroundTaskDeliveries({
+          db,
+          eventBus,
+          nowMs,
+        });
+        if (count > 0) {
+          logger.debug(
+            { count },
+            "background-task delivery recovery enqueued task.delivery events",
+          );
+        }
+      } catch (err) {
+        logger.warn({ err }, "background-task housekeeping tick failed (continuing)");
+      }
+    }
+
+    const timer = setInterval(() => {
+      void tick();
+    }, TICK_MS);
+    if (typeof timer.unref === "function") timer.unref();
+    void tick();
+    return timer;
+  })();
+
+  // ── Background-task boot recovery (resume / re-dispatch) ──────────────
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §10.2 — unlike browser_task (whose
+  // in-memory session is unrecoverable, so its rows are force-failed),
+  // background tasks survive a restart: their brief is self-contained AND
+  // (Phase 4) their SDK session id is persisted.
+  //
+  // With `backgroundTaskResumeAcrossRestart` ON (default):
+  //   - `running` rows that captured a session id  → RESUME the warm SDK
+  //     session (`resumeFromBoot`), falling back to re-dispatch on any
+  //     "couldn't load the session" signal.
+  //   - `awaiting_user` rows that captured a session id → LEFT as-is, so a
+  //     later `/clarify` reconstructs the handle and resumes (the delivery
+  //     recovery sweep re-sends the question if it never reached the owner).
+  //   - everything else (no session id, `pending`, or never-inited)
+  //     → re-dispatch from brief.
+  // With the toggle OFF: the v1 behaviour — every non-terminal row is
+  // re-dispatched from brief.
+  //
+  // Best-effort — failures log but do not abort startup.
+  void (async (): Promise<void> => {
+    try {
+      const {
+        resetNonTerminalForBootRedispatch,
+        listNonTerminalBackgroundTasks,
+      } = await import("../db/background-task-store.js");
+
+      if (!config.backgroundTaskResumeAcrossRestart) {
+        const reset = resetNonTerminalForBootRedispatch(db);
+        if (reset.length === 0) return;
+        logger.warn(
+          { count: reset.length },
+          "background-task boot recovery — re-dispatching non-terminal tasks from brief (resume disabled)",
+        );
+        for (const { id } of reset) {
+          void backgroundTaskRunner.runFromPost(id).catch((err) => {
+            logger.error(
+              { err, taskId: id },
+              "background-task boot re-dispatch threw (continuing)",
+            );
+          });
+        }
+        return;
+      }
+
+      const rows = listNonTerminalBackgroundTasks(db);
+      if (rows.length === 0) return;
+      const resumeRunning = rows.filter(
+        (r) => r.state === "running" && r.backendSessionId,
+      );
+      const leaveParked = rows.filter(
+        (r) => r.state === "awaiting_user" && r.backendSessionId,
+      );
+      // Everything not resumed and not left parked is re-dispatched: the
+      // runner's `resumeFromBoot` resets+re-runs each one (a `running` row
+      // without a session id, a `pending` row, etc.).
+      const redispatchIds = rows
+        .filter(
+          (r) =>
+            !(r.state === "running" && r.backendSessionId)
+            && !(r.state === "awaiting_user" && r.backendSessionId),
+        )
+        .map((r) => r.id);
+      logger.warn(
+        {
+          resume: resumeRunning.length,
+          leftParked: leaveParked.length,
+          redispatch: redispatchIds.length,
+        },
+        "background-task boot recovery — resuming / re-dispatching non-terminal tasks",
+      );
+      for (const { id } of [...resumeRunning, ...redispatchIds.map((id) => ({ id }))]) {
+        void backgroundTaskRunner.resumeFromBoot(id).catch((err) => {
+          logger.error(
+            { err, taskId: id },
+            "background-task boot resume/re-dispatch threw (continuing)",
+          );
+        });
+      }
+    } catch (err) {
+      logger.warn(
+        { err },
+        "background-task boot recovery failed (continuing; rows stay non-terminal for next boot)",
+      );
+    }
   })();
 
   // ── Browser-task boot-recovery DM fan-out ─────────────────────────────
@@ -1563,6 +1908,9 @@ export async function createEventPipeline(
     browserTaskDeadlineTimer,
     browserTaskSlotStateRef,
     browserTaskRunner,
+    backgroundTaskSlotStateRef,
+    backgroundTaskRunner,
+    backgroundTaskHousekeepingTimer,
   };
 }
 

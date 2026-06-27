@@ -43,7 +43,7 @@ ui_anchors:
   - /knowledge?tab=context-files
   - /connections
   - /connections/mcp
-  - /settings/routines
+  - /agents
   - /activity
 context_files:
   - identity/profile.md
@@ -52,14 +52,14 @@ context_files:
 api_endpoints:
   - POST /api/knowledge/import
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-10
 related:
   - getting-started/02-first-steps
   - getting-started/03-what-can-this-do
   - guides/setup-wizard
   - guides/import-knowledge-file
   - features/routines/morning-routine
-  - features/routines/custom-routines
+  - guides/add-a-custom-routine
   - features/memory-files/user-profile
   - concepts/delegated-mode
   - concepts/skills
@@ -236,12 +236,11 @@ recurring:
   and message me on WhatsApp."* The agent stores a recurring
   schedule and runs the same prompt at the same cron. Best for
   per-channel reminders and small recurring asks.
-- **Custom routines** — heavier, multi-step jobs that should write
-  to Markdown memory and DM you with a summary. Add one under
-  **Settings → Routines → Add custom routine**, or DM the agent the
-  cron + steps and ask it to save the routine. See
-  [Custom Routines](../features/routines/custom-routines.md) and
-  [Add a Custom Routine](../guides/add-a-custom-routine.md).
+- **User Agents** — heavier, multi-step jobs that should write
+  to Markdown memory and DM you with a summary. Create one under
+  **Agents → New Agent** (`/agents`), or DM the agent the
+  cron + steps and ask it to save it as an Agent. See
+  [Create a Recurring Agent](../guides/add-a-custom-routine.md).
 
 ### A worked example: a richer morning routine
 
@@ -265,23 +264,22 @@ Shortest path from zero to that:
    notes." This makes the gaps obvious — Notion not connected?
    Calendar not connected? WhatsApp not paired? Drive not reachable
    through a connector or MCP server? Fix them as they show up.
-2. **Once each piece works standalone**, open **Settings → Routines
-   → Add custom routine**:
-   - Slug: `morning-deep-prep`
-   - Cron: `0 7 * * 1-5`
-   - Backend tier: `high (opus)` — this is a heavy, multi-tool job
-   - Max budget (USD): `0.20` (a generous per-execute override; the
-     form default is `0.05`)
-   - Description: paste the four numbered steps above verbatim.
-3. **Watch the next firing in Agent Log** and iterate. The vault file
-   at `~/.personal-agent/context/policies/routines/custom/morning-deep-prep.md`
-   is a plain Markdown file: edit the `## Checks` body to refine the
-   step wording, or the `cron:` field in the YAML frontmatter to
-   change the schedule. The watcher picks up changes without a
-   restart.
+2. **Once each piece works standalone**, open **Agents → New Agent**
+   (`/agents`):
+   - Name / ID: `morning-deep-prep`
+   - Schedule: weekdays (Mon–Fri) at 07:00
+   - Model tier: `high (opus)` — this is a heavy, multi-tool job
+   - Max budget (USD): `0.20` (a generous per-execute override)
+   - Task prompt: paste the four numbered steps above verbatim.
+3. **Watch the next firing in Agent Log** and iterate. The agent
+   definition lives in the vault at
+   `~/.personal-agent/context/policies/agents/morning-deep-prep/agent.md`
+   — a plain Markdown file whose body is the task prompt and whose
+   YAML frontmatter carries the schedule — but the easiest place to
+   refine the step wording or the schedule is the agent's own page
+   at `/agents/morning-deep-prep`.
 
-→ [Custom Routines](../features/routines/custom-routines.md) ·
-[Add a Custom Routine](../guides/add-a-custom-routine.md)
+→ [Create a Recurring Agent](../guides/add-a-custom-routine.md)
 
 ---
 
@@ -294,8 +292,8 @@ By end of day one you should have:
   **Activity**.
 - One DM whose answer references something only your connected
   apps could have told the agent.
-- (Stretch) one custom routine or recurring schedule in **Settings
-  → Routines** that you'd be sad to lose.
+- (Stretch) one user agent or recurring schedule under **Agents**
+  (`/agents`) that you'd be sad to lose.
 
 ## If it fails
 
@@ -312,8 +310,7 @@ By end of day one you should have:
 
 - [Import a Knowledge File](../guides/import-knowledge-file.md)
 - [Morning Routine](../features/routines/morning-routine.md)
-- [Custom Routines](../features/routines/custom-routines.md)
-- [Add a Custom Routine](../guides/add-a-custom-routine.md)
+- [Create a Recurring Agent](../guides/add-a-custom-routine.md)
 - [Delegated Mode](../concepts/delegated-mode.md)
 - [Skills and MCP](../concepts/skills.md)
 - [identity/profile.md](../features/memory-files/user-profile.md)

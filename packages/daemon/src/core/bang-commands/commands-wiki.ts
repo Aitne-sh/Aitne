@@ -172,7 +172,7 @@ async function requireWikiWorkspace(
 export const ingestCommand: BangPrefixCommand = {
   prefix: "!ingest",
   title: "Ingest URLs",
-  describe: "ingest one or more URLs into the wiki's raw layer (`@<workspace>` optional)",
+  describe: "ingest one or more URLs into the wiki's raw layer",
   parseArgs(rest) {
     try {
       const { workspaceName, rest: payload } = splitWorkspaceToken(rest);
@@ -441,7 +441,7 @@ function renderCompileInProgressDm(holder: WikiCompileLockHolder, workspaceName:
 export const askCommand: BangPrefixCommand = {
   prefix: "!ask",
   title: "Ask wiki",
-  describe: "ask a question against the wiki (`@<workspace>` optional)",
+  describe: "ask a question against the wiki",
   parseArgs(rest) {
     const { workspaceName, rest: payload } = splitWorkspaceToken(rest);
     const question = payload.trim();
@@ -555,7 +555,7 @@ export const wikiHelpCommand: BangCommand = {
 export const lintCommand: BangPrefixCommand = {
   prefix: "!lint",
   title: "Lint wiki",
-  describe: "audit the wiki and write a dated health report (`@<workspace>` optional)",
+  describe: "audit the wiki and write a dated health report",
   parseArgs(rest) {
     const { workspaceName, rest: payload } = splitWorkspaceToken(rest);
     if (payload.trim().length > 0) {
@@ -596,7 +596,7 @@ export const lintCommand: BangPrefixCommand = {
 export const traceCommand: BangPrefixCommand = {
   prefix: "!trace",
   title: "Trace wiki topic",
-  describe: "reconstruct an idea's evolution across raw / wiki / outputs (`@<workspace>` optional)",
+  describe: "reconstruct an idea's evolution across raw / wiki / outputs",
   parseArgs(rest) {
     const { workspaceName, rest: payload } = splitWorkspaceToken(rest);
     const topic = payload.trim();
@@ -670,7 +670,7 @@ export function parseConnectArgs(rest: string): ConnectArgs {
 export const connectCommand: BangPrefixCommand = {
   prefix: "!connect",
   title: "Connect wiki domains",
-  describe: "bridge two domains in the wiki (`@<workspace>` optional)",
+  describe: "bridge two domains in the wiki",
   parseArgs(rest) {
     return parseConnectArgs(rest);
   },

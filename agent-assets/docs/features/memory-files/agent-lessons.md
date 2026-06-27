@@ -30,7 +30,7 @@ ask_examples:
   - How do I tune the lesson caps?
 locale: en-US
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-06-07
 keywords:
   - lessons
   - feedback
@@ -112,9 +112,10 @@ Those raw signals don't become lessons immediately. Each night the
 [evening review](../routines/evening-review.md) folds the day's
 unconsumed signals into the right store as dated lessons, then marks them
 consumed (it skips the step entirely when nothing pends). Once a month
-the monthly review runs a re-generalize pass that collapses several
-same-theme lessons into one higher-level principle, keeping each store
-small.
+the monthly review — off by default; opt in by enabling the
+monthly-review agent at `/agents/monthly-review` — runs a re-generalize
+pass that collapses several same-theme lessons into one higher-level
+principle, keeping each store small.
 
 ## Provisional vs. active
 
@@ -169,8 +170,8 @@ any time — the loop will pick up from whatever it finds the next night.
 - [Evening Review](../routines/evening-review.md) — folds the day's
   feedback signals into these stores each night.
 - [Weekly Review](../routines/weekly-review.md) — posts self-critique
-  signals that feed the loop. The monthly review re-generalizes the
-  stores once a month.
+  signals that feed the loop. The optional (off-by-default) monthly
+  review re-generalizes the stores once a month.
 - [agent journal](agent-journal.md) — the reflection-shaped diary, a
   separate file from these directive stores.
 - [Knowledge layout](../../reference/knowledge-layout.md) — where the

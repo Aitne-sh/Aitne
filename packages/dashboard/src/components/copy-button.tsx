@@ -48,7 +48,7 @@ export function CopyButton({
         title="Copy"
       >
         {copied ? (
-          <Check className={cn(iconSize, "text-emerald-500")} />
+          <Check className={cn(iconSize, "text-success")} />
         ) : (
           <Copy className={iconSize} />
         )}
@@ -68,7 +68,7 @@ export function CopyButton({
       title="Copy"
     >
       {copied ? (
-        <Check className={cn(iconSize, "text-emerald-500")} />
+        <Check className={cn(iconSize, "text-success")} />
       ) : (
         <Copy className={iconSize} />
       )}

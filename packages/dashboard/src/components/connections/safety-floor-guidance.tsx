@@ -111,7 +111,7 @@ export function SafetyFloorGuidance({
   const block = STARTER_BLOCKS[integrationKey]?.[delegatedBackend];
 
   return (
-    <Card className="bg-amber-50/40 dark:bg-amber-950/20">
+    <Card className="bg-warning/5">
       <h4 className="text-sm font-semibold">Your destructive-action floor</h4>
       <p className="mt-2 text-xs text-muted-foreground">
         By default, the wizard pre-populated the destructive tools below into

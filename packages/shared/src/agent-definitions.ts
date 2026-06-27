@@ -47,6 +47,12 @@ export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
 export const OVERRIDE_EDIT_PATHS = [
   "backend.tier",
   "backend.model",
+  // Companion to `backend.model`: the backend that owns the pinned model id.
+  // The dashboard model picker writes both together so the runtime override
+  // (BackendRouter agent-override resolution) never has to guess which
+  // backend a model id belongs to. `null` (or absent, for snapshots written
+  // before this key existed) falls back to registry inference at resolve time.
+  "backend.backend_id",
   "limits.max_turns",
   "limits.max_budget_usd",
   "limits.timeout_minutes",

@@ -191,7 +191,7 @@ export function ModelPicker({ value, onChange, id, disabled }: ModelPickerProps)
                   <span>
                     {option.label}
                     {option.deprecated ? (
-                      <span className="ml-2 rounded-sm bg-amber-100 px-1 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                      <span className="ml-2 rounded-sm bg-warning/15 px-1 text-[10px] font-medium uppercase tracking-wide text-warning">
                         deprecated
                       </span>
                     ) : null}

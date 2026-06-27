@@ -1,13 +1,13 @@
 ---
 kind: reference
 name: today-skeleton
-description: today.md full-skeleton detail for Morning Routine — day-type derivation, focus-dimension mapping, downstream focus-filter usage, per-section update matrix, and entry-format table. Only Morning Routine writes the full skeleton; DM/hourly events do not need this.
+description: today.md full-skeleton detail for Morning Routine — day-type derivation, focus-dimension mapping, downstream focus-filter usage, per-section update matrix, and entry-format table. Only Morning Routine writes the full skeleton; DM/activity-scan events do not need this.
 ---
 
 # today.md skeleton — derivation, sections, entry formats
 
 Only the Morning Routine writes the full skeleton from scratch. DM
-handlers, hourly checks, and scheduled.task sessions patch individual
+handlers, activity scans, and scheduled.task sessions patch individual
 sections and do not need this detail — load it only when populating
 line 2 or laying out the section bodies.
 
@@ -35,7 +35,7 @@ How downstream events use the filter:
 - Morning Routine suppresses items with focus `off` at generation time
 - scheduled.task re-checks at fire time: if focus is off, skip + close as `skipped (focus off)`
 - DM handler skips follow-ups on rows whose focus is off
-- Hourly check drops observations whose focus is off
+- Activity scan drops observations whose focus is off
 - schedule.approaching suppresses notifications for off categories
 
 ## Sections and when to update
@@ -43,8 +43,8 @@ How downstream events use the filter:
 | Section | When to update | Mode | Who writes |
 |---|---|---|---|
 | `user_schedule` | Morning from calendar; refresh after sync | PUT (Morning) / PATCH replace | Morning primary |
-| `user_tasks` | Status changes, new tasks, hourly observations | PATCH append (new) / replace (flip) | Morning + event-driven |
-| `agent_plan` | Morning lays out actions; hourly adds new; scheduled.task flips `[x]` | PATCH append / replace (flip) | Morning + hourly + scheduled.task |
+| `user_tasks` | Status changes, new tasks, activity-scan observations | PATCH append (new) / replace (flip) | Morning + event-driven |
+| `agent_plan` | Morning lays out actions; activity scan adds new; scheduled.task flips `[x]` | PATCH append / replace (flip) | Morning + activity scan + scheduled.task |
 | `agent_notes` | Look-ahead + day-time events | PATCH append | Morning (look-ahead) + event-driven |
 | `agent_log` | Every non-trivial agent action | PATCH append | All events |
 | `handoff` | Evening Review finalizes carry-overs | PATCH replace | Evening Review only |

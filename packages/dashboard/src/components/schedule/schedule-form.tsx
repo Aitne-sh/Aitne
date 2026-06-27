@@ -378,7 +378,7 @@ export function ScheduleForm({
             className="h-9"
           />
           {errors?.oneOffDateTime ? (
-            <p className="mt-1 text-xs text-red-600">{errors.oneOffDateTime}</p>
+            <p className="mt-1 text-xs text-destructive">{errors.oneOffDateTime}</p>
           ) : (
             <p className="mt-1 text-xs text-muted-foreground">
               Local time. The daemon stores it as UTC.
@@ -407,7 +407,7 @@ export function ScheduleForm({
               className="h-9 w-32"
             />
             {errors?.intervalHours ? (
-              <p className="mt-1 text-xs text-red-600">{errors.intervalHours}</p>
+              <p className="mt-1 text-xs text-destructive">{errors.intervalHours}</p>
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">
                 1–23. Anchored at midnight local time, so &ldquo;every 2 hours&rdquo; fires at 00, 02, 04, …
@@ -437,7 +437,7 @@ export function ScheduleForm({
               className="h-9 w-32"
             />
             {errors?.minuteOfHour ? (
-              <p className="mt-1 text-xs text-red-600">{errors.minuteOfHour}</p>
+              <p className="mt-1 text-xs text-destructive">{errors.minuteOfHour}</p>
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">0–59. e.g. set to 30 for HH:30.</p>
             )}
@@ -459,7 +459,7 @@ export function ScheduleForm({
             className="h-9 w-32"
           />
           {errors?.recurringTime ? (
-            <p className="mt-1 text-xs text-red-600">{errors.recurringTime}</p>
+            <p className="mt-1 text-xs text-destructive">{errors.recurringTime}</p>
           ) : (
             <p className="mt-1 text-xs text-muted-foreground">
               Interpreted in the daemon&rsquo;s configured timezone.
@@ -498,7 +498,7 @@ export function ScheduleForm({
             })}
           </div>
           {errors?.daysOfWeek ? (
-            <p className="mt-1 text-xs text-red-600">{errors.daysOfWeek}</p>
+            <p className="mt-1 text-xs text-destructive">{errors.daysOfWeek}</p>
           ) : null}
         </div>
       ) : null}
@@ -537,7 +537,7 @@ export function ScheduleForm({
             })}
           </div>
           {errors?.daysOfMonth ? (
-            <p className="mt-1 text-xs text-red-600">{errors.daysOfMonth}</p>
+            <p className="mt-1 text-xs text-destructive">{errors.daysOfMonth}</p>
           ) : null}
         </div>
       ) : null}
@@ -620,7 +620,7 @@ export function ScheduleForm({
           }
         />
         {errors?.description ? (
-          <p className="mt-1 text-xs text-red-600">{errors.description}</p>
+          <p className="mt-1 text-xs text-destructive">{errors.description}</p>
         ) : (
           <p className="mt-1 text-xs text-muted-foreground">
             {isOnce
@@ -655,7 +655,7 @@ export function ScheduleForm({
           }
         />
         {errors?.prompt ? (
-          <p className="mt-1 text-xs text-red-600">{errors.prompt}</p>
+          <p className="mt-1 text-xs text-destructive">{errors.prompt}</p>
         ) : isOnce ? (
           <p className="mt-1 text-xs text-muted-foreground">
             {promptLen} / {SCHEDULE_PROMPT_MAX_CHARS} characters. Required.

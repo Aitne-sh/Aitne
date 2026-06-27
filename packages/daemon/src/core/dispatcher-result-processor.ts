@@ -58,12 +58,14 @@ import {
 } from "../db/repositories-store.js";
 import {
   formatForwardSuffix,
-  getProactiveForwardType,
   isProactiveForwardMetadata,
   parseMessageMetadata,
   recordProactiveForwardDeliveries,
+  type ProactiveForwardType,
 } from "./channel-timeline.js";
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import {
   OWNER_DM_SCOPE,
   OWNER_SCOPE_KEY,
@@ -78,6 +80,8 @@ import type {
   ISessionManager,
   MessageReplyTarget,
 } from "./dispatcher-types.js";
+import type { OutboundAttachmentRef } from "../adapters/types.js";
+import { TASK_DELIVERY_ATTACHMENTS_KEY } from "./dispatcher-task-delivery.js";
 import type { AgentExecutionOutcome } from "./agents/agent-execution-tracker.js";
 import { createLogger } from "../logging.js";
 import {
@@ -232,6 +236,7 @@ export class ResultProcessor {
       const sendOptions: {
         originSessionId?: number;
         replyTo?: MessageReplyTarget;
+        attachments?: OutboundAttachmentRef[];
       } = {};
       if (options.originSessionId !== undefined) {
         sendOptions.originSessionId = options.originSessionId;
@@ -242,6 +247,16 @@ export class ResultProcessor {
           channel: explicitReply.channel,
           threadId: explicitReply.threadId ?? null,
         };
+      }
+      // BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 (delivery assets) — the
+      // task.delivery active turn is a no-tool DM turn, so the daemon (not
+      // the agent) attaches any deliverable files the task produced. The
+      // delivery handler resolved them and stashed the refs on the
+      // synthetic event; carry them onto the woven reply send. Only ever
+      // populated for the synthetic scheduled.dm delivery event.
+      const deliveryAttachments = readTaskDeliveryAttachments(event);
+      if (deliveryAttachments.length > 0 && explicitReply) {
+        sendOptions.attachments = deliveryAttachments;
       }
       // MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §17.7 structural-anti-
       // spoofing layer. The LLM's outbound text reaches the messaging
@@ -295,6 +310,7 @@ export class ResultProcessor {
       // the send itself, so wrap in try/catch.
       if (explicitReply && output.length > 0) {
         try {
+          const taskDeliveryRecord = readTaskDeliveryRecord(event);
           recordProactiveForwardDeliveries({
             db: this.db,
             config: this.config,
@@ -309,7 +325,11 @@ export class ResultProcessor {
             ...(options.originSessionId !== undefined
               ? { originSessionIds: [options.originSessionId] }
               : {}),
-            notificationType: "proactive_forward",
+            notificationType:
+              taskDeliveryRecord?.notificationType ?? "proactive_forward",
+            ...(taskDeliveryRecord
+              ? { extraMetadata: taskDeliveryRecord.metadata }
+              : {}),
           });
         } catch (err) {
           logger.warn(
@@ -321,6 +341,25 @@ export class ResultProcessor {
         }
       }
     }
+    // RESEARCH_CLUSTER_COST_FIX_PLAN F5 — outcome verification. The
+    // routine.research_cluster_update flow's ONLY deliverable is the
+    // per-cluster journal at context/research/<slug>.md. The 2026-06-11
+    // incident showed the flow ending "successfully" (no backend error,
+    // num_turns=1) while never writing the file — every "success" was a
+    // text-only narration. Upgrade "success" from "the session ended
+    // without a backend error" to "...AND the journal was written this
+    // run": a clean-but-unwritten run is recorded as `partial` /
+    // `journal_write_missing` (surfaced in the dashboard activity feed,
+    // `!report`, and `aitne audit --result partial`) rather than a
+    // misleading success. Gated to clean runs — a hard error already took
+    // the logError path with a more informative message.
+    const outcomeOverride =
+      isRoutineEvent(event)
+      && event.routine === "research_cluster_update"
+      && !result.isError
+      && !this.researchClusterJournalWritten(event, result)
+        ? ({ result: "partial", error: "journal_write_missing" } as const)
+        : undefined;
     this.audit.logAction({
       event,
       model: result.model,
@@ -334,6 +373,7 @@ export class ResultProcessor {
       costSource: result.costSource,
       contextUpdated: result.contextUpdated,
       advisorCallCount: result.advisorCallCount,
+      ...(outcomeOverride ?? {}),
       ...(options.dmFreshness ? { dmFreshness: options.dmFreshness } : {}),
       ...(options.dailyWrite ? { dailyWrite: options.dailyWrite } : {}),
     });
@@ -357,7 +397,7 @@ export class ResultProcessor {
     //  - github.*        (GitHub poller high-priority events)
     //  - git.*           (git watcher batched events)
     //  - notion.*        (notion poller)
-    //  - routine.hourly_check (Phase-9 polling sink for obsidian/git/notion)
+    //  - routine.activity_scan (Phase-9 polling sink for obsidian/git/notion)
     if (this.isObserverEvent(event)) {
       logger.info(
         {
@@ -615,13 +655,8 @@ export class ResultProcessor {
   }): string {
     if (message.role !== "assistant") return message.role;
     const metadata = parseMessageMetadata(message.metadata);
-    const type = getProactiveForwardType(metadata);
-    if (type === "scheduled_dm") {
-      return "assistant (scheduled DM dispatched)";
-    }
-    if (type !== null) {
-      return "assistant (forwarded from autonomous run)";
-    }
+    const suffix = formatForwardSuffix(metadata);
+    if (suffix.length > 0) return `assistant${suffix}`;
     return message.role;
   }
 
@@ -726,13 +761,106 @@ export class ResultProcessor {
    */
   isObserverEvent(event: Event): boolean {
     return (
-      (isRoutineEvent(event) && event.routine === "hourly_check") ||
+      (isRoutineEvent(event) && event.routine === "activity_scan") ||
       event.type.startsWith("calendar.") ||
       event.type === "schedule.approaching" ||
       event.type.startsWith("notion.") ||
       event.type.startsWith("github.") ||
       event.type.startsWith("git.")
     );
+  }
+
+  /**
+   * RESEARCH_CLUSTER_COST_FIX_PLAN F5 — was the cluster journal actually
+   * written during this `routine.research_cluster_update` run?
+   *
+   * Detection is the on-disk journal file itself — the authoritative,
+   * path-specific, backend-agnostic signal. The daemon writes the journal
+   * via the context-API chokepoint (`writeFileAtomically`), so the file's
+   * mtime reflects the real write time; a write that landed inside the run
+   * window (`[min(event enqueue, now − durationMs) − buffer, now]`) proves
+   * the agent executed the append rather than narrating success.
+   *
+   * Why not the `context_write` audit row (the plan's first idea): that
+   * row is emitted only inside `notifyPromptContextChanged`, which fires
+   * solely for prompt-refreshing paths (`shouldRefreshPromptContext`).
+   * `research/*` is intentionally a *quiet* namespace — it never triggers
+   * a refresh — so a research write records **no** `context_write` row.
+   * (The plan's §1 "zero context_write rows ⇒ zero writes" inference was
+   * therefore unsound for this namespace; the on-disk check has none of
+   * that coupling.) F1 guarantees ≤ 1 cluster_update run/cluster/day, so
+   * the run window cannot collide with another run writing the same file;
+   * the sibling research flows write *different* files
+   * (`<slug>-assistance-<date>.md`, `<slug>-wiki.md`), never `<slug>.md`.
+   *
+   * Returns `true` (treat as written — do NOT downgrade) when the slug is
+   * absent/invalid or the stat fails for any reason other than ENOENT: a
+   * verification fault must never relabel a genuinely-successful run.
+   */
+  private researchClusterJournalWritten(
+    event: Event,
+    result: AgentResult,
+  ): boolean {
+    const data = (event.data ?? {}) as { slug?: unknown };
+    const slug = typeof data.slug === "string" ? data.slug : null;
+    // Defense in depth against path traversal even though the slug comes
+    // from the daemon's own cluster table — same sanitized character set
+    // the context-API whitelist enforces (PLACEHOLDER_SEGMENT_RE).
+    if (!slug || !/^[a-z0-9._-]+$/.test(slug)) {
+      logger.warn(
+        { correlationId: event.correlationId, slug },
+        "research_cluster_update: missing/invalid slug — skipping journal-write verification",
+      );
+      return true;
+    }
+    // Resolve the dir WITHOUT the db argument, mirroring the context
+    // route's own `getCurrentContextDir` (api/routes/context/index.ts):
+    // with `db`, `getContextDir` falls back to the legacy
+    // `<dataDir>/context` while the vault is degraded — but the write
+    // route never writes there (degraded mode 503s every request), so
+    // statting the fallback could mislabel a run that wrote to the real
+    // vault just before degraded mode engaged. Always stat the path the
+    // agent's writes would have landed at.
+    const journalPath = join(
+      getContextDir(this.config),
+      "research",
+      `${slug}.md`,
+    );
+    // Anchor the window at the event's enqueue time when it is older than
+    // `now − durationMs`: `durationMs` covers only the FINAL backend
+    // attempt, so a write made during an earlier `executeWithRetry`
+    // attempt (or before any dispatcher latency between run end and this
+    // check) would otherwise fall outside the window and downgrade a run
+    // that DID write. Widening backwards is safe — F1 guarantees at most
+    // one run per cluster per agent day and no sibling flow writes
+    // `<slug>.md`, so the only possible writer inside the widened window
+    // is this run.
+    const bufferMs = 5_000;
+    const eventCreatedMs =
+      event.timestamp instanceof Date
+        ? event.timestamp.getTime()
+        : Date.parse(String(event.timestamp));
+    const runStartMs = Date.now() - (result.durationMs ?? 0);
+    const windowStartMs =
+      (Number.isFinite(eventCreatedMs)
+        ? Math.min(eventCreatedMs, runStartMs)
+        : runStartMs) - bufferMs;
+    try {
+      return statSync(journalPath).mtimeMs >= windowStartMs;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // File never created — the strongest "not written" signal.
+        return false;
+      }
+      /* c8 ignore next 5 — non-ENOENT stat failure (e.g. EACCES) is not
+       * reproducible in the test harness; the conservative fall-through
+       * (treat as written) is asserted indirectly by the ENOENT path. */
+      logger.warn(
+        { err, journalPath, correlationId: event.correlationId },
+        "research_cluster_update: journal stat failed — skipping verification",
+      );
+      return true;
+    }
   }
 
   /**
@@ -809,4 +937,64 @@ export class ResultProcessor {
     );
     return `Failed ${url ?? "<url>"} — agent reported completion but no raw note was POSTed via the Wiki API; the vault is unchanged.`;
   }
+}
+
+export function readTaskDeliveryRecord(event: Event): {
+  notificationType: ProactiveForwardType;
+  metadata: Record<string, unknown>;
+} | null {
+  const raw = (event.data as { task_delivery_record?: unknown } | undefined)
+    ?.task_delivery_record;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as {
+    notificationType?: unknown;
+    metadata?: unknown;
+  };
+  if (
+    record.notificationType !== "task_result"
+    && record.notificationType !== "task_clarification"
+    // Phase 4 autonomous-forward natural delivery: the active weave turn
+    // carries a task_delivery_record whose notificationType is
+    // "proactive_forward" (autonomous forwards have no task row, so they
+    // reuse the proactive_forward type). Its metadata still tags the woven
+    // message with taskKind/deliveredTaskId so `deliverActive`'s
+    // message-existence check can confirm the weave landed and skip the
+    // verbatim re-send. Without accepting it here the metadata is dropped,
+    // the existence check misses, and the owner receives BOTH the woven DM
+    // and a verbatim duplicate.
+    && record.notificationType !== "proactive_forward"
+  ) {
+    return null;
+  }
+  const metadata =
+    record.metadata
+    && typeof record.metadata === "object"
+    && !Array.isArray(record.metadata)
+      ? (record.metadata as Record<string, unknown>)
+      : {};
+  return {
+    notificationType: record.notificationType,
+    metadata,
+  };
+}
+
+/**
+ * Resolved deliverable-file refs the task.delivery handler stashed on the
+ * synthetic `scheduled.dm` event (BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1
+ * — delivery assets). Returns `[]` for every ordinary event. Shape is
+ * validated loosely — a malformed entry is dropped rather than thrown so a
+ * bad ref never blocks the woven reply.
+ */
+function readTaskDeliveryAttachments(event: Event): OutboundAttachmentRef[] {
+  const raw = (event.data as Record<string, unknown> | undefined)?.[
+    TASK_DELIVERY_ATTACHMENTS_KEY
+  ];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (a): a is OutboundAttachmentRef =>
+      !!a
+      && typeof a === "object"
+      && typeof (a as { path?: unknown }).path === "string"
+      && typeof (a as { id?: unknown }).id === "string",
+  );
 }

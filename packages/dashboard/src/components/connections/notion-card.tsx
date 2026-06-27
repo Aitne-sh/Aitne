@@ -4,8 +4,14 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useConfig } from "@/lib/hooks/use-config";
 import { useHealth } from "@/lib/hooks/use-health";
+import { useIntegrations, usePatchIntegration } from "@/lib/hooks/use-integrations";
 import { api } from "@/lib/api-client";
 import { saveNotionDatabaseIds } from "@/lib/notion-database-ids";
+import type {
+  IntegrationFetchTargetDto,
+  IntegrationPatchRequest,
+  IntegrationStateDto,
+} from "@/lib/api-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Alert } from "@/components/ui/alert";
@@ -46,6 +52,8 @@ export function NotionCard() {
 export function NotionDirectSettingsBody() {
   const { data: config } = useConfig();
   const { data: health } = useHealth();
+  const integrations = useIntegrations();
+  const patchIntegration = usePatchIntegration();
   const queryClient = useQueryClient();
 
   // API key state
@@ -64,10 +72,17 @@ export function NotionDirectSettingsBody() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Routine fetch target state
+  const [newTarget, setNewTarget] = useState("");
+  const [targetError, setTargetError] = useState<string | null>(null);
+
   if (!config || !health) return null;
 
   const isKeyConfigured = !!config.notionConfigured;
   const databaseIds: Record<string, string> = config.notionDatabaseIds ?? {};
+  const notionIntegration = integrations.data?.integrations.find((x) => x.key === "notion");
+  const fetchTargets: IntegrationFetchTargetDto[] =
+    notionIntegration?.state.fetchTargets ?? [];
 
   const handleSaveKey = async () => {
     const key = apiKey.trim();
@@ -141,13 +156,65 @@ export function NotionDirectSettingsBody() {
     setEditingLabel(null);
   };
 
+  const saveFetchTargets = async (targets: IntegrationFetchTargetDto[]) => {
+    if (!notionIntegration) return;
+    setTargetError(null);
+    try {
+      await patchIntegration.mutateAsync({
+        key: "notion",
+        body: buildFetchTargetPatch(notionIntegration.state, targets),
+      });
+    } catch (e) {
+      setTargetError(e instanceof Error ? e.message : "Failed to save fetch targets");
+    }
+  };
+
+  const handleAddTarget = async () => {
+    const value = newTarget.trim();
+    if (!value || !notionIntegration) return;
+    const normalized = value.toLocaleLowerCase();
+    if (fetchTargets.some((target) => target.locator.toLocaleLowerCase() === normalized)) {
+      setTargetError("That Notion target is already listed.");
+      return;
+    }
+    await saveFetchTargets([
+      ...fetchTargets,
+      // Schema caps label at 200 chars (locator at 2000) — slice rather
+      // than bounce a long URL back as an opaque validation error.
+      { label: value.slice(0, 200), locator: value },
+    ]);
+    setNewTarget("");
+  };
+
+  const handleRemoveTarget = async (index: number) => {
+    await saveFetchTargets(fetchTargets.filter((_, i) => i !== index));
+  };
+
   const entries = Object.entries(databaseIds);
 
   return (
     <>
+      {/* Source identity first: what the agent watches in this workspace. */}
+      {isKeyConfigured && (
+        <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">
+              Notion workspace
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {entries.length} watched database{entries.length === 1 ? "" : "s"}
+            {" · "}
+            {fetchTargets.length} routine fetch target
+            {fetchTargets.length === 1 ? "" : "s"}
+          </p>
+        </div>
+      )}
+
       {/* API Key */}
       <div className="space-y-1.5 mt-3">
-        <p className="text-xs font-medium text-muted-foreground">API Key</p>
+        <p className="text-xs font-medium text-foreground">API Key</p>
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Input
@@ -175,15 +242,21 @@ export function NotionDirectSettingsBody() {
             {savingKey ? "..." : "Save"}
           </Button>
           {(keySaved || isKeyConfigured) && (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
           )}
         </div>
         {keyError && <Alert variant="error">{keyError}</Alert>}
       </div>
 
       {/* Database ID mappings */}
-      <div className="space-y-2 mt-3">
-        <p className="text-xs font-medium text-muted-foreground">Database mappings</p>
+      <div className="space-y-2 mt-3 border-t border-border pt-3">
+        <div>
+          <p className="text-xs font-medium text-foreground">Watched databases</p>
+          <p className="text-[11px] text-muted-foreground">
+            The daemon polls these databases for changes (direct mode). Label
+            them so the agent can refer to each by name.
+          </p>
+        </div>
 
         {entries.length > 0 && (
           <div className="space-y-1.5">
@@ -217,7 +290,7 @@ export function NotionDirectSettingsBody() {
                   type="button"
                   onClick={() => handleRemove(label)}
                   disabled={saving}
-                  className="text-muted-foreground hover:text-red-500 shrink-0"
+                  className="text-muted-foreground hover:text-destructive shrink-0"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -257,6 +330,76 @@ export function NotionDirectSettingsBody() {
 
         {notice && <Alert variant="warning">{notice}</Alert>}
         {error && <Alert variant="error">{error}</Alert>}
+      </div>
+
+      {/* Routine fetch target allowlist */}
+      <div className="space-y-2 mt-3 border-t border-border pt-3">
+        <div>
+          <p className="text-xs font-medium text-foreground">
+            Routine fetch targets
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            Autonomous Notion checks are limited to these pages. Use a page URL
+            or page ID when possible; titles are matched best-effort.
+          </p>
+        </div>
+
+        {fetchTargets.length > 0 && (
+          <div className="space-y-1.5">
+            {fetchTargets.map((target, index) => (
+              <div key={`${target.locator}-${index}`} className="flex items-center gap-2 text-xs">
+                <span className="truncate flex-1 text-foreground" title={target.locator}>
+                  {target.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleRemoveTarget(index)}
+                  disabled={patchIntegration.isPending}
+                  className="text-muted-foreground hover:text-destructive shrink-0"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <Input
+            type="text"
+            value={newTarget}
+            onChange={(e) => setNewTarget(e.target.value)}
+            placeholder="Notion page name, URL, or ID"
+            maxLength={2000}
+            className="h-7 text-xs flex-1"
+            disabled={!notionIntegration || patchIntegration.isPending}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void handleAddTarget();
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAddTarget}
+            disabled={!notionIntegration || patchIntegration.isPending || !newTarget.trim()}
+            className="h-7 text-xs px-2 shrink-0"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+
+        {fetchTargets.length === 0 && (
+          <Alert variant="warning">
+            Notion routine fetches are skipped until at least one target is listed.
+          </Alert>
+        )}
+        {fetchTargets.length > 10 && (
+          <Alert variant="warning">
+            Routine passes fetch at most 10 targets per window — entries beyond
+            the first 10 are skipped each pass.
+          </Alert>
+        )}
+        {targetError && <Alert variant="error">{targetError}</Alert>}
       </div>
 
       <Collapsible>
@@ -301,4 +444,20 @@ export function NotionDirectSettingsBody() {
       </Collapsible>
     </>
   );
+}
+
+function buildFetchTargetPatch(
+  state: IntegrationStateDto,
+  fetchTargets: IntegrationFetchTargetDto[],
+): IntegrationPatchRequest {
+  return {
+    mode: state.mode,
+    ...(state.mode === "delegated" && state.delegatedBackend
+      ? { delegatedBackend: state.delegatedBackend }
+      : {}),
+    ...(state.mode === "native" && state.nativeBackend
+      ? { nativeBackend: state.nativeBackend }
+      : {}),
+    fetchTargets,
+  };
 }

@@ -36,14 +36,14 @@ keywords:
   - EDITABLE_RUNTIME_KEY_TUPLE
   - RESTART_REQUIRED_KEY_TUPLE
   - dayBoundaryHour
-  - hourlyCheckIntervalMinutes
+  - activityScanIntervalMinutes
   - quietHoursStart
   - quietHoursEnd
   - executeTimeoutMinutes
   - autonomousDailyCostCapUsd
   - allowedToolsOverride
   - voiceTranscriptionEnabled
-  - hourlyCheckPrePassFreshnessMinutes
+  - activityScanPrePassFreshnessMinutes
   - vaultMode
   - PA_DATA_DIR
   - PA_API_PORT
@@ -52,9 +52,9 @@ config_keys:
   - timezone
   - primaryLanguage
   - vaultMode
-  - hourlyCheckEnabled
-  - hourlyCheckIntervalMinutes
-  - hourlyCheckPrePassFreshnessMinutes
+  - activityScanEnabled
+  - activityScanIntervalMinutes
+  - activityScanPrePassFreshnessMinutes
   - quietHoursStart
   - quietHoursEnd
   - maxNotificationsPerHour
@@ -75,7 +75,7 @@ api_endpoints:
   - PATCH /api/config
   - POST /api/voice/install
 ui_anchors:
-  - /settings/advanced
+  - /settings/infrastructure
   - /settings/models
 created: 2026-04-25
 updated: 2026-06-08
@@ -131,19 +131,26 @@ case-sensitive.
 | `primaryLanguage` | BCP-47 | Output language for DMs, journal, and Obsidian writes. Templates stay English-headered. |
 | `vaultMode` | enum | Where context lives — `plain` (default; `<dataDir>/context`) or `obsidian` (an external Obsidian vault). |
 
-### Hourly check and gate
+### Activity scan and gate
+
+The first five keys are **deprecated fallbacks**: the activity-scan
+cadence, active window, min-observations threshold, and enable switch
+moved onto the activity-scan agent (`/agents/activity-scan`, Definition
+tab → Cadence card; Enable/Disable). The keys are still accepted by
+`PATCH /api/config` but no longer surfaced in the dashboard; values
+resolve agent override → legacy config key → built-in default.
 
 | Key | Type | Notes |
 |---|---|---|
-| `hourlyCheckEnabled` | boolean | Default `true`. |
-| `hourlyCheckIntervalMinutes` | number | Default `60`. |
-| `hourlyCheckActiveStartHour` | 0–23 | Default `4`. |
-| `hourlyCheckActiveEndHour` | 1–24 | End-exclusive; `24` ≡ midnight. |
-| `hourlyCheckMinObservations` | number | Default `1`. |
-| `hourlyCheckStage2Enabled` | boolean | cost-reduction-structural §B Stage 2 toggle. |
-| `hourlyCheckHeartbeatHours` | number | Quiet-day heartbeat cadence. |
-| `hourlyCheckLowSignalPendingCeiling` | number | Low-signal ceiling before forcing dispatch. |
-| `hourlyCheckPrePassFreshnessMinutes` | 0–480 | Default `30`. Layer-1 freshness window — `harvestForGate` skips a per-integration fetch if `runtime_state.pre_pass_last_run:<key>` is fresher. Cap widened 240 → 480 for the self-tuning R1 ladder (120/240/360/480). |
+| `activityScanEnabled` | boolean | **Deprecated fallback** — the agent's enable switch on `/agents/activity-scan` is the source of truth. Default `true`. |
+| `activityScanIntervalMinutes` | number | **Deprecated fallback** — edit on `/agents/activity-scan`. Default `60`. |
+| `activityScanActiveStartHour` | 0–23 | **Deprecated fallback** — edit on `/agents/activity-scan`. Default `4`. |
+| `activityScanActiveEndHour` | 1–24 | **Deprecated fallback** — edit on `/agents/activity-scan`. End-exclusive; `24` ≡ midnight. |
+| `activityScanMinObservations` | number | **Deprecated fallback** — edit on `/agents/activity-scan`. Default `1`. |
+| `activityScanStage2Enabled` | boolean | cost-reduction-structural §B Stage 2 toggle. |
+| `activityScanHeartbeatHours` | number | Quiet-day heartbeat cadence. |
+| `activityScanLowSignalPendingCeiling` | number | Low-signal ceiling before forcing dispatch. |
+| `activityScanPrePassFreshnessMinutes` | 0–480 | Default `30`. Layer-1 freshness window — `harvestForGate` skips a per-integration fetch if `runtime_state.pre_pass_last_run:<key>` is fresher. Cap widened 240 → 480 for the self-tuning R1 ladder (120/240/360/480). |
 
 ### Notifications and quiet hours
 
@@ -267,11 +274,13 @@ shift the whole day, change `dayBoundaryHour` instead.
 | `routine.morning_routine` | Daily at `dayBoundaryHour` (default 04:00). |
 | `routine.evening_review` | Daily at `18:00` local. |
 | `routine.weekly_review` | Friday `19:00` local (one hour after the evening review). |
-| `routine.monthly_review` | Last day of the month at `18:00` local, but **disabled by default** (`monthlyReviewEnabled = false`). |
+| `routine.monthly_review` | Last day of the month at `18:00` local, but **disabled by default** — opt in by enabling the monthly-review agent at `/agents/monthly-review` (`agents.enabled` is the single switch; the legacy `monthlyReviewEnabled` config key is a deprecated fallback, carried forward once by a boot-time reconcile). |
 
-The hourly check is the one autonomous routine with a configurable
-cadence (`hourlyCheckIntervalMinutes`) and active window
-(`hourlyCheckActiveStartHour` / `…ActiveEndHour`).
+The activity scan is the one autonomous routine with a configurable
+cadence and active window — edited on the activity-scan agent's page
+(`/agents/activity-scan`, Definition tab → Cadence card); the legacy
+`activityScanIntervalMinutes` / `activityScanActiveStartHour` /
+`…ActiveEndHour` keys remain as deprecated fallbacks.
 
 ## Restart-Required Keys
 

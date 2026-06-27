@@ -18,7 +18,7 @@ import {
   morningRoutineRanToday,
   readMorningRoutineStallThresholdMinutes,
   readSkillCurationCadence,
-  shouldCatchUpHourlyCheck,
+  shouldCatchUpActivityScan,
   shouldQueueMissedMorningFire,
 } from "./schedule-helpers.js";
 
@@ -371,20 +371,20 @@ describe("getProgressMinutesForHour", () => {
   });
 });
 
-// ── shouldCatchUpHourlyCheck ──────────────────────────────────────────────
-// Catch-up runs when (a) hourly check is enabled, (b) we're inside active
+// ── shouldCatchUpActivityScan ──────────────────────────────────────────────
+// Catch-up runs when (a) activity scan is enabled, (b) we're inside active
 // hours and not on the day-boundary hour, and (c) the most recent slot
-// (anchored at activeStartHour) hasn't already produced a hourly_check
+// (anchored at activeStartHour) hasn't already produced a activity_scan
 // agent_actions row. Slot math must remain consistent with scheduler.ts's
-// `shouldFireHourlyTickAt`, which anchors at the same activeStartHour.
+// `shouldFireActivityScanTickAt`, which anchors at the same activeStartHour.
 
 const defaultHourlyConfig = {
   timezone: "Asia/Tokyo",
   dayBoundaryHour: 4,
-  hourlyCheckEnabled: true,
-  hourlyCheckIntervalMinutes: 60,
-  hourlyCheckActiveStartHour: 4,
-  hourlyCheckActiveEndHour: 24,
+  activityScanEnabled: true,
+  activityScanIntervalMinutes: 60,
+  activityScanActiveStartHour: 4,
+  activityScanActiveEndHour: 24,
 } as unknown as AgentConfig;
 
 function insertHourlyAction(
@@ -396,7 +396,7 @@ function insertHourlyAction(
     .prepare(
       `INSERT INTO agent_actions
          (event_id, action_type, result, started_at, completed_at)
-       VALUES (?, 'routine.hourly_check', ?, ?, ?)`,
+       VALUES (?, 'routine.activity_scan', ?, ?, ?)`,
     )
     .run(
       "evt-" + Math.random().toString(36).slice(2),
@@ -406,7 +406,7 @@ function insertHourlyAction(
     );
 }
 
-describe("shouldCatchUpHourlyCheck", () => {
+describe("shouldCatchUpActivityScan", () => {
   let db: Database.Database;
 
   beforeEach(() => {
@@ -419,10 +419,24 @@ describe("shouldCatchUpHourlyCheck", () => {
     db.close();
   });
 
-  it("returns false when hourlyCheckEnabled=false (early exit)", () => {
-    const cfg = { ...defaultHourlyConfig, hourlyCheckEnabled: false } as AgentConfig;
+  it("returns false when the activity-scan agent row is disabled (early exit)", () => {
+    // AGENTS_HUB_REDESIGN_PLAN §2 — `agents.enabled` is the single switch;
+    // the legacy `activityScanEnabled` config key no longer gates catch-up.
+    db.prepare(
+      `INSERT INTO agents
+         (id, name, source, definition_path, definition_hash, enabled,
+          schedule_kind, schedule_timezone, created_at, updated_at)
+       VALUES ('activity-scan', 'Activity Scan', 'builtin', '/x/agent.md', 'h', 0,
+               'cron', 'UTC', 0, 0)`,
+    ).run();
     const now = new Date("2026-05-14T08:00:00Z"); // 17:00 JST
-    expect(shouldCatchUpHourlyCheck(db, cfg, now)).toBe(false);
+    expect(shouldCatchUpActivityScan(db, defaultHourlyConfig, now)).toBe(false);
+  });
+
+  it("legacy activityScanEnabled=false alone no longer suppresses catch-up", () => {
+    const cfg = { ...defaultHourlyConfig, activityScanEnabled: false } as AgentConfig;
+    const now = new Date("2026-05-14T08:00:00Z"); // 17:00 JST
+    expect(shouldCatchUpActivityScan(db, cfg, now)).toBe(true);
   });
 
   it("falls back to the system zone when config.timezone is the empty string", () => {
@@ -434,49 +448,49 @@ describe("shouldCatchUpHourlyCheck", () => {
     // We're not asserting the boolean result (it depends on the test
     // host's TZ); we're asserting the path does not throw and returns a
     // boolean — that pins the branch.
-    expect(typeof shouldCatchUpHourlyCheck(db, cfg, now)).toBe("boolean");
+    expect(typeof shouldCatchUpActivityScan(db, cfg, now)).toBe("boolean");
   });
 
   it("returns false before the active-start hour", () => {
     // 03:30 JST = before 04:00 active start.
     const now = new Date("2026-05-13T18:30:00Z");
-    expect(shouldCatchUpHourlyCheck(db, defaultHourlyConfig, now)).toBe(false);
+    expect(shouldCatchUpActivityScan(db, defaultHourlyConfig, now)).toBe(false);
   });
 
   it("returns false at or after the active-end hour", () => {
     // activeEndHour=24 means [4, 24) — so 23:00 is inside, but if we set
     // activeEndHour=22, then 22:00 JST should be outside.
-    const cfg = { ...defaultHourlyConfig, hourlyCheckActiveEndHour: 22 } as AgentConfig;
+    const cfg = { ...defaultHourlyConfig, activityScanActiveEndHour: 22 } as AgentConfig;
     const now = new Date("2026-05-14T13:00:00Z"); // 22:00 JST
-    expect(shouldCatchUpHourlyCheck(db, cfg, now)).toBe(false);
+    expect(shouldCatchUpActivityScan(db, cfg, now)).toBe(false);
   });
 
   it("returns false when the local hour equals the day-boundary hour", () => {
     // The boundary hour is carved out to avoid double-firing at the same
     // moment the agent-day starts.
     const now = new Date("2026-05-13T19:30:00Z"); // 04:30 JST
-    expect(shouldCatchUpHourlyCheck(db, defaultHourlyConfig, now)).toBe(false);
+    expect(shouldCatchUpActivityScan(db, defaultHourlyConfig, now)).toBe(false);
   });
 
-  it("returns true when inside active hours and no hourly_check row exists at the current slot", () => {
+  it("returns true when inside active hours and no activity_scan row exists at the current slot", () => {
     const now = new Date("2026-05-14T08:00:00Z"); // 17:00 JST sharp
-    expect(shouldCatchUpHourlyCheck(db, defaultHourlyConfig, now)).toBe(true);
+    expect(shouldCatchUpActivityScan(db, defaultHourlyConfig, now)).toBe(true);
   });
 
-  it("returns false when an hourly_check row already exists inside the current slot", () => {
+  it("returns false when an activity_scan row already exists inside the current slot", () => {
     // 17:00 JST slot with interval=60 spans [17:00, 18:00). An action at
     // 17:30 JST (08:30 UTC) sits inside that slot.
     insertHourlyAction(db, "2026-05-14 08:30:00");
     const now = new Date("2026-05-14T08:45:00Z"); // 17:45 JST
-    expect(shouldCatchUpHourlyCheck(db, defaultHourlyConfig, now)).toBe(false);
+    expect(shouldCatchUpActivityScan(db, defaultHourlyConfig, now)).toBe(false);
   });
 
-  it("returns true when the only hourly_check row sits in a *prior* slot", () => {
+  it("returns true when the only activity_scan row sits in a *prior* slot", () => {
     // 16:00–17:00 slot covered; we're now in the 17:00–18:00 slot with
     // nothing yet recorded.
     insertHourlyAction(db, "2026-05-14 07:15:00"); // 16:15 JST
     const now = new Date("2026-05-14T08:30:00Z"); // 17:30 JST
-    expect(shouldCatchUpHourlyCheck(db, defaultHourlyConfig, now)).toBe(true);
+    expect(shouldCatchUpActivityScan(db, defaultHourlyConfig, now)).toBe(true);
   });
 
   it("anchors slots at activeStartHour, not at midnight (45-minute interval)", () => {
@@ -486,19 +500,19 @@ describe("shouldCatchUpHourlyCheck", () => {
     // offset = 780, slotOffset = floor(780/45)*45 = 17*45 = 765, slot start
     // = 240 + 765 = 1005 → 16:45 JST. An action at 16:50 JST (07:50 UTC)
     // sits inside this slot and should suppress catch-up.
-    const cfg = { ...defaultHourlyConfig, hourlyCheckIntervalMinutes: 45 } as AgentConfig;
+    const cfg = { ...defaultHourlyConfig, activityScanIntervalMinutes: 45 } as AgentConfig;
     insertHourlyAction(db, "2026-05-14 07:50:00"); // 16:50 JST
     const now = new Date("2026-05-14T08:00:00Z"); // 17:00 JST
-    expect(shouldCatchUpHourlyCheck(db, cfg, now)).toBe(false);
+    expect(shouldCatchUpActivityScan(db, cfg, now)).toBe(false);
   });
 
   it("still finds a stale slot when the only existing row is from the previous interval", () => {
     // Inverse of the previous test: same 45-min interval, but the latest
     // action sat in the 16:00–16:45 slot, not the current 16:45–17:30 slot.
-    const cfg = { ...defaultHourlyConfig, hourlyCheckIntervalMinutes: 45 } as AgentConfig;
+    const cfg = { ...defaultHourlyConfig, activityScanIntervalMinutes: 45 } as AgentConfig;
     insertHourlyAction(db, "2026-05-14 07:30:00"); // 16:30 JST — prior slot
     const now = new Date("2026-05-14T08:00:00Z"); // 17:00 JST
-    expect(shouldCatchUpHourlyCheck(db, cfg, now)).toBe(true);
+    expect(shouldCatchUpActivityScan(db, cfg, now)).toBe(true);
   });
 });
 
@@ -530,12 +544,23 @@ function insertReviewAction(
 const reviewConfig = {
   timezone: "Asia/Tokyo",
   dayBoundaryHour: 4,
-  // Monthly review is default-off (kill switch); existing review tests
-  // assert the historical behavior where catchup queues monthly on the
-  // last day of the month. Flip it on for the fixture, and pin the
-  // disabled behavior in its own test below.
-  monthlyReviewEnabled: true,
 } as unknown as AgentConfig;
+
+/**
+ * Monthly review is default-off; the switch is the monthly-review AGENT
+ * row's `enabled` (AGENTS_HUB_REDESIGN_PLAN §2). The fixture enables it so
+ * the review tests can assert the historical queue-on-month-end behavior;
+ * the disabled case is pinned in its own test below.
+ */
+function seedMonthlyReviewAgent(db: Database.Database, enabled: boolean): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO agents
+       (id, name, source, definition_path, definition_hash, enabled,
+        schedule_kind, schedule_timezone, created_at, updated_at)
+     VALUES ('monthly-review', 'Monthly Review', 'builtin', '/x/agent.md', 'h', ?,
+             'cron', 'UTC', 0, 0)`,
+  ).run(enabled ? 1 : 0);
+}
 
 describe("getDueCatchupRoutines", () => {
   let db: Database.Database;
@@ -544,6 +569,7 @@ describe("getDueCatchupRoutines", () => {
     db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
     applySchema(db);
+    seedMonthlyReviewAgent(db, true);
   });
 
   afterEach(() => {
@@ -553,7 +579,7 @@ describe("getDueCatchupRoutines", () => {
   it("falls back to the system zone when config.timezone is the empty string", () => {
     // Covers the `config.timezone || undefined` branch in
     // `getDueCatchupRoutines`. Mirrors the parallel branch in
-    // `shouldCatchUpHourlyCheck` — the helper must not throw on empty
+    // `shouldCatchUpActivityScan` — the helper must not throw on empty
     // timezone; it just resolves against the wall-clock zone.
     const cfg = { ...reviewConfig, timezone: "" } as AgentConfig;
     const now = new Date("2026-05-14T08:30:00Z");
@@ -642,20 +668,31 @@ describe("getDueCatchupRoutines", () => {
     ).toEqual(["evening_review", "weekly_review", "monthly_review"]);
   });
 
-  it("does NOT queue monthly_review when monthlyReviewEnabled=false (kill switch off)", () => {
-    // Same scenario as the previous test, but with the kill switch off
+  it("does NOT queue monthly_review when the monthly-review agent row is disabled", () => {
+    // Same scenario as the previous test, but with the agent switch off
     // (the pre-release default). Monthly catchup must be suppressed so
     // the disabled routine cannot fire via boot-time recovery either.
-    // Weekly + evening continue to queue — the flag is monthly-only.
-    const cfg = {
-      ...reviewConfig,
-      monthlyReviewEnabled: false,
-    } as AgentConfig;
+    // Weekly + evening continue to queue — the switch is monthly-only.
+    seedMonthlyReviewAgent(db, false);
     const now = new Date("2026-05-31T10:00:00Z"); // 19:00 JST Sunday
     expect(
       getDueCatchupRoutines(
         db,
-        cfg,
+        reviewConfig,
+        "2026-05-30 19:00:00",
+        "2026-05-31 19:00:00",
+        now,
+      ),
+    ).toEqual(["evening_review", "weekly_review"]);
+  });
+
+  it("does NOT queue monthly_review when the agent row is absent (fallback default off)", () => {
+    db.prepare("DELETE FROM agents WHERE id = 'monthly-review'").run();
+    const now = new Date("2026-05-31T10:00:00Z"); // 19:00 JST Sunday
+    expect(
+      getDueCatchupRoutines(
+        db,
+        reviewConfig,
         "2026-05-30 19:00:00",
         "2026-05-31 19:00:00",
         now,

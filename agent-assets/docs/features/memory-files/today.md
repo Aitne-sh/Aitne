@@ -9,7 +9,7 @@ aliases:
 category: features
 summary: |
   today.md is the live plan for the current agent day. The morning
-  routine rebuilds it each day; the hourly check, evening review,
+  routine rebuilds it each day; the activity scan, evening review,
   and the operator all read and append to it during the day.
 section: memory-files
 tags:
@@ -23,7 +23,7 @@ ask_examples:
   - Why does today.md keep getting rewritten?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - today
   - day plan
@@ -31,7 +31,7 @@ keywords:
   - handoff
 related:
   - features/routines/morning-routine
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - features/routines/evening-review
   - features/memory-files/schedule
   - concepts/agent-day
@@ -59,7 +59,9 @@ today.md holds six sections, written in this order:
 - **User Schedule** — the day's calendar events.
 - **User Tasks** — today's external tasks plus agent-tracked to-dos.
 - **Agent Plan** — what the agent intends to work on today (each row is
-  registered as a schedule entry by the morning routine).
+  registered as a schedule entry by the morning routine; mid-day
+  sessions may add rows for new signals or cancel ones whose premise
+  changed).
 - **Agent Notes** — look-ahead items and date-bound memos folded in from
   inbox triage.
 - **Agent Log** — what actually happened, appended throughout the day.
@@ -69,10 +71,11 @@ today.md holds six sections, written in this order:
 
 - The **morning routine** fully rebuilds today.md (the daemon first
   rotates the previous day's file to `state/yesterday.md`).
-- The **hourly check** routes new observations into the right section
+- The **activity scan** routes new observations into the right section
   and appends short status lines under Agent Log.
 - The **evening review** finalizes the file — it updates Agent Log and
-  the Handoff section before writing the daily journal.
+  the Handoff section. (The daily journal itself is written the next
+  morning, from the rotated file.)
 
 ## How It Is Written
 
@@ -94,6 +97,6 @@ during the morning routine: while the lock is held, a write to
 ## Related
 
 - [Morning routine](../routines/morning-routine.md)
-- [Hourly check](../routines/hourly-check.md)
+- [Activity scan](../routines/activity-scan.md)
 - [Evening review](../routines/evening-review.md)
 - [schedule/ files](schedule.md)

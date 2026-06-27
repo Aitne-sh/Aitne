@@ -26,7 +26,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 interface RunNowResponse {
   status: "queued" | "skipped";
-  reason?: "morning_routine_active" | "hourly_check_in_progress" | "below_threshold";
+  reason?: "morning_routine_active" | "activity_scan_in_progress" | "below_threshold";
 }
 
 const RUN_NOW_POLL_INTERVAL_MS = 1_500;
@@ -40,16 +40,16 @@ function getRunNowFeedback(result: RunNowResponse): { tone: "success" | "warning
   switch (result.reason) {
     case "morning_routine_active":
       return { tone: "warning", message: "Skipped: morning routine is still running." };
-    case "hourly_check_in_progress":
-      return { tone: "warning", message: "Skipped: a previous hourly check is still running." };
+    case "activity_scan_in_progress":
+      return { tone: "warning", message: "Skipped: a previous activity scan is still running." };
     case "below_threshold":
       return { tone: "warning", message: "Skipped: there were no reviewable pending observations." };
     default:
-      return { tone: "warning", message: "Skipped: hourly check was not queued." };
+      return { tone: "warning", message: "Skipped: activity scan was not queued." };
   }
 }
 
-function hasCompletedHourlyCheckSince(events: EventsResponse["events"], requestedAtMs: number): boolean {
+function hasCompletedActivityScanSince(events: EventsResponse["events"], requestedAtMs: number): boolean {
   const latest = events[0];
   if (!latest) return false;
   const completedAt = latest.completed_at ?? latest.started_at;
@@ -107,13 +107,13 @@ export default function OverviewPage() {
 
     try {
       const events = await api.get<EventsResponse>("/events", {
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         days: "1",
         page: 1,
         limit: 1,
       });
       if (token !== runNowPollTokenRef.current) return;
-      if (hasCompletedHourlyCheckSince(events.events, requestedAtMs)) {
+      if (hasCompletedActivityScanSince(events.events, requestedAtMs)) {
         return;
       }
     } catch {
@@ -132,7 +132,7 @@ export default function OverviewPage() {
 
   const handleRunNow = async () => {
     const ok = await confirm({
-      title: "Trigger hourly check now?",
+      title: "Trigger activity scan now?",
       description: "This will run the reviewable observation queue immediately instead of waiting for the next scheduled check.",
       confirmLabel: "Run now",
     });

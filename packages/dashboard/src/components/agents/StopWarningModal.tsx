@@ -51,7 +51,7 @@ export function StopWarningModal({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertTriangle className="h-4 w-4 text-warning" />
             Stop {agentName}?
           </DialogTitle>
           <DialogDescription>

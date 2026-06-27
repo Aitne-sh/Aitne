@@ -161,9 +161,9 @@ function EventDetailSheetContent({ event }: { event: EventRow }) {
           )}
 
           {event.error && (
-            <div className="rounded-lg bg-red-50 p-3 dark:bg-red-950">
-              <p className="text-xs font-medium text-red-700 dark:text-red-300">Error</p>
-              <pre className="mt-1 whitespace-pre-wrap text-xs text-red-600 dark:text-red-400">
+            <div className="rounded-lg bg-destructive/10 p-3">
+              <p className="text-xs font-medium text-destructive">Error</p>
+              <pre className="mt-1 whitespace-pre-wrap text-xs text-destructive">
                 {event.error}
               </pre>
             </div>

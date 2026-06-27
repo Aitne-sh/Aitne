@@ -1,5 +1,5 @@
 import type { AgentDefinition, AgentTier, OverrideEditPath } from "@aitne/shared";
-import { AGENT_TIERS } from "@aitne/shared";
+import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS } from "@aitne/shared";
 
 /**
  * Pure logic for the restricted built-in editor (§10.4). A built-in Agent's
@@ -33,19 +33,33 @@ export interface OverrideFieldSpec {
   help: string;
 }
 
+/**
+ * Allow-listed paths that have NO standalone form field. `backend.backend_id`
+ * is written together with `backend.model` by the model dropdown (the picked
+ * option carries its owning backend), so rendering it separately would only
+ * invite an inconsistent pair. Diff/validation logic still covers it via
+ * `ALL_OVERRIDE_KEYS`.
+ */
+export const HIDDEN_OVERRIDE_KEYS: readonly OverrideFieldKey[] = [
+  "backend.backend_id",
+] as const;
+
+/** Every editable path — displayed fields plus the hidden companions. */
+export const ALL_OVERRIDE_KEYS: readonly OverrideFieldKey[] = OVERRIDE_EDIT_PATHS;
+
 /** Field metadata in display order. The single source for the form layout. */
 export const BUILTIN_OVERRIDE_FIELDS: readonly OverrideFieldSpec[] = [
   {
     key: "backend.tier",
     label: "Tier",
     kind: "tier",
-    help: "Model tier override. Default routes via process_backend_config.",
+    help: "Model tier override for this Agent's runs. Default routes via process_backend_config (Settings → Models).",
   },
   {
     key: "backend.model",
     label: "Model",
     kind: "model",
-    help: "Pin a specific model id, or leave blank to use the tier default.",
+    help: "Pin a specific model for this Agent's runs, or leave on the tier default. Only enabled, authenticated backends are listed.",
   },
   {
     key: "limits.max_turns",
@@ -57,13 +71,13 @@ export const BUILTIN_OVERRIDE_FIELDS: readonly OverrideFieldSpec[] = [
     key: "limits.max_budget_usd",
     label: "Max budget (USD)",
     kind: "number",
-    help: "Per-execution soft cost cap (advisory in v1).",
+    help: "Per-execution cost cap.",
   },
   {
     key: "limits.timeout_minutes",
     label: "Timeout (minutes)",
     kind: "int",
-    help: "Per-execution wall-clock timeout.",
+    help: "Per-execution wall-clock timeout (stored; runtime still applies the global execute timeout).",
   },
   {
     key: "on_error.notify_owner",
@@ -84,6 +98,7 @@ export function extractOverrideValues(def: AgentDefinition): OverrideValues {
   return {
     "backend.tier": def.backend.tier,
     "backend.model": def.backend.model,
+    "backend.backend_id": def.backend.backend_id,
     "limits.max_turns": def.limits.max_turns,
     "limits.max_budget_usd": def.limits.max_budget_usd,
     "limits.timeout_minutes": def.limits.timeout_minutes,
@@ -103,6 +118,11 @@ export function validateOverrideValue(
       return value === null || (typeof value === "string" && value.length > 0)
         ? null
         : "Model must be a non-empty string or blank";
+    case "backend.backend_id":
+      return value === null
+        || (typeof value === "string" && (BACKEND_IDS as readonly string[]).includes(value))
+        ? null
+        : "Backend must be a known backend id or blank";
     case "limits.max_turns":
     case "limits.timeout_minutes":
       return typeof value === "number" && Number.isInteger(value) && value > 0
@@ -122,7 +142,7 @@ export function validateOverrideValues(
   edited: OverrideValues,
 ): Partial<Record<OverrideFieldKey, string>> {
   const errors: Partial<Record<OverrideFieldKey, string>> = {};
-  for (const { key } of BUILTIN_OVERRIDE_FIELDS) {
+  for (const key of ALL_OVERRIDE_KEYS) {
     const err = validateOverrideValue(key, edited[key]);
     if (err) errors[key] = err;
   }
@@ -132,6 +152,7 @@ export function validateOverrideValues(
 const PARENT_OF: Record<OverrideFieldKey, "backend" | "limits" | "on_error"> = {
   "backend.tier": "backend",
   "backend.model": "backend",
+  "backend.backend_id": "backend",
   "limits.max_turns": "limits",
   "limits.max_budget_usd": "limits",
   "limits.timeout_minutes": "limits",
@@ -160,7 +181,7 @@ export function buildBuiltinPatchBody(
 ): BuiltinPatchResult {
   const body: Record<string, Record<string, OverrideFieldValue>> = {};
   const changedKeys: OverrideFieldKey[] = [];
-  for (const { key } of BUILTIN_OVERRIDE_FIELDS) {
+  for (const key of ALL_OVERRIDE_KEYS) {
     if (Object.is(original[key], edited[key])) continue;
     changedKeys.push(key);
     const parent = PARENT_OF[key];
@@ -181,7 +202,7 @@ export function overriddenFieldKeys(
   snapshot: Record<string, unknown> | null | undefined,
 ): OverrideFieldKey[] {
   if (!snapshot) return [];
-  return BUILTIN_OVERRIDE_FIELDS.map((f) => f.key).filter((key) =>
+  return ALL_OVERRIDE_KEYS.filter((key) =>
     Object.prototype.hasOwnProperty.call(snapshot, key),
   );
 }

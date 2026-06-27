@@ -114,8 +114,8 @@ Surface the choice to the user.
 
 ## 4. Decision rules
 
-- **Hourly check is read-only** — inherits the constraint from
-  `routine.hourly_check.native.gemini.md`.
+- **Activity scan is read-only** — inherits the constraint from
+  `routine.activity_scan.native.gemini.md`.
 - **Mass-update — ask first.** Batch page-creation can take up to 100
   pages; batches >~10 pages warrant explicit confirmation.
 - **Schema admin — Approve-tier.** Database / view / data-source

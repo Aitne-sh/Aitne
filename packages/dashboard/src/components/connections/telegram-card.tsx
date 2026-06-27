@@ -125,7 +125,7 @@ export function TelegramCard() {
             </Button>
           </div>
           {botInfo && (
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">
+            <p className="text-xs text-success">
               ✓ Bot: <code className="font-mono">@{botInfo.username ?? botInfo.id}</code>
             </p>
           )}
@@ -160,7 +160,7 @@ export function TelegramCard() {
             </div>
           )}
           {pairing.status?.paired && (
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">
+            <p className="text-xs text-success">
               ✓ Paired with chat ID <code className="font-mono">{pairing.status.ownerChatId}</code>
             </p>
           )}

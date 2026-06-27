@@ -116,6 +116,12 @@ confirmation.
 ### Step 3: Execute (only if not skipped)
 5. Execute the task. Use Daemon API (curl) as needed.
    Use <today> for day state and <calendar_today> for live calendar events.
+   Premise check first: if the task references a calendar event, confirm
+   it still exists at the expected time in <calendar_today>. Skip only on
+   positive evidence — the event is absent or moved while sibling events
+   show the data is live. Then do NOT execute; proceed to Step 4 with
+   outcome `skipped (premise gone)`. Missing or unfetchable calendar
+   data is NOT evidence — execute normally.
    If the task description is unclear or lacks critical details (who, what,
    when, why), do NOT guess — log `ambiguous task — skipped` to Agent Log
    and proceed to Step 4 with outcome `skipped (ambiguous)`.
@@ -125,7 +131,7 @@ confirmation.
    `- HH:MM [agent_plan] <action summary> — <outcome>`
    Outcome taxonomy: DM sent / notify sent / check-in scheduled /
    skipped (focus off) / skipped (quiet hours) / skipped (user in meeting) /
-   skipped (ambiguous) / failed: <reason>.
+   skipped (premise gone) / skipped (ambiguous) / failed: <reason>.
 7. If Step 1 found a matching Agent Plan row, flip it to `- [x]` via the
    lifecycle recipe in the context skill (GET → edit body → PATCH
    replace section=agent_plan). Annotate per the skill's outcome table:

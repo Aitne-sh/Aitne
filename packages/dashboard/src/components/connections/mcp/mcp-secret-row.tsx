@@ -81,12 +81,12 @@ export function McpSecretRow({ serverId, keyName, present }: McpSecretRowProps) 
       </Button>
       {present && (
         <>
-          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+          <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
           <button
             type="button"
             onClick={handleDelete}
             disabled={deleteMutation.isPending}
-            className="text-muted-foreground hover:text-red-500 shrink-0"
+            className="text-muted-foreground hover:text-destructive shrink-0"
             aria-label="Delete stored secret"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -94,7 +94,7 @@ export function McpSecretRow({ serverId, keyName, present }: McpSecretRowProps) 
         </>
       )}
       {error && (
-        <span className="text-red-600 dark:text-red-400 text-[11px]">{error}</span>
+        <span className="text-destructive text-[11px]">{error}</span>
       )}
     </div>
   );

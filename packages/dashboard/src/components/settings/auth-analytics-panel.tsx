@@ -187,7 +187,7 @@ export function AuthAnalyticsPanel() {
 
       {!hasAnyData ? (
         <p className="py-8 text-center text-sm text-muted-foreground">
-          No auth telemetry data in the last {hours} hours. The hourly probe
+          No auth telemetry data in the last {hours} hours. The periodic probe
           will start generating data once it runs.
         </p>
       ) : (

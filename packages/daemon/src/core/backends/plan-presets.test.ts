@@ -419,7 +419,7 @@ describe("applyDefaultPresets", () => {
   // flow for a single backend: setMainBackend writes default_backend,
   // then applyDefaultPresets(force:false) cascades every preset row.
   // Asserts that the core operator-facing ProcessKeys (DM,
-  // morning_routine, hourly_check, today_refresh, hourly_check.triage,
+  // morning_routine, activity_scan, today_refresh, activity_scan.triage,
   // routine.fetch_window) end up routed to the chosen backend with the
   // correct per-tier model. This is the integration-level regression
   // guard for the schema-seed marker fix: a future change that breaks
@@ -463,7 +463,7 @@ describe("applyDefaultPresets", () => {
           "message.mention",
           "dashboard.chat",
           "routine.morning_routine",
-          "routine.hourly_check",
+          "routine.activity_scan",
           "routine.evening_review",
           "routine.weekly_review",
           "routine.monthly_review",
@@ -493,7 +493,7 @@ describe("applyDefaultPresets", () => {
 
         const liteKeys = [
           "routine.fetch_window",
-          "routine.hourly_check.triage",
+          "routine.activity_scan.triage",
           "observation.summarize",
           "gmail_classify",
           "calendar.change",

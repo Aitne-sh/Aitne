@@ -40,7 +40,7 @@ related:
   - features/memory-files/today
 ui_anchors:
   - /settings
-  - /settings/schedule
+  - /settings/hours
 config_keys:
   - dayBoundaryHour
 ---
@@ -84,10 +84,9 @@ clean boundary before they start.
 
 ## Where You See It in the Dashboard
 
-- The Schedule view labels each day's column by **agent day**, so a 02:30 calendar entry appears under the previous day's header.
-- Activity → Conversations groups sessions by agent day for the same reason.
-- Cost analytics roll up by agent day so a late-night research binge does not split into two separate "days" of spend.
-- To change the boundary, open **Settings → Schedule** (`/settings/schedule`) and edit the day-boundary hour.
+- Analytics → Cost rolls up spend by agent day — both the "Today" card and the per-day buckets use the shifted boundary — so a late-night research binge does not split into two separate "days" of spend.
+- The Hours & Notifications time-axis ring marks the day boundary with a dashed blue line, alongside quiet hours and the activity scan's active window.
+- To change the boundary, open **Settings → Hours & Notifications** (`/settings/hours`) and edit the day-boundary hour.
 
 ## Related
 

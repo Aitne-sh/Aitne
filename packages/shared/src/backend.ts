@@ -91,7 +91,7 @@ export type ExecutionPermissionMode =
  *   integration drift sync, calendar change probes). For Claude this is
  *   Haiku 4.5; for Codex it's gpt-5.4-mini; for Gemini it's the flash-lite
  *   preview. Bound by a tight per-call envelope.
- * - `medium` — main agent surfaces (DMs, dashboard chat, hourly check,
+ * - `medium` — main agent surfaces (DMs, dashboard chat, activity scan,
  *   morning/evening/weekly/monthly reviews, scheduled DM tasks). Default
  *   tier for owner-in-the-loop work. For Claude this is Sonnet 4.6.
  * - `high` — heaviest reasoning workloads (advisor escalation, knowledge

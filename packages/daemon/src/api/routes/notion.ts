@@ -40,7 +40,7 @@ export interface NotionRouteDependencies {
   /**
    * Optional shared write tracker. All write endpoints pre-mark the target
    * page (`notion:<pageId>`) so NotionPoller attributes the resulting
-   * observation to `actor='agent'` and hourly_check's `?actor=user` filter
+   * observation to `actor='agent'` and activity_scan's `?actor=user` filter
    * excludes the echo. Without this the agent can observe its own writes
    * and loop.
    */

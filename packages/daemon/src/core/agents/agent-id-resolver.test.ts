@@ -40,7 +40,7 @@ describe("routineToAgentSlug", () => {
     expect(routineToAgentSlug("evening_review", null)).toBe("evening-review");
     expect(routineToAgentSlug("weekly_review", null)).toBe("weekly-review");
     expect(routineToAgentSlug("monthly_review", null)).toBe("monthly-review");
-    expect(routineToAgentSlug("hourly_check", null)).toBe("hourly-check");
+    expect(routineToAgentSlug("activity_scan", null)).toBe("activity-scan");
     expect(routineToAgentSlug("skill_curation", null)).toBe("skill-curation");
   });
 

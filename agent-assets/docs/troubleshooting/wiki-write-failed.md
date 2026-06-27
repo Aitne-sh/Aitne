@@ -25,7 +25,7 @@ ask_examples:
   - How do I retry the write-strategy probe?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-06-11
 keywords:
   - wiki write failed
   - wiki API failure
@@ -36,7 +36,7 @@ api_endpoints:
   - /api/wiki/:workspace/health
 ui_anchors:
   - /settings/wiki
-  - /connections/knowledge
+  - /connections/notes
 related:
   - features/wiki/overview
   - guides/use-an-existing-obsidian-vault
@@ -84,7 +84,7 @@ If any of these is missing, the daemon surfaces a structured error:
 
 | Error code | Meaning | Fix |
 |---|---|---|
-| `EWIKI_CLI_UNAVAILABLE` | Aitne's `ObsidianService` is not configured (the `obsidian` binary is not resolvable on `PATH`). | Open **Connections → Knowledge** and connect Obsidian via the Obsidian card, then confirm Obsidian 1.12+ is installed with the CLI enabled. |
+| `EWIKI_CLI_UNAVAILABLE` | Aitne's `ObsidianService` is not configured (the `obsidian` binary is not resolvable on `PATH`). | Open **Connections → Notes** and connect Obsidian via the Obsidian card, then confirm Obsidian 1.12+ is installed with the CLI enabled. |
 | `EWIKI_CLI_NOT_RUNNING` | The CLI is configured but the Obsidian app is not running, so it cannot reach the sandboxed vault. | Launch the Obsidian app and retry. |
 
 ## Force a Re-Probe

@@ -14,7 +14,7 @@ default; it exists so a future user override has a clear base behavior.
 ### Decision Framework
 
 1. Do not send a DM. A normal push is expected repository activity and
-   should be coalesced by the hourly observation review.
+   should be coalesced by the periodic activity-scan review.
 2. If this push is on the default branch and materially changes current
    work, append one concise line to today.md `## Agent Notes`. Keep it
    factual: repository path, branch, short SHA, and subject if available

@@ -25,6 +25,27 @@ Task: {event_data[task]}
 - `<task_origin>` — what triggered this run (recurring schedule id,
   source)
 
+## Agent Plan close-out (plan-backed firings)
+
+When this firing matches a pending `## Agent Plan` row in <today>
+(typically a `→wake` row the Morning Routine registered — match HH:MM
++ action text), run these gates BEFORE composing, then close the loop
+per the today skill's Agent Plan lifecycle:
+
+1. **Day-type filter** — if the row's `[category]` focus is `off` on
+   line 2 of <today>, do not send the DM: end with empty output (the
+   delivery path drops zero-length turns) and close the loop with
+   outcome `skipped (focus off)`.
+2. **Premise check** — if the row references a calendar event that
+   <calendar_today> positively shows gone or moved, skip the same way
+   with outcome `skipped (premise gone)`. Missing or unfetchable
+   calendar data is NOT evidence — proceed normally.
+3. **Close the loop** — append the Agent Log entry, then flip the row
+   to `[x]` (annotate skips / failures per the lifecycle).
+
+Recurring briefings and confirm sub-flows with no matching row skip
+this section silently.
+
 ## Conversation-state framing (universal — every dm_session)
 
 Detect state from `<recent_dm_messages>`:
@@ -77,6 +98,7 @@ prefix matching. Find the matching sub-flow below and follow its
 content rules.
 
 - starts with `morning briefing` → see `## Morning briefing` below
+- starts with `task delivery:` → see `## Task delivery` below
 - starts with `profile_interview:` → see `## Profile interview` below
 - starts with `confirm:` → see `## Confirmation follow-up` below
 - (future sub-flows added here)
@@ -95,6 +117,55 @@ Do NOT emit a placeholder line like `(unrecognized ...)` as the final
 text. shouldNotify is unconditional for `scheduled.dm` (any non-empty
 final text is delivered as a DM), so a placeholder would reach the
 user verbatim — defeating the skip.
+
+---
+
+## Task delivery
+
+Triggered by `{event_data[task]}` starting with `task delivery:`.
+
+Your final assistant turn IS the DM that delivers a background task
+artifact. The daemon has already decided that the owner is active in
+conversation, so weave this into the current thread instead of writing a
+standalone report.
+
+Read `<task_context>` → `task_delivery`:
+
+- `deliveryType: "task_result"` means a task finished. Use `draft` for
+  the compact owner-facing summary and `report` as the fidelity source.
+- `deliveryType: "task_clarification"` means the task is blocked on an
+  answer. Ask the question naturally and briefly; if there is useful
+  `contextSummary`, include only what helps the owner answer.
+- `title` is the human task label. Use it only when it helps orient the
+  owner.
+- `assets` is the list of files the task produced for the owner (each has
+  a `filename`, a `kind` like `screenshot` / `pdf` / `slides` / `image`,
+  and sometimes a `label`). **When `assets` is present, the daemon attaches
+  those files to THIS message automatically** — you do not upload anything.
+  Reference them naturally so the attachment makes sense (e.g. "I've
+  attached the confirmation screenshots" or "the slide deck is attached").
+  When `assets` is absent or empty, do not mention or imply any file.
+- IDs and other internal fields are for daemon routing and audit. Do not
+  expose filenames-as-paths, keys, or IDs in user-facing text.
+
+Delivery rules:
+
+1. Use the conversational state from `<recent_dm_messages>` and
+   `<recent_dm_conversation>` to write a short interruption-preface when
+   the owner is mid-topic. If the recent topic is clear, acknowledge it
+   lightly and hand the floor back after the task note.
+2. Preserve factual fidelity. Do not invent findings, counts, URLs, or
+   decisions not present in `report` / `draft`. Do not claim a file is
+   attached unless it appears in `assets`.
+3. Do not mention implementation details such as task IDs,
+   `task.delivery`, `scheduled.dm`, artifacts, metadata, API routes,
+   context blocks, or background runners.
+4. Keep the message compact. For long reports, summarize the decision
+   points and offer to pull details if the owner asks. If the owner later
+   asks for a file again, you can re-send it from the task detail in a
+   normal turn (the artifact API exposes the asset list).
+5. End with exactly the message to send. Do not perform follow-up work in
+   this turn.
 
 ---
 
@@ -168,6 +239,7 @@ the daily greeting.
    - Calendar updates: events in today→+7d window with updated_at
      >= today 04:00
    - Pending observations: `GET /api/observations?pending=true&actor=user`
+   - Filed background results (§10.5): `GET /api/background-task?state=completed&notify=false&sinceHours=24` — background tasks the user started that finished without clearing the bar to ping (a `silent` task, or an `if_significant` task whose criteria weren't met). Each row carries a `title` and a one-line `significance`. These were deliberately not surfaced when they finished; the briefing is where they get a quiet mention so nothing is silently dropped. Empty list → nothing to mention.
 4. **At-risk items** — schedule conflicts, missing prep for known
    events, unanswered RSVPs. Derive by cross-referencing 1+2+3.
 
@@ -190,6 +262,7 @@ Overnight:
 - (mail) summary
 - (calendar) summary
 - (dm) summary
+- (filed) N background results: <title> (<significance>), …
 
 At-risk:
 - conflict / prep gap
@@ -270,7 +343,10 @@ voice carries the whole message.
 - Maximum ~25 lines total (briefing fits one mobile screen).
 - Schedule list: cap 8, append `...and N more` if over.
 - Tasks list: cap 10, append `...and N more` if over.
-- Overnight: cap 5 per category (mail / dm / calendar).
+- Overnight: cap 5 per category (mail / dm / calendar / filed). For
+  `(filed)`, lead with the count and name at most 3 by title; on a
+  long-quiet day a single line ("N background results filed quietly")
+  is enough — never let filed results crowd out the day's actual shape.
 - No internal names ("Morning Routine", "Agent Plan",
   "scheduled.dm", "state/today.md") in user-facing text.
 - Forbidden openers across all variants: "Morning briefing —",

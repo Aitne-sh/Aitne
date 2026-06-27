@@ -150,13 +150,13 @@ export function ModeExplainer({
                   </p>
                   <p className="text-xs text-muted-foreground">{copy.brief}</p>
                   {isDelegatedDisabled && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                    <p className="text-xs text-warning">
                       No backend connector is registered for this integration —
                       Delegated mode cannot be activated.
                     </p>
                   )}
                   {isNativeDisabled && nativeUnsupportedReason && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                    <p className="text-xs text-warning">
                       {nativeUnsupportedReason}
                     </p>
                   )}

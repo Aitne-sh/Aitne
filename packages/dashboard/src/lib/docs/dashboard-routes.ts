@@ -11,21 +11,36 @@
  * Why a whitelist rather than `/^\//`-anything: docs also embed API
  * endpoints (`/api/...`), placeholder paths (`/connections/...`), and
  * file-system paths in the same inline-code form. Only entries listed
- * here are actual Next.js routes under `packages/dashboard/src/app/` that
- * the router can navigate to without 404ing.
+ * here can be navigated to without 404ing — either an actual Next.js
+ * route under `packages/dashboard/src/app/` or a retired path that
+ * 302-redirects in `middleware.ts` (kept so older doc revisions' link
+ * chips keep working; e.g. `/settings/advanced`, `/settings/journal`).
  *
- * Keep this list in sync with `src/app/**` and `PAGE_DOC_MAP`.
+ * Keep this list in sync with `src/app/**`, `middleware.ts` REDIRECTS,
+ * and `PAGE_DOC_MAP`.
  */
 export const DASHBOARD_ROUTES: ReadonlySet<string> = new Set([
   "/",
   "/activity",
+  // The Agents hub + the built-in detail pages docs deep-link to
+  // (AGENTS_HUB_REDESIGN_PLAN §4 — /agents/<slug> is dynamic, so each
+  // doc-referenced slug is whitelisted explicitly).
+  "/agents",
+  "/agents/morning-routine",
+  "/agents/evening-review",
+  "/agents/weekly-review",
+  "/agents/monthly-review",
+  "/agents/activity-scan",
   "/analytics",
+  "/browser",
+  "/browser-tasks",
   "/chat",
   "/connections",
   "/connections/calendar",
   "/connections/repositories",
   "/connections/journal",
   "/connections/knowledge",
+  "/connections/notes",
   "/connections/mail",
   "/connections/mcp",
   "/connections/messaging",
@@ -41,11 +56,15 @@ export const DASHBOARD_ROUTES: ReadonlySet<string> = new Set([
   "/settings/backends",
   "/settings/commands",
   "/settings/connections",
+  "/settings/danger-zone",
+  "/settings/hours",
+  "/settings/infrastructure",
   "/settings/journal",
   "/settings/messaging",
   "/settings/models",
   "/settings/processes",
   "/settings/routines",
+  "/settings/safety",
   "/settings/schedule",
   "/settings/wiki",
   "/setup",

@@ -15,29 +15,29 @@ function getLocalHourMinute(date: Date, timeZone?: string): { hour: number; minu
   return { hour, minute };
 }
 
-function isHourlyCheckSlot(date: Date, config: ApiDependencies["config"]): boolean {
-  if (!config.hourlyCheckEnabled) return false;
+function isActivityScanSlot(date: Date, config: ApiDependencies["config"]): boolean {
+  if (!config.activityScanEnabled) return false;
   const { hour, minute } = getLocalHourMinute(date, config.timezone || undefined);
   if (hour === config.dayBoundaryHour) return false;
-  if (hour < config.hourlyCheckActiveStartHour || hour >= config.hourlyCheckActiveEndHour) {
+  if (hour < config.activityScanActiveStartHour || hour >= config.activityScanActiveEndHour) {
     return false;
   }
-  return minute % config.hourlyCheckIntervalMinutes === 0;
+  return minute % config.activityScanIntervalMinutes === 0;
 }
 
-function getNextHourlyCheck(config: ApiDependencies["config"]): { active: boolean; nextRunAt: string | null } {
-  if (!config.hourlyCheckEnabled) {
+function getNextActivityScan(config: ApiDependencies["config"]): { active: boolean; nextRunAt: string | null } {
+  if (!config.activityScanEnabled) {
     return { active: false, nextRunAt: null };
   }
 
   const now = new Date();
-  const active = isHourlyCheckSlot(now, config);
+  const active = isActivityScanSlot(now, config);
   const start = new Date(now.getTime() + 60_000);
   start.setSeconds(0, 0);
 
   for (let offset = 0; offset < 48 * 60; offset++) {
     const candidate = new Date(start.getTime() + offset * 60_000);
-    if (isHourlyCheckSlot(candidate, config)) {
+    if (isActivityScanSlot(candidate, config)) {
       return { active, nextRunAt: candidate.toISOString() };
     }
   }
@@ -49,7 +49,7 @@ export function registerNotificationsRoutes(app: Hono, deps: ApiDependencies): v
   const { db, config } = deps;
 
   app.get("/dashboard/next-check", (c) => {
-    return c.json(getNextHourlyCheck(config));
+    return c.json(getNextActivityScan(config));
   });
 
   // STAGE-C-DM-FRESHNESS-PLAN §Task 4 — DM freshness aggregate. Powered

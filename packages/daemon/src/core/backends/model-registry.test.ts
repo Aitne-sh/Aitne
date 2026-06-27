@@ -129,7 +129,7 @@ describe("model-registry", () => {
     // deprecated `gemini-2.5-flash` is excluded by `!deprecated` in
     // `latestMediumFor`. Pinning `gemini-3.1-pro-preview` at `tier: "medium"`
     // gives every main-agent surface (morning_routine, message.dm,
-    // hourly_check, evening / weekly / monthly review) a real medium-tier
+    // activity_scan, evening / weekly / monthly review) a real medium-tier
     // default instead of silently degrading to lite. `latestHighFor` still
     // reports `gemini-2.5-pro` honestly (it's the only remaining `high`
     // entry), but `defaultModelForTier(gemini, "high")` is steered to the

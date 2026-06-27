@@ -16,13 +16,17 @@ import {
   writeManagementMd,
 } from "./management-md.js";
 import { defaultIntegrationsMap } from "@aitne/shared";
+import { validateContextFileFrontmatter } from "./context-frontmatter.js";
 
 describe("management-md render", () => {
   it("renders a default all-disabled map with a stable structure", () => {
     const body = renderManagementMd(
       defaultIntegrationsMap("2026-04-19T00:00:00.000Z"),
     );
-    expect(body).toMatch(/^---\nfile: integrations.md/);
+    // Vault frontmatter contract: the file lives under `policies/`, so it
+    // must carry `type: rule` + a valid `owner` + an ISO `updated` date.
+    // `updated` is derived from the latest `lastChangedAt` (date-only).
+    expect(body).toMatch(/^---\ntype: rule\nslug: integrations\nowner: shared\nupdated: 2026-04-19\n/);
     expect(body).toContain("# Integration Management");
     expect(body).toContain("## Current state");
     expect(body).toContain("| gmail | disabled | — | — | 2026-04-19T00:00:00.000Z |");
@@ -39,6 +43,29 @@ describe("management-md render", () => {
     // has no native MCP connector for gmail (OPENCODE_BACKEND_DESIGN
     // §11) so its column is em-dash.
     expect(body).toContain("| gmail | ✅ | ⚠️ draft-only | ✅ | ✅ | — |");
+  });
+
+  it("renders frontmatter that passes the vault validator (Vault Health regression)", () => {
+    // Regression: the vault restructure moved this file under `policies/`
+    // and added strict frontmatter validation, but the renderer kept the
+    // legacy `owner: daemon` / no-`type` snapshot frontmatter — so every
+    // install's `policies/integrations.md` was flagged "frontmatter
+    // requires `type`". Couple the renderer directly to the validator so
+    // the contract can never silently drift again.
+    const body = renderManagementMd(
+      defaultIntegrationsMap("2026-04-19T00:00:00.000Z"),
+    );
+    expect(
+      validateContextFileFrontmatter(body, "policies/integrations.md"),
+    ).toBeNull();
+
+    // The fallback `updated` (no valid `lastChangedAt` anywhere) must also
+    // produce a valid file.
+    const blank = renderManagementMd(defaultIntegrationsMap(""));
+    expect(blank).toContain("updated: 2026-04-17");
+    expect(
+      validateContextFileFrontmatter(blank, "policies/integrations.md"),
+    ).toBeNull();
   });
 
   it("renders the draft-only sub-tier for Claude-delegated Gmail", () => {
@@ -143,6 +170,42 @@ describe("Note Sources section (SETUP-FLOW-REDESIGN-PLAN §6.2)", () => {
       },
     });
     expect(body).toContain("- Notion: enabled (direct)");
+  });
+
+  it("renders the Notion native state with backend name", () => {
+    const body = renderManagementMd({
+      ...defaultIntegrationsMap("2026-04-19T00:00:00.000Z"),
+      notion: {
+        mode: "native",
+        nativeBackend: "claude",
+        deniedTools: [],
+        lastChangedAt: "2026-04-19T00:00:00.000Z",
+      },
+    });
+    expect(body).toContain("- Notion: enabled (native via claude)");
+  });
+
+  it("renders routine fetch target labels, em-dash when none configured", () => {
+    const withTargets = renderManagementMd({
+      ...defaultIntegrationsMap("2026-04-19T00:00:00.000Z"),
+      notion: {
+        mode: "direct",
+        fetchTargets: [
+          { label: "Projects", locator: "https://notion.so/projects" },
+          { label: "Reading list", locator: "https://notion.so/reading" },
+        ],
+        deniedTools: [],
+        lastChangedAt: "2026-04-19T00:00:00.000Z",
+      },
+    });
+    expect(withTargets).toContain(
+      "- Notion routine fetch targets: Projects, Reading list",
+    );
+
+    const without = renderManagementMd(
+      defaultIntegrationsMap("2026-04-19T00:00:00.000Z"),
+    );
+    expect(without).toContain("- Notion routine fetch targets: —");
   });
 
   it("preserves the section across hand-edits via parser silence (round-trip parity)", () => {
@@ -492,6 +555,42 @@ file: integrations.md
     expect(result.created).toBe(false);
     expect(result.integrations.gmail.mode).toBe("direct");
     expect(readIntegrations(db).gmail.mode).toBe("direct");
+  });
+
+  it("hand-edit merge preserves fetchTargets (file never carries the allowlist)", async () => {
+    writeIntegrations(db, {
+      notion: {
+        mode: "direct",
+        fetchTargets: [{ label: "Projects", locator: "https://notion.so/projects" }],
+        deniedTools: [],
+        lastChangedAt: "2026-04-19T00:00:00.000Z",
+      },
+    });
+    await bootstrapManagementMd(dir, db);
+    const path = getManagementMdPath(dir);
+
+    // Hand-edit flips notion to disabled — the Current state table has no
+    // targets column, so the merge must carry the DB allowlist forward.
+    const edited = `---
+file: integrations.md
+---
+
+# Integration Management
+
+## Current state
+
+| Integration | Mode | Backend | Sub-tier | Last changed |
+|---|---|---|---|---|
+| notion | disabled | — | — | 2026-04-19T00:00:00.000Z |
+`;
+    writeFileSync(path, edited, "utf-8");
+
+    await bootstrapManagementMd(dir, db);
+    const after = readIntegrations(db).notion;
+    expect(after.mode).toBe("disabled");
+    expect(after.fetchTargets).toEqual([
+      { label: "Projects", locator: "https://notion.so/projects" },
+    ]);
   });
 
   it("bootstrapManagementMd rewrites the file when parse fails", async () => {

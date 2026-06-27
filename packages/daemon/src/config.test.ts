@@ -40,7 +40,7 @@ describe("loadConfig", () => {
     expect(config.agentDisplayName).toBe(DEFAULT_AGENT_DISPLAY_NAME);
     expect(config.apiPort).toBe(8321);
     expect(config.dayBoundaryHour).toBe(4);
-    expect(config.hourlyCheckIntervalMinutes).toBe(60);
+    expect(config.activityScanIntervalMinutes).toBe(120);
     expect(config.historyOtherSurfaceWindowMinutes).toBe(1440);
     expect(config.dmStalenessStrict).toBe(false);
     expect(config.proactiveForwardChannelTimelineEnabled).toBe(true);
@@ -52,7 +52,7 @@ describe("loadConfig", () => {
 
   it("applies custom values from env", () => {
     process.env.PA_API_PORT = "9999";
-    process.env.PA_HOURLY_CHECK_INTERVAL_MINUTES = "30";
+    process.env.PA_ACTIVITY_SCAN_INTERVAL_MINUTES = "30";
     process.env.PA_PRIMARY_PLATFORM = "telegram";
     process.env.PA_AGENT_DISPLAY_NAME = "[ai bot]";
     process.env.PA_WHATSAPP_ENABLED = "true";
@@ -68,7 +68,7 @@ describe("loadConfig", () => {
     const config = loadConfig();
 
     expect(config.apiPort).toBe(9999);
-    expect(config.hourlyCheckIntervalMinutes).toBe(30);
+    expect(config.activityScanIntervalMinutes).toBe(30);
     expect(config.primaryPlatform).toBe("telegram");
     expect(config.agentDisplayName).toBe("ai bot");
     expect(config.whatsappEnabled).toBe(true);
@@ -449,32 +449,32 @@ describe("parse edge cases via loadConfig", () => {
   });
 
   it("parses boolean '0' as false", () => {
-    process.env.PA_HOURLY_CHECK_ENABLED = "0";
+    process.env.PA_ACTIVITY_SCAN_ENABLED = "0";
     const config = loadConfig();
-    expect(config.hourlyCheckEnabled).toBe(false);
+    expect(config.activityScanEnabled).toBe(false);
   });
 
   it("parses boolean '1' as true", () => {
-    process.env.PA_HOURLY_CHECK_ENABLED = "1";
+    process.env.PA_ACTIVITY_SCAN_ENABLED = "1";
     const config = loadConfig();
-    expect(config.hourlyCheckEnabled).toBe(true);
+    expect(config.activityScanEnabled).toBe(true);
   });
 
   it("parses boolean 'false' as false", () => {
-    process.env.PA_HOURLY_CHECK_ENABLED = "false";
-    expect(loadConfig().hourlyCheckEnabled).toBe(false);
+    process.env.PA_ACTIVITY_SCAN_ENABLED = "false";
+    expect(loadConfig().activityScanEnabled).toBe(false);
   });
 
   it("parses boolean 'true' as true", () => {
-    process.env.PA_HOURLY_CHECK_ENABLED = "true";
-    expect(loadConfig().hourlyCheckEnabled).toBe(true);
+    process.env.PA_ACTIVITY_SCAN_ENABLED = "true";
+    expect(loadConfig().activityScanEnabled).toBe(true);
   });
 
   it("falls back on unrecognized boolean string", () => {
-    process.env.PA_HOURLY_CHECK_ENABLED = "garbage";
+    process.env.PA_ACTIVITY_SCAN_ENABLED = "garbage";
     const config = loadConfig();
     // default is true
-    expect(config.hourlyCheckEnabled).toBe(true);
+    expect(config.activityScanEnabled).toBe(true);
   });
 
 

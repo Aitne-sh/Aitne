@@ -24,7 +24,8 @@ this session.
 curl -s http://localhost:8321/api/context/plans/roadmap
 ```
 
-Response: `{ "content": "...", "lastModified": "ISO8601" }` or `404`.
+Response: `{ "content": "...", "lastModified": "ISO8601", "editable": true }` or `404`
+(`editable` is a boolean — `isWriteAllowed(path, "PUT")`).
 Returns the **entire file** — no section-level GET. Path traversal is
 rejected; the trailing `.md` is implicit (do not include it in the
 URL).
@@ -125,8 +126,9 @@ Common rejections (informational responses worth knowing):
 ### DELETE /api/context/:path
 
 Removes the file (snapshot first). The daemon only allows DELETE on a
-small set of paths — notably `policies/routines/custom/<slug>` (after the user
-asks to retire a custom routine). Most files are NOT delete-eligible
+small set of paths — notably legacy `policies/routines/custom/<slug>` files
+(inert since the Agents-hub redesign; DELETE remains for cleanup after the
+user asks). Most files are NOT delete-eligible
 (e.g. `state/today.md`, `plans/roadmap.md`, `identity/profile.md`); the daemon returns
 `403 {error:"forbidden"}` (with `errors[0].code: "context.write_forbidden"`)
 for those.

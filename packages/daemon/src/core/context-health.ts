@@ -75,7 +75,7 @@ export interface ContextHealthReport {
 }
 
 export const DOSSIER_FLOW_PATHS = [
-  dossierPath("hourly"),
+  dossierPath("activity-scan"),
   dossierPath("morning"),
   dossierPath("evening"),
   dossierPath("weekly"),
@@ -98,7 +98,7 @@ const REQUIRED_CONTEXT_FILES: readonly string[] = [
   CONTEXT_RELATIVE_PATHS.rules.journalExport,
   CONTEXT_RELATIVE_PATHS.rules.redaction,
   CONTEXT_RELATIVE_PATHS.routines.index,
-  CONTEXT_RELATIVE_PATHS.routines.hourly,
+  CONTEXT_RELATIVE_PATHS.routines.activityScan,
   CONTEXT_RELATIVE_PATHS.routines.morning,
   CONTEXT_RELATIVE_PATHS.routines.evening,
   CONTEXT_RELATIVE_PATHS.routines.weekly,

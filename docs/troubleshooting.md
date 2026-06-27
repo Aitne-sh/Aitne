@@ -109,7 +109,7 @@ Retry the connection from the dashboard. No need to change the client ID or re-r
 2. Cost by model: `curl -H "Authorization: Bearer $PA_API_TOKEN" http://localhost:8321/api/cost | jq '.byModel'`
 3. Sonnet vs Opus split: `curl -H "Authorization: Bearer $PA_API_TOKEN" http://localhost:8321/api/metrics | jq '.modelCounts'`
    - Opus sessions only land here when explicitly requested (dashboard chat model picker, `agent_schedule.model='opus'`, or `run-now requestedModel='opus'`). Automatic escalation was removed — see [Advisor](./advisor.md).
-4. Set or lower `autonomousDailyCostCapUsd` via the dashboard's **Settings → Cost** card, or `PATCH /api/config { "autonomousDailyCostCapUsd": 1.0 }`. The cap triggers priority-based skipping: `hourly_check` at 100 %, `evening_review` at 150 %, `morning_routine` at 200 %. Reactive DMs are never gated.
+4. Set or lower `autonomousDailyCostCapUsd` via the dashboard's **Settings → Cost** card, or `PATCH /api/config { "autonomousDailyCostCapUsd": 1.0 }`. The cap triggers priority-based skipping: `activity_scan` at 100 %, `evening_review` at 150 %, `morning_routine` at 200 %. Reactive DMs are never gated.
 
 ### Notifications not arriving
 

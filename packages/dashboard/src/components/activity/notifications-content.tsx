@@ -6,6 +6,7 @@ import { useMetrics } from "@/lib/hooks/use-metrics";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DocsLearnMore } from "@/components/docs/docs-learn-more";
 import { QueryResult, CardSkeleton } from "@/components/shared/query-result";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,13 +14,6 @@ import { Card, CardHeader, CardStatLabel, CardValue } from "@/components/ui/card
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { formatRelativeTime, formatAbsoluteTime } from "@/lib/utils";
 import { Bell } from "lucide-react";
-
-const STATUS_COLORS: Record<string, "green" | "blue" | "gray" | "red"> = {
-  delivered: "green",
-  batched: "blue",
-  suppressed: "gray",
-  failed: "red",
-};
 
 const PRIORITY_COLORS: Record<string, "red" | "amber" | "blue" | "gray"> = {
   critical: "red",
@@ -129,7 +123,7 @@ export function NotificationsContent({ enabled = true }: { enabled?: boolean }) 
                   <td className="max-w-md truncate px-3 py-2 text-sm text-foreground">{n.message}</td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">{n.platform}</td>
                   <td className="px-3 py-2">
-                    <Badge variant={STATUS_COLORS[n.status] ?? "gray"}>{n.status}</Badge>
+                    <StatusBadge status={n.status} />
                   </td>
                 </tr>
               ))}

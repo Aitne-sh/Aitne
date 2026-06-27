@@ -14,10 +14,16 @@ Base URL: `http://localhost:8321`. All daemon calls via `curl -s` with
 > **Refusal directive — read first.** Google Calendar is in `native`
 > mode bound to Gemini. Do **NOT** call any of:
 >
-> - `POST /api/integrations/google_calendar/exec` (410 with
->   `X-Integration-Mode: native`)
-> - `POST /api/integrations/google_calendar/reconcile` (410)
 > - `/api/calendar/*` (route-prefix 410)
+> - `POST /api/integrations/google_calendar/exec`
+> - `POST /api/integrations/google_calendar/reconcile`
+>
+> In native mode `POST /api/integrations/google_calendar/exec` returns
+> **409 `mode_mismatch`** (the handler rejects non-delegated mode);
+> `.../reconcile` is not mode-gated at all. Do not call either — use the
+> native connector. The 410 + `X-Integration-Mode: native` refusal
+> contract applies ONLY to the integration's own data routes
+> (`/api/calendar/*`).
 >
 > Reach Google Calendar through the in-session Google Calendar
 > connector your harness exposes (typically Gemini CLI's
@@ -110,9 +116,9 @@ master-id update shifts the whole series. Confirm scope.
 ISO 8601 with TZ offset for timed events; `YYYY-MM-DD` for all-day.
 Connectors typically reject naked-ISO inputs.
 
-### Imminent-event reminders (hourly_check)
+### Imminent-event reminders (activity_scan)
 
-The hourly_check native variant's Step 0b drives the imminent-window
+The activity_scan native variant's Step 0b drives the imminent-window
 fetch each hour; this skill describes the per-call surface. POST each
 materialised event to `/api/observations` per the section below.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type { EventsResponse } from "@/lib/api-types";
 
@@ -24,5 +24,9 @@ export function useEvents(
         : undefined,
     initialPageParam: 1,
     enabled: options?.enabled,
+    // Keep the current list on screen while a new filter loads — otherwise
+    // the key change clears data, QueryResult collapses to a skeleton, and
+    // the page scrolls to the top on every type/result/days change.
+    placeholderData: keepPreviousData,
   });
 }

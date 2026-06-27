@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS agent_actions (
     --   'trigger'      — fired by an automation_triggers row
     --   'message'      — owner DM / mention / dashboard chat
     --   'cron'         — built-in routine (morning, hourly, evening, ...)
-    --   'observation'  — hourly-check consumed pending observations
+    --   'observation'  — activity-scan consumed pending observations
     --   'manual'       — Run-now / dashboard-driven invocation
     --   NULL           — legacy / not yet classified
     -- source_ref is the id of the upstream entity (e.g. trigger id).
@@ -453,9 +453,9 @@ CREATE TABLE IF NOT EXISTS observations (
     -- cost-reduction-structural section A -- pre-summarization at insert time.
     -- The summarizer worker (observers/observation-summarizer.ts) drains
     -- pending rows asynchronously and populates these columns; the
-    -- hourly_check skill consumes the summary instead of fetching raw
+    -- activity_scan skill consumes the summary instead of fetching raw
     -- content unless novelty_score >= 2. NULL novelty_score + non-
-    -- 'done' status means hourly_check falls back to legacy fetch-on-doubt.
+    -- 'done' status means activity_scan falls back to legacy fetch-on-doubt.
     summary_text TEXT,
     novelty_score INTEGER CHECK (novelty_score IS NULL OR (novelty_score >= 0 AND novelty_score <= 3)),
     summary_at TEXT,
@@ -1223,7 +1223,16 @@ CREATE TABLE IF NOT EXISTS browser_research_clusters (
     last_wiki_offer_at INTEGER,
     research_offer_accepted_at INTEGER,
     wiki_summary_written_at INTEGER,
-    agent_summary_revision INTEGER DEFAULT 0
+    agent_summary_revision INTEGER DEFAULT 0,
+    -- RESEARCH_CLUSTER_COST_FIX_PLAN.md F1 — local agent-day label
+    -- ('YYYY-MM-DD', see getAgentDayDateStr) on which the day-boundary
+    -- fan-out last enqueued routine.research_cluster_update for this
+    -- cluster. Stamped BEFORE the EventBus put so a replayed
+    -- day-boundary callback (wake catch-up fires on every sleep gap
+    -- >= 5 min) cannot re-enqueue the same cluster within one agent
+    -- day. NULL = never enqueued. Pre-existing installs get the column
+    -- via migration 0011.
+    journal_update_enqueued_on TEXT
 );
 
 CREATE TABLE IF NOT EXISTS browser_pending_offers (
@@ -1657,7 +1666,12 @@ CREATE TABLE IF NOT EXISTS browser_task (
         CHECK (extract_chars_total >= 0),
     created_at                  INTEGER NOT NULL,
     started_at                  INTEGER,
-    finished_at                 INTEGER
+    finished_at                 INTEGER,
+    -- BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 — browser-task reports are
+    -- delivered through the shared task.delivery boundary. This timestamp
+    -- is the recovery key for completed reports whose worker stored the
+    -- report before the DM was sent/recorded.
+    delivered_at                INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_browser_task_created_at
     ON browser_task(created_at DESC);
@@ -1710,6 +1724,10 @@ CREATE TABLE IF NOT EXISTS browser_task_clarifications (
     -- sweeps overdue rows on the same 30 s tick that handles the
     -- pending-queue timeout.
     deadline_at     INTEGER NOT NULL,
+    -- Phase 1 task.delivery recovery key for ask_user rows. Null means the
+    -- clarification has not yet been surfaced through the gated delivery
+    -- boundary; the deadline scanner still owns answer expiry separately.
+    delivered_at    INTEGER,
     answer          TEXT,
     answered_at     INTEGER,
     resolved        INTEGER NOT NULL DEFAULT 0
@@ -1779,6 +1797,166 @@ CREATE INDEX IF NOT EXISTS idx_final_confirm_tokens_status_expires
     ON browser_task_final_confirm_tokens(status, expires_at);
 CREATE INDEX IF NOT EXISTS idx_final_confirm_tokens_task
     ON browser_task_final_confirm_tokens(task_id);
+
+-- ── Background-task runner (BACKGROUND_TASK_RUNNER_DESIGN.md §6) ──────────
+--
+-- Generic detached-task surface — the browser-task lifecycle skeleton
+-- (state machine, clarifications store, slot manager, parked-resume,
+-- delivery boundary) minus the Playwright driver. A worker is a fresh
+-- Agent-SDK session seeded with a self-contained 'brief'; on completion
+-- (or when it needs input) it WRITES AN ARTIFACT to this row via its
+-- 'finish' / 'ask_user' tools rather than DMing directly. The runner's
+-- delivery boundary reads the 'notify' disposition and, when true, the
+-- REAL DM agent delivers (active delivery turn) or a no-model 'draft'
+-- send (idle) through the shared 'task.delivery' path.
+--
+-- Separate table (Decision 7) — 'browser_task' carries a large browser-
+-- specific column set (site_key, allowlist regex, blocked-request /
+-- extract counters, final-confirm gate) that does not generalize, and
+-- browser_task is experimental. The artifact fields ('report', 'draft',
+-- 'notify', 'significance', 'artifact_path', 'notification_policy',
+-- 'delivered_at') are the genuinely new shape this design adds.
+--
+-- Boot-recovery (§10.2): unlike browser_task (whose in-memory
+-- BrowserContext is unrecoverable, so rows are force-failed), background
+-- tasks are RE-DISPATCHED FROM 'brief' on restart — they are precisely
+-- the long-lived tasks likely to span a restart, and the brief is
+-- self-contained. The event-pipeline boot hook resets non-terminal rows
+-- to 'pending' and re-runs them once the runner is wired.
+CREATE TABLE IF NOT EXISTS background_task (
+    -- uuid v4 (crypto.randomUUID).
+    id                  TEXT PRIMARY KEY,
+    -- Self-contained worker prompt: objective + scope + the inputs the
+    -- task needs + the output-language directive + persona hints for the
+    -- 'draft' + the notification policy / (if_significant) criteria. A
+    -- 'settingSources:["project"]' worker sees ONLY this, so an
+    -- under-specified brief → clarification ping-pong (§9). Capped
+    -- 1..16384 at the route layer.
+    brief               TEXT NOT NULL,
+    -- Short label for status / listing / delivery. Optional; the route
+    -- derives one from the brief when absent.
+    title               TEXT,
+    -- State machine — mirrors browser_task minus final_confirm/abandoned.
+    -- 'awaiting_user' parks for a clarification; the slot stays held.
+    state               TEXT NOT NULL DEFAULT 'pending'
+        CHECK (state IN (
+            'pending',
+            'running',
+            'awaiting_user',
+            'completed',
+            'failed',
+            'timeout',
+            'cancelled'
+        )),
+    -- The spawn-time notification policy the worker evaluates at finish
+    -- time (§4.3). 'always' (the common case) — notify even on a "0
+    -- issues" result. 'if_significant' — notify iff the concrete criteria
+    -- written into the brief are met. 'silent' — file only.
+    notification_policy TEXT NOT NULL DEFAULT 'always'
+        CHECK (notification_policy IN ('always', 'if_significant', 'silent')),
+    -- Phase 4 if_significant criteria DSL (§4.3): a JSON array of concrete,
+    -- atomic conditions the worker checks one-by-one against its result
+    -- ("any repo main build is red", "total spend > 100"). Authored by the
+    -- DM agent at spawn for 'if_significant' tasks; the driver injects them
+    -- as a numbered checklist and the worker sets notify=true iff ANY is
+    -- met (and records which in significance). NULL / empty array means the
+    -- worker falls back to the prose criteria in the brief (back-compat).
+    significance_criteria TEXT,
+    -- ── ARTIFACT (written by the worker's finish tool) ───────────────
+    -- Full verbatim result (findings, numbers, URLs, IDs) — the fidelity
+    -- anchor, never paraphrased by a weak model. Null until finished. On
+    -- the fail-loud path (worker died before finish) the runner
+    -- synthesizes a failure note here.
+    report              TEXT,
+    -- Worker-authored plain-language summary in the owner's language.
+    -- NOT the final DM — it is the body for the idle direct-send path,
+    -- grounding material for the active delivery turn, and the fallback
+    -- if a delivery turn errors. Null until finished.
+    draft               TEXT,
+    -- Worker disposition vs the policy: 1 ⇒ surface, 0 ⇒ file only. NULL
+    -- until finished. The recovery sweep selects 'notify = 1 AND
+    -- delivered_at IS NULL'.
+    notify              INTEGER,
+    -- Worker note: why notify is true/false (digest + audit). Free-form.
+    significance        TEXT,
+    -- Optional vault MD path for research-type output (reuses the
+    -- obsidian 30_outputs/ pattern). Null for quick tasks whose row
+    -- fields suffice.
+    artifact_path       TEXT,
+    -- ── lifecycle ────────────────────────────────────────────────────
+    -- Free-form categorical detail on non-success terminals. Examples:
+    -- 'daemon_restarted', 'budget_exceeded', 'max_turns_exceeded',
+    -- 'execute_timeout', 'clarification_deadline', 'queue_timeout',
+    -- 'sdk_error', 'backend_misconfigured', 'runner_unavailable'.
+    outcome_detail      TEXT,
+    -- "<platform>:<channel_id>". NULL when no DM channel is associable
+    -- (synthetic / channel-less runs) — the artifact is still filed but
+    -- there is nowhere to deliver it.
+    originating_channel TEXT,
+    -- Links to the spawning owner-DM turn / correlation chain.
+    correlation_id      TEXT,
+    -- FK to agent_schedule when the task was inserted via 'scheduleAt'.
+    -- ON DELETE SET NULL so deleting a schedule row leaves history intact.
+    schedule_row_id     INTEGER REFERENCES agent_schedule(id) ON DELETE SET NULL,
+    -- Budget envelope inputs. 'tier' (lite|medium|high) selects the
+    -- default turn/budget/timeout envelope; 'max_budget_usd' is an
+    -- optional per-task override, clamped to the hard cap at run time.
+    tier                TEXT
+        CHECK (tier IS NULL OR tier IN ('lite', 'medium', 'high')),
+    max_budget_usd      REAL,
+    -- Parked worker SDK session id (resume after /clarify). Captured from
+    -- the init message; null until the first turn streams.
+    backend_session_id  TEXT,
+    created_at          INTEGER NOT NULL,
+    started_at          INTEGER,
+    finished_at         INTEGER,
+    -- NULL until delivered; the recovery-sweep key (§10.2).
+    delivered_at        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_background_task_state
+    ON background_task(state);
+CREATE INDEX IF NOT EXISTS idx_background_task_corr
+    ON background_task(correlation_id);
+-- Powers the delivery recovery sweep (completed & notify=1 &
+-- delivered_at IS NULL) without scanning every historical row.
+CREATE INDEX IF NOT EXISTS idx_background_task_delivery
+    ON background_task(state, notify, delivered_at);
+CREATE INDEX IF NOT EXISTS idx_background_task_created_at
+    ON background_task(created_at DESC);
+-- The non-terminal index powers the boot re-dispatch sweep + the
+-- "needs attention" / status queries.
+CREATE INDEX IF NOT EXISTS idx_background_task_non_terminal
+    ON background_task(state)
+    WHERE state IN ('pending', 'running', 'awaiting_user');
+
+-- Mirror of browser_task_clarifications (CAS-resolve, TTL). Clarifications
+-- are always notify=true (the task cannot proceed without an answer), so
+-- there is no policy column. The TTL default is longer than browser-task's
+-- 5 min (no browser resource is held while parked).
+CREATE TABLE IF NOT EXISTS background_task_clarifications (
+    -- uuid v4 == clarificationId.
+    id              TEXT PRIMARY KEY,
+    task_id         TEXT NOT NULL REFERENCES background_task(id) ON DELETE CASCADE,
+    -- Worker-authored; the delivery turn weaves it / the idle send DMs it.
+    question        TEXT NOT NULL,
+    context_summary TEXT,
+    asked_at        INTEGER NOT NULL,
+    -- asked_at + configurable TTL (backgroundTaskClarificationTtlMinutes).
+    deadline_at     INTEGER NOT NULL,
+    -- task.delivery recovery key for ask_user rows.
+    delivered_at    INTEGER,
+    answer          TEXT,
+    answered_at     INTEGER,
+    resolved        INTEGER NOT NULL DEFAULT 0
+        CHECK (resolved IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_bgtask_clar_task
+    ON background_task_clarifications(task_id);
+-- Partial index over the unresolved set — the deadline scanner sweeps
+-- this on the same housekeeping tick that handles delivery recovery.
+CREATE INDEX IF NOT EXISTS idx_bgtask_clar_unresolved
+    ON background_task_clarifications(deadline_at)
+    WHERE resolved = 0;
 
 -- INTEGRATION-DRIFT-PHASE-7-PLAN.md §3.2 — persistent dedup for the
 -- 15-minute imminent-meeting reminder. Pre-Phase-7 the scheduler kept
@@ -2072,7 +2250,7 @@ VALUES
 -- Per-process seeds. Two tiers are wired in at install time:
 --   - Sonnet (DEFAULT_CLAUDE_MEDIUM_MODEL) for "main agent work" surfaces
 --     where output quality drives the operator's daily experience: DMs,
---     dashboard chat, hourly check, daily/weekly/monthly review, morning
+--     dashboard chat, activity scan, daily/weekly/monthly review, morning
 --     routine, scheduled tasks, git.project.* one-shots. Standard
 --     50-turn / $1.00 envelope (git.project.* span 30–100 turns and
 --     $0.50–$2.00 — retemplate is widest because re-template work is
@@ -2170,7 +2348,7 @@ VALUES
     -- above).
     ('routine.morning_routine_today',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50, 1.50, 'preset'),
     ('routine.morning_routine_journal', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',   20, 0.30, 'preset'),
-    ('routine.hourly_check',    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
+    ('routine.activity_scan',    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     -- $0.50 budget: a typical drift-triggered refresh on Sonnet runs ~$0.10
     -- in 4 turns, but a busy-calendar drift (many/large pending calendar
     -- observations read via the task-flow GET limit=200) compounded by a
@@ -2271,7 +2449,7 @@ VALUES
     -- the seeded max_turns=1 caps every backend at one assistant turn,
     -- so this envelope is the absolute ceiling — defense-in-depth on
     -- top of the prompt's "no tools" contract.
-    ('routine.hourly_check.triage', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 1,  0.05, 'preset'),
+    ('routine.activity_scan.triage', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 1,  0.05, 'preset'),
     -- docs/design/appendices/routine-data-acquisition.md §6.2 / §6.9 — pre-pass window
     -- fetcher dispatched before each routine session. Lite tier
     -- (Haiku-class) per P3 ("Lite for Fetch"). Envelope sized for the
@@ -2290,9 +2468,19 @@ VALUES
     ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 10,  0.50, 'preset'),
     -- BROWSER_HISTORY_INTEGRATION_PLAN P3:
     --   research_cluster_update — nightly per-cluster journal append.
-    --     Lite tier (Haiku-class) — templated DM dispatcher with a
-    --     single PUT to context/research/<slug>.md. 5 turns / $0.05 is
-    --     enough headroom; the §10.3 safety floor refuses Codex
+    --     Lite tier (Haiku-class) — a small curl flow against the
+    --     daemon API ending in one append PATCH to research/<slug>.md.
+    --     $0.50 is a STOP-LOSS, not a per-run cost target
+    --     (RESEARCH_CLUSTER_COST_FIX_PLAN.md RC2/F3): the SDK budget
+    --     check only fires between turns, and a cold-prompt-cache run
+    --     writes the full session prefix (~$0.13-0.30 observed) before
+    --     the check can abort — the original $0.05 seed killed every
+    --     cold run after the money was already spent. The F1
+    --     per-agent-day enqueue stamp bounds the key to one run per
+    --     cluster per day, so this ceiling caps daily spend at
+    --     $0.50/cluster. Existing installs are bumped by migration
+    --     0012; keep in lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY
+    --     in plan-presets.ts. The §10.3 safety floor refuses Codex
     --     outright, so the seeded claude row is the only eligible
     --     binding until the operator widens via /settings/models.
     --   research_dispatch — accept path. Medium tier (Sonnet). Uses
@@ -2303,7 +2491,7 @@ VALUES
     --     tier; smaller envelope (30/$0.50) — the agent composes from
     --     the cluster journal it already wrote, so WebFetch fan-out is
     --     bounded.
-    ('routine.research_cluster_update', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',    5,  0.05, 'preset'),
+    ('routine.research_cluster_update', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',    5,  0.50, 'preset'),
     ('routine.research_dispatch',       'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50,  1.00, 'preset'),
     ('routine.research_wiki_summary',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  0.50, 'preset'),
     -- BROWSER_TASK_REDESIGN_PLAN.md §5 — open-ended browser sub-agent.
@@ -2317,7 +2505,16 @@ VALUES
     -- Keep this row's (max_turns, max_budget_usd) in sync with §5's
     -- envelope spec — a future widening to support multi-tab tasks
     -- needs both this seed and the spec to move together.
-    ('browser_task',                    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  1.00, 'preset');
+    ('browser_task',                    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 30,  1.00, 'preset'),
+    -- BACKGROUND_TASK_RUNNER_DESIGN.md §6 — generic detached-task worker.
+    -- Medium tier (Sonnet) by default; the worker runs arbitrary
+    -- long-running work (deep research, multi-repo audit, monitoring).
+    -- The seed envelope is the FALLBACK + the per-tier base — the row's
+    -- 'tier'/'max_budget_usd' (POST body) scale within the hard caps in
+    -- background-task-budget.ts. 40 turns / $2.00 is the medium-tier base;
+    -- long tasks select tier='high' for the wider envelope. Operators can
+    -- pin model/backend per-row from /settings/models.
+    ('background_task',                 'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 40,  2.00, 'preset');
 
 INSERT OR IGNORE INTO settings (key, value_json, updated_at)
 VALUES (

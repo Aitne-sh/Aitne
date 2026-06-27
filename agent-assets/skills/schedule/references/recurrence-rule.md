@@ -69,20 +69,28 @@ of the four frequencies the engine accepts.
 > Managed tasks only support daily, weekly, or monthly cadences.
 > "every hour" / "every 5 minutes" is too tight for a recurring app
 > fetch — pick `daily` or coarser. (If you want a daemon-internal
-> hourly check, use `/api/recurring-schedules` via the `schedule`
+> activity scan, use `/api/recurring-schedules` via the `schedule`
 > skill.)
 
 Same template applies to "every 5 minutes", "every 30 minutes",
 "every 2 hours", etc. when the registering surface is managed-tasks.
 
-## Cadence string vs structured rule
+## Cadence string vs structured rule — consumer-specific
 
-Always send both `cadence` (human-readable, rendered in
-`policies/management.md` §B) and `recurrenceRule` (structured, what the
-scheduler executes). They must agree — if they drift, the rendered
-file misleads the user about what the scheduler will actually do.
+`cadence` and `recurrenceRule` are two views of the same schedule, but
+which one a given endpoint persists depends on the consumer:
 
-When the user modifies just the time (`"9am instead of 10am"`),
-send the new `cadence` and new `recurrenceRule` together in the same
-PATCH so the §B label matches the executable schedule in one
-transition.
+- **managed-tasks** (`mt_<n>` rows, rendered in `policies/management.md`
+  §B): send both `cadence` (human-readable, the §B label) and
+  `recurrenceRule` (structured, what the scheduler executes). They must
+  agree — if they drift, the rendered file misleads the user about what
+  the scheduler will actually do. When the user modifies just the time
+  (`"9am instead of 10am"`), send the new `cadence` and new
+  `recurrenceRule` together so the §B label matches the executable
+  schedule in one transition.
+- **recurring-schedules** (`/api/recurring-schedules`, the `schedule`
+  skill): persists ONLY `recurrenceRule`. The body schema has no
+  `cadence` field and the `recurring_schedules` table has no `cadence`
+  column — any `cadence` you send is silently dropped. Send just
+  `recurrenceRule` (plus `taskType`/`description`/`prompt`/`model`/
+  `tier`/`taskContext`); there is no §B label to keep in sync.

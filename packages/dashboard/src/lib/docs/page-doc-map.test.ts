@@ -35,6 +35,34 @@ describe("docIdForPath", () => {
     );
   });
 
+  it("agents hub: documented built-ins get their routine doc, everything else the hub doc", () => {
+    // AGENTS_HUB_REDESIGN_PLAN §4 — the `?` button on /agents pages.
+    expect(docIdForPath("/agents", search())).toBe("concepts/routines");
+    expect(docIdForPath("/agents/morning-routine", search())).toBe(
+      "features/routines/morning-routine",
+    );
+    // ?tab=rulebook deep link resolves to the same routine doc (covers
+    // rulebook + journal-rules editing).
+    expect(docIdForPath("/agents/morning-routine", search({ tab: "rulebook" }))).toBe(
+      "features/routines/morning-routine",
+    );
+    expect(docIdForPath("/agents/evening-review", search())).toBe(
+      "features/routines/evening-review",
+    );
+    expect(docIdForPath("/agents/weekly-review", search())).toBe(
+      "features/routines/weekly-review",
+    );
+    expect(docIdForPath("/agents/activity-scan", search())).toBe(
+      "features/routines/activity-scan",
+    );
+    // Undocumented built-ins, user Agents, and sub-pages fall to the hub doc.
+    expect(docIdForPath("/agents/monthly-review", search())).toBe("concepts/routines");
+    expect(docIdForPath("/agents/my-custom-agent", search())).toBe("concepts/routines");
+    expect(docIdForPath("/agents/my-custom-agent/executions", search())).toBe(
+      "concepts/routines",
+    );
+  });
+
   it("query-qualified entries win over their unqualified twin", () => {
     expect(docIdForPath("/knowledge", search({ tab: "skills" }))).toBe(
       "concepts/skills",
@@ -49,6 +77,9 @@ describe("docIdForPath", () => {
   it("specific sub-pages win over their parent catch-all", () => {
     expect(docIdForPath("/connections/repositories", search())).toBe(
       "features/integrations/git",
+    );
+    expect(docIdForPath("/connections/notes", search())).toBe(
+      "features/integrations/obsidian",
     );
     expect(docIdForPath("/connections", search())).toBe(
       "features/messaging/overview",

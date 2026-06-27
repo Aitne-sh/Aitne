@@ -159,7 +159,7 @@ workflow; the skill owns the file contract.
       Ground this bucket in the `<self_performance>` block when it is
       present in your context — it carries the objective 7-day evidence
       (per-routine run/failure/cost rows, fetch-window empty-run rates per
-      integration, hourly-gate stage distribution, per-type notification
+      integration, activity-scan gate stage distribution, per-type notification
       reaction rates, lesson-store byte pressure, and any applied
       self-tuning changes in `<tuning_ledger>`). Cite its numbers instead
       of impressions ("gmail pre-pass 78% empty over 40 runs", not "mail

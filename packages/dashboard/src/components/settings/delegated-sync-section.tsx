@@ -13,12 +13,13 @@ import {
   useRunDelegatedSyncCadence,
 } from "@/lib/hooks/use-delegated-sync";
 import type { DelegatedSyncCadenceRow } from "@/lib/api-types";
+import { truncate } from "@/lib/utils";
 
 /**
  * Delegated-sync settings section
  * (docs/design/appendices/delegated-sync-opt-in.md).
  *
- * Lives on /settings/schedule between the Hourly Check and Notifications
+ * Lives on /settings/hours between the Day Shape and Notifications
  * cards. Renders only when the worker reports at least one delegated
  * integration; otherwise it returns null so the page doesn't show an
  * empty stub.
@@ -28,7 +29,7 @@ import type { DelegatedSyncCadenceRow } from "@/lib/api-types";
  *    Now button. Toggling persists immediately; the interval persists on
  *    blur / Enter so a user typing intermediate digits doesn't fire 3 PATCHes.
  *  - The active-hours subsection appears only when at least one cadence is
- *    enabled — it lets the user pause all cadences at once. Mirrors the Hourly Check
+ *    enabled — it lets the user pause all cadences at once. Mirrors the Activity Scan
  *    fields' look but writes to /api/delegated-sync/active-hours rather
  *    than the runtime-settings PATCH path.
  */
@@ -63,7 +64,7 @@ export function DelegatedSyncSection() {
           are inactive. Move an integration (Calendar / Gmail / Notion)
           to delegated mode in <code>/connections</code> to enable
           opt-in cadences here. Native-mode integrations fetch their
-          observations directly during the hourly check turn and do not
+          observations directly during the activity scan turn and do not
           use this worker.
         </div>
       </Card>
@@ -87,7 +88,7 @@ export function DelegatedSyncSection() {
       <div className="space-y-1 p-4 pt-0">
         <p className="pb-2 text-xs text-muted-foreground">
           Background cadences poll Calendar, Gmail, and Notion through a
-          backend MCP subprocess so the hourly check sees fresh observations.
+          backend MCP subprocess so the activity scan sees fresh observations.
           Every poll spends tokens, so all cadences are off by default —
           enable just the ones you want. Enabled cadences respect the shared
           active-hours window below.
@@ -252,7 +253,7 @@ function CadenceRow({ row }: { row: DelegatedSyncCadenceRow & { id: string } }) 
       </div>
       {isNative ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          Observations land via the in-turn fetch during the hourly
+          Observations land via the in-turn fetch during the periodic
           check turn — no background cadence runs for this row.
         </p>
       ) : (
@@ -439,9 +440,4 @@ function inPastWords(deltaSec: number): string {
   if (deltaSec < 60 * 60) return `${Math.round(deltaSec / 60)}m ago`;
   if (deltaSec < 24 * 60 * 60) return `${Math.round(deltaSec / 3600)}h ago`;
   return `${Math.round(deltaSec / 86400)}d ago`;
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
 }

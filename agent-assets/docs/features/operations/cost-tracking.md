@@ -79,6 +79,16 @@ Open **Analytics**. It has two tabs:
 - **Cost** — per-run USD spend. A period selector switches between
   **Daily**, **Weekly**, and **Monthly** windows, with summary cards for
   **Today**, **Last 7 Days**, and **Last 30 Days**. Inside Cost:
+  - **Today's Spend Drivers** — answers "what is costing money *right
+    now*". **Most Expensive Runs Today** lists the day's costliest runs
+    (top 15, most expensive first); click a row for the full per-run
+    detail, including the actually-billed model and cache token breakdown.
+    Next to it, **By Process Today** shows each process's share of today's
+    total, and **Today at a Glance** tracks the day's efficiency: cache
+    hit rate, autonomous spend share, failed-run spend (money paid for
+    runs that produced no result), average cost per run, and total token
+    volume. Everything here uses the agent-day boundary, so the numbers
+    reconcile with the **Today** summary card.
   - **Overview** — a cost-trend chart over the selected period plus a
     **By Event Type** breakdown (which process keys cost the most).
   - **By Backend** — totals and a trend chart split by the backend that
@@ -105,7 +115,7 @@ reactive work such as DMs and mentions always runs.
 - **`autonomousDailyCostCapUsd`** (Autonomous Daily Cost Cap) — when
   today's autonomous spend reaches the cap, the dispatcher skips
   lower-priority routines first, using priority-based degradation:
-  - `hourly_check` — skipped at 100% of the cap
+  - `activity_scan` — skipped at 100% of the cap
   - `roadmap_refresh` — skipped at 120%
   - `evening_review` — skipped at 150%
   - `morning_routine` — last to be cut, only at 200%

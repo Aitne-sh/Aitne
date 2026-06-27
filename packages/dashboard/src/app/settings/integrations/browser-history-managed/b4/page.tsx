@@ -342,7 +342,7 @@ function EnableCard(props: {
           <div className="flex items-center gap-2 text-sm font-semibold">
             {props.enabled ? (
               <>
-                <ShieldCheck className="h-4 w-4 text-green-600" aria-hidden />
+                <ShieldCheck className="h-4 w-4 text-success" aria-hidden />
                 Master toggle: ENABLED
               </>
             ) : (
@@ -390,7 +390,7 @@ function ExperimentalEnableModal(props: {
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-600" aria-hidden />
+            <ShieldAlert className="h-5 w-5 text-warning" aria-hidden />
             Enable experimental purchase confirmations?
           </DialogTitle>
           <DialogDescription className="space-y-3 pt-2 text-sm">
@@ -876,7 +876,7 @@ function RecentPurchaseRow(props: {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {t.status === "confirmed" ? (
-            <CheckCircle2 className="h-4 w-4 text-green-600" aria-hidden />
+            <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />
           ) : (
             <XCircle className="h-4 w-4 text-muted-foreground" aria-hidden />
           )}

@@ -157,9 +157,9 @@ describe("Integration registry", () => {
     // at runtime which `<fetch>` rows reach it, so every integration
     // that owns a partial appears in this list.
     expect(routines).toEqual([
+      "routine.activity_scan",
       "routine.evening_review",
       "routine.fetch_window",
-      "routine.hourly_check",
       "routine.morning_routine",
     ]);
     expect(refs!.every((r) => r.via === "partial")).toBe(true);
@@ -179,8 +179,8 @@ describe("Integration registry", () => {
     expect(refs).toBeDefined();
     const routines = refs!.map((r) => r.routine).sort();
     expect(routines).toEqual([
+      "routine.activity_scan",
       "routine.fetch_window",
-      "routine.hourly_check",
       "routine.today_refresh",
       "routine.weekly_review",
     ]);
@@ -197,7 +197,7 @@ describe("Integration registry", () => {
   // in `routine-partials.test.ts` exercises all five acquire partials.
   // `taskFlowsTouched` retains its variant-materialization semantics
   // (non-empty for gmail / google_calendar / notion because their
-  // `routine.hourly_check.delegated.<be>.md` variants used to live in
+  // `routine.activity_scan.delegated.<be>.md` variants used to live in
   // the tree — Phase 3 R4 deleted those, but the field is still
   // honoured by `selectTaskFlowVariantSuffix` for the DM variants).
   it("gmail declares taskFlowsReferenced for every routine that includes its mail-acquire partial", () => {
@@ -205,9 +205,9 @@ describe("Integration registry", () => {
     expect(refs).toBeDefined();
     const routines = refs!.map((r) => r.routine).sort();
     expect(routines).toEqual([
+      "routine.activity_scan",
       "routine.evening_review",
       "routine.fetch_window",
-      "routine.hourly_check",
       "routine.morning_routine",
     ]);
     expect(refs!.every((r) => r.via === "partial")).toBe(true);
@@ -222,8 +222,8 @@ describe("Integration registry", () => {
     expect(refs).toBeDefined();
     const routines = refs!.map((r) => r.routine).sort();
     expect(routines).toEqual([
+      "routine.activity_scan",
       "routine.fetch_window",
-      "routine.hourly_check",
       "routine.today_refresh",
       "routine.weekly_review",
     ]);
@@ -239,8 +239,8 @@ describe("Integration registry", () => {
     expect(refs).toBeDefined();
     const routines = refs!.map((r) => r.routine).sort();
     expect(routines).toEqual([
+      "routine.activity_scan",
       "routine.fetch_window",
-      "routine.hourly_check",
       "routine.morning_routine",
     ]);
     expect(refs!.every((r) => r.via === "partial")).toBe(true);
@@ -362,8 +362,8 @@ describe("Integration registry", () => {
     ]);
   });
 
-  it("retains taskFlowsTouched: ['routine.hourly_check'] on gmail and google_calendar — pollers stop in delegated mode and the variant compensates; INTEGRATION_NATIVE_MODE_DESIGN.md §8.1 adds the DM flows so the native DM variants resolve via selectTaskFlowVariantSuffix", () => {
-    // The per-integration mode-aware variant of the hourly check
+  it("retains taskFlowsTouched: ['routine.activity_scan'] on gmail and google_calendar — pollers stop in delegated mode and the variant compensates; INTEGRATION_NATIVE_MODE_DESIGN.md §8.1 adds the DM flows so the native DM variants resolve via selectTaskFlowVariantSuffix", () => {
+    // The per-integration mode-aware variant of the activity scan
     // restores observations the stopped pollers no longer produce.
     // `delegatedIntegrationsForProcessKey` excludes proxy-driven
     // integrations from fallback-refusal because the daemon proxy
@@ -378,12 +378,12 @@ describe("Integration registry", () => {
     // and `missingVariantsForMode` (skills-compiler.ts) is lenient when
     // the base file exists.
     expect(INTEGRATION_DESCRIPTORS.gmail.taskFlowsTouched).toEqual([
-      "routine.hourly_check",
+      "routine.activity_scan",
       "message.received.dm",
       "message.received.dm_first",
     ]);
     expect(INTEGRATION_DESCRIPTORS.google_calendar.taskFlowsTouched).toEqual([
-      "routine.hourly_check",
+      "routine.activity_scan",
       "message.received.dm",
       "message.received.dm_first",
     ]);
@@ -575,6 +575,7 @@ describe("defaultIntegrationsMap", () => {
     for (const key of INTEGRATION_KEYS) {
       expect(map[key]).toEqual({
         mode: key === "git" || key === "github" ? "direct" : "disabled",
+        fetchTargets: [],
         deniedTools: [],
         lastChangedAt: now,
       });
@@ -614,6 +615,21 @@ describe("integrationStateSchema", () => {
       lastChangedAt: "2026-04-19T00:00:00.000Z",
     });
     expect(result.delegatedBackend).toBe("claude");
+  });
+
+  it("accepts routine fetch targets and trims title/url input", () => {
+    const result = integrationStateSchema.parse({
+      mode: "native",
+      nativeBackend: "claude",
+      deniedTools: [],
+      fetchTargets: [
+        { label: " Project notes ", locator: " https://notion.so/project " },
+      ],
+      lastChangedAt: "2026-04-19T00:00:00.000Z",
+    });
+    expect(result.fetchTargets).toEqual([
+      { label: "Project notes", locator: "https://notion.so/project" },
+    ]);
   });
 
   it("rejects an unknown mode", () => {
@@ -661,6 +677,16 @@ describe("integrationPatchSchema", () => {
       delegatedBackend: "codex",
     });
     expect(result.delegatedBackend).toBe("codex");
+  });
+
+  it("accepts fetch target edits without changing mode", () => {
+    const result = integrationPatchSchema.parse({
+      mode: "direct",
+      fetchTargets: [{ label: "Tasks", locator: "notion-page-id" }],
+    });
+    expect(result.fetchTargets).toEqual([
+      { label: "Tasks", locator: "notion-page-id" },
+    ]);
   });
 });
 
@@ -811,24 +837,24 @@ describe("selectTaskFlowVariantSuffix", () => {
     expect(selectTaskFlowVariantSuffix("routine.morning_routine", "codex", integrations)).toBe("direct");
   });
 
-  it("returns 'delegated.claude' for hourly_check when ONLY gmail is delegated — variant compensates for the MailPoller per-account filter", () => {
+  it("returns 'delegated.claude' for activity_scan when ONLY gmail is delegated — variant compensates for the MailPoller per-account filter", () => {
     const integrations = defaultIntegrationsMap(now);
     integrations.gmail = { mode: "delegated", delegatedBackend: "claude", deniedTools: [], lastChangedAt: now };
-    expect(selectTaskFlowVariantSuffix("routine.hourly_check", "claude", integrations)).toBe("delegated.claude");
+    expect(selectTaskFlowVariantSuffix("routine.activity_scan", "claude", integrations)).toBe("delegated.claude");
   });
 
-  it("returns 'delegated.codex' for hourly_check when ONLY google_calendar is delegated — variant compensates for the stopped CalendarPoller", () => {
+  it("returns 'delegated.codex' for activity_scan when ONLY google_calendar is delegated — variant compensates for the stopped CalendarPoller", () => {
     const integrations = defaultIntegrationsMap(now);
     integrations.google_calendar = { mode: "delegated", delegatedBackend: "codex", deniedTools: [], lastChangedAt: now };
-    expect(selectTaskFlowVariantSuffix("routine.hourly_check", "codex", integrations)).toBe("delegated.codex");
+    expect(selectTaskFlowVariantSuffix("routine.activity_scan", "codex", integrations)).toBe("delegated.codex");
   });
 
-  it("returns 'delegated.claude' for hourly_check when notion is delegated on claude — legacy path retained for notion", () => {
+  it("returns 'delegated.claude' for activity_scan when notion is delegated on claude — legacy path retained for notion", () => {
     const integrations = defaultIntegrationsMap(now);
     integrations.notion = { mode: "delegated", delegatedBackend: "claude", deniedTools: [], lastChangedAt: now };
-    // notion still uses the legacy variant path; its hourly_check variant
+    // notion still uses the legacy variant path; its activity_scan variant
     // restores observation coverage when NotionPoller stops.
-    expect(selectTaskFlowVariantSuffix("routine.hourly_check", "claude", integrations)).toBe("delegated.claude");
+    expect(selectTaskFlowVariantSuffix("routine.activity_scan", "claude", integrations)).toBe("delegated.claude");
   });
 
   it("returns null for the notion skill when notion is delegated on claude with a Claude DM session — same-backend native MCP", () => {
@@ -863,7 +889,7 @@ describe("selectTaskFlowVariantSuffix", () => {
     // A bare `{}` map plus a touched task flow exercises
     // `integrations[k]?.mode ?? "disabled"` — every touchingKey
     // resolves through the nullish-coalescing branch.
-    expect(selectTaskFlowVariantSuffix("routine.hourly_check", "claude", {})).toBe("direct");
+    expect(selectTaskFlowVariantSuffix("routine.activity_scan", "claude", {})).toBe("direct");
   });
 });
 
@@ -881,10 +907,10 @@ describe("delegatedIntegrationsForProcessKey", () => {
     expect(delegatedIntegrationsForProcessKey("routine.evening_review", integrations)).toEqual([]);
   });
 
-  it("returns empty for hourly_check when ONLY gmail is delegated — gmail is proxy-driven so the daemon proxy handles the connector call independently of the agent backend", () => {
+  it("returns empty for activity_scan when ONLY gmail is delegated — gmail is proxy-driven so the daemon proxy handles the connector call independently of the agent backend", () => {
     const integrations = defaultIntegrationsMap(now);
     integrations.gmail = { mode: "delegated", delegatedBackend: "claude", deniedTools: [], lastChangedAt: now };
-    expect(delegatedIntegrationsForProcessKey("routine.hourly_check", integrations)).toEqual([]);
+    expect(delegatedIntegrationsForProcessKey("routine.activity_scan", integrations)).toEqual([]);
   });
 
   it("returns empty for morning_routine when gmail+calendar are delegated — Phase D removed both claims", () => {
@@ -903,7 +929,7 @@ describe("delegatedIntegrationsForProcessKey", () => {
     expect(delegatedIntegrationsForProcessKey("routine.morning_routine", integrations)).toEqual([]);
   });
 
-  it("returns notion for hourly_check when notion is delegated — legacy path retained", () => {
+  it("returns notion for activity_scan when notion is delegated — legacy path retained", () => {
     const integrations = defaultIntegrationsMap(now);
     integrations.notion = {
       mode: "delegated",
@@ -911,13 +937,13 @@ describe("delegatedIntegrationsForProcessKey", () => {
       deniedTools: [],
       lastChangedAt: now,
     };
-    expect(delegatedIntegrationsForProcessKey("routine.hourly_check", integrations)).toEqual([
+    expect(delegatedIntegrationsForProcessKey("routine.activity_scan", integrations)).toEqual([
       "notion",
     ]);
   });
 
-  it("returns notion only for hourly_check even when gmail+calendar are also delegated — gmail/calendar are proxy-driven so they're excluded regardless of taskFlowsTouched", () => {
-    // gmail + google_calendar carry `taskFlowsTouched: ["routine.hourly_check"]`
+  it("returns notion only for activity_scan even when gmail+calendar are also delegated — gmail/calendar are proxy-driven so they're excluded regardless of taskFlowsTouched", () => {
+    // gmail + google_calendar carry `taskFlowsTouched: ["routine.activity_scan"]`
     // (so the variant compensates for stopped pollers), but the router
     // should NOT pin the agent backend to their `delegatedBackend` —
     // the daemon proxy handles connector access independently. Notion is
@@ -941,7 +967,7 @@ describe("delegatedIntegrationsForProcessKey", () => {
       deniedTools: [],
       lastChangedAt: now,
     };
-    expect(delegatedIntegrationsForProcessKey("routine.hourly_check", integrations)).toEqual([
+    expect(delegatedIntegrationsForProcessKey("routine.activity_scan", integrations)).toEqual([
       "notion",
     ]);
   });
@@ -2075,7 +2101,7 @@ describe("native mode — nativeIntegrationsForProcessKey (§10.1 — fallback g
       },
     };
     const result = nativeIntegrationsForProcessKey(
-      "routine.hourly_check",
+      "routine.activity_scan",
       integrations as never,
     );
     expect(result.sort()).toEqual(["gmail", "notion"].sort());
@@ -2090,7 +2116,7 @@ describe("native mode — nativeIntegrationsForProcessKey (§10.1 — fallback g
       },
     };
     const result = nativeIntegrationsForProcessKey(
-      "routine.hourly_check",
+      "routine.activity_scan",
       integrations as never,
     );
     expect(result).toEqual([]);
@@ -2137,7 +2163,7 @@ describe("native mode — nativeIntegrationsForProcessKey (§10.1 — fallback g
     };
     expect(
       nativeIntegrationsForProcessKey(
-        "routine.hourly_check",
+        "routine.activity_scan",
         integrations as never,
       ),
     ).toEqual([]);
@@ -2226,7 +2252,7 @@ describe("native mode — selectTaskFlowVariantSuffix (§5.4.2)", () => {
       },
     };
     expect(
-      selectTaskFlowVariantSuffix("routine.hourly_check", "claude", integrations as never),
+      selectTaskFlowVariantSuffix("routine.activity_scan", "claude", integrations as never),
     ).toBe("native.claude");
   });
 
@@ -2246,7 +2272,7 @@ describe("native mode — selectTaskFlowVariantSuffix (§5.4.2)", () => {
       },
     };
     expect(
-      selectTaskFlowVariantSuffix("routine.hourly_check", "claude", integrations as never),
+      selectTaskFlowVariantSuffix("routine.activity_scan", "claude", integrations as never),
     ).toBe("delegated.claude");
   });
 
@@ -2259,7 +2285,7 @@ describe("native mode — selectTaskFlowVariantSuffix (§5.4.2)", () => {
       },
     };
     expect(
-      selectTaskFlowVariantSuffix("routine.hourly_check", "claude", integrations as never),
+      selectTaskFlowVariantSuffix("routine.activity_scan", "claude", integrations as never),
     ).toBe("direct");
   });
 
@@ -2275,7 +2301,7 @@ describe("native mode — selectTaskFlowVariantSuffix (§5.4.2)", () => {
     // Cross-backend native (drift) — the resolver degrades to direct so
     // we never request a SKILL.native.<wrong-backend>.md file.
     expect(
-      selectTaskFlowVariantSuffix("routine.hourly_check", "codex", integrations as never),
+      selectTaskFlowVariantSuffix("routine.activity_scan", "codex", integrations as never),
     ).toBe("direct");
   });
 });
@@ -2406,7 +2432,7 @@ describe("native mode — applyIntegrationModeFilter `native` predicate (§5.4)"
 
 // ────────────────────────────────────────────────────────────────────────────
 // HOURLY_CHECK_GATE_REDESIGN_PLAN.md Phase 1.B — source-prefix-set
-// derivation. The hourly_check gate's signal compute consumes these to
+// derivation. The activity_scan gate's signal compute consumes these to
 // filter `observations.source LIKE ?` clauses without hardcoding any
 // integration reference outside the registry.
 // ────────────────────────────────────────────────────────────────────────────

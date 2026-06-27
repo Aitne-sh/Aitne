@@ -74,9 +74,10 @@ around them and DM you ahead of meetings that matter.
 
 ## What It Does
 
-- **Polls** the connected calendar(s) on `calendarPollIntervalSeconds`.
+- **Polls** Google Calendar on `calendarPollIntervalSeconds`; Outlook
+  and Apple calendars are read on demand rather than polled.
 - **Records observations** when events change (add / move / remove),
-  consumed by the hourly check.
+  consumed by the activity scan.
 - **Surfaces today's events** to the morning routine so they land in
   `state/today.md` and the day's schedule file.
 - **Reads** events on demand for reactive turns ("am I free at 3?").
@@ -99,18 +100,20 @@ an explicit request.
 
 ## Where in the Dashboard
 
-- **Connections → Calendar** holds OAuth, scope, and polling.
+- **Connections → Calendar** holds OAuth, scope, and the integration
+  mode; the poll interval itself is edited on Settings → Infrastructure.
 - The same page hosts the **Calendar Event Model** card (see below)
-  when Google Calendar is in direct mode.
+  unless Google Calendar runs in delegated mode.
 
 ## Calendar Event Model
 
 The Calendar Event Model picker chooses the backend and model that
 runs when the **daemon-side poller detects a calendar change**. It binds
-the `calendar.change` ProcessKey, which fires in two situations:
+the `calendar.change` ProcessKey. The poller's change detection reacts
+in two situations:
 
 - An event was added, moved, or deleted between polls (recorded as a
-  change observation; the hourly check picks it up).
+  change observation; the activity scan picks it up).
 - An event was created far in advance (long-horizon events more than 14
   days out nudge the roadmap-refresh routine so `plans/roadmap.md` can
   build a preparation timeline).
@@ -127,22 +130,28 @@ different mix.
 
 The picker is **only meaningful when Google Calendar runs in direct
 mode.** In delegated mode the daemon hands off all Google Calendar
-work to the connector inside your agent's backend, so:
+work to the connector inside your agent's backend, so, by default:
 
 - No approaching-event reminders fire from the daemon.
 - No change observations are recorded between polls.
-- The hourly check has no calendar-side observations to react to.
+- The activity scan has no calendar-side observations to react to.
 - Long-horizon roadmap-refresh nudges from calendar do not fire.
 
 The agent only learns about calendar state in delegated mode when it
 asks the connector itself inside a session (for example, while
 running the morning routine). It is a pull-only model — the daemon
-does not push.
+does not push. The exception is **Background Sync** (Settings → Hours
+& Notifications): two opt-in cadences, off by default, poll the
+calendar through the backend's connector while delegated — the
+imminent cadence (next 1 h) restores the 15-minute reminders, and the
+day-ahead cadence (next 24 h) restores change observations and
+far-future roadmap-refresh detection.
 
 To avoid presenting a setting that does nothing, the dashboard hides
 the Calendar Event Model card whenever Google Calendar is delegated.
 If you want approaching-event reminders and change observations back,
-switch the integration mode to direct on the same page.
+switch the integration mode to direct on the same page, or enable the
+calendar Background Sync cadences.
 
 ## Configuration
 
@@ -158,10 +167,12 @@ rather than an env-style setting; the underlying state lives in the
 
 - A **stale calendar** in `/schedule` after a real-world add usually
   means the poll has not yet run. Check the next-fire timestamp.
-- An **OAuth-expired** state reports on the auth-health card.
+- An **OAuth-expired** state reports on the Google card's connection
+  status on Connections → Calendar.
 - **No reminders or change observations** while in delegated mode is
-  expected behavior, not a bug — switch to direct mode to restore the
-  daemon-side flows. See "Calendar Event Model" above.
+  expected behavior, not a bug — switch to direct mode or enable the
+  Background Sync cadences to restore the daemon-side flows. See
+  "Calendar Event Model" above.
 
 ## Related
 

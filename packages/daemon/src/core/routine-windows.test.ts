@@ -232,7 +232,7 @@ describe("lookupWindowQuery", () => {
 describe("routineHasWindows", () => {
   it("returns true for routines with at least one row", () => {
     expect(routineHasWindows("routine.morning_routine")).toBe(true);
-    expect(routineHasWindows("routine.hourly_check")).toBe(true);
+    expect(routineHasWindows("routine.activity_scan")).toBe(true);
   });
 
   it("returns false for routines whose plan is empty", () => {

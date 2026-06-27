@@ -214,7 +214,7 @@ const PROCESS_LABELS: Record<string, string> = {
   "routine.evening_review": "Evening Review",
   "routine.weekly_review": "Weekly Review",
   "routine.monthly_review": "Monthly Review",
-  "routine.hourly_check": "Hourly Check",
+  "routine.activity_scan": "Activity Scan",
   "routine.roadmap_refresh": "Roadmap Refresh",
   "message.dm": "Direct Messages",
   "message.mention": "Mentions",

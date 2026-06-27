@@ -89,7 +89,7 @@ export function inferIntegrationKeyFromSource(
 
 /** Per-integration source prefixes whose pre-pass payload carries the
  *  mail shape (`payload.raw.from`, no `is_read`). Drives
- *  {@link normalizeMailObservationPayload} so the hourly-check gate can
+ *  {@link normalizeMailObservationPayload} so the activity-scan gate can
  *  read a canonical `is_read` + `from_email` shape regardless of mode. */
 const MAIL_OBSERVATION_INTEGRATION_KEYS: ReadonlySet<IntegrationKey> = new Set(
   INTEGRATION_KEYS.filter((k) => {
@@ -108,7 +108,7 @@ function extractEmailAddress(raw: string): string | null {
 
 /**
  * Normalize pre-pass mail payloads at the ingest chokepoint so the
- * hourly-check gate can read a canonical shape regardless of mode. See
+ * activity-scan gate can read a canonical shape regardless of mode. See
  * HOURLY_CHECK_GATE_REDESIGN_PLAN.md for the full rationale; the rules:
  *   - mail integration source AND `payload.raw.from` is a string → set
  *     `is_read = 0` and `from_email = <lowercased extracted address>`

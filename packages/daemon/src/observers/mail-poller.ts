@@ -585,7 +585,7 @@ export class MailPoller implements Observer {
     // Observe only what actually landed in local state. If upsert failed,
     // `mail_messages_index` has no row for the provider's reported
     // `userMessages` — emitting the observation anyway would tell the
-    // hourly-check signal compute (and downstream skill flows) that N new
+    // activity-scan signal compute (and downstream skill flows) that N new
     // mails exist, and the agent would then query the index and find
     // zero. Worse: when the next tick retries the upsert successfully it
     // emits a second observation, double-counting the same batch. Gate
@@ -600,7 +600,7 @@ export class MailPoller implements Observer {
         ref: `${account.id}-${Date.now()}`,
         changeType: "created",
         // External-sender mail is owner-relevant signal, not internal-system
-        // bookkeeping. The hourly-check threshold gate, the silent-gate
+        // bookkeeping. The activity-scan threshold gate, the silent-gate
         // consumption path, and the `observations` skill all filter to
         // `actor='user'` (see dispatcher.ts:1540, 1832 + skills/observations
         // SKILL.md). Marking this `system` would invisibly excise mail from

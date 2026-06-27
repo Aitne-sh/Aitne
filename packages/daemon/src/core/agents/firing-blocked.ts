@@ -4,7 +4,7 @@ import type Database from "better-sqlite3";
  * `agent.firing_blocked` audit throttle (AGENT_DEFINITIONS_DESIGN.md §12.3).
  *
  * When a disabled built-in Agent's cron would have fired, the scheduler records
- * the suppressed firing — but a routine on a tight cadence (hourly_check) could
+ * the suppressed firing — but a routine on a tight cadence (activity_scan) could
  * otherwise write dozens of identical audit rows a day. The throttle keeps **at
  * most one** `agent_actions(action_type='agent.firing_blocked')` row per
  * `(agent_id, agent-day)`; every subsequent suppression in the same agent-day

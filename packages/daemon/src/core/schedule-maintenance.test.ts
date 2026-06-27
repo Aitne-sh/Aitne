@@ -91,7 +91,7 @@ describe("schedule-maintenance", () => {
       `INSERT INTO agent_actions (action_type, started_at)
        VALUES
        ('routine.evening_review', '2026-04-07 18:10:00'),
-       ('routine.hourly_check', '2026-04-07 12:00:00')`,
+       ('routine.activity_scan', '2026-04-07 12:00:00')`,
     ).run();
 
     expect(

@@ -71,7 +71,7 @@ If the preview clears all three gates, surface 1–2 tasks:
 
 #### Resolved User Tasks
 
-When the user reports completing one of their tasks, mark it `[x]` per the today / context skill. Do NOT modify Agent Plan rows from this handler — those flip in `scheduled.task` handlers and Evening Review only.
+When the user reports completing one of their tasks, mark it `[x]` per the today / context skill. Do NOT flip Agent Plan rows for execution outcomes — those flip at fire time in `scheduled.task` / `scheduled.dm` handlers. If the user's message invalidates a pending planned action, apply the today skill's "Agent Plan revision — cancel / amend" recipe. Unambiguous match only.
 
 #### Agent Plan is private — never surface as task status
 
@@ -80,7 +80,7 @@ Agent Plan rows in <today> are the agent's own pending actions, not user tasks. 
 - Never frame an Agent Plan row as a user task ("your 9am task", "pending task", "still incomplete", "did-not-fire") — in any language.
 - Never quote the row's HH:MM, its action text, a task ID, or internal labels.
 - If a past-due `[ ]` row's content is a reminder relevant to the current DM, deliver the question as natural prose — no preamble.
-- Delivering a row's content does NOT execute it; the DM handler never flips Agent Plan rows.
+- Delivering a row's content does NOT execute it; execution-outcome flips happen only at fire time.
 
 Bad — exposes the row as a task with internal identifiers:
 
@@ -139,6 +139,8 @@ affirmative.
 **Scheduling.** Recurring autonomous **work** ("every hour check X and act") → create an **Agent** via the `agent-create` skill (`POST /api/agents`). Recurring scheduled **DM / briefing** ("DM me every morning at 9") → `POST /api/recurring-schedules` (`taskType: "dm_session"`). One-shot ("tomorrow 3pm", "in 30 min") → `POST /api/schedule/dm` (pre-composed; default) or `POST /api/schedule` (wake-up). Load the `schedule` skill (one-shot + recurring-DM) or `agent-create` (recurring work Agents). Use `<current_time>` for timezone resolution. Prefer `tier` over `model`; the two are mutually exclusive.
 
 Schedules go through this daemon — never through any cloud-hosted scheduled-agent feature your CLI may expose. Cloud routines cannot reach `localhost:8321`, so they cannot deliver via the user's chat platforms or use any integration registered here.
+
+**Background task** (a single long-running / open-ended job the user wants done while they keep chatting — deep research, a multi-repo / multi-file audit, "monitor X over time", a bulk compile) → hand it to the detached runner via the `background-task` skill. Resolve scope *this turn*, compose a self-contained brief (objective, inputs, output language, notification policy + concrete `if_significant` criteria), POST, ack in one line, and **end the turn** — never poll; the daemon delivers the result in your voice when it's done. Keep a plausibly-quick lookup inline, but if one you started inline balloons, promote it — fold the work already done into the brief so the worker continues rather than restarting, then POST + ack + end the turn. A recurring cadence is the Scheduling arm above (`agent-create`); an open-ended *browser* job is the `browser-task` skill.
 
 **Long-horizon intent** (commitment, trip, deliverable, learning target beyond today) → apply the decision tree below; the `roadmap` skill is the writer. Ambiguous or speculative items belong in `journal/agent.md` as a candidate line for the next morning routine to confirm — do **not** write directly to `plans/roadmap.md` without a clear positive signal.
 

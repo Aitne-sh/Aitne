@@ -528,6 +528,7 @@ describe("OVERRIDE_EDIT_PATHS", () => {
     expect([...OVERRIDE_EDIT_PATHS]).toEqual([
       "backend.tier",
       "backend.model",
+      "backend.backend_id",
       "limits.max_turns",
       "limits.max_budget_usd",
       "limits.timeout_minutes",

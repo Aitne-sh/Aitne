@@ -10,6 +10,8 @@ import {
   ScheduledTaskRunner,
   SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS,
   REFRESH_ARCHITECTURE_ALLOWED_TOOLS,
+  TASK_DELIVERY_TURN_ALLOWED_TOOLS,
+  isTaskDeliveryTurn,
   appendToWeeklyInterestsJournalSection,
   pruneWeeklyInterestsJournalBullets,
 } from "./dispatcher-scheduled-tasks.js";
@@ -52,8 +54,8 @@ function fakeConfig(dataDir: string): AgentConfig {
     feedbackLessonMaxBytesGlobal: 8192,
     feedbackLessonMaxBytesPerAgent: 4096,
     // Phase 2 Recommend pre-step knob inputs (rule-table current values).
-    hourlyCheckPrePassFreshnessMinutes: 240,
-    hourlyCheckLowSignalPendingCeiling: 0,
+    activityScanPrePassFreshnessMinutes: 240,
+    activityScanLowSignalPendingCeiling: 0,
   } as unknown as AgentConfig;
 }
 
@@ -162,7 +164,7 @@ function makeRunner(opts: {
     diagnoseTodayMdState: () => ({ kind: "fresh" }),
     isRoadmapStale: () => false,
     emitRoadmapRefresh: vi.fn(),
-    triggerHourlyCheck: vi.fn().mockResolvedValue(undefined),
+    triggerActivityScan: vi.fn().mockResolvedValue(undefined),
   } as unknown as ConstructorParameters<typeof MorningRoutineRunner>[0]);
   const runner = new ScheduledTaskRunner({
     db: opts.db,
@@ -274,7 +276,7 @@ describe("ScheduledTaskRunner — handleMorningRoutineRetry gate", () => {
   // Skipping on today.md alone caused a stall-loop failure mode in
   // handleMorningRoutineRetry-gate: if the audit row is missing (daemon
   // crash mid-write OR user manually edited today.md) every
-  // hourly_check tick would queue a retry, the retry would fast-path
+  // activity_scan tick would queue a retry, the retry would fast-path
   // skip, and the morning_routine never actually ran — autonomous work
   // silently stalled.
   let db: Database.Database;
@@ -399,6 +401,36 @@ describe("ScheduledTaskRunner — handleMorningRoutineRetry gate", () => {
       >[0],
     );
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the wake event's agentId stamp onto the synthesized RoutineEvent", async () => {
+    const { runner, morningRoutine } = makeRunner({ db, dataDir });
+    const spy = vi
+      .spyOn(morningRoutine, "executeMorningRoutine")
+      .mockResolvedValue(undefined);
+    const scheduleId = insertRetryWakeRow();
+    // `dispatchSafe.beginAgentExecution` stamps the wake event before
+    // dispatch; the synthesized morning event must keep it so run-now /
+    // retry firings honour the Agent's overrides + lesson injection the
+    // same way a cron fire does.
+    const stamped = buildRetryEvent(scheduleId) as { data: Record<string, unknown> };
+    stamped.data.agentId = "morning-routine";
+    await runner.executeScheduledTask(
+      stamped as Parameters<typeof runner.executeScheduledTask>[0],
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    const synth = spy.mock.calls[0][0];
+    expect(synth.data.agentId).toBe("morning-routine");
+
+    // An unstamped wake event stays unstamped — no phantom identity.
+    spy.mockClear();
+    const plainScheduleId = insertRetryWakeRow();
+    await runner.executeScheduledTask(
+      buildRetryEvent(plainScheduleId) as Parameters<
+        typeof runner.executeScheduledTask
+      >[0],
+    );
+    expect(spy.mock.calls[0][0].data.agentId).toBeUndefined();
   });
 });
 
@@ -643,20 +675,20 @@ describe("ScheduledTaskRunner.executeDefault — Phase 4 / D4 pre-pass", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT invoke the pre-pass when event.data.fetchReportBlock is already set (idempotency for hourly_check D3)", async () => {
+  it("does NOT invoke the pre-pass when event.data.fetchReportBlock is already set (idempotency for activity_scan D3)", async () => {
     const { fetchWindowRunner, run } = makeRecordingPrepass();
     const { runner, router } = makeRunner({ db, dataDir, fetchWindowRunner });
     stubExecute(router);
     await runner.executeDefault({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "cron",
       priority: 2,
       timestamp: new Date(),
       data: {
-        fetchReportBlock: "<fetch_report routine=\"hourly_check\" status=\"success\" />",
+        fetchReportBlock: "<fetch_report routine=\"activity_scan\" status=\"success\" />",
       },
       correlationId: "evt-hc",
-      routine: "hourly_check",
+      routine: "activity_scan",
     } as unknown as Parameters<typeof runner.executeDefault>[0]);
     expect(run).not.toHaveBeenCalled();
   });
@@ -985,6 +1017,102 @@ describe("ScheduledTaskRunner — REFRESH_ARCHITECTURE_ALLOWED_TOOLS", () => {
     ]) {
       expect(curl).not.toContain(forbidden);
     }
+  });
+});
+
+describe("isTaskDeliveryTurn", () => {
+  it("is true only for a taskContext carrying the task_delivery block", () => {
+    expect(isTaskDeliveryTurn({ task_delivery: { taskId: "x" } } as never)).toBe(true);
+    expect(isTaskDeliveryTurn({ routine: "morning_routine" } as never)).toBe(false);
+    expect(isTaskDeliveryTurn(null as never)).toBe(false);
+    expect(isTaskDeliveryTurn(undefined as never)).toBe(false);
+  });
+});
+
+describe("ScheduledTaskRunner.executeScheduledTask — task.delivery no-tool clamp", () => {
+  let db: Database.Database;
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-st-deliv-"));
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  function stubExecute(router: IAgentRouter): void {
+    (router.execute as ReturnType<typeof vi.fn>).mockResolvedValue({
+      output: "",
+      isError: false,
+      durationMs: 10,
+      numTurns: 1,
+      sessionId: null,
+      model: "model",
+      backendId: "claude",
+      costUsd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+      modelUsage: {},
+      costSource: "backend",
+      contextUpdated: false,
+      advisorCallCount: 0,
+      stopReason: null,
+    });
+  }
+
+  function deliveryEvent() {
+    return {
+      type: "scheduled.dm",
+      source: "task.delivery",
+      priority: 2,
+      timestamp: new Date(),
+      data: {},
+      correlationId: "corr-delivery",
+      task: "task delivery: CI audit",
+      taskContext: {
+        task_delivery: {
+          taskKind: "background_task",
+          taskId: "t-1",
+          deliveryType: "task_result",
+          title: "CI audit",
+          draft: "Audit done.",
+          report: "full report",
+          activity: "active",
+        },
+      },
+    } as unknown as Parameters<ScheduledTaskRunner["executeScheduledTask"]>[0];
+  }
+
+  it("pins an EMPTY allowedToolsOverride on a delivery turn (claude backend)", async () => {
+    const { runner, router } = makeRunner({ db, dataDir });
+    (router.resolveBinding as ReturnType<typeof vi.fn>).mockReturnValue({
+      main: { backendId: "claude", modelId: "model", maxTurns: 1 },
+    });
+    stubExecute(router);
+    await runner.executeScheduledTask(deliveryEvent());
+    const call = (router.execute as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      allowedToolsOverride?: readonly string[];
+    };
+    expect(call.allowedToolsOverride).toEqual([...TASK_DELIVERY_TURN_ALLOWED_TOOLS]);
+    expect(call.allowedToolsOverride).toEqual([]);
+  });
+
+  it("degrades (no override, still delivers) when the backend can't enforce the clamp", async () => {
+    const { runner, router } = makeRunner({ db, dataDir });
+    (router.resolveBinding as ReturnType<typeof vi.fn>).mockReturnValue({
+      main: { backendId: "codex", modelId: "model", maxTurns: 1 },
+    });
+    stubExecute(router);
+    await runner.executeScheduledTask(deliveryEvent());
+    const call = (router.execute as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+      allowedToolsOverride?: readonly string[];
+    };
+    // not refused — execute still ran — but no clamp on an unsupporting backend
+    expect((router.execute as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect(call.allowedToolsOverride).toBeUndefined();
   });
 });
 
@@ -1826,7 +1954,7 @@ describe("ScheduledTaskRunner.executeDefault — self-performance Measure pre-st
       const block = builtTuningBlock(contextBuilder);
       expect(typeof block).toBe("string");
       expect(block).toContain("<tuning_recommendations ");
-      expect(block).toContain('key="hourlyCheckPrePassFreshnessMinutes"');
+      expect(block).toContain('key="activityScanPrePassFreshnessMinutes"');
       expect(block).toContain('proposed="360"');
       // Phase 3 — `selfTuningEnabled` defaults off → the block advertises
       // shadow mode to the weekly session.
@@ -1839,7 +1967,7 @@ describe("ScheduledTaskRunner.executeDefault — self-performance Measure pre-st
       }>(db, TUNING_PENDING_CYCLE_STATE_KEY);
       expect(cycle?.recommendations).toHaveLength(1);
       expect(cycle?.recommendations[0].key).toBe(
-        "hourlyCheckPrePassFreshnessMinutes",
+        "activityScanPrePassFreshnessMinutes",
       );
       expect(cycle?.verdicts).toEqual({});
       // Both blocks ride the same event.
@@ -1875,7 +2003,7 @@ describe("ScheduledTaskRunner.executeDefault — self-performance Measure pre-st
     it("preserves same-day verdicts across a re-run — judged ids are not reopened", async () => {
       insertEmptyFetchRuns(12); // R1 fires with a same-day-stable id
       const todayUtc = new Date().toISOString().slice(0, 10);
-      const r1Id = `${todayUtc}:R1:hourlyCheckPrePassFreshnessMinutes`;
+      const r1Id = `${todayUtc}:R1:activityScanPrePassFreshnessMinutes`;
       const verdict = {
         verdict: "reject",
         reason: "travel week — mail volume not representative",
@@ -1884,7 +2012,7 @@ describe("ScheduledTaskRunner.executeDefault — self-performance Measure pre-st
       writeRuntimeState(db, TUNING_PENDING_CYCLE_STATE_KEY, {
         cycleId: todayUtc,
         generatedAt: `${todayUtc}T05:00:00.000Z`,
-        recommendations: [{ id: r1Id, key: "hourlyCheckPrePassFreshnessMinutes" }],
+        recommendations: [{ id: r1Id, key: "activityScanPrePassFreshnessMinutes" }],
         verdicts: { [r1Id]: verdict },
       });
       const { runner, router } = makeRunner({ db, dataDir });
@@ -1954,6 +2082,9 @@ describe("appendToWeeklyInterestsJournalSection", () => {
     const out = appendToWeeklyInterestsJournalSection(
       original,
       "- 2026-05-21 09:00: refresh applied",
+      // Pin `now` so the 30-day retention prune does not evict the fixture
+      // bullets once wall-clock time drifts past them.
+      Date.UTC(2026, 4, 21, 12),
     );
     expect(out).toContain(
       "- 2026-05-14 09:00: interest reflection skipped: no_browser_history",
@@ -1990,6 +2121,8 @@ describe("appendToWeeklyInterestsJournalSection", () => {
     const second = appendToWeeklyInterestsJournalSection(
       first,
       "- 2026-05-21 10:00: second",
+      // Pin `now` so the retention prune keeps both fixture bullets.
+      Date.UTC(2026, 4, 21, 12),
     );
     expect(second.match(/## Weekly interests reflection/g)?.length).toBe(1);
     expect(second).toContain("- 2026-05-21 09:00: first");

@@ -155,8 +155,9 @@ of "report to me" events. Information about what the agent did is
 ## Recommended Starter Denylists
 
 The setup wizard pre-populates these on first delegated setup. The
-operator can keep them, edit, or explicitly opt for an empty list (a
-confirmation modal explains the trade-off).
+operator can keep them, edit, or explicitly opt for an empty list by
+saving `deniedTools: []` (the safety-floor guidance rendered above the
+deny-list editor explains the trade-off).
 
 **Gmail × Codex** (Codex's `mcp__codex_apps__gmail._*`):
 
@@ -172,10 +173,19 @@ delete / archive surface):
 
 | Tool | Why deny by default |
 |---|---|
-| `label_message` | The only mutating tool the connector exposes |
+| `label_message` | Label mutations are the connector's only state-changing surface; the starter denies 2 of the 5 `label` tools, keeping the capability satisfiable |
 | `label_thread` | Same |
 
-**Google Calendar** (Codex + Claude):
+**Gmail × Gemini** (the google-workspace connector; `sendDraft` and the
+`modify` / `modifyThread` label tools stay available):
+
+| Tool | Why deny by default |
+|---|---|
+| `send` | Compose-and-send in one call — strictly destructive |
+| `batchModify` | The mass-mutation path; same rationale as Codex's `apply_labels_to_emails` |
+
+**Google Calendar** (Codex + Claude; Gemini denies the same two
+operations under its camelCase names `deleteEvent` / `updateEvent`):
 
 | Tool | Why deny by default |
 |---|---|
@@ -214,7 +224,7 @@ against the connector's `capabilityTools` set so typos fail fast.
 The starter floor re-fires not just on first-delegated setup but also
 on `delegatedBackend` swap (e.g. claude → codex) when the previous
 deny list is namespace-stale on the new backend and the operator
-hadn't already chosen an empty list. The audit row carries
+hadn't already chosen an empty list. The daemon log entry carries
 `trigger="backend_swap_stale"` to distinguish from
 `trigger="first_delegated"`. Operators who explicitly set
 `deniedTools: []` before the swap are honored — the swap clause does
@@ -239,9 +249,10 @@ and answers in conversation. The endpoint:
 - Redacts the free-text `error` / `detail` fields via the standard
   secret-redaction utility before serializing.
 - Returns rows from `agent_actions` only. Same-backend / native MCP
-  calls surface as their own `action_type` rows (e.g. `kind=mcp`);
-  the per-call detail lives in `mcp_tool_calls`, which this endpoint
-  does not join — query it separately if you need step-level fidelity.
+  calls do not get their own rows — they roll up under the parent
+  session row, and the per-call detail lives in `mcp_tool_calls`,
+  which this endpoint does not join — query it separately if you need
+  step-level fidelity.
 
 Common `kind` values for the cross-backend proxy: `delegated_task.exec`
 (one header row per `/exec` call), `delegated_task.run` (one header row

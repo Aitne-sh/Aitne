@@ -66,24 +66,24 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   // -- Profile (/settings) --
   { kind: "setting", label: "Display Name", configKey: "agentDisplayName", page: "/settings", section: "Agent Identity", keywords: "name agent" },
   { kind: "setting", label: "Character", configKey: "character", page: "/settings", section: "Personality", keywords: "character persona tone style voice prompt" },
+  { kind: "setting", label: "Primary Vault location", configKey: "", page: "/settings", section: "Management Mode", keywords: "primary vault location move relocate migrate context directory obsidian plain mode" },
+  { kind: "setting", label: "Vault Health", configKey: "", page: "/settings", section: "Vault Health", keywords: "vault health context repair missing files frontmatter index" },
 
-  // -- Schedule (/settings/schedule) --
-  { kind: "setting", label: "Timezone", configKey: "timezone", page: "/settings/schedule", section: "Day Shape", keywords: "tz iana time zone" },
-  { kind: "setting", label: "Day Boundary Hour", configKey: "dayBoundaryHour", page: "/settings/schedule", section: "Day Shape", keywords: "day start reset boundary" },
-  { kind: "setting", label: "Hourly Check Enabled", configKey: "hourlyCheckEnabled", page: "/settings/schedule", section: "Hourly Check", keywords: "polling observation toggle" },
-  { kind: "setting", label: "Check Interval", configKey: "hourlyCheckIntervalMinutes", page: "/settings/schedule", section: "Hourly Check", keywords: "poll frequency minutes" },
-  { kind: "setting", label: "Active Start Hour", configKey: "hourlyCheckActiveStartHour", page: "/settings/schedule", section: "Hourly Check", keywords: "active window start" },
-  { kind: "setting", label: "Active End Hour", configKey: "hourlyCheckActiveEndHour", page: "/settings/schedule", section: "Hourly Check", keywords: "active window end" },
-  { kind: "setting", label: "Min Observations", configKey: "hourlyCheckMinObservations", page: "/settings/schedule", section: "Hourly Check", keywords: "threshold minimum" },
-  { kind: "setting", label: "Monthly Review Enabled", configKey: "monthlyReviewEnabled", page: "/settings/schedule", section: "Monthly Review", keywords: "monthly review retro experimental kill switch toggle disabled" },
-  { kind: "setting", label: "Background Sync Cadences", configKey: "", page: "/settings/schedule", section: "Background Sync", keywords: "delegated drift cadence calendar gmail notion poll interval" },
-  { kind: "setting", label: "Background Sync Active Hours", configKey: "", page: "/settings/schedule", section: "Background Sync", keywords: "delegated cadence active hours quiet schedule window" },
-  { kind: "setting", label: "Max Notifications Per Hour", configKey: "maxNotificationsPerHour", page: "/settings/schedule", section: "Notifications", keywords: "rate limit hourly" },
-  { kind: "setting", label: "Max Notifications Per Day", configKey: "maxNotificationsPerDay", page: "/settings/schedule", section: "Notifications", keywords: "rate limit daily" },
-  { kind: "setting", label: "Quiet Hours Start", configKey: "quietHoursStart", page: "/settings/schedule", section: "Notifications", keywords: "do not disturb dnd silent" },
-  { kind: "setting", label: "Quiet Hours End", configKey: "quietHoursEnd", page: "/settings/schedule", section: "Notifications", keywords: "do not disturb dnd silent" },
-  { kind: "setting", label: "Batch Interval", configKey: "batchIntervalMinutes", page: "/settings/schedule", section: "Notifications", keywords: "batch group delay" },
-  { kind: "setting", label: "Fallback Primary Platform", configKey: "primaryPlatform", page: "/settings/schedule", section: "Notifications", keywords: "default platform channel" },
+  // -- Hours & Notifications (/settings/hours) --
+  { kind: "setting", label: "Timezone", configKey: "timezone", page: "/settings/hours", section: "Day Shape", keywords: "tz iana time zone" },
+  { kind: "setting", label: "Day Boundary Hour", configKey: "dayBoundaryHour", page: "/settings/hours", section: "Day Shape", keywords: "day start reset boundary" },
+  // Hourly-check cadence + the monthly-review opt-in are agent-owned now
+  // (AGENTS_HUB_REDESIGN_PLAN §2) — surfaced as navigation entries below.
+  { kind: "setting", label: "Activity Scan Cadence", configKey: "", page: "/agents/activity-scan", section: "Agents", keywords: "activity scan interval active window min observations polling cadence" },
+  { kind: "setting", label: "Monthly Review Opt-in", configKey: "", page: "/agents/monthly-review", section: "Agents", keywords: "monthly review retro experimental opt-in enable" },
+  { kind: "setting", label: "Background Sync Cadences", configKey: "", page: "/settings/hours", section: "Background Sync", keywords: "delegated drift cadence calendar gmail notion poll interval" },
+  { kind: "setting", label: "Background Sync Active Hours", configKey: "", page: "/settings/hours", section: "Background Sync", keywords: "delegated cadence active hours quiet schedule window" },
+  { kind: "setting", label: "Max Notifications Per Hour", configKey: "maxNotificationsPerHour", page: "/settings/hours", section: "Notifications", keywords: "rate limit hourly" },
+  { kind: "setting", label: "Max Notifications Per Day", configKey: "maxNotificationsPerDay", page: "/settings/hours", section: "Notifications", keywords: "rate limit daily" },
+  { kind: "setting", label: "Quiet Hours Start", configKey: "quietHoursStart", page: "/settings/hours", section: "Notifications", keywords: "do not disturb dnd silent" },
+  { kind: "setting", label: "Quiet Hours End", configKey: "quietHoursEnd", page: "/settings/hours", section: "Notifications", keywords: "do not disturb dnd silent" },
+  { kind: "setting", label: "Batch Interval", configKey: "batchIntervalMinutes", page: "/settings/hours", section: "Notifications", keywords: "batch group delay" },
+  { kind: "setting", label: "Fallback Primary Platform", configKey: "primaryPlatform", page: "/settings/hours", section: "Notifications", keywords: "default platform channel" },
 
   // -- Models (/settings/models) --
   { kind: "setting", label: "Max Concurrent Sessions", configKey: "maxConcurrentSessions", page: "/settings/models", section: "Execution Limits", keywords: "parallel sessions concurrency" },
@@ -94,21 +94,30 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { kind: "setting", label: "Channel Timeout", configKey: "sessionTimeoutChannelMinutes", page: "/settings/models", section: "Session Timeouts", keywords: "channel mention timeout" },
   { kind: "setting", label: "Dashboard Timeout", configKey: "sessionTimeoutDashboardMinutes", page: "/settings/models", section: "Session Timeouts", keywords: "dashboard chat timeout" },
 
-  // -- Advanced (/settings/advanced) --
-  { kind: "setting", label: "Disallowed Tools", configKey: "disallowedTools", page: "/settings/advanced", section: "Safety — Tool Policy", keywords: "blocked forbidden tools safety" },
-  { kind: "setting", label: "Allowed Tools Override", configKey: "allowedToolsOverride", page: "/settings/advanced", section: "Safety — Tool Policy", keywords: "allowed exception permit" },
-  { kind: "setting", label: "Obsidian Debounce", configKey: "obsidianDebounceSeconds", page: "/settings/advanced", section: "Polling Intervals", keywords: "obsidian vault debounce" },
-  { kind: "setting", label: "Scheduler Poll Interval", configKey: "schedulePollIntervalSeconds", page: "/settings/advanced", section: "Polling Intervals", keywords: "scheduler recurring tasks poll" },
-  { kind: "setting", label: "Git Poll Interval", configKey: "gitPollIntervalSeconds", page: "/settings/advanced", section: "Polling Intervals", keywords: "git repo poll" },
-  { kind: "setting", label: "Notion Poll Interval", configKey: "notionPollIntervalSeconds", page: "/settings/advanced", section: "Polling Intervals", keywords: "notion database poll" },
-  { kind: "setting", label: "Calendar Poll Interval", configKey: "calendarPollIntervalSeconds", page: "/settings/advanced", section: "Polling Intervals", keywords: "google calendar poll" },
-  { kind: "setting", label: "Gmail Poll Interval", configKey: "gmailPollIntervalSeconds", page: "/settings/advanced", section: "Polling Intervals", keywords: "gmail inbox poll" },
-  { kind: "setting", label: "Max Messages", configKey: "historyInjectionMaxMessages", page: "/settings/advanced", section: "History Injection", keywords: "history context messages" },
-  { kind: "setting", label: "Max Tokens", configKey: "historyInjectionMaxTokens", page: "/settings/advanced", section: "History Injection", keywords: "history context tokens budget" },
-  { kind: "setting", label: "Strict DM Staleness", configKey: "dmStalenessStrict", page: "/settings/advanced", section: "History Injection", keywords: "dm resume context stale invalidation strict" },
-  { kind: "setting", label: "API Port", configKey: "apiPort", page: "/settings/advanced", section: "Infrastructure", keywords: "port hono daemon tcp" },
-  { kind: "setting", label: "Disable Auth Probes", configKey: "authProbeDisabled", page: "/settings/advanced", section: "Infrastructure", keywords: "auth health probe disable" },
-  { kind: "setting", label: "Auth Preflight Freshness", configKey: "authPreflightFreshnessMs", page: "/settings/advanced", section: "Infrastructure", keywords: "backend auth preflight cache freshness" },
+  // -- Safety (/settings/safety) — split from the former /settings/advanced --
+  { kind: "setting", label: "Disallowed Tools", configKey: "disallowedTools", page: "/settings/safety", section: "Safety — Tool Policy", keywords: "blocked forbidden tools safety" },
+  { kind: "setting", label: "Allowed Tools Override", configKey: "allowedToolsOverride", page: "/settings/safety", section: "Safety — Tool Policy", keywords: "allowed exception permit" },
+
+  // -- Infrastructure (/settings/infrastructure) — split from the former /settings/advanced --
+  { kind: "setting", label: "Obsidian Debounce", configKey: "obsidianDebounceSeconds", page: "/settings/infrastructure", section: "Polling Intervals", keywords: "obsidian vault debounce" },
+  { kind: "setting", label: "Scheduler Poll Interval", configKey: "schedulePollIntervalSeconds", page: "/settings/infrastructure", section: "Polling Intervals", keywords: "scheduler recurring tasks poll" },
+  { kind: "setting", label: "Git Poll Interval", configKey: "gitPollIntervalSeconds", page: "/settings/infrastructure", section: "Polling Intervals", keywords: "git repo poll" },
+  { kind: "setting", label: "Notion Poll Interval", configKey: "notionPollIntervalSeconds", page: "/settings/infrastructure", section: "Polling Intervals", keywords: "notion database poll" },
+  { kind: "setting", label: "Calendar Poll Interval", configKey: "calendarPollIntervalSeconds", page: "/settings/infrastructure", section: "Polling Intervals", keywords: "google calendar poll" },
+  { kind: "setting", label: "Gmail Poll Interval", configKey: "gmailPollIntervalSeconds", page: "/settings/infrastructure", section: "Polling Intervals", keywords: "gmail inbox poll" },
+  { kind: "setting", label: "Max Messages", configKey: "historyInjectionMaxMessages", page: "/settings/infrastructure", section: "History Injection", keywords: "history context messages" },
+  { kind: "setting", label: "Max Tokens", configKey: "historyInjectionMaxTokens", page: "/settings/infrastructure", section: "History Injection", keywords: "history context tokens budget" },
+  { kind: "setting", label: "Strict DM Staleness", configKey: "dmStalenessStrict", page: "/settings/infrastructure", section: "History Injection", keywords: "dm resume context stale invalidation strict" },
+  { kind: "setting", label: "API Port", configKey: "apiPort", page: "/settings/infrastructure", section: "Infrastructure", keywords: "port hono daemon tcp" },
+  { kind: "setting", label: "Disable Auth Probes", configKey: "authProbeDisabled", page: "/settings/infrastructure", section: "Infrastructure", keywords: "auth health probe disable" },
+  { kind: "setting", label: "Auth Preflight Freshness", configKey: "authPreflightFreshnessMs", page: "/settings/infrastructure", section: "Infrastructure", keywords: "backend auth preflight cache freshness" },
+  { kind: "setting", label: "Voice Mode", configKey: "", page: "/settings/infrastructure", section: "Voice Mode", keywords: "voice whisper transcription audio telegram whatsapp ptt model install" },
+
+  // -- Journal rules (morning-routine agent Rulebook tab) --
+  { kind: "setting", label: "Journal Rules", configKey: "", page: "/agents/morning-routine?tab=rulebook", section: "Rulebook", keywords: "journal format export redaction daily synthesis morning routine" },
+
+  // -- Danger Zone (/settings/danger-zone) — page-level navigation only --
+  { kind: "setting", label: "Danger Zone", configKey: "", page: "/settings/danger-zone", section: "Danger Zone", keywords: "factory reset purge history reinstall context destructive wipe danger" },
   { kind: "setting", label: "Autonomous Daily Cost Cap", configKey: "autonomousDailyCostCapUsd", page: "/settings/models", section: "Cost Guardrails", keywords: "daily cost cap autonomous routines budget" },
   { kind: "setting", label: "Autonomous Monthly Cost Cap", configKey: "autonomousMonthlyCostCapUsd", page: "/settings/models", section: "Cost Guardrails", keywords: "monthly cost cap autonomous notification alert budget" },
 
@@ -118,6 +127,9 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { kind: "setting", label: "Purchase confirmations (experimental)", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Browser Automation", keywords: "purchase b4 buy checkout cart token caps daily spend experimental danger workflows chromium" },
   { kind: "setting", label: "Purchase per-site caps", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Browser Automation", keywords: "currency daily token cap spend cap per transaction limit site b4" },
   { kind: "setting", label: "Purchase primary DM channels", configKey: "", page: "/settings/integrations/browser-history-managed/b4", section: "Browser Automation", keywords: "primary dm channel token delivery slack telegram discord whatsapp b4" },
+  // BROWSER_HUB_CONSOLIDATION_DESIGN.md — the /browser hub fronting every
+  // browser surface (history, automation, B-4, tasks).
+  { kind: "setting", label: "Browser (hub)", configKey: "", page: "/browser", section: "Browser", keywords: "browser hub overview history automation chromium tasks purchases" },
   // BROWSER_TASK_REDESIGN_PLAN.md §9a.1 — top-level browser-task surface.
   { kind: "setting", label: "Browser Tasks (list)", configKey: "", page: "/browser-tasks", section: "Browser Tasks", keywords: "browser task list runs in-flight completed natural language" },
   { kind: "setting", label: "Browser Task — needs your attention", configKey: "", page: "/browser-tasks", section: "Browser Tasks", keywords: "awaiting clarification final confirm pending parked needs attention" },
@@ -130,8 +142,8 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { kind: "setting", label: "WhatsApp", configKey: "", page: "/connections/messaging", section: "Messaging", keywords: "whatsapp messaging phone" },
   { kind: "setting", label: "Notification Destinations", configKey: "", page: "/connections/messaging", section: "Messaging", keywords: "default notification platform destination" },
   { kind: "setting", label: "Repositories", configKey: "", page: "/connections/repositories", section: "Repositories", keywords: "git github repository watch clone webhook" },
-  { kind: "setting", label: "Notion", configKey: "", page: "/connections/knowledge", section: "Knowledge", keywords: "notion database api" },
-  { kind: "setting", label: "Obsidian", configKey: "", page: "/connections/knowledge", section: "Knowledge", keywords: "obsidian vault markdown" },
+  { kind: "setting", label: "Notion", configKey: "", page: "/connections/notes", section: "Notes", keywords: "notion database api note" },
+  { kind: "setting", label: "Obsidian", configKey: "", page: "/connections/notes", section: "Notes", keywords: "obsidian vault markdown note" },
   { kind: "setting", label: "Google Calendar", configKey: "", page: "/connections/calendar", section: "Calendar", keywords: "google oauth calendar" },
   { kind: "setting", label: "Mail accounts", configKey: "", page: "/connections/mail", section: "Mail", keywords: "gmail outlook imap yahoo icloud mailbox" },
   { kind: "setting", label: "MCP Servers", configKey: "", page: "/connections/mcp", section: "MCP", keywords: "mcp model context protocol" },
@@ -162,15 +174,21 @@ export const ACTION_ENTRIES: ActionEntry[] = [
 // Page labels for the group headings
 const PAGE_LABELS: Record<string, string> = {
   "/settings": "Profile",
-  "/settings/schedule": "Schedule",
+  "/settings/hours": "Hours & Notifications",
+  "/agents/activity-scan": "Agents — Activity Scan",
+  "/agents/monthly-review": "Agents — Monthly Review",
+  "/agents/morning-routine?tab=rulebook": "Agents — Morning Routine Rulebook",
   "/settings/models": "Models",
-  "/settings/advanced": "Advanced",
+  "/settings/safety": "Safety",
+  "/settings/infrastructure": "Infrastructure",
+  "/settings/danger-zone": "Danger Zone",
   "/settings/integrations/browser-history-managed": "Browser Automation",
   "/settings/integrations/browser-history-managed/b4": "Browser Automation — B-4",
+  "/browser": "Browser",
   "/browser-tasks": "Browser Tasks",
   "/connections/messaging": "Connections — Messaging",
   "/connections/repositories": "Connections — Repositories",
-  "/connections/knowledge": "Connections — Knowledge",
+  "/connections/notes": "Connections — Notes",
   "/connections/calendar": "Connections — Calendar",
   "/connections/mail": "Connections — Mail",
   "/connections/mcp": "Connections — MCP",

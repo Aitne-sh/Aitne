@@ -33,6 +33,7 @@ describe("MERGEABLE_OVERRIDE_PATHS / isMergeableOverridePath", () => {
       "enabled_overridden_at",
       "backend.tier",
       "backend.model",
+      "backend.backend_id",
       "limits.max_turns",
       "limits.max_budget_usd",
       "limits.timeout_minutes",
@@ -125,6 +126,7 @@ describe("mergeAgentDefinition — override application", () => {
       enabled: false,
       "backend.tier": "high",
       "backend.model": "claude-opus-4-8",
+      "backend.backend_id": "claude",
       "limits.max_turns": 50,
       "limits.max_budget_usd": 2.5,
       "limits.timeout_minutes": 25,
@@ -133,6 +135,7 @@ describe("mergeAgentDefinition — override application", () => {
     expect(merged.enabled).toBe(false);
     expect(merged.backend.tier).toBe("high");
     expect(merged.backend.model).toBe("claude-opus-4-8");
+    expect(merged.backend.backend_id).toBe("claude");
     expect(merged.limits.max_turns).toBe(50);
     expect(merged.limits.max_budget_usd).toBe(2.5);
     expect(merged.limits.timeout_minutes).toBe(25);
@@ -183,6 +186,22 @@ describe("mergeAgentDefinition — out-of-contract values are dropped (base surv
     expect(
       mergeAgentDefinition(shipped, shipped, { "backend.model": 42 }).backend.model,
     ).toBe("claude-sonnet-4-6");
+  });
+
+  it("accepts null and drops an unknown backend.backend_id", () => {
+    const shipped = makeDefinition();
+    expect(
+      mergeAgentDefinition(shipped, shipped, { "backend.backend_id": "codex" }).backend.backend_id,
+    ).toBe("codex");
+    expect(
+      mergeAgentDefinition(shipped, shipped, { "backend.backend_id": null }).backend.backend_id,
+    ).toBeNull();
+    expect(
+      mergeAgentDefinition(shipped, shipped, { "backend.backend_id": "not-a-backend" }).backend.backend_id,
+    ).toBe(shipped.backend.backend_id);
+    expect(
+      mergeAgentDefinition(shipped, shipped, { "backend.backend_id": 7 }).backend.backend_id,
+    ).toBe(shipped.backend.backend_id);
   });
 
   it("drops a non-positive / non-integer / non-number max_turns", () => {

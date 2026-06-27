@@ -92,7 +92,7 @@ export function formatActiveHours(cadence: AgentIntervalCadence): string | null 
 }
 
 /**
- * Friendly description of a runtime-window interval cadence (hourly-check):
+ * Friendly description of a runtime-window interval cadence (activity-scan):
  * "Every 1h" or "Every 30m, 04:00–24:00". A full-day active window (00:00–24:00)
  * is the implicit default, so it is omitted. (For a split display of the two
  * parts, use {@link formatIntervalEvery} + {@link formatActiveHours}.)
@@ -221,7 +221,7 @@ export function describeCron(expression: string): string {
 export function describeSchedule(schedule: AgentScheduleSummary): string {
   switch (schedule.kind) {
     case "cron":
-      // A resolved runtime-window cadence (hourly-check) wins over the stored
+      // A resolved runtime-window cadence (activity-scan) wins over the stored
       // placeholder cron — it carries the real, config-driven interval.
       if (schedule.interval) return describeInterval(schedule.interval);
       return schedule.expression ? describeCron(schedule.expression) : "Recurring";

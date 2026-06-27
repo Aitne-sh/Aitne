@@ -486,7 +486,7 @@ describe("Obsidian API routes", () => {
     // These tests guarantee that every write endpoint pre-marks the
     // resolved absolute path on the shared tracker — the attribution
     // invariant that keeps the obsidian-watcher from looping the agent's
-    // own writes back into the hourly_check queue.
+    // own writes back into the activity_scan queue.
 
     it("PUT marks the resolved absolute path on the write tracker", async () => {
       const vault = makeTempVault();

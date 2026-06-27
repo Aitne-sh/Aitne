@@ -35,7 +35,7 @@ function blob(over: Partial<TuningLedgerBlob> = {}): TuningLedgerBlob {
     rule: "R1",
     actuator: "config",
     proposed: 360,
-    recommendation_id: "2026-06-01:R1:hourlyCheckPrePassFreshnessMinutes",
+    recommendation_id: "2026-06-01:R1:activityScanPrePassFreshnessMinutes",
     evidence: "fetch_window 80% empty",
     baselineMetric: { noveltyGe2PerDay: 1, cautiousEscalateShare: 0.1 },
     ...over,
@@ -43,7 +43,7 @@ function blob(over: Partial<TuningLedgerBlob> = {}): TuningLedgerBlob {
 }
 
 function entry(
-  key = "hourlyCheckPrePassFreshnessMinutes",
+  key = "activityScanPrePassFreshnessMinutes",
   over: Partial<TuningLedgerBlob> = {},
 ): LedgerScanEntry {
   return { key, blob: blob(over) };
@@ -60,7 +60,7 @@ function seed(
 function insertGateRow(db: Database.Database, at: Date, detail: unknown): void {
   db.prepare(
     `INSERT INTO agent_actions (action_type, result, detail, started_at)
-     VALUES ('hourly_check.gate', 'success', ?, ?)`,
+     VALUES ('activity_scan.gate', 'success', ?, ?)`,
   ).run(JSON.stringify(detail), formatSqliteDatetime(at));
 }
 
@@ -167,7 +167,7 @@ describe("evaluateAppliedEntry", () => {
     });
     const decision = evaluateAppliedEntry(
       db,
-      entry("hourlyCheckLowSignalPendingCeiling", { rule: "R3" }),
+      entry("activityScanLowSignalPendingCeiling", { rule: "R3" }),
       NOW,
     );
     expect(decision.action).toBe("revert");
@@ -225,7 +225,7 @@ describe("evaluateAppliedEntry", () => {
 describe("buildAutoRevertDmMessage", () => {
   it("names the key, restored value, reason, and cool-down", () => {
     const message = buildAutoRevertDmMessage(entry(), "novelty dropped");
-    expect(message).toContain("hourlyCheckPrePassFreshnessMinutes");
+    expect(message).toContain("activityScanPrePassFreshnessMinutes");
     expect(message).toContain("240");
     expect(message).toContain("novelty dropped");
     expect(message).toContain("28-day");
@@ -269,14 +269,14 @@ describe("runSelfTuningRevertMonitor", () => {
 
   it("verifies a clean entry: stamps the ledger and audits", async () => {
     const db = makeDb();
-    seed(db, "hourlyCheckPrePassFreshnessMinutes", {
+    seed(db, "activityScanPrePassFreshnessMinutes", {
       baselineMetric: { noveltyGe2PerDay: 0, cautiousEscalateShare: 0 },
     });
     const run = await runSelfTuningRevertMonitor(makeDeps(db), NOW);
-    expect(run.verified).toEqual(["hourlyCheckPrePassFreshnessMinutes"]);
+    expect(run.verified).toEqual(["activityScanPrePassFreshnessMinutes"]);
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored?.verified_at).toBe(NOW.toISOString());
     expect(stored?.verify_result).toBe("pass");
@@ -292,7 +292,7 @@ describe("runSelfTuningRevertMonitor", () => {
   it("reverts a regressed entry and DMs the owner", async () => {
     const db = makeDb();
     // Baseline 1/day, empty verify window → >30% drop.
-    seed(db, "hourlyCheckPrePassFreshnessMinutes", {});
+    seed(db, "activityScanPrePassFreshnessMinutes", {});
     const calls: Array<Record<string, unknown>> = [];
     const dms: string[] = [];
     const run = await runSelfTuningRevertMonitor(
@@ -307,13 +307,13 @@ describe("runSelfTuningRevertMonitor", () => {
       }),
       NOW,
     );
-    expect(run.reverted).toEqual(["hourlyCheckPrePassFreshnessMinutes"]);
-    expect(calls).toEqual([{ hourlyCheckPrePassFreshnessMinutes: 240 }]);
+    expect(run.reverted).toEqual(["activityScanPrePassFreshnessMinutes"]);
+    expect(calls).toEqual([{ activityScanPrePassFreshnessMinutes: 240 }]);
     expect(dms).toHaveLength(1);
     expect(dms[0]).toContain("auto-revert");
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored?.reverted_at).toBe(NOW.toISOString());
     expect(stored?.revert_trigger).toBe("auto");
@@ -321,7 +321,7 @@ describe("runSelfTuningRevertMonitor", () => {
 
   it("keeps the revert when the DM throws, and warns when no DM path exists", async () => {
     const db = makeDb();
-    seed(db, "hourlyCheckPrePassFreshnessMinutes", {});
+    seed(db, "activityScanPrePassFreshnessMinutes", {});
     const run = await runSelfTuningRevertMonitor(
       makeDeps(db, { sendDm: vi.fn().mockRejectedValue(new Error("offline")) }),
       NOW,
@@ -329,19 +329,19 @@ describe("runSelfTuningRevertMonitor", () => {
     expect(run.reverted).toHaveLength(1);
 
     const db2 = makeDb();
-    seed(db2, "hourlyCheckPrePassFreshnessMinutes", {});
+    seed(db2, "activityScanPrePassFreshnessMinutes", {});
     const silent = await runSelfTuningRevertMonitor(makeDeps(db2), NOW);
     expect(silent.reverted).toHaveLength(1);
   });
 
   it("leaves the entry unstamped when the chokepoint rejects the revert", async () => {
     const db = makeDb();
-    seed(db, "hourlyCheckPrePassFreshnessMinutes", {});
+    seed(db, "activityScanPrePassFreshnessMinutes", {});
     const run = await runSelfTuningRevertMonitor(
       makeDeps(db, {
         applyUpdates: async () => ({
           updated: [],
-          errors: { hourlyCheckPrePassFreshnessMinutes: "rejected" },
+          errors: { activityScanPrePassFreshnessMinutes: "rejected" },
         }),
       }),
       NOW,
@@ -349,7 +349,7 @@ describe("runSelfTuningRevertMonitor", () => {
     expect(run.reverted).toEqual([]);
     const stored = readRuntimeState<TuningLedgerBlob>(
       db,
-      ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+      ledgerStateKey("activityScanPrePassFreshnessMinutes"),
     );
     expect(stored?.reverted_at).toBeUndefined();
   });
@@ -398,11 +398,11 @@ describe("runSelfTuningRevertMonitor", () => {
     const db = makeDb();
     // R1 with a baseline forces computeR1Metric → throws once the
     // observations table is gone; the R3 entry below never touches it.
-    seed(db, "hourlyCheckPrePassFreshnessMinutes", {});
-    seed(db, "hourlyCheckLowSignalPendingCeiling", { rule: "R3" });
+    seed(db, "activityScanPrePassFreshnessMinutes", {});
+    seed(db, "activityScanLowSignalPendingCeiling", { rule: "R3" });
     db.prepare("DROP TABLE observations").run();
     const run = await runSelfTuningRevertMonitor(makeDeps(db), NOW);
     expect(run.reverted).toEqual([]);
-    expect(run.verified).toEqual(["hourlyCheckLowSignalPendingCeiling"]);
+    expect(run.verified).toEqual(["activityScanLowSignalPendingCeiling"]);
   });
 });

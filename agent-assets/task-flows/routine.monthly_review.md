@@ -3,10 +3,11 @@
 
   The scheduler cron and boot-time catchup in
   `packages/daemon/src/{core/scheduler.ts,bootstrap/schedule-helpers.ts}`
-  consult `config.monthlyReviewEnabled` (default `false`) before
-  firing this routine. The task flow below is preserved verbatim as
-  the design-of-record but is not exercised at runtime until the kill
-  switch flips on.
+  consult the monthly-review AGENT row's `enabled` (ships `false`;
+  enable from /agents/monthly-review — AGENTS_HUB_REDESIGN_PLAN.md §2)
+  before firing this routine. The task flow below is preserved verbatim
+  as the design-of-record but is not exercised at runtime until the
+  agent is enabled.
 
   Why disabled: the current routine reads ~30 daily files + 4-5 weekly
   files + the agent journal to synthesise a user-facing snapshot whose
@@ -35,8 +36,8 @@
     5. Drop the agent-internal `## Monthly YYYY-MM` block — weekly's
        12-week journal already covers self-critique signal.
 
-  When the redesign ships, flip the default to `true` in
-  `packages/daemon/src/settings/runtime-settings.ts:monthlyReviewEnabled`
+  When the redesign ships, flip `defaultEnabled`/`enabled` to `true` in
+  `builtin-registry.ts` + `agent-assets/agents/monthly-review/agent.md`
   and re-introduce the docs under `agent-assets/docs/features/routines/`.
 -->
 
@@ -73,7 +74,7 @@ workflow; the skill owns the file contract.
 1. Determine the target file name from <current_time>:
    `journal/monthly/YYYY-MM.md`.
 
-**Pre-pass acquisition (none).** Unlike morning / hourly / today_refresh /
+**Pre-pass acquisition (none).** Unlike morning / activity-scan / today_refresh /
 evening / weekly, monthly_review does NOT trigger an `<acquisition-plan>`
 block — the 30-day calendar window already arrives via the
 `<calendar_events_30d>` ContextBuilder block (multi-provider after the
@@ -219,7 +220,7 @@ continue.
    ### Proposed adjustments
    - (max 3 bullets; concrete and testable — prompt tweak, schedule
      adjustment, filter rule, silence gate tuning. "Improve filter quality"
-     is not testable; "Lower hourly_check observation threshold from 2 to 1
+     is not testable; "Lower activity_scan observation threshold from 2 to 1
      on weekends" is)
    ### Metrics (agent side, monthly roll-up)
    - Agent plan rows completed: N

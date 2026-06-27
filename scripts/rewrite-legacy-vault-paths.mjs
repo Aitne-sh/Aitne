@@ -110,7 +110,7 @@ const RULES = [
     note: "rules/{known} → policies/{known}",
   },
   {
-    re: /(?<![A-Za-z0-9_-])(["'`/])routines\/(?=morning|evening|hourly|weekly|monthly|custom|_index)/g,
+    re: /(?<![A-Za-z0-9_-])(["'`/])routines\/(?=morning|evening|hourly|activity-scan|weekly|monthly|custom|_index)/g,
     sub: "$1policies/routines/",
     note: "routines/{known} → policies/routines/{known}",
   },
@@ -181,7 +181,7 @@ const RULES = [
     note: "/api/context/rules/{known} → /api/context/policies/{known}",
   },
   {
-    re: /\/api\/context\/routines\/(?=morning|evening|hourly|weekly|monthly|custom|_index)/g,
+    re: /\/api\/context\/routines\/(?=morning|evening|hourly|activity-scan|weekly|monthly|custom|_index)/g,
     sub: "/api/context/policies/routines/",
     note: "/api/context/routines/{known} → /api/context/policies/routines/{known}",
   },

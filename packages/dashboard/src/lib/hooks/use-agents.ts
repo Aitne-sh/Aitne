@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -61,6 +62,10 @@ export function useAgents(filters?: AgentListFilters) {
               : String(filters.include_invalid),
         },
       }),
+    // Keep the current list on screen while a new filter loads — otherwise
+    // the key change clears data, QueryResult collapses to a skeleton, and
+    // the page scrolls to the top on every kind/status/cadence/search change.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -118,6 +123,10 @@ export function useAgentExecutionsInfinite(
       return last?.id;
     },
     enabled: !!slug,
+    // Keep the current rows on screen while a new result filter loads —
+    // otherwise the key change clears data, QueryResult collapses to a
+    // skeleton, and the page scrolls to the top on every filter change.
+    placeholderData: keepPreviousData,
   });
 }
 

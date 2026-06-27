@@ -13,7 +13,7 @@
  * Daemon-direct writers (which fire from cron ticks and scheduled-task
  * pre-hooks) ran their own `readFileSync` → mutate → `writeFileAtomically`
  * sequence with no shared coordination, so a concurrent HTTP `PATCH` and
- * a hourly_check `appendAgentLogLine` could both read the same pre-state,
+ * a activity_scan `appendAgentLogLine` could both read the same pre-state,
  * each compute their own "next", and the second `rename` would silently
  * drop the first writer's bullet.
  *

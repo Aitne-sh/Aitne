@@ -10,6 +10,7 @@ import type { ApiDependencies } from "../../server.js";
 import {
   upsertAgent,
   getAgent,
+  getRuntimeWindow,
   setLastExecutionId,
 } from "../../../db/agents-store.js";
 import {
@@ -43,6 +44,7 @@ interface Harness {
   notifications: Array<{ message: string; notificationType?: string }>;
   broadcasts: Array<Record<string, unknown>>;
   invalidations: number;
+  scheduleReloads: number;
   recurringId: number;
 }
 
@@ -140,10 +142,14 @@ function setup(): Harness {
   const notifications: Harness["notifications"] = [];
   const broadcasts: Harness["broadcasts"] = [];
   let invalidations = 0;
+  let scheduleReloads = 0;
 
   const deps = {
     db,
     config: { dayBoundaryHour: 4, timezone: "UTC" } as unknown as AgentConfig,
+    onScheduleConfigChanged: () => {
+      scheduleReloads += 1;
+    },
     eventBroadcaster: {
       broadcastEvent: (d: unknown) => broadcasts.push(d as Record<string, unknown>),
     },
@@ -168,6 +174,9 @@ function setup(): Harness {
     broadcasts,
     get invalidations() {
       return invalidations;
+    },
+    get scheduleReloads() {
+      return scheduleReloads;
     },
     recurringId: recurring.id,
   } as Harness;
@@ -246,6 +255,29 @@ describe("/api/agents routes", () => {
     it("404s an unknown slug", async () => {
       const res = await h.app.request("/agents/nope");
       expect(res.status).toBe(404);
+    });
+
+    // v0.1.10 → v0.1.11 rename: the legacy slug is normalized in-process
+    // (LEGACY_AGENT_SLUG_ALIASES) so old bookmarks / in-flight skill calls
+    // keep resolving for one deprecation window.
+    it("resolves the legacy hourly-check slug to the renamed built-in", async () => {
+      upsertAgent(h.db, {
+        slug: "activity-scan",
+        name: "Activity Scan",
+        description: "Triages pending observations each interval.",
+        source: "builtin",
+        definitionPath: join(h.tmp, "agents", "activity-scan", "agent.md"),
+        definitionHash: "h-scan",
+        enabled: true,
+        processKey: "routine.activity_scan",
+        scheduleKind: "cron",
+        scheduleExpression: "0 * * * *",
+        scheduleTimezone: "UTC",
+      });
+      const res = await h.app.request("/agents/hourly-check");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, any>;
+      expect(body.agent.slug).toBe("activity-scan");
     });
   });
 
@@ -437,6 +469,97 @@ describe("/api/agents routes", () => {
     it("404s an unknown slug", async () => {
       const res = await patch("nope", { enabled: true });
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ── PATCH /agents/:slug schedule_window (AGENTS_HUB_REDESIGN_PLAN §2) ──
+  describe("PATCH /agents/activity-scan schedule_window", () => {
+    const patch = (slug: string, body: unknown) =>
+      h.app.request(`/agents/${slug}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    const seedActivityScan = () =>
+      upsertAgent(h.db, {
+        slug: "activity-scan",
+        name: "Activity Scan",
+        description: "Triages pending observations each interval.",
+        source: "builtin",
+        definitionPath: join(h.tmp, "agents", "activity-scan", "agent.md"),
+        definitionHash: "h-hourly",
+        enabled: true,
+        processKey: "routine.activity_scan",
+        scheduleKind: "cron",
+        scheduleExpression: "0 * * * *",
+        scheduleTimezone: "UTC",
+      });
+
+    it("persists the window, rebuilds crons, audits, and reflects in the detail block", async () => {
+      seedActivityScan();
+      const res = await patch("activity-scan", {
+        schedule_window: { interval_minutes: 30, active_start_hour: 8 },
+      });
+      expect(res.status).toBe(200);
+      expect(getRuntimeWindow(h.db, "activity-scan")).toEqual({
+        interval_minutes: 30,
+        active_start_hour: 8,
+      });
+      // Interval/active-hours changes require a live cron rebuild.
+      expect(h.scheduleReloads).toBe(1);
+      const audit = h.db
+        .prepare(
+          "SELECT detail FROM agent_actions WHERE action_type = 'agent.schedule_window_changed' AND agent_id = 'activity-scan'",
+        )
+        .all() as Array<{ detail: string }>;
+      expect(audit.length).toBe(1);
+      const detail = (await (await h.app.request("/agents/activity-scan")).json()) as Record<
+        string,
+        any
+      >;
+      expect(detail.schedule_window.overrides).toEqual({
+        interval_minutes: 30,
+        active_start_hour: 8,
+      });
+      expect(detail.schedule_window.resolved).toMatchObject({
+        interval_minutes: 30,
+        active_start_hour: 8,
+      });
+    });
+
+    it("min_observations alone does not rebuild crons; null resets a field", async () => {
+      seedActivityScan();
+      expect((await patch("activity-scan", { schedule_window: { min_observations: 3 } })).status).toBe(200);
+      expect(h.scheduleReloads).toBe(0);
+      expect((await patch("activity-scan", { schedule_window: { min_observations: null } })).status).toBe(200);
+      expect(getRuntimeWindow(h.db, "activity-scan")).toEqual({});
+    });
+
+    it("rejects an invalid window without applying ANY part of the patch", async () => {
+      seedActivityScan();
+      // end ≤ resolved start → invalid_window; the combined enabled toggle
+      // must not be half-applied (validate-before-apply).
+      const res = await patch("activity-scan", {
+        enabled: false,
+        ack_warning: true,
+        schedule_window: { active_end_hour: 2 },
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe("invalid_window");
+      expect(getAgent(h.db, "activity-scan")!.enabled).toBe(true);
+      expect(getRuntimeWindow(h.db, "activity-scan")).toEqual({});
+      expect(h.scheduleReloads).toBe(0);
+    });
+
+    it("rejects schedule_window on a fixed-cron builtin", async () => {
+      const res = await patch("morning-routine", {
+        schedule_window: { interval_minutes: 30 },
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        "schedule_window_not_supported",
+      );
     });
   });
 

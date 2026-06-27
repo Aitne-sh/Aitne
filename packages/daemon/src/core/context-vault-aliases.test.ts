@@ -74,14 +74,42 @@ describe("aliasVaultPath", () => {
   });
 
   describe("legacy routines/", () => {
-    it("routines/hourly.md → policies/routines/hourly.md", () => {
-      expect(aliasVaultPath("routines/hourly.md").canonicalPath).toBe(
-        "policies/routines/hourly.md",
+    it("routines/morning.md → policies/routines/morning.md", () => {
+      expect(aliasVaultPath("routines/morning.md").canonicalPath).toBe(
+        "policies/routines/morning.md",
       );
     });
     it("routines/custom/foo.md → policies/routines/custom/foo.md", () => {
       expect(aliasVaultPath("routines/custom/foo.md").canonicalPath).toBe(
         "policies/routines/custom/foo.md",
+      );
+    });
+  });
+
+  describe("activity-scan rename (v0.1.11)", () => {
+    it("policies/routines/hourly.md → policies/routines/activity-scan.md", () => {
+      expect(aliasVaultPath("policies/routines/hourly.md").canonicalPath).toBe(
+        "policies/routines/activity-scan.md",
+      );
+    });
+    it("routines/hourly.md → policies/routines/activity-scan.md", () => {
+      expect(aliasVaultPath("routines/hourly.md").canonicalPath).toBe(
+        "policies/routines/activity-scan.md",
+      );
+    });
+    it("knowledge/dossiers/hourly.md → knowledge/dossiers/activity-scan.md", () => {
+      expect(aliasVaultPath("knowledge/dossiers/hourly.md").canonicalPath).toBe(
+        "knowledge/dossiers/activity-scan.md",
+      );
+    });
+    it("dossiers/hourly.md → knowledge/dossiers/activity-scan.md", () => {
+      expect(aliasVaultPath("dossiers/hourly.md").canonicalPath).toBe(
+        "knowledge/dossiers/activity-scan.md",
+      );
+    });
+    it("does not alias hourly-prefixed siblings", () => {
+      expect(aliasVaultPath("policies/routines/hourly-notes.md").canonicalPath).toBe(
+        "policies/routines/hourly-notes.md",
       );
     });
   });

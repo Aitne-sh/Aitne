@@ -29,7 +29,7 @@ ask_examples:
   - How does the daemon prevent the agent from writing to disk directly?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-11
 keywords:
   - context
   - markdown
@@ -53,7 +53,7 @@ related:
   - features/memory-files/projects
 ui_anchors:
   - /knowledge
-  - /connections/knowledge
+  - /settings
 context_files:
   - state/today.md
   - identity/profile.md
@@ -129,7 +129,8 @@ curl -X PATCH http://localhost:8321/api/context/state/today.md \
 
 - `PUT /api/context/*` replaces a whole file; `PATCH` does a section op
   (`append`, `replace`, `clear`, `clear_before`, `append_to_file`);
-  `DELETE` removes a file (permitted only for custom routines).
+  `DELETE` removes a file (permitted only on a few paths — user Agent
+  definitions, inbox/scratch notes, and legacy custom-routine files).
 - Legacy bare paths (`/api/context/today.md`) still resolve — the daemon
   rewrites them to the canonical class-prefixed form in process, so a
   plain `curl -X PATCH` without `-L` keeps working — but new writes
@@ -155,8 +156,8 @@ curl -X PATCH http://localhost:8321/api/context/state/today.md \
 - `policies/management.md` — the umbrella registry: Source-of-Truth
   bindings, Managed Tasks, an Active Policies summary. Injected as
   `<management_rules>` on the wide-path flows (DMs, mentions, the
-  morning routine); a few narrow routines (the journal stage, hourly
-  check, today refresh, observer events, scheduled tasks) opt out to
+  morning routine); a few narrow routines (the journal stage, activity
+  scan, today refresh, observer events, scheduled tasks) opt out to
   save budget.
 - `policies/management-captures/<slug>.md` — one file per durable management rule
   ("from now on, do X"). The daemon auto-maintains a slug index at
@@ -164,10 +165,13 @@ curl -X PATCH http://localhost:8321/api/context/state/today.md \
 
 ## Where You See It in the Dashboard
 
-- **Knowledge → Context Files** lists every file with its size, last
-  modified time, and a preview.
-- **Connections → Knowledge** is where vault integrations (Obsidian,
-  Notion) attach.
+- **Knowledge → Context Files** lists every file with its last
+  modified time and a preview.
+- **Settings → Management Mode** shows where the vault lives (this app
+  or an Obsidian-style directory), relocates it, and surfaces vault
+  health.
+- **Connections → Notes** is where personal note sources (your external
+  Obsidian vault, Notion) attach.
 
 ## Related
 

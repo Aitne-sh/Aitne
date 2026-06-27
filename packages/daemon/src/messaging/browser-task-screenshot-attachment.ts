@@ -149,3 +149,77 @@ export async function resolveScreenshotAttachment(params: {
       )
     : buildTraceAttachment(params.paDataDir, params.key);
 }
+
+/** MIME by extension for generic worker-produced deliverables (PDF / slides
+ *  / docs / images). Superset of the screenshot image map. Unknown
+ *  extensions fall back to `application/octet-stream` so the adapter still
+ *  uploads the bytes. */
+const DELIVERABLE_MIME_BY_EXT: Record<string, string> = {
+  ...IMAGE_MIME_BY_EXT,
+  gif: "image/gif",
+  pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ppt: "application/vnd.ms-powerpoint",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  doc: "application/msword",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv",
+  txt: "text/plain",
+  md: "text/markdown",
+};
+
+function mimeForFilename(filename: string): string {
+  const ext = filename.slice(filename.lastIndexOf(".") + 1).toLowerCase();
+  return DELIVERABLE_MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+/**
+ * Resolve a worker-produced output FILE (absolute path) to a
+ * platform-appropriate outbound attachment — the generic-asset sibling of
+ * `resolveScreenshotAttachment` (BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 —
+ * delivery assets). Messaging adapters take the file path directly; the
+ * dashboard ingests it into the `AttachmentStore` so it renders inline.
+ * Returns null when the file is missing on disk or the dashboard ingest
+ * hook is unavailable — the caller omits it rather than sending a dead link.
+ */
+export async function buildPathAttachment(params: {
+  platform: string;
+  absPath: string;
+  filename: string;
+  ingestOutboundImage?: IngestOutboundImage;
+}): Promise<OutboundAttachmentRef | null> {
+  const mimeType = mimeForFilename(params.filename);
+  if (params.platform === "dashboard") {
+    if (!params.ingestOutboundImage) return null;
+    try {
+      return await params.ingestOutboundImage({
+        absPath: params.absPath,
+        mimeType,
+        originalFilename: params.filename,
+      });
+    } catch (err) {
+      logger.warn(
+        { absPath: params.absPath, err: toErrMsg(err) },
+        "deliverable asset: dashboard ingest failed",
+      );
+      return null;
+    }
+  }
+  let sizeBytes: number;
+  try {
+    sizeBytes = (await stat(params.absPath)).size;
+  } catch (err) {
+    logger.warn(
+      { absPath: params.absPath, err: toErrMsg(err) },
+      "deliverable asset: file missing — omitted",
+    );
+    return null;
+  }
+  return {
+    id: params.absPath,
+    path: params.absPath,
+    originalFilename: params.filename,
+    mimeType,
+    sizeBytes,
+  };
+}

@@ -42,6 +42,7 @@ related:
   - features/operations/activity-and-conversations
   - concepts/memory-model
 process_keys:
+  - routine.morning_routine_today
   - routine.morning_routine_journal
   - routine.evening_review
   - routine.weekly_review
@@ -49,8 +50,7 @@ context_files:
   - journal/agent.md
 ui_anchors:
   - /knowledge?tab=context-files
-  - /connections/journal
-  - /settings/journal
+  - /agents/morning-routine?tab=rulebook
 ---
 
 # journal/agent.md
@@ -86,15 +86,18 @@ pruning older ones. Later routines read it back to look for patterns.
 
 Three routines append to the journal — none ever rewrites it:
 
-- **Morning routine** (Stage B, `routine.morning_routine_journal`) is
-  the recurring daily writer. After the day's stages settle, the
-  daemon appends a one-paragraph audit-trail entry assembled from the
-  prior day's `agent_actions` — stage results, retry stats, anomalies.
-  This is the entry you'll see most often.
+- **Morning routine** is the recurring daily writer — and here the
+  daemon itself does the writing, not an LLM stage. After the day's
+  stages (Stage A `routine.morning_routine_today`, Stage B
+  `routine.morning_routine_journal`) settle, the daemon appends a
+  one-paragraph audit-trail entry assembled from the run's
+  `agent_actions` rows — stage results, inbox stats, anomalies — plus
+  a one-line footprint of the prior day's actions. This is the entry
+  you'll see most often.
 - **Weekly review** (`routine.weekly_review`) appends the largest
   structured block: a `## Weekly YYYY-Www` retro with *What worked*,
   *What slipped on my side*, *System improvement ideas*, and agent-side
-  metrics. It quotes prior entries to find a thread.
+  metrics.
 - **Evening review** (`routine.evening_review`) appends short
   bookkeeping lines — for example a one-liner each time it bumps a
   roadmap review forward, or a validation error if a roadmap write was
@@ -142,8 +145,9 @@ cannot destroy history. Writes go through the daemon context API
   read view of the file — `journal/agent` is listed among the top-level
   context files. It is flagged as sensitive: entering edit mode surfaces
   a "deliberately pruning noise" warning before you change anything.
-- **Settings → Journal** (`/settings/journal`) does *not* edit this
-  file. It is a two-tab editor for the daily-journal rule files —
+- **The morning-routine agent's Rulebook tab**
+  (`/agents/morning-routine?tab=rulebook`)
+  does *not* edit this file. It hosts the daily-journal rule files —
   `policies/journal-format.md` (sections, voice, frontmatter) and
   `policies/journal-export.md` (redaction / inclusion rules) — both of
   which the morning routine reads when synthesizing `daily/YYYY-MM-DD.md`,
@@ -160,7 +164,8 @@ agent's own writes, not to you editing the file on disk.
 ## When something goes wrong
 
 - **The journal stops growing.** This usually points at the morning
-  routine's Stage B (the daily writer) or the evening/weekly review not
+  routine (whose daemon-side appender writes the daily entry) or the
+  evening/weekly review not
   running. See [Morning Routine](../routines/morning-routine.md) and
   [Evening Review](../routines/evening-review.md).
 - **Entries look duplicated.** This usually means a routine retried
@@ -175,9 +180,8 @@ agent's own writes, not to you editing the file on disk.
 ## Related
 
 - [Morning Routine](../routines/morning-routine.md) — the recurring
-  daily writer (Stage B).
-- [Weekly Review](../routines/weekly-review.md) — the largest retro,
-  and the main consumer that reads prior entries back.
+  daily writer (via the daemon-side appender).
+- [Weekly Review](../routines/weekly-review.md) — the largest retro.
 - [Evening Review](../routines/evening-review.md) — appends short
   bookkeeping lines.
 - [Activity & Conversations](../operations/activity-and-conversations.md)

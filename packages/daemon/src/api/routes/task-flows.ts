@@ -14,7 +14,7 @@
  * that disallows `/`, `..`, leading dots, and anything outside
  * `[A-Za-z0-9._-]`. Length is capped at 80 characters — the longest
  * bundled key today is ~45 characters
- * (`routine.hourly_check.delegated.gemini`), so 80 leaves comfortable
+ * (`routine.activity_scan.delegated.gemini`), so 80 leaves comfortable
  * headroom without giving an attacker a path-bomb surface.
  *
  * Risk tier: Approve. The task-flow body is dispatcher prose that the

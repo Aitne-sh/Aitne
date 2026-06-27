@@ -30,7 +30,7 @@ interface GitDelegatedCronOptions {
   githubRepos: readonly string[];
   cadenceSeconds: number;
   pushOverdueMinutes: number;
-  hourlyCheckEnabled?: boolean;
+  activityScanEnabled?: boolean;
   now?: () => Date;
 }
 
@@ -124,10 +124,10 @@ export class GitDelegatedCronObserver implements Observer {
   }
 
   private initialDelaySeconds(): number {
-    // Keep 1h delegated Git checks away from routine.hourly_check. This is
+    // Keep 1h delegated Git checks away from routine.activity_scan. This is
     // the collision-avoidance rule from the Git lifecycle design: no session
     // reuse, just a 30-minute offset to avoid light-tier concurrency spikes.
-    if (this.options.hourlyCheckEnabled && this.cadenceSeconds === 3600) {
+    if (this.options.activityScanEnabled && this.cadenceSeconds === 3600) {
       return 30 * 60;
     }
     return this.cadenceSeconds;

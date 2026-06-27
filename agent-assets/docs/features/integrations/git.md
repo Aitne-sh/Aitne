@@ -10,7 +10,7 @@ aliases:
 category: features
 summary: |
   Watch one or more git repositories for new commits. Changes record
-  observations the hourly check coalesces — there is no per-commit
+  observations the activity scan coalesces — there is no per-commit
   notification spam.
 section: integrations
 tags:
@@ -26,7 +26,7 @@ ask_examples:
   - How often does the daemon poll my repos?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - git
   - commit
@@ -35,10 +35,11 @@ keywords:
   - polling
 related:
   - features/integrations/github
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - concepts/observations
 ui_anchors:
   - /connections/repositories
+  - /git
 config_keys:
   - gitPollIntervalSeconds
 process_keys:
@@ -53,7 +54,7 @@ api_endpoints:
 # Git
 
 Add local git repositories to a watched set; the daemon polls them
-and the hourly check decides whether the recent activity is worth
+and the activity scan decides whether the recent activity is worth
 flagging.
 
 ## What It Does
@@ -71,19 +72,20 @@ by design.
 ## When It Runs / How It Is Triggered
 
 - The poller is continuous.
-- The hourly check consumes the accumulated observations.
+- The activity scan consumes the accumulated observations.
 
 ## What It Outputs
 
 - An `observation` row per detected change set.
-- A summary in the hourly check's output when observations qualified.
+- A summary in the activity scan's output when observations qualified.
 
 ## Where in the Dashboard
 
-- **Connections → Repositories** lists the watched paths and last-poll
-  times. Git repos are managed as part of the unified Repositories
-  surface (the same place that links a local checkout to its GitHub
-  remote).
+- **Connections → Repositories** lists the watched paths. Git repos are
+  managed as part of the unified Repositories surface (the same place
+  that links a local checkout to its GitHub remote).
+- **My Life → Git** (`/git`) configures per-repo polling cadence,
+  automation triggers, and daily git management.
 
 ## Configuration
 
@@ -103,4 +105,4 @@ by design.
 ## Related
 
 - [GitHub](github.md) — separate integration for remote-side data.
-- [Hourly Check](../routines/hourly-check.md) — the consumer.
+- [Activity Scan](../routines/activity-scan.md) — the consumer.

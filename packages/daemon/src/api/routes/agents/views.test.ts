@@ -156,7 +156,7 @@ describe("buildListItem", () => {
 
   it("surfaces the runtime-window interval cadence on schedule.interval", () => {
     const item = buildListItem(
-      makeDto({ slug: "hourly-check", scheduleExpression: "0 4-23 * * *" }),
+      makeDto({ slug: "activity-scan", scheduleExpression: "0 4-23 * * *" }),
       {
         metrics7d: mw(),
         lastExecution: null,
@@ -229,7 +229,7 @@ describe("buildRow / buildDetail", () => {
 
   it("defaults schedule_interval to null, and carries the cadence when supplied", () => {
     expect(buildRow(makeDto()).schedule_interval).toBeNull();
-    const row = buildRow(makeDto({ slug: "hourly-check" }), {
+    const row = buildRow(makeDto({ slug: "activity-scan" }), {
       interval_minutes: 60,
       active_start_hour: 4,
       active_end_hour: 24,
@@ -263,7 +263,7 @@ describe("buildRow / buildDetail", () => {
 
   it("threads the runtime-window cadence into the detail row", () => {
     const detail = buildDetail({
-      dto: makeDto({ slug: "hourly-check" }),
+      dto: makeDto({ slug: "activity-scan" }),
       definition: null,
       definitionYaml: null,
       recentExecutions: [],
@@ -451,7 +451,7 @@ describe("planPatch — enabled toggle", () => {
 describe("planPatch — built-in override edits", () => {
   it("collects valid override edits into overrideSet", () => {
     const plan = planPatch(makeDto(), {
-      backend: { tier: "high", model: "claude-opus-4-8" },
+      backend: { tier: "high", model: "claude-opus-4-8", backend_id: "claude" },
       limits: { max_turns: 30, max_budget_usd: 0, timeout_minutes: 15 },
       on_error: { notify_owner: true },
     });
@@ -459,6 +459,7 @@ describe("planPatch — built-in override edits", () => {
     expect(plan.overrideSet).toEqual({
       "backend.tier": "high",
       "backend.model": "claude-opus-4-8",
+      "backend.backend_id": "claude",
       "limits.max_turns": 30,
       "limits.max_budget_usd": 0,
       "limits.timeout_minutes": 15,
@@ -477,6 +478,8 @@ describe("planPatch — built-in override edits", () => {
     ["backend.tier invalid string", { backend: { tier: "ultra" } }, "backend.tier"],
     ["backend.tier non-string", { backend: { tier: 1 } }, "backend.tier"],
     ["backend.model empty string", { backend: { model: "" } }, "backend.model"],
+    ["backend.backend_id unknown", { backend: { backend_id: "not-a-backend" } }, "backend.backend_id"],
+    ["backend.backend_id empty string", { backend: { backend_id: "" } }, "backend.backend_id"],
     ["limits.max_turns non-integer", { limits: { max_turns: 1.5 } }, "limits.max_turns"],
     ["limits.max_turns non-number", { limits: { max_turns: "10" } }, "limits.max_turns"],
     ["limits.max_turns zero", { limits: { max_turns: 0 } }, "limits.max_turns"],
@@ -493,7 +496,7 @@ describe("planPatch — built-in override edits", () => {
     });
   });
 
-  it("strips read-only top-level + nested keys, keeping the valid edit", () => {
+  it("strips read-only top-level + nested keys, keeping the valid edits", () => {
     const plan = planPatch(makeDto(), {
       name: "Renamed",
       process_key: "routine.x",
@@ -501,10 +504,16 @@ describe("planPatch — built-in override edits", () => {
       on_error: { retries: 2 },
     });
     if (!plan.ok) throw new Error("unreachable");
-    expect(plan.overrideSet).toEqual({ "backend.tier": "medium" });
+    // `backend_id` became an editable override path alongside `model` (the
+    // dashboard model dropdown writes the pair) — no longer stripped.
+    expect(plan.overrideSet).toEqual({
+      "backend.tier": "medium",
+      "backend.backend_id": "codex",
+    });
     expect(plan.stripped).toEqual(
-      expect.arrayContaining(["name", "process_key", "backend.process_key", "backend.backend_id", "on_error.retries"]),
+      expect.arrayContaining(["name", "process_key", "backend.process_key", "on_error.retries"]),
     );
+    expect(plan.stripped).not.toContain("backend.backend_id");
   });
 
   it("strips a non-object editable parent block", () => {
@@ -567,6 +576,158 @@ describe("planPatch — user Agent field edits routed to the file", () => {
   it("returns an empty no-op plan when the body carries nothing actionable", () => {
     const plan = planPatch(makeDto(), {});
     expect(plan).toEqual({ ok: true, overrideSet: {}, overrideReset: [], stripped: [] });
+  });
+});
+
+describe("planPatch — schedule_window (AGENTS_HUB_REDESIGN_PLAN §2)", () => {
+  const hourlyDto = () =>
+    makeDto({ slug: "activity-scan", processKey: "routine.activity_scan" });
+
+  it("passes a schedule_window block through for the runtime-window builtin", () => {
+    const plan = planPatch(hourlyDto(), {
+      schedule_window: { interval_minutes: 30, min_observations: 2 },
+    });
+    expect(plan).toMatchObject({
+      ok: true,
+      scheduleWindow: { interval_minutes: 30, min_observations: 2 },
+      stripped: [],
+    });
+  });
+
+  it("combines with an enabled toggle in the same body", () => {
+    const plan = planPatch(hourlyDto(), {
+      enabled: false,
+      ack_warning: true,
+      schedule_window: { interval_minutes: 120 },
+    });
+    expect(plan).toMatchObject({
+      ok: true,
+      setEnabled: false,
+      scheduleWindow: { interval_minutes: 120 },
+    });
+  });
+
+  it("rejects a non-object schedule_window", () => {
+    expect(planPatch(hourlyDto(), { schedule_window: 30 })).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "invalid_schedule_window",
+    });
+  });
+
+  it("rejects schedule_window on a fixed-cron builtin", () => {
+    expect(
+      planPatch(makeDto(), { schedule_window: { interval_minutes: 30 } }),
+    ).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "schedule_window_not_supported",
+    });
+  });
+
+  it("rejects schedule_window on a user Agent", () => {
+    expect(
+      planPatch(makeDto({ source: "user", processKey: "agent.task" }), {
+        schedule_window: { interval_minutes: 30 },
+      }),
+    ).toMatchObject({
+      ok: false,
+      status: 400,
+      error: "schedule_window_not_supported",
+    });
+  });
+});
+
+describe("category + policy_files exposure (AGENTS_HUB_REDESIGN_PLAN §1/§4)", () => {
+  it("buildListItem carries the registry category for builtins and 'user' for user Agents", () => {
+    const builtin = buildListItem(makeDto(), {
+      metrics7d: mw(),
+      lastExecution: null,
+      intervalCadence: null,
+    });
+    expect(builtin.category).toBe("synthesis");
+    const user = buildListItem(
+      makeDto({ slug: "my-agent", source: "user", processKey: "agent.task" }),
+      { metrics7d: mw(), lastExecution: null, intervalCadence: null },
+    );
+    expect(user.category).toBe("user");
+  });
+
+  it("buildRow carries category; buildDetail carries policy_files + schedule_window_overrides", () => {
+    const row = buildRow(makeDto({ slug: "activity-scan" }));
+    expect(row.category).toBe("monitoring");
+
+    const detail = buildDetail({
+      dto: makeDto(),
+      definition: null,
+      definitionYaml: null,
+      recentExecutions: [],
+      metrics7d: mw(),
+      metrics30d: mw(),
+      byErrorKind7d: {},
+      scheduleWindow: null,
+    });
+    const policyFiles = detail.policy_files as Array<{ path: string }>;
+    expect(policyFiles.map((f) => f.path)).toEqual([
+      "policies/routines/morning.md",
+      "policies/journal-format.md",
+      "policies/journal-export.md",
+    ]);
+    expect(detail.schedule_window).toBeNull();
+  });
+
+  it("buildDetail passes through the runtime-window block", () => {
+    const scheduleWindow = {
+      overrides: { interval_minutes: 30 },
+      resolved: {
+        interval_minutes: 30,
+        active_start_hour: 4,
+        active_end_hour: 24,
+        min_observations: 1,
+      },
+    };
+    const detail = buildDetail({
+      dto: makeDto({ slug: "activity-scan" }),
+      definition: null,
+      definitionYaml: null,
+      recentExecutions: [],
+      metrics7d: mw(),
+      metrics30d: mw(),
+      byErrorKind7d: {},
+      scheduleWindow,
+    });
+    expect(detail.schedule_window).toEqual(scheduleWindow);
+  });
+
+  it("an unknown builtin slug degrades to maintenance with no policy files (registry drift guard)", () => {
+    // Should not happen (the loader synthesises rows from the registry), but a
+    // row from a newer/older package version must not fail the response.
+    const ghost = makeDto({ slug: "future-builtin", processKey: null });
+    const row = buildRow(ghost);
+    expect(row.category).toBe("maintenance");
+    const detail = buildDetail({
+      dto: ghost,
+      definition: null,
+      definitionYaml: null,
+      recentExecutions: [],
+      metrics7d: mw(),
+      metrics30d: mw(),
+      byErrorKind7d: {},
+    });
+    expect(detail.policy_files).toEqual([]);
+  });
+
+  it("user Agents expose no policy files", () => {
+    const detail = buildDetail({
+      dto: makeDto({ slug: "my-agent", source: "user", processKey: "agent.task" }),
+      definition: null,
+      definitionYaml: null,
+      recentExecutions: [],
+      metrics7d: mw(),
+      metrics30d: mw(),
+      byErrorKind7d: {},
+    });
+    expect(detail.policy_files).toEqual([]);
   });
 });
 

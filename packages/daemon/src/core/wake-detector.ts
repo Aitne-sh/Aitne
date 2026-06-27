@@ -12,7 +12,7 @@ export const WAKE_DETECTOR_INTERVAL_MS = 60_000;
  * Minimum unexplained gap between ticks that counts as a sleep / suspend /
  * forward clock jump. Five minutes is far above any plausible event-loop
  * stall on a healthy daemon, and far below the shortest sleep that can
- * swallow a cron tick worth catching up (the hourly check's default
+ * swallow a cron tick worth catching up (the activity scan's default
  * 60-minute cadence).
  */
 export const WAKE_GAP_THRESHOLD_MS = 5 * 60_000;

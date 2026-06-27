@@ -113,7 +113,7 @@ type MigrationErrorCode =
  * in-flight cron tick to settle (plan §6.2 step 4). Configurable so
  * tests can override to 0; production default 1s is sufficient because
  * all known cron handlers either stop immediately (observer pollers)
- * or enqueue to the paused EventBus (schedule watcher / hourly check).
+ * or enqueue to the paused EventBus (schedule watcher / activity scan).
  *
  * Plan says "up to 10s" but that's a ceiling; shorter is fine when no
  * cron handler is known to block for that long.

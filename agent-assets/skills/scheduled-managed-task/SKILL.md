@@ -109,12 +109,13 @@ in order:
 #### 4.1 Exact `(source_key, external_id)` match
 
 ```bash
-curl -s "http://localhost:8321/api/entities?source=zoom&external_id=zm_xyz789" | jq .
+curl -s "http://localhost:8321/api/entities?source=zoom&external_id=zm_xyz789" | jq '.items | length'
 ```
 
-If 1 result, that's the entity. Reuse its `path`. This is the
-strongest signal and guarantees no duplicates when the upstream app
-exposes a stable id.
+The route returns an object `{tier, mode, items:[…]}` — results live
+under `items`. If 1 result, that's the entity; reuse its `path`
+(`jq -r '.items[0].path'`). This is the strongest signal and
+guarantees no duplicates when the upstream app exposes a stable id.
 
 If >1 result the mirror is corrupted — record
 `last_result='failed: entity-mirror conflict'` and stop. The boot
@@ -123,14 +124,16 @@ reconciler converges from the L2 files.
 #### 4.2 Fallback: `(domain, type, date, fuzzy title)` within ±48 h
 
 ```bash
-curl -s "http://localhost:8321/api/entities?domain=work&type=meeting&date=2026-12-04&q=foo+1on1" | jq .
+curl -s "http://localhost:8321/api/entities?domain=work&type=meeting&date=2026-12-04&q=foo+1on1" | jq '.items | length'
 ```
 
 The daemon does the fuzzy match server-side (token-overlap on
-`title`). If 1 confident result, reuse. If >1 confident result, pick
-the one whose `sources.<other_app>.*` already overlaps with this
-datum's metadata (e.g. a Calendar entity already bound to the same
-attendees → that's the right meeting).
+`title`) and returns the matches under `items` (object response
+`{tier, q, items:[…]}`). If 1 confident result, reuse it
+(`jq -r '.items[0].path'`). If >1 confident result, iterate
+`jq -r '.items[].path'` and pick the one whose `sources.<other_app>.*`
+already overlaps with this datum's metadata (e.g. a Calendar entity
+already bound to the same attendees → that's the right meeting).
 
 #### 4.3 Otherwise: allocate a new entity
 

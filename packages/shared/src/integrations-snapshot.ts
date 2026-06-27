@@ -9,7 +9,7 @@ import { INTEGRATION_KEYS, type IntegrationKey } from "./integrations.js";
  * shape stored in `integration_snapshots.payload_json`, plus a stable
  * sha256 over a sorted JSON encoding of that shape used for diff
  * comparison. The normalizer is shared between the daemon (CalendarPoller,
- * DelegatedSyncWorker, reconcile route) and the LLM-driven hourly check
+ * DelegatedSyncWorker, reconcile route) and the LLM-driven activity scan
  * path so behaviour is identical regardless of who writes the snapshot.
  *
  * Phase 1 shipped the calendar normalizer; Phase 5 adds Gmail thread and

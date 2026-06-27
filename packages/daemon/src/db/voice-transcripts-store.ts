@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 /**
  * Persistence helpers for `voice_transcripts` — local-Whisper transcripts
  * keyed 1:1 to `chat_attachments.id`. The cache lets a re-dispatch of the
- * same turn (or a Phase-9 hourly check that revisits an old voice
+ * same turn (or a Phase-9 activity scan that revisits an old voice
  * message) reuse a transcription instead of re-running inference.
  *
  * See `docs/design/appendices/voice-transcription.md`.

@@ -139,7 +139,12 @@ export function SettingsSaveBar() {
   };
 
   return (
-    <div className="sticky bottom-0 z-30 -mx-6 mt-6 border-t border-border bg-background/95 backdrop-blur-sm px-6 py-3">
+    // `-mx-6 px-6` full-bleeds across SettingsShell's p-6 — valid only below
+    // md where that shell padding exists to bleed into. On md+ SettingsContent
+    // is its own scroll pane (SETTINGS_REDESIGN_PLAN.md §2) and a negative
+    // margin would overflow it horizontally (horizontal scrollbar whenever
+    // the bar is visible), so the bar spans the pane edge to edge instead.
+    <div className="sticky bottom-0 z-30 -mx-6 mt-6 border-t border-border bg-background/95 backdrop-blur-sm px-6 py-3 md:mx-0 md:px-0">
       {feedback && (
         <Alert variant={feedback.type} className="mb-3">
           {feedback.message}
@@ -150,7 +155,7 @@ export function SettingsSaveBar() {
           <p className="text-sm text-muted-foreground">
             {dirtyCount} unsaved change{dirtyCount !== 1 ? "s" : ""}
             {restartKeys.length > 0 && (
-              <span className="ml-1 text-amber-600 dark:text-amber-400">
+              <span className="ml-1 text-warning">
                 (restart required)
               </span>
             )}

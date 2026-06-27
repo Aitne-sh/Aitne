@@ -65,7 +65,7 @@ function normalizeCron(expr: string): string {
  * expression. Returns a non-fatal warning string on mismatch, or `null` when
  * they agree.
  *
- * `registryExpr` is `null` for the runtime-window builtins (`hourly-check`)
+ * `registryExpr` is `null` for the runtime-window builtins (`activity-scan`)
  * whose cadence is not a fixed expression — drift is meaningless there, so the
  * check is a no-op (returns `null`, §5.5.1). Whitespace differences are
  * normalised away before comparing.

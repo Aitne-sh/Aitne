@@ -181,12 +181,12 @@ function KillSwitchPanel({ enabledCount }: { enabledCount: number }) {
   }
 
   return (
-    <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs">
-      <div className="mb-2 flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+    <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
+      <div className="mb-2 flex items-center gap-2 font-semibold text-warning">
         <AlertTriangle className="h-3.5 w-3.5" />
         Disable every MCP server?
       </div>
-      <p className="mb-3 text-amber-900/90 dark:text-amber-100/90">
+      <p className="mb-3 text-warning/90">
         This flips {enabledCount === 1 ? "1 server" : `${enabledCount} servers`}{" "}
         to disabled. Every future routine and DM session will run without MCP
         tools until you re-enable them individually. Existing runs finish with

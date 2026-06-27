@@ -89,9 +89,17 @@ const COLOR_DAY_BOUNDARY = "var(--color-primary)";
 export function TimeRangeRing({
   values,
   onChange,
+  activeWindowReadOnly = false,
 }: {
   values: TimeRangeRingValues;
   onChange: (next: TimeRangeRingValues) => void;
+  /**
+   * Render the activity-scan active window as a display-only band (no drag
+   * handles). Used by the Hours & Notifications page now that the window is
+   * owned by the activity-scan agent row and edited from /agents/activity-scan
+   * (AGENTS_HUB_REDESIGN_PLAN §4.3).
+   */
+  activeWindowReadOnly?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [dragging, setDragging] = useState<DragTarget>(null);
@@ -284,6 +292,7 @@ export function TimeRangeRing({
           QUIET_R,
           ACTIVE_R,
           values,
+          activeWindowReadOnly,
         })}
 
         {/* Center legend */}
@@ -332,6 +341,7 @@ function renderHandles({
   QUIET_R,
   ACTIVE_R,
   values,
+  activeWindowReadOnly,
 }: {
   dragging: DragTarget;
   hovered: DragTarget;
@@ -345,13 +355,19 @@ function renderHandles({
   QUIET_R: number;
   ACTIVE_R: number;
   values: TimeRangeRingValues;
+  activeWindowReadOnly: boolean;
 }) {
   const activeTarget = dragging ?? hovered;
   const handles: { target: DragTarget; angle: number; r: number; color: string; label: string }[] = [
     { target: "quietStart", angle: quietStartA, r: QUIET_R, color: COLOR_QUIET, label: values.quietHoursStart },
     { target: "quietEnd", angle: quietEndA, r: QUIET_R, color: COLOR_QUIET, label: values.quietHoursEnd },
-    { target: "activeStart", angle: activeStartA, r: ACTIVE_R, color: COLOR_ACTIVE, label: `${values.activeStartHour}:00` },
-    { target: "activeEnd", angle: activeEndA, r: ACTIVE_R, color: COLOR_ACTIVE, label: `${values.activeEndHour}:00` },
+    // Read-only active window (agent-owned cadence) renders the arc only.
+    ...(activeWindowReadOnly
+      ? []
+      : [
+          { target: "activeStart" as DragTarget, angle: activeStartA, r: ACTIVE_R, color: COLOR_ACTIVE, label: `${values.activeStartHour}:00` },
+          { target: "activeEnd" as DragTarget, angle: activeEndA, r: ACTIVE_R, color: COLOR_ACTIVE, label: `${values.activeEndHour}:00` },
+        ]),
   ];
 
   // Sort so the active handle renders last (on top in SVG).

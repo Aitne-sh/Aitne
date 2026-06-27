@@ -214,7 +214,7 @@ function LessonStoresCard() {
 
 const CAP_BAR_COLOR: Record<CapLevel, string> = {
   ok: "bg-primary",
-  warn: "bg-amber-500",
+  warn: "bg-warning",
   full: "bg-destructive",
 };
 

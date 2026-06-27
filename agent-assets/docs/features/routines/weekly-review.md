@@ -27,7 +27,7 @@ ask_examples:
   - Where do weekly retros get stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-09
+updated: 2026-06-10
 keywords:
   - weekly review
   - Friday review
@@ -48,7 +48,7 @@ config_keys:
   - selfTuningEnabled
 ui_anchors:
   - /settings/models
-  - /settings/routines
+  - /agents/weekly-review
 context_files:
   - journal/weekly/YYYY-Www.md
   - journal/agent.md
@@ -115,7 +115,10 @@ The fire time (Friday 19:00 local) and day-of-week are fixed in code
 and are not operator-tunable. The backend and model that handle this
 routine, however, are configurable: `routine.weekly_review` is a
 configurable process key (default **medium** tier — Sonnet on Claude)
-that you can repoint from **Settings → Models**.
+that you can repoint from **Settings → Models**. The weekly rulebook
+(`policies/routines/weekly.md`) is edited on the weekly-review agent's
+Rulebook tab (`/agents/weekly-review?tab=rulebook`), where the agent
+can also be enabled or disabled.
 
 ## When Something Goes Wrong
 

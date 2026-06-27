@@ -104,7 +104,7 @@ function resolveSinceParam(
 /**
  * INTEGRATION_NATIVE_MODE_DESIGN.md §11.3.1 — map an observation `source`
  * string to the integration key whose flip lock would gate writes against
- * it. The agent's hourly_check / native-mode skill always uses one of the
+ * it. The agent's activity_scan / native-mode skill always uses one of the
  * registry's integration keys verbatim as the `source` value (e.g.
  * `"gmail"`, `"google_calendar"`, `"notion"`). Sources outside the
  * registry (Obsidian, Git, messaging adapter, system) are never locked
@@ -127,7 +127,7 @@ const normalizeMailObservationPayload = normalizeMailObservationPayloadShared;
  * cost-reduction-structural §A "Failure modes" — the summary may be
  * outdated when the worker lags far behind the observation moment (e.g.
  * laptop-sleep backlog reclaimed at startup, where the summarizer has
- * caught up by the time hourly_check runs but the underlying source
+ * caught up by the time activity_scan runs but the underlying source
  * may have shifted in between). Surface a `summaryStale` flag the
  * consumer skill can branch on, rather than asking the LLM to do
  * timestamp arithmetic.
@@ -240,10 +240,10 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
   /**
    * POST /observations — record an agent-originated observation.
    *
-   * Used by `routine.hourly_check` to queue `roadmap_candidate` signals
+   * Used by `routine.activity_scan` to queue `roadmap_candidate` signals
    * (long-horizon intents too weak to write to roadmap.md directly;
    * ROADMAP-REDESIGN §3.4 RFC-C) AND by INTEGRATION_NATIVE_MODE_DESIGN.md
-   * §8.3 native-mode hourly_check turns to persist the materialised mail
+   * §8.3 native-mode activity_scan turns to persist the materialised mail
    * thread / calendar event list the agent just fetched via the main
    * backend's MCP. The DB layer UPSERTs on `(source, ref)` where
    * `consumed_at IS NULL`, so re-posting the same candidate across hourly
@@ -275,7 +275,7 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
     // Peek at the raw body BEFORE delegating to `readJsonBody` so we can
     // turn a query-string-shaped body ("limit=30", "actor=user&limit=20")
     // into a method-confusion hint. Production telemetry showed the
-    // hourly_check agent sending `POST /api/observations` with body
+    // activity_scan agent sending `POST /api/observations` with body
     // `limit=30`, expecting it to fetch. Forwarding readJsonBody's
     // generic "Unexpected token 'l'" message gave the agent no signal
     // that the right call was `GET /api/observations?limit=30`.
@@ -682,7 +682,7 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
   /**
    * Field-level validation contract for `POST /observations/consume`.
    *
-   * Without per-field error envelopes, a single Stage-3 hourly_check can
+   * Without per-field error envelopes, a single Stage-3 activity_scan can
    * burn turns retrying this endpoint with shape variants
    * (`correlation_id` snake_case, stringified ids, the angle-bracket
    * placeholder copied verbatim, per-id paths, etc.). The legacy
@@ -853,7 +853,7 @@ export function createObservationRoutes(deps: ApiDependencies): Hono {
    * Helpful 405 for `GET /api/observations/consume`. The bulk consume is
    * POST-only — without this handler the request 404s with no actionable
    * detail, and the agent's recovery loop produced 8x retries in one
-   * routine.hourly_check session.
+   * routine.activity_scan session.
    */
   app.get("/observations/consume", (c) =>
     c.json(

@@ -128,7 +128,7 @@ function makeRunner(opts: {
   runner: MorningRoutineRunner;
   notificationMgr: INotificationManager;
   emitRoadmapRefresh: ReturnType<typeof vi.fn>;
-  triggerHourlyCheck: ReturnType<typeof vi.fn>;
+  triggerActivityScan: ReturnType<typeof vi.fn>;
   rotateDayFiles: ReturnType<typeof vi.fn>;
   setMorningRoutineInProgress: ReturnType<typeof vi.fn>;
   fetchWindowRunner: RoutineFetchWindowRunner;
@@ -143,7 +143,7 @@ function makeRunner(opts: {
       beginReplyActivity: vi.fn(),
     } as unknown as INotificationManager);
   const emitRoadmapRefresh = vi.fn();
-  const triggerHourlyCheck = vi.fn().mockResolvedValue(undefined);
+  const triggerActivityScan = vi.fn().mockResolvedValue(undefined);
   const rotateDayFiles = vi.fn();
   const setMorningRoutineInProgress = vi.fn();
   const fetchWindowRunner = opts.fetchWindowRunner ?? makeStubFetchWindowRunner();
@@ -165,14 +165,14 @@ function makeRunner(opts: {
     diagnoseTodayMdState: opts.diagnoseTodayMdState ?? (() => ({ kind: "fresh" })),
     isRoadmapStale: opts.isRoadmapStale ?? (() => false),
     emitRoadmapRefresh,
-    triggerHourlyCheck,
+    triggerActivityScan,
     pipelineOrchestrator,
   });
   return {
     runner,
     notificationMgr,
     emitRoadmapRefresh,
-    triggerHourlyCheck,
+    triggerActivityScan,
     rotateDayFiles,
     setMorningRoutineInProgress,
     fetchWindowRunner,

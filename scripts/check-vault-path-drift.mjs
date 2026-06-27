@@ -148,7 +148,7 @@ const LEGACY_PATTERNS = [
   ],
   [
     legacyPattern(
-      "([\"'`/])routines\\/(?:morning|evening|hourly|weekly|monthly|custom|_index)",
+      "([\"'`/])routines\\/(?:morning|evening|hourly|activity-scan|weekly|monthly|custom|_index)",
     ),
     "legacy policies/routines/ path under routines/",
   ],

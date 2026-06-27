@@ -31,7 +31,7 @@ ask_examples:
   - How does Aitne fail over when a backend hits its quota?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - claude
   - codex
@@ -99,7 +99,7 @@ What each tier is for:
 
 - **Medium / Main** — the default for owner-facing work: DMs and
   mentions, dashboard chat, morning / evening / weekly / monthly
-  review, the hourly check, scheduled tasks.
+  review, the activity scan, scheduled tasks.
 - **Lite / Delegated** — the cheaper model for "simple" backend
   surfaces with no owner in the loop: Gmail classification, GitHub
   event triage, git-poll observers, calendar-change handlers, the
@@ -129,7 +129,7 @@ Each backend authenticates via a provider API key registered on
 | `claude` | `anthropic` (`sk-ant-…`) | `bedrock` (Amazon Bedrock), `vertex` (Google Vertex AI), `foundry` (Microsoft Foundry) |
 | `codex` | `openai` (`sk-…`) | `azure-openai` (Codex CLI on Azure OpenAI; daemon writes a managed `config.toml` under `<dataDir>/codex-home/`) |
 | `gemini` | `google` (`AIza…`) | `gemini-vertex` (Gemini on Google Vertex AI) |
-| `opencode` | provider key forwarded to the OpenCode server (Anthropic / OpenAI / OpenRouter / …) | "Managed" mode runs a local `opencode` HTTP server on loopback; "Remote" mode points at a baseUrl you operate |
+| `opencode` | `opencode-server` (server URL + HTTP Basic-Auth username / optional password). Model-provider keys (Anthropic / OpenAI / OpenRouter / …) live on the OpenCode server itself — configure them there with `opencode auth login`; Aitne does not store or forward them | "Managed" mode runs a local `opencode` HTTP server on loopback; a "Remote" mode pointing at a baseUrl you operate is designed but not wired up yet |
 
 API keys are the recommended and provider-supported auth method for
 headless agent use; if you skip the key the daemon falls back to the
@@ -153,16 +153,20 @@ each path.
 
 OpenCode joined as a 4th backend in 2026-05. It is implemented on
 top of the `@opencode-ai/sdk` HTTP server and supports the same
-`ProcessKey` set as the other backends. Two operating modes:
+`ProcessKey` set as the other backends. Two operating modes are
+designed:
 
 - **Managed** — the daemon spawns and supervises a local
   `opencode` HTTP server on loopback (`127.0.0.1`, OS-picked port).
   Per-session config (model, permissions, agent dir) is passed
   inline to the server via the `OPENCODE_CONFIG_CONTENT` env var —
-  no config file is written to disk.
-- **Remote** — you point Aitne at an existing OpenCode server
-  baseUrl (your own cluster or a managed deployment), set via the
-  `opencodeBaseUrl` / `opencodeServerUsername` config keys.
+  no config file is written to disk. This is the only mode wired up
+  today.
+- **Remote** — pointing Aitne at an existing OpenCode server baseUrl
+  (your own cluster or a managed deployment). The `opencodeBaseUrl` /
+  `opencodeServerUsername` config keys exist, but the daemon's
+  server factory currently always runs the Managed local server —
+  Remote lands in a later phase.
 
 OpenCode is a runtime peer of Claude / Codex / Gemini for
 dispatching ProcessKeys, but it intentionally does **not** host
@@ -205,7 +209,7 @@ Claude's quota is exhausted, or use Gemini for cheap polling tasks.
 | `routine.morning_routine` | claude | Sonnet 4.6 |
 | `routine.evening_review` | claude | Sonnet 4.6 |
 | `routine.weekly_review` | claude | Sonnet 4.6 |
-| `routine.hourly_check` | claude | Sonnet 4.6 |
+| `routine.activity_scan` | claude | Sonnet 4.6 |
 | `message.dm` | claude | Sonnet 4.6 |
 | `dashboard.chat` | claude | Sonnet 4.6 |
 | `dashboard.docs_qa` | inherits from `message.dm` | Sonnet 4.6 (locked to medium) |

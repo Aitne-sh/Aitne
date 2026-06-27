@@ -310,7 +310,7 @@ describe("GitDelegatedCronObserver — edge cases and scheduling", () => {
     }
   });
 
-  it("delays first tick by 30 min when hourlyCheckEnabled=true and cadenceSeconds=3600", async () => {
+  it("delays first tick by 30 min when activityScanEnabled=true and cadenceSeconds=3600", async () => {
     vi.useFakeTimers();
     try {
       const db = freshDb();
@@ -331,7 +331,7 @@ describe("GitDelegatedCronObserver — edge cases and scheduling", () => {
         githubRepos: [],
         cadenceSeconds: 3600,
         pushOverdueMinutes: 60,
-        hourlyCheckEnabled: true,
+        activityScanEnabled: true,
         now: () => new Date("2026-04-30T12:00:00.000Z"),
       });
 

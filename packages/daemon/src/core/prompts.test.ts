@@ -181,8 +181,8 @@ describe("getTaskFlow", () => {
   });
 
   it("returns base flow when overlay map has no entry for the backend", () => {
-    const base = getTaskFlow("routine.hourly_check");
-    const withGemini = getTaskFlow("routine.hourly_check", "gemini");
+    const base = getTaskFlow("routine.activity_scan");
+    const withGemini = getTaskFlow("routine.activity_scan", "gemini");
     expect(withGemini).toBe(base);
   });
 
@@ -622,6 +622,63 @@ describe("getTaskFlow", () => {
     expect(flow).toContain("byte-for-byte");
   });
 
+  // Plan-revision contract (invalidation propagation). The morning
+  // plan is composed once at 04:00; without these markers, nothing
+  // retires an Agent Plan row + agent_schedule pair whose premise dies
+  // mid-day (meeting cancelled, user already handled it), and stale
+  // wakes fire anyway. The `today` skill owns the shared cancel/amend
+  // recipe — each flow carries only its own trigger surface and must
+  // cite the skill rather than inline a divergent copy.
+  it("activity_scan retires invalidated plan rows via the today skill recipe", () => {
+    const flow = getTaskFlow("routine.activity_scan");
+    expect(flow).toContain("Retire invalidated rows");
+    expect(flow).toContain("cancel / amend");
+    // Additive stance is preserved — retiring rows is folding in
+    // signals, not re-planning the day.
+    expect(flow).toMatch(/not to re-plan/);
+  });
+
+  it("DM flows route plan invalidation through the today skill cancel/amend recipe", () => {
+    for (const key of ["message.received.dm", "message.received.dm_first"]) {
+      const flow = getTaskFlow(key);
+      expect(flow).toContain("Agent Plan revision");
+      expect(flow).toContain("cancel / amend");
+      // Execution-outcome flips stay at fire time — the revision path
+      // is the single exception, not a general row-write licence.
+      expect(flow).toMatch(/execution outcomes/);
+    }
+  });
+
+  it("DM flow flips the day-type header on a declared day-shape change", () => {
+    const flow = getTaskFlow("message.received.dm");
+    expect(flow).toContain("Day-shape change");
+    // Whole-category suppression goes through line 2 + fire-time
+    // filters, not row-by-row hand-cancellation.
+    expect(flow).toMatch(/do not hand-cancel individual Agent Plan rows/);
+  });
+
+  it("scheduled.task checks the premise at fire time before executing", () => {
+    const flow = getTaskFlow("scheduled.task");
+    expect(flow).toContain("Premise check");
+    expect(flow).toContain("skipped (premise gone)");
+    // False-positive guard: a failed/absent calendar fetch must not be
+    // read as "event gone" — a silently skipped reminder is worse than
+    // a stale one.
+    expect(flow).toMatch(/NOT evidence/);
+  });
+
+  // `→wake` rows fire as `scheduled.dm` (dm_session), so the dm-tone
+  // flow needs the same fire-time gates and loop close-out as
+  // scheduled.task — without this section, plan-backed dm firings
+  // leave their row `[ ]` and the next Morning Routine mislabels them
+  // `(did-not-fire)`.
+  it("scheduled.dm closes the Agent Plan loop for plan-backed firings", () => {
+    const flow = getTaskFlow("scheduled.dm");
+    expect(flow).toContain("Agent Plan close-out");
+    expect(flow).toContain("skipped (focus off)");
+    expect(flow).toContain("skipped (premise gone)");
+  });
+
   // `evening-review-slimdown.md` §2.4 — the old Step 4 (user-facing
   // wrap-up) was deleted entirely. FEEDBACK_LEARNING_LOOP_DESIGN.md §4
   // (Phase 2) later reclaimed the Step-4 slot for *internal* feedback
@@ -882,8 +939,8 @@ describe("template variable resolution", () => {
     expect(resolved).toContain("12");
   });
 
-  it("hourly_check prompt points to observations review endpoints", () => {
-    const flow = getTaskFlow("routine.hourly_check");
+  it("activity_scan prompt points to observations review endpoints", () => {
+    const flow = getTaskFlow("routine.activity_scan");
     expect(flow).toContain("observations skill");
     // docs/design/appendices/routine-data-acquisition.md Phase 3 R4: the merged read query
     // (both `actor=user` and `actor=agent` reach this session because the
@@ -996,8 +1053,8 @@ describe("template variable resolution", () => {
 });
 
 describe("task flow quality (Phase 9)", () => {
-  it("hourly_check batches observations and prefers silence for noise", () => {
-    const flow = getTaskFlow("routine.hourly_check");
+  it("activity_scan batches observations and prefers silence for noise", () => {
+    const flow = getTaskFlow("routine.activity_scan");
     expect(flow).toContain("Decision Framework");
     expect(flow).toContain("Group related observations");
     expect(flow).toContain("Skip noise");
@@ -1007,21 +1064,21 @@ describe("task flow quality (Phase 9)", () => {
   });
 
   // Phase 5 partition-collision fix (INTEGRATION-DRIFT-DETECTION-PLAN.md
-  // §11) originally landed by editing three `routine.hourly_check.delegated.<be>.md`
+  // §11) originally landed by editing three `routine.activity_scan.delegated.<be>.md`
   // variant files. docs/design/appendices/routine-data-acquisition.md Phase 3 R4 deleted
   // those variants. Phase 4 D3 wires a pre-pass fetcher session
   // (`routine.fetch_window`) that runs the partials in its OWN prompt and
-  // POSTs to `/api/observations` ahead of the main hourly_check session;
+  // POSTs to `/api/observations` ahead of the main activity_scan session;
   // the main session reads pending observations and never embeds the
   // partials directly (per docs/design/appendices/routine-data-acquisition.md §6.8). The
   // partition-collision regression is therefore prevented by construction
   // — neither the main routine body nor the partial bodies (now consumed
   // by the pre-pass only) ever mention `/reconcile`. We pin the rendered
-  // hourly_check body across all three legacy delegated backends to make
+  // activity_scan body across all three legacy delegated backends to make
   // sure no future edit reintroduces a direct fetch / `/reconcile` POST
   // into the main session's prompt.
   for (const variantBackend of ["claude", "codex", "gemini"] as const) {
-    it(`hourly_check (gmail+notion delegated to ${variantBackend}) does NOT POST gmail / notion reconcile`, () => {
+    it(`activity_scan (gmail+notion delegated to ${variantBackend}) does NOT POST gmail / notion reconcile`, () => {
       const ts = "2026-04-29T00:00:00.000Z";
       const integrations = {
         gmail: {
@@ -1038,12 +1095,12 @@ describe("task flow quality (Phase 9)", () => {
         },
       };
       const flow = getTaskFlow(
-        "routine.hourly_check",
+        "routine.activity_scan",
         variantBackend,
         integrations,
       );
 
-      // The rendered hourly_check must NOT carry a `/reconcile` curl POST
+      // The rendered activity_scan must NOT carry a `/reconcile` curl POST
       // — neither in the base file nor through any (deleted) partial
       // include path.
       expect(flow).not.toMatch(
@@ -1075,7 +1132,7 @@ describe("task flow quality (Phase 9)", () => {
       expect(flow).toMatch(/schedule[._]approaching/);
 
       // After docs/design/appendices/routine-data-acquisition.md Phase 3 R4, the main
-      // hourly_check session does NOT embed the acquisition partials —
+      // activity_scan session does NOT embed the acquisition partials —
       // they live in the pre-pass session's prompt only (§6.8). The
       // body must reference `/api/observations` (the read path) and
       // `<fetch_report>` (the pre-pass status block ContextBuilder
@@ -1144,6 +1201,17 @@ describe("today skill formats", () => {
     // before "the entire section body", so anchor on the load-bearing
     // verb instead).
     expect(skillContent).toContain('`PATCH mode: "replace"` replaces');
+  });
+
+  it("documents the pre-fire cancel/amend revision recipe", () => {
+    // Body carries the summary; the recipe lives in
+    // `references/agent-plan-revision.md` and is inlined here by
+    // renderReferenceIncludes — both halves must survive.
+    expect(skillContent).toContain(
+      "## Agent Plan revision — cancel / amend before fire time",
+    );
+    expect(skillContent).toContain("(cancelled: <reason>)");
+    expect(skillContent).toContain("lock-step holds in both directions");
   });
 });
 
@@ -1811,12 +1879,12 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
   const TASK_FLOWS_ROOT = join(REPO_ROOT, "agent-assets/task-flows");
 
   // docs/design/appendices/routine-data-acquisition.md Phase 3 R4 + Phase 4 D3 — the
-  // `routine.hourly_check.native.<be>.md` variants were deleted along
+  // `routine.activity_scan.native.<be>.md` variants were deleted along
   // with their `delegated.<be>` siblings (Phase 3 R4); the dispatcher
   // pre-pass (`routine.fetch_window`) now owns the partial-include
   // surface and POSTs to `/api/observations` ahead of the main session
   // (Phase 4 D3). The §8.3 contracts those native variants used to
-  // encode live on against the base hourly_check + the pre-pass
+  // encode live on against the base activity_scan + the pre-pass
   // session instead:
   //
   //   - "no `/reconcile` POST" — guaranteed by the partial bodies in
@@ -1827,13 +1895,13 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
   //     `/api/observations?pending=true`; the per-source POST contract
   //     is taught in the pre-pass partials, covered by
   //     `routine-partials-render.test.ts`.
-  //   - "read-only-this-hour" — preserved in the base
-  //     `routine.hourly_check.md` body.
+  //   - "read-only-during-this-run" — preserved in the base
+  //     `routine.activity_scan.md` body.
   //
   // The substitute test below pins each contract against the rendered
-  // hourly_check under a native gmail binding for every backend.
+  // activity_scan under a native gmail binding for every backend.
   it.each(["claude", "codex", "gemini"] as const)(
-    "routine.hourly_check (native gmail / %s session) preserves the §8.3 contracts after R4",
+    "routine.activity_scan (native gmail / %s session) preserves the §8.3 contracts after R4",
     (backend) => {
       const integrations = {
         gmail: {
@@ -1855,7 +1923,7 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
           lastChangedAt: "2026-05-01T00:00:00.000Z",
         },
       };
-      const flow = getTaskFlow("routine.hourly_check", backend, integrations);
+      const flow = getTaskFlow("routine.activity_scan", backend, integrations);
 
       // No `/reconcile` curl POST anywhere in the rendered body.
       expect(flow).not.toMatch(
@@ -1865,8 +1933,8 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
       expect(flow).toContain("/api/observations");
       // `<fetch_report>` is the contract surface for pre-pass status.
       expect(flow).toContain("<fetch_report>");
-      // The "read-only this hour" constraint is owned by the base file.
-      expect(flow).toContain("External services are read-only this hour");
+      // The "read-only during this run" constraint is owned by the base file.
+      expect(flow).toContain("External services are read-only during this run");
       // No partial-include directives in the main body — those live in
       // the pre-pass session (`routine.fetch_window.md`) only.
       expect(flow).not.toContain("{include:_partials/");
@@ -1910,11 +1978,11 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
   );
 
   // docs/design/appendices/routine-data-acquisition.md Phase 3 R4 — the deleted native
-  // hourly_check variants used to carry a `Native Mode (<Backend> connectors)`
+  // activity_scan variants used to carry a `Native Mode (<Backend> connectors)`
   // section header and an `<integration-routing-table-actionable>`
   // placeholder. After R4, `selectTaskFlowVariantSuffix` still returns
   // `native.<backend>` when gmail is native, but `loadFlowVariant` falls
-  // through to the base `routine.hourly_check.md` (`prompts.ts:152-158`).
+  // through to the base `routine.activity_scan.md` (`prompts.ts:152-158`).
   // The base file does NOT carry the routing-table placeholder; mode-
   // specific prose flows through the partial includes instead. The
   // routing-table substitution mechanism stays exercised through the
@@ -1924,7 +1992,7 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
   // Pin the fallback behaviour so a future revert that re-creates the
   // variant files would be caught.
   it.each(["claude", "codex", "gemini"] as const)(
-    "routine.hourly_check (native gmail / %s session) falls back to the base file after R4",
+    "routine.activity_scan (native gmail / %s session) falls back to the base file after R4",
     (backend) => {
       const integrations = {
         gmail: {
@@ -1934,12 +2002,12 @@ describe("native task-flow variants — Phase B2 content invariants", () => {
           lastChangedAt: "2026-05-01T00:00:00.000Z",
         },
       };
-      const flow = getTaskFlow("routine.hourly_check", backend, integrations);
+      const flow = getTaskFlow("routine.activity_scan", backend, integrations);
       // The deleted variant's header is gone; the base file's H2 stays.
       expect(flow).not.toContain("Native Mode (Claude connectors)");
       expect(flow).not.toContain("Native Mode (Codex connectors)");
       expect(flow).not.toContain("Native Mode (Gemini connectors)");
-      expect(flow).toContain("## Hourly Observation Review");
+      expect(flow).toContain("## Activity Scan — Observation Review");
       // No partial-include directives in the main body (Phase 4 D3 —
       // they're in the pre-pass session only).
       expect(flow).not.toContain("{include:_partials/");

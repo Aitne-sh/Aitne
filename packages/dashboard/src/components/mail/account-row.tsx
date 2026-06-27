@@ -135,7 +135,7 @@ export function AccountRow({
       className={
         "rounded-md border p-3 transition-colors " +
         (highlight
-          ? "border-amber-400 ring-1 ring-amber-300/60"
+          ? "border-warning ring-1 ring-warning/40"
           : "border-border")
       }
     >
@@ -256,7 +256,7 @@ function ImapRefreshForm({
   };
 
   return (
-    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900 dark:bg-amber-950/30 space-y-2">
+    <div className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-3 space-y-2">
       <p className="text-xs text-foreground">
         Generate a new app password at the provider, paste it here, and the
         daemon will swap it in place — the polling cursor and account ID stay
@@ -302,7 +302,7 @@ function HealthSummary({ health }: { health: ReturnType<typeof useMailAccountHea
           <span
             title={formatAbsoluteTime(lastPoll)}
             className={
-              stale ? "text-amber-600 dark:text-amber-400" : undefined
+              stale ? "text-warning" : undefined
             }
           >
             {formatRelativeTime(lastPoll)}
@@ -313,13 +313,13 @@ function HealthSummary({ health }: { health: ReturnType<typeof useMailAccountHea
         )}
       </span>
       {health.consecutiveErrorCount > 0 && (
-        <span className="text-amber-600 dark:text-amber-400">
+        <span className="text-warning">
           {health.consecutiveErrorCount} consecutive errors
         </span>
       )}
       {health.lastError && (
         <span
-          className="flex items-center gap-1 text-red-600 dark:text-red-400 max-w-full truncate"
+          className="flex items-center gap-1 text-destructive max-w-full truncate"
           title={health.lastError}
         >
           <AlertTriangle className="h-3 w-3 shrink-0" />

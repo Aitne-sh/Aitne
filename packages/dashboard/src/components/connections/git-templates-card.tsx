@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { FileType2, Loader2, Play, Save } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { statusBadgeVariant } from "@/lib/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -314,7 +315,7 @@ function RetemplateStatusGrid() {
         <div className="flex flex-wrap gap-1 text-xs">
           {Object.entries(counts).map(([status, count]) =>
             count > 0 ? (
-              <Badge key={status} variant={badgeVariantForStatus(status)}>
+              <Badge key={status} variant={statusBadgeVariant(status)}>
                 {status}: {count}
               </Badge>
             ) : null,
@@ -337,7 +338,7 @@ function RetemplateStatusGrid() {
               <tr key={row.slug} className="border-b last:border-0">
                 <td className="px-2 py-1 font-mono">{row.slug}</td>
                 <td className="px-2 py-1">
-                  <Badge variant={badgeVariantForStatus(row.status)}>
+                  <Badge variant={statusBadgeVariant(row.status)}>
                     {row.status}
                   </Badge>
                 </td>
@@ -361,32 +362,6 @@ function RetemplateStatusGrid() {
       </div>
     </div>
   );
-}
-
-function badgeVariantForStatus(
-  status: string,
-):
-  | "default"
-  | "gray"
-  | "green"
-  | "amber"
-  | "red"
-  | "blue" {
-  switch (status) {
-    case "completed":
-      return "green";
-    case "skipped":
-      return "gray";
-    case "started":
-    case "pending":
-      return "blue";
-    case "failed":
-      return "red";
-    case "rolled_back":
-      return "amber";
-    default:
-      return "default";
-  }
 }
 
 export default GitTemplatesCard;

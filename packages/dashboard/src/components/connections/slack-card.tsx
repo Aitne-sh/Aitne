@@ -167,7 +167,7 @@ export function SlackCard() {
             </Button>
           </div>
           {botInfo && (
-            <p className="text-xs text-emerald-700 dark:text-emerald-300">
+            <p className="text-xs text-success">
               ✓ Bot: <code className="font-mono">{botInfo.botName}</code>
               {botInfo.team && <> · workspace: <code className="font-mono">{botInfo.team}</code></>}
               {botInfo.botUserId && <> · id: <code className="font-mono">{botInfo.botUserId}</code></>}

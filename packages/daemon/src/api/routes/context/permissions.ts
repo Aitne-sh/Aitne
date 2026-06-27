@@ -62,8 +62,9 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
   "policies/management-captures/*": ["PUT", "PATCH"],
   "policies/routines/_index": ["PUT", "PATCH"],
   "policies/routines/*": ["PUT", "PATCH"],
-  // Custom routines support DELETE so the agent can retire a routine
-  // when the user asks via DM.
+  // Legacy custom-routine files (inert since the Agents-hub redesign —
+  // recurring work is an Agent now). Writes stay validated and DELETE
+  // remains so the agent can clean a leftover file up when the user asks.
   "policies/routines/custom/*": ["PUT", "PATCH", "DELETE"],
   // User Agent definitions (AGENT_DEFINITIONS_DESIGN.md §9.5 / §3.3). The
   // dashboard's "+ New Agent" scaffold and the YAML editor write user Agents

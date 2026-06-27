@@ -19,6 +19,9 @@ import type { ContextIndexRow } from "../review-context.js";
 /** Vocabulary understood by `review-context.ts:reviewFlowsMatch`. */
 const REVIEW_FLOW_VOCAB = new Set([
   "all",
+  "activity-scan",
+  // Legacy token for the activity-scan flow (the agent was "Hourly Check"
+  // until v0.1.11); kept so pre-rename `_index.md` rows stay valid.
   "hourly",
   "morning",
   "evening",
@@ -242,7 +245,7 @@ export function renderReconcilerBlockBody(
     "- Maintained by the daemon reconciler (`packages/daemon/src/core/context/index-reconciler.ts`).",
   );
   lines.push(
-    "- `Review flows` tokens: `all`, `hourly`, `morning`, `evening`, `weekly`,",
+    "- `Review flows` tokens: `all`, `activity-scan`, `morning`, `evening`, `weekly`,",
   );
   lines.push("  `monthly`, `roadmap`, or `-` when no flow should auto-load the file.");
   return lines.join("\n");
@@ -318,7 +321,7 @@ function defaultCells(
   if (path === CONTEXT_RELATIVE_PATHS.today) {
     return emit({
       purpose: "Current-day schedule, tasks, agent plan, handoff",
-      reviewFlows: "hourly, morning, evening",
+      reviewFlows: "activity-scan, morning, evening",
     });
   }
   if (path === CONTEXT_RELATIVE_PATHS.yesterday) {

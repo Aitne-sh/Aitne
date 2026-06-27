@@ -649,13 +649,13 @@ export interface EventRow {
    * sibling model (e.g. opus-4-7 → opus-4-6[1m]). Null for non-LLM rows.
    */
   model_usage_json: string | null;
-  cost_usd: number;
-  tokens_input: number;
-  tokens_output: number;
+  cost_usd: number | null;
+  tokens_input: number | null;
+  tokens_output: number | null;
   cache_creation_tokens: number | null;
   cache_read_tokens: number | null;
-  duration_ms: number;
-  num_turns: number;
+  duration_ms: number | null;
+  num_turns: number | null;
   result: string;
   detail: string | null;
   started_at: string;
@@ -723,6 +723,21 @@ export interface CostResponse {
   byEventType: { event_type: string; total_cost: number; session_count: number }[];
   byBackend: { backend: BackendId; total_cost: number; session_count: number }[];
   byBackendPeriod: { period: string; backend: BackendId; total_cost: number; session_count: number }[];
+  todayBreakdown: TodayBreakdown;
+}
+
+/**
+ * Today-scoped spend drivers — every field shares the Today card's agent-day
+ * bounds (04:00 local boundary), so Σ byEventType.total_cost reconciles with
+ * `today.costUsd`. `topActions` rows carry the full /events shape so the
+ * table can reuse EventRow + EventDetailSheet.
+ */
+export interface TodayBreakdown {
+  topActions: EventRow[];
+  byEventType: { event_type: string; total_cost: number; session_count: number }[];
+  byTrigger: { trigger: string; total_cost: number; session_count: number }[];
+  tokens: { input: number; output: number; cacheRead: number; cacheCreation: number };
+  failed: { costUsd: number; sessions: number };
 }
 
 // ── Config ──
@@ -738,11 +753,11 @@ export interface ConfigResponse {
   timezone: string;
   dayBoundaryHour: number;
   monthlyReviewEnabled: boolean;
-  hourlyCheckEnabled: boolean;
-  hourlyCheckIntervalMinutes: number;
-  hourlyCheckActiveStartHour: number;
-  hourlyCheckActiveEndHour: number;
-  hourlyCheckMinObservations: number;
+  activityScanEnabled: boolean;
+  activityScanIntervalMinutes: number;
+  activityScanActiveStartHour: number;
+  activityScanActiveEndHour: number;
+  activityScanMinObservations: number;
   authPreflightFreshnessMs: number;
   maxNotificationsPerHour: number;
   maxNotificationsPerDay: number;
@@ -1462,6 +1477,11 @@ export interface IntegrationStateDto {
    */
   delegatedMaxTurns?: number | null;
   /**
+   * User allowlist of pages / notes autonomous routines may fetch for this
+   * integration. Notion uses this to avoid workspace-wide connector scans.
+   */
+  fetchTargets?: IntegrationFetchTargetDto[];
+  /**
    * §7.7 — per-tool deny list. Each entry is the unsuffixed connector
    * tool name (e.g. `notion-create-database` for Claude, or
    * `notion_create_database` for Codex). Tools listed here are stripped
@@ -1469,6 +1489,11 @@ export interface IntegrationStateDto {
    */
   deniedTools?: string[];
   lastChangedAt: string;
+}
+
+export interface IntegrationFetchTargetDto {
+  label: string;
+  locator: string;
 }
 
 export interface IntegrationListItem {
@@ -1527,6 +1552,10 @@ export interface IntegrationPatchRequest {
    * if the daemon starts persisting the value.
    */
   delegatedMaxTurns?: number | null;
+  /**
+   * Omit to preserve the current allowlist. Pass [] to clear.
+   */
+  fetchTargets?: IntegrationFetchTargetDto[];
   /**
    * §7.7 — optional tool-deny list. Omit to preserve the previously
    * stored value. Validation against `descriptor.capabilityTools` and

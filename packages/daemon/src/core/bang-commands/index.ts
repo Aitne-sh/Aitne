@@ -21,6 +21,7 @@ export type {
   RegisteredBangCommand,
 } from "./registry.js";
 export { stopCommand, startCommand } from "./commands-stop-start.js";
+export { statusCommand, stopTaskCommand } from "./commands-task-control.js";
 export { closeCommand } from "./commands-close.js";
 export {
   costAllCommand,
@@ -79,6 +80,7 @@ export type {
 
 import { BangCommandRegistry } from "./registry.js";
 import { startCommand, stopCommand } from "./commands-stop-start.js";
+import { statusCommand, stopTaskCommand } from "./commands-task-control.js";
 import { closeCommand } from "./commands-close.js";
 import {
   costAllCommand,
@@ -108,6 +110,11 @@ export function createDefaultBangCommandRegistry(): BangCommandRegistry {
   const registry = new BangCommandRegistry();
   registry.register(stopCommand);
   registry.register(startCommand);
+  // BACKGROUND_TASK_RUNNER_DESIGN.md Phase 4 — per-task control. `!status`
+  // (exact) lists active detached tasks; `!stop <id>` (prefix) cancels one.
+  // Bare `!stop` still resolves to the exact pause command above.
+  registry.register(statusCommand);
+  registry.register(stopTaskCommand);
   registry.register(closeCommand);
   registry.register(costAllCommand);
   for (const cmd of costBackendCommands) {

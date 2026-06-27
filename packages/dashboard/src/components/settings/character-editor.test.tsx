@@ -27,7 +27,7 @@ describe("CharacterEditor — counter", () => {
     expect(html).toContain("999/1000");
     // Below-cap color is muted-foreground; neither amber nor destructive.
     expect(html).toContain("text-muted-foreground");
-    expect(html).not.toContain("text-amber-600");
+    expect(html).not.toContain("text-warning");
     expect(html).not.toContain("text-destructive");
   });
 
@@ -36,7 +36,7 @@ describe("CharacterEditor — counter", () => {
       <CharacterEditor value={"x".repeat(1000)} onChange={() => {}} />,
     );
     expect(html).toContain("1000/1000");
-    expect(html).toContain("text-amber-600");
+    expect(html).toContain("text-warning");
     expect(html).not.toContain("text-destructive");
   });
 
@@ -46,7 +46,7 @@ describe("CharacterEditor — counter", () => {
     );
     expect(html).toContain("1001/1000");
     expect(html).toContain("text-destructive");
-    expect(html).not.toContain("text-amber-600");
+    expect(html).not.toContain("text-warning");
   });
 
   it("renders the textarea with the provided placeholder", () => {

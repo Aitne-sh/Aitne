@@ -39,7 +39,7 @@ export function RegenerateButton({
       <Button
         variant={variant}
         size={size}
-        className={cn("text-emerald-600 dark:text-emerald-400", className)}
+        className={cn("text-success", className)}
         onClick={onDismiss}
       >
         <Check className="h-3.5 w-3.5 mr-1.5" />
@@ -54,14 +54,14 @@ export function RegenerateButton({
         <Button
           variant={variant}
           size={size}
-          className={cn("text-red-600 dark:text-red-400", className)}
+          className={cn("text-destructive", className)}
           onClick={onDismiss}
         >
           <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
           Failed
         </Button>
         {error && (
-          <span className="text-xs text-red-600 dark:text-red-400 max-w-48 truncate">
+          <span className="text-xs text-destructive max-w-48 truncate">
             {error}
           </span>
         )}

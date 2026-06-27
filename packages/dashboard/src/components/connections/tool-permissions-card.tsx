@@ -288,7 +288,7 @@ export function ToolPermissionsCard({
       {(draftDirty || savedFlash) && (
         <div className="mt-3 flex items-center justify-end gap-2">
           {savedFlash && !draftDirty && (
-            <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+            <span className="flex items-center gap-1 text-xs text-success">
               <Check className="h-3 w-3" /> Saved
             </span>
           )}

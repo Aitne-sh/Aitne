@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Play,
@@ -28,6 +28,9 @@ import {
 import { QueryResult } from "@/components/shared/query-result";
 import { StopWarningModal } from "@/components/agents/StopWarningModal";
 import { AgentEditor } from "@/components/agents/AgentEditor";
+import { RulebookTab } from "@/components/agents/RulebookTab";
+import { ScheduleWindowCard } from "@/components/agents/ScheduleWindowCard";
+import { CATEGORY_META } from "@/lib/agents/categories";
 import {
   useAgent,
   useAgentLiveRefresh,
@@ -52,6 +55,16 @@ import type {
 } from "@/lib/agents/types";
 
 export default function AgentDetailPage() {
+  // useSearchParams (deep-link ?tab=) requires a Suspense boundary for the
+  // build-time CSR bailout — same idiom as the activity / knowledge pages.
+  return (
+    <Suspense>
+      <AgentDetailPageInner />
+    </Suspense>
+  );
+}
+
+function AgentDetailPageInner() {
   const params = useParams<{ slug: string }>();
   const slug = params.slug;
   useAgentLiveRefresh();
@@ -81,13 +94,23 @@ function AgentDetail({ detail, running }: { detail: AgentDetailResponse; running
   const runNow = useRunAgentNow();
   const del = useDeleteAgent();
 
+  const searchParams = useSearchParams();
   const [stopModalOpen, setStopModalOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [tab, setTab] = useState("overview");
+  // Deep links (e.g. the retired /settings/journal redirect →
+  // /agents/morning-routine?tab=rulebook) can open a specific tab.
+  const [tab, setTab] = useState(() => {
+    const requested = searchParams.get("tab");
+    return requested && ["overview", "rulebook", "definition", "history", "metrics"].includes(requested)
+      ? requested
+      : "overview";
+  });
 
   const isBuiltin = row.source === "builtin";
   const runnable = !row.invalid && row.process_key !== null;
+  const hasRulebook = detail.policy_files.length > 0;
+  const categoryMeta = row.category ? CATEGORY_META[row.category] : undefined;
 
   const onToggle = () => {
     if (row.enabled) {
@@ -117,9 +140,14 @@ function AgentDetail({ detail, running }: { detail: AgentDetailResponse; running
           <span className="flex items-center gap-2">
             {isBuiltin && <Settings2 className="h-5 w-5 text-muted-foreground" />}
             {row.name}
+            {categoryMeta && (
+              <Badge variant="gray" className="font-normal">
+                {categoryMeta.label}
+              </Badge>
+            )}
             {running && (
               <span
-                className="h-2 w-2 animate-pulse rounded-full bg-emerald-500"
+                className="h-2 w-2 animate-pulse rounded-full bg-success"
                 aria-label="executing"
               />
             )}
@@ -164,6 +192,7 @@ function AgentDetail({ detail, running }: { detail: AgentDetailResponse; running
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          {hasRulebook && <TabsTrigger value="rulebook">Rulebook</TabsTrigger>}
           <TabsTrigger value="definition">Definition</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
@@ -173,7 +202,22 @@ function AgentDetail({ detail, running }: { detail: AgentDetailResponse; running
           <OverviewTab detail={detail} />
         </TabsContent>
 
+        {hasRulebook && (
+          <TabsContent value="rulebook" className="mt-4">
+            <RulebookTab agentName={row.name} files={detail.policy_files} />
+          </TabsContent>
+        )}
+
         <TabsContent value="definition" className="mt-4 space-y-4">
+          {detail.schedule_window && (
+            <ScheduleWindowCard
+              // Remount when the stored overrides change (save / reset round-trip)
+              // so the form's local draft re-seeds from the fresh resolved values.
+              key={JSON.stringify(detail.schedule_window.overrides)}
+              slug={row.slug}
+              window={detail.schedule_window}
+            />
+          )}
           {editing ? (
             <AgentEditor detail={detail} onClose={() => setEditing(false)} />
           ) : (
@@ -295,7 +339,7 @@ function OverviewTab({ detail }: { detail: AgentDetailResponse }) {
       <div className="grid gap-3 rounded-xl border border-border p-4 text-sm sm:grid-cols-2">
         {row.schedule_interval ? (
           <>
-            {/* Runtime-window Agent (e.g. hourly check): the interval and the
+            {/* Runtime-window Agent (e.g. activity scan): the interval and the
                 active-hours window are shown as two separate fields. */}
             <Field label="Interval">{formatIntervalEvery(row.schedule_interval)}</Field>
             <Field label="Active hours">
@@ -405,7 +449,7 @@ function MetricsTab({ detail }: { detail: AgentDetailResponse }) {
                   <span className="w-40 shrink-0 truncate font-mono text-xs">{kind}</span>
                   <div className="h-3 flex-1 overflow-hidden rounded bg-muted">
                     <div
-                      className="h-full rounded bg-red-400/70"
+                      className="h-full rounded bg-destructive/70"
                       style={{ width: `${maxKind === 0 ? 0 : (count / maxKind) * 100}%` }}
                     />
                   </div>

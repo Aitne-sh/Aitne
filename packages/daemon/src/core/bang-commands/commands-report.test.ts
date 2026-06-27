@@ -82,13 +82,13 @@ describe("!report", () => {
     // grouping must collapse them, not split.
     insertFailure(db, {
       backend: "claude",
-      actionType: "routine.hourly_check",
+      actionType: "routine.activity_scan",
       daysAgo: 1,
       error: "Backend quota exceeded for claude (req-abc)",
     });
     insertFailure(db, {
       backend: "claude",
-      actionType: "routine.hourly_check",
+      actionType: "routine.activity_scan",
       daysAgo: 1,
       error: "Backend quota exceeded for claude (req-xyz)",
     });
@@ -103,13 +103,13 @@ describe("!report", () => {
     });
     const reply = notify.mock.calls[0]?.[0] as string;
     expect(reply).toContain("1 error groups (2 total)");
-    expect(reply).toMatch(/routine\.hourly_check · claude \(2×\)/);
+    expect(reply).toMatch(/routine\.activity_scan · claude \(2×\)/);
   });
 
   it("excludes failures outside the 7-day window", async () => {
     insertFailure(db, {
       backend: "claude",
-      actionType: "routine.hourly_check",
+      actionType: "routine.activity_scan",
       daysAgo: 8,
       error: "old",
     });
@@ -169,6 +169,56 @@ describe("!report", () => {
   });
 });
 
+describe("!report — partial outcome-check rows (RESEARCH_CLUSTER_COST_FIX_PLAN F5)", () => {
+  let db: Database.Database;
+  const config = { timezone: "UTC" } as AgentConfig;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    applySchema(db);
+  });
+
+  function insertPartial(args: { error: string | null }): void {
+    db.prepare(
+      `INSERT INTO agent_actions
+         (event_id, action_type, trigger, backend, result, error, started_at)
+       VALUES ('e', 'routine.research_cluster_update', 'autonomous', 'claude',
+               'partial', ?, datetime('now', '-1 days'))`,
+    ).run(args.error);
+  }
+
+  it("includes a partial run that failed its post-run outcome check", async () => {
+    insertPartial({ error: "journal_write_missing" });
+    const notify = vi.fn().mockResolvedValue(undefined);
+    await reportCommand.handler({
+      event: makeEvent(),
+      db,
+      config,
+      notify,
+      audit: makeAudit(),
+      registry: new BangCommandRegistry(),
+    });
+    const reply = notify.mock.calls[0]?.[0] as string;
+    expect(reply).toContain("1 error groups (1 total)");
+    expect(reply).toMatch(/routine\.research_cluster_update · claude \(1×\)/);
+    expect(reply).toContain("journal_write_missing");
+  });
+
+  it("excludes benign partial rows that carry no error (e.g. wiki-bridge dedup)", async () => {
+    insertPartial({ error: null });
+    const notify = vi.fn().mockResolvedValue(undefined);
+    await reportCommand.handler({
+      event: makeEvent(),
+      db,
+      config,
+      notify,
+      audit: makeAudit(),
+      registry: new BangCommandRegistry(),
+    });
+    expect(notify.mock.calls[0]?.[0]).toContain("Clean. No agent failures recorded.");
+  });
+});
+
 describe("formatReport (pure)", () => {
   const config = { timezone: "UTC" } as AgentConfig;
 
@@ -185,7 +235,7 @@ describe("formatReport (pure)", () => {
         rows: [
           {
             backend: "claude",
-            action_type: "routine.hourly_check",
+            action_type: "routine.activity_scan",
             n: 3,
             first_seen: "2026-04-30 12:00:00",
             last_seen: "2026-05-01 03:02:00",
@@ -230,7 +280,7 @@ describe("formatReport (pure)", () => {
         rows: [
           {
             backend: "claude",
-            action_type: "routine.hourly_check",
+            action_type: "routine.activity_scan",
             n: 1,
             first_seen: "2026-05-01 00:00:00",
             last_seen: "2026-05-01 00:00:00",

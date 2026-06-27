@@ -364,6 +364,14 @@ export const SKILL_DESCRIPTION_MAX_LENGTH = 280;
  */
 export const READ_SENSITIVE_API_PREFIXES = [
   "/api/apple-calendar",
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §7 — list / detail reads on the
+  // generic detached-task surface. The artifact JSON (`report` / `brief`
+  // / `draft` / `significance`) carries the user's research / audit
+  // content, so the GETs are ReadSensitive (the POST spawn + clarify +
+  // cancel are Autonomous). A Codex DM session referencing the
+  // `background-task` skill body gets the read-token banner so its
+  // follow-up `GET /:id` read doesn't 401 silently.
+  "/api/background-task",
   "/api/books",
   // BROWSER_TASK_REDESIGN_PLAN.md §3 — list / detail / events / screenshot
   // reads on the open-ended browser sub-agent surface. The screenshot

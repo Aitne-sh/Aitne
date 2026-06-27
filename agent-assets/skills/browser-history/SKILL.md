@@ -99,20 +99,36 @@ curl --silent --show-error \
 
 ## Flow: routine.research_cluster_update
 
-Runs nightly at the day boundary for every cluster with new activity.
+Runs nightly at the day boundary. The daemon already selected exactly
+one cluster and passed it as `event.data.slug` — the fan-out enqueues
+one event per cluster, so operate on **that slug only**. Do **not** call
+`GET /research-clusters` or iterate clusters here; that contradicts the
+single-slug contract.
 
-1. List active clusters via `GET /research-clusters`. Filter to
-   `status="active"` and `lastActivityAt` within the last 24h. For each
-   match continue.
-2. Fetch `GET /research-clusters/<slug>/delta` (capped at 31 days; the
-   route returns the most recent buckets first).
+1. (Optional) Fetch `GET /research-clusters/<slug>` for `displayName`,
+   `topDomains`, and `agentSummaryRevision` (frontmatter for the
+   initial-file case).
+2. Fetch `GET /research-clusters/<slug>/delta`. `days[]` is capped to the
+   most recent 31 days and ordered **oldest-first**. Each entry carries
+   `complete` — `false` only on the still-accumulating current agent
+   day.
 3. Read the existing cluster journal at
    `context/research/<slug>.md` via
-   `GET /api/context/research/<slug>.md`. The first run will return
-   404 — create the file from the template below.
-4. Append today's day entry. **Do not** rewrite earlier days; this is
-   an append-only ledger. Use `PATCH /api/context/research/<slug>.md`
-   with a multi-line `append:` body.
+   `GET /api/context/research/<slug>.md`, and note which
+   `### <YYYY-MM-DD>` headings already exist under `## Day log`. The
+   first run will return 404 — create the file from the template below.
+4. Append a block for **every** `complete: true` day in `days[]` not
+   already present under `## Day log`, **oldest first** (iterate `days[]`
+   in order). Never append a `complete: false` day — its counts are
+   still growing, and a premature block freezes an undercounted day in
+   this append-only ledger (it arrives complete on a later run). This
+   backfills nights that were skipped or failed — a failed run waits a
+   full agent-day before retrying, so missed days accumulate until the
+   next successful run (bounded by the 31-day delta window). **Do not**
+   rewrite earlier days; this is an append-only ledger. Use
+   `PATCH /api/context/research/<slug>.md` with body
+   `{"mode":"append","section":"## Day log","content":"<block>"}`
+   (use `PUT` only for the initial-file case).
 
 Initial-file template (use only when the GET in step 3 returned 404):
 
@@ -136,13 +152,15 @@ Do not invent a thesis the data does not support.)
 
 ## Day log
 
+<!-- one block per missing `complete: true` day in `days[]`, oldest first -->
 ### <YYYY-MM-DD>
 - visits: <meaningfulVisits> (<meaningfulForegroundSec / 60>m foreground)
 - new domains: <newDomains.join(", ")>
 - agent observation: <one neutral sentence about the day's shape>
 ```
 
-Per-day append shape:
+Per-day append shape (one block per missing `complete: true` day,
+**oldest first**):
 
 ```markdown
 ### <YYYY-MM-DD>

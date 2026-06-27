@@ -98,7 +98,7 @@ export function DestinationSelector() {
           back to the app where the conversation happened, and you can override
           the destination for a single request without changing this default.
         </p>
-        {notice && <p className="text-xs text-amber-700 dark:text-amber-300">{notice}</p>}
+        {notice && <p className="text-xs text-warning">{notice}</p>}
         <Button
           size="sm"
           variant="outline"

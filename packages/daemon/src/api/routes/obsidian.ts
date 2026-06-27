@@ -13,7 +13,7 @@ export interface ObsidianRouteDependencies {
   /**
    * Optional shared tracker. When present, every write endpoint pre-marks
    * the target vault file so the obsidian-watcher attributes the resulting
-   * chokidar event to `actor='agent'` (and hourly_check's `?actor=user`
+   * chokidar event to `actor='agent'` (and activity_scan's `?actor=user`
    * filter excludes it). Without this the agent can observe its own
    * Obsidian writes and loop.
    */

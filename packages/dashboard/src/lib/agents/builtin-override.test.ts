@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { agentDefinitionSchema, OVERRIDE_EDIT_PATHS, type AgentDefinition } from "@aitne/shared";
 import {
   BUILTIN_OVERRIDE_FIELDS,
+  HIDDEN_OVERRIDE_KEYS,
   buildBuiltinPatchBody,
   buildOverrideResetBody,
   extractOverrideValues,
@@ -31,6 +32,7 @@ describe("extractOverrideValues", () => {
     expect(extractOverrideValues(def)).toEqual({
       "backend.tier": null,
       "backend.model": null,
+      "backend.backend_id": null,
       "limits.max_turns": 20,
       "limits.max_budget_usd": 0.25,
       "limits.timeout_minutes": 10,
@@ -45,6 +47,9 @@ describe("validateOverrideValue", () => {
     expect(validateOverrideValue("backend.tier", null)).toBeNull();
     expect(validateOverrideValue("backend.model", "claude-opus-4-8")).toBeNull();
     expect(validateOverrideValue("backend.model", null)).toBeNull();
+    expect(validateOverrideValue("backend.backend_id", "claude")).toBeNull();
+    expect(validateOverrideValue("backend.backend_id", "opencode")).toBeNull();
+    expect(validateOverrideValue("backend.backend_id", null)).toBeNull();
     expect(validateOverrideValue("limits.max_turns", 5)).toBeNull();
     expect(validateOverrideValue("limits.timeout_minutes", 1)).toBeNull();
     expect(validateOverrideValue("limits.max_budget_usd", 0)).toBeNull();
@@ -54,6 +59,8 @@ describe("validateOverrideValue", () => {
   it("rejects invalid values per field", () => {
     expect(validateOverrideValue("backend.tier", "huge")).not.toBeNull();
     expect(validateOverrideValue("backend.model", "")).not.toBeNull();
+    expect(validateOverrideValue("backend.backend_id", "not-a-backend")).not.toBeNull();
+    expect(validateOverrideValue("backend.backend_id", "")).not.toBeNull();
     expect(validateOverrideValue("limits.max_turns", 0)).not.toBeNull();
     expect(validateOverrideValue("limits.max_turns", 2.5)).not.toBeNull();
     expect(validateOverrideValue("limits.timeout_minutes", -1)).not.toBeNull();
@@ -63,17 +70,22 @@ describe("validateOverrideValue", () => {
 });
 
 describe("validateOverrideValues", () => {
-  it("returns only the failing fields", () => {
+  it("returns only the failing fields (hidden keys included)", () => {
     const values: OverrideValues = {
       "backend.tier": "nope",
       "backend.model": null,
+      "backend.backend_id": "bogus",
       "limits.max_turns": 20,
       "limits.max_budget_usd": -5,
       "limits.timeout_minutes": 10,
       "on_error.notify_owner": false,
     };
     const errors = validateOverrideValues(values);
-    expect(Object.keys(errors).sort()).toEqual(["backend.tier", "limits.max_budget_usd"]);
+    expect(Object.keys(errors).sort()).toEqual([
+      "backend.backend_id",
+      "backend.tier",
+      "limits.max_budget_usd",
+    ]);
   });
 
   it("returns no errors for a clean set", () => {
@@ -115,6 +127,17 @@ describe("buildBuiltinPatchBody", () => {
     expect(changedKeys).toEqual(["backend.model"]);
     expect(body).toEqual({ backend: { model: "claude-sonnet-4-6" } });
   });
+
+  it("carries the hidden backend_id companion when the model pick changes it", () => {
+    const original = extractOverrideValues(definition());
+    const { body, changedKeys } = buildBuiltinPatchBody(original, {
+      ...original,
+      "backend.model": "gpt-5.4",
+      "backend.backend_id": "codex",
+    });
+    expect(changedKeys.sort()).toEqual(["backend.backend_id", "backend.model"]);
+    expect(body).toEqual({ backend: { model: "gpt-5.4", backend_id: "codex" } });
+  });
 });
 
 describe("buildOverrideResetBody", () => {
@@ -132,12 +155,24 @@ describe("overriddenFieldKeys", () => {
       overriddenFieldKeys({ "backend.tier": "high", "unrelated.key": 1, "limits.max_turns": 30 }),
     ).toEqual(["backend.tier", "limits.max_turns"]);
   });
+
+  it("includes the hidden backend_id key so resets clear it too", () => {
+    expect(
+      overriddenFieldKeys({ "backend.model": "gpt-5.4", "backend.backend_id": "codex" }),
+    ).toEqual(["backend.model", "backend.backend_id"]);
+  });
 });
 
 describe("BUILTIN_OVERRIDE_FIELDS", () => {
-  it("covers exactly the shared OVERRIDE_EDIT_PATHS allow-list (single source of truth)", () => {
-    // Assert against the imported constant (not a hardcoded copy) so adding a
-    // 7th override path to @aitne/shared fails here until the form is updated.
-    expect(BUILTIN_OVERRIDE_FIELDS.map((f) => f.key)).toEqual([...OVERRIDE_EDIT_PATHS]);
+  it("plus the hidden keys covers exactly the shared OVERRIDE_EDIT_PATHS allow-list", () => {
+    // Assert against the imported constant (not a hardcoded copy) so adding an
+    // 8th override path to @aitne/shared fails here until the form is updated.
+    // `backend.backend_id` has no standalone field — the Model dropdown writes
+    // it together with `backend.model` (see HIDDEN_OVERRIDE_KEYS).
+    const rendered = BUILTIN_OVERRIDE_FIELDS.map((f) => f.key);
+    expect([...rendered, ...HIDDEN_OVERRIDE_KEYS].sort()).toEqual(
+      [...OVERRIDE_EDIT_PATHS].sort(),
+    );
+    expect(rendered).not.toContain("backend.backend_id");
   });
 });

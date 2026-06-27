@@ -217,7 +217,7 @@ function ClaudeRecoveryView({ backendId, onToast, onRefresh }: ClaudeRecoveryVie
             href={recoveryData.authUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-1 flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400 break-all"
+            className="mt-1 flex items-center gap-1 text-sm font-medium text-primary hover:underline break-all"
           >
             Sign in to Anthropic
             <ExternalLink className="h-3 w-3 shrink-0" />
@@ -438,7 +438,7 @@ function CodexRecoveryView({ backendId, onToast, onRefresh }: CodexRecoveryViewP
             href={recoveryData.authUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-1 flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+            className="mt-1 flex items-center gap-1 text-sm font-medium text-primary hover:underline"
           >
             {recoveryData.authUrl}
             <ExternalLink className="h-3 w-3" />
@@ -679,7 +679,7 @@ function GeminiRecoveryView({ backendId, onToast, onRefresh }: GeminiRecoveryVie
             href={recoveryData.authUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-1 flex items-center gap-1 break-all text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+            className="mt-1 flex items-center gap-1 break-all text-sm font-medium text-primary hover:underline"
           >
             Open Google Sign-In
             <ExternalLink className="h-3 w-3 shrink-0" />

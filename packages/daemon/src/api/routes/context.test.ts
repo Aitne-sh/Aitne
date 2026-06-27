@@ -851,7 +851,7 @@ describe("Context API — optimistic concurrency", () => {
   describe("GET /context/list/routines — custom routine flattening", () => {
     it("surfaces files under routines/custom/ with a custom/ prefix", async () => {
       mkdirSync(join(contextDir, "policies", "routines", "custom"), { recursive: true });
-      writeFileSync(join(contextDir, "policies", "routines", "hourly.md"), "# hourly\n", "utf-8");
+      writeFileSync(join(contextDir, "policies", "routines", "activity-scan.md"), "# activity scan\n", "utf-8");
       writeFileSync(
         join(contextDir, "policies", "routines", "custom", "tuesday-notion.md"),
         "# tuesday\n",
@@ -862,13 +862,13 @@ describe("Context API — optimistic concurrency", () => {
       expect(res.status).toBe(200);
       const data = (await res.json()) as { files: { name: string }[] };
       const names = data.files.map((f) => f.name).sort();
-      expect(names).toContain("hourly.md");
+      expect(names).toContain("activity-scan.md");
       expect(names).toContain("custom/tuesday-notion.md");
     });
 
     it("returns an empty custom/ list when the subdir is absent", async () => {
       mkdirSync(join(contextDir, "policies", "routines"), { recursive: true });
-      writeFileSync(join(contextDir, "policies", "routines", "hourly.md"), "# h\n", "utf-8");
+      writeFileSync(join(contextDir, "policies", "routines", "activity-scan.md"), "# h\n", "utf-8");
 
       const res = await app.request("/api/context/list/routines");
       expect(res.status).toBe(200);
@@ -901,12 +901,12 @@ describe("Context API — optimistic concurrency", () => {
 
     it("lists nested dirs across classes (knowledge/dossiers, policies/routines, plans/projects)", async () => {
       writeFileSync(join(contextDir, "knowledge", "dossiers", "acme.md"), "# acme\n", "utf-8");
-      writeFileSync(join(contextDir, "policies", "routines", "hourly.md"), "# h\n", "utf-8");
+      writeFileSync(join(contextDir, "policies", "routines", "activity-scan.md"), "# h\n", "utf-8");
       writeFileSync(join(contextDir, "plans", "projects", "launch.md"), "# launch\n", "utf-8");
 
       const cases: ReadonlyArray<readonly [string, string]> = [
         ["knowledge/dossiers", "acme.md"],
-        ["policies/routines", "hourly.md"],
+        ["policies/routines", "activity-scan.md"],
         ["plans/projects", "launch.md"],
       ];
       for (const [dir, file] of cases) {

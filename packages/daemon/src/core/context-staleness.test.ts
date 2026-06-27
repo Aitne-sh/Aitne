@@ -51,7 +51,7 @@ describe("classifyContextWriteStaleness", () => {
         path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
-        content: "- 12:00 Quiet hourly check",
+        content: "- 12:00 Quiet activity scan",
         previousContent: "# Today\n\n## Agent Log\n- old\n",
       }).tier,
     ).toBe("quiet");
@@ -61,7 +61,7 @@ describe("classifyContextWriteStaleness", () => {
         path: "state/today.md",
         method: "PATCH",
         mode: "append_to_file",
-        content: "- 12:00 Quiet hourly check",
+        content: "- 12:00 Quiet activity scan",
         previousContent: "# Today\n\n## Handoff\n- old\n",
       }).tier,
     ).toBe("loud");

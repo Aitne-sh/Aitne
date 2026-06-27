@@ -5,12 +5,12 @@
  * the daemon — adapter / service interfaces (`IDashboardStream`,
  * `INotificationManager`, `ISessionManager`, `IMessageRecorder`,
  * `IContextBuilder`, `IAuditLogger`), the `GetTaskFlow` callback, and the
- * value types used at API boundaries (`TriggerHourlyCheckOptions`,
- * `TriggerHourlyCheckResult`, `InFlightExecutionInfo`, `SetupMode`,
+ * value types used at API boundaries (`TriggerActivityScanOptions`,
+ * `TriggerActivityScanResult`, `InFlightExecutionInfo`, `SetupMode`,
  * `BangCommandDetail`, `ReplyActivityHandle`). It also hosts two pure
  * helpers that have no dependence on dispatcher instance state:
  * `buildLogErrorContext` (recovers backend/quota failure metadata from a
- * thrown error) and `parseStage2Verdict` (extracts the Stage 2 hourly-check
+ * thrown error) and `parseStage2Verdict` (extracts the Stage 2 activity-scan
  * triage JSON verdict from an LLM response).
  *
  * The dispatcher re-exports the public-surface members of this file so that
@@ -31,6 +31,7 @@ import {
   BackendQuotaError,
 } from "./agent-core.js";
 import { BackendRouterHandledError } from "./backends/backend-router.js";
+import type { OutboundAttachmentRef } from "../adapters/types.js";
 import type { SessionInfoPayload } from "../api/chat-binding-query.js";
 import type { DeferredSessionEffects } from "./session-manager.js";
 
@@ -144,6 +145,15 @@ export interface INotificationManager {
        * WIKI_BUILDER_DESIGN.md §3.4-bis (completion notification path).
        */
       replyTo?: MessageReplyTarget;
+      /**
+       * Outbound media attachments, delivered alongside `message` in a
+       * single adapter send. Only honoured on the direct `replyTo` path
+       * (the manager hands them to `messageHub.sendToPlatform`); ignored
+       * on the proactive/batch paths. Used by the background task-delivery
+       * idle branch to re-attach browser-task screenshots inline
+       * (BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1).
+       */
+      attachments?: readonly OutboundAttachmentRef[];
     },
   ): Promise<void>;
   beginReplyActivity(event: MessageEvent): Promise<ReplyActivityHandle>;
@@ -311,6 +321,21 @@ export interface IAuditLogger {
     trigger: "reactive" | "autonomous";
     backend?: BackendId;
     costSource?: AgentResult["costSource"];
+    /**
+     * Terminal result override for the success path. Defaults to
+     * `"success"`. The only other legal value here is `"partial"` — a
+     * session that ended cleanly (no backend error) but failed a post-run
+     * outcome check, e.g. RESEARCH_CLUSTER_COST_FIX_PLAN F5's
+     * journal-write verification. Hard errors take the `logError` path
+     * (`result='failed'`); this override never expresses failure.
+     */
+    result?: "success" | "partial";
+    /**
+     * Outcome-failure marker persisted to `agent_actions.error` when a run
+     * is downgraded to `result:"partial"` (F5: `'journal_write_missing'`).
+     * Paired with `result:"partial"`; ignored on a plain success.
+     */
+    error?: string;
     /**
      * Whether the agent made at least one PUT/PATCH call to /api/context/*.
      * Used for observer-event observability — see Phase 6 of
@@ -548,9 +573,9 @@ export interface BangCommandDetail {
   [extra: string]: unknown;
 }
 
-export type TriggerHourlyCheckSkipReason =
+export type TriggerActivityScanSkipReason =
   | "morning_routine_active"
-  | "hourly_check_in_progress"
+  | "activity_scan_in_progress"
   | "below_threshold"
   | "setup_incomplete"
   | "setup_in_progress"
@@ -624,17 +649,17 @@ export function buildLogErrorContext(
   return { durationMs };
 }
 
-export interface TriggerHourlyCheckOptions {
+export interface TriggerActivityScanOptions {
   force?: boolean;
   /** Optional model hint — injected as `requestedModel` on the enqueued
-   *  routine.hourly_check event so the user can force an Opus run from
+   *  routine.activity_scan event so the user can force an Opus run from
    *  /api/agent/run-now without touching process_backend_config. */
   requestedModel?: "sonnet" | "opus";
 }
 
-export interface TriggerHourlyCheckResult {
+export interface TriggerActivityScanResult {
   status: "queued" | "skipped";
-  reason?: TriggerHourlyCheckSkipReason;
+  reason?: TriggerActivityScanSkipReason;
   pendingCount?: number;
   minObservations: number;
   forced: boolean;

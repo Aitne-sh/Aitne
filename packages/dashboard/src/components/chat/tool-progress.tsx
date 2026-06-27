@@ -20,7 +20,7 @@ export function ToolProgress({ items }: ToolProgressProps) {
             className="flex items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-xs text-muted-foreground"
           >
             {done ? (
-              <Check className="h-3 w-3 text-emerald-500" />
+              <Check className="h-3 w-3 text-success" />
             ) : (
               <Loader2 className="h-3 w-3 animate-spin" />
             )}

@@ -385,7 +385,7 @@ function DegradedHero({
 }) {
   return (
     <div className="mx-auto max-w-2xl px-6 py-12 text-center">
-      <AlertTriangle className="mx-auto h-10 w-10 text-amber-500" />
+      <AlertTriangle className="mx-auto h-10 w-10 text-warning" />
       <h2 className="mt-4 text-xl font-semibold">Docs failed to seed</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
         The docs corpus did not initialize. QA and browse are unavailable
@@ -401,7 +401,7 @@ function DegradedHero({
           {health.errors.slice(0, 5).map((e, i) => (
             <li
               key={`${e.slug ?? e.path ?? "_"}-${i}`}
-              className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+              className="rounded border border-warning/40 bg-warning/10 px-2 py-1 text-warning"
             >
               <span className="font-mono">{e.slug ?? e.path ?? "?"}</span>: {e.message}
             </li>

@@ -53,9 +53,8 @@ related:
 ui_anchors:
   - /connections
   - /connections/messaging
-  - /settings/connections
   - /settings/commands
-  - /settings/schedule
+  - /settings/hours
 process_keys:
   - message.dm
   - message.mention
@@ -101,8 +100,9 @@ the owner channel independently.
 
 ## When It Runs / How It Is Triggered
 
-- The messaging adapter for each connected platform polls / receives
-  webhooks for incoming messages.
+- The messaging adapter for each connected platform long-polls
+  (Telegram) or holds a persistent WebSocket connection (Slack,
+  Discord, WhatsApp) for incoming messages.
 - An incoming DM dispatches to the `message.dm` ProcessKey.
 - An incoming mention dispatches to `message.mention`.
 - Notifications fire as a side-effect of routines and observations
@@ -111,21 +111,24 @@ the owner channel independently.
 ## What It Outputs
 
 - Replies in the operator's chosen messaging app.
-- Notification messages, batched during quiet hours.
+- Notification messages — suppressed during quiet hours; a pending
+  batch is deferred and delivered when the window ends (see
+  [Quiet Hours](../operations/quiet-hours.md)).
 
 ## Where in the Dashboard
 
 - **Connections (`/connections`)** is the unified pairing page.
 - **Connections → Messaging (`/connections/messaging`)** lists each
-  app's status, owner channel, and rate limit settings.
+  app's status, owner pairing, and notification destinations.
 
 ## Configuration
 
 - Per-app: bot token / OAuth, owner channel, optional default channel.
 - Global: `primaryPlatform` (default `slack`) — the platform the agent
   prefers for outbound notifications when more than one app is paired.
-- Outbound rate limits and quiet hours live on `/settings/schedule`
-  (see [Quiet Hours](../operations/quiet-hours.md)).
+- Outbound rate limits and quiet hours live on `/settings/hours`
+  ("Hours & Notifications" — see
+  [Quiet Hours](../operations/quiet-hours.md)).
 
 ## When Something Goes Wrong
 
@@ -133,7 +136,7 @@ the owner channel independently.
   `/connections/messaging` first (see
   [Pairing & Magic Phrase](pairing-and-magic-phrase.md)).
 - A **notification you expected but did not get**: check quiet hours
-  and rate limits on `/settings/schedule`.
+  and rate limits on `/settings/hours`.
 
 ## Related
 

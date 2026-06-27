@@ -66,11 +66,11 @@ function makeConfig(dataDir: string): AgentConfig {
     dmStalenessStrict: false,
     timezone: "",
     dayBoundaryHour: 4,
-    hourlyCheckEnabled: true,
-    hourlyCheckIntervalMinutes: 60,
-    hourlyCheckActiveStartHour: 4,
-    hourlyCheckActiveEndHour: 24,
-    hourlyCheckMinObservations: 1,
+    activityScanEnabled: true,
+    activityScanIntervalMinutes: 60,
+    activityScanActiveStartHour: 4,
+    activityScanActiveEndHour: 24,
+    activityScanMinObservations: 1,
     authProbeDisabled: false,
     authPreflightFreshnessMs: 600000,
     schedulePollIntervalSeconds: 5,
@@ -366,10 +366,10 @@ describe("Dashboard API", () => {
       expect(data.dayBoundaryHour).toBe(4);
       expect(data.quietHoursStart).toBe("22:00");
       expect(data.quietHoursEnd).toBe("08:00");
-      expect(data.hourlyCheckEnabled).toBe(true);
-      expect(data.hourlyCheckIntervalMinutes).toBe(60);
-      expect(data.hourlyCheckActiveStartHour).toBe(4);
-      expect(data.hourlyCheckActiveEndHour).toBe(24);
+      expect(data.activityScanEnabled).toBe(true);
+      expect(data.activityScanIntervalMinutes).toBe(120);
+      expect(data.activityScanActiveStartHour).toBe(4);
+      expect(data.activityScanActiveEndHour).toBe(24);
       expect(data.maxNotificationsPerHour).toBe(3);
       expect(data.maxNotificationsPerDay).toBe(12);
       expect(data.authPreflightFreshnessMs).toBe(600000);
@@ -1253,6 +1253,91 @@ describe("Dashboard API", () => {
       const data = (await res.json()) as Record<string, any>;
       expect(data.period).toBe("weekly");
     });
+
+    it("returns todayBreakdown scoped to the agent day", async () => {
+      // Two costly runs today (different process + trigger), one failed run
+      // today, one zero-cost row today (excluded from topActions but counted
+      // in aggregates), and one expensive run 3 days ago (excluded from all
+      // today fields even though it dominates on cost).
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, trigger, model_used, cost_usd, tokens_input, tokens_output, cache_creation_tokens, cache_read_tokens, result, started_at)
+         VALUES ('routine.fetch_window', 'autonomous', 'claude-haiku-4-5', 0.80, 100, 50, 2000, 40000, 'success', datetime('now'))`,
+      ).run();
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, trigger, model_used, cost_usd, tokens_input, tokens_output, cache_creation_tokens, cache_read_tokens, result, started_at)
+         VALUES ('message.dm', 'reactive', 'claude-sonnet-4-6', 0.30, 200, 100, 1000, 8000, 'success', datetime('now'))`,
+      ).run();
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, trigger, model_used, cost_usd, tokens_input, tokens_output, result, started_at)
+         VALUES ('routine.activity_scan', 'autonomous', 'claude-haiku-4-5', 0.10, 50, 20, 'failed', datetime('now'))`,
+      ).run();
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, trigger, model_used, cost_usd, tokens_input, tokens_output, result, started_at)
+         VALUES ('routine.activity_scan', 'autonomous', 'claude-haiku-4-5', 0.0, 10, 5, 'success', datetime('now'))`,
+      ).run();
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, trigger, model_used, cost_usd, tokens_input, tokens_output, result, started_at)
+         VALUES ('routine.morning_routine', 'autonomous', 'claude-opus-4-7', 9.99, 9000, 4000, 'success', datetime('now', '-3 days'))`,
+      ).run();
+
+      const res = await app.request("/api/cost", {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as Record<string, any>;
+      const breakdown = data.todayBreakdown;
+
+      // topActions: cost-desc, today-only, zero-cost rows excluded.
+      expect(breakdown.topActions.map((a: any) => a.cost_usd)).toEqual([
+        0.8, 0.3, 0.1,
+      ]);
+      expect(breakdown.topActions[0].action_type).toBe("routine.fetch_window");
+      // Carries the full /events row shape for the detail sheet.
+      expect(breakdown.topActions[0].cache_read_tokens).toBe(40000);
+      expect(breakdown.topActions[0].num_turns).toBeNull();
+
+      // byEventType reconciles with the Today card (includes the $0 row's
+      // process, excludes the 3-day-old run).
+      expect(breakdown.byEventType).toEqual([
+        { event_type: "routine.fetch_window", total_cost: 0.8, session_count: 1 },
+        { event_type: "message.dm", total_cost: 0.3, session_count: 1 },
+        { event_type: "routine.activity_scan", total_cost: expect.closeTo(0.1, 6), session_count: 2 },
+      ]);
+      const byEventTypeSum = breakdown.byEventType.reduce(
+        (sum: number, row: any) => sum + row.total_cost,
+        0,
+      );
+      expect(byEventTypeSum).toBeCloseTo(data.today.costUsd, 6);
+
+      expect(breakdown.byTrigger).toEqual([
+        { trigger: "autonomous", total_cost: expect.closeTo(0.9, 6), session_count: 3 },
+        { trigger: "reactive", total_cost: 0.3, session_count: 1 },
+      ]);
+
+      expect(breakdown.tokens).toEqual({
+        input: 360,
+        output: 175,
+        cacheRead: 48000,
+        cacheCreation: 3000,
+      });
+
+      expect(breakdown.failed).toEqual({ costUsd: 0.1, sessions: 1 });
+    });
+
+    it("returns empty todayBreakdown shapes when there is no spend today", async () => {
+      const res = await app.request("/api/cost", {
+        headers: authHeaders(),
+      });
+      expect(res.status).toBe(200);
+      const data = (await res.json()) as Record<string, any>;
+      expect(data.todayBreakdown).toEqual({
+        topActions: [],
+        byEventType: [],
+        byTrigger: [],
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+        failed: { costUsd: 0, sessions: 0 },
+      });
+    });
   });
 
   // ── Approvals API ──
@@ -1580,7 +1665,7 @@ describe("Dashboard API", () => {
   // ── Dashboard-specific endpoints ──
 
   describe("GET /api/dashboard/next-check", () => {
-    it("returns next hourly check info", async () => {
+    it("returns next activity scan info", async () => {
       const res = await app.request("/api/dashboard/next-check", {
         headers: authHeaders(),
       });
@@ -1834,7 +1919,7 @@ describe("Dashboard API", () => {
   describe("GET /api/events — additional filters", () => {
     it("filters by result", async () => {
       db.prepare(
-        `INSERT INTO agent_actions (action_type, trigger, result, started_at) VALUES ('routine.hourly_check', 'autonomous', 'skipped', datetime('now'))`,
+        `INSERT INTO agent_actions (action_type, trigger, result, started_at) VALUES ('routine.activity_scan', 'autonomous', 'skipped', datetime('now'))`,
       ).run();
       db.prepare(
         `INSERT INTO agent_actions (action_type, trigger, result, started_at) VALUES ('message.received', 'reactive', 'success', datetime('now'))`,
@@ -2158,7 +2243,7 @@ describe("Dashboard API", () => {
           ...authHeaders(),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ hourlyCheckIntervalMinutes: 30 }),
+        body: JSON.stringify({ activityScanIntervalMinutes: 30 }),
       });
 
       expect(res.status).toBe(200);
@@ -2174,15 +2259,15 @@ describe("Dashboard API", () => {
         },
         body: JSON.stringify({
           executeTimeoutMinutes: 90,
-          // 0 is below the hourlyCheckIntervalMinutes minimum of 1.
-          hourlyCheckIntervalMinutes: 0,
+          // 0 is below the activityScanIntervalMinutes minimum of 1.
+          activityScanIntervalMinutes: 0,
         }),
       });
 
       expect(res.status).toBe(200);
       const data = (await res.json()) as Record<string, any>;
       expect(data.updated).toContain("executeTimeoutMinutes");
-      expect(data.errors).toHaveProperty("hourlyCheckIntervalMinutes");
+      expect(data.errors).toHaveProperty("activityScanIntervalMinutes");
     });
 
     it("reports restart-required keys", async () => {

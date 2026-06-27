@@ -78,7 +78,7 @@ process_keys:
   - dashboard.docs_qa
   - delegated_task_heavy
   - routine.fetch_window
-  - routine.hourly_check
+  - routine.activity_scan
   - routine.research_cluster_update
 config_keys:
   - dayBoundaryHour
@@ -230,7 +230,7 @@ Operator-facing umbrella for the two non-heavy lanes on each backend:
 
 - **Medium / Main** (Claude Sonnet 4.6, `gpt-5.4` on Codex,
   `gemini-3.1-pro-preview` on Gemini, Sonnet 4.6 via OpenCode) —
-  default for owner DMs, dashboard chat, the hourly check, and the
+  default for owner DMs, dashboard chat, the activity scan, and the
   morning / evening / weekly review routines.
 - **Lite / Delegated** (Claude Haiku 4.5, `gpt-5.4-mini` on Codex,
   `gemini-3.1-flash-lite-preview` on Gemini, Haiku 4.5 via OpenCode) —
@@ -252,7 +252,7 @@ fallback when upstream reports zero.
 ## Routine Pre-pass
 
 A lite-tier `routine.fetch_window` session spawned before each main
-routine (morning / today_refresh / hourly_check / evening / weekly).
+routine (morning / today_refresh / activity_scan / evening / weekly).
 It fetches each routine's mail / calendar / Notion window
 (`ROUTINE_WINDOWS`) and POSTs the results to `/api/observations`. The
 main routine then consumes the resulting `<fetch_report>` block and
@@ -264,7 +264,7 @@ in 2026-05 to trim morning-routine input tokens by ~24%.
 One row in the `observations` table. A change record a polling
 integration (Obsidian, Git, Notion, calendar, mail, browser history)
 or a `routine.fetch_window` pre-pass wrote into SQLite. The
-`routine.hourly_check` is the consumer — there is no per-change
+`routine.activity_scan` is the consumer — there is no per-change
 notification. `actor='agent'` rows are filtered out by the consumer
 to break the agent-observing-its-own-writes loop. See
 [Observations](concepts/observations.md).

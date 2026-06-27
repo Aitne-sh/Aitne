@@ -11,7 +11,7 @@ A new remote tag appeared in a watched repository.
 ### Decision Framework
 
 1. Do not send a DM by default. Tags and releases are recorded for
-   hourly review and project documentation updates.
+   activity-scan review and project documentation updates.
 2. If the tag clearly represents an active release the user is tracking
    today, append one concise line to today.md `## Agent Notes`.
 3. If it is routine versioning or lacks current-day relevance, log one

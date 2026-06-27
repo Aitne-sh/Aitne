@@ -126,7 +126,7 @@ describe("Agent API routes", () => {
     db.close();
   });
 
-  it("returns 503 when hourly check trigger is unavailable", async () => {
+  it("returns 503 when activity scan trigger is unavailable", async () => {
     const app = createAgentRoutes({ db } as never);
 
     const res = await app.request("/agent/run-now", {
@@ -141,18 +141,18 @@ describe("Agent API routes", () => {
     // observable contract rather than the full envelope shape so registry
     // additions (constraint, severity, …) do not break this assertion.
     const body = await res.json() as Record<string, unknown>;
-    expect(body.error).toBe("hourly_check_unavailable");
+    expect(body.error).toBe("activity_scan_unavailable");
     expect(Array.isArray(body.errors)).toBe(true);
     expect((body.errors as Array<{ code: string }>)[0].code).toBe(
-      "agent.hourly_check_unavailable",
+      "agent.activity_scan_unavailable",
     );
   });
 
   it("returns 503 while daemon startup is still in progress", async () => {
-    const triggerHourlyCheck = vi.fn();
+    const triggerActivityScan = vi.fn();
     const app = createAgentRoutes({
       db,
-      triggerHourlyCheck,
+      triggerActivityScan,
       isStartupComplete: () => false,
     } as never);
 
@@ -163,7 +163,7 @@ describe("Agent API routes", () => {
     });
 
     expect(res.status).toBe(503);
-    expect(triggerHourlyCheck).not.toHaveBeenCalled();
+    expect(triggerActivityScan).not.toHaveBeenCalled();
     const body = await res.json() as Record<string, unknown>;
     expect(body.error).toBe("daemon_starting");
     expect(body.message).toBe(
@@ -174,14 +174,14 @@ describe("Agent API routes", () => {
     );
   });
 
-  it("forces hourly check for manual run requests and returns the dispatcher result", async () => {
-    const triggerHourlyCheck = vi.fn().mockResolvedValue({
+  it("forces activity scan for manual run requests and returns the dispatcher result", async () => {
+    const triggerActivityScan = vi.fn().mockResolvedValue({
       status: "queued",
       pendingCount: 3,
       minObservations: 1,
       forced: true,
     });
-    const app = createAgentRoutes({ db, triggerHourlyCheck } as never);
+    const app = createAgentRoutes({ db, triggerActivityScan } as never);
 
     const res = await app.request("/agent/run-now", {
       method: "POST",
@@ -190,7 +190,7 @@ describe("Agent API routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(triggerHourlyCheck).toHaveBeenCalledWith("manual:dashboard", {
+    expect(triggerActivityScan).toHaveBeenCalledWith("manual:dashboard", {
       force: true,
     });
     await expect(res.json()).resolves.toEqual({
@@ -202,31 +202,31 @@ describe("Agent API routes", () => {
   });
 
   it("uses the default manual reason when request body is empty", async () => {
-    const triggerHourlyCheck = vi.fn().mockResolvedValue({
+    const triggerActivityScan = vi.fn().mockResolvedValue({
       status: "skipped",
-      reason: "hourly_check_in_progress",
+      reason: "activity_scan_in_progress",
       minObservations: 1,
       forced: true,
     });
-    const app = createAgentRoutes({ db, triggerHourlyCheck } as never);
+    const app = createAgentRoutes({ db, triggerActivityScan } as never);
 
     const res = await app.request("/agent/run-now", { method: "POST" });
 
     expect(res.status).toBe(200);
-    expect(triggerHourlyCheck).toHaveBeenCalledWith("manual:api", {
+    expect(triggerActivityScan).toHaveBeenCalledWith("manual:api", {
       force: true,
     });
     await expect(res.json()).resolves.toEqual({
       status: "skipped",
-      reason: "hourly_check_in_progress",
+      reason: "activity_scan_in_progress",
       minObservations: 1,
       forced: true,
     });
   });
 
   it("respects force: false when explicitly passed", async () => {
-    const triggerHourlyCheck = vi.fn().mockResolvedValue({ status: "queued" });
-    const app = createAgentRoutes({ db, triggerHourlyCheck } as never);
+    const triggerActivityScan = vi.fn().mockResolvedValue({ status: "queued" });
+    const app = createAgentRoutes({ db, triggerActivityScan } as never);
 
     const res = await app.request("/agent/run-now", {
       method: "POST",
@@ -235,14 +235,14 @@ describe("Agent API routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(triggerHourlyCheck).toHaveBeenCalledWith("manual:cron", {
+    expect(triggerActivityScan).toHaveBeenCalledWith("manual:cron", {
       force: false,
     });
   });
 
   it("forwards requestedModel=opus to the dispatcher", async () => {
-    const triggerHourlyCheck = vi.fn().mockResolvedValue({ status: "queued" });
-    const app = createAgentRoutes({ db, triggerHourlyCheck } as never);
+    const triggerActivityScan = vi.fn().mockResolvedValue({ status: "queued" });
+    const app = createAgentRoutes({ db, triggerActivityScan } as never);
 
     const res = await app.request("/agent/run-now", {
       method: "POST",
@@ -251,15 +251,15 @@ describe("Agent API routes", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(triggerHourlyCheck).toHaveBeenCalledWith("manual:weekly", {
+    expect(triggerActivityScan).toHaveBeenCalledWith("manual:weekly", {
       force: true,
       requestedModel: "opus",
     });
   });
 
   it("rejects invalid requestedModel with 400", async () => {
-    const triggerHourlyCheck = vi.fn();
-    const app = createAgentRoutes({ db, triggerHourlyCheck } as never);
+    const triggerActivityScan = vi.fn();
+    const app = createAgentRoutes({ db, triggerActivityScan } as never);
 
     const res = await app.request("/agent/run-now", {
       method: "POST",
@@ -268,7 +268,7 @@ describe("Agent API routes", () => {
     });
 
     expect(res.status).toBe(400);
-    expect(triggerHourlyCheck).not.toHaveBeenCalled();
+    expect(triggerActivityScan).not.toHaveBeenCalled();
   });
 
   // ── /escalate (removed → 410 Gone) ──

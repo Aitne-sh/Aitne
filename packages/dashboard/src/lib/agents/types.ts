@@ -14,11 +14,41 @@ export type { AgentDefinition, StopWarning };
 /** `kind` of an Agent — built-in (shipped) vs user-authored (§3.3). */
 export type AgentKind = "builtin" | "user";
 
+/**
+ * Hub grouping for the `/agents` index (AGENTS_HUB_REDESIGN_PLAN §4.1).
+ * Built-ins carry one of the three registry categories; every user Agent is
+ * `"user"`. Mirrors the daemon's `agentCategory()`.
+ */
+export type AgentCategory = "synthesis" | "monitoring" | "maintenance" | "user";
+
+/**
+ * A context-vault policy file an Agent reads at prompt-assembly time — its
+ * editable Rulebook surface (AGENTS_HUB_REDESIGN_PLAN §4.2). Loaded/saved via
+ * the context API (`/api/context/<path>`).
+ */
+export interface AgentPolicyFile {
+  path: string;
+  label: string;
+  description: string;
+}
+
+/**
+ * Stored per-field runtime-window overrides for the activity-scan cadence
+ * (AGENTS_HUB_REDESIGN_PLAN §2). An absent field follows the legacy config
+ * fallback; PATCH `schedule_window` with `null` resets a field.
+ */
+export interface ScheduleWindowOverrides {
+  interval_minutes?: number;
+  active_start_hour?: number;
+  active_end_hour?: number;
+  min_observations?: number;
+}
+
 /** Terminal execution outcome (daemon `AgentExecutionResult`, §5.2). */
 export type AgentExecutionResult = "success" | "error" | "skipped" | "timeout";
 
 /**
- * Interval cadence of a runtime-window Agent (today: the built-in hourly-check).
+ * Interval cadence of a runtime-window Agent (today: the built-in activity-scan).
  * Resolved by the daemon from live config so the UI shows the REAL cadence
  * ("Every 60 min, 04:00–24:00") rather than the loader-ignored placeholder cron
  * the `agents` row stores for these slugs. `null` for fixed-cron / one-shot /
@@ -71,6 +101,7 @@ export interface AgentListItem {
   name: string;
   description: string;
   kind: AgentKind;
+  category: AgentCategory;
   enabled: boolean;
   tags: string[];
   schedule: AgentScheduleSummary;
@@ -112,6 +143,7 @@ export interface AgentRow {
   name: string;
   description: string;
   source: AgentKind;
+  category: AgentCategory;
   definition_path: string;
   definition_hash: string | null;
   enabled: boolean;
@@ -144,6 +176,22 @@ export interface AgentDetailResponse {
   };
   definition_yaml: string | null;
   definition_path: string;
+  /** Rulebook tab inputs — vault policy files this Agent reads (§4.2). */
+  policy_files: AgentPolicyFile[];
+  /**
+   * Runtime-window editing block for the activity-scan cadence form (stored
+   * overrides + resolved effective values), or `null` for every
+   * non-runtime-window Agent (§2).
+   */
+  schedule_window: {
+    overrides: ScheduleWindowOverrides;
+    resolved: {
+      interval_minutes: number;
+      active_start_hour: number;
+      active_end_hour: number;
+      min_observations: number;
+    };
+  } | null;
 }
 
 /** `GET /api/agents/:slug/executions` envelope (§9.3). */

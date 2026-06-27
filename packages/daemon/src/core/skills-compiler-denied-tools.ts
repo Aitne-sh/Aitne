@@ -148,7 +148,7 @@ export function buildSameBackendDenyBlock(
     "## Denied tools (per-integration)",
     "",
     "The user has restricted the following connector tools for this session.",
-    "Do NOT invoke them in any flow — including hourly check, morning routine,",
+    "Do NOT invoke them in any flow — including activity scan, morning routine,",
     "or DM responses. If a workflow appears to require one, stop and tell the",
     "user the tool is denied.",
   ];
@@ -187,7 +187,7 @@ function appendCliDenyBlock(
     "## Denied tools (do not invoke)",
     "",
     "The user has restricted these connector tools for this integration. Do",
-    "NOT invoke them in any flow — including hourly check, morning routine,",
+    "NOT invoke them in any flow — including activity scan, morning routine,",
     "or DM responses. If a workflow appears to require one, stop and tell",
     "the user the tool is denied.",
     "",

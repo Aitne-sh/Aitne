@@ -21,7 +21,7 @@ day rotation and **not** a morning routine.
   tries. If still locked after the final retry, **return a one-line
   status (`deferred — morning routine lock held`) and stop**. Do NOT
   attempt to append a deferred line to `## Agent Log` — that PATCH is
-  also blocked by the same lock. The next morning/hourly run will
+  also blocked by the same lock. The next morning/activity-scan run will
   reconcile.
 
 ### Step 1 — Read today's calendar from observations

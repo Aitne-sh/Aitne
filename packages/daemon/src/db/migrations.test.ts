@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -1314,5 +1314,842 @@ describe("schema introspection helpers", () => {
     db.exec("CREATE INDEX idx_rows_value ON rows(value)");
     expect(indexExists(db, "idx_rows_value")).toBe(true);
     expect(indexExists(db, "idx_missing")).toBe(false);
+  });
+});
+
+// 0010 carries the "Hourly Check" → "Activity Scan" rename across every
+// persisted surface (CLAUDE.md upgrade-safety checklist): agents row id,
+// agent_executions FK rows, process_backend_config keys, settings keys,
+// self-tuning ledger keys, and the two on-disk vault files (+ snapshot
+// paths). Contract per non-negotiable #4: fresh DB (applySchema) → no-op
+// with id recorded; pre-rename-shape DB → renames applied; re-run → no
+// second apply.
+describe("0010-hourly-check-to-activity-scan", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0010-hourly-check-to-activity-scan",
+  );
+
+  function runWithCtx(
+    db: Database.Database,
+    ctx: { dataDir: string; contextDir: string },
+  ) {
+    return runMigrations(db, { ctx, migrations: [migration!] });
+  }
+
+  function insertAgentRow(
+    db: Database.Database,
+    id: string,
+    opts: { enabled: number; overriddenAt: number | null },
+  ): void {
+    db.prepare(
+      `INSERT INTO agents (
+         id, name, description, source, definition_path, definition_hash,
+         enabled, enabled_overridden_at, process_key, schedule_kind,
+         schedule_expression, schedule_timezone, tags_json,
+         stop_warning_json, metadata_json, created_at, updated_at
+       ) VALUES (?, 'Hourly Check', 'desc', 'builtin',
+         '/assets/agents/hourly-check/agent.md', 'hash-old',
+         ?, ?, 'routine.hourly_check', 'cron', '0 4-23 * * *', 'UTC', '[]',
+         '{}', '{"runtime_window":{"interval_minutes":45}}', 1, 1)`,
+    ).run(id, opts.enabled, opts.overriddenAt);
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("throws without a MigrationContext (vault file step needs contextDir)", () => {
+    const db = openDb();
+    applySchema(db);
+    expect(() => runMigrations(db, [migration!])).toThrow(/MigrationContext/);
+  });
+
+  it("is a no-op on a fresh DB — applySchema already seeds the new names", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      const result = runWithCtx(db, ctx);
+      expect(result.applied).toEqual(["0010-hourly-check-to-activity-scan"]);
+      const keys = db
+        .prepare<[], { process_key: string }>(
+          `SELECT process_key FROM process_backend_config
+            WHERE process_key LIKE 'routine.activity_scan%'
+            ORDER BY process_key`,
+        )
+        .all()
+        .map((r) => r.process_key);
+      expect(keys).toEqual([
+        "routine.activity_scan",
+        "routine.activity_scan.triage",
+      ]);
+      expect(
+        db
+          .prepare("SELECT 1 FROM process_backend_config WHERE process_key LIKE 'routine.hourly_check%'")
+          .get(),
+      ).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renames the agents row preserving enabled state and moves executions", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      insertAgentRow(db, "hourly-check", { enabled: 0, overriddenAt: 1781157396084 });
+      db.prepare(
+        `INSERT INTO agent_executions (agent_id, trigger, started_at)
+         VALUES ('hourly-check', 'cron', 1)`,
+      ).run();
+
+      runWithCtx(db, ctx);
+
+      expect(
+        db.prepare("SELECT 1 FROM agents WHERE id = 'hourly-check'").get(),
+      ).toBeUndefined();
+      const renamed = db
+        .prepare<[], {
+          name: string;
+          enabled: number;
+          enabled_overridden_at: number;
+          process_key: string;
+          definition_path: string;
+          metadata_json: string;
+        }>(
+          `SELECT name, enabled, enabled_overridden_at, process_key,
+                  definition_path, metadata_json
+             FROM agents WHERE id = 'activity-scan'`,
+        )
+        .get()!;
+      expect(renamed.name).toBe("Activity Scan");
+      expect(renamed.enabled).toBe(0);
+      expect(renamed.enabled_overridden_at).toBe(1781157396084);
+      expect(renamed.process_key).toBe("routine.activity_scan");
+      expect(renamed.definition_path).toBe(
+        "/assets/agents/activity-scan/agent.md",
+      );
+      expect(JSON.parse(renamed.metadata_json)).toEqual({
+        runtime_window: { interval_minutes: 45 },
+      });
+      const exec = db
+        .prepare<[], { agent_id: string }>(
+          "SELECT agent_id FROM agent_executions",
+        )
+        .get()!;
+      expect(exec.agent_id).toBe("activity-scan");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("drops the stale old row when BOTH slugs exist, re-homing executions", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      // Mixed-version backup restore: the live (new) row coexists with a
+      // stale pre-rename row that still owns execution history.
+      insertAgentRow(db, "hourly-check", { enabled: 0, overriddenAt: 123 });
+      db.prepare(
+        `INSERT INTO agents (
+           id, name, description, source, definition_path, definition_hash,
+           enabled, process_key, schedule_kind, schedule_timezone, tags_json,
+           metadata_json, created_at, updated_at
+         ) VALUES ('activity-scan', 'Activity Scan', 'desc', 'builtin',
+           '/assets/agents/activity-scan/agent.md', 'hash-new', 1,
+           'routine.activity_scan', 'cron', 'UTC', '[]', '{}', 1, 1)`,
+      ).run();
+      db.prepare(
+        `INSERT INTO agent_executions (agent_id, trigger, started_at)
+         VALUES ('hourly-check', 'cron', 1)`,
+      ).run();
+
+      runWithCtx(db, ctx);
+
+      expect(
+        db.prepare("SELECT 1 FROM agents WHERE id = 'hourly-check'").get(),
+      ).toBeUndefined();
+      // The live row keeps ITS values (not the stale row's enabled=0).
+      const live = db
+        .prepare<[], { enabled: number }>(
+          "SELECT enabled FROM agents WHERE id = 'activity-scan'",
+        )
+        .get()!;
+      expect(live.enabled).toBe(1);
+      expect(
+        db
+          .prepare<[], { agent_id: string }>(
+            "SELECT agent_id FROM agent_executions",
+          )
+          .get()!.agent_id,
+      ).toBe("activity-scan");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renames the pre-restructure root spellings on a 0004-deferred vault", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      // Obsidian vault whose 0004 consent is pending: the rulebook and
+      // dossier still live at the legacy roots, not under policies/ /
+      // knowledge/.
+      mkdirSync(join(ctx.contextDir, "routines"), { recursive: true });
+      mkdirSync(join(ctx.contextDir, "dossiers"), { recursive: true });
+      writeFileSync(
+        join(ctx.contextDir, "routines", "hourly.md"),
+        "# Legacy checks\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(ctx.contextDir, "dossiers", "hourly.md"),
+        "# Legacy dossier\n",
+        "utf-8",
+      );
+      db.prepare(
+        `INSERT INTO md_file_snapshots (file_path, content, trigger)
+         VALUES ('routines/hourly.md', '# old', 'pre-write')`,
+      ).run();
+
+      runWithCtx(db, ctx);
+
+      expect(
+        existsSync(join(ctx.contextDir, "routines", "activity-scan.md")),
+      ).toBe(true);
+      expect(existsSync(join(ctx.contextDir, "routines", "hourly.md"))).toBe(
+        false,
+      );
+      expect(
+        existsSync(join(ctx.contextDir, "dossiers", "activity-scan.md")),
+      ).toBe(true);
+      expect(
+        db
+          .prepare(
+            "SELECT 1 FROM md_file_snapshots WHERE file_path = 'routines/activity-scan.md'",
+          )
+          .get(),
+      ).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("does not touch an already-renamed agents row (re-run shape)", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      db.prepare(
+        `INSERT INTO agents (
+           id, name, description, source, definition_path, definition_hash,
+           enabled, process_key, schedule_kind, schedule_timezone, tags_json,
+           metadata_json, created_at, updated_at
+         ) VALUES ('activity-scan', 'Activity Scan', 'desc', 'builtin',
+           '/assets/agents/activity-scan/agent.md', 'hash-new', 1,
+           'routine.activity_scan', 'cron', 'UTC', '[]', '{}', 1, 1)`,
+      ).run();
+      runWithCtx(db, ctx);
+      expect(
+        db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM agents").get()!
+          .n,
+      ).toBe(1);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renames process_backend_config keys, old row beating the fresh seed", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      // Simulate the upgrade moment: the operator's pre-rename row exists
+      // alongside the new-key preset row applySchema just seeded.
+      db.prepare(
+        `INSERT INTO process_backend_config
+           (process_key, main_backend, main_model, max_turns, max_budget_usd, updated_by)
+         VALUES ('routine.hourly_check', 'claude', 'user-pinned-model', 99, 9.99, 'user')`,
+      ).run();
+
+      runWithCtx(db, ctx);
+
+      const row = db
+        .prepare<[], { main_model: string; max_budget_usd: number; updated_by: string }>(
+          `SELECT main_model, max_budget_usd, updated_by
+             FROM process_backend_config WHERE process_key = 'routine.activity_scan'`,
+        )
+        .get()!;
+      expect(row.main_model).toBe("user-pinned-model");
+      expect(row.max_budget_usd).toBe(9.99);
+      expect(row.updated_by).toBe("user");
+      expect(
+        db
+          .prepare("SELECT 1 FROM process_backend_config WHERE process_key = 'routine.hourly_check'")
+          .get(),
+      ).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renames settings keys; canonical row wins when both exist", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      const put = db.prepare(
+        "INSERT INTO settings (key, value_json) VALUES (?, ?)",
+      );
+      put.run("hourlyCheckEnabled", "false");
+      put.run("hourlyCheckPrePassFreshnessMinutes", "240");
+      put.run("hourlyCheckIntervalMinutes", "60");
+      // Both-keys conflict: canonical wins, legacy dropped.
+      put.run("activityScanIntervalMinutes", "90");
+
+      runWithCtx(db, ctx);
+
+      const get = (key: string) =>
+        (
+          db
+            .prepare<[string], { value_json: string }>(
+              "SELECT value_json FROM settings WHERE key = ?",
+            )
+            .get(key) ?? null
+        )?.value_json ?? null;
+      expect(get("activityScanEnabled")).toBe("false");
+      expect(get("activityScanPrePassFreshnessMinutes")).toBe("240");
+      expect(get("activityScanIntervalMinutes")).toBe("90");
+      expect(get("hourlyCheckEnabled")).toBeNull();
+      expect(get("hourlyCheckPrePassFreshnessMinutes")).toBeNull();
+      expect(get("hourlyCheckIntervalMinutes")).toBeNull();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renames self-tuning ledger keys in runtime_state; new key wins a conflict", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      const put = db.prepare(
+        "INSERT INTO runtime_state (key, value_json) VALUES (?, ?)",
+      );
+      put.run(
+        "self_tuning:hourlyCheckPrePassFreshnessMinutes",
+        '{"applied_at":"2026-06-01T00:00:00Z"}',
+      );
+      // Conflict shape (mixed-version backup restore): both spellings of the
+      // OTHER knob exist — the new-key blob must survive, the old dropped.
+      put.run(
+        "self_tuning:hourlyCheckLowSignalPendingCeiling",
+        '{"applied_at":"old"}',
+      );
+      put.run(
+        "self_tuning:activityScanLowSignalPendingCeiling",
+        '{"applied_at":"new"}',
+      );
+      runWithCtx(db, ctx);
+      expect(
+        db
+          .prepare(
+            "SELECT 1 FROM runtime_state WHERE key = 'self_tuning:activityScanPrePassFreshnessMinutes'",
+          )
+          .get(),
+      ).toBeDefined();
+      expect(
+        db
+          .prepare(
+            "SELECT 1 FROM runtime_state WHERE key = 'self_tuning:hourlyCheckPrePassFreshnessMinutes'",
+          )
+          .get(),
+      ).toBeUndefined();
+      const ceiling = db
+        .prepare<[], { value_json: string }>(
+          "SELECT value_json FROM runtime_state WHERE key = 'self_tuning:activityScanLowSignalPendingCeiling'",
+        )
+        .get()!;
+      expect(JSON.parse(ceiling.value_json)).toEqual({ applied_at: "new" });
+      expect(
+        db
+          .prepare(
+            "SELECT 1 FROM runtime_state WHERE key = 'self_tuning:hourlyCheckLowSignalPendingCeiling'",
+          )
+          .get(),
+      ).toBeUndefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("renames the two vault files and rewrites their snapshot paths", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      mkdirSync(join(ctx.contextDir, "policies", "routines"), { recursive: true });
+      mkdirSync(join(ctx.contextDir, "knowledge", "dossiers"), { recursive: true });
+      writeFileSync(
+        join(ctx.contextDir, "policies", "routines", "hourly.md"),
+        "# My checks\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(ctx.contextDir, "knowledge", "dossiers", "hourly.md"),
+        "# Dossier\n",
+        "utf-8",
+      );
+      db.prepare(
+        `INSERT INTO md_file_snapshots (file_path, content, trigger)
+         VALUES ('policies/routines/hourly.md', '# old', 'pre-write')`,
+      ).run();
+
+      runWithCtx(db, ctx);
+
+      expect(
+        existsSync(join(ctx.contextDir, "policies", "routines", "activity-scan.md")),
+      ).toBe(true);
+      expect(
+        existsSync(join(ctx.contextDir, "policies", "routines", "hourly.md")),
+      ).toBe(false);
+      expect(
+        existsSync(join(ctx.contextDir, "knowledge", "dossiers", "activity-scan.md")),
+      ).toBe(true);
+      expect(
+        readFileSync(
+          join(ctx.contextDir, "policies", "routines", "activity-scan.md"),
+          "utf-8",
+        ),
+      ).toBe("# My checks\n");
+      expect(
+        db
+          .prepare(
+            "SELECT 1 FROM md_file_snapshots WHERE file_path = 'policies/routines/activity-scan.md'",
+          )
+          .get(),
+      ).toBeDefined();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("re-run is a recorded no-op (id already applied)", () => {
+    const { ctx, cleanup } = tempMigrationCtx();
+    const db = openDb();
+    applySchema(db);
+    try {
+      insertAgentRow(db, "hourly-check", { enabled: 1, overriddenAt: null });
+      const first = runWithCtx(db, ctx);
+      expect(first.applied).toEqual(["0010-hourly-check-to-activity-scan"]);
+      const second = runWithCtx(db, ctx);
+      expect(second.applied).toEqual([]);
+      expect(
+        db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM agents").get()!
+          .n,
+      ).toBe(1);
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// RESEARCH_CLUSTER_COST_FIX_PLAN.md F1 — peer test for
+// `0011-research-clusters-journal-enqueue-stamp`, per the CLAUDE.md
+// non-negotiable #4 contract: fresh DB (applySchema already added the
+// column) → no-op + id recorded; pre-migration-shape table (no column)
+// → ALTER applied + id recorded; bare DB (no table) → no-op + id
+// recorded; re-run → no second apply.
+describe("0011-research-clusters-journal-enqueue-stamp", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0011-research-clusters-journal-enqueue-stamp",
+  );
+
+  /** The browser_research_clusters shape as it existed before this
+   *  migration (v0.1.10) — no journal_update_enqueued_on column. */
+  function seedPreMigrationTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE browser_research_clusters (
+          slug TEXT PRIMARY KEY,
+          root_task_id INTEGER NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          last_activity_at INTEGER NOT NULL,
+          visits_total INTEGER NOT NULL,
+          meaningful_visits_total INTEGER NOT NULL,
+          meaningful_foreground_sec_total INTEGER NOT NULL,
+          distinct_meaningful_domains INTEGER NOT NULL,
+          status TEXT NOT NULL
+              CHECK (status IN ('active', 'dormant', 'concluded', 'muted')),
+          last_dm_at INTEGER,
+          last_research_offer_at INTEGER,
+          last_wiki_offer_at INTEGER,
+          research_offer_accepted_at INTEGER,
+          wiki_summary_written_at INTEGER,
+          agent_summary_revision INTEGER DEFAULT 0
+      );
+    `);
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when the table does not exist (bare/empty DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0011-research-clusters-journal-enqueue-stamp",
+    ]);
+    const recorded = db
+      .prepare<[string], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0011-research-clusters-journal-enqueue-stamp");
+    expect(recorded).toEqual({
+      id: "0011-research-clusters-journal-enqueue-stamp",
+    });
+  });
+
+  it("is a no-op on a fresh DB where applySchema already created the column", () => {
+    const db = openDb();
+    applySchema(db);
+    expect(
+      columnExists(db, "browser_research_clusters", "journal_update_enqueued_on"),
+    ).toBe(true);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0011-research-clusters-journal-enqueue-stamp",
+    ]);
+    expect(
+      columnExists(db, "browser_research_clusters", "journal_update_enqueued_on"),
+    ).toBe(true);
+  });
+
+  it("adds the column to a pre-migration-shape table and preserves rows", () => {
+    const db = openDb();
+    seedPreMigrationTable(db);
+    db.prepare(
+      `INSERT INTO browser_research_clusters
+         (slug, root_task_id, display_name, started_at, last_activity_at,
+          visits_total, meaningful_visits_total,
+          meaningful_foreground_sec_total, distinct_meaningful_domains, status)
+       VALUES ('keep-me', 1, 'Keep Me', 1, 1, 1, 1, 120, 1, 'active')`,
+    ).run();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0011-research-clusters-journal-enqueue-stamp",
+    ]);
+    expect(
+      columnExists(db, "browser_research_clusters", "journal_update_enqueued_on"),
+    ).toBe(true);
+    const row = db
+      .prepare(
+        `SELECT slug, journal_update_enqueued_on AS stamp
+           FROM browser_research_clusters WHERE slug = 'keep-me'`,
+      )
+      .get() as { slug: string; stamp: string | null };
+    expect(row).toEqual({ slug: "keep-me", stamp: null });
+  });
+
+  it("re-run is a recorded no-op (id already applied)", () => {
+    const db = openDb();
+    seedPreMigrationTable(db);
+    const first = runMigrations(db, [migration!]);
+    expect(first.applied).toEqual([
+      "0011-research-clusters-journal-enqueue-stamp",
+    ]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(
+      columnExists(db, "browser_research_clusters", "journal_update_enqueued_on"),
+    ).toBe(true);
+  });
+});
+
+// RESEARCH_CLUSTER_COST_FIX_PLAN.md F3 — peer test for
+// `0012-research-budget-bump`, same CLAUDE.md non-negotiable #4 contract
+// as 0006/0009: fresh DB (no table) → no-op + id recorded; fresh install
+// already seeded at the new values → untouched; pre-migration
+// preset-default rows ($0.05 / $0.02 on claude-opencode, the lite-factor
+// 2.5 scaled $0.13 / $0.05 on codex/gemini) → bumped to $0.50 / $0.15
+// (resp. $1.25 / $0.38) + id recorded; operator-pinned ('user') or
+// already-custom rows → untouched; re-run → no second bump.
+describe("0012-research-budget-bump", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0012-research-budget-bump",
+  );
+
+  function seedProcessConfigTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE process_backend_config (
+        process_key    TEXT PRIMARY KEY,
+        main_backend   TEXT NOT NULL,
+        main_model     TEXT NOT NULL,
+        max_turns      INTEGER NOT NULL,
+        max_budget_usd REAL NOT NULL,
+        updated_by     TEXT NOT NULL
+      );
+    `);
+  }
+
+  function insertRow(
+    db: Database.Database,
+    processKey: string,
+    maxBudgetUsd: number,
+    updatedBy: string,
+    backend = "claude",
+  ): void {
+    db.prepare(
+      `INSERT INTO process_backend_config
+         (process_key, main_backend, main_model, max_turns, max_budget_usd, updated_by)
+       VALUES (?, ?, 'seed-model', 5, ?, ?)`,
+    ).run(processKey, backend, maxBudgetUsd, updatedBy);
+  }
+
+  function budgetOf(db: Database.Database, processKey: string): number {
+    return (
+      db
+        .prepare<[string], { max_budget_usd: number }>(
+          "SELECT max_budget_usd FROM process_backend_config WHERE process_key = ?",
+        )
+        .get(processKey) as { max_budget_usd: number }
+    ).max_budget_usd;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when process_backend_config does not exist (fresh/empty DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0012-research-budget-bump"]);
+    const recorded = db
+      .prepare<[string], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0012-research-budget-bump");
+    expect(recorded).toEqual({ id: "0012-research-budget-bump" });
+  });
+
+  it("is a no-op on a fresh install already seeded at the new values", () => {
+    // Real fresh installs run applySchema (which now seeds
+    // cluster_update at $0.50) BEFORE the migration runner; offer_dm has
+    // no seed row but applyDefaultPresets materializes it at $0.15. The
+    // band gates must recognise both as already-migrated.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.5, "preset", "claude");
+    insertRow(db, "routine.research_offer_dm", 0.15, "preset", "claude");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.5);
+    expect(budgetOf(db, "routine.research_offer_dm")).toBe(0.15);
+  });
+
+  it("bumps claude preset-default rows ($0.05→$0.50, $0.02→$0.15)", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.05, "preset", "claude");
+    insertRow(db, "routine.research_offer_dm", 0.02, "preset", "claude");
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0012-research-budget-bump"]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.5);
+    expect(budgetOf(db, "routine.research_offer_dm")).toBe(0.15);
+  });
+
+  it("bumps opencode preset-default rows like claude (no scaling)", () => {
+    // opencode rides the Anthropic SDK — post-hoc factor 1, so its old
+    // and new defaults match claude.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.05, "preset", "opencode");
+    insertRow(db, "routine.research_offer_dm", 0.02, "preset", "opencode");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.5);
+    expect(budgetOf(db, "routine.research_offer_dm")).toBe(0.15);
+  });
+
+  it("bumps codex preset rows from the lite-scaled band ($0.13→$1.25, $0.05→$0.38)", () => {
+    // applyDefaultPresets stores the post-hoc-scaled budget — the LITE
+    // factor for codex/gemini is 2.5 (not the medium 1.5), so
+    // cluster_update was seeded at $0.13 (0.05 x 2.5, 2-decimal rounded)
+    // and offer_dm at $0.05. The migration must lift them to the scaled
+    // new defaults ($0.50 x 2.5 = $1.25, $0.15 x 2.5 = $0.38), NOT the
+    // claude bases.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.13, "preset", "codex");
+    insertRow(db, "routine.research_offer_dm", 0.05, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(1.25);
+    expect(budgetOf(db, "routine.research_offer_dm")).toBe(0.38);
+  });
+
+  it("bumps gemini preset rows from the lite-scaled band", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.13, "preset", "gemini");
+    insertRow(db, "routine.research_offer_dm", 0.05, "preset", "gemini");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(1.25);
+    expect(budgetOf(db, "routine.research_offer_dm")).toBe(0.38);
+  });
+
+  it("does not bump a codex row sitting at the claude band", () => {
+    // Defensive: a codex row should only be lifted from its own scaled
+    // old default. A codex cluster_update row at $0.05 is not a
+    // recognised old default, so leave it untouched rather than guess.
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.05, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.05);
+  });
+
+  it("leaves operator-pinned ('user') rows untouched even in the old band", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.05, "user", "claude");
+    insertRow(db, "routine.research_offer_dm", 0.02, "user", "claude");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.05);
+    expect(budgetOf(db, "routine.research_offer_dm")).toBe(0.02);
+  });
+
+  it("leaves preset rows already at a custom value untouched", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.2, "preset", "claude");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.2);
+  });
+
+  it("does not touch sibling research rows (research_dispatch / wiki_summary)", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_dispatch", 1.0, "preset", "claude");
+    insertRow(db, "routine.research_wiki_summary", 0.5, "preset", "claude");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.research_dispatch")).toBe(1.0);
+    expect(budgetOf(db, "routine.research_wiki_summary")).toBe(0.5);
+  });
+
+  it("is idempotent — re-running does not bump again", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.research_cluster_update", 0.05, "preset", "claude");
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(budgetOf(db, "routine.research_cluster_update")).toBe(0.5);
+  });
+});
+
+describe("0013-browser-task-delivery-timestamps", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0013-browser-task-delivery-timestamps",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB where applySchema already created the columns", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0013-browser-task-delivery-timestamps",
+    ]);
+    expect(columnExists(db, "browser_task", "delivered_at")).toBe(true);
+    expect(
+      columnExists(db, "browser_task_clarifications", "delivered_at"),
+    ).toBe(true);
+  });
+
+  it("adds delivered_at to pre-migration browser-task tables", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE browser_task (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        state TEXT NOT NULL,
+        require_final_confirm INTEGER NOT NULL DEFAULT 1,
+        blocked_requests_count INTEGER NOT NULL DEFAULT 0,
+        extract_chars_total INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE browser_task_clarifications (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        question TEXT NOT NULL,
+        asked_at INTEGER NOT NULL,
+        deadline_at INTEGER NOT NULL,
+        resolved INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0013-browser-task-delivery-timestamps",
+    ]);
+    expect(columnExists(db, "browser_task", "delivered_at")).toBe(true);
+    expect(
+      columnExists(db, "browser_task_clarifications", "delivered_at"),
+    ).toBe(true);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+  });
+});
+
+describe("0014-background-task-significance-criteria", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0014-background-task-significance-criteria",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB where applySchema already created the column", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0014-background-task-significance-criteria",
+    ]);
+    expect(columnExists(db, "background_task", "significance_criteria")).toBe(true);
+  });
+
+  it("adds significance_criteria to a pre-migration background_task table", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE background_task (
+        id TEXT PRIMARY KEY,
+        brief TEXT NOT NULL,
+        state TEXT NOT NULL,
+        notification_policy TEXT NOT NULL DEFAULT 'always',
+        created_at INTEGER NOT NULL
+      );
+    `);
+    expect(columnExists(db, "background_task", "significance_criteria")).toBe(false);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0014-background-task-significance-criteria",
+    ]);
+    expect(columnExists(db, "background_task", "significance_criteria")).toBe(true);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+  });
+
+  it("is a recorded no-op when the table is absent (bare :memory: db)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0014-background-task-significance-criteria",
+    ]);
   });
 });

@@ -571,7 +571,7 @@ describe("runRetentionCleanup", () => {
   // ── Phase 9: observations retention boundary ──
   //
   // Observations are kept for 7 days after consumption. Pending rows are
-  // never automatically deleted (the hourly_check dispatcher is expected
+  // never automatically deleted (the activity_scan dispatcher is expected
   // to consume them); ancient pending rows survive cleanup forever so
   // that operational bugs don't silently drop observation data.
 
@@ -646,7 +646,7 @@ describe("runRetentionCleanup", () => {
   //
   // Pending observations are never auto-deleted (by design — silent drops
   // would hide bugs). But if a row stays pending for many days, it usually
-  // means the hourly_check pipeline is stalled. Retention surfaces this via
+  // means the activity_scan pipeline is stalled. Retention surfaces this via
   // a warning log so the operator notices, without changing the data.
 
   it("warns about pending observations older than the warn threshold without deleting them", () => {

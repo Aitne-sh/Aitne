@@ -7,47 +7,47 @@ aliases:
   - observation missing
   - no observations
   - polling broken
-  - hourly check empty
+  - activity scan empty
 category: troubleshooting
 summary: |
   An expected change (commit, note, calendar move) didn't surface in
-  the hourly check. Most often a polling delay, a vault/repo not
+  the activity scan. Most often a polling delay, a vault/repo not
   watched, or a change the agent authored itself (filtered out).
 section: troubleshooting
 tags:
   - troubleshooting
   - observations
   - polling
-  - hourly-check
+  - activity-scan
 status: stable
 ask_examples:
   - Why didn't the agent notice my new commit?
   - Why didn't a calendar change show up?
-  - Why is the hourly check empty?
+  - Why is the activity scan empty?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-10
 keywords:
   - observation
   - polling
   - observer
   - AgentWriteTracker
-  - hourly check
+  - activity scan
 related:
   - concepts/observations
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - features/integrations/git
   - features/integrations/obsidian
 config_keys:
-  - hourlyCheckMinObservations
-  - hourlyCheckEnabled
-  - hourlyCheckIntervalMinutes
+  - activityScanMinObservations
+  - activityScanEnabled
+  - activityScanIntervalMinutes
 process_keys:
-  - routine.hourly_check
+  - routine.activity_scan
 ui_anchors:
   - /connections/repositories
   - /connections/calendar
-  - /settings/schedule
+  - /agents/activity-scan
 context_files:
   - state/today.md
 ---
@@ -55,24 +55,24 @@ context_files:
 # Observation Not Detected
 
 You made a change by hand — a commit, an Obsidian note, a calendar move — and
-expected the agent to notice it on the next hourly check. It didn't.
+expected the agent to notice it on the next activity scan. It didn't.
 
 This is almost always one of four things: the poller hasn't run yet, the
 source isn't being watched, the agent itself made the change (so it was
-filtered out), or there weren't enough observations to clear the hourly-check
+filtered out), or there weren't enough observations to clear the activity-scan
 gate. Work through them in that order.
 
 ## How detection actually works
 
 Observers (Obsidian, Git, Notion, Calendar) do **not** fire an event per
 change. They poll on a cadence and call `recordObservation(...)`, which
-appends a row to the `observations` table. The hourly check later reads those
+appends a row to the `observations` table. The activity scan later reads those
 rows in a single batch. So a "missing" observation is usually a row that was
 never written, or one that was written but filtered.
 
 `AgentWriteTracker` tags every change as `actor='agent'` or `actor='user'`.
 Changes the agent itself wrote are tagged `actor='agent'` and skipped by the
-hourly check — this is the deliberate anti-loop filter that stops the agent
+activity scan — this is the deliberate anti-loop filter that stops the agent
 from observing its own output.
 
 ## Most likely causes
@@ -84,9 +84,10 @@ from observing its own output.
    was never connected, nothing polls it.
 3. **The change was tagged `actor='agent'`.** If the agent (not you) authored
    the commit or note, the anti-loop filter drops it.
-4. **It was below the gate threshold.** The hourly check only runs its full
-   pass when at least `hourlyCheckMinObservations` (default `1`) pending
-   observations exist. A single low-signal change can be held back.
+4. **It was below the gate threshold.** The activity scan only runs its full
+   pass when at least the activity-scan agent's **min observations**
+   threshold (default `1`; legacy key `activityScanMinObservations`) of
+   pending observations exists. A single low-signal change can be held back.
 
 ## Diagnostic steps
 
@@ -101,21 +102,22 @@ from observing its own output.
 3. **Rule out the agent-authored filter.** If the commit or note was written
    by the agent, that's expected — it's filtered by design. Look for a change
    *you* made by hand to test detection.
-4. **Lower the gate threshold to test.** Temporarily set
-   `hourlyCheckMinObservations` to `1` (its default) on `/settings/schedule`
+4. **Lower the gate threshold to test.** Temporarily set **Min
+   observations** to `1` (its default) on the activity-scan agent's page
+   (`/agents/activity-scan`, Definition tab → Cadence card)
    so even a single observation triggers the check, then make a manual change
-   and wait for the next hourly run.
+   and wait for the next activity-scan run.
 
 ## Confirming the fix
 
 After the next poll runs, a manual change you made should record an
-observation and surface in the next hourly check. You can cross-check recent
+observation and surface in the next activity scan. You can cross-check recent
 agent activity from the CLI with `aitne audit`, which reads the `agent_actions`
 log read-only.
 
 ## Related
 
 - [Observations](../concepts/observations.md) — what gets recorded and why
-- [Hourly Check](../features/routines/hourly-check.md) — the gate and its thresholds
+- [Activity Scan](../features/routines/activity-scan.md) — the gate and its thresholds
 - [Git integration](../features/integrations/git.md)
 - [Obsidian integration](../features/integrations/obsidian.md)

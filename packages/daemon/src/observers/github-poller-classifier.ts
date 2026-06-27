@@ -50,7 +50,7 @@ export type Classification =
       /**
        * When `true`, the orchestrator emits to EventBus in addition to
        * recording the observation. Reserved for HIGH-priority signals that
-       * should DM the user without waiting for the hourly check.
+       * should DM the user without waiting for the activity scan.
        */
       emitEvent: boolean;
     };
@@ -60,8 +60,8 @@ export type Classification =
  * emit-to-EventBus) per the agent's "patterns not events" philosophy.
  *
  * - `review_requested` / `assign` / `security_alert` are HIGH and bypass
- *   hourly_check via direct DM.
- * - `mention` / `team_mention` are NORMAL — coalesced in hourly_check.
+ *   activity_scan via direct DM.
+ * - `mention` / `team_mention` are NORMAL — coalesced in activity_scan.
  * - `subscribed` / `manual` / `comment` / `state_change` etc. are LOW
  *   noise; recorded as observations only so the agent can surface them
  *   if a pattern emerges.
@@ -212,7 +212,7 @@ export function classifyWorkflowRun(
     ref,
     payload,
     // Only DM-grade for default-branch failures. Feature-branch failures
-    // are noise during normal development and only surface via hourly_check.
+    // are noise during normal development and only surface via activity_scan.
     emitEvent: onDefaultBranch,
   };
 }

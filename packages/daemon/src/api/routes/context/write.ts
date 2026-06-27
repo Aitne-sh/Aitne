@@ -411,9 +411,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           { path, method: "PUT" },
         );
       }
-      if (path.startsWith("policies/routines/custom/")) {
-        deps.onCustomRoutinesChanged?.();
-      }
       const writtenStat = statSync(fullPath);
       logger.info(
         {
@@ -646,9 +643,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
             },
           );
         }
-        if (path.startsWith("policies/routines/custom/")) {
-          deps.onCustomRoutinesChanged?.();
-        }
         logger.info({ path, method: "PATCH", mode }, "Content appended to file");
         return c.json({ status: "appended" });
       }
@@ -727,9 +721,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
             content: newContent,
             previousContent: fileContent,
           });
-        }
-        if (path.startsWith("policies/routines/custom/")) {
-          deps.onCustomRoutinesChanged?.();
         }
         logger.info({ path, method: "PATCH", mode }, "Frontmatter merged");
         return c.json({ status: "merged" });
@@ -861,9 +852,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           },
         );
       }
-      if (path.startsWith("policies/routines/custom/")) {
-        deps.onCustomRoutinesChanged?.();
-      }
       deps.onIndexableContextChange?.(`${path}${target.ext}`);
       const resultStatus = mode === "append" ? "appended" : mode === "replace" ? "replaced" : "cleared";
       logger.info({ path, method: "PATCH", section, mode, removedCount, trimmedCount }, "Context section " + resultStatus);
@@ -873,8 +861,9 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
 
   // DELETE /context/* — File delete (currently limited to `routines/custom/*`
   // via the write-permission whitelist). B-007 §5.8 Q3: the agent retires a
-  // custom routine after the user confirms. The scheduler listens via
-  // `onCustomRoutinesChanged` and unregisters the cron job on reload.
+  // custom routine after the user confirms. (Legacy path — custom routines
+  // no longer fire; they were converted to user Agents at the Agents-hub
+  // redesign. The delete surface stays so leftover files can be removed.)
   app.delete("/context/*", (c) => {
     const path = normalizeContextPath(c.req.path.replace("/api/context/", ""));
 
@@ -910,9 +899,6 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       const existing = readFileSync(fullPath, "utf-8");
       const snapshotId = saveSnapshot(path, existing, "api_delete", true);
       unlinkSync(fullPath);
-      if (path.startsWith("policies/routines/custom/")) {
-        deps.onCustomRoutinesChanged?.();
-      }
       deps.onIndexableContextChange?.(path);
       logger.info({ path, method: "DELETE", snapshotId: snapshotId ?? undefined }, "Context file deleted");
       return c.json({ status: "deleted", snapshotId: snapshotId ?? 0 });

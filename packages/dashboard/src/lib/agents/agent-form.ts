@@ -31,7 +31,7 @@ import {
  * the same path as a hand-authored one. `/agents` is recurring-only: a one-time
  * task is a one-shot wake on the `/schedule` queue, not an Agent — so there is
  * no `once` option here. (Sub-hourly, e.g. every 30 min, is not offered — only
- * the built-in hourly-check supports that, via config.)
+ * the built-in activity-scan supports that, via config.)
  */
 export const AGENT_SCHEDULE_FREQUENCIES = ["hourly", "daily", "weekly", "monthly"] as const;
 export type AgentScheduleFrequency = (typeof AGENT_SCHEDULE_FREQUENCIES)[number];

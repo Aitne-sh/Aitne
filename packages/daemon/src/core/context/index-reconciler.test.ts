@@ -144,7 +144,7 @@ describe("defaultRowFor", () => {
     expect(defaultRowFor(entry("state/today.md"))).toEqual({
       path: "state/today.md",
       purpose: "Current-day schedule, tasks, agent plan, handoff",
-      reviewFlows: "hourly, morning, evening",
+      reviewFlows: "activity-scan, morning, evening",
       lastTouched: TODAY,
     });
   });
@@ -194,6 +194,10 @@ describe("defaultRowFor", () => {
   });
 
   it("matches cadence flow for routines/<cadence>.md", () => {
+    expect(defaultRowFor(entry("policies/routines/activity-scan.md")).reviewFlows).toBe(
+      "activity-scan",
+    );
+    // Pre-rename rulebook file in an unmigrated vault — legacy token kept.
     expect(defaultRowFor(entry("policies/routines/hourly.md")).reviewFlows).toBe("hourly");
     expect(defaultRowFor(entry("policies/routines/morning.md")).reviewFlows).toBe("morning");
     expect(defaultRowFor(entry("policies/routines/evening.md")).reviewFlows).toBe("evening");
@@ -367,7 +371,7 @@ describe("renderContextIndex", () => {
       {
         path: "today.md",
         purpose: "Today",
-        reviewFlows: "hourly, morning, evening",
+        reviewFlows: "activity-scan, morning, evening",
         lastTouched: TODAY,
       },
       {
@@ -405,7 +409,7 @@ describe("renderContextIndex", () => {
       {
         path: "today.md",
         purpose: "Today",
-        reviewFlows: "hourly, morning, evening",
+        reviewFlows: "activity-scan, morning, evening",
         lastTouched: TODAY,
       },
     ];

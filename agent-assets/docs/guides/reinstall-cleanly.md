@@ -46,6 +46,8 @@ related:
   - guides/migrate-machines
   - guides/pause-the-agent
   - glossary
+ui_anchors:
+  - /settings/danger-zone
 ---
 
 # Reinstall Cleanly

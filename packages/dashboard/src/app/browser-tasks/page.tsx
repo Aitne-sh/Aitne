@@ -122,7 +122,10 @@ export default function BrowserTasksPage() {
     limit: 200,
   });
 
-  const rows = data?.tasks ?? [];
+  // Wrap in useMemo so the empty-array fallback keeps a stable identity
+  // across renders — otherwise a fresh `[]` each render would invalidate
+  // the `knownSiteKeys` / `visible` memos below on every render.
+  const rows = useMemo(() => data?.tasks ?? [], [data?.tasks]);
 
   // Collect all known siteKeys from the result for the filter chip
   // row. Sorted + deduped; "all" is the front-of-list.

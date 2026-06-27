@@ -14,8 +14,8 @@ export function SetupComplete({ mode, agentDisplayName }: SetupCompleteProps) {
 
   return (
     <div className="flex flex-col items-center justify-center gap-8 py-16 text-center">
-      <div className="rounded-full bg-emerald-100 p-6 dark:bg-emerald-950">
-        <CheckCircle2 className="h-12 w-12 text-emerald-600 dark:text-emerald-400" />
+      <div className="rounded-full bg-success/10 p-6">
+        <CheckCircle2 className="h-12 w-12 text-success" />
       </div>
 
       <div className="max-w-md space-y-3">

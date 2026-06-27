@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import type { ConversationsResponse } from "@/lib/api-types";
 
@@ -24,5 +24,9 @@ export function useConversations(
         : undefined,
     initialPageParam: 1,
     enabled: options?.enabled ?? true,
+    // Keep the current list on screen while a new filter loads — otherwise
+    // the key change clears data, QueryResult collapses to a skeleton, and
+    // the page scrolls to the top on every platform/status change.
+    placeholderData: keepPreviousData,
   });
 }

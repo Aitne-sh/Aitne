@@ -51,13 +51,13 @@ describe("tool-audit", () => {
       logMcpToolCall(db, {
         serverId: "ha",
         toolName: "turn_on",
-        eventType: "routine.hourly_check",
+        eventType: "routine.activity_scan",
         sessionId: "sess-abc",
       });
       const row = db
         .prepare("SELECT event_type, session_id FROM mcp_tool_calls WHERE server_id = 'ha'")
         .get() as { event_type: string; session_id: string };
-      expect(row.event_type).toBe("routine.hourly_check");
+      expect(row.event_type).toBe("routine.activity_scan");
       expect(row.session_id).toBe("sess-abc");
     });
 

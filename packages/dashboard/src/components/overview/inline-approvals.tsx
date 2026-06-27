@@ -32,7 +32,7 @@ export function InlineApprovals() {
     <Card tone="warning">
       <CardHeader className="mb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+          <AlertTriangle className="h-4 w-4 text-warning" />
           {approvals.length} pending approval{approvals.length !== 1 ? "s" : ""}
         </CardTitle>
       </CardHeader>
@@ -56,7 +56,7 @@ export function InlineApprovals() {
             <div className="flex shrink-0 gap-1.5">
               <Button
                 size="sm"
-                className="h-7 bg-emerald-600 px-2.5 hover:bg-emerald-700"
+                className="h-7 bg-success/15 px-2.5 text-success hover:bg-success/25"
                 onClick={() => approveAction.mutate(approval.id)}
                 disabled={approveAction.isPending}
               >
@@ -66,7 +66,7 @@ export function InlineApprovals() {
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 border-red-300 px-2.5 text-red-600 hover:bg-red-50 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950"
+                className="h-7 border-destructive/40 px-2.5 text-destructive hover:bg-destructive/10"
                 onClick={() => handleDeny(approval.id, approval.task_description)}
                 disabled={denyAction.isPending}
               >

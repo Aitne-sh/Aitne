@@ -17,7 +17,7 @@ a specific push attempt failed.
 
 ### Decision Framework
 
-1. Do not send a DM by default. Let hourly observation review decide
+1. Do not send a DM by default. Let the activity-scan observation review decide
    whether this matters in today's context.
 2. Add a concise entry to today.md `## Agent Notes` only when the repo is
    tied to an active task or deadline in today.md.

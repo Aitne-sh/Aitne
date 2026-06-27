@@ -29,7 +29,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
 import { QueryResult } from "@/components/shared/query-result";
 import { BrowserTaskStateBadge } from "@/components/browser-tasks/state-badge";
-import { formatAbsoluteTime, formatDuration } from "@/lib/utils";
+import { formatAbsoluteTime, formatDuration, truncate } from "@/lib/utils";
 
 /**
  * BROWSER_TASK_REDESIGN_PLAN.md §9a.3 — per-task detail page.
@@ -564,10 +564,6 @@ function renderArgsSummary(toolName: string, args: unknown): string {
     return `wait_for ${truncate(sel, 60)}`;
   }
   return "click for args";
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
 function ScreenshotThumb({

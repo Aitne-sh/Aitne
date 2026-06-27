@@ -22,6 +22,15 @@ function state(
   } as IntegrationState;
 }
 
+function notionState(
+  partial: Partial<IntegrationState> & { mode: IntegrationState["mode"] },
+): IntegrationState {
+  return state({
+    fetchTargets: [{ label: "Projects", locator: "https://notion.so/projects" }],
+    ...partial,
+  });
+}
+
 describe("buildAcquisitionTimestamps", () => {
   it("anchors day_start to the agent-day boundary in the given timezone", () => {
     const ts = buildAcquisitionTimestamps(FIXED_NOW, "UTC", 0);
@@ -144,7 +153,7 @@ describe("buildAcquisitionPlan", () => {
   it("skips integrations whose state is disabled", () => {
     const plan = buildAcquisitionPlan({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "disabled" }),
         google_calendar: state({ mode: "direct" }),
@@ -271,7 +280,7 @@ describe("buildAcquisitionPlan", () => {
         integrations: {
           gmail: state({ mode: "native", nativeBackend: "codex" }),
           google_calendar: state({ mode: "delegated", delegatedBackend: "claude" }),
-          notion: state({ mode: "direct" }),
+          notion: notionState({ mode: "direct" }),
         },
         accounts: [{ integration: "gmail", accountId: "acc1" }],
       });
@@ -357,7 +366,7 @@ describe("buildAcquisitionPlan", () => {
   it("substitutes timestamp tokens into the emitted query attribute", () => {
     const plan = buildAcquisitionPlan({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "direct" }),
       },
@@ -383,7 +392,7 @@ describe("buildAcquisitionPlan", () => {
     // (1) URL-shape query: `?since=…&unreadOnly=true&limit=10`
     const direct = buildAcquisitionPlan({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         outlook_mail: state({ mode: "direct" }),
       },
@@ -398,7 +407,7 @@ describe("buildAcquisitionPlan", () => {
     const delegated = buildAcquisitionPlan({
       ...baseInput,
       sessionBackend: "claude",
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "delegated", delegatedBackend: "claude" }),
       },
@@ -424,7 +433,7 @@ describe("buildAcquisitionPlan", () => {
     // `{now_date}` and hits the daemon's "invalid date format" branch.
     const plan = buildAcquisitionPlan({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         google_calendar: state({ mode: "direct" }),
       },
@@ -437,11 +446,11 @@ describe("buildAcquisitionPlan", () => {
   it("emits one row per non-perAccount window (calendar / notion) regardless of account count", () => {
     const plan = buildAcquisitionPlan({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         google_calendar: state({ mode: "direct" }),
         outlook_calendar: state({ mode: "direct" }),
-        notion: state({ mode: "direct" }),
+        notion: notionState({ mode: "direct" }),
       },
       accounts: [],
     });
@@ -450,6 +459,22 @@ describe("buildAcquisitionPlan", () => {
     expect(plan).toContain('integration="google_calendar"');
     expect(plan).toContain('integration="outlook_calendar"');
     expect(plan).toContain('integration="notion"');
+    expect(plan).toContain("targets='[{");
+    expect(plan).toContain("notion.so/projects");
+  });
+
+  it("skips Notion routine fetches until fetch targets are configured", () => {
+    const plan = buildAcquisitionPlan({
+      ...baseInput,
+      routine: "routine.activity_scan",
+      integrations: {
+        google_calendar: state({ mode: "direct" }),
+        notion: state({ mode: "direct" }),
+      },
+      accounts: [],
+    });
+    expect(plan).toContain('integration="google_calendar"');
+    expect(plan).not.toContain('integration="notion"');
   });
 
   it("omits rows whose (symbol, integration, mode) cell is unmapped (no silent emission)", () => {
@@ -458,7 +483,7 @@ describe("buildAcquisitionPlan", () => {
     // no row should appear even if gmail is delegated.
     const plan = buildAcquisitionPlan({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "delegated", delegatedBackend: "claude" }),
         google_calendar: state({ mode: "disabled" }),
@@ -769,11 +794,11 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("returns one sub-plan per active integration (per-integration-key granularity)", () => {
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "direct" }),
         google_calendar: state({ mode: "direct" }),
-        notion: state({ mode: "direct" }),
+        notion: notionState({ mode: "direct" }),
       },
       accounts: [{ integration: "gmail", accountId: "acc1" }],
     });
@@ -785,7 +810,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("collapses to one sub-plan when only one integration is active", () => {
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         google_calendar: state({ mode: "direct" }),
       },
@@ -808,7 +833,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("returns an empty array when every integration is disabled", () => {
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "disabled" }),
         google_calendar: state({ mode: "disabled" }),
@@ -845,10 +870,10 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("emits rowsHaveAccount=false for accountless integrations", () => {
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         google_calendar: state({ mode: "direct" }),
-        notion: state({ mode: "direct" }),
+        notion: notionState({ mode: "direct" }),
       },
       accounts: [],
     });
@@ -862,7 +887,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("wraps each sub-plan with a scoped=<key> attribute on its acquisition-plan element", () => {
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "direct" }),
         google_calendar: state({ mode: "direct" }),
@@ -875,7 +900,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
     // Every sub-plan still carries the routine + agent_day attributes
     // unchanged — the partial assumes those are present.
     for (const sp of subPlans) {
-      expect(sp.block).toContain('routine="hourly_check"');
+      expect(sp.block).toContain('routine="activity_scan"');
       expect(sp.block).toContain('agent_day="2026-05-11"');
       expect(sp.block).toContain("</acquisition-plan>");
     }
@@ -888,9 +913,9 @@ describe("splitAcquisitionPlanByIntegration", () => {
     // match the enumeration, not the JS object key order.
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
-        notion: state({ mode: "direct" }),
+        notion: notionState({ mode: "direct" }),
         gmail: state({ mode: "direct" }),
         google_calendar: state({ mode: "direct" }),
       },
@@ -910,7 +935,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       integrations: {
         gmail: state({ mode: "direct" }),
         google_calendar: state({ mode: "direct" }),
-        notion: state({ mode: "direct" }),
+        notion: notionState({ mode: "direct" }),
       },
       accounts: [
         { integration: "gmail" as IntegrationKey, accountId: "acc1" },
@@ -928,7 +953,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("skips integrations whose state is disabled — sub-plan absent rather than empty", () => {
     const subPlans = splitAcquisitionPlanByIntegration({
       ...baseInput,
-      routine: "routine.hourly_check",
+      routine: "routine.activity_scan",
       integrations: {
         gmail: state({ mode: "disabled" }),
         google_calendar: state({ mode: "direct" }),
@@ -967,7 +992,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
   it("queries inside each sub-plan are token-substituted (identical to the monolithic plan)", () => {
     const input = {
       ...baseInput,
-      routine: "routine.hourly_check" as const,
+      routine: "routine.activity_scan" as const,
       integrations: {
         gmail: state({ mode: "direct" }),
       },
@@ -991,7 +1016,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: { google_calendar: state({ mode: "direct" }) },
         accounts: [],
       });
@@ -1003,7 +1028,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: {
           gmail: state({ mode: "delegated", delegatedBackend: "claude" }),
         },
@@ -1017,7 +1042,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: {
           gmail: state({ mode: "delegated", delegatedBackend: "codex" }),
         },
@@ -1039,7 +1064,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: {
           outlook_mail: state({ mode: "delegated", delegatedBackend: "codex" }),
         },
@@ -1062,7 +1087,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: {
           gmail: state({ mode: "native", nativeBackend: "codex" }),
         },
@@ -1077,7 +1102,7 @@ describe("splitAcquisitionPlanByIntegration", () => {
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: {
           gmail: state({ mode: "native", nativeBackend: "claude" }),
         },
@@ -1088,20 +1113,20 @@ describe("splitAcquisitionPlanByIntegration", () => {
     });
 
     it("mixed routine: each sub-plan carries its own requiredBackend", () => {
-      // The hourly_check fans across mail / calendar / notion. Verify
+      // The activity_scan fans across mail / calendar / notion. Verify
       // that each integration gets the right backend independent of the
       // others: gmail-native-codex spawns on codex, google_calendar-direct
       // spawns on the default (claude), notion-delegated-same spawns on
       // claude. This is the canonical mixed-mode case from the
-      // hourly_check design discussion.
+      // activity_scan design discussion.
       const subPlans = splitAcquisitionPlanByIntegration({
         ...baseInput,
         sessionBackend: "claude",
-        routine: "routine.hourly_check",
+        routine: "routine.activity_scan",
         integrations: {
           gmail: state({ mode: "native", nativeBackend: "codex" }),
           google_calendar: state({ mode: "direct" }),
-          notion: state({ mode: "delegated", delegatedBackend: "claude" }),
+          notion: notionState({ mode: "delegated", delegatedBackend: "claude" }),
         },
         accounts: [],
       });
@@ -1182,6 +1207,20 @@ describe("buildAcquisitionPlanAssembly — drops (PREPASS_COST_REDUCTION_PLAN.md
     // No sub-plan was emitted for gmail — the drop is the only trace.
     expect(
       assembly.subPlans.find((p) => p.integrationKey === "gmail"),
+    ).toBeUndefined();
+  });
+
+  it("records no_fetch_targets for active Notion without an allowlist", () => {
+    const assembly = buildAcquisitionPlanAssembly({
+      ...baseInput,
+      integrations: { notion: state({ mode: "native", nativeBackend: "claude" }) },
+      accounts: [],
+    });
+    const notionDrops = assembly.drops.filter((d) => d.integration === "notion");
+    expect(notionDrops.length).toBeGreaterThan(0);
+    expect(notionDrops.every((d) => d.reason === "no_fetch_targets")).toBe(true);
+    expect(
+      assembly.subPlans.find((p) => p.integrationKey === "notion"),
     ).toBeUndefined();
   });
 

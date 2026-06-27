@@ -16,7 +16,6 @@ import { initDirectories } from "./init.js";
 
 import { EventBus } from "./core/event-bus.js";
 import { AgentScheduler } from "./core/scheduler.js";
-import { CustomRoutineScheduler } from "./core/custom-routine-scheduler.js";
 import { HealthMonitor } from "./core/health-monitor.js";
 import { Heartbeat } from "./core/heartbeat.js";
 import { MessageHub, type MessageDelivery } from "./adapters/message-hub.js";
@@ -57,6 +56,7 @@ import type { IntegrationStatuses } from "./api/server.js";
 import {
   APP_NAME,
   EventPriority,
+  getAgentDayDateStr,
   getBackendIds,
 } from "@aitne/shared";
 import {
@@ -77,6 +77,8 @@ import {
 } from "./core/roadmap-write-lock.js";
 import { runRoadmapMechanicalMaintenance } from "./core/roadmap-maintenance.js";
 import { fanoutResearchClusterUpdates } from "./core/browser-history/research-cluster-fanout.js";
+import { runDayBoundaryTasks } from "./core/day-boundary.js";
+import { SleepInhibitor } from "./core/sleep-inhibitor.js";
 import { safeRunPreMorningDigestJob } from "./core/browser-history/pre-morning-digest-job.js";
 import { shouldStartObserversFor } from "./core/integration-lifecycle.js";
 import { sweepExpiredMigrationBackups } from "./api/routes/setup-migrate.js";
@@ -167,6 +169,17 @@ async function startup(): Promise<void> {
   const { db, settingsStore, persistedSettings, attachmentStore } = initDatabase({
     config,
   });
+
+  // ── Keep-awake (sleep inhibitor) ──
+  // Host sleep freezes every daemon timer; on a sleeping macOS laptop the
+  // 04:00 day-boundary flow degrades into hours of wake-catchup replays
+  // riding maintenance DarkWakes, each at cold-prompt-cache cost. Hold a
+  // `caffeinate` assertion tied to our pid for the daemon's lifetime
+  // (AC-power-only by default — see `preventSleepMode` in
+  // settings/runtime-settings.ts). Started after initDatabase so a
+  // dashboard-persisted mode from the settings table is honored.
+  const sleepInhibitor = new SleepInhibitor({ mode: config.preventSleepMode });
+  sleepInhibitor.start();
 
   // ── Integration Delegation Framework (Phase 1) ──
   // Reconcile `<contextDir>/policies/integrations.md` with the DB integrations map.
@@ -1083,15 +1096,10 @@ async function startup(): Promise<void> {
   // ── 9. Scheduler ──
   const scheduler = new AgentScheduler(eventBus, db, config);
 
-  // ── 9.1 Custom routine scheduler (B-007 §5.8) ──
-  // Reads `policies/routines/custom/*.md` from the context dir and registers a
-  // cron job per enabled routine. Reloaded from the context API whenever
-  // the agent or dashboard edits a file under that directory.
-  const customRoutineScheduler = new CustomRoutineScheduler({
-    contextDir: getContextDir(config),
-    eventBus,
-    timezone: config.timezone || undefined,
-  });
+  // NB: the legacy CustomRoutineScheduler (B-007 §5.8 — per-file node-cron
+  // jobs over `policies/routines/custom/*.md`) was retired at the Agents-hub
+  // redesign; `bootstrapAgents` converts those files into user Agents once at
+  // boot (AGENTS_HUB_REDESIGN_PLAN.md §3).
 
   // ── 10. Event Processing Pipeline ──
   // §9.5 SignalDetector + §10 event-processing pipeline (agent cores,
@@ -1177,6 +1185,7 @@ async function startup(): Promise<void> {
     handlePromptContextChanged,
     keepaliveTimer,
     browserTaskDeadlineTimer,
+    backgroundTaskHousekeepingTimer,
   } = eventPipeline;
 
   // ── 10.5 Agent Definitions load (AGENT_DEFINITIONS_DESIGN.md §6.1 / §7.1) ──
@@ -1230,7 +1239,6 @@ async function startup(): Promise<void> {
     sessionManager,
     scheduler,
     agentEnabledCache,
-    customRoutineScheduler,
     healthMonitor,
     heartbeat,
     messageHub,
@@ -1245,6 +1253,10 @@ async function startup(): Promise<void> {
     // same in-memory state as the runner's promote/release cascade.
     browserTaskRunner: eventPipeline.browserTaskRunner,
     browserTaskSlotStateRef: eventPipeline.browserTaskSlotStateRef,
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §4 — generic runner + shared slot
+    // state, threaded through so the API routes share the runner's state.
+    backgroundTaskRunner: eventPipeline.backgroundTaskRunner,
+    backgroundTaskSlotStateRef: eventPipeline.backgroundTaskSlotStateRef,
     writeTracker,
     auditLogger,
     attachmentStore,
@@ -1308,20 +1320,30 @@ async function startup(): Promise<void> {
   // (BROWSER_HISTORY_INTEGRATION_PLAN §10.6 step 3). The fan-out is
   // bounded at 25 clusters / cycle; backlog clusters surface on the
   // next day-boundary tick.
+  //
+  // RESEARCH_CLUSTER_COST_FIX_PLAN.md F2 — `runDayBoundaryTasks` gates
+  // the body behind a per-agent-day runtime_state marker. The scheduler
+  // invokes this callback from three sites (04:00 cron, wake catch-up,
+  // morning self-heal); wrapping the single composition site keeps a
+  // sleep-replay morning from re-running the body. Errors propagate
+  // WITHOUT writing the marker — each scheduler site catches + logs and
+  // the next fire retries the whole body.
   scheduler.setDayBoundaryCallback(async () => {
-    await dispatcher.summarizeDmSessions();
-    try {
-      const result = await fanoutResearchClusterUpdates(db, eventBus);
-      if (result.enqueuedSlugs.length > 0) {
-        logger.info(
-          { enqueuedSlugs: result.enqueuedSlugs },
-          "Research cluster updates enqueued at day boundary",
-        );
-      }
-    } catch (err) {
-      logger.error(
-        { err },
-        "Research cluster update fan-out failed; will retry next day boundary",
+    const todayAgentDay = getAgentDayDateStr(
+      config.timezone || undefined,
+      config.dayBoundaryHour,
+    );
+    const result = await runDayBoundaryTasks({
+      db,
+      todayAgentDay,
+      summarizeDmSessions: () => dispatcher.summarizeDmSessions(),
+      fanoutResearchClusterUpdates: () =>
+        fanoutResearchClusterUpdates(db, eventBus, { todayAgentDay }),
+    });
+    if (result.ran && result.enqueuedSlugs.length > 0) {
+      logger.info(
+        { enqueuedSlugs: result.enqueuedSlugs },
+        "Research cluster updates enqueued at day boundary",
       );
     }
   });
@@ -1339,7 +1361,7 @@ async function startup(): Promise<void> {
     }
     return messageHub.sendToUser(message);
   });
-  scheduler.setHourlyCheckCallback((source) => dispatcher.triggerHourlyCheck(source));
+  scheduler.setActivityScanCallback((source) => dispatcher.triggerActivityScan(source));
   // B-004 Phase 2a — nightly context-index reconciler. The design doc
   // (§4.1, §5.3) originally proposed an `agent_schedule` row with
   // `task_type: "internal.reconcile_context_index"`, but the dispatcher's
@@ -1406,7 +1428,7 @@ async function startup(): Promise<void> {
       },
     });
   });
-  // Phase 4 auth probe — runs BEFORE the hourly check on each cron
+  // Phase 4 auth probe — runs BEFORE the activity scan on each cron
   // tick so auth health detection happens independently of the
   // observation-threshold gate. checkAll() owns its own kill switch
   // (authProbeDisabled), morning-routine skip, and in-flight dedupe.
@@ -1459,7 +1481,7 @@ async function startup(): Promise<void> {
   scheduler.setAutonomousGate(() => dispatcher.isAutonomousAllowed());
   // Pre-routine morning_routine gate (sleep-skip recovery). When the
   // current agent-day's morning_routine has not completed yet — typical
-  // cause: Mac slept through the 04:00 cron tick — hourly_check and the
+  // cause: Mac slept through the 04:00 cron tick — activity_scan and the
   // review routines enqueue a wake row instead of running on stale state.
   // Wired here after both `dispatcher` and `scheduler` exist so the
   // binding is a single, stable function reference for the duration of
@@ -1474,7 +1496,6 @@ async function startup(): Promise<void> {
   await messageHub.startAll();
   adapterWatchdog.start();
   scheduler.start();
-  customRoutineScheduler.start();
   signalDetector.start();
   const registeredPlatforms = messageHub.getPlatforms();
   // Single-app installs (Telegram-only / Discord-only / etc.) would
@@ -1671,9 +1692,9 @@ async function startup(): Promise<void> {
     dispatcher.stop(); // Signals dispatcher to exit run() loop
     adapterWatchdog.stop();
     scheduler.stop();
-    customRoutineScheduler.stop();
     healthMonitor.stop();
     heartbeat.stop();
+    sleepInhibitor.stop();
     signalDetector.stop();
     notificationManager.stop(); // Clear pending batch-flush timer
     authRecovery.shutdown(); // Kill any active recovery subprocesses
@@ -1687,6 +1708,8 @@ async function startup(): Promise<void> {
     clearInterval(keepaliveTimer);
     // BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — 30 s deadline tick.
     clearInterval(browserTaskDeadlineTimer);
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §6 — 30 s housekeeping tick.
+    clearInterval(backgroundTaskHousekeepingTimer);
     clearTimeout(migrationBackupSweepInitial);
     clearInterval(migrationBackupSweepTimer);
     if (managementMdWatcher) {
@@ -1733,7 +1756,7 @@ async function startup(): Promise<void> {
 }
 
 // Catchup (`runCatchup` / `runPostMessagingCatchup`) and the pure schedule
-// predicates (`getDueCatchupRoutines`, `shouldCatchUpHourlyCheck`,
+// predicates (`getDueCatchupRoutines`, `shouldCatchUpActivityScan`,
 // `getProgressMinutesForHour`, `hasFreshAgentDayTodayMd`,
 // `readSkillCurationCadence`) live in `./bootstrap/` — see
 // `docs/design/appendices/file-split-plan.md` §10. Imports are at the top

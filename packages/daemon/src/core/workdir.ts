@@ -51,6 +51,7 @@ import {
 } from "./skills-compiler-tree.js";
 import { refreshSkillIndexBlock } from "./skills-compiler-skill-index.js";
 import {
+  eventTypeAcceptsUserSkills,
   getProfileForEvent,
   resolveSkillManifest,
   resolveSkillManifestForProcess,
@@ -375,11 +376,17 @@ export function createSessionWorkdir(
     );
     ensureDaemonApiCli(sessionDir);
 
-    // User skills: every skill the user has authored, regardless of event type.
-    // Uses the manifest-backed sync so the initial population is consistent
-    // with the per-message sync the dispatcher runs on Opus events.
+    // User skills: every skill the user has authored, EXCEPT for
+    // narrow-persona keys (wiki.* / routine.research_*) which run a tight
+    // built-in manifest and would only be diluted by the owner's general
+    // skill library — see `eventTypeAcceptsUserSkills`. Uses the
+    // manifest-backed sync so the initial population is consistent with the
+    // per-message sync the dispatcher runs on Opus events.
     let userSync: ReturnType<typeof syncAllUserSkills> | null = null;
-    if (userSkillsDir) {
+    if (
+      userSkillsDir &&
+      eventTypeAcceptsUserSkills(options?.processKey ?? eventType)
+    ) {
       userSync = syncAllUserSkills(sessionDir, userSkillsDir);
       // docs/design/appendices/skills-unification.md Phase 1 §R4 — splice user-authored
       // slugs into the `<skill-index>` block AFTER they land on disk.
@@ -630,7 +637,12 @@ export function ensureSessionWorkdir(
       "policies",
       "skills",
     );
-    const userSync = syncAllUserSkills(sessionDir, userSkillsDir);
+    // Narrow-persona keys (wiki.* / routine.research_*) skip the owner's
+    // user-skill library; their tight built-in manifest is the whole
+    // surface. See `eventTypeAcceptsUserSkills`.
+    const userSync = eventTypeAcceptsUserSkills(options?.processKey ?? eventType)
+      ? syncAllUserSkills(sessionDir, userSkillsDir)
+      : null;
     // docs/design/appendices/skills-unification.md Phase 1 §R4 — fold user-authored slugs
     // into the `<skill-index>` block now that they're on disk. Idempotent
     // and inexpensive (single instruction-file rewrite).

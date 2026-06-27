@@ -97,7 +97,7 @@ export type WindowSymbol = (typeof WINDOW_SYMBOLS)[number];
 export const ROUTINE_WINDOW_KEYS = [
   "routine.morning_routine",
   "routine.today_refresh",
-  "routine.hourly_check",
+  "routine.activity_scan",
   "routine.evening_review",
   "routine.weekly_review",
   "routine.monthly_review",
@@ -156,7 +156,7 @@ export interface RoutineWindowSpec {
  *    differs). The dispatcher's `applySinceFilter` in
  *    `db/observations.ts` ensures the main session reads back the
  *    merged pending set uniformly.
- *  - `hourly_check`: small, frequent. `unread_last_hour` typically
+ *  - `activity_scan`: small, frequent. `unread_last_hour` typically
  *    yields ≤1 mail item; `imminent_2h` ≤1 calendar item. Notion
  *    `updated_1h` is similarly bounded.
  *  - `evening_review`: ContextBuilder covers `<calendar_events_3d>`,
@@ -193,7 +193,7 @@ export const ROUTINE_WINDOWS: Readonly<
   "routine.today_refresh": [
     { kind: "calendar", window: "cal_next_24h_drift", perAccount: false },
   ],
-  "routine.hourly_check": [
+  "routine.activity_scan": [
     { kind: "mail", window: "unread_last_hour", perAccount: true },
     { kind: "calendar", window: "imminent_2h", perAccount: false },
     { kind: "notion", window: "updated_1h", perAccount: false },
@@ -271,7 +271,7 @@ export const WINDOW_QUERIES: Readonly<
   // shell-fragile Unicode whitespace. Filtering at the FETCH boundary
   // means the agent never sees these messages at all: zero cost, zero
   // chance of a Unicode-whitespace-bearing curl body, zero observations
-  // for the morning_routine / hourly_check skill to wade through.
+  // for the morning_routine / activity_scan skill to wade through.
   //
   // Sent-folder windows (today_outcomes) skip the filter — sent mail is
   // the user's own writing, not promotional.
@@ -484,7 +484,7 @@ export function routineHasWindows(key: RoutineWindowKey): boolean {
 }
 
 // Note: there is intentionally no `routineHasCalendarPrepass` helper
-// even though every morning_routine / hourly_check / today_refresh /
+// even though every morning_routine / activity_scan / today_refresh /
 // weekly_review row carries a calendar entry. The decision a caller
 // (e.g. ContextBuilder.buildCalendarBlock) really wants to make is
 // "does the pre-pass own the window I'm about to emit," and that needs

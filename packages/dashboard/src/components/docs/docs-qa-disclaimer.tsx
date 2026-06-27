@@ -86,7 +86,7 @@ export function DocsQADisclaimer({
       ) : data ? (
         <LongFormCopy data={data} pickedModelLabel={pickedModelLabel} />
       ) : null}
-      <p className="flex gap-1.5 text-amber-700 dark:text-amber-400">
+      <p className="flex gap-1.5 text-warning">
         <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         <span>
           Answers can be inaccurate. The agent searches all {APP_NAME} docs

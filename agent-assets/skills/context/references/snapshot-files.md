@@ -27,7 +27,7 @@ Notes:
 - Weekly file name uses ISO week (`YYYY-Www` — `2026-W19`, not
   `2026-W5`); pad the week to two digits.
 - Never write `journal/weekly/*.md` or `journal/monthly/*.md` on any other day. The
-  Morning Routine, Hourly Check, Evening Review, and DM handlers do
+  Morning Routine, Activity Scan, Evening Review, and DM handlers do
   not produce these files; if you are not the matching review
   routine, do not PUT this path.
 - `PATCH` is technically accepted but unusual. The normal write is a
@@ -99,6 +99,6 @@ max_budget_usd: <number>
 
 The file body must also contain a `## Checks` section.
 
-Deleting a custom routine uses `DELETE /api/context/policies/routines/custom/<slug>`
-**only** after the user asks to retire it. The daemon snapshots the
-prior content for restore.
+Deleting a legacy custom-routine file uses
+`DELETE /api/context/policies/routines/custom/<slug>` **only** after the user
+asks to clean it up. The daemon snapshots the prior content for restore.

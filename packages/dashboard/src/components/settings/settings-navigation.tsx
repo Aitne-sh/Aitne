@@ -8,12 +8,12 @@ import {
   Clock,
   Cpu,
   Terminal,
+  AlertTriangle,
   BookOpenText,
-  BookText,
   History,
   MonitorCog,
+  ShieldCheck,
   SlidersHorizontal,
-  Repeat,
   ClipboardList,
   Sparkles,
   GraduationCap,
@@ -54,25 +54,13 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/settings",
         label: "Profile",
         icon: User,
-        description: "Identity and time axis",
+        description: "Identity, personality, language",
       },
       {
-        href: "/settings/schedule",
-        label: "Schedule",
+        href: "/settings/hours",
+        label: "Hours & Notifications",
         icon: Clock,
-        description: "Hourly check, quiet hours, notifications",
-      },
-      {
-        href: "/settings/routines",
-        label: "Routines",
-        icon: Repeat,
-        description: "Per-cadence check rulebooks and custom cron routines",
-      },
-      {
-        href: "/settings/journal",
-        label: "Journal",
-        icon: BookText,
-        description: "Daily journal format template and export redaction rules",
+        description: "Timezone, day boundary, quiet hours, notification caps",
       },
     ],
   },
@@ -143,10 +131,22 @@ const NAV_GROUPS: NavGroup[] = [
     label: "System",
     items: [
       {
-        href: "/settings/advanced",
-        label: "Advanced",
+        href: "/settings/safety",
+        label: "Safety",
+        icon: ShieldCheck,
+        description: "Tool-policy guardrails for every backend",
+      },
+      {
+        href: "/settings/infrastructure",
+        label: "Infrastructure",
         icon: SlidersHorizontal,
-        description: "Safety, infrastructure, danger zone",
+        description: "Polling, history injection, ports, voice model",
+      },
+      {
+        href: "/settings/danger-zone",
+        label: "Danger Zone",
+        icon: AlertTriangle,
+        description: "Destructive maintenance actions",
       },
     ],
   },
@@ -170,11 +170,8 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     // ManagementModeSection's dialog, not defer-save, so they don't
     // participate in the page dirty-dot indicator.
   ],
-  "/settings/schedule": [
+  "/settings/hours": [
     "timezone", "dayBoundaryHour",
-    "hourlyCheckEnabled", "hourlyCheckIntervalMinutes",
-    "hourlyCheckActiveStartHour", "hourlyCheckActiveEndHour", "hourlyCheckMinObservations",
-    "monthlyReviewEnabled",
     "maxNotificationsPerHour", "maxNotificationsPerDay",
     "quietHoursStart", "quietHoursEnd", "batchIntervalMinutes",
     "defaultNotificationPlatforms", "primaryPlatform",
@@ -197,8 +194,13 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "feedbackLessonStaleDays",
     "feedbackSignalRetentionDays",
   ],
-  "/settings/advanced": [
+  // DASHBOARD_UI_REFRESH_DESIGN.md follow-up #1 — the former /settings/advanced
+  // keys split across the Safety and Infrastructure pages. Danger Zone has no
+  // deferred-save keys (its actions are immediate, confirm-gated POSTs).
+  "/settings/safety": [
     "disallowedTools", "allowedToolsOverride",
+  ],
+  "/settings/infrastructure": [
     "obsidianDebounceSeconds", "schedulePollIntervalSeconds", "gitPollIntervalSeconds",
     "notionPollIntervalSeconds", "calendarPollIntervalSeconds", "gmailPollIntervalSeconds",
     "historyInjectionMaxMessages", "historyInjectionMaxTokens", "dmStalenessStrict",
@@ -276,6 +278,11 @@ export function SettingsNavigation() {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      // Scroll containment lives in SettingsContent (it
+                      // resets its own pane on route change); without
+                      // scroll={false} Next.js would also scroll the outer
+                      // LayoutShell pane and the whole frame jumps.
+                      scroll={false}
                       aria-current={active ? "page" : undefined}
                       className={cn(
                         "group flex items-center gap-3 whitespace-nowrap rounded-lg px-3 py-2 text-sm transition-colors md:whitespace-normal",

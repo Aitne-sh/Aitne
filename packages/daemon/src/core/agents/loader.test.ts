@@ -264,8 +264,8 @@ describe("synthesizeRegistryDefinition", () => {
     expect(def.backend.tier).toBeNull();
     expect(def.stop_warning).toBeDefined();
   });
-  it("uses the fallback cron for the runtime-window hourly-check", () => {
-    const def = synthesizeRegistryDefinition(getBuiltinRegistryEntry("hourly-check")!, 4);
+  it("uses the fallback cron for the runtime-window activity-scan", () => {
+    const def = synthesizeRegistryDefinition(getBuiltinRegistryEntry("activity-scan")!, 4);
     expect(def.schedule.expression).toBe("0 * * * *");
   });
   it("honours monthly-review's OFF-by-default", () => {
@@ -355,10 +355,10 @@ describe("validateDefinition", () => {
     expect(validateDefinition(def, "builtin", "evening-review", {}, warnings)).toBeNull();
     expect(warnings.join()).toMatch(/cron drift/);
   });
-  it("does not flag drift for the null-resolver hourly-check", () => {
-    const def = builtinDef("hourly-check", { schedule: { kind: "cron", expression: "30 5 * * *" } });
+  it("does not flag drift for the null-resolver activity-scan", () => {
+    const def = builtinDef("activity-scan", { schedule: { kind: "cron", expression: "30 5 * * *" } });
     const warnings: string[] = [];
-    expect(validateDefinition(def, "builtin", "hourly-check", {}, warnings)).toBeNull();
+    expect(validateDefinition(def, "builtin", "activity-scan", {}, warnings)).toBeNull();
     expect(warnings.join()).not.toMatch(/drift/);
   });
 });
@@ -433,12 +433,18 @@ describe("loadAgents: built-ins", () => {
       scheduleTimezone: seed.scheduleTimezone,
       tags: seed.tags,
       stopWarning: seed.stopWarning,
-      metadata: { version_counter: 3, override_snapshot: { "limits.max_budget_usd": 0.99 } },
+      metadata: {
+        version_counter: 3,
+        override_snapshot: { "limits.max_budget_usd": 0.99 },
+        runtime_window: { interval_minutes: 30 },
+      },
     }, 1000);
     loadAgents(db, baseOptions({ dayBoundaryHour: 5, now: () => 2000 }));
     const after = getAgent(db, "morning-routine")!;
     expect(after.scheduleExpression).toBe("0 5 * * *");
     expect(after.metadata.override_snapshot).toEqual({ "limits.max_budget_usd": 0.99 });
+    // Runtime-window cadence overrides survive the reload like the snapshot.
+    expect(after.metadata.runtime_window).toEqual({ interval_minutes: 30 });
     expect(after.metadata.version_counter).toBe(4); // bumped on the change
   });
 

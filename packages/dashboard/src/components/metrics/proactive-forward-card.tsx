@@ -34,7 +34,7 @@ export function ProactiveForwardCard({
 
       {!stats || stats.injected === 0 ? (
         <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          <CheckCircle2 className="h-4 w-4 text-success" />
           No forwarded notifications injected in the last 30 days
         </div>
       ) : (
@@ -44,8 +44,8 @@ export function ProactiveForwardCard({
               <Icon
                 className={
                   overThreshold
-                    ? "h-4 w-4 text-amber-500"
-                    : "h-4 w-4 text-emerald-500"
+                    ? "h-4 w-4 text-warning"
+                    : "h-4 w-4 text-success"
                 }
               />
               <span className="text-sm font-medium text-foreground">

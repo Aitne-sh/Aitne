@@ -88,7 +88,7 @@ describe("context-builder-yesterday", () => {
 
       db.prepare(
         `INSERT INTO agent_actions (action_type, trigger, result, started_at)
-         VALUES ('routine.hourly_check', 'autonomous', 'success', ?)`,
+         VALUES ('routine.activity_scan', 'autonomous', 'success', ?)`,
       ).run(prevTs);
       db.prepare(
         `INSERT INTO agent_actions (action_type, trigger, result, started_at)
@@ -97,7 +97,7 @@ describe("context-builder-yesterday", () => {
 
       const result = await buildYesterdayContext(deps());
 
-      expect(result.agentActions).toContain("routine.hourly_check");
+      expect(result.agentActions).toContain("routine.activity_scan");
       expect(result.agentActions).not.toContain("routine.evening_review");
     });
 
@@ -105,12 +105,12 @@ describe("context-builder-yesterday", () => {
       const prevBounds = previousAgentDayBounds();
       db.prepare(
         `INSERT INTO agent_actions (action_type, trigger, result, started_at, error)
-         VALUES ('routine.hourly_check', 'autonomous', 'failed', ?, ?)`,
+         VALUES ('routine.activity_scan', 'autonomous', 'failed', ?, ?)`,
       ).run(offsetIntoBounds(prevBounds, 2), "auth expired during MCP probe");
 
       const result = await buildYesterdayContext(deps());
 
-      expect(result.agentActions).toContain("[failed] routine.hourly_check");
+      expect(result.agentActions).toContain("[failed] routine.activity_scan");
       expect(result.agentActions).toContain("(autonomous)");
       expect(result.agentActions).toContain(
         "error: auth expired during MCP probe",

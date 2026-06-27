@@ -805,17 +805,25 @@ export function bumpClusterAgentSummaryRevision(
 }
 
 /**
- * Clusters whose `last_activity_at` is newer than the row's most recent
- * cluster_update session — i.e. the agent has new visits to journal.
- * Surfaces only `active` rows: muted / concluded / dormant clusters do
- * not get nightly journal appends. Capped by `limit` so a backlog never
- * floods the schedule fan-out.
+ * Clusters eligible for a `routine.research_cluster_update` enqueue this
+ * agent-day: `active` rows with meaningful activity inside the lookback
+ * window that have NOT already been enqueued for `todayAgentDay`
+ * (`journal_update_enqueued_on` is the stamp `claimClusterJournalEnqueue`
+ * writes at fan-out time; ISO 'YYYY-MM-DD' strings compare lexically =
+ * chronologically, so `< todayAgentDay` means "last enqueued on an
+ * earlier agent day"). This filter is the efficiency gate for SEQUENTIAL
+ * replays (a wake catch-up / morning self-heal re-running after a prior
+ * fire completed); the atomic per-row claim in `claimClusterJournalEnqueue`
+ * is what additionally protects against two CONCURRENTLY in-flight
+ * callbacks — RESEARCH_CLUSTER_COST_FIX_PLAN.md RC1. Muted / concluded / dormant clusters do not get nightly journal
+ * appends. Capped by `limit` so a backlog never floods the fan-out.
  */
 export function listClustersNeedingUpdate(
   db: Database.Database,
   lookbackMs: number,
-  nowMs: number = Date.now(),
-  limit = 25,
+  nowMs: number,
+  limit: number,
+  todayAgentDay: string,
 ): Array<{ slug: string; displayName: string }> {
   const since = nowMs - lookbackMs;
   return db
@@ -824,10 +832,57 @@ export function listClustersNeedingUpdate(
        FROM browser_research_clusters
        WHERE status = 'active'
          AND last_activity_at >= ?
+         AND (journal_update_enqueued_on IS NULL
+              OR journal_update_enqueued_on < ?)
        ORDER BY last_activity_at DESC
        LIMIT ?`,
     )
-    .all(since, limit) as Array<{ slug: string; displayName: string }>;
+    .all(since, todayAgentDay, limit) as Array<{
+    slug: string;
+    displayName: string;
+  }>;
+}
+
+/**
+ * Atomically CLAIM `agentDay`'s `routine.research_cluster_update` enqueue
+ * slot for this cluster. Returns `true` iff THIS call wrote the stamp —
+ * the prior value was NULL or an earlier agent-day; `false` if the slot
+ * was already claimed for `agentDay` (or a newer one) or the slug is
+ * unknown. Called BEFORE `eventBus.put` (claim-before-enqueue — same
+ * rationale as `fireDecision`'s `stampClusterDmFields` call in
+ * browser-history-poller.ts).
+ *
+ * The conditional UPDATE is a single atomic SQLite statement, so two
+ * day-boundary callbacks racing on the same cluster cannot both claim
+ * it: the 04:00 cron fires `onDayBoundary` fire-and-forget (scheduler.ts)
+ * and can overlap a wake catch-up, and each fan-out iterates its own
+ * `listClustersNeedingUpdate` snapshot — so the per-row claim, not the
+ * snapshot filter, is what guarantees exactly one enqueue per cluster per
+ * agent day. Exactly one caller sees `changes === 1` and enqueues; the
+ * loser skips. The `< ?` guard doubles as monotonicity — a stale replay
+ * carrying an older agent-day matches no row and cannot regress a newer
+ * stamp (ISO 'YYYY-MM-DD' strings compare lexically = chronologically).
+ *
+ * Failure semantics are intentional: the claim persists even if the
+ * subsequent `eventBus.put` throws, so a cluster whose enqueue failed
+ * retries on the NEXT agent day — bounded, no same-day loop (the F6
+ * backfill covers the missed day).
+ */
+export function claimClusterJournalEnqueue(
+  db: Database.Database,
+  slug: string,
+  agentDay: string,
+): boolean {
+  const info = db
+    .prepare(
+      `UPDATE browser_research_clusters
+          SET journal_update_enqueued_on = ?
+        WHERE slug = ?
+          AND (journal_update_enqueued_on IS NULL
+               OR journal_update_enqueued_on < ?)`,
+    )
+    .run(agentDay, slug, agentDay);
+  return info.changes > 0;
 }
 
 // ── browser_pending_offers — materialised view of open offer state ──

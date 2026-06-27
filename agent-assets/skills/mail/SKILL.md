@@ -54,7 +54,7 @@ accordingly:
   user) registered on that backend. The daemon does not poll Outlook
   in this mode — mail observations only land when the agent fetches
   in-turn through the user's MCP during a DM that needs them. There
-  is no proactive hourly_check fetch for `outlook_mail` (user-managed
+  is no proactive activity_scan fetch for `outlook_mail` (user-managed
   reactive-only contract; see
   `docs/design/appendices/native-integration-mode.md`).
 <!-- /mode:native:outlook_mail -->
@@ -187,7 +187,7 @@ curl -s "http://localhost:8321/api/mail/ACCT/messages/MSG/body?format=raw&chunk=
 ```
 
 ### When NOT to act
-- During `routine.hourly_check` this skill is **read-only** — no sending,
+- During `routine.activity_scan` this skill is **read-only** — no sending,
   no draft edits, no tag changes, no trash / untrash / archive.
 - No bulk operations without user confirmation.
 - Trash / untrash / archive run autonomously when not on the user's

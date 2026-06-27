@@ -211,7 +211,7 @@ const notionClaude: IntegrationListItem = {
     },
   },
   skillsTouched: ["notion"],
-  taskFlowsTouched: ["routine.hourly_check"],
+  taskFlowsTouched: ["routine.activity_scan"],
   observersTouched: ["notion-poller"],
   apiRoutesTouched: ["/api/notion/query", "/api/notion/search", "/api/notion/pages"],
   state: { mode: "disabled", lastChangedAt: "2026-04-25T00:00:00Z" },

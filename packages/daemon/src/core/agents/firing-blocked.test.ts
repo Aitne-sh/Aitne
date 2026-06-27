@@ -83,11 +83,11 @@ describe("recordAgentFiringBlocked", () => {
   });
 
   it("keeps separate rows per Agent on the same agent-day", () => {
-    seedAgent(db, "hourly-check");
+    seedAgent(db, "activity-scan");
     recordAgentFiringBlocked(db, { slug: "morning-routine", agentDay: "2026-05-31", reason: "disabled" });
-    const other = recordAgentFiringBlocked(db, { slug: "hourly-check", agentDay: "2026-05-31", reason: "disabled" });
+    const other = recordAgentFiringBlocked(db, { slug: "activity-scan", agentDay: "2026-05-31", reason: "disabled" });
     expect(other).toBe("inserted");
     expect(readRow(db, "morning-routine", "2026-05-31").count).toBe(1);
-    expect(readRow(db, "hourly-check", "2026-05-31").count).toBe(1);
+    expect(readRow(db, "activity-scan", "2026-05-31").count).toBe(1);
   });
 });

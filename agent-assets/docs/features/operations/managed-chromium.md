@@ -48,6 +48,7 @@ related:
   - concepts/safety-and-execution
   - reference/disallowed-tools
 ui_anchors:
+  - /browser
   - /settings/integrations/browser-history-managed
   - /settings/integrations/browser-history-managed/b4
 process_keys:

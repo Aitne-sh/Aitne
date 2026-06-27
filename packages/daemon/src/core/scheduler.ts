@@ -13,6 +13,7 @@ import {
   type RoutineEvent,
   type AgentTaskEvent,
   type ScheduledBrowserTaskEvent,
+  type ScheduledBackgroundTaskEvent,
   type ScheduledDmEvent,
 } from "@aitne/shared";
 import type { AgentConfig } from "../config.js";
@@ -25,6 +26,8 @@ import type { MessageDelivery } from "../adapters/message-hub.js";
 import { reconcileRecurringSchedules } from "../db/recurring-schedules.js";
 import { recordAgentFiringBlocked } from "./agents/firing-blocked.js";
 import type { AgentEnabledCache } from "./agents/loader.js";
+import { resolveActivityScanCadence } from "./agents/activity-scan-cadence.js";
+import { getRuntimeWindow } from "../db/agents-store.js";
 import {
   getDueCatchupRoutines,
   getRecoverableStalledMorningWake,
@@ -32,7 +35,7 @@ import {
   MORNING_MISSED_FIRE_GRACE_MINUTES,
   morningRoutineRanToday,
   readMorningRoutineStallThresholdMinutes,
-  shouldCatchUpHourlyCheck,
+  shouldCatchUpActivityScan,
   shouldQueueMissedMorningFire,
 } from "../bootstrap/schedule-helpers.js";
 import { WakeDetector } from "./wake-detector.js";
@@ -53,9 +56,9 @@ const MORNING_ROUTINE_STALL_ALERT_KEY = "morning_routine.stall_alert_day";
  * SQLite reads in the common healthy case), and 10 minutes bounds the
  * worst-case detection latency for a swallowed 04:00 cron fire at
  * `MORNING_MISSED_FIRE_GRACE_MINUTES + 10`. Deliberately a dedicated
- * interval rather than a rider on the hourly-check cron: the watchdog
+ * interval rather than a rider on the activity-scan cron: the watchdog
  * historically rode that cron and went silently dead the moment an
- * operator set `hourlyCheckEnabled=false` — exactly the configuration
+ * operator set `activityScanEnabled=false` — exactly the configuration
  * where the morning routine has no other safety net.
  */
 export const MORNING_SELF_HEAL_INTERVAL_MS = 10 * 60_000;
@@ -106,7 +109,7 @@ function isDivisorOfHour(intervalMinutes: number): boolean {
 }
 
 /**
- * Build the cron expression that drives the hourly check.
+ * Build the cron expression that drives the activity scan.
  *
  * Two regimes:
  *
@@ -119,7 +122,7 @@ function isDivisorOfHour(intervalMinutes: number): boolean {
  * 2. **Arbitrary interval** (anything else, e.g. 7, 45, 90, 120, 720,
  *    1440): we emit `"* <hourRange> * * *"` (every minute within active
  *    hours). The caller is expected to gate each tick with
- *    `shouldFireHourlyTickAt(...)`, which anchors the cadence to
+ *    `shouldFireActivityScanTickAt(...)`, which anchors the cadence to
  *    `activeStartHour` via `((h*60 + m) - activeStartHour*60) %
  *    intervalMinutes`. This anchor matters: a midnight-anchored modulo
  *    plus `activeStartHour > 0` would silently drop intervals where the
@@ -131,9 +134,9 @@ function isDivisorOfHour(intervalMinutes: number): boolean {
  *
  * The minute-tick cron does fire 60× per hour even when most ticks are
  * no-ops, but the callback's first action is the modulo check — overhead
- * is negligible compared to the actual hourly-check work.
+ * is negligible compared to the actual activity-scan work.
  */
-export function buildHourlyCronExpr(
+export function buildActivityScanCronExpr(
   intervalMinutes: number,
   startHour: number,
   endHourExclusive: number,
@@ -170,7 +173,7 @@ export function buildHourlyCronExpr(
  * so the divisor early-return doesn't change behavior — it's just
  * explicit about which path the cron expression itself handles.
  */
-export function shouldFireHourlyTickAt(
+export function shouldFireActivityScanTickAt(
   localHour: number,
   localMinute: number,
   intervalMinutes: number,
@@ -291,12 +294,12 @@ export class AgentScheduler {
   private noFutureTasksWarned = false;
   private onDayBoundary: (() => Promise<void>) | null = null;
   private sendDm: ((message: string, platforms?: string[]) => Promise<MessageDelivery[]>) | null = null;
-  private onHourlyCheck: ((source: string) => Promise<unknown>) | null = null;
+  private onActivityScan: ((source: string) => Promise<unknown>) | null = null;
   /**
    * Phase 4 auth probe hook — fired on every hourly cron tick BEFORE
-   * `onHourlyCheck` so the probe gets a chance to refresh DB cache +
+   * `onActivityScan` so the probe gets a chance to refresh DB cache +
    * emit DMs even when the observation-threshold gate would skip the
-   * hourly check itself. The AuthHealthMonitor.checkAll() method owns
+   * activity scan itself. The AuthHealthMonitor.checkAll() method owns
    * its own kill-switch and morning-routine skip; the scheduler only
    * applies the same `autonomousGate` short-circuit that protects the
    * other cron callbacks.
@@ -304,18 +307,18 @@ export class AgentScheduler {
    * See `docs/design/09-safety-cost.md` §9.5.4 for the gate
    * ordering: morning-routine → hourly-already-running → auth probe
    * → observation-threshold. Steps 1 + 2 are handled inside
-   * `triggerHourlyCheck`; step 3 is this callback; step 4 is the
-   * threshold gate inside `triggerHourlyCheck`.
+   * `triggerActivityScan`; step 3 is this callback; step 4 is the
+   * threshold gate inside `triggerActivityScan`.
    */
   private onAuthProbe: (() => Promise<unknown>) | null = null;
   /**
    * SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4 Phase 3 — auto-revert monitor.
    * Piggybacks the hourly cron tick (P2 — zero new scheduled sessions),
    * fired AHEAD of the per-agent enabled gate and the autonomous setup
-   * gate so rollback safety survives the owner disabling the hourly-check
+   * gate so rollback safety survives the owner disabling the activity-scan
    * Agent or a setup-gated daemon; the callback owns its own 1/day
    * throttle, per-entry isolation, and DM emission. Remaining coupling:
-   * with `hourlyCheckEnabled=false` this cron is never registered and
+   * with `activityScanEnabled=false` this cron is never registered and
    * applied changes stay unverified until the check is re-enabled —
    * acceptable because R1/R3 govern the (now-idle) hourly pipeline
    * itself; an applied R5 (`feedbackLessonMaxBytesGlobal`) change would
@@ -411,7 +414,7 @@ export class AgentScheduler {
   /**
    * Independent self-heal tick for the morning routine (alert + recover +
    * missed-fire re-queue). See {@link runMorningSelfHeal}. Kept off the
-   * hourly-check cron on purpose — that cron is operator-disableable.
+   * activity-scan cron on purpose — that cron is operator-disableable.
    */
   private morningSelfHealTimer: ReturnType<typeof setInterval> | null = null;
   /**
@@ -444,14 +447,14 @@ export class AgentScheduler {
     this.sendDm = fn;
   }
 
-  setHourlyCheckCallback(fn: (source: string) => Promise<unknown>): void {
-    this.onHourlyCheck = fn;
+  setActivityScanCallback(fn: (source: string) => Promise<unknown>): void {
+    this.onActivityScan = fn;
   }
 
   /**
    * Register the Phase 4 auth probe callback. Called on each hourly
-   * cron tick BEFORE the hourly-check observation threshold gate so
-   * the probe continues to run even when the hourly check itself
+   * cron tick BEFORE the activity-scan observation threshold gate so
+   * the probe continues to run even when the activity scan itself
    * would be skipped for lack of pending observations.
    */
   setAuthProbeCallback(fn: () => Promise<unknown>): void {
@@ -570,9 +573,9 @@ export class AgentScheduler {
    * (CLAUDE.md "morning_routine wake stall"). When the morning routine
    * never writes an `agent_actions.result='success'` row, the dedup
    * inside `queueMorningRoutineWake` keeps the stuck wake row pinned in
-   * `pending`/`running` and the hourly-check pre-routine gate silently
+   * `pending`/`running` and the activity-scan pre-routine gate silently
    * skips every subsequent autonomous tick. The user gets no morning
-   * brief, no evening review, no hourly check, and no error — the
+   * brief, no evening review, no activity scan, and no error — the
    * system is functionally dead until the wake row clears.
    *
    * Detection: oldest `task_type='wake'` row tied to
@@ -659,7 +662,7 @@ export class AgentScheduler {
 
       const message =
         `Aitne: morning routine stalled ${stalled.ageMinutes} min `
-        + `(wake #${stalled.id}, status=${stalled.status}). Hourly check + `
+        + `(wake #${stalled.id}, status=${stalled.status}). Activity scan + `
         + `evening review blocked. Check logs or \`aitne restart\`.`;
 
       try {
@@ -708,8 +711,8 @@ export class AgentScheduler {
    *    alive after all: one duplicate morning run, serialized by the
    *    today-write-lock.
    * 2. **Alert** — the stall watchdog ({@link checkMorningRoutineStall}).
-   *    Previously this only ran on hourly-check cron ticks, so
-   *    `hourlyCheckEnabled=false` silently disabled it; this timer is the
+   *    Previously this only ran on activity-scan cron ticks, so
+   *    `activityScanEnabled=false` silently disabled it; this timer is the
    *    guaranteed host now (the cron-tick invocation remains, made safe
    *    by the watchdog's mutex + per-day DM dedup).
    * 3. **Missed fire** — no attempt, no wake row, agent-day older than the
@@ -826,7 +829,7 @@ export class AgentScheduler {
         return;
       }
       // Mirror runWakeCatchup's morning branch: open the day properly and
-      // let any due reviews / hourly check ride the wake row's
+      // let any due reviews / activity scan ride the wake row's
       // post-catchup context instead of being skipped by the dispatcher's
       // morning-pending gate.
       const tz = this.config.timezone || undefined;
@@ -847,9 +850,9 @@ export class AgentScheduler {
           `${routine}_self_heal`,
         ),
       );
-      const needsHourlyCheck =
-        shouldCatchUpHourlyCheck(this.db, this.config, now)
-        && this.isAgentEnabledForFiring("hourly-check", "hourly_check_self_heal");
+      const needsActivityScan =
+        shouldCatchUpActivityScan(this.db, this.config, now)
+        && this.isAgentEnabledForFiring("activity-scan", "activity_scan_self_heal");
       try {
         if (this.onDayBoundary) {
           await this.onDayBoundary();
@@ -860,11 +863,11 @@ export class AgentScheduler {
       this.dailyCleanup();
       const queued = this.queueMorningRoutineWake("missed_cron_selfheal", {
         postCatchupRoutines: dueRoutines,
-        postCatchupHourlyCheck: needsHourlyCheck,
+        postCatchupActivityScan: needsActivityScan,
       });
       this.nudgeWatcher();
       logger.warn(
-        { queued, dueRoutines, needsHourlyCheck },
+        { queued, dueRoutines, needsActivityScan },
         "Morning routine fire was missed (sleep swallowed the boundary cron tick) — self-heal queued wake",
       );
     } catch (err) {
@@ -905,14 +908,14 @@ export class AgentScheduler {
    *
    * Reuses the boot-time catchup's decision predicates so the two paths
    * cannot drift: `getDueCatchupRoutines` dedups against `agent_actions`,
-   * `shouldCatchUpHourlyCheck` replays at most the current slot, and the
+   * `shouldCatchUpActivityScan` replays at most the current slot, and the
    * morning routine goes through `queueMorningRoutineWake`'s DB-backed
    * dedup. Downstream dispatch-time gates (autonomous setup gate,
    * morning-pending review gate) still apply.
    *
    * Ordering: when the morning routine has not completed for the current
-   * agent-day, the review routines and the hourly check ride along on the
-   * wake row's `postCatchupRoutines` / `postCatchupHourlyCheck` context
+   * agent-day, the review routines and the activity scan ride along on the
+   * wake row's `postCatchupRoutines` / `postCatchupActivityScan` context
    * (same replay mechanism the boot catchup uses) so they run AFTER the
    * day is opened instead of being skipped by the dispatcher's
    * pre-routine gate.
@@ -945,9 +948,9 @@ export class AgentScheduler {
         `${routine}_wake_catchup`,
       ),
     );
-    const needsHourlyCheck =
-      shouldCatchUpHourlyCheck(this.db, this.config, now)
-      && this.isAgentEnabledForFiring("hourly-check", "hourly_check_wake_catchup");
+    const needsActivityScan =
+      shouldCatchUpActivityScan(this.db, this.config, now)
+      && this.isAgentEnabledForFiring("activity-scan", "activity_scan_wake_catchup");
 
     if (
       !morningRoutineRanToday(
@@ -973,11 +976,11 @@ export class AgentScheduler {
       this.dailyCleanup();
       const queued = this.queueMorningRoutineWake("wake_catchup", {
         postCatchupRoutines: dueRoutines,
-        postCatchupHourlyCheck: needsHourlyCheck,
+        postCatchupActivityScan: needsActivityScan,
       });
       this.nudgeWatcher();
       logger.info(
-        { gapMinutes, queued, dueRoutines, needsHourlyCheck },
+        { gapMinutes, queued, dueRoutines, needsActivityScan },
         "Wake catch-up queued morning routine",
       );
       return;
@@ -987,15 +990,15 @@ export class AgentScheduler {
       logger.info({ routine, gapMinutes }, "Wake catch-up replaying missed routine");
       this.emitRoutine(routine);
     }
-    if (needsHourlyCheck && this.onHourlyCheck) {
-      logger.info({ gapMinutes }, "Wake catch-up triggering missed hourly check");
-      void Promise.resolve(this.onHourlyCheck("wake_catchup")).catch(
+    if (needsActivityScan && this.onActivityScan) {
+      logger.info({ gapMinutes }, "Wake catch-up triggering missed activity scan");
+      void Promise.resolve(this.onActivityScan("wake_catchup")).catch(
         (err: unknown) => {
-          logger.warn({ err }, "Wake catch-up hourly check failed");
+          logger.warn({ err }, "Wake catch-up activity scan failed");
         },
       );
     }
-    if (dueRoutines.length === 0 && !needsHourlyCheck) {
+    if (dueRoutines.length === 0 && !needsActivityScan) {
       logger.info({ gapMinutes }, "Wake catch-up: nothing missed");
     }
   }
@@ -1217,18 +1220,18 @@ export class AgentScheduler {
     // node-cron doesn't directly support "last day of month",
     // so we run daily at 18:00 and check if tomorrow is the 1st.
     //
-    // Default OFF pre-release (see runtime-settings.ts:monthlyReviewEnabled).
-    // The cron is always registered, but the callback consults
-    // `this.config.monthlyReviewEnabled` at fire time so a runtime PATCH
-    // takes effect on the next month-end without restart — that is also
-    // why this key is intentionally absent from SCHEDULE_KEYS in
-    // dashboard/config.ts (no cron rebuild needed). The routine itself
-    // (task-flow, context-builder branch, retention coupling) stays in
-    // tree as a concept pending the Mirror+Prune redesign.
+    // Default OFF pre-release: the monthly-review AGENT row ships
+    // `enabled: false`, and `isAgentEnabledForFiring` below is the single
+    // fire-time switch (AGENTS_HUB_REDESIGN_PLAN.md §2 — the legacy
+    // `monthlyReviewEnabled` config gate was unified into it; a one-time
+    // boot reconcile carries an operator's old `true` forward). A toggle
+    // takes effect on the next month-end without restart or cron rebuild.
+    // The routine itself (task-flow, context-builder branch, retention
+    // coupling) stays in tree as a concept pending the Mirror+Prune
+    // redesign.
     const monthlyJob = cron.schedule(
       "0 18 * * *",
       () => {
-        if (!this.config.monthlyReviewEnabled) return;
         // Check if tomorrow (in configured timezone) is the 1st
         const tomorrow = new Date();
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -1310,14 +1313,27 @@ export class AgentScheduler {
     );
     this.cronJobs.push(browserDigestJob);
 
-    if (this.config.hourlyCheckEnabled) {
-      const hourlyExpr = buildHourlyCronExpr(
-        this.config.hourlyCheckIntervalMinutes,
-        this.config.hourlyCheckActiveStartHour,
-        this.config.hourlyCheckActiveEndHour,
+    {
+      // Cadence is owned by the activity-scan AGENT ROW (metadata_json.
+      // runtime_window, edited via PATCH /api/agents/activity-scan) with the
+      // legacy `activityScan*` config keys as per-field fallback —
+      // AGENTS_HUB_REDESIGN_PLAN.md §2. Resolved once at registration; the
+      // agents PATCH route triggers `reloadCrons()` on a cadence change, so
+      // the closure below never goes stale. The job is registered
+      // UNCONDITIONALLY: `agents.enabled` (fire-time `isAgentEnabledForFiring`
+      // gate below) is the single on/off switch — the legacy
+      // `activityScanEnabled` registration gate was unified into it.
+      const activityScanCadence = resolveActivityScanCadence(
+        getRuntimeWindow(this.db, "activity-scan"),
+        this.config,
       );
-      const hourlyJob = cron.schedule(
-        hourlyExpr,
+      const activityScanExpr = buildActivityScanCronExpr(
+        activityScanCadence.intervalMinutes,
+        activityScanCadence.activeStartHour,
+        activityScanCadence.activeEndHour,
+      );
+      const activityScanJob = cron.schedule(
+        activityScanExpr,
         () => {
           const now = new Date();
           // Pull both hour and minute from the canonical timezone helper
@@ -1336,18 +1352,18 @@ export class AgentScheduler {
           // critical for intervals near or equal to the window length.
           // Divisor-of-60 cases short-circuit inside the helper.
           if (
-            !shouldFireHourlyTickAt(
+            !shouldFireActivityScanTickAt(
               local.hours,
               local.minutes,
-              this.config.hourlyCheckIntervalMinutes,
-              this.config.hourlyCheckActiveStartHour,
+              activityScanCadence.intervalMinutes,
+              activityScanCadence.activeStartHour,
             )
           ) {
             return;
           }
           // Self-tuning auto-revert monitor — ahead of BOTH the per-agent
           // enabled gate and the autonomous setup gate below: rollback
-          // safety must survive the owner disabling the hourly-check
+          // safety must survive the owner disabling the activity-scan
           // Agent (a plausible cost-saving move while a tuned knob sits
           // unverified) and a degraded/setup-gated daemon. It is pure
           // daemon code (no LLM dispatch), owns its own 1/day throttle,
@@ -1359,16 +1375,16 @@ export class AgentScheduler {
           }
           // Per-built-in enabled gate, AFTER the interval gate so a
           // per-minute non-firing tick never inflates the suppressed count.
-          if (!this.isAgentEnabledForFiring("hourly-check", "hourly_check")) return;
-          // triggerHourlyCheck has its own setup gate, but short-circuit
+          if (!this.isAgentEnabledForFiring("activity-scan", "activity_scan")) return;
+          // triggerActivityScan has its own setup gate, but short-circuit
           // here to avoid the in-progress flag toggling for no reason.
           const gateReason = this.autonomousGate();
           if (gateReason !== null) {
-            this.logGateBlock(gateReason, { cron: "hourly_check" });
+            this.logGateBlock(gateReason, { cron: "activity_scan" });
             return;
           }
-          // Phase 4 auth probe runs BEFORE the hourly check so that the
-          // observation-threshold gate (which can skip `onHourlyCheck`
+          // Phase 4 auth probe runs BEFORE the activity scan so that the
+          // observation-threshold gate (which can skip `onActivityScan`
           // entirely when there's no pending user activity) does not
           // also stall auth health detection. The probe owns its own
           // morning-routine / probe-disabled gating; we only respect
@@ -1380,18 +1396,18 @@ export class AgentScheduler {
           }
           // Morning-routine stall watchdog. Runs alongside the auth probe
           // because both are observability hooks that should fire even
-          // when the hourly check itself gets gated (e.g., the gate
+          // when the activity scan itself gets gated (e.g., the gate
           // skip is the *symptom* the watchdog needs to catch).
           void this.checkMorningRoutineStall(now).catch((err: unknown) => {
             logger.warn({ err }, "Morning routine stall watchdog threw");
           });
-          if (this.onHourlyCheck) {
-            void this.onHourlyCheck("cron");
+          if (this.onActivityScan) {
+            void this.onActivityScan("cron");
           }
         },
         { timezone: tz },
       );
-      this.cronJobs.push(hourlyJob);
+      this.cronJobs.push(activityScanJob);
     }
 
     // P22 §6.3, §6.4 — skill curation. Registered only when the operator
@@ -1429,15 +1445,21 @@ export class AgentScheduler {
       this.cronJobs.push(skillCurationJob);
     }
 
-    logger.info(
-      {
-        morningHour: this.config.dayBoundaryHour,
-        timezone: tz ?? "system",
-        hourlyCheckEnabled: this.config.hourlyCheckEnabled,
-        hourlyCheckIntervalMinutes: this.config.hourlyCheckIntervalMinutes,
-      },
-      "Recurring cron jobs configured",
-    );
+    {
+      const cadence = resolveActivityScanCadence(
+        getRuntimeWindow(this.db, "activity-scan"),
+        this.config,
+      );
+      logger.info(
+        {
+          morningHour: this.config.dayBoundaryHour,
+          timezone: tz ?? "system",
+          activityScanIntervalMinutes: cadence.intervalMinutes,
+          activityScanActiveHours: `${cadence.activeStartHour}-${cadence.activeEndHour}`,
+        },
+        "Recurring cron jobs configured",
+      );
+    }
   }
 
   private emitRoutine(
@@ -1467,7 +1489,7 @@ export class AgentScheduler {
    */
   queueMorningRoutineWake(
     source: string,
-    options?: { postCatchupRoutines?: string[]; postCatchupHourlyCheck?: boolean },
+    options?: { postCatchupRoutines?: string[]; postCatchupActivityScan?: boolean },
   ): { inserted: boolean; existingId?: number } {
     const scheduledFor = formatSqliteDatetime(new Date());
     const wakeEvent = createEvent({
@@ -1482,7 +1504,7 @@ export class AgentScheduler {
       routine: "morning_routine",
       source,
       postCatchupRoutines: options?.postCatchupRoutines ?? [],
-      postCatchupHourlyCheck: options?.postCatchupHourlyCheck ?? false,
+      postCatchupActivityScan: options?.postCatchupActivityScan ?? false,
       importance: "low",
     });
 
@@ -1502,7 +1524,7 @@ export class AgentScheduler {
         const existingContext = JSON.parse(existing.task_context ?? "{}") as {
           source?: string;
           postCatchupRoutines?: string[];
-          postCatchupHourlyCheck?: boolean;
+          postCatchupActivityScan?: boolean;
         };
         const mergedRoutines = Array.from(
           new Set([
@@ -1512,9 +1534,9 @@ export class AgentScheduler {
             ...(options?.postCatchupRoutines ?? []),
           ]),
         );
-        const mergedHourlyCheck =
-          existingContext.postCatchupHourlyCheck === true ||
-          options?.postCatchupHourlyCheck === true;
+        const mergedActivityScan =
+          existingContext.postCatchupActivityScan === true ||
+          options?.postCatchupActivityScan === true;
         // Spread the existing context FIRST so keys this merge doesn't
         // know about survive — in particular the ScheduleWatcher's
         // `claimedAt` stamp on a running row: dropping it would blind
@@ -1525,7 +1547,7 @@ export class AgentScheduler {
           routine: "morning_routine",
           source: existingContext.source ?? source,
           postCatchupRoutines: mergedRoutines,
-          postCatchupHourlyCheck: mergedHourlyCheck,
+          postCatchupActivityScan: mergedActivityScan,
           importance: "low",
         };
         // Bump `scheduled_for` forward when the new caller's NOW lies
@@ -1821,6 +1843,48 @@ export class AgentScheduler {
                 logger.info(
                   { scheduleId: row.id, taskType: row.task_type },
                   "Scheduled browser-task dispatched",
+                );
+                continue;
+              }
+
+              // BACKGROUND_TASK_RUNNER_DESIGN.md §4.2 — generic background
+              // task firing at its scheduled time. Body lives in
+              // `task_context` (frozen at schedule time); the dispatcher's
+              // `scheduled.background_task` handler creates the row at fire
+              // time and hands off to the runner. No quiet-hours deferral
+              // on dispatch — the worker may run at any hour; the DELIVERY
+              // boundary quiet-hours-gates the owner-facing DM (§10.6).
+              if (row.task_type === "background_task") {
+                const base = createEvent({
+                  type: "scheduled.background_task",
+                  source: row.task_type,
+                  priority: EventPriority.NORMAL,
+                });
+                let parsedContext: Record<string, unknown>;
+                try {
+                  parsedContext = JSON.parse(row.task_context ?? "{}");
+                } catch (parseErr) {
+                  logger.error(
+                    { err: parseErr, scheduleId: row.id },
+                    "scheduled.background_task: task_context JSON parse failed — marking row failed",
+                  );
+                  this.db
+                    .prepare(
+                      "UPDATE agent_schedule SET status = 'failed' WHERE id = ? AND status = 'running'",
+                    )
+                    .run(row.id);
+                  continue;
+                }
+                const event = {
+                  ...base,
+                  taskContext: parsedContext,
+                  correlationId: row.correlation_id ?? base.correlationId,
+                  scheduleId: row.id,
+                } as ScheduledBackgroundTaskEvent;
+                await this.eventBus.put(event);
+                logger.info(
+                  { scheduleId: row.id, taskType: row.task_type },
+                  "Scheduled background-task dispatched",
                 );
                 continue;
               }

@@ -36,8 +36,13 @@ B-4 purchase tokens, or workflow approvals — those live under
    log, paraphrase, or relay the token. If the user asks "what was that
    code?", point them at the original DM with the screenshot — that DM is
    the only authoritative source.
-4. **Never invent `clarificationId` / `taskId`.** Both are uuid v4 minted
-   by the daemon; read from GET responses.
+4. **Never invent the clarification id or the task id.** Both are uuid v4
+   minted by the daemon; read them from the daemon's responses, never make
+   them up. The POST-create response carries the task uuid as a top-level
+   `taskId`; on GET (`/:id` and the list) that same task uuid is the row's
+   `id`. The clarification identifier is the clarifications row's `id` on
+   the GET response — to answer you send it back as the request-body field
+   `clarificationId` on POST `/clarify`.
 5. **Do not pre-decline based on the URL or site.** Open navigation is
    the default — the sub-agent decides where to go and the daemon enforces
    a user-curated hostname denylist plus the payment-path block at
@@ -91,7 +96,9 @@ to appear). You act only when the user comes back with an answer:
 1. `GET /api/browser-task?state=awaiting_user` — find the parked task.
    Usually one; if several, match topic or ask which.
 2. `GET /api/browser-task/<taskId>` — read the open `clarifications` row
-   (`resolved:false`) for `clarificationId`.
+   (`resolved:false`). The GET response exposes each clarification row's
+   identifier as `id`; to answer, POST `/clarify` with that value in the
+   request-body field `clarificationId`.
 3. `POST /api/browser-task/<taskId>/clarify` with `{clarificationId,
    answer}` (user reply verbatim), then ack briefly and end the turn —
    the runner resumes on its own.
@@ -122,11 +129,11 @@ last `actionLog` entry, and `queueState` if pending. States:
   report`. Don't re-post; if asked "what did it find?", quote the
   `report` field verbatim (don't paraphrase).
 - `failed` / `timeout` / `cancelled` / `abandoned` — terminal; the daemon
-  already DMed `🟦 Browser task <id> ended: <state>`. `outcome_detail`
+  already DMed `🟦 Browser task <id> ended: <state>`. `outcomeDetail`
   carries the reason (e.g. `queue_timeout`, `budget_exceeded`,
   `tool_loop_detected`) — quote it verbatim.
 
-## Force-stop — "stop" / "cancel" / "abort" / "止めて"
+## Force-stop — "stop" / "cancel" / "abort"
 
 When the user signals stop, find the task (same identification path as
 status), then `POST /api/browser-task/<taskId>/cancel` with optional

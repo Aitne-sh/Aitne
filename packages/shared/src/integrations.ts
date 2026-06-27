@@ -45,7 +45,7 @@ export function isIntegrationKey(value: string): value is IntegrationKey {
  * "the main backend reaches the integration through its own native MCP
  * connector; the daemon does not poll and does not proxy." Unlike
  * `delegated` it does not run a worker; unlike `disabled` the agent can
- * still call the integration on-demand inside a DM / hourly_check turn.
+ * still call the integration on-demand inside a DM / activity_scan turn.
  *
  * Order matters for UI tables: kept stable so dashboards rendering by
  * `INTEGRATION_MODES.indexOf(mode)` do not reflow when `native` ships.
@@ -156,7 +156,7 @@ export interface IntegrationDescriptor {
    *    routines consume this integration's data?") and the
    *    partial-coupling lint (`routine-partials.test.ts`). The original
    *    §6.5.1 native threshold-bypass that also consumed this field was
-   *    retired by HOURLY_CHECK_GATE_REDESIGN_PLAN.md — the hourly_check
+   *    retired by HOURLY_CHECK_GATE_REDESIGN_PLAN.md — the activity_scan
    *    gate now sees pre-pass observations directly through its
    *    source-prefix-derived signal compute.
    *
@@ -481,7 +481,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // cross-backend pairs; same-backend resolves to `null` (native MCP,
     // no skill body).
     skillsTouched: ["mail"],
-    // `routine.hourly_check` retains a delegated variant: when Gmail is
+    // `routine.activity_scan` retains a delegated variant: when Gmail is
     // delegated, MailPoller's per-account filter (mail-poller.ts:173-181)
     // stops Gmail-account polling, so `mail:lifecycle` observations
     // disappear. The variant's Step 0a fetches the equivalent window via
@@ -496,7 +496,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // markers for the Calendar block); the loader falls back to the
     // base file when the delegated variant is missing.
     taskFlowsTouched: [
-      "routine.hourly_check",
+      "routine.activity_scan",
       "message.received.dm",
       "message.received.dm_first",
     ],
@@ -512,7 +512,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // relaxed predicate accepts the include OR a pre-pass dispatch).
     taskFlowsReferenced: [
       { routine: "routine.morning_routine", via: "partial" },
-      { routine: "routine.hourly_check", via: "partial" },
+      { routine: "routine.activity_scan", via: "partial" },
       { routine: "routine.evening_review", via: "partial" },
       // The directive-owning task-flow (the pre-pass session itself);
       // keeps the lint's "every taskFlowsReferenced points at a routine"
@@ -644,7 +644,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // DELEGATED-MODE-V2-DESIGN.md §3.4 / §5.1 — restored in Phase 3 so
     // `selectSkillVariantFile` engages on the `external-services` skill.
     skillsTouched: ["external-services"],
-    // `routine.hourly_check` retains a delegated variant: when Calendar is
+    // `routine.activity_scan` retains a delegated variant: when Calendar is
     // delegated, the CalendarPoller stops (see `observersTouched` below)
     // so `calendar:*` observations and `schedule.approaching` events are
     // lost. The variant's Step 0b restores both via two connector fetches
@@ -657,7 +657,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // disabled inline; the loader falls back to the base when a
     // delegated variant file is absent.
     taskFlowsTouched: [
-      "routine.hourly_check",
+      "routine.activity_scan",
       "message.received.dm",
       "message.received.dm_first",
     ],
@@ -673,7 +673,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // the symmetric coverage.
     taskFlowsReferenced: [
       { routine: "routine.today_refresh", via: "partial" },
-      { routine: "routine.hourly_check", via: "partial" },
+      { routine: "routine.activity_scan", via: "partial" },
       { routine: "routine.weekly_review", via: "partial" },
       // Pre-pass fetcher's task-flow (literal include lives here).
       { routine: "routine.fetch_window", via: "partial" },
@@ -957,17 +957,17 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
       },
     },
     skillsTouched: ["notion"],
-    // `routine.hourly_check` is the only routine that consumes Notion
+    // `routine.activity_scan` is the only routine that consumes Notion
     // observations today (NotionPoller → observations table → routine via
     // the `observations` skill). When Notion is delegated the poller
-    // stops; the hourly_check delegated variant compensates by pulling
+    // stops; the activity_scan delegated variant compensates by pulling
     // recent edits via `notion-search` inline. See §7.5 of the design.
     //
     // INTEGRATION_NATIVE_MODE_DESIGN.md §8.1 — DM / dm_first listed so
     // the native DM variants resolve. Delegated DM has no variant file
     // today; the loader falls back to the base when missing.
     taskFlowsTouched: [
-      "routine.hourly_check",
+      "routine.activity_scan",
       "message.received.dm",
       "message.received.dm_first",
     ],
@@ -981,7 +981,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // carry-over instead of a fresh pre-pass.
     taskFlowsReferenced: [
       { routine: "routine.morning_routine", via: "partial" },
-      { routine: "routine.hourly_check", via: "partial" },
+      { routine: "routine.activity_scan", via: "partial" },
       // Pre-pass fetcher's task-flow (literal include lives here).
       { routine: "routine.fetch_window", via: "partial" },
     ],
@@ -1112,7 +1112,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // through a fresh pre-pass.
     taskFlowsReferenced: [
       { routine: "routine.morning_routine", via: "partial" },
-      { routine: "routine.hourly_check", via: "partial" },
+      { routine: "routine.activity_scan", via: "partial" },
       { routine: "routine.evening_review", via: "partial" },
       // Pre-pass fetcher's task-flow (literal include lives here).
       { routine: "routine.fetch_window", via: "partial" },
@@ -1163,7 +1163,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // covered by ContextBuilder's multi-provider `<calendar_events_*>`
     // block:
     //   - today_refresh  → cal_next_24h_drift
-    //   - hourly_check   → imminent_2h
+    //   - activity_scan   → imminent_2h
     //   - weekly_review  → cal_iso_week_to_now retrospective (Monday
     //                      00:00 local through `now`; the next-7d view
     //                      is delivered by ContextBuilder
@@ -1176,7 +1176,7 @@ export const INTEGRATION_DESCRIPTORS: Readonly<
     // not via this descriptor field.
     taskFlowsReferenced: [
       { routine: "routine.today_refresh", via: "partial" },
-      { routine: "routine.hourly_check", via: "partial" },
+      { routine: "routine.activity_scan", via: "partial" },
       { routine: "routine.weekly_review", via: "partial" },
       // docs/design/appendices/routine-data-acquisition.md Phase 4 / D1 — pre-pass fetcher.
       { routine: "routine.fetch_window", via: "partial" },
@@ -1346,6 +1346,20 @@ export const BROWSER_HISTORY_PROCESS_KEYS: Readonly<
     rationale:
       "DOM-driving sub-agent; in-process SDK MCP server is Claude-only; tool allowlist enforcement requires `allowedToolsOverride` which is Claude-only.",
   },
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §4.1 / §10.6 — generic detached
+  // worker. Claude-only for the same structural reasons as browser_task:
+  // the `aitne-task` MCP envelope ships as an in-process
+  // `createSdkMcpServer` instance only `@anthropic-ai/claude-agent-sdk`
+  // consumes, and the tool allowlist enforcement (read_memory / ask_user
+  // / finish + WebSearch/WebFetch only) needs Claude's allowedTools +
+  // PreToolUse authority. The budget resolver refuses non-Claude bindings
+  // outright; this floor keeps a main-backend switch from cascading the
+  // row off Claude in the first place.
+  "background_task": {
+    eligible: ["claude"],
+    rationale:
+      "Detached worker drives the Claude Agent SDK query loop directly; in-process SDK MCP server + tool allowlist enforcement are Claude-only.",
+  },
 };
 
 export function getBrowserHistorySafetyFloor(
@@ -1384,6 +1398,23 @@ const PROXY_DRIVEN_INTEGRATIONS: ReadonlySet<IntegrationKey> = new Set([
   "gmail",
   "google_calendar",
 ]);
+
+const integrationFetchTargetTextSchema = z.string().trim().min(1).max(2_000);
+
+/**
+ * User-scoped fetch allowlist entry. Notion uses this today to keep
+ * `routine.fetch_window` from searching the whole workspace. `locator`
+ * accepts a page URL, page id, database item id, or title; URL/id is
+ * preferred because titles can be duplicated or renamed.
+ */
+export const integrationFetchTargetSchema = z
+  .object({
+    label: integrationFetchTargetTextSchema.max(200),
+    locator: integrationFetchTargetTextSchema,
+  })
+  .strict();
+
+export type IntegrationFetchTarget = z.infer<typeof integrationFetchTargetSchema>;
 
 /**
  * Per-integration runtime state. Persisted as a single JSON blob in the
@@ -1449,7 +1480,7 @@ export const integrationStateSchema = z
     /**
      * Inert today: the cadence worker has no role in native mode (see
      * `docs/design/appendices/native-integration-mode.md` §"Polling,
-     * observers, and the hourly-check threshold"; native observations
+     * observers, and the activity-scan threshold"; native observations
      * come from the in-turn `routine.fetch_window` pre-pass, not the
      * worker). The field is retained so user settings written under the
      * earlier §19.6 design survive a downgrade and so a future native
@@ -1457,6 +1488,13 @@ export const integrationStateSchema = z
      * Omitted means the (currently-vacuous) default.
      */
     nativeSyncEnabled: z.boolean().optional(),
+    /**
+     * Optional user allowlist of pages / notes this integration may fetch in
+     * autonomous routines. Used by Notion to avoid workspace-wide searches in
+     * the in-turn `routine.fetch_window` pre-pass. Empty means "do not fetch
+     * this integration in routine pre-pass until targets are configured".
+     */
+    fetchTargets: z.array(integrationFetchTargetSchema).max(50).optional(),
     /**
      * §7.7 tool-deny policy. Each entry is the unsuffixed tool name as
      * declared in the descriptor's `capabilityTools` (e.g. for Claude
@@ -1546,6 +1584,7 @@ export function defaultIntegrationsMap(
   for (const key of INTEGRATION_KEYS) {
     out[key] = {
       mode: defaultModeForIntegration(key),
+      fetchTargets: [],
       deniedTools: [],
       lastChangedAt: now,
     };
@@ -1603,6 +1642,11 @@ export const integrationPatchSchema = z
      * matching field on the state schema above.
      */
     nativeSyncEnabled: z.boolean().optional(),
+    /**
+     * Optional user allowlist for routine fetches. Omit to preserve; pass an
+     * empty array to clear.
+     */
+    fetchTargets: z.array(integrationFetchTargetSchema).max(50).optional(),
     /**
      * §7.7 — optional tool-deny list. Validation against
      * descriptor.capabilityTools and required-capability coverage runs in
@@ -1929,7 +1973,7 @@ export function supportedNativeBackends(
  *
  * The historical §6.5.1 threshold-bypass that consumed a union
  * (touched ∪ referenced) was retired by
- * HOURLY_CHECK_GATE_REDESIGN_PLAN.md when the hourly_check gate moved
+ * HOURLY_CHECK_GATE_REDESIGN_PLAN.md when the activity_scan gate moved
  * onto registry-derived source-prefix sets — there is no longer a
  * caller that needs the union variant.
  */
@@ -1945,7 +1989,7 @@ export function nativeIntegrationsForProcessKey(
 }
 
 /**
- * Canonical "kind" buckets the hourly_check gate's signal compute uses
+ * Canonical "kind" buckets the activity_scan gate's signal compute uses
  * to filter `observations.source LIKE ?` clauses. Each kind maps to a
  * set of source-prefix patterns covering:
  *

@@ -19,6 +19,7 @@ import {
   agentCreateActiveForDm,
   composeSkillSet,
   eveningRulebookIsActive,
+  eventTypeAcceptsUserSkills,
   gmailLifestyleActive,
   gmailLifestyleActiveForDm,
   managedTasksActive,
@@ -37,6 +38,63 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../../");
 const SKILLS_DIR = join(REPO_ROOT, "agent-assets/skills");
 const TASK_FLOWS_DIR = join(REPO_ROOT, "agent-assets/task-flows");
+
+describe("eventTypeAcceptsUserSkills (narrow-persona user-skill gate)", () => {
+  test("excludes the wiki-agent family", () => {
+    for (const key of [
+      "wiki.ingest_url",
+      "wiki.compile",
+      "wiki.ask",
+      "wiki.lint",
+      "wiki.trace",
+      "wiki.connect",
+    ]) {
+      expect(eventTypeAcceptsUserSkills(key)).toBe(false);
+    }
+  });
+
+  test("excludes the browser-history research routines", () => {
+    for (const key of [
+      "routine.research_cluster_update",
+      "routine.research_offer_dm",
+      "routine.research_dispatch",
+      "routine.research_wiki_summary",
+    ]) {
+      expect(eventTypeAcceptsUserSkills(key)).toBe(false);
+    }
+  });
+
+  test("keeps user skills for conversational, scheduled, and general routine surfaces", () => {
+    for (const key of [
+      "message.received",
+      "message.received.dm",
+      "message.received.dm_first",
+      "scheduled.dm",
+      "scheduled.task",
+      "routine.morning_routine",
+      "routine.evening_review",
+      "routine.weekly_review",
+      "routine.activity_scan",
+      "setup.initial",
+      "knowledge.import",
+    ]) {
+      expect(eventTypeAcceptsUserSkills(key)).toBe(true);
+    }
+  });
+
+  test("every excluded family has a tight built-in manifest (gate never strands a session with no skills)", () => {
+    // The gate only removes user-authored skills; the process key must still
+    // resolve to a non-empty built-in bundle so the excluded session is not
+    // left skill-less.
+    for (const key of [
+      "wiki.compile",
+      "routine.research_dispatch",
+    ] as const) {
+      expect(eventTypeAcceptsUserSkills(key)).toBe(false);
+      expect(getSkillsForProcess(key).length).toBeGreaterThan(0);
+    }
+  });
+});
 
 // WIKI_BUILDER_DESIGN.md §9.1 — wiki skills live under a `wiki/`
 // category subdirectory. The shared `listBuiltinSkillDirs` /
@@ -397,8 +455,8 @@ describe("skills-manifest integrity", () => {
   });
 
   /**
-   * Phase 9 — every `routine.hourly_check*.md` task-flow MUST carry the
-   * "external services are read-only this hour" rule.
+   * Phase 9 — every `routine.activity_scan*.md` task-flow MUST carry the
+   * "external services are read-only during this run" rule.
    *
    * The constraint owns three failure modes that the per-skill body
    * cannot cover uniformly:
@@ -415,14 +473,14 @@ describe("skills-manifest integrity", () => {
    * pass.
    */
   // docs/design/appendices/routine-data-acquisition.md Phase 3 R4 deleted
-  // `routine.hourly_check.{delegated,native}.<be>.md`; the
+  // `routine.activity_scan.{delegated,native}.<be>.md`; the
   // mode-specific prose now flows through `_partials/*-acquire.<key>.md`.
   // The external-write prohibition is owned by the base file (it
   // applies regardless of integration mode), so the matrix narrows to
   // the single base entry.
-  test("routine.hourly_check.md contains the external-write prohibition", () => {
-    const body = readFileSync(join(TASK_FLOWS_DIR, "routine.hourly_check.md"), "utf-8");
-    expect(body).toContain("External services are read-only this hour");
+  test("routine.activity_scan.md contains the external-write prohibition", () => {
+    const body = readFileSync(join(TASK_FLOWS_DIR, "routine.activity_scan.md"), "utf-8");
+    expect(body).toContain("External services are read-only during this run");
     // Each touched system must be named so the agent can't argue
     // a particular surface (e.g. calendar) is unaffected.
     expect(body).toMatch(/Notion/);
@@ -437,7 +495,7 @@ describe("skills-manifest integrity", () => {
 
   test("notion/SKILL.base.md was removed (Phase 9 dead-asset cleanup)", () => {
     // The orphaned base.md never had a `{{> base }}` consumer; its
-    // hourly-check read-only constraint relocated to the task-flow,
+    // activity-scan read-only constraint relocated to the task-flow,
     // its other sections either duplicated the delegated variants or
     // described connector-literal formats with no valid load path.
     // The file's continued presence would re-create the dead-asset
@@ -547,7 +605,7 @@ describe("browser-task skill wiring (BROWSER_TASK_REDESIGN_PLAN Phase 5)", () =>
     "scheduled.dm",
     "scheduled.task",
     "routine.morning_routine",
-    "routine.hourly_check",
+    "routine.activity_scan",
     "routine.evening_review",
   ])("NOT loaded for non-DM-chat event '%s'", (eventType) => {
     const slugs = EVENT_SKILL_SETS[eventType];
@@ -644,6 +702,177 @@ describe("browser-task skill wiring (BROWSER_TASK_REDESIGN_PLAN Phase 5)", () =>
     // Sign-in lives on the other surface — the skill must point there
     // rather than implying browser-task drives per-site auth.
     expect(body).toMatch(/\/api\/browser-automation\/sites/);
+  });
+});
+
+/**
+ * BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 — DM-agent surface for the
+ * generic detached background-task runner. Two skills, parallel to the
+ * browser-task pair:
+ *
+ *   `background-task`        — spawn (loaded on message.received.dm AND
+ *                              message.received.dm_first, like browser-task)
+ *   `background-task-reply`  — clarify relay (loaded on message.received.dm
+ *                              only, like browser-history-respond — no task
+ *                              can be parked on a session's first DM)
+ *
+ * Pin the wiring + the load-surface boundary so a future manifest edit
+ * can't silently drop the spawn surface or widen the clarify surface, and
+ * pin the §4.3 / §5 / §10.5 body contract (notification policy, the
+ * POST-ack-end-turn / never-poll discipline, the GET /:id follow-up, the
+ * localhost chokepoint).
+ */
+describe("background-task skill wiring (BACKGROUND_TASK_RUNNER_DESIGN Phase 3)", () => {
+  const SKILL_PATH = join(SKILLS_DIR, "background-task", "SKILL.md");
+
+  test("SKILL.md exists at agent-assets/skills/background-task/", () => {
+    expect(existsSync(SKILL_PATH)).toBe(true);
+  });
+
+  test("frontmatter declares name=background-task with Bash(curl *) allowed-tool", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    const fm = body.match(/^---\n([\s\S]+?)\n---/);
+    expect(fm, "missing YAML frontmatter").toBeTruthy();
+    const fmBody = fm![1];
+    expect(fmBody).toMatch(/^name:\s*background-task\s*$/m);
+    // curl is the only mechanism the skill ships to reach localhost; a
+    // future widening to Read / Write / Edit would bypass the daemon
+    // chokepoint that owns audit + the artifact store. Pin the list.
+    expect(fmBody).toMatch(/allowed-tools:[\s\S]*Bash\(curl \*\)/);
+    expect(fmBody).not.toMatch(/Bash\(rm\s/);
+    expect(fmBody).not.toMatch(/^\s+-\s+(Read|Write|Edit|WebFetch)\b/m);
+  });
+
+  test("ALL_SKILLS includes background-task", () => {
+    expect(ALL_SKILLS).toContain("background-task");
+  });
+
+  test.each([
+    "message.received.dm",
+    "message.received.dm_first",
+  ])("spawn skill loaded by event '%s' (static manifest)", (eventType) => {
+    const slugs = EVENT_SKILL_SETS[eventType];
+    expect(slugs, `event '${eventType}' has no manifest`).toBeDefined();
+    expect(slugs).toContain("background-task");
+  });
+
+  test("loaded for message.dm + dashboard.chat process keys via PROCESS_TO_EVENT_TYPE", () => {
+    expect(getSkillsForProcess("message.dm")).toContain("background-task");
+    expect(getSkillsForProcess("dashboard.chat")).toContain("background-task");
+  });
+
+  test("resolveSkillManifestForProcess returns background-task for the DM process keys", () => {
+    expect(
+      resolveSkillManifestForProcess("message.dm"),
+    ).toContain("background-task");
+    expect(
+      resolveSkillManifestForProcess("dashboard.chat"),
+    ).toContain("background-task");
+  });
+
+  test.each([
+    "message.received",
+    "scheduled.dm",
+    "scheduled.task",
+    "routine.morning_routine",
+    "routine.activity_scan",
+    "routine.evening_review",
+  ])("NOT loaded for non-DM-chat event '%s'", (eventType) => {
+    const slugs = EVENT_SKILL_SETS[eventType];
+    expect(slugs, `event '${eventType}' has no manifest`).toBeDefined();
+    expect(slugs, `event '${eventType}' must not carry background-task`)
+      .not.toContain("background-task");
+  });
+
+  test("body covers the §5 / §4.3 / §10.5 contract topics", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    // POST surface + brief composition
+    expect(body).toMatch(/POST\s+\/api\/background-task\b/);
+    expect(body).toMatch(/\bbrief\b/);
+    // Notification policy authoring — all three values must be taught.
+    expect(body).toMatch(/notificationPolicy/);
+    expect(body).toMatch(/\balways\b/);
+    expect(body).toMatch(/\bif_significant\b/);
+    expect(body).toMatch(/\bsilent\b/);
+    // The GET /:id follow-up affordance (read verbatim detail, not guess).
+    expect(body).toMatch(/GET\s+\/api\/background-task\/:id|\/api\/background-task\/<taskId>/);
+    // Fire-and-forget contract — POST, ack, end the turn, never poll.
+    expect(body.toLowerCase()).toMatch(/never poll/i);
+    expect(body).toMatch(/end (your|the) turn/i);
+    // Cancel surface (when the user says "stop").
+    expect(body).toMatch(/\/cancel\b/);
+    // Clarifications are answered with the sibling skill, not from here.
+    expect(body).toMatch(/background-task-reply/);
+    // Phase 4 — inline→background promotion guidance (carry work already done).
+    expect(body).toMatch(/promot/i);
+  });
+
+  test("body declares the localhost-only chokepoint", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    expect(body).toContain("127.0.0.1:8321");
+    expect(body.toLowerCase()).toMatch(/localhost only/i);
+  });
+});
+
+describe("background-task-reply skill wiring (BACKGROUND_TASK_RUNNER_DESIGN Phase 3)", () => {
+  const SKILL_PATH = join(SKILLS_DIR, "background-task-reply", "SKILL.md");
+
+  test("SKILL.md exists at agent-assets/skills/background-task-reply/", () => {
+    expect(existsSync(SKILL_PATH)).toBe(true);
+  });
+
+  test("frontmatter declares name=background-task-reply with Bash(curl *) allowed-tool", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    const fm = body.match(/^---\n([\s\S]+?)\n---/);
+    expect(fm, "missing YAML frontmatter").toBeTruthy();
+    const fmBody = fm![1];
+    expect(fmBody).toMatch(/^name:\s*background-task-reply\s*$/m);
+    expect(fmBody).toMatch(/allowed-tools:[\s\S]*Bash\(curl \*\)/);
+    expect(fmBody).not.toMatch(/^\s+-\s+(Read|Write|Edit|WebFetch)\b/m);
+  });
+
+  test("ALL_SKILLS includes background-task-reply", () => {
+    expect(ALL_SKILLS).toContain("background-task-reply");
+  });
+
+  test("clarify skill loaded by message.received.dm (static manifest)", () => {
+    expect(EVENT_SKILL_SETS["message.received.dm"]).toContain(
+      "background-task-reply",
+    );
+  });
+
+  test("loaded for message.dm + dashboard.chat process keys", () => {
+    expect(getSkillsForProcess("message.dm")).toContain("background-task-reply");
+    expect(getSkillsForProcess("dashboard.chat")).toContain(
+      "background-task-reply",
+    );
+  });
+
+  test.each([
+    "message.received.dm_first",
+    "message.received",
+    "scheduled.dm",
+    "scheduled.task",
+    "routine.morning_routine",
+  ])("NOT loaded for event '%s' (clarify has no parked task to answer)", (eventType) => {
+    const slugs = EVENT_SKILL_SETS[eventType];
+    expect(slugs, `event '${eventType}' has no manifest`).toBeDefined();
+    // The clarify relay is correctly absent from the first DM of a session
+    // (nothing can be parked yet) and from every non-DM-chat surface —
+    // exactly the boundary `browser-history-respond` holds.
+    expect(slugs, `event '${eventType}' must not carry background-task-reply`)
+      .not.toContain("background-task-reply");
+  });
+
+  test("body covers the §4.7 clarify-relay contract", () => {
+    const body = readFileSync(SKILL_PATH, "utf-8");
+    expect(body).toMatch(/awaiting_user/);
+    expect(body).toMatch(/clarificationId/);
+    expect(body).toMatch(/\/clarify\b/);
+    // The never-cold-call guard — relay only when a task is genuinely
+    // parked AND the conversation shows the question was asked.
+    expect(body.toLowerCase()).toMatch(/never cold-call|no-op/);
+    expect(body).toContain("127.0.0.1:8321");
   });
 });
 
@@ -800,12 +1029,12 @@ describe("native variant existence (Phase B2 content)", () => {
   // integration is native and bound to the session backend.
   //
   // docs/design/appendices/routine-data-acquisition.md Phase 3 R4 removed
-  // `routine.hourly_check` from this matrix — the variant files
-  // (`routine.hourly_check.native.<be>.md`) were deleted; the
-  // partial-include mechanism in the base `routine.hourly_check.md`
+  // `routine.activity_scan` from this matrix — the variant files
+  // (`routine.activity_scan.native.<be>.md`) were deleted; the
+  // partial-include mechanism in the base `routine.activity_scan.md`
   // now carries the mode-specific prose for every (delegated × native)
   // permutation. `loadFlowVariant` falls through to the base when the
-  // selector returns `native.<be>` for hourly_check.
+  // selector returns `native.<be>` for activity_scan.
   const NATIVE_TASK_FLOWS = [
     "message.received.dm",
     "message.received.dm_first",
@@ -961,7 +1190,7 @@ describe("native variant existence (Phase B2 content)", () => {
   );
 
   // docs/design/appendices/routine-data-acquisition.md Phase 3 R4 — the
-  // `routine.hourly_check.native.<be>.md` variants are deleted. The
+  // `routine.activity_scan.native.<be>.md` variants are deleted. The
   // §8.3 contracts they used to encode (no /reconcile POSTs; documents
   // /api/observations; inherits the read-only constraint) live on
   // against the base file + partials, which are exercised by
@@ -971,10 +1200,10 @@ describe("native variant existence (Phase B2 content)", () => {
   // no longer exist — `missingNativeVariants` skips them now too (the
   // §6.10 descriptor matrix declares the partial-only coupling).
   test.each(["claude", "codex", "gemini"] as const)(
-    "routine.hourly_check.native.%s.md is deleted (Phase 3 R4 — superseded by partial-include mechanism)",
+    "routine.activity_scan.native.%s.md is deleted (Phase 3 R4 — superseded by partial-include mechanism)",
     (backend) => {
       expect(
-        existsSync(join(TASK_FLOWS_DIR, `routine.hourly_check.native.${backend}.md`)),
+        existsSync(join(TASK_FLOWS_DIR, `routine.activity_scan.native.${backend}.md`)),
       ).toBe(false);
     },
   );
@@ -1708,7 +1937,7 @@ describe("per-skill body line-range pin (P1)", () => {
     // Operational-procedure-heavy skills — regression-guard ceiling
     // set above current size. Per-skill phases (§§ in
     // skills-improvement.md) drive the design target.
-    today: { designTarget: 120, regressionCeiling: 164 },              // §2  — day-type/section tables extracted to references/today-skeleton.md
+    today: { designTarget: 120, regressionCeiling: 177 },              // §2  — day-type/section tables extracted to references/today-skeleton.md; 2026-06 plan-revision contract added (recipe in references/agent-plan-revision.md) — 169 measured + 5%
     "user-profile": { designTarget: 100, regressionCeiling: 198 },     // §3  — character-preferences ref exists; legacy user/→identity/ canonicalized
     "user-interview": { designTarget: 180, regressionCeiling: 216 },   // §15 — Op 2/4 extracted to references/op-dm-handler.md
     notify: { designTarget: 80, regressionCeiling: 130 },              // §4  — priority ref exists; rate-limit dupes collapsed
@@ -1882,7 +2111,16 @@ describe("DM manifest body byte budget (P4)", () => {
   // step the ceiling back down as bodies trim. Do NOT raise this ceiling
   // further without a similar justification — adding cost to the DM
   // manifest is regression risk.
-  const REGRESSION_CEILING_BYTES = 147 * 1024;
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 — bumped 147 KB → 150 KB
+  // to admit the two new DM-agent skills: `background-task` (~8 KB, the
+  // spawn surface — triage, brief-completeness, notification-policy
+  // authoring, the GET /:id follow-up) and `background-task-reply` (~4 KB,
+  // the clarify relay, mirror of `browser-history-respond`). Both are the
+  // smallest concrete artefacts that close the DM-side gap for the
+  // detached background runner shipped in Phase 2; the spawn body was kept
+  // lean (smaller than browser-task) before bumping. The 80 KB design
+  // target still stands.
+  const REGRESSION_CEILING_BYTES = 150 * 1024;
 
   test("message.received.dm total SKILL.md bytes ≤ regression ceiling", () => {
     const slugs = EVENT_SKILL_SETS["message.received.dm"];

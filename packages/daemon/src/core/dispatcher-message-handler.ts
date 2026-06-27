@@ -176,6 +176,18 @@ export interface MessageHandlerDeps {
   getFinalConfirmHandler?: () =>
     | import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler
     | null;
+  /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md Phase 4 — lazily-injected runner
+   * accessors for the per-task `!stop <id>` bang command. Null in tests
+   * and before the runners are wired at startup; the `!stop` handler tells
+   * the owner the runner is unavailable rather than dropping the request.
+   */
+  getBackgroundTaskRunner?: () =>
+    | import("../services/background-task/background-task-runner.js").BackgroundTaskRunner
+    | null;
+  getBrowserTaskRunner?: () =>
+    | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
+    | null;
 
   /** Live getter for the dispatcher's `currentSetupMode` flag. */
   getCurrentSetupMode: () => SetupMode | null;
@@ -228,6 +240,12 @@ export class MessageHandler {
   private readonly getFinalConfirmHandler: () =>
     | import("../services/browser-history/automation/final-confirm-handler.js").FinalConfirmHandler
     | null;
+  private readonly getBackgroundTaskRunner: () =>
+    | import("../services/background-task/background-task-runner.js").BackgroundTaskRunner
+    | null;
+  private readonly getBrowserTaskRunner: () =>
+    | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
+    | null;
   private readonly getCurrentSetupMode: () => SetupMode | null;
   private readonly beginSetupMode: (mode: SetupMode) => void;
   private readonly lookupCustomBangCommandForEvent: (
@@ -268,6 +286,10 @@ export class MessageHandler {
     this.getPurchaseHandler = deps.getPurchaseHandler ?? ((): null => null);
     this.getFinalConfirmHandler =
       deps.getFinalConfirmHandler ?? ((): null => null);
+    this.getBackgroundTaskRunner =
+      deps.getBackgroundTaskRunner ?? ((): null => null);
+    this.getBrowserTaskRunner =
+      deps.getBrowserTaskRunner ?? ((): null => null);
     this.getCurrentSetupMode = deps.getCurrentSetupMode;
     this.beginSetupMode = deps.beginSetupMode;
     this.lookupCustomBangCommandForEvent = deps.lookupCustomBangCommandForEvent;
@@ -697,6 +719,17 @@ export class MessageHandler {
         },
         enqueueBrowserResearchEvent: async (researchEvent) => {
           await this.eventBus.put(researchEvent);
+        },
+        // Per-task `!stop <id>` — abort one detached worker. Resolved
+        // lazily from the live runner instances (which hold the in-memory
+        // handles the abort must reach); null until the runners are wired.
+        cancelBackgroundTask: async (taskId, reason) => {
+          const runner = this.getBackgroundTaskRunner();
+          return runner ? runner.cancel(taskId, reason) : false;
+        },
+        cancelBrowserTask: async (taskId, reason) => {
+          const runner = this.getBrowserTaskRunner();
+          return runner ? runner.cancel(taskId, reason) : false;
         },
         enqueueWikiApproval: async (approvalInput) => {
           // WIKI_BUILDER_DESIGN.md §5.5 / §P2.E — escalate to Approve tier

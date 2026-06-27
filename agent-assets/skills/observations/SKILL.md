@@ -1,6 +1,6 @@
 ---
 name: observations
-description: Drain the pending-observations queue and inspect raw external-source state (Obsidian edits, new git commits, Notion updates), marking processed entries consumed. Use during hourly check or morning routine review.
+description: Drain the pending-observations queue and inspect raw external-source state (Obsidian edits, new git commits, Notion updates), marking processed entries consumed. Use during activity scan or morning routine review.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -56,7 +56,7 @@ The daemon pre-summarizes every observation with a per-source LLM call (lite tie
 | `summaryStale === true` | Treat as if `summary_status !== 'done'` — fall back to legacy fetch-on-doubt | Summary aged out (>6h since observed_at); content may have drifted under it |
 | `summary_status !== 'done'` (pending/skipped/failed/null) | Fall back to legacy fetch-on-doubt below | Summarizer disabled, lagging, or crashed |
 
-**Hard rule:** never fetch raw content when `novelty_score < 2`, unless a different observation in the same batch references the same path/ref OR `summaryStale === true`. This is the primary lever for hourly_check cost reduction.
+**Hard rule:** never fetch raw content when `novelty_score < 2`, unless a different observation in the same batch references the same path/ref OR `summaryStale === true`. This is the primary lever for activity_scan cost reduction.
 
 ### Legacy fetch-on-doubt (used when `summary_status !== 'done'`)
 
@@ -66,7 +66,7 @@ When the summarizer hasn't run (`summary_status !== 'done'`) or its summary aged
 
 ## Observation Review Logging
 
-Hourly check and Morning Routine review pending observations in aggregate. Even when nothing is surfaced, the review must remain auditable.
+Activity scan and Morning Routine review pending observations in aggregate. Even when nothing is surfaced, the review must remain auditable.
 
 ### observations → Agent Log
 
@@ -100,7 +100,7 @@ Response: `{ "observations": [{ "id", "source", "ref", "changeType", "actor", "o
 
 Record an agent-queued observation (only `actor: "agent"` or `"system"`
 accepted — user-authored observations arrive through the vault / mail
-watchers, never this route). Used by `routine.hourly_check` to queue
+watchers, never this route). Used by `routine.activity_scan` to queue
 `roadmap_candidate` signals the next `routine.roadmap_refresh` consumes.
 
 ```bash
@@ -133,7 +133,7 @@ cardinality mismatch without weakening either hook.
 > `too-complex` gate and cascade to a denied curl / wasted retry /
 > `budget-cap`. The tool input is the same `{"observations":[…]}` envelope
 > and the response is identical. The curl form below is the fallback for
-> sessions without the MCP tool (the hourly check, Codex/Gemini).
+> sessions without the MCP tool (the activity scan, Codex/Gemini).
 
 ```bash
 curl -s -X POST http://localhost:8321/api/observations/batch \

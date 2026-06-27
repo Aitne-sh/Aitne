@@ -13,7 +13,11 @@ agent to keep applying. It is NOT a one-off task.
 
 Each policy lives at `policies/management-captures/<slug>.md` and may link to:
 
-- `policies/routines/custom/<slug>.md` — the cron-driven execution rulebook
+- a recurring **Agent** (`policies/agents/<slug>/agent.md`, created via
+  `POST /api/agents`) — the cron-driven execution vehicle, recorded in the
+  policy frontmatter under `linked.routine` (legacy field name; the value is
+  the Agent slug — legacy `policies/routines/custom/` files no longer fire
+  and were auto-converted to same-slug Agents at upgrade).
 - `knowledge/dossiers/<topic>.md` — where the policy's accumulating data lands
 
 A readable summary of every policy lives at `policies/management-captures/_index.md`,
@@ -79,7 +83,7 @@ Heuristics to compare against existing policies:
 | Signal | Likely interpretation |
 |---|---|
 | Same `linked.dossier` topic | Likely a duplicate or extension of an existing policy |
-| Same cron expression on the linked routine | Likely a duplicate cadence |
+| Same cron expression on the linked Agent | Likely a duplicate cadence |
 | Slug stem matches an existing slug ("finance", "inbox", …) | Likely related |
 
 If a candidate matches, ask the user **before** creating:
@@ -110,12 +114,13 @@ saved. The slug must:
 - equal the filename stem
 - match `^[a-z0-9][a-z0-9-]*[a-z0-9]$` (or a single `[a-z0-9]`)
 - be ≤ 64 chars
-- equal the linked `policies/routines/custom/<slug>.md` slug (if any) — keep
-  them aligned in v1
+- equal the linked Agent's slug (if any) — keep them aligned in v1; Agent
+  slugs must start with a lowercase letter, so avoid digit-first slugs when
+  scheduling.
 
 ### Step 5 — Wire the dependencies (strict order; on failure, roll back in reverse)
 
-5.1 dossier → 5.2 routine → 5.3 policy file → 5.4 (auto-index — no
+5.1 dossier → 5.2 Agent → 5.3 policy file → 5.4 (auto-index — no
 manual step). Each step gates the next. The full curl recipes,
 when-to-skip rules, and rollback table are in the policy-workflow
 reference below.
@@ -152,9 +157,9 @@ the active policies first and ask.
    `updated: <today>`, PUT back. (The frontmatter parser is
    line-scalar so a per-field PATCH section call would not target a
    frontmatter key — always GET-merge-PUT for frontmatter edits.)
-2. If `linked.routine` is set: GET `policies/routines/custom/<slug>`, flip
-   frontmatter `enabled: false`, PUT back. The reload hook flips the
-   cron job off automatically.
+2. If `linked.routine` is set: `PATCH /api/agents/<slug>` with
+   `{"enabled": false}`. (User Agents stop without a warning ack; the
+   scheduler's fire-time gate takes effect immediately.)
 
 The policy-index reconciler re-renders both `_index.md` and the
 management.md section within ~10 s (reconciler-owned — see body intro).
@@ -165,20 +170,22 @@ partial state to the user and tell them which file is in which state.
 
 ### Resume
 
-Same fan-out, with `status: active` and `enabled: true`.
+Same fan-out, with `status: active` and `PATCH /api/agents/<slug>`
+`{"enabled": true}`.
 
 ### Remove
 
 1. GET the policy file, flip frontmatter `status: removed` and
    `updated: <today>`, PUT back.
-2. If `linked.routine` is set: `DELETE
-   /api/context/policies/routines/custom/<slug>` (whitelisted).
+2. If `linked.routine` is set: `DELETE /api/agents/<slug>` with body
+   `{"keep_history": false}` — removes the Agent definition, schedule,
+   and execution history (the default `true` would merely disable it).
 
 The reconciler moves the row from `## Active` to `## Removed`
 automatically — the `removedAt` cell is read from the policy file's
 `updated` field, which step 1 set to today.
 
-The policy file itself is **kept for history** — DELETE on `rules/*`
+The policy file itself is **kept for history** — DELETE on `policies/management-captures/*`
 is intentionally not whitelisted (see MANAGEMENT-POLICY-CAPTURE-PLAN
 §5.1).
 
@@ -186,9 +193,10 @@ is intentionally not whitelisted (see MANAGEMENT-POLICY-CAPTURE-PLAN
 
 - Does NOT touch `policies/management.md` body sections (Source of Truth
   table, Notification Rules, Schedule, etc.). Those are wizard-only.
-- Does NOT create rows in the `recurring_schedules` DB table — defer to
-  `policies/routines/custom/` for cron, which gives the user a visible MD file
-  to edit.
+- Does NOT write `recurring_schedules` rows or `agent.md` files by hand —
+  scheduling goes through `POST /api/agents`, which materialises the
+  user-visible `policies/agents/<slug>/agent.md` and pairs the schedule row
+  itself.
 
 ## Cross-skill pointers
 
@@ -214,10 +222,11 @@ skill targets these paths:
 - `GET /api/context/list/policies` (Step 1 authoritative — entries prefixed `management-captures/`)
 - `GET /api/context/policies/management-captures/<slug>` (read before pause / resume / remove)
 - `PUT /api/context/knowledge/dossiers/<topic>` (Step 5.1 — if new)
-- `PUT /api/context/policies/routines/custom/<slug>` (Step 5.2 — if scheduling)
+- `POST /api/agents` (Step 5.2 — if scheduling; the only non-context call)
 - `PUT /api/context/policies/management-captures/<slug>` (Step 5.3)
 - `PATCH /api/context/policies/management-captures/<slug>` (pause / resume / remove; frontmatter via GET-merge-PUT only — line-scalar parser)
-- `DELETE /api/context/policies/routines/custom/<slug>` (remove only)
+- `PATCH /api/agents/<slug>` (pause / resume — `{"enabled": …}`)
+- `DELETE /api/agents/<slug>` (remove only — `{"keep_history": false}`)
 
 `policies/management-captures/_index.md` and the `## Active Policies` section in
 `policies/management.md` are reconciler-owned (see body intro) — NOT in

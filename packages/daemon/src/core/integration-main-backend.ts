@@ -176,6 +176,10 @@ export function cascadeNativeBindingsOnMainSwitch(
       // against the same drift covered by the c8-ignored branch above.
       /* c8 ignore next */
       deniedTools: state.deniedTools ?? [],
+      // User configuration that must survive the disable/re-enable cycle —
+      // PATCH re-enables with `previous.fetchTargets`, so dropping it here
+      // would silently wipe the allowlist on a main-backend change.
+      fetchTargets: state.fetchTargets ?? [],
       lastChangedAt: now,
     });
     flipped.push({

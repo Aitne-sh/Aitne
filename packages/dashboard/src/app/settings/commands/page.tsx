@@ -435,7 +435,7 @@ function UserCommandCard({
         </div>
       </div>
       {hasBuiltInConflict && (
-        <div className="mt-3 flex gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+        <div className="mt-3 flex gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             A built-in command with this name now exists. Runtime dispatch will
@@ -662,7 +662,7 @@ function CommandForm({
           })}
         </div>
         {draft.enabledSkills.length === 0 && (
-          <p className="text-xs text-amber-600 dark:text-amber-400">
+          <p className="text-xs text-warning">
             No skills selected — the agent will run with only safety + your
             instructions. Reply quality may suffer without <code>notify</code>.
           </p>

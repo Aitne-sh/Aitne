@@ -33,7 +33,7 @@ const DEFAULT_COMMIT_TTL_MS = 15 * 60_000;
  * AgentWriteTracker — short-lived, in-memory record of paths the agent is
  * currently writing via the daemon API. Observers consult it to classify
  * file-change events as `actor='agent'` vs `actor='user'`, which gives the
- * hourly-check dispatcher a way to ignore its own writes.
+ * activity-scan dispatcher a way to ignore its own writes.
  *
  * Two marking modes:
  *  1. **Content-hash mode** — caller passes the exact bytes they wrote.
@@ -57,14 +57,14 @@ const DEFAULT_COMMIT_TTL_MS = 15 * 60_000;
  * polled sources (Notion, Calendar) whose observation lag is measured in
  * minutes, the caller MUST pass `opts.ttlMs` large enough to outlive the
  * poll cadence — otherwise every agent write is seen as a fresh user
- * edit and the hourly_check can loop on its own output.
+ * edit and the activity_scan can loop on its own output.
  */
 export class AgentWriteTracker {
   private readonly recentWrites = new Map<string, RecentWrite>();
   /**
    * Parallel commit-tracking map keyed by `<repoPath>::<sha-lower>`. Used by
    * `GitWatcher` to flip observations of agent-originated commits from
-   * `actor='user'` / `'unknown'` to `actor='agent'` so the hourly_check
+   * `actor='user'` / `'unknown'` to `actor='agent'` so the activity_scan
    * pending-floor does not count the daemon's own commits as user
    * activity (C1).
    */
@@ -147,7 +147,7 @@ export class AgentWriteTracker {
    * Register a git SHA the daemon just committed in `repoPath`. The next
    * `GitWatcher` observation of that SHA is flipped from `actor='user'` /
    * `'unknown'` to `actor='agent'` via `isAgentCommit`, which keeps the
-   * hourly_check pending-floor from counting the daemon's own commits as
+   * activity_scan pending-floor from counting the daemon's own commits as
    * user activity (the loop bug described in C1).
    *
    * Production callers pass the full 40-char SHA from `git rev-parse HEAD`.

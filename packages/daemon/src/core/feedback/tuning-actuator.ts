@@ -41,7 +41,7 @@ import type Database from "better-sqlite3";
 import { formatSqliteDatetime } from "@aitne/shared";
 
 import {
-  HOURLY_GATE_ACTION_TYPE,
+  ACTIVITY_SCAN_GATE_ACTION_TYPE,
   SELF_TUNING_LEDGER_PREFIX,
 } from "./self-performance-prep.js";
 import type {
@@ -165,7 +165,7 @@ export function findLatestRevertableEntry(
 // Computed twice per applied change: once at apply time (the pre-change
 // baseline stored in the ledger) and once by the auto-revert monitor over
 // the 7-day verify window. Both windows read rows that already exist —
-// `observations.novelty_score` and the `hourly_check.gate` audit rows —
+// `observations.novelty_score` and the `activity_scan.gate` audit rows —
 // never recomputed signals.
 
 /** D4 — R1's target metric pair. */
@@ -203,7 +203,7 @@ export function computeR1Metric(
       `SELECT detail FROM agent_actions
         WHERE action_type = ? AND started_at >= ? AND started_at < ?`,
     )
-    .all(HOURLY_GATE_ACTION_TYPE, fromUtc, toUtc) as GateDetailRow[];
+    .all(ACTIVITY_SCAN_GATE_ACTION_TYPE, fromUtc, toUtc) as GateDetailRow[];
   let cautious = 0;
   for (const row of gateRows) {
     if (parseJsonObject(row.detail)?.cautious_escalate === true) cautious += 1;
@@ -232,7 +232,7 @@ export function computeR3Metric(
         WHERE action_type = ? AND started_at >= ? AND started_at < ?`,
     )
     .all(
-      HOURLY_GATE_ACTION_TYPE,
+      ACTIVITY_SCAN_GATE_ACTION_TYPE,
       formatSqliteDatetime(from),
       formatSqliteDatetime(to),
     ) as GateDetailRow[];

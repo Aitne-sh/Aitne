@@ -195,7 +195,7 @@ export function BackendCard(props: BackendCardProps) {
           </p>
         )}
         {deprecation && (
-          <p className="rounded-md border border-amber-300/60 bg-amber-50/60 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-100">
+          <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
             {deprecation.reason}
           </p>
         )}
@@ -211,7 +211,7 @@ export function BackendCard(props: BackendCardProps) {
                 }}
               />
             ) : (
-              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <div className="flex items-center gap-2 text-sm text-success">
                 <CheckCircle2 className="h-4 w-4" />
                 <span>CLI installed</span>
               </div>
@@ -267,14 +267,14 @@ export function BackendCard(props: BackendCardProps) {
                 ) : installCheck?.status === "ok" ? (
                   <CheckCircle2
                     className={cn(
-                      "text-green-500",
+                      "text-success",
                       verifyInstallRequired ? "h-4 w-4" : "h-3.5 w-3.5",
                     )}
                   />
                 ) : installCheck?.status === "error" ? (
                   <XCircle
                     className={cn(
-                      "text-red-500",
+                      "text-destructive",
                       verifyInstallRequired ? "h-4 w-4" : "h-3.5 w-3.5",
                     )}
                   />
@@ -287,7 +287,7 @@ export function BackendCard(props: BackendCardProps) {
               </Button>
             </div>
             {installCheck?.status === "ok" && installCheck.version && (
-              <p className="text-xs text-green-700 dark:text-green-400">
+              <p className="text-xs text-success">
                 CLI runs OK —{" "}
                 <code className="rounded bg-muted px-1">
                   {installCheck.version}
@@ -295,7 +295,7 @@ export function BackendCard(props: BackendCardProps) {
               </p>
             )}
             {installCheck?.status === "error" && installCheck.error && (
-              <p className="text-xs text-red-600 dark:text-red-400">
+              <p className="text-xs text-destructive">
                 {installCheck.error}
               </p>
             )}
@@ -356,7 +356,7 @@ export function BackendCard(props: BackendCardProps) {
                     : "This backend does not expose a web-search tool."}
                 </p>
                 {webSearchSupported && !enabled && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                  <p className="text-xs text-warning">
                     Enable the backend first to toggle web search.
                   </p>
                 )}

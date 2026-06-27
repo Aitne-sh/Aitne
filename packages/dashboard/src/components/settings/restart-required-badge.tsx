@@ -15,7 +15,7 @@ export function RestartRequiredBadge() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex items-center gap-0.5 rounded-sm bg-amber-100 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+        <span className="inline-flex items-center gap-0.5 rounded-sm bg-warning/15 px-1 py-0.5 text-[10px] font-medium text-warning">
           <RotateCcw className="h-2.5 w-2.5" />
           restart
         </span>

@@ -7,7 +7,7 @@ import {
   gatherSelfPerformanceData,
   summarizeLessonStoreUtilization,
   FETCH_WINDOW_ACTION_TYPE,
-  HOURLY_GATE_ACTION_TYPE,
+  ACTIVITY_SCAN_GATE_ACTION_TYPE,
   SELF_PERFORMANCE_MAX_BYTES,
   SELF_PERFORMANCE_WINDOW_DAYS,
   SELF_TUNING_LEDGER_PREFIX,
@@ -327,7 +327,7 @@ describe("self-performance-prep", () => {
   describe("gatherSelfPerformanceData — hourly gate stage distribution", () => {
     it("counts ticks, stages, and the low-signal low-novelty stage-3 share", () => {
       const db = makeDb();
-      const gate = HOURLY_GATE_ACTION_TYPE;
+      const gate = ACTIVITY_SCAN_GATE_ACTION_TYPE;
       const snap = (maxNoveltyScore: unknown) => ({ maxNoveltyScore });
       insertAction(db, {
         actionType: gate,
@@ -486,7 +486,7 @@ describe("self-performance-prep", () => {
       const db = makeDb();
       insertLedger(
         db,
-        "hourlyCheckPrePassFreshnessMinutes",
+        "activityScanPrePassFreshnessMinutes",
         JSON.stringify({
           prev: 240,
           applied_at: "2026-06-01T00:00:00Z",
@@ -512,7 +512,7 @@ describe("self-performance-prep", () => {
       expect(ledger).toEqual([
         { key: "maxNotificationsPerHour", prev: 6, appliedAt: null, rule: null },
         {
-          key: "hourlyCheckPrePassFreshnessMinutes",
+          key: "activityScanPrePassFreshnessMinutes",
           prev: 240,
           appliedAt: "2026-06-01T00:00:00Z",
           rule: "R1",
@@ -525,7 +525,7 @@ describe("self-performance-prep", () => {
       const db = makeDb();
       insertLedger(
         db,
-        "hourlyCheckLowSignalPendingCeiling",
+        "activityScanLowSignalPendingCeiling",
         JSON.stringify({
           prev: 0,
           applied_at: "2026-05-01T00:00:00Z",
@@ -545,7 +545,7 @@ describe("self-performance-prep", () => {
 
       const { ledger } = gatherSelfPerformanceData(db, { now: NOW });
       expect(ledger[1]).toMatchObject({
-        key: "hourlyCheckLowSignalPendingCeiling",
+        key: "activityScanLowSignalPendingCeiling",
         revertedAt: "2026-05-20T00:00:00Z",
         verifyResult: "pass",
       });
@@ -798,7 +798,7 @@ describe("self-performance-prep", () => {
       const data = makeData({
         ledger: [
           {
-            key: "hourlyCheckPrePassFreshnessMinutes",
+            key: "activityScanPrePassFreshnessMinutes",
             prev: 240,
             appliedAt: "2026-06-01T00:00:00Z",
             rule: "R1",
@@ -811,7 +811,7 @@ describe("self-performance-prep", () => {
       });
       const block = build(data, { maxBytes: 4000 })!;
       expect(block).toContain(
-        '<c key="hourlyCheckPrePassFreshnessMinutes" prev="240" ' +
+        '<c key="activityScanPrePassFreshnessMinutes" prev="240" ' +
           'applied_at="2026-06-01T00:00:00Z" rule="R1" baseline="0.72" />',
       );
       expect(block).toContain(`<c key="long" prev="${"x".repeat(59)}…" />`);
@@ -825,7 +825,7 @@ describe("self-performance-prep", () => {
       const data = makeData({
         ledger: [
           {
-            key: "hourlyCheckLowSignalPendingCeiling",
+            key: "activityScanLowSignalPendingCeiling",
             prev: 0,
             appliedAt: "2026-05-25T00:00:00Z",
             rule: "R3",
@@ -842,7 +842,7 @@ describe("self-performance-prep", () => {
       });
       const block = build(data, { maxBytes: 4000 })!;
       expect(block).toContain(
-        '<c key="hourlyCheckLowSignalPendingCeiling" prev="0" ' +
+        '<c key="activityScanLowSignalPendingCeiling" prev="0" ' +
           'applied_at="2026-05-25T00:00:00Z" rule="R3" ' +
           'reverted_at="2026-06-02T00:00:00Z" />',
       );

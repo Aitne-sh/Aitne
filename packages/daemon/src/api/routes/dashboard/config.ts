@@ -44,13 +44,13 @@ const PUBLIC_CONFIG_RUNTIME_KEYS = [
   "sessionTimeoutDashboardMinutes",
   "timezone",
   "dayBoundaryHour",
-  // Monthly Review kill switch — default off; see runtime-settings.ts.
-  "monthlyReviewEnabled",
-  "hourlyCheckEnabled",
-  "hourlyCheckIntervalMinutes",
-  "hourlyCheckActiveStartHour",
-  "hourlyCheckActiveEndHour",
-  "hourlyCheckMinObservations",
+  // The legacy activity-scan / monthly-review gate + cadence keys
+  // (activityScanEnabled, activityScanIntervalMinutes, activityScanActive*,
+  // activityScanMinObservations, monthlyReviewEnabled) left this surface at
+  // the Agents-hub redesign: `agents.enabled` + the activity-scan row's
+  // runtime_window own them now (PATCH /api/agents/activity-scan). The keys
+  // remain valid in runtimeSettingsSchema as resolver fallbacks
+  // (AGENTS_HUB_REDESIGN_PLAN.md §2).
   "authProbeDisabled",
   "authPreflightFreshnessMs",
   "maxNotificationsPerHour",
@@ -355,14 +355,18 @@ export function registerConfigRoutes(app: Hono, deps: ApiDependencies): void {
       return c.json({ error: "validation_failed", details: result.errors }, 400);
     }
 
-    // Hot-reload cron schedules when schedule-related config changes
+    // Hot-reload cron schedules when schedule-related config changes.
+    // The activityScan* entries are legacy-API back-compat only: the dashboard
+    // no longer surfaces them (agent-row runtime_window owns the cadence), but
+    // a direct PATCH of the deprecated keys must still rebuild the cron so the
+    // resolver fallback change takes effect.
     const SCHEDULE_KEYS = [
       "dayBoundaryHour",
       "timezone",
-      "hourlyCheckEnabled",
-      "hourlyCheckIntervalMinutes",
-      "hourlyCheckActiveStartHour",
-      "hourlyCheckActiveEndHour",
+      "activityScanEnabled",
+      "activityScanIntervalMinutes",
+      "activityScanActiveStartHour",
+      "activityScanActiveEndHour",
     ];
     if (result.updated.some((k) => SCHEDULE_KEYS.includes(k))) {
       deps.onScheduleConfigChanged?.();

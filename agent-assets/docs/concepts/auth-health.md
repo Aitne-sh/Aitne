@@ -11,9 +11,9 @@ aliases:
   - subscription auth warning
 category: concepts
 summary: |
-  The auth-health monitor probes each backend's credentials at startup
-  and on a recurring interval, surfaces failures on the dashboard, and
-  triggers recovery flows when the right signal is available.
+  The auth-health monitor probes each backend's credentials on every
+  activity-scan tick (default: every 2 hours), surfaces failures on the dashboard, and triggers
+  recovery flows when the right signal is available.
 section: auth-health
 tags:
   - core
@@ -29,7 +29,7 @@ ask_examples:
   - What is the SubscriptionAuthWarning banner?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-06-07
 keywords:
   - auth
   - authentication
@@ -62,9 +62,9 @@ api_endpoints:
 
 ## TL;DR
 
-The daemon probes each configured backend on boot and at a freshness
-interval. A failed probe flips the dashboard's auth-health card from
-green to amber/red and surfaces a recovery hint.
+The daemon probes each configured backend on every activity-scan cron tick (default: every 2 hours).
+A failed probe flips the dashboard's auth-health card from green to
+red and surfaces a recovery hint.
 
 ## Why This Concept Exists
 
@@ -80,7 +80,7 @@ routine fails.
   `models` endpoint (Anthropic, OpenAI, Google) and verifies the key
   is live. Without an API key, the probe checks whatever local CLI
   login Aitne fell back to (Claude credentials store, Codex token,
-  Gemini ADC).
+  Gemini OAuth credentials).
 - **Preflight freshness**: how long the daemon trusts a cached probe
   result before the router consults the backend again. Controlled by
   `authPreflightFreshnessMs` (default 600000 = 10 min). A cached
@@ -89,13 +89,15 @@ routine fails.
   disable the pre-flight check entirely.
 - **Recovery**: backend-specific repair. The recommended path is always
   re-pasting a paid API key on `/settings/models`. If you run on CLI
-  subscription auth instead, you can recover the login from the same
-  page: `/settings/models` exposes a recovery dialog that drives the
-  backend's own interactive login subprocess —
+  subscription auth instead, you can recover the login by DMing the
+  agent: `/auth fix claude`, `/auth fix codex`, or `/auth fix gemini`
+  drives the backend's own interactive login flow —
   `claude auth login --claudeai` (browser OAuth), `codex login
-  --device-auth` (device code), or Gemini's direct OAuth flow. As a
-  manual fallback you can always re-run the backend's CLI login in a
-  terminal yourself.
+  --device-auth` (device code), or Gemini's direct OAuth flow (open
+  the URL, then DM the authorization code back). `/auth status` shows
+  the current state; `/auth fix all` recovers every expired backend.
+  As a manual fallback you can always re-run the backend's CLI login
+  in a terminal yourself.
 
 ## Concrete Examples
 
@@ -104,16 +106,17 @@ routine fails.
   resumes against the new key on the next run.
 - Operator never registered an API key, ran on the subscription
   fallback, and the underlying `claude` CLI session expired → probe
-  fails → card flips amber → recommended fix is to register an API
+  fails → card flips red → recommended fix is to register an API
   key on `/settings/models`. To keep using subscription auth instead,
-  open the recovery dialog on the same page and complete the browser
-  OAuth login it launches.
+  DM the agent `/auth fix claude` and complete the browser OAuth
+  login it links you to.
 
 Cloud-provider credentials (Bedrock / Vertex / Foundry / Azure
 OpenAI / Gemini-Vertex) are not probed against a `models` endpoint —
-those providers trust the SDK's runtime auth chain, so the auth-
-health card stays neutral until the first execution either succeeds
-or surfaces a runtime auth error.
+real verification is left to the SDK's runtime auth chain, so a bad
+cloud credential only surfaces as a runtime auth error at execution
+time. For the env-var-driven providers the probe just checks the
+required env vars are present and marks the card OK ("Configured").
 
 ## The "API key recommended" warning
 

@@ -298,7 +298,6 @@ function loadWindowsHelper(): WindowsHelper {
   // a module-scope global — build one via `createRequire` to reach the
   // CommonJS loader. This branch only runs on win32.
   const req = createRequire(import.meta.url);
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = req("../../../../native/win-appcontainer/loader.js") as {
     loadHelper: () => WindowsHelper;
   };

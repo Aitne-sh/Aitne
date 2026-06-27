@@ -47,7 +47,7 @@ import type {
 import { useConfig } from "@/lib/hooks/use-config";
 import { usePatchIntegration } from "@/lib/hooks/use-integrations";
 import { useSaveConfig } from "@/lib/hooks/use-save-config";
-import { cn } from "@/lib/utils";
+import { cn, formatTimestamp } from "@/lib/utils";
 
 const BROWSERS: Array<{ key: BrowserHistoryBrowserKey; label: string }> = [
   { key: "chrome", label: "Chrome" },
@@ -108,11 +108,6 @@ function useBrowserHistoryIntegration() {
   });
 }
 
-function formatTime(ms: number | null | undefined): string {
-  if (!ms) return "Never";
-  return new Date(ms).toLocaleString();
-}
-
 function humanDuration(seconds: number | null | undefined): string {
   if (!seconds) return "n/a";
   if (seconds < 90) return `${seconds}s`;
@@ -157,16 +152,16 @@ function BrowserStatusIcon({
   status: BrowserHistoryDetectionStatus | undefined;
 }) {
   if (status === "available" || status === "available_no_sync") {
-    return <CheckCircle2 className="h-4 w-4 text-emerald-600" />;
+    return <CheckCircle2 className="h-4 w-4 text-success" />;
   }
   if (
     status === "permission_denied"
     || status === "available_sync_broken"
   ) {
-    return <AlertTriangle className="h-4 w-4 text-amber-600" />;
+    return <AlertTriangle className="h-4 w-4 text-warning" />;
   }
   if (status === "error") {
-    return <XCircle className="h-4 w-4 text-red-600" />;
+    return <XCircle className="h-4 w-4 text-destructive" />;
   }
   return <EyeOff className="h-4 w-4 text-muted-foreground" />;
 }
@@ -441,7 +436,7 @@ export default function BrowserHistorySettingsPage() {
             <div className="rounded-md border p-3">
               <div className="text-xs text-muted-foreground">Last ingest</div>
               <div className="mt-1 truncate text-sm font-medium">
-                {formatTime(status.data?.lastIngestAt)}
+                {formatTimestamp(status.data?.lastIngestAt, "Never")}
               </div>
             </div>
           </div>
@@ -513,9 +508,9 @@ export default function BrowserHistorySettingsPage() {
 
                 <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
                   <span>Signed in: {detail?.signedInProfiles ?? 0}</span>
-                  <span>History mtime: {formatTime(detail?.lastHistoryMtimeMs)}</span>
+                  <span>History mtime: {formatTimestamp(detail?.lastHistoryMtimeMs, "Never")}</span>
                   <span>Lifecycle: {browserLifecycle?.state ?? "stopped"}</span>
-                  <span>Last sync: {formatTime(browserLifecycle?.lastSuccessfulSyncAt)}</span>
+                  <span>Last sync: {formatTimestamp(browserLifecycle?.lastSuccessfulSyncAt, "Never")}</span>
                   <span>Failures: {browserLifecycle?.consecutiveFailures ?? 0}</span>
                   <span>Wait: {humanDuration(lifecycleConfig.per_browser?.[key]?.sync_flush_wait_seconds)}</span>
                 </div>

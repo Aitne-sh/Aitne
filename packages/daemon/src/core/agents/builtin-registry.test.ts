@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isProcessKey, AGENT_SLUG_PATTERN, stopWarningSchema } from "@aitne/shared";
 import {
+  AGENT_CATEGORIES,
   BUILTIN_AGENT_REGISTRY,
   BUILTIN_AGENT_REGISTRY_BY_SLUG,
   BUILTIN_AGENT_SLUGS,
@@ -17,7 +18,7 @@ const EXPECTED_SLUGS = [
   "evening-review",
   "weekly-review",
   "monthly-review",
-  "hourly-check",
+  "activity-scan",
   "user-profile-sweep-morning",
   "user-profile-sweep-evening",
   "roadmap-maintenance",
@@ -103,7 +104,7 @@ describe("BUILTIN_AGENT_REGISTRY — structure", () => {
 describe("BUILTIN_AGENT_REGISTRY — frozen firing paths (§5.5.1)", () => {
   // Mirror of the frozen table: slug → processKey, schedulerFn shape, and the
   // resolved cron at the default dayBoundaryHour (4). `cron: null` ==
-  // runtime-window builtin (hourly-check).
+  // runtime-window builtin (activity-scan).
   const TABLE: Record<
     string,
     {
@@ -132,10 +133,10 @@ describe("BUILTIN_AGENT_REGISTRY — frozen firing paths (§5.5.1)", () => {
       cron: "0 18 * * *",
       scheduler: { kind: "emit_routine", routine: "monthly_review" },
     },
-    "hourly-check": {
-      processKey: "routine.hourly_check",
+    "activity-scan": {
+      processKey: "routine.activity_scan",
       cron: null,
-      scheduler: { kind: "in_process_callback", callbackName: "onHourlyCheck" },
+      scheduler: { kind: "in_process_callback", callbackName: "onActivityScan" },
     },
     "user-profile-sweep-morning": {
       processKey: "routine.user_profile_sweep",
@@ -240,20 +241,20 @@ describe("registry lookup helpers", () => {
   });
 
   it("isBuiltinAgentSlug discriminates built-in vs user slugs", () => {
-    expect(isBuiltinAgentSlug("hourly-check")).toBe(true);
+    expect(isBuiltinAgentSlug("activity-scan")).toBe(true);
     expect(isBuiltinAgentSlug("weekly-bookmarks-cleanup")).toBe(false);
   });
 });
 
 describe("resolveRuntimeWindowCadence", () => {
   const cfg = {
-    hourlyCheckIntervalMinutes: 60,
-    hourlyCheckActiveStartHour: 4,
-    hourlyCheckActiveEndHour: 24,
+    activityScanIntervalMinutes: 60,
+    activityScanActiveStartHour: 4,
+    activityScanActiveEndHour: 24,
   };
 
-  it("returns the live interval cadence for the runtime-window built-in (hourly-check)", () => {
-    expect(resolveRuntimeWindowCadence("hourly-check", cfg)).toEqual({
+  it("returns the live interval cadence for the runtime-window built-in (activity-scan)", () => {
+    expect(resolveRuntimeWindowCadence("activity-scan", cfg)).toEqual({
       interval_minutes: 60,
       active_start_hour: 4,
       active_end_hour: 24,
@@ -262,10 +263,10 @@ describe("resolveRuntimeWindowCadence", () => {
 
   it("reflects a runtime-changed interval / active window verbatim", () => {
     expect(
-      resolveRuntimeWindowCadence("hourly-check", {
-        hourlyCheckIntervalMinutes: 30,
-        hourlyCheckActiveStartHour: 8,
-        hourlyCheckActiveEndHour: 22,
+      resolveRuntimeWindowCadence("activity-scan", {
+        activityScanIntervalMinutes: 30,
+        activityScanActiveStartHour: 8,
+        activityScanActiveEndHour: 22,
       }),
     ).toEqual({ interval_minutes: 30, active_start_hour: 8, active_end_hour: 22 });
   });
@@ -277,6 +278,61 @@ describe("resolveRuntimeWindowCadence", () => {
 
   it("returns null for an unknown / user slug", () => {
     expect(resolveRuntimeWindowCadence("not-a-builtin", cfg)).toBeNull();
+  });
+});
+
+describe("hub metadata — category + policyFiles (AGENTS_HUB_REDESIGN_PLAN §1)", () => {
+  it("every entry carries a known category", () => {
+    for (const entry of BUILTIN_AGENT_REGISTRY) {
+      expect(AGENT_CATEGORIES).toContain(entry.category);
+    }
+  });
+
+  it("pins the frozen category assignments", () => {
+    const bySlug = Object.fromEntries(
+      BUILTIN_AGENT_REGISTRY.map((e) => [e.slug, e.category]),
+    );
+    expect(bySlug).toEqual({
+      "morning-routine": "synthesis",
+      "evening-review": "synthesis",
+      "weekly-review": "synthesis",
+      "monthly-review": "synthesis",
+      "activity-scan": "monitoring",
+      "user-profile-sweep-morning": "maintenance",
+      "user-profile-sweep-evening": "maintenance",
+      "roadmap-maintenance": "maintenance",
+      "context-index-reconcile": "maintenance",
+      "skill-curation": "maintenance",
+    });
+  });
+
+  it("policy files use canonical class-prefixed vault paths with .md", () => {
+    for (const entry of BUILTIN_AGENT_REGISTRY) {
+      for (const file of entry.policyFiles) {
+        expect(file.path).toMatch(/^policies\/.+\.md$/);
+        expect(file.label.length).toBeGreaterThan(0);
+        expect(file.description.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("each review routine declares its rulebook; morning also owns the journal rules", () => {
+    const paths = (slug: string) =>
+      getBuiltinRegistryEntry(slug)!.policyFiles.map((f) => f.path);
+    expect(paths("morning-routine")).toEqual([
+      "policies/routines/morning.md",
+      "policies/journal-format.md",
+      "policies/journal-export.md",
+    ]);
+    expect(paths("evening-review")).toEqual(["policies/routines/evening.md"]);
+    expect(paths("weekly-review")).toEqual(["policies/routines/weekly.md"]);
+    expect(paths("monthly-review")).toEqual(["policies/routines/monthly.md"]);
+    expect(paths("activity-scan")).toEqual(["policies/routines/activity-scan.md"]);
+    expect(paths("roadmap-maintenance")).toEqual([]);
+    expect(paths("context-index-reconcile")).toEqual([]);
+    expect(paths("user-profile-sweep-morning")).toEqual([]);
+    expect(paths("user-profile-sweep-evening")).toEqual([]);
+    expect(paths("skill-curation")).toEqual([]);
   });
 });
 

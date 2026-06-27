@@ -399,8 +399,8 @@ export function MessagingPanel({
         </Card>
       )}
 
-      {error && <div className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">{error}</div>}
-      {notice && <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">{notice}</div>}
+      {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+      {notice && <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">{notice}</div>}
 
       {showDestinationSelector && (
         <Card>
@@ -439,7 +439,7 @@ export function MessagingPanel({
                   <StatLine label="Owner channel known" value={status.ownerChannelKnown ? "yes" : "no"} />
                   <StatLine label="Reminder eligible" value={status.notificationEligible ? "yes" : "no"} />
                   <StatLine label="Last inbound" value={status.lastInboundAt ?? "—"} />
-                  {status.error && <p className="text-xs text-red-600 dark:text-red-400">{status.error}</p>}
+                  {status.error && <p className="text-xs text-destructive">{status.error}</p>}
                 </>
               )}
 
@@ -550,7 +550,7 @@ export function MessagingPanel({
                       </Button>
                     </div>
                     {slackBotInfo && (
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                      <p className="text-xs text-success">
                         ✓ Bot connected: <code className="font-mono">{slackBotInfo.botName}</code>
                         {slackBotInfo.team && (
                           <> · workspace: <code className="font-mono">{slackBotInfo.team}</code></>
@@ -699,7 +699,7 @@ export function MessagingPanel({
                       </Button>
                     </div>
                     {tgBotInfo && (
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                      <p className="text-xs text-success">
                         ✓ Bot: <code className="font-mono">@{tgBotInfo.username ?? tgBotInfo.id}</code>
                       </p>
                     )}
@@ -777,7 +777,7 @@ export function MessagingPanel({
                       </div>
                     )}
                     {tgStatus?.paired && (
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                      <p className="text-xs text-success">
                         ✓ Paired with chat ID <code className="font-mono">{tgStatus.ownerChatId}</code>
                       </p>
                     )}
@@ -847,7 +847,7 @@ export function MessagingPanel({
                       </Button>
                     </div>
                     {dcBotInfo && (
-                      <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                      <p className="text-xs text-success flex items-center gap-2">
                         ✓ Bot: <code className="font-mono">{dcBotInfo.username}</code>
                         {dcBotInfo.avatarUrl && (
                           /* eslint-disable-next-line @next/next/no-img-element */
@@ -1148,7 +1148,7 @@ export function MessagingPanel({
                           </p>
                         )}
                         {whatsappQr.error && (
-                          <p className="text-xs text-red-600 dark:text-red-400">{whatsappQr.error}</p>
+                          <p className="text-xs text-destructive">{whatsappQr.error}</p>
                         )}
                       </div>
                     </>

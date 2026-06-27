@@ -46,10 +46,10 @@ function buildGrid(data: MetricsHeatmapDay[]) {
 function cellColor(count: number, max: number): string {
   if (count === 0) return "bg-muted/40";
   const ratio = count / max;
-  if (ratio <= 0.25) return "bg-emerald-200 dark:bg-emerald-900/60";
-  if (ratio <= 0.5) return "bg-emerald-400 dark:bg-emerald-700/80";
-  if (ratio <= 0.75) return "bg-emerald-500 dark:bg-emerald-600";
-  return "bg-emerald-600 dark:bg-emerald-500";
+  if (ratio <= 0.25) return "bg-success/25";
+  if (ratio <= 0.5) return "bg-success/50";
+  if (ratio <= 0.75) return "bg-success/75";
+  return "bg-success";
 }
 
 const DOW_LABELS = ["Mon", "", "Wed", "", "Fri", "", ""];
@@ -105,10 +105,10 @@ export function ActivityHeatmap({ data }: ActivityHeatmapProps) {
       <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
         <span>Less</span>
         <div className="h-[10px] w-[10px] rounded-[2px] bg-muted/40" />
-        <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-200 dark:bg-emerald-900/60" />
-        <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-400 dark:bg-emerald-700/80" />
-        <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500 dark:bg-emerald-600" />
-        <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-600 dark:bg-emerald-500" />
+        <div className="h-[10px] w-[10px] rounded-[2px] bg-success/25" />
+        <div className="h-[10px] w-[10px] rounded-[2px] bg-success/50" />
+        <div className="h-[10px] w-[10px] rounded-[2px] bg-success/75" />
+        <div className="h-[10px] w-[10px] rounded-[2px] bg-success" />
         <span>More</span>
       </div>
     </Card>

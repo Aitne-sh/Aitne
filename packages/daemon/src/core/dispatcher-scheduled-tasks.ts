@@ -309,6 +309,37 @@ export const REFRESH_ARCHITECTURE_ALLOWED_TOOLS = [
 ] as const;
 
 /**
+ * BACKGROUND_TASK_RUNNER_DESIGN.md §4.5 / §4.5-bis / Phase 4 — the active
+ * delivery turn is a NO-TOOL DM turn. Its sole job is to weave the
+ * already-injected artifact (`taskContext.task_delivery.report` carries the
+ * full verbatim result) into the live conversation; the agent's reply text
+ * IS the DM (recorded by the result processor) and any deliverable files
+ * are attached by the daemon, not by the agent. So the turn needs no tools
+ * at all — and an EMPTY override structurally prevents it from taking
+ * "further action" (spawning another task, writing memory, sending mail)
+ * during what should be a pure phrasing turn. Follow-up turns ("what did it
+ * find?") are ordinary DM turns and keep the full envelope, including the
+ * `GET /api/background-task/:id` read affordance.
+ */
+export const TASK_DELIVERY_TURN_ALLOWED_TOOLS: readonly string[] = [];
+
+/**
+ * True when `taskCtx` is a synthetic `scheduled.dm` event minted by the
+ * task-delivery handler (`createScheduledDmDeliveryEvent`) — the only place
+ * that sets the `task_delivery` block. Used to pin the no-tool clamp above.
+ * Keying off this structural marker (not `event.source`) is fail-safe: the
+ * clamp only ever NARROWS the envelope, so a false positive degrades a turn
+ * to no-tool rather than widening anything.
+ */
+export function isTaskDeliveryTurn(taskCtx: AgentTaskEvent["taskContext"]): boolean {
+  return (
+    !!taskCtx
+    && typeof taskCtx === "object"
+    && "task_delivery" in (taskCtx as Record<string, unknown>)
+  );
+}
+
+/**
  * Backends that honor the per-execute `allowedToolsOverride` clamp end-to-
  * end. Claude consumes the list verbatim through the SDK's `dontAsk` +
  * `allowedTools` posture and the dispatcher swaps Allow mode back to
@@ -318,6 +349,14 @@ export const REFRESH_ARCHITECTURE_ALLOWED_TOOLS = [
  * become a no-op. We refuse-at-execute rather than silently widen the
  * envelope; the operator sees an `agent_actions` row of action_type
  * `scheduled_task_clamp_unsupported` and a clear log line.
+ *
+ * Exception — the Phase-4 task-delivery turn (`isTaskDeliveryTurn`)
+ * consumes this same set but DEGRADES rather than refuses: when the
+ * resolved backend can't enforce `[]` it still runs the delivery turn
+ * with the default envelope (logged), because failing to deliver the
+ * owner's result is worse than running the phrasing turn untooled. The
+ * clamp is keyed off `binding.main.backendId`, so — as with the refuse
+ * path — a runtime fallback to a non-claude backend is not re-evaluated.
  *
  * Add a backend here only after verifying its core threads
  * `allowedToolsOverride` through to its concrete deny enforcement layer
@@ -342,7 +381,7 @@ export interface ScheduledTaskRunnerDeps {
    * in `ROUTINE_WINDOWS` (today_refresh / evening_review / weekly_review;
    * monthly_review is registered but has zero rows so the runner
    * short-circuits without dispatching a session). Idempotent against
-   * the morning_routine + hourly_check paths: when the upstream
+   * the morning_routine + activity_scan paths: when the upstream
    * dispatcher already attached a `fetchReportBlock`, `executeDefault`
    * skips re-running the pre-pass.
    */
@@ -716,6 +755,27 @@ export class ScheduledTaskRunner {
       this.markScheduledTaskCompleted(event);
       return;
     }
+    // BACKGROUND_TASK_RUNNER_DESIGN.md §4.5 / Phase 4 — pin the no-tool
+    // clamp on the active delivery turn. Mutually exclusive with the
+    // refresh-architecture clamp (a delivery turn is never that process
+    // key). Unlike the safety-critical refresh/curation clamps, this is a
+    // HARDENING: when the resolved backend can't enforce a per-execute
+    // clamp we DEGRADE (deliver with the default envelope) rather than
+    // refuse — failing to deliver the owner's result would be the worse
+    // outcome. The degrade is logged per the "no silent drops" posture.
+    const taskDeliveryToolClamp = isTaskDeliveryTurn(taskCtx)
+      ? TOOL_CLAMP_SUPPORTING_BACKENDS.has(binding.main.backendId)
+        ? TASK_DELIVERY_TURN_ALLOWED_TOOLS
+        : undefined
+      : undefined;
+    if (isTaskDeliveryTurn(taskCtx) && taskDeliveryToolClamp === undefined) {
+      logger.info(
+        { backendId: binding.main.backendId, correlationId: event.correlationId },
+        "task.delivery active turn: resolved backend does not honor the per-execute tool clamp; delivering with the default DM envelope (degraded, not refused)",
+      );
+    }
+    const effectiveAllowedToolsOverride =
+      refreshArchitectureOverride ?? taskDeliveryToolClamp;
     // AGENT_DEFINITIONS_DESIGN.md §4.2 — fold the firing Agent's
     // `tools.skills` onto the process-key skill bundle. `undefined` for every
     // non-Agent firing (managed task, git project doc, automation trigger) and
@@ -731,8 +791,8 @@ export class ScheduledTaskRunner {
           requestedTier,
           preResolvedBinding: binding,
           reassemblePrompt,
-          ...(refreshArchitectureOverride
-            ? { allowedToolsOverride: refreshArchitectureOverride }
+          ...(effectiveAllowedToolsOverride
+            ? { allowedToolsOverride: effectiveAllowedToolsOverride }
             : {}),
           ...(agentSkillOverride
             ? {
@@ -1116,7 +1176,7 @@ export class ScheduledTaskRunner {
       originalCorrelationId?: string;
       source?: string;
       postCatchupRoutines?: string[];
-      postCatchupHourlyCheck?: boolean;
+      postCatchupActivityScan?: boolean;
     },
   ): Promise<void> {
     const retryCount = Number(taskCtx.retryCount ?? 0);
@@ -1134,7 +1194,7 @@ export class ScheduledTaskRunner {
     //     row insert (today.md is fresh, audit row is missing);
     //   - the user manually edits today.md to the current date (CLAUDE.md
     //     calls this out as a documented edit path).
-    // In both, the hourly_check pre-routine gate (`morningRoutineRanToday`)
+    // In both, the activity_scan pre-routine gate (`morningRoutineRanToday`)
     // would keep refusing to run because the audit row is absent, the
     // pre-routine gate kept enqueuing wake rows, and each wake row was
     // fast-path completed here — never producing the audit row that would
@@ -1179,6 +1239,15 @@ export class ScheduledTaskRunner {
     // carries the previous attempt so executeMorningRoutine → scheduleMorningRetry
     // can increment properly. correlationId tracks back to the original
     // cron morning_routine for log correlation.
+    //
+    // `agentId` is carried over from the wake event (stamped there by
+    // `Dispatcher.beginAgentExecution` via `task_context.agent_id` /
+    // `task_context.routine`): the cron path's RoutineEvent gets the stamp
+    // directly, so dropping it here would make run-now / retry firings
+    // ignore the morning-routine Agent's overrides + lesson injection while
+    // cron firings honour them — the same manual-vs-cron divergence class
+    // AGENT_DEFINITIONS_KNOWN_LIMITATIONS §1 fixed for user Agents.
+    const wakeAgentId = (event.data as { agentId?: unknown } | undefined)?.agentId;
     const synthEvent: RoutineEvent = {
       ...createEvent({
         type: "routine.morning_routine",
@@ -1191,12 +1260,15 @@ export class ScheduledTaskRunner {
         priority: retryCount > 0 ? EventPriority.NORMAL : EventPriority.HIGH,
         correlationId: taskCtx.originalCorrelationId ?? event.correlationId,
         data: {
+          ...(typeof wakeAgentId === "string" && wakeAgentId.length > 0
+            ? { agentId: wakeAgentId }
+            : {}),
           ...(retryCount > 0 ? { retryCount, isRetry: true } : {}),
           ...(Array.isArray(taskCtx.postCatchupRoutines)
             ? { postCatchupRoutines: taskCtx.postCatchupRoutines }
             : {}),
-          ...(taskCtx.postCatchupHourlyCheck === true
-            ? { postCatchupHourlyCheck: true }
+          ...(taskCtx.postCatchupActivityScan === true
+            ? { postCatchupActivityScan: true }
             : {}),
           ...(typeof taskCtx.source === "string"
             ? { queuedSource: taskCtx.source }
@@ -1437,7 +1509,7 @@ export class ScheduledTaskRunner {
     try {
       // docs/design/appendices/routine-data-acquisition.md Phase 4 / D4 — pre-pass for
       // routine events whose ProcessKey appears in `ROUTINE_WINDOWS`
-      // (today_refresh, evening_review, weekly_review). The hourly_check
+      // (today_refresh, evening_review, weekly_review). The activity_scan
       // and morning_routine dispatch paths attach their own
       // `fetchReportBlock` upstream (D2 / D3); we honour an existing
       // attachment to avoid double-spawning the fetcher. `monthly_review`
@@ -1985,10 +2057,10 @@ export class ScheduledTaskRunner {
         const recommendations = buildTuningRecommendations({
           data,
           knobs: {
-            hourlyCheckPrePassFreshnessMinutes:
-              this.config.hourlyCheckPrePassFreshnessMinutes,
-            hourlyCheckLowSignalPendingCeiling:
-              this.config.hourlyCheckLowSignalPendingCeiling,
+            activityScanPrePassFreshnessMinutes:
+              this.config.activityScanPrePassFreshnessMinutes,
+            activityScanLowSignalPendingCeiling:
+              this.config.activityScanLowSignalPendingCeiling,
             feedbackLessonMaxBytesGlobal:
               this.config.feedbackLessonMaxBytesGlobal,
           },

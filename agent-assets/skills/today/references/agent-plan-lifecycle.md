@@ -8,9 +8,10 @@ description: Agent Plan close-the-loop lifecycle for scheduled.task / scheduled.
 
 This reference is consumed by `scheduled.task`, `scheduled.dm`,
 `routine.morning_routine`, and `routine.evening_review` — every event
-that may flip an Agent Plan row. DM handlers and hourly checks never
-flip Agent Plan rows; if you are not one of the listed events, the
-lifecycle below does not apply to your turn.
+that flips an Agent Plan row at fire time. DM handlers and hourly
+checks never flip rows for execution outcomes; their one write path is
+the pre-fire cancel / amend revision in the `today` skill body, not
+this lifecycle.
 
 ## Why flip inside the scheduled task, not later?
 
@@ -84,6 +85,10 @@ Leaving rows as `[ ]` is a bug: Morning Routine's reconciliation
 treats unflipped past rows as "scheduler dropped the wake", which
 triggers self-recovery and inflates the agent-actions audit.
 
+A fourth terminal state — `(cancelled: <reason>)` — is written before
+fire time by the cancel / amend revision path (today skill body),
+never by this lifecycle.
+
 ## Lock retry rules
 
 The Morning Routine holds the `state/today.md` write lock. Other sessions
@@ -94,7 +99,7 @@ get `409 morning_routine_lock_held` on PUT / PATCH while the lock is held.
   status code 409 alone.
 - Retry policy: 30 s back-off, max 3 attempts. If the third attempt
   also returns 409, log `loop-closeout deferred (lock_held)` to Agent
-  Log and exit. The next Evening Review reconciliation will catch the
+  Log and exit. The next Morning Routine reconciliation will catch the
   un-flipped row.
 - Do NOT retry without the `X-Lock-Id` header when the tag is in
   context. Sending a PATCH without the header during a held-lock

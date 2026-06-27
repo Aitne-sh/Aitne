@@ -23,7 +23,7 @@ voice, and content all belong to the user.
 
 Agent-side bookkeeping (action counts, internal anomalies, audit
 trail) lives in `journal/agent.md` — not here. If you find yourself
-about to log "the agent ran N tools today" or "the hourly check
+about to log "the agent ran N tools today" or "the activity scan
 fired M times", that belongs in the agent-side log instead. Filter
 it out.
 

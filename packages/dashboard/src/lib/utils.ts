@@ -45,11 +45,12 @@ export function niceAxisMax(values: readonly number[]): number {
   const magnitude = Math.pow(10, Math.floor(Math.log10(target)));
   const normalized = target / magnitude;
   const steps = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
-  const nice = steps.find((s) => normalized <= s) ?? 10;
+  const nice = steps.find((s) => normalized <= s)!;
   return nice * magnitude;
 }
 
-export function formatDuration(ms: number): string {
+export function formatDuration(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   const m = Math.floor(ms / 60_000);
@@ -84,6 +85,62 @@ export function formatShortDateTime(date: string | Date): string {
 export function formatDate(date: string | Date): string {
   const d = parseUtcDate(date);
   return format(d, "yyyy-MM-dd");
+}
+
+/**
+ * Locale-formatted absolute timestamp for "last activity"-style fields.
+ * Accepts an ISO string or epoch milliseconds. Falsy values render as
+ * `emptyLabel`; an unparseable string renders as-is.
+ *
+ * Unlike `formatAbsoluteTime`, this does NOT apply the SQLite-UTC
+ * normalization — use it for values that already carry timezone info
+ * (ISO strings with offset, epoch ms).
+ */
+export function formatTimestamp(
+  value: string | number | null | undefined,
+  emptyLabel = "—",
+): string {
+  if (!value) return emptyLabel;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    return typeof value === "string" ? value : emptyLabel;
+  }
+  return d.toLocaleString();
+}
+
+/** Relative "Xm ago" label from an epoch-millisecond timestamp. */
+export function formatRelativeMs(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 0) return "just now";
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return `${Math.floor(hr / 24)}d ago`;
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/** Truncate to at most `max` characters, ellipsis included. */
+export function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * Human-readable message from a thrown fetch/query error. `ApiError`
+ * already extracts the daemon's `message`/`error` body field into
+ * `Error#message`, so a plain `Error` check covers it.
+ */
+export function formatApiError(error: unknown): string {
+  return error instanceof Error ? error.message : "Request failed";
 }
 
 export function formatAmount(amount: number, currency: string): string {

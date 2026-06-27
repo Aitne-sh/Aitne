@@ -12,7 +12,7 @@ I've added later via DM). All checks are treated equally.
 
 | File | Cadence | Process key |
 |---|---|---|
-| `hourly.md` | every hour | `routine.hourly_check` |
+| `activity-scan.md` | every 2 h (default) | `routine.activity_scan` |
 | `morning.md` | 04:00 daily | `routine.morning_routine` |
 | `evening.md` | evening | `routine.evening_review` |
 | `weekly.md` | Friday | `routine.weekly_review` |

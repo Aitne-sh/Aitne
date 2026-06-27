@@ -108,17 +108,17 @@ function isRestartRequiredKey(key: string): key is RestartRequiredKey {
 const NUMERIC_RANGE: Record<string, { min: number; max: number; label: string }> = {
   dayBoundaryHour: { min: 0, max: 9, label: "0–9 (before 10:00)" },
   executeTimeoutMinutes: { min: 1, max: 1440, label: "1–1440 minutes" },
-  hourlyCheckActiveStartHour: { min: 0, max: 23, label: "0–23" },
-  hourlyCheckActiveEndHour: { min: 1, max: 24, label: "1–24" },
+  activityScanActiveStartHour: { min: 0, max: 23, label: "0–23" },
+  activityScanActiveEndHour: { min: 1, max: 24, label: "1–24" },
   // Any positive integer up to one day. Intervals that evenly divide 60
   // produce a tight cron; arbitrary intervals run a minute-tick cron with an
   // in-callback modulo gate anchored at activeStartHour. See
-  // scheduler.ts:buildHourlyCronExpr / shouldFireHourlyTickAt.
-  hourlyCheckIntervalMinutes: { min: 1, max: 1440, label: "1–1440 minutes" },
-  hourlyCheckMinObservations: { min: 0, max: 1000, label: "0–1000" },
+  // scheduler.ts:buildActivityScanCronExpr / shouldFireActivityScanTickAt.
+  activityScanIntervalMinutes: { min: 1, max: 1440, label: "1–1440 minutes" },
+  activityScanMinObservations: { min: 0, max: 1000, label: "0–1000" },
   // Twin of the runtimeSettingsSchema bound; cap 480 = the self-tuning R1
   // freshness ladder's top notch (SELF_TUNING_REVIEW_CYCLE_DESIGN.md D2).
-  hourlyCheckPrePassFreshnessMinutes: { min: 0, max: 480, label: "0–480 minutes" },
+  activityScanPrePassFreshnessMinutes: { min: 0, max: 480, label: "0–480 minutes" },
   gitPollIntervalSeconds: { min: 60, max: 86400, label: "60–86400 seconds" },
   githubPollIntervalSeconds: { min: 60, max: 86400, label: "60–86400 seconds" },
   // 0 disables the observer; 20160 min = 14 days which is already well past

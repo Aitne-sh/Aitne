@@ -56,7 +56,7 @@ describe("policy-files", () => {
     });
 
     it("includes hourly / morning / evening / weekly / monthly / roadmap keys", () => {
-      expect(POLICY_FILE_REGISTRY["routine.hourly_check"]).toBeDefined();
+      expect(POLICY_FILE_REGISTRY["routine.activity_scan"]).toBeDefined();
       expect(POLICY_FILE_REGISTRY["routine.morning_routine"]).toBeDefined();
       expect(POLICY_FILE_REGISTRY["routine.evening_review"]).toBeDefined();
       expect(POLICY_FILE_REGISTRY["routine.weekly_review"]).toBeDefined();
@@ -100,12 +100,12 @@ describe("policy-files", () => {
 
   describe("resolvePolicyRefs", () => {
     it("combines global + specific refs for known keys", () => {
-      const refs = resolvePolicyRefs("routine.hourly_check");
+      const refs = resolvePolicyRefs("routine.activity_scan");
       const paths = refs.map((r) => r.path);
       // management.md is injected by ContextBuilder, not here.
       expect(paths).not.toContain("policies/management.md");
       expect(paths).toContain("policies/redaction.md");
-      expect(paths).toContain("policies/routines/hourly.md");
+      expect(paths).toContain("policies/routines/activity-scan.md");
     });
 
     it("maps roadmap refresh to the monthly planning rulebook", () => {
@@ -168,7 +168,7 @@ describe("policy-files", () => {
     it("skips refs whose file is missing", () => {
       const blocks = loadPolicyBlocks({
         contextDir,
-        processKey: "routine.hourly_check",
+        processKey: "routine.activity_scan",
       });
       expect(blocks).toEqual([]);
     });
@@ -179,16 +179,16 @@ describe("policy-files", () => {
         "# Redaction\n\nPatterns",
       );
       writeFileSync(
-        join(contextDir, "policies", "routines", "hourly.md"),
-        "# Hourly\n\nChecks",
+        join(contextDir, "policies", "routines", "activity-scan.md"),
+        "# Activity Scan\n\nChecks",
       );
       const blocks = loadPolicyBlocks({
         contextDir,
-        processKey: "routine.hourly_check",
+        processKey: "routine.activity_scan",
       });
       const labels = blocks.map((b) => b.label);
       expect(labels).toContain("Redaction patterns");
-      expect(labels).toContain("Hourly checks");
+      expect(labels).toContain("Activity scans");
     });
 
     it("always loads journal-export rules for morning routine when the file exists", () => {
@@ -216,7 +216,7 @@ describe("policy-files", () => {
     it("supports a custom reader override", () => {
       const blocks = loadPolicyBlocks({
         contextDir,
-        processKey: "routine.hourly_check",
+        processKey: "routine.activity_scan",
         readFile: () => "synthetic content",
       });
       expect(blocks.length).toBeGreaterThan(0);
@@ -226,7 +226,7 @@ describe("policy-files", () => {
     it("swallows reader failures and skips the ref", () => {
       const blocks = loadPolicyBlocks({
         contextDir,
-        processKey: "routine.hourly_check",
+        processKey: "routine.activity_scan",
         readFile: () => {
           throw new Error("io failure");
         },
@@ -238,7 +238,7 @@ describe("policy-files", () => {
       const oversize = "x".repeat(40 * 1024);
       const blocks = loadPolicyBlocks({
         contextDir,
-        processKey: "routine.hourly_check",
+        processKey: "routine.activity_scan",
         readFile: () => oversize,
       });
       expect(blocks).toEqual([]);
@@ -291,7 +291,7 @@ describe("policy-files", () => {
       const prompt = "base prompt";
       const result = appendPolicyBlocks(prompt, {
         contextDir,
-        processKey: "routine.hourly_check",
+        processKey: "routine.activity_scan",
       });
       expect(result).toBe(prompt);
     });

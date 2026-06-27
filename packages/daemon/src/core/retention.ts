@@ -20,6 +20,7 @@ import {
 import { deletePurchaseRepliesOlderThan } from "../db/browser-automation-purchase-replies-store.js";
 import { deleteWorkflowRunsOlderThan } from "../db/browser-automation-store.js";
 import { deleteTerminalBrowserTasksOlderThan } from "../db/browser-task-store.js";
+import { deleteTerminalBackgroundTasksOlderThan } from "../db/background-task-store.js";
 import {
   expireStaleLiteFinalConfirmTokens,
   scrubRotatedLiteFinalConfirmTokens,
@@ -84,6 +85,16 @@ const RETENTION_DAYS = {
    */
   browserTask: TRACE_RETENTION_DAYS,
   /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §6 — terminal `background_task` rows
+   * age out at 30 days. Unlike browser_task there are no trace
+   * screenshots to keep in sync; 30 days keeps a month of completed-task
+   * history so a late "what did that find?" follow-up can still
+   * `GET /api/background-task/:id`. Children
+   * (`background_task_clarifications`) cascade via FK. Non-terminal rows
+   * are NEVER deleted — boot re-dispatch owns them.
+   */
+  backgroundTask: 30,
+  /**
    * BROWSER_TASK_REDESIGN_PLAN.md §14.11 Q#6 — lite-final-confirm tokens
    * carry the same `!~xxxxxxxx` shape as B-4 purchase tokens. Mirror the
    * 1-day scrub window so a terminal row's raw token is rotated to NULL
@@ -101,7 +112,7 @@ const RETENTION_DAYS = {
   skillCurationRunningMaxHours: 24,
   tempFiles: 1,
   /**
-   * Pending observations are NEVER deleted by retention (the hourly_check
+   * Pending observations are NEVER deleted by retention (the activity_scan
    * dispatcher owns consumption). After this many days unconsumed, retention
    * logs a warning so the operator notices a stalled pipeline.
    */
@@ -264,6 +275,11 @@ export interface RetentionResult {
    */
   browserTask: number;
   /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §6 — terminal `background_task` rows
+   * pruned during this sweep (children cascade via FK).
+   */
+  backgroundTask: number;
+  /**
    * BROWSER_TASK_REDESIGN_PLAN.md §5 — pending lite-final-confirm
    * tokens past their 5-min TTL flipped to `expired` during this sweep
    * (mirrors B-4's `browserAutomationPurchaseTokensExpired`).
@@ -330,6 +346,7 @@ export function runRetentionCleanup(
     browserAutomationPurchaseTokensScrubbed: 0,
     browserAutomationPurchaseRepliesDeleted: 0,
     browserTask: 0,
+    backgroundTask: 0,
     browserTaskFinalConfirmTokensExpired: 0,
     browserTaskFinalConfirmTokensScrubbed: 0,
     ftsOptimized: false,
@@ -370,6 +387,7 @@ export function runRetentionCleanup(
     browserAutomationPurchaseTokensScrubbed: 0,
     browserAutomationPurchaseRepliesDeleted: 0,
     browserTask: 0,
+    backgroundTask: 0,
     browserTaskFinalConfirmTokensExpired: 0,
     browserTaskFinalConfirmTokensScrubbed: 0,
   };
@@ -611,11 +629,17 @@ export function runRetentionCleanup(
         db,
         browserTaskCutoff,
       );
+      const backgroundTaskCutoff =
+        now - RETENTION_DAYS.backgroundTask * 86_400_000;
+      counts.backgroundTask = deleteTerminalBackgroundTasksOlderThan(
+        db,
+        backgroundTaskCutoff,
+      );
     } catch (err) {
       /* c8 ignore next 5 */
       logger.warn(
         { err },
-        "browser_task retention sweep skipped (tables missing)",
+        "browser_task / background_task retention sweep skipped (tables missing)",
       );
     }
   })();
@@ -649,6 +673,7 @@ export function runRetentionCleanup(
   result.imminentEventNotifications = counts.imminentEventNotifications;
   result.browserAutomationWorkflows = counts.browserAutomationWorkflows;
   result.browserTask = counts.browserTask;
+  result.backgroundTask = counts.backgroundTask;
   result.browserTaskFinalConfirmTokensExpired =
     counts.browserTaskFinalConfirmTokensExpired;
   result.browserTaskFinalConfirmTokensScrubbed =
@@ -673,7 +698,7 @@ export function runRetentionCleanup(
   result.attachmentDanglingRows = attachmentCleanup.danglingRows;
   result.attachmentUntrackedDirs = attachmentCleanup.untrackedDirs;
 
-  // Surface stale pending observations so a stalled hourly_check pipeline
+  // Surface stale pending observations so a stalled activity_scan pipeline
   // becomes visible in daemon logs. Pending rows are intentionally not
   // deleted (see RETENTION_DAYS.stalePendingObservationsWarn comment).
   const stalePending = getStalePendingObservationStats(
@@ -687,7 +712,7 @@ export function runRetentionCleanup(
         oldestObservedAt: stalePending.oldestObservedAt,
         thresholdDays: RETENTION_DAYS.stalePendingObservationsWarn,
       },
-      "Stale pending observations detected — hourly_check may be skipping or stalled",
+      "Stale pending observations detected — activity_scan may be skipping or stalled",
     );
   }
 

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEvent, EventPriority } from "@aitne/shared";
@@ -206,7 +212,7 @@ describe("ResultProcessor — isObserverEvent", () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it("classifies hourly_check, calendar.*, schedule.approaching, notion.*, github.*, git.* as observer events", () => {
+  it("classifies activity_scan, calendar.*, schedule.approaching, notion.*, github.*, git.* as observer events", () => {
     const { processor } = makeProcessor({ db, dataDir });
     const cases: Array<[string, boolean]> = [
       ["calendar.changed", true],
@@ -221,10 +227,10 @@ describe("ResultProcessor — isObserverEvent", () => {
       const e = createEvent({ type, source: "src", priority: EventPriority.NORMAL });
       expect(processor.isObserverEvent(e)).toBe(expected);
     }
-    // hourly_check carries the routine field.
+    // activity_scan carries the routine field.
     const hourly = {
-      ...createEvent({ type: "routine.hourly_check", source: "cron", priority: EventPriority.NORMAL }),
-      routine: "hourly_check",
+      ...createEvent({ type: "routine.activity_scan", source: "cron", priority: EventPriority.NORMAL }),
+      routine: "activity_scan",
     } as unknown as Event;
     expect(processor.isObserverEvent(hourly)).toBe(true);
   });
@@ -783,6 +789,22 @@ describe("ResultProcessor — formatSummaryRole", () => {
       }),
     ).toBe("assistant (scheduled DM dispatched)");
   });
+
+  it("decorates task.delivery assistant messages with the specific task labels", () => {
+    const { processor } = makeProcessor({ db, dataDir });
+    expect(
+      processor.formatSummaryRole({
+        role: "assistant",
+        metadata: JSON.stringify({ notificationType: "task_result" }),
+      }),
+    ).toBe("assistant (background task result delivered)");
+    expect(
+      processor.formatSummaryRole({
+        role: "assistant",
+        metadata: JSON.stringify({ notificationType: "task_clarification" }),
+      }),
+    ).toBe("assistant (background task clarification requested)");
+  });
 });
 
 describe("ResultProcessor — logProactiveForwardDisavowalIfMatched", () => {
@@ -836,5 +858,171 @@ describe("ResultProcessor — logProactiveForwardDisavowalIfMatched", () => {
       const matched = PROACTIVE_FORWARD_DISAVOWAL_PATTERNS.some((p) => p.test(probe));
       expect(matched, `probe should match: ${probe}`).toBe(true);
     }
+  });
+});
+
+// RESEARCH_CLUSTER_COST_FIX_PLAN F5 — outcome verification for
+// routine.research_cluster_update. The flow's ONLY deliverable is the
+// per-cluster journal at context/research/<slug>.md; a clean session
+// (no backend error) that didn't write it must settle as `partial` /
+// `journal_write_missing` instead of a misleading "success". Detection
+// is the on-disk file's mtime vs the run window — there is no
+// `context_write` audit row for the quiet `research/*` namespace.
+describe("ResultProcessor — research_cluster_update journal-write verification (F5)", () => {
+  let db: Database.Database;
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-rp-"));
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  // fakeConfig leaves vaultMode unset → getContextDir resolves to
+  // `<dataDir>/context`, so the journal lives at
+  // `<dataDir>/context/research/<slug>.md`.
+  function journalPath(slug: string): string {
+    return join(dataDir, "context", "research", `${slug}.md`);
+  }
+
+  function writeJournal(slug: string, mtime?: Date): void {
+    const path = journalPath(slug);
+    mkdirSync(join(dataDir, "context", "research"), { recursive: true });
+    writeFileSync(path, "## Day log\n\n### 2026-06-11\n- visits: 3\n");
+    if (mtime) utimesSync(path, mtime, mtime);
+  }
+
+  function makeClusterUpdateEvent(slug: string): Event {
+    return {
+      ...createEvent({
+        type: "routine.research_cluster_update",
+        source: "browser_history.cron",
+        priority: EventPriority.NORMAL,
+        data: { slug },
+      }),
+      routine: "research_cluster_update",
+    } as unknown as Event;
+  }
+
+  function logActionArg(audit: IAuditLogger): Record<string, unknown> {
+    return (audit.logAction as ReturnType<typeof vi.fn>).mock
+      .calls[0][0] as Record<string, unknown>;
+  }
+
+  it("records success (no override) when the journal was written inside the run window", async () => {
+    const slug = "quantum-mechanics";
+    writeJournal(slug); // mtime = now
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    await processor.processResult(
+      makeAgentResult({ output: "appended 1 day", durationMs: 2_000 }),
+      makeClusterUpdateEvent(slug),
+    );
+    const arg = logActionArg(audit);
+    expect(arg.result).toBeUndefined();
+    expect(arg.error).toBeUndefined();
+  });
+
+  it("downgrades to partial/journal_write_missing when the journal file is absent", async () => {
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    await processor.processResult(
+      makeAgentResult({ output: "narrated success but wrote nothing", durationMs: 800 }),
+      makeClusterUpdateEvent("absent-cluster"),
+    );
+    expect(logActionArg(audit)).toMatchObject({
+      result: "partial",
+      error: "journal_write_missing",
+    });
+  });
+
+  it("accepts a write made before the final attempt (window anchored at event enqueue time)", async () => {
+    const slug = "retried-cluster";
+    // Written 30s ago — after the event was enqueued (60s ago) but well
+    // before the final attempt's run window (durationMs=1s ⇒ run start
+    // ≈ now−1s). Models an `executeWithRetry` first attempt that wrote
+    // the journal and then failed; the retry had nothing left to append.
+    writeJournal(slug, new Date(Date.now() - 30_000));
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    const event = {
+      ...makeClusterUpdateEvent(slug),
+      timestamp: new Date(Date.now() - 60_000),
+    } as unknown as Event;
+    await processor.processResult(
+      makeAgentResult({ output: "already up to date", durationMs: 1_000 }),
+      event,
+    );
+    const arg = logActionArg(audit);
+    expect(arg.result).toBeUndefined();
+    expect(arg.error).toBeUndefined();
+  });
+
+  it("downgrades to partial when the journal exists but was not touched this run (stale mtime)", async () => {
+    const slug = "stale-cluster";
+    // mtime two days ago — well before the run window.
+    writeJournal(slug, new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    await processor.processResult(
+      makeAgentResult({ output: "no append happened", durationMs: 1_000 }),
+      makeClusterUpdateEvent(slug),
+    );
+    expect(logActionArg(audit)).toMatchObject({
+      result: "partial",
+      error: "journal_write_missing",
+    });
+  });
+
+  it("does NOT downgrade a run that already errored (gated on !isError)", async () => {
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    await processor.processResult(
+      makeAgentResult({ output: "", durationMs: 500, isError: true }),
+      makeClusterUpdateEvent("errored-cluster"),
+    );
+    const arg = logActionArg(audit);
+    expect(arg.result).toBeUndefined();
+    expect(arg.error).toBeUndefined();
+  });
+
+  it("does NOT downgrade when the slug is missing/invalid (unverifiable → treat as written)", async () => {
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    const event = {
+      ...createEvent({
+        type: "routine.research_cluster_update",
+        source: "browser_history.cron",
+        priority: EventPriority.NORMAL,
+        data: { slug: "../escape" }, // fails the slug character-set guard
+      }),
+      routine: "research_cluster_update",
+    } as unknown as Event;
+    await processor.processResult(
+      makeAgentResult({ output: "x", durationMs: 500 }),
+      event,
+    );
+    const arg = logActionArg(audit);
+    expect(arg.result).toBeUndefined();
+    expect(arg.error).toBeUndefined();
+  });
+
+  it("leaves non-research routine events untouched (no journal check)", async () => {
+    const { processor, audit } = makeProcessor({ db, dataDir });
+    const event = {
+      ...createEvent({
+        type: "routine.morning_routine",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      }),
+      routine: "morning_routine",
+    } as unknown as Event;
+    await processor.processResult(
+      makeAgentResult({ output: "", durationMs: 500 }),
+      event,
+    );
+    const arg = logActionArg(audit);
+    expect(arg.result).toBeUndefined();
+    expect(arg.error).toBeUndefined();
   });
 });

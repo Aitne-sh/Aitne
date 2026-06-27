@@ -144,7 +144,7 @@ export function CliInstallPanel({
     if (compact) return null;
     if (cliInstalled === true) {
       return (
-        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+        <div className="flex items-center gap-2 text-sm text-success">
           <CheckCircle2 className="h-4 w-4" />
           <span>{backendLabel} CLI is installed and ready</span>
         </div>
@@ -175,7 +175,7 @@ export function CliInstallPanel({
   if (result?.ok) {
     return (
       <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+        <div className="flex items-center gap-2 text-sm text-success">
           <CheckCircle2 className="h-4 w-4" />
           <span>{backendLabel} CLI installed successfully</span>
         </div>
@@ -193,7 +193,7 @@ export function CliInstallPanel({
   return (
     <div className={compact ? "space-y-2" : "space-y-3"}>
       {/* Status heading */}
-      <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+      <div className="flex items-center gap-2 text-sm text-warning">
         <Download className="h-4 w-4 shrink-0" />
         <span>{backendLabel} CLI is not installed</span>
       </div>
@@ -235,7 +235,7 @@ export function CliInstallPanel({
                 className="gap-2 shrink-0"
               >
                 {copied ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                  <CheckCircle2 className="h-3.5 w-3.5 text-success" />
                 ) : (
                   <ClipboardCopy className="h-3.5 w-3.5" />
                 )}
@@ -299,11 +299,11 @@ export function CliInstallPanel({
         </>
       ) : (
         /* No package manager available — manual install guidance */
-        <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-          <p className="text-xs font-medium text-amber-800 dark:text-amber-200">
+        <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 p-3">
+          <p className="text-xs font-medium text-warning">
             No supported package manager was detected on this system.
           </p>
-          <p className="text-xs text-amber-700 dark:text-amber-300">
+          <p className="text-xs text-warning">
             Please install the CLI manually in your terminal:
           </p>
           <div className="flex items-center gap-2">
@@ -334,7 +334,7 @@ export function CliInstallPanel({
               className="shrink-0"
             >
               {copied ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
               ) : (
                 <ClipboardCopy className="h-3.5 w-3.5" />
               )}
@@ -355,7 +355,7 @@ export function CliInstallPanel({
                 href={docsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-amber-700 underline hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100"
+                className="inline-flex items-center gap-1 text-xs text-warning underline"
               >
                 <ExternalLink className="h-3 w-3" />
                 Official installation guide
@@ -367,8 +367,8 @@ export function CliInstallPanel({
 
       {/* ── Install failure ── */}
       {result && !result.ok && (
-        <div className="space-y-2 rounded-md border border-red-200 bg-red-50/50 p-3 dark:border-red-900 dark:bg-red-950/30">
-          <div className="flex items-center gap-2 text-sm font-medium text-red-700 dark:text-red-300">
+        <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-destructive">
             <XCircle className="h-4 w-4 shrink-0" />
             <span>
               {result.timedOut
@@ -379,13 +379,13 @@ export function CliInstallPanel({
 
           {/* stderr output */}
           {result.stderr && (
-            <pre className="max-h-32 overflow-auto rounded bg-red-100/50 p-2 text-xs text-red-800 dark:bg-red-950/50 dark:text-red-200">
+            <pre className="max-h-32 overflow-auto rounded bg-destructive/10 p-2 text-xs text-destructive">
               {result.stderr.slice(-1500)}
             </pre>
           )}
 
           {/* Recovery suggestions */}
-          <div className="space-y-1 text-xs text-red-700 dark:text-red-300">
+          <div className="space-y-1 text-xs text-destructive">
             {otherAvailable.length > 0 && (
               <p>
                 Try a different method: select{" "}
@@ -415,7 +415,7 @@ export function CliInstallPanel({
                 href={docsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-red-600 underline hover:text-red-800 dark:text-red-400 dark:hover:text-red-200"
+                className="inline-flex items-center gap-1 text-xs text-destructive underline"
               >
                 <ExternalLink className="h-3 w-3" />
                 Official install guide
@@ -427,7 +427,7 @@ export function CliInstallPanel({
 
       {/* API-level error (not install failure) */}
       {error && (
-        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="text-xs text-destructive">{error}</p>
       )}
     </div>
   );

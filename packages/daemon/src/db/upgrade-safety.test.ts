@@ -41,7 +41,7 @@ const BUILTIN_SLUGS = [
   "evening-review",
   "weekly-review",
   "monthly-review",
-  "hourly-check",
+  "activity-scan",
   "user-profile-sweep-morning",
   "user-profile-sweep-evening",
   "roadmap-maintenance",
@@ -186,7 +186,7 @@ describe("upgrade safety — pre-0007 DB boots cleanly with no data loss", () =>
   it("first boot: 0007 applies once, schema reaches target, legacy data preserved", () => {
     // The real boot DB path: applySchema then runMigrations.
     applySchema(db);
-    const result = runMigrations(db, MIGRATIONS);
+    const result = runMigrations(db, { ctx: { dataDir: tmp, contextDir: join(tmp, "context") }, migrations: MIGRATIONS });
 
     // 0007 applied exactly once on this boot.
     expect(result.applied).toContain(MIGRATION_0007);
@@ -228,7 +228,7 @@ describe("upgrade safety — pre-0007 DB boots cleanly with no data loss", () =>
 
   it("first boot: the Agent loader installs every built-in and auto-imports the orphan recurring row", () => {
     applySchema(db);
-    runMigrations(db, MIGRATIONS);
+    runMigrations(db, { ctx: { dataDir: tmp, contextDir: join(tmp, "context") }, migrations: MIGRATIONS });
 
     const result = loadAgents(db, buildAgentLoadOptions({ db, config: makeConfig(tmp) }));
 
@@ -263,7 +263,7 @@ describe("upgrade safety — pre-0007 DB boots cleanly with no data loss", () =>
   it("second boot is idempotent: no migration re-applies, no Agent duplicates, data intact", () => {
     // First boot.
     applySchema(db);
-    runMigrations(db, MIGRATIONS);
+    runMigrations(db, { ctx: { dataDir: tmp, contextDir: join(tmp, "context") }, migrations: MIGRATIONS });
     loadAgents(db, buildAgentLoadOptions({ db, config: makeConfig(tmp) }));
 
     const builtinCountAfterFirst = countRows(db, "agents");
@@ -271,7 +271,7 @@ describe("upgrade safety — pre-0007 DB boots cleanly with no data loss", () =>
 
     // Second boot — same sequence.
     applySchema(db);
-    const rerun = runMigrations(db, MIGRATIONS);
+    const rerun = runMigrations(db, { ctx: { dataDir: tmp, contextDir: join(tmp, "context") }, migrations: MIGRATIONS });
     loadAgents(db, buildAgentLoadOptions({ db, config: makeConfig(tmp) }));
 
     // No migration runs a second time.

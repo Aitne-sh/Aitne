@@ -42,10 +42,10 @@ function pendingCycle(over: Partial<PendingTuningCycle> = {}): PendingTuningCycl
     generatedAt: "2026-06-09T05:00:00.000Z",
     recommendations: [
       {
-        id: "2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes",
+        id: "2026-06-09:R1:activityScanPrePassFreshnessMinutes",
         rule: "R1",
         actuator: "config",
-        key: "hourlyCheckPrePassFreshnessMinutes",
+        key: "activityScanPrePassFreshnessMinutes",
         currentValue: 240,
         proposedValue: 360,
         bounds: { min: 120, max: 480 },
@@ -88,7 +88,7 @@ async function postVerdicts(
   });
 }
 
-const R1_ID = "2026-06-09:R1:hourlyCheckPrePassFreshnessMinutes";
+const R1_ID = "2026-06-09:R1:activityScanPrePassFreshnessMinutes";
 const R2_ID = "2026-06-09:R2:notification:reminder";
 
 describe("tuning routes", () => {
@@ -478,7 +478,7 @@ describe("tuning routes", () => {
       return {
         feedbackLearningEnabled: true,
         selfTuningEnabled: true,
-        hourlyCheckPrePassFreshnessMinutes: 240,
+        activityScanPrePassFreshnessMinutes: 240,
         ...over,
       };
     }
@@ -519,7 +519,7 @@ describe("tuning routes", () => {
       expect(json.applied).toEqual([
         {
           id: R1_ID,
-          key: "hourlyCheckPrePassFreshnessMinutes",
+          key: "activityScanPrePassFreshnessMinutes",
           rule: "R1",
           mode: "config",
           from: 240,
@@ -529,17 +529,17 @@ describe("tuning routes", () => {
 
       // The live config object was mutated and the settings row persisted —
       // the real applyConfigUpdates ran, not a stub.
-      expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(360);
+      expect(config.activityScanPrePassFreshnessMinutes).toBe(360);
       const persisted = db
         .prepare(`SELECT value_json FROM settings WHERE key = ?`)
-        .get("hourlyCheckPrePassFreshnessMinutes") as
+        .get("activityScanPrePassFreshnessMinutes") as
         | { value_json: string }
         | undefined;
       expect(persisted && JSON.parse(persisted.value_json)).toBe(360);
 
       const ledger = readRuntimeState<TuningLedgerBlob>(
         db,
-        ledgerStateKey("hourlyCheckPrePassFreshnessMinutes"),
+        ledgerStateKey("activityScanPrePassFreshnessMinutes"),
       );
       expect(ledger).toMatchObject({ prev: 240, proposed: 360, rule: "R1" });
 
@@ -572,7 +572,7 @@ describe("tuning routes", () => {
       expect(json.applied).toEqual([
         expect.objectContaining({ mode: "lesson", key: "notification:reminder" }),
       ]);
-      expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(240);
+      expect(config.activityScanPrePassFreshnessMinutes).toBe(240);
       const signals = db
         .prepare(`SELECT summary FROM feedback_signals`)
         .all() as Array<{ summary: string }>;
@@ -594,7 +594,7 @@ describe("tuning routes", () => {
       });
       const json = (await res.json()) as { applied: unknown[] };
       expect(json.applied).toEqual([]);
-      expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(240);
+      expect(config.activityScanPrePassFreshnessMinutes).toBe(240);
     });
 
     it("a retried apply POST is a duplicate and never double-applies (§3.4)", async () => {
@@ -607,9 +607,9 @@ describe("tuning routes", () => {
         verdicts: [{ id: R1_ID, verdict: "apply", reason: "fine" }],
       };
       await postVerdicts(app, body);
-      expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(360);
+      expect(config.activityScanPrePassFreshnessMinutes).toBe(360);
       // Sneak the knob back: a re-POST must NOT re-apply.
-      config.hourlyCheckPrePassFreshnessMinutes = 240;
+      config.activityScanPrePassFreshnessMinutes = 240;
       const res = await postVerdicts(app, body);
       const json = (await res.json()) as {
         duplicates: number;
@@ -617,7 +617,7 @@ describe("tuning routes", () => {
       };
       expect(json.duplicates).toBe(1);
       expect(json.applied).toEqual([]);
-      expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(240);
+      expect(config.activityScanPrePassFreshnessMinutes).toBe(240);
     });
 
     it("surfaces a bounds rejection as an actuation failure without failing the verdict", async () => {
@@ -644,7 +644,7 @@ describe("tuning routes", () => {
       expect(json.actuationFailures).toEqual([
         expect.objectContaining({ id: R1_ID }),
       ]);
-      expect(config.hourlyCheckPrePassFreshnessMinutes).toBe(240);
+      expect(config.activityScanPrePassFreshnessMinutes).toBe(240);
       // The verdict itself is still recorded.
       const stored = readRuntimeState<PendingTuningCycle>(
         db,

@@ -1,7 +1,11 @@
 import type { AgentDefinition, AgentTier, StopWarning, OverrideEditPath } from "@aitne/shared";
-import { AGENT_TIERS, OVERRIDE_EDIT_PATHS, agentDefinitionSchema, recurrenceRuleSchema } from "@aitne/shared";
+import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS, agentDefinitionSchema, recurrenceRuleSchema } from "@aitne/shared";
 
-import type { IntervalCadence } from "../../../core/agents/builtin-registry.js";
+import type {
+  AgentPolicyFile,
+  IntervalCadence,
+} from "../../../core/agents/builtin-registry.js";
+import { getBuiltinRegistryEntry } from "../../../core/agents/builtin-registry.js";
 import { recurrenceRuleToCron } from "../../../core/agents/recurrence-convert.js";
 import type { AgentDTO } from "../../../db/agents-store.js";
 import type {
@@ -96,12 +100,33 @@ export interface ListItemInputs {
   metrics7d: AgentMetricsWindow;
   lastExecution: AgentExecutionDTO | null;
   /**
-   * Live interval cadence for a runtime-window built-in (hourly-check), or
+   * Live interval cadence for a runtime-window built-in (activity-scan), or
    * `null` for fixed-cron / one-shot / event Agents. Resolved by the route from
    * live config via `resolveRuntimeWindowCadence` so the schedule block carries
    * the REAL cadence rather than the stored placeholder cron (§5.5.1).
    */
   intervalCadence?: IntervalCadence | null;
+}
+
+/**
+ * Hub category for the `/agents` dashboard grouping
+ * (AGENTS_HUB_REDESIGN_PLAN.md §4.1): built-ins carry their registry
+ * category; every user Agent is `"user"`. An unknown builtin slug (should
+ * not happen — the loader synthesises rows from the registry) degrades to
+ * `"maintenance"` rather than failing the response.
+ */
+export function agentCategory(dto: AgentDTO): string {
+  if (dto.source === "user") return "user";
+  return getBuiltinRegistryEntry(dto.slug)?.category ?? "maintenance";
+}
+
+/**
+ * The declared Rulebook surface (registry `policyFiles`) for a built-in, or
+ * `[]` for user Agents / undeclared built-ins (AGENTS_HUB_REDESIGN_PLAN §4.2).
+ */
+export function agentPolicyFiles(dto: AgentDTO): readonly AgentPolicyFile[] {
+  if (dto.source !== "builtin") return [];
+  return getBuiltinRegistryEntry(dto.slug)?.policyFiles ?? [];
 }
 
 /** One row of `GET /api/agents` (§9.1). `kind` mirrors the stored `source`. */
@@ -127,6 +152,7 @@ export function buildListItem(
     // string here loses no information (a valid/fallback row always has one).
     description: dto.description ?? "",
     kind: dto.source,
+    category: agentCategory(dto),
     enabled: dto.enabled,
     tags: dto.tags,
     schedule: {
@@ -164,6 +190,7 @@ export function buildRow(
     // failure via the envelope's separate error field, not this column.
     description: dto.description ?? "",
     source: dto.source,
+    category: agentCategory(dto),
     definition_path: dto.definitionPath,
     definition_hash: dto.definitionHash,
     enabled: dto.enabled,
@@ -198,6 +225,21 @@ export interface DetailInputs {
   byErrorKind7d: Record<string, number>;
   /** Live runtime-window cadence for the detail `row.schedule_interval` (§5.5.1). */
   intervalCadence?: IntervalCadence | null;
+  /**
+   * Runtime-window editing block for a runtime-window built-in (activity-scan):
+   * the stored per-field overrides + the fully-resolved effective values the
+   * cadence form prefills with. Null/absent for every other Agent
+   * (AGENTS_HUB_REDESIGN_PLAN §2).
+   */
+  scheduleWindow?: {
+    overrides: Record<string, number>;
+    resolved: {
+      interval_minutes: number;
+      active_start_hour: number;
+      active_end_hour: number;
+      min_observations: number;
+    };
+  } | null;
 }
 
 /** Full `GET /api/agents/:slug` envelope (§9.2). */
@@ -213,6 +255,14 @@ export function buildDetail(inputs: DetailInputs): Record<string, unknown> {
     },
     definition_yaml: inputs.definitionYaml,
     definition_path: inputs.dto.definitionPath,
+    // Rulebook tab inputs (AGENTS_HUB_REDESIGN_PLAN §4.2): the vault policy
+    // files this Agent reads at prompt-assembly time. The dashboard edits
+    // them through `/api/context/<path>`; this only declares the list.
+    policy_files: agentPolicyFiles(inputs.dto),
+    // Runtime-window editing inputs (§2): stored overrides + resolved
+    // effective values for the activity-scan cadence form. `null` for every
+    // non-runtime-window Agent.
+    schedule_window: inputs.scheduleWindow ?? null,
   };
 }
 
@@ -507,7 +557,7 @@ export const EDITABLE_NESTED: Record<string, ReadonlySet<string>> = (() => {
   return acc;
 })();
 
-const CONTROL_KEYS = new Set(["enabled", "ack_warning", "reset"]);
+const CONTROL_KEYS = new Set(["enabled", "ack_warning", "reset", "schedule_window"]);
 
 export type PatchPlan =
   | { ok: false; status: 409; error: "stop_warning_required"; warning: StopWarning | null }
@@ -520,6 +570,13 @@ export type PatchPlan =
       overrideSet: Record<string, unknown>;
       /** Built-in override-snapshot keys to delete. */
       overrideReset: string[];
+      /**
+       * Raw `schedule_window` patch for a runtime-window built-in
+       * (AGENTS_HUB_REDESIGN_PLAN §2). Field-level validation + the
+       * cross-field window check happen in `mergeRuntimeWindow` at the route
+       * (it needs the stored override + live config). Undefined when absent.
+       */
+      scheduleWindow?: Record<string, unknown>;
       /** For a user Agent enabled toggle: mirror onto its recurring row. */
       mirrorRecurringEnabled?: boolean;
       /** Read-only / unknown body keys ignored (logged in the response). */
@@ -543,6 +600,8 @@ function isValidOverrideValue(path: OverrideEditPath, value: unknown): boolean {
       return value === null || isAgentTier(value);
     case "backend.model":
       return value === null || (typeof value === "string" && value.length > 0);
+    case "backend.backend_id":
+      return value === null || (typeof value === "string" && (BACKEND_IDS as readonly string[]).includes(value));
     case "limits.max_turns":
     case "limits.timeout_minutes":
       return isPositiveInt(value);
@@ -629,6 +688,27 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
     }
   }
 
+  // ── schedule_window (runtime-window built-ins only) ──
+  let scheduleWindow: Record<string, unknown> | undefined;
+  if ("schedule_window" in body) {
+    if (!isPlainObject(body.schedule_window)) {
+      return { ok: false, status: 400, error: "invalid_schedule_window", field: "schedule_window" };
+    }
+    const entry = dto.source === "builtin" ? getBuiltinRegistryEntry(dto.slug) : undefined;
+    // Runtime-window marker: a builtin whose registry cron resolver is null
+    // (today: activity-scan) owns an interval cadence on its agent row.
+    if (!entry || entry.cronExpression !== null) {
+      return {
+        ok: false,
+        status: 400,
+        error: "schedule_window_not_supported",
+        field: "schedule_window",
+        hint: "Only the interval-based activity-scan Agent accepts schedule_window edits.",
+      };
+    }
+    scheduleWindow = body.schedule_window;
+  }
+
   // ── user Agents: only enabled is editable via this endpoint ──
   if (dto.source === "user" && (edits.length > 0 || reset.length > 0)) {
     return {
@@ -654,6 +734,7 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
     overrideReset: reset,
     stripped,
     ...(setEnabled !== undefined ? { setEnabled } : {}),
+    ...(scheduleWindow !== undefined ? { scheduleWindow } : {}),
   };
   if (dto.source === "user" && setEnabled !== undefined && dto.recurringScheduleId !== null) {
     plan.mirrorRecurringEnabled = setEnabled;

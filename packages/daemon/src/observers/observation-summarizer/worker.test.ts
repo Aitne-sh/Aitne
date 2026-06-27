@@ -181,11 +181,11 @@ describe("ObservationSummarizerWorker", () => {
     await worker.stop();
   });
 
-  it("translates auth_missing into skipped (not failed) so the hourly_check fallback path picks the row up", async () => {
+  it("translates auth_missing into skipped (not failed) so the activity_scan fallback path picks the row up", async () => {
     // Regression guard: when ANTHROPIC_API_KEY is missing, every pending
     // row used to be marked failed (producing a flood of "Summarizer
     // LLM call failed" warnings). The post-fix behavior matches
-    // `unsupported_backend`: row → skipped so hourly_check legacy fetch
+    // `unsupported_backend`: row → skipped so activity_scan legacy fetch
     // handles it, no per-row failure state.
     const client = new FakeLlmClient(() => ({
       ok: false,

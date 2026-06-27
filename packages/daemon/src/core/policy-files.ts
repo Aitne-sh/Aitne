@@ -47,7 +47,7 @@ export function createPromptInjectionBudget(
  *   - `policies/mcp.md` — MCP usage rules (B-003; inject when any MCP enabled)
  *   - `policies/journal-format.md` — daily journal format (morning routine)
  *   - `policies/redaction.md` — secret patterns (all flows)
- *   - `policies/routines/hourly.md` — hourly check list
+ *   - `policies/routines/activity-scan.md` — activity scan list
  *   - `policies/routines/morning.md` — 04:00 checks (morning routine)
  *   - `policies/routines/custom/<slug>.md` — per-custom-routine check list
  *
@@ -122,8 +122,8 @@ export const POLICY_FILE_REGISTRY: Record<string, PolicyFileRef[]> = {
       injectIf: (ctx) => ctx.flags?.mcpEnabled === true,
     },
   ],
-  "routine.hourly_check": [
-    { path: CONTEXT_RELATIVE_PATHS.routines.hourly, label: "Hourly checks" },
+  "routine.activity_scan": [
+    { path: CONTEXT_RELATIVE_PATHS.routines.activityScan, label: "Activity scans" },
   ],
   "routine.morning_routine": [
     {

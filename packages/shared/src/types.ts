@@ -14,7 +14,7 @@ export enum EventPriority {
 // Note: Node.js 15+ exposes a global `Event` class; importing this one
 // must come through the package barrel or be aliased at the call site.
 export interface Event {
-  type: string; // e.g., "message.received", "routine.hourly_check"
+  type: string; // e.g., "message.received", "routine.activity_scan"
   source: string; // e.g., "slack", "obsidian", "cron"
   priority: EventPriority;
   timestamp: Date;
@@ -279,6 +279,115 @@ export function isScheduledBrowserTaskEvent(
   e: Event,
 ): e is ScheduledBrowserTaskEvent {
   return e.type === "scheduled.browser_task";
+}
+
+/**
+ * BACKGROUND_TASK_RUNNER_DESIGN.md §4.2 — `scheduled.background_task` is
+ * emitted from the ScheduleWatcher when an `agent_schedule` row with
+ * `task_type='background_task'` becomes due. The `taskContext` carries
+ * the original `POST /api/background-task` body (frozen at schedule
+ * time), augmented with a `preGeneratedTaskId` so the user-facing taskId
+ * returned at schedule time matches the row id created at fire time.
+ *
+ * Mirrors `ScheduledBrowserTaskEvent`: the dispatcher routes it to a
+ * dedicated handler (`dispatcher-scheduled-background-task.ts`) that
+ * creates the `background_task` row at fire time and hands off to the
+ * runner — it does NOT flow through the AgentTaskEvent SDK paths.
+ * `isScheduledEvent` returns `true` (so the shared `agent_schedule`
+ * lifecycle applies); `isAgentTaskEvent` / `isScheduledDmEvent` /
+ * `isScheduledBrowserTaskEvent` all return `false`.
+ */
+export interface ScheduledBackgroundTaskEvent extends Event {
+  type: "scheduled.background_task";
+  taskContext: {
+    /** UUID v4 minted at schedule time. */
+    preGeneratedTaskId: string;
+    brief: string;
+    title?: string | null;
+    notificationPolicy?: "always" | "if_significant" | "silent";
+    tier?: "lite" | "medium" | "high" | null;
+    maxBudgetUsd?: number | null;
+    originatingChannel?: string | null;
+  };
+  /** `agent_schedule.id` of the row that fired this event. */
+  scheduleId: number;
+}
+
+export function isScheduledBackgroundTaskEvent(
+  e: Event,
+): e is ScheduledBackgroundTaskEvent {
+  return e.type === "scheduled.background_task";
+}
+
+/**
+ * A user-deliverable file a task produced (a browser-task trace
+ * screenshot, or a worker-written PDF / PPTX / PNG / document). The
+ * delivery handler resolves it to an outbound attachment and sends it
+ * with the result/clarification DM; the DM agent additionally sees the
+ * filename/kind/label so it can reference assets naturally and re-offer
+ * them later. Exactly one of `screenshotKey` / `path` identifies the
+ * bytes — `screenshotKey` for browser-task trace screenshots (resolved
+ * via the trace store), `path` for an absolute worker-output file.
+ *
+ * BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 (delivery assets).
+ */
+export interface TaskDeliveryAsset {
+  /** Display name + outbound attachment filename (e.g. `report.pdf`). */
+  filename: string;
+  /** Coarse category — drives the agent's phrasing and the manifest. */
+  kind:
+    | "screenshot"
+    | "image"
+    | "pdf"
+    | "slides"
+    | "document"
+    | "spreadsheet"
+    | "other";
+  /** Browser-task trace screenshot key (`<taskId>/<file>`). */
+  screenshotKey?: string;
+  /** Absolute path to a worker-produced output file. */
+  path?: string;
+  /** Optional human description surfaced to the agent ("confirmation page"). */
+  label?: string;
+}
+
+/**
+ * Delivery request for a background-ish task artifact. Phase 1 uses this
+ * for browser-task reports and clarifications; later phases can add
+ * `background_task` payloads without changing the dispatch branch.
+ *
+ * The event itself is not a scheduled event. The daemon delivery handler
+ * acquires the owner-DM gates, chooses idle vs active, and only in the
+ * active case synthesizes a `scheduled.dm`-shaped event internally so the
+ * conversational delivery path inherits the scheduled-DM context blocks.
+ */
+export interface TaskDeliveryEvent extends Event {
+  type: "task.delivery";
+  taskContext: {
+    // `autonomous_forward` (Phase 4, opt-in) routes a routine/autonomous
+    // proactive forward through the SAME gate + activity-branch machinery
+    // so an active owner gets a woven delivery turn instead of a verbatim
+    // dump. It carries no DB row (fire-and-forget, no delivered_at recovery).
+    taskKind: "browser_task" | "background_task" | "autonomous_forward";
+    taskId: string;
+    deliveryType: "task_result" | "task_clarification";
+    title: string;
+    draft: string;
+    report?: string | null;
+    originatingChannel?: string | null;
+    clarificationId?: string | null;
+    contextSummary?: string | null;
+    /** Browser-task trace screenshot keys (legacy Phase-1 source; folded
+     *  into `assets` at delivery time). */
+    screenshotKeys?: string[];
+    /** Deliverable files the task produced. Empty / absent ⇒ nothing is
+     *  attached and no asset manifest is surfaced to the agent. */
+    assets?: TaskDeliveryAsset[];
+  };
+}
+
+export function isTaskDeliveryEvent(e: Event): e is TaskDeliveryEvent {
+  return e.type === "task.delivery";
 }
 
 /**

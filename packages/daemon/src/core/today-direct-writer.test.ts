@@ -35,7 +35,7 @@ describe("appendBulletToAgentLog", () => {
   it("inserts a bullet as the last entry in the Agent Log section", () => {
     const updated = appendBulletToAgentLog(
       sampleToday,
-      "- 12:00 [hourly_check] Quiet — 0 obs",
+      "- 12:00 [activity_scan] Quiet — 0 obs",
     );
     expect(updated).not.toBeNull();
     const lines = updated!.split("\n");
@@ -46,7 +46,7 @@ describe("appendBulletToAgentLog", () => {
     const sectionLines = lines.slice(headerIdx + 1, nextHeader);
     expect(sectionLines.filter((l) => l.startsWith("- "))).toEqual([
       "- 09:00 routine ran",
-      "- 12:00 [hourly_check] Quiet — 0 obs",
+      "- 12:00 [activity_scan] Quiet — 0 obs",
     ]);
     // The User Notes section is preserved verbatim afterwards.
     expect(updated).toContain("\n## User Notes\n- random note\n");
@@ -101,13 +101,13 @@ describe("appendAgentLogLine", () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const result = await appendAgentLogLine({
       contextDir,
-      message: "[hourly_check] Quiet — 0 obs",
+      message: "[activity_scan] Quiet — 0 obs",
       todayWriteLock: lock,
       now: new Date(2026, 4, 6, 12, 0, 0),
     });
     expect(result.appended).toBe(true);
     const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
-    expect(updated).toMatch(/- 12:00 \[hourly_check\] Quiet — 0 obs\n/);
+    expect(updated).toMatch(/- 12:00 \[activity_scan\] Quiet — 0 obs\n/);
     expect(lock.getHolder()).toBeNull();
   });
 
@@ -155,13 +155,13 @@ describe("appendAgentLogLine", () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const result = await appendAgentLogLine({
       contextDir,
-      message: "13:30 [hourly_check] custom timestamp",
+      message: "13:30 [activity_scan] custom timestamp",
       todayWriteLock: lock,
       now: new Date(2026, 4, 6, 12, 0, 0),
     });
     expect(result.appended).toBe(true);
     const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
-    expect(updated).toMatch(/- 13:30 \[hourly_check\] custom timestamp\n/);
+    expect(updated).toMatch(/- 13:30 \[activity_scan\] custom timestamp\n/);
   });
 
   it("preserves a message that is already formatted as a bullet (- prefix)", async () => {
@@ -180,7 +180,7 @@ describe("appendAgentLogLine", () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const result = await appendAgentLogLine({
       contextDir,
-      message: "[hourly_check] tz check",
+      message: "[activity_scan] tz check",
       todayWriteLock: lock,
       // 2026-05-06T03:00:00Z — at UTC the local time is 03:00, but Tokyo
       // is +09:00 so the formatted bullet should show 12:00.
@@ -189,14 +189,14 @@ describe("appendAgentLogLine", () => {
     });
     expect(result.appended).toBe(true);
     const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
-    expect(updated).toMatch(/- 12:00 \[hourly_check\] tz check\n/);
+    expect(updated).toMatch(/- 12:00 \[activity_scan\] tz check\n/);
   });
 
   it("falls back to a system-clock HH:MM when Intl.DateTimeFormat throws on an invalid timezone", async () => {
     const lock = new InMemoryTodayWriteLockManager(60_000);
     const result = await appendAgentLogLine({
       contextDir,
-      message: "[hourly_check] tz fallback",
+      message: "[activity_scan] tz fallback",
       todayWriteLock: lock,
       now: new Date(2026, 4, 6, 7, 5, 0),
       // Bogus IANA zone — Intl.DateTimeFormat throws a RangeError on
@@ -206,7 +206,7 @@ describe("appendAgentLogLine", () => {
     });
     expect(result.appended).toBe(true);
     const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
-    expect(updated).toMatch(/- 07:05 \[hourly_check\] tz fallback\n/);
+    expect(updated).toMatch(/- 07:05 \[activity_scan\] tz fallback\n/);
   });
 
   it("returns io_error when today.md cannot be read (path is a directory)", async () => {

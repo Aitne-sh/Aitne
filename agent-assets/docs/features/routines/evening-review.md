@@ -27,7 +27,7 @@ ask_examples:
   - How do I disable the evening review?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-10
 keywords:
   - evening review
   - retro
@@ -39,7 +39,7 @@ related:
   - features/memory-files/agent-journal
   - features/memory-files/today
   - features/routines/morning-routine
-  - features/routines/custom-routines
+  - guides/add-a-custom-routine
 process_keys:
   - routine.evening_review
 context_files:
@@ -50,8 +50,8 @@ context_files:
   - policies/routines/evening.md
   - policies/agent-lessons.md
 ui_anchors:
-  - /connections/journal
-  - /settings/routines
+  - /knowledge?tab=context-files
+  - /agents/evening-review
 ---
 
 # Evening Review
@@ -110,19 +110,21 @@ including steps that call `POST /api/notify`.)
 
 ## Where in the Dashboard
 
-- **Connections → Journal** (`/connections/journal`) shows `journal/agent.md`
-  entries when the roadmap step logged one.
-- **Settings → Routines** (`/settings/routines`) is where you manage the
-  evening rulebook.
+- **Knowledge → Context Files** (`/knowledge?tab=context-files`) shows
+  `journal/agent.md` entries when the roadmap step logged one.
+- **Agents → Evening Review** (`/agents/evening-review`) is where you
+  manage the evening rulebook (Rulebook tab) and enable or disable the
+  routine.
 
 ## Configuration
 
 The fire time and tier are fixed in code, but the routine is not a black box:
 - **Add your own evening checks.** Append `### <label>` entries to
-  `policies/routines/evening.md` (via the dashboard, or the
-  [custom routines guide](../../guides/add-a-custom-routine.md)). They run
-  alongside the built-in steps using the same journaling conventions and
-  may notify you explicitly.
+  `policies/routines/evening.md` (via the dashboard or the context
+  API). They run alongside the built-in steps using the same
+  journaling conventions and may notify you explicitly. For a
+  standalone recurring job on its own schedule, create a
+  [recurring Agent](../../guides/add-a-custom-routine.md) instead.
 - **Verify it stays healthy.** `aitne verify evening-review-slimdown`
   checks that recent `routine.evening_review` sessions ran inside their
   seeded token envelope (read-only; `--days N` widens the window).

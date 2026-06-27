@@ -67,6 +67,7 @@ import { createBrowserHistoryManagedRoutes } from "./routes/browser-history-mana
 import { createBrowserAutomationSitesRoutes } from "./routes/browser-automation-sites.js";
 import { createBrowserAutomationPurchaseRoutes } from "./routes/browser-automation-purchase.js";
 import { createBrowserTaskRoutes } from "./routes/browser-task.js";
+import { createBackgroundTaskRoutes } from "./routes/background-task.js";
 import {
   buildManagedTasksRoutesDepsFromApi,
   createManagedTasksRoutes,
@@ -87,8 +88,8 @@ import type { AttachmentStore } from "../services/attachments/store.js";
 import type { EventBus } from "../core/event-bus.js";
 import type {
   InFlightExecutionInfo,
-  TriggerHourlyCheckOptions,
-  TriggerHourlyCheckResult,
+  TriggerActivityScanOptions,
+  TriggerActivityScanResult,
 } from "../core/dispatcher.js";
 import type { PromptContextChangedCallback } from "../core/context-staleness.js";
 import type { IAgentCore } from "../core/agent-core.js";
@@ -316,6 +317,18 @@ export interface ApiDependencies {
     "../services/browser-task/browser-task-runner.js"
   ).SlotStateRef;
   /**
+   * BACKGROUND_TASK_RUNNER_DESIGN.md §4 — generic background-task runner
+   * + shared slot state, wired together at boot in `index.ts`. Optional
+   * in tests; when absent the POST /api/background-task route writes a
+   * synthetic terminal transition so the row doesn't hang in pending.
+   */
+  backgroundTaskRunner?: import(
+    "../services/background-task/background-task-runner.js"
+  ).BackgroundTaskRunner;
+  backgroundTaskSlotStateRef?: import(
+    "../services/background-task/background-task-runner.js"
+  ).BackgroundTaskSlotStateRef;
+  /**
    * BROWSER_TASK_REDESIGN_PLAN.md §5 / §14.11 — lite-final-confirm
    * token handler. The runner calls into it from the final-confirm
    * gate; the messaging adapter's `!~xxxxxxxx` inbound dispatcher
@@ -341,11 +354,6 @@ export interface ApiDependencies {
    */
   onIndexableContextChange?: (path: string) => void;
   /**
-   * B-007 §5.8 — called after any write/delete under `policies/routines/custom/`
-   * so the CustomRoutineScheduler re-enumerates and re-registers jobs.
-   */
-  onCustomRoutinesChanged?: () => void;
-  /**
    * Called after a mutation to the effective mail scope — enabled providers,
    * account add/remove, active toggle, or app-password refresh. Implementations
    * re-materialize active DM session workdirs so the agent picks up the new
@@ -353,11 +361,11 @@ export interface ApiDependencies {
    * tearing down the SDK session.
    */
   onMailScopeChanged?: (reason: string) => void;
-  /** Manual trigger for the polling-based hourly check */
-  triggerHourlyCheck?: (
+  /** Manual trigger for the polling-based activity scan */
+  triggerActivityScan?: (
     source: string,
-    options?: TriggerHourlyCheckOptions,
-  ) => Promise<TriggerHourlyCheckResult>;
+    options?: TriggerActivityScanOptions,
+  ) => Promise<TriggerActivityScanResult>;
   /**
    * Evening-review slimdown §2.2 — synchronous manual fire of
    * `runRoadmapMechanicalMaintenance` (substeps 2a / 2b / 2d). Used
@@ -1029,6 +1037,10 @@ export function createApp(deps: ApiDependencies): Hono {
   // wired (tests / lite installs). The route handlers degrade
   // gracefully on absent runner / slot ref.
   const browserTaskRoutes = createBrowserTaskRoutes(deps);
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §7 — generic background-task surface.
+  // Mounted unconditionally; the handlers degrade gracefully when the
+  // runner / slot ref are absent (tests / lite installs).
+  const backgroundTaskRoutes = createBackgroundTaskRoutes(deps);
   // Management Registry & Entities (docs/design/21-management-registry-
   // and-entities.md). The managed-tasks and sot-bindings routes MUST
   // share one lock manager — separate instances would let back-to-back
@@ -1094,6 +1106,7 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", browserAutomationSitesRoutes);
   app.route("/api", browserAutomationPurchaseRoutes);
   app.route("/api", browserTaskRoutes);
+  app.route("/api", backgroundTaskRoutes);
 
   // ── Chat file attachments (Phase 1) ──
   if (deps.attachmentStore) {

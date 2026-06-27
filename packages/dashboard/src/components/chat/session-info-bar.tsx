@@ -95,7 +95,7 @@ export function SessionInfoBar({
           <Button
             variant="outline"
             size="sm"
-            className="border-green-400 text-green-600 hover:bg-green-50 hover:text-green-700 dark:border-green-600 dark:text-green-400 dark:hover:bg-green-950 dark:hover:text-green-300"
+            className="border-success/40 text-success hover:bg-success/10 hover:text-success"
             onClick={onEndSession}
           >
             New Chat

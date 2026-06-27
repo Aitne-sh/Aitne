@@ -22,7 +22,7 @@ tags:
 status: stable
 ask_examples:
   - List all the ProcessKeys
-  - What is the default tier for hourly check?
+  - What is the default tier for activity scan?
   - Which ProcessKeys are configurable from the dashboard?
   - What is routine.fetch_window used for?
 locale: en-US
@@ -45,7 +45,7 @@ updated: 2026-06-07
 config_keys:
   - monthlyReviewEnabled
   - delegatedTaskHeavyEnabled
-  - hourlyCheckIntervalMinutes
+  - activityScanIntervalMinutes
   - dayBoundaryHour
 api_endpoints:
   - POST /api/browser-task
@@ -62,7 +62,7 @@ related:
 # ProcessKeys
 
 A **ProcessKey** identifies the kind of work being dispatched (an owner DM,
-the morning routine, an hourly check, …). The dispatcher passes a ProcessKey
+the morning routine, an activity scan, …). The dispatcher passes a ProcessKey
 to the `BackendRouter`, which resolves it to a `{ main, fallback }` backend
 plus an execution tier — the dispatcher never picks a model directly.
 
@@ -81,14 +81,14 @@ The **default tier** column maps to a model size, not a specific id:
 | `routine.today_refresh` | Calendar-drift-triggered (calendar change touching today's items; 5-min dedup, fires ~30s later) — drift-refresh of `state/today.md` | medium | yes |
 | `routine.evening_review` | Daily at 18:00 local (fixed) | medium | yes |
 | `routine.weekly_review` | Friday 19:00 local (fixed) | medium | yes |
-| `routine.monthly_review` | Monthly cadence (gated OFF by default — kill switch `monthlyReviewEnabled` in runtime settings). The routine itself is off by default, but its backend/tier binding is still configurable. | medium | yes |
-| `routine.hourly_check` | Every `hourlyCheckIntervalMinutes` (default 60) inside the active window | medium | yes |
-| `routine.hourly_check.triage` | Stage 2 triage gate of every hourly check | lite | yes |
+| `routine.monthly_review` | Monthly cadence (gated OFF by default — opt in by enabling the monthly-review agent at `/agents/monthly-review`; the legacy `monthlyReviewEnabled` config key is a deprecated fallback). The routine itself is off by default, but its backend/tier binding is still configurable. | medium | yes |
+| `routine.activity_scan` | Every N interval minutes (default 60) inside the active window — cadence set on `/agents/activity-scan`; legacy key `activityScanIntervalMinutes` is a deprecated fallback | medium | yes |
+| `routine.activity_scan.triage` | Stage 2 triage gate of every activity scan | lite | yes |
 | `routine.fetch_window` | Pre-pass fetcher spawned before each main routine | lite | yes |
 | `routine.user_profile_sweep` | Periodic agent-day profile summarization pass | medium | no |
 | `routine.roadmap_refresh` | Periodic roadmap re-derivation (NOT in `ROUTINE_WINDOWS` — no `routine.fetch_window` pre-pass; the synthesis session itself drives the native-mode MCP fan-out) | medium | yes |
 | `routine.skill_curation` | Background skill-curation / overlay refinement loop (cron cadence picked at `/settings/self-learning`) | medium | yes |
-| `routine.custom.<slug>` | Operator-defined recurrence (see [Custom Routines](../features/routines/custom-routines.md)) | configurable | yes |
+| `routine.custom.<slug>` | Retired — legacy custom routines no longer fire; they were converted to user Agents running under `agent.task` (see [Custom Routines (Retired)](../features/routines/custom-routines.md)). Seen only in historical Activity rows. | — | no |
 | `message.dm` | Owner DM | medium | yes |
 | `message.mention` | @-mention in a paired Slack channel where the agent is invited (DMs are `message.dm`; Telegram/WhatsApp groups are filtered out) | medium | yes |
 | `dashboard.chat` | `/chat` send | medium | yes |

@@ -168,7 +168,7 @@ function makeBootstrapApiDeps(
       getInFlightExecutions: () => [],
       isAutonomousAllowed: () => null,
       markEventNotified: vi.fn(),
-      triggerHourlyCheck: vi.fn(),
+      triggerActivityScan: vi.fn(),
       emitRoadmapRefresh: vi.fn(),
       beginSetupMode: vi.fn(),
       clearSetupMode: vi.fn(),
@@ -180,9 +180,6 @@ function makeBootstrapApiDeps(
       reloadCrons: vi.fn(),
       queueMorningRoutineWake: vi.fn(),
     } as unknown as BootstrapApiDeps["scheduler"],
-    customRoutineScheduler: {
-      reload: vi.fn(),
-    } as unknown as BootstrapApiDeps["customRoutineScheduler"],
     healthMonitor: {
       getStatus: () => ({
         daemonUptime: 0,
@@ -254,6 +251,8 @@ function makeBootstrapApiDeps(
     buildGithubPoller: () => null as unknown as ReturnType<BootstrapApiDeps["buildGithubPoller"]>,
     browserTaskSlotStateRef: {} as unknown as BootstrapApiDeps["browserTaskSlotStateRef"],
     browserTaskRunner: {} as unknown as BootstrapApiDeps["browserTaskRunner"],
+    backgroundTaskSlotStateRef: {} as unknown as BootstrapApiDeps["backgroundTaskSlotStateRef"],
+    backgroundTaskRunner: {} as unknown as BootstrapApiDeps["backgroundTaskRunner"],
     buildDelegatedSyncWorker: () =>
       ({}) as ReturnType<BootstrapApiDeps["buildDelegatedSyncWorker"]>,
     buildGitDelegatedCronObserver: () =>

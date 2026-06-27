@@ -44,7 +44,7 @@ const HIGH_STAKES_PROCESS_KEYS = new Set([
   "routine.evening_review",
   "routine.weekly_review",
   "routine.monthly_review",
-  "routine.hourly_check",
+  "routine.activity_scan",
 ]);
 
 /**
@@ -111,19 +111,19 @@ export function HaikuAdvisorWarning() {
     return (
       <div
         role="alert"
-        className="flex items-start gap-3 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-4 text-sm"
+        className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 p-4 text-sm"
       >
         <AlertTriangle
-          className="mt-0.5 h-5 w-5 flex-shrink-0 text-yellow-600"
+          className="mt-0.5 h-5 w-5 flex-shrink-0 text-warning"
           aria-hidden="true"
         />
         <div className="space-y-1 [&>p]:max-w-prose">
-          <p className="font-medium text-yellow-900 dark:text-yellow-100">
+          <p className="font-medium text-warning">
             Advisor-incompatible models on high-stakes processes
           </p>
-          <p className="text-yellow-900/80 dark:text-yellow-100/80">
+          <p className="text-warning/80">
             Advisor is enabled on{" "}
-            <code className="rounded bg-yellow-500/20 px-1 py-0.5">
+            <code className="rounded bg-warning/20 px-1 py-0.5">
               {advisor.model ?? "(unset)"}
             </code>
             , but the Claude Agent SDK only registers the{" "}
@@ -140,21 +140,21 @@ export function HaikuAdvisorWarning() {
             . The following processes are pinned to incompatible models and
             will silently skip advisor calls:
           </p>
-          <p className="text-yellow-900/80 dark:text-yellow-100/80">
+          <p className="text-warning/80">
             {highStakes.map((row, idx) => (
               <span key={row.processKey}>
                 {idx > 0 && ", "}
-                <code className="rounded bg-yellow-500/20 px-1 py-0.5">
+                <code className="rounded bg-warning/20 px-1 py-0.5">
                   {row.processKey}
                 </code>
                 {" → "}
-                <code className="rounded bg-yellow-500/20 px-1 py-0.5">
+                <code className="rounded bg-warning/20 px-1 py-0.5">
                   {row.mainModel}
                 </code>
               </span>
             ))}
           </p>
-          <p className="text-yellow-900/70 dark:text-yellow-100/70">
+          <p className="text-warning/70">
             Either switch these processes to a Sonnet/Opus model above,
             or disable advisor on{" "}
             <a className="underline" href="/settings/models">
@@ -163,7 +163,7 @@ export function HaikuAdvisorWarning() {
             .
           </p>
           {lowStakes.length > 0 && (
-            <p className="text-yellow-900/60 dark:text-yellow-100/60">
+            <p className="text-warning/60">
               ({lowStakes.length} additional low-stakes process
               {lowStakes.length === 1 ? "" : "es"} also incompatible.)
             </p>

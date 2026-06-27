@@ -150,7 +150,7 @@ export function McpServerCard({ server, onEdit }: McpServerCardProps) {
           <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-2">
             {server.lastProbeStatus.tools.length} tools{" "}
             {server.toolAllowlist !== null && (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning">
                 ({server.toolAllowlist.length} allowed)
               </span>
             )}
@@ -280,7 +280,7 @@ export function McpServerCard({ server, onEdit }: McpServerCardProps) {
               <Button
                 size="sm"
                 variant="outline"
-                className="h-7 text-xs text-red-600"
+                className="h-7 text-xs text-destructive"
                 onClick={handleDelete}
                 disabled={deleteMutation.isPending}
               >
@@ -291,7 +291,7 @@ export function McpServerCard({ server, onEdit }: McpServerCardProps) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 text-xs text-muted-foreground hover:text-red-600"
+              className="h-7 text-xs text-muted-foreground hover:text-destructive"
               onClick={() => setDeleteConfirm(true)}
             >
               <Trash2 className="h-3.5 w-3.5" />

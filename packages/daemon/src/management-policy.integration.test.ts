@@ -139,7 +139,6 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
   let contextDir: string;
   let db: Database.Database;
   let app: Hono;
-  let onCustomRoutinesChangedCalls: number;
   let onIndexableContextChangeCalls: string[];
 
   beforeEach(() => {
@@ -157,15 +156,11 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
     db = new Database(":memory:");
     applySchema(db);
 
-    onCustomRoutinesChangedCalls = 0;
     onIndexableContextChangeCalls = [];
 
     const routes = createContextRoutes({
       db,
       config: makeConfig(dataDir),
-      onCustomRoutinesChanged: () => {
-        onCustomRoutinesChangedCalls += 1;
-      },
       onIndexableContextChange: (path: string) => {
         onIndexableContextChangeCalls.push(path);
       },
@@ -216,14 +211,14 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       const dossierRes = await putContext(`dossiers/${POLICY_TOPIC}`, dossierContent());
       expect(dossierRes.status).toBe(200);
 
-      // 5.2 routine — also fires onCustomRoutinesChanged so the cron
-      // scheduler reloads. The integration harness counts the call.
+      // 5.2 routine — legacy path; still accepted + validated (the cron
+      // scheduler that used to reload on this write was retired at the
+      // Agents-hub redesign).
       const routineRes = await putContext(
         `routines/custom/${POLICY_SLUG}`,
         routineContent(),
       );
       expect(routineRes.status).toBe(200);
-      expect(onCustomRoutinesChangedCalls).toBe(1);
 
       // 5.3 policy file
       const policyRes = await putContext(
@@ -321,7 +316,6 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
         ),
       ).toBe(false);
       // No reload fired for an invalid file.
-      expect(onCustomRoutinesChangedCalls).toBe(0);
     });
 
     it("DELETE on rules/policies/* is intentionally not whitelisted (plan §5.1)", async () => {
@@ -444,7 +438,6 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
         mode: "append",
         content: `| ${POLICY_SLUG} | active | 0 7 * * * | ${POLICY_SLUG} | ${POLICY_TOPIC} | Why |`,
       });
-      onCustomRoutinesChangedCalls = 0;
     });
 
     it("pause = policy.status:paused + routine.enabled:false (both succeed)", async () => {
@@ -461,7 +454,6 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
         routineContent({ enabled: "false" }),
       );
       expect(routineRes.status).toBe(200);
-      expect(onCustomRoutinesChangedCalls).toBe(1);
 
       // Confirm both files reflect the new state.
       const policyRead = await getContext(`rules/policies/${POLICY_SLUG}`);
@@ -512,7 +504,6 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       await putContext(`dossiers/${POLICY_TOPIC}`, dossierContent());
       await putContext(`routines/custom/${POLICY_SLUG}`, routineContent());
       await putContext(`rules/policies/${POLICY_SLUG}`, policyContent());
-      onCustomRoutinesChangedCalls = 0;
     });
 
     it("policy → status:removed; routine DELETEd; reload hook fires", async () => {
@@ -526,7 +517,6 @@ describe("management-policy fan-out — HTTP integration (plan §4.4.1, §4.6)",
       // Step 2 — routine file DELETE (whitelisted on routines/custom/*).
       const routineDelete = await deleteContext(`routines/custom/${POLICY_SLUG}`);
       expect(routineDelete.status).toBe(200);
-      expect(onCustomRoutinesChangedCalls).toBe(1);
 
       // Policy file still exists for audit.
       expect(

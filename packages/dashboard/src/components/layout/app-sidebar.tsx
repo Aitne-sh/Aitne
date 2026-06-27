@@ -158,6 +158,11 @@ export function AppSidebar() {
       // Conversation detail pages (/conversations/[id]) are children of Agent Log
       return pathname.startsWith("/activity") || pathname.startsWith("/conversations/");
     }
+    if (href === "/browser") {
+      // The task list and detail pages live at /browser-tasks but belong to
+      // the Browser hub (BROWSER_HUB_CONSOLIDATION_DESIGN.md Q4).
+      return pathname === "/browser" || pathname.startsWith("/browser-tasks");
+    }
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
@@ -218,8 +223,12 @@ export function AppSidebar() {
         { label: "Agents", href: "/agents", icon: Bot },
         { label: "Schedule", href: "/schedule", icon: Clock },
         {
-          label: "Browser Tasks",
-          href: "/browser-tasks",
+          // /browser hub fronts every browser surface (history integration,
+          // managed Chromium, B-4, task list) — BROWSER_HUB_CONSOLIDATION_DESIGN.md.
+          // /browser-tasks stays routable one click inside; the awaiting badge
+          // carries over unchanged.
+          label: "Browser",
+          href: "/browser",
           icon: Globe2,
           badge:
             !collapsed && awaitingBrowserTaskCount > 0 ? (

@@ -124,7 +124,7 @@ export default defineConfig({
         "packages/daemon/src/api/routes/dashboard/messaging.ts",        // adapter pairing controls I/O (whatsapp/slack/telegram/discord)
         "packages/daemon/src/api/routes/dashboard/conversations.ts",    // FTS5 + chat-attachments + sessions/messages SQL
         "packages/daemon/src/api/routes/dashboard/cost-approvals.ts",   // SQL aggregation; pure aggregateByBilledModel covered by dashboard.cost-aggregation.test.ts
-        "packages/daemon/src/api/routes/dashboard/notifications.ts",    // hourly-check next-run helpers + DM freshness aggregate
+        "packages/daemon/src/api/routes/dashboard/notifications.ts",    // activity-scan next-run helpers + DM freshness aggregate
 
         // mail.ts was decomposed into routes/mail/* (multi-mail-provider split).
         // Each sub-file is a thin Hono handler over the mail registry +
@@ -239,7 +239,7 @@ export default defineConfig({
         // on event-loop / SDK-stream files and docs/design/appendices/
         // file-split-plan.md §4 option 3.
         "packages/daemon/src/core/dispatcher-prompt.ts",          // attachment staging FS + voice subprocess
-        "packages/daemon/src/core/dispatcher-hourly-check.ts",    // Stage 2 triage runs through agent_router.execute (SDK)
+        "packages/daemon/src/core/dispatcher-activity-scan.ts",    // Stage 2 triage runs through agent_router.execute (SDK)
         "packages/daemon/src/core/dispatcher-morning-routine.ts", // today.md write-lock + agent execute + retry insert orchestration
         "packages/daemon/src/core/morning/orchestrator.ts",       // morning-routine-optimization Phase 5 — Promise.allSettled over agentRouter.execute() (SDK-bound), same exclusion rationale as dispatcher-morning-routine.ts. Pure builders / composers / parent-audit / calendar-payload helpers are covered by orchestrator.test.ts
         "packages/daemon/src/core/dispatcher-scheduled-tasks.ts", // repository run + git project doc FS + skill_curation workdir
@@ -280,15 +280,17 @@ export default defineConfig({
 
         // ── Remaining I/O-heavy or framework-level code ──
         "packages/daemon/src/core/prompts.ts",            // task flow FS loading
-        // fetch-window-prompt-loader.ts mirrors prompts.ts's shape — a
-        // cached disk-read with a relative-path-from-module-url primary
-        // and a cwd fallback. The happy path (cache hit / primary read)
-        // is covered transitively via `claude-code-core.test.ts`'s
-        // `_testInternals` re-exports. The cwd-fallback and throw
-        // branches are unreachable from a real repo checkout (the
-        // primary path always resolves) and would require ESM-blocked
-        // `vi.mock("node:fs")`, matching the prompts.ts rationale.
-        "packages/daemon/src/core/fetch-window-prompt-loader.ts",
+        // slim-system-prompt-loader.ts mirrors prompts.ts's shape — a
+        // per-template cached disk-read with a relative-path-from-module-url
+        // primary and a cwd fallback (RESEARCH_CLUSTER_COST_FIX_PLAN.md F4
+        // generalized the former fetch-window-prompt-loader.ts). The happy
+        // path (cache hit / primary read) is covered by its own
+        // `slim-system-prompt-loader.test.ts` plus `claude-code-core.test.ts`'s
+        // `_testInternals` re-exports. The cwd-fallback and throw branches
+        // are unreachable from a real repo checkout (the primary path always
+        // resolves) and would require ESM-blocked `vi.mock("node:fs")`,
+        // matching the prompts.ts rationale.
+        "packages/daemon/src/core/slim-system-prompt-loader.ts",
         "packages/daemon/src/core/workdir.ts",            // session workdir FS management
         "packages/daemon/src/core/backends/codex-core.ts",      // CLI subprocess
         "packages/daemon/src/core/backends/gemini-cli-core.ts", // CLI subprocess
@@ -326,7 +328,7 @@ export default defineConfig({
         "packages/daemon/src/core/repository-management-docs.ts",
         "packages/daemon/src/core/roadmap-maintenance.ts",
         "packages/daemon/src/core/routine-acquisition-plan.ts",
-        "packages/daemon/src/db/hourly-check-signals.ts",
+        "packages/daemon/src/db/activity-scan-signals.ts",
         "packages/daemon/src/core/routine-fetch-window-runner.ts",
         "packages/daemon/src/core/backends/native-skill-discovery-probe.ts",
         "packages/daemon/src/core/morning/roadmap-skeleton-builder.ts",
@@ -748,6 +750,23 @@ export default defineConfig({
         // Phase 1 sibling exclusions above.
         "packages/daemon/src/services/browser-history/automation/browser-task-tools/server.ts",
         "packages/daemon/src/services/browser-task/browser-task-driver.ts",
+
+        // ── BACKGROUND_TASK_RUNNER_DESIGN.md Phase 2 (generic runner) ──
+        // Pure-logic peers stay covered: the budget envelope
+        // (`background-task-budget.ts`), the SSE transition emitter
+        // (`background-task-transition-events.ts`), and the scheduled
+        // dispatch handler (`dispatcher-scheduled-background-task.ts`) all
+        // carry peer tests. The exclusions below are I/O-bound — SQL
+        // stores, the Hono route layer, the worker MCP tools (store-write
+        // glue), the runner (slot/park/cancel orchestration), and the
+        // driver (Claude SDK query stream consumer). Mirrors the
+        // browser-task Phase 1/2 exclusion rationale above.
+        "packages/daemon/src/db/background-task-store.ts",
+        "packages/daemon/src/db/background-task-clarifications-store.ts",
+        "packages/daemon/src/api/routes/background-task.ts",
+        "packages/daemon/src/services/background-task/background-task-tools.ts",
+        "packages/daemon/src/services/background-task/background-task-runner.ts",
+        "packages/daemon/src/services/background-task/background-task-driver.ts",
 
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──
         // FS-locked write coordinator + best-effort cleanup helpers.

@@ -34,7 +34,7 @@
  * is the monthly `onMissingDay` policy, which cron cannot carry — it is dropped
  * on conversion (a `daysOfMonth` cron uses node-cron's own missing-day
  * behaviour). Sub-hourly intervals (every N minutes) are NOT representable —
- * only the built-in hourly-check supports those, via config.
+ * only the built-in activity-scan supports those, via config.
  */
 
 /** Loader-local mirror of the daemon `recurrence_rule` JSON (§2.2). Covers the

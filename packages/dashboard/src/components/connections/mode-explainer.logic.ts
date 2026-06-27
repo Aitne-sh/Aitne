@@ -143,13 +143,13 @@ export function buildModeExplainer(
       title: `Native — via ${bk}`,
       brief: `Your DM agent (${bk}) reaches ${name} directly through its own connector — no background polling and no daemon-side proxy.`,
       details: [
-        `Pick this when you already use ${bk}'s ${name} connector for ad-hoc work and just want the agent's hourly check and DM replies to use the same connector instead of the daemon. No background poller runs, no delegated worker ticks, no per-call proxy hop — the agent fetches in-turn when it needs ${name}.`,
-        `Token cost moves from the (cheap) delegated worker to your main DM session. Reads sit on the same prompt as the rest of the turn, which raises the medium-tier token bill — typically by an order of magnitude per integration vs. delegated. Worth it when you would otherwise leave the integration "Disabled" and lose hourly-check awareness entirely.`,
+        `Pick this when you already use ${bk}'s ${name} connector for ad-hoc work and just want the agent's activity scan and DM replies to use the same connector instead of the daemon. No background poller runs, no delegated worker ticks, no per-call proxy hop — the agent fetches in-turn when it needs ${name}.`,
+        `Token cost moves from the (cheap) delegated worker to your main DM session. Reads sit on the same prompt as the rest of the turn, which raises the medium-tier token bill — typically by an order of magnitude per integration vs. delegated. Worth it when you would otherwise leave the integration "Disabled" and lose activity-scan awareness entirely.`,
         `${bk} must already have its ${name} connector configured (e.g. claude.ai/connections for Claude, an MCP entry for Codex, an extension for Gemini). The daemon never sees your ${name} credentials; auth and revocation live in ${bk}.`,
         `Daemon-side safety guardrails (destructive-op confirmation, deny-lists) still cover the absolute-block layer. Per-tool deny lists do NOT apply here — the call never crosses the daemon proxy, so deny enforcement is whatever your backend allows.`,
         `If you switch the main backend later, this row is automatically flipped to Disabled and you'll be asked to re-configure. Native is an explicit binding to the backend, not a routing rule.`,
       ],
-      footnote: `Recommended when ${bk} already has the ${name} connector wired up and you want the agent to use it for hourly check / DM, instead of either running a background poller or leaving the integration disabled.`,
+      footnote: `Recommended when ${bk} already has the ${name} connector wired up and you want the agent to use it for activity scan / DM, instead of either running a background poller or leaving the integration disabled.`,
     };
   }
 

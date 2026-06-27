@@ -420,7 +420,7 @@ export function createSetupRoutes(deps: ApiDependencies): Hono {
 
     // Engage the autonomous-work gate BEFORE enqueuing the greeting so any
     // concurrent cron tick / ScheduleWatcher poll observes the flag and
-    // yields. Without this, a hourly_check firing in the same tick could
+    // yields. Without this, a activity_scan firing in the same tick could
     // still race the setup conversation and patch today.md, which would
     // mark the owner-DM session stale and orphan the setup mode.
     deps.onSetupStart?.(mode);

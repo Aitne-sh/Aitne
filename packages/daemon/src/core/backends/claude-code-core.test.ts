@@ -2446,7 +2446,7 @@ describe("ClaudeCodeCore", () => {
           // Negation of the Phase 1 branch — every non-fetch_window
           // processKey must keep the preset shape so the existing
           // Claude Code preset (memory system, skills, tools, …) still
-          // ships to DMs / morning routines / hourly checks.
+          // ships to DMs / morning routines / activity scans.
           expect(typeof sp).toBe("object");
           expect(sp?.type).toBe("preset");
           expect(sp?.preset).toBe("claude_code");
@@ -2457,6 +2457,170 @@ describe("ClaudeCodeCore", () => {
             /* best-effort */
           }
         }
+      });
+    });
+  });
+
+  // RESEARCH_CLUSTER_COST_FIX_PLAN.md F4 — the slim-prompt generalization +
+  // per-key `settingSources` / `strictMcpConfig` shed for
+  // `routine.research_cluster_update`. Distinct from fetch_window: research
+  // ALSO drops the `"user"` settingSource (it reaches no native-mode
+  // connector), whereas fetch_window keeps `["user","project"]`.
+  describe("slim process keys — F4 (research_cluster_update)", () => {
+    // One-shot success stream so `execute()` resolves and we can read the
+    // captured `query()` options. Mirrors the fetch_window wire-up fixture.
+    function mockQueryOnceSuccess(model: string, sessionId: string): void {
+      vi.mocked(query).mockReset();
+      vi.mocked(query).mockImplementation(
+        () =>
+          (async function* () {
+            yield { type: "system", subtype: "init", session_id: sessionId, model };
+            yield {
+              type: "result",
+              subtype: "success",
+              result: "ok",
+              session_id: sessionId,
+              total_cost_usd: 0,
+              usage: {
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+              },
+              modelUsage: {},
+              num_turns: 1,
+              duration_api_ms: 1,
+              is_error: false,
+              stop_reason: "end_turn",
+            };
+          })() as unknown as ReturnType<typeof query>,
+      );
+    }
+
+    // `eventType` defaults to a neutral non-message type so `extractEventData`
+    // (which expects MessageEvent fields for `message.*` event types) stays
+    // happy. The behavior under test keys off `processKey`, not the event
+    // type, so decoupling them keeps the message.dm case from needing a full
+    // MessageEvent fixture (mirrors the existing fetch_window wire-up test).
+    async function captureExecuteOptions(
+      processKey: string,
+      model: string,
+      eventType = "test.event",
+    ): Promise<Record<string, unknown>> {
+      const tempSessionDir = mkdtempSync(join(tmpdir(), "pa-slim-f4-"));
+      try {
+        mockQueryOnceSuccess(model, "slim-sess");
+        const core = new ClaudeCodeCore(makeConfig());
+        await core.execute({
+          prompt: "test",
+          context: "ctx",
+          event: createEvent({
+            type: eventType,
+            source: "test",
+            priority: EventPriority.NORMAL,
+          }),
+          modelId: model,
+          maxTurns: 1,
+          maxBudgetUsd: 0.5,
+          sessionDir: tempSessionDir,
+          processKey: processKey as never,
+        });
+        const call = vi.mocked(query).mock.calls[0]?.[0] as
+          | { options?: Record<string, unknown> }
+          | undefined;
+        return call?.options ?? {};
+      } finally {
+        try {
+          rmSync(tempSessionDir, { recursive: true, force: true });
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+
+    describe("buildSystemPrompt", () => {
+      it("returns the slim research string (not a preset object)", () => {
+        const core = new ClaudeCodeCore(makeConfig());
+        const prompt = (core as any).buildSystemPrompt(
+          "routine.research_cluster_update",
+        );
+        expect(typeof prompt).toBe("string");
+        expect(prompt).toMatch(/routine\.research_cluster_update journal session/);
+      });
+
+      it("is byte-stable across repeated calls (prompt-cache invariant)", () => {
+        const core = new ClaudeCodeCore(makeConfig());
+        const a = (core as any).buildSystemPrompt("routine.research_cluster_update");
+        const b = (core as any).buildSystemPrompt("routine.research_cluster_update");
+        expect(a).toBe(b);
+      });
+    });
+
+    describe("resolveSettingSources / resolveStrictMcpConfig (unit)", () => {
+      const core = new ClaudeCodeCore(makeConfig());
+
+      it("sheds the user scope only for research_cluster_update", () => {
+        expect((core as any).resolveSettingSources("routine.research_cluster_update"))
+          .toEqual(["project"]);
+        // fetch_window has a slim PROMPT but keeps the user scope (native-mode
+        // connectors) — it must NOT be shed.
+        expect((core as any).resolveSettingSources("routine.fetch_window"))
+          .toEqual(["user", "project"]);
+        expect((core as any).resolveSettingSources("message.dm"))
+          .toEqual(["user", "project"]);
+        // Resume path (no processKey) keeps the full default.
+        expect((core as any).resolveSettingSources()).toEqual(["user", "project"]);
+      });
+
+      it("forces strictMcpConfig only for research_cluster_update", () => {
+        expect((core as any).resolveStrictMcpConfig("routine.research_cluster_update"))
+          .toBe(true);
+        expect((core as any).resolveStrictMcpConfig("routine.fetch_window")).toBe(false);
+        expect((core as any).resolveStrictMcpConfig("message.dm")).toBe(false);
+        expect((core as any).resolveStrictMcpConfig()).toBe(false);
+      });
+
+      it("returns a fresh settingSources array per call (no shared mutable state)", () => {
+        const a = (core as any).resolveSettingSources("message.dm");
+        const b = (core as any).resolveSettingSources("message.dm");
+        expect(a).not.toBe(b);
+        expect(a).toEqual(b);
+      });
+    });
+
+    describe("execute() wire-up to query()", () => {
+      it("research_cluster_update gets settingSources=['project'] + strictMcpConfig + the slim string", async () => {
+        const opts = await captureExecuteOptions(
+          "routine.research_cluster_update",
+          "claude-haiku-4-5",
+        );
+        expect(opts.settingSources).toEqual(["project"]);
+        expect(opts.strictMcpConfig).toBe(true);
+        expect(typeof opts.systemPrompt).toBe("string");
+        expect(opts.systemPrompt).toMatch(
+          /routine\.research_cluster_update journal session/,
+        );
+      });
+
+      it("fetch_window keeps settingSources=['user','project'] and omits strictMcpConfig", async () => {
+        const opts = await captureExecuteOptions(
+          "routine.fetch_window",
+          "claude-haiku-4-5",
+        );
+        expect(opts.settingSources).toEqual(["user", "project"]);
+        expect(opts.strictMcpConfig).toBeUndefined();
+        // Still slim on the prompt axis.
+        expect(typeof opts.systemPrompt).toBe("string");
+        expect(opts.systemPrompt).toMatch(/routine\.fetch_window pre-pass/);
+      });
+
+      it("message.dm keeps the full settingSources, omits strictMcpConfig, keeps the preset", async () => {
+        const opts = await captureExecuteOptions("message.dm", "claude-sonnet-4-6");
+        expect(opts.settingSources).toEqual(["user", "project"]);
+        expect(opts.strictMcpConfig).toBeUndefined();
+        const sp = opts.systemPrompt as { type?: string; preset?: string };
+        expect(sp?.type).toBe("preset");
+        expect(sp?.preset).toBe("claude_code");
       });
     });
   });
@@ -3330,7 +3494,7 @@ describe("ClaudeCodeCore", () => {
       // override silently fell through to the default `dontAsk` branch
       // and the SDK got `CLAUDE_DEFAULT_ALLOWED_TOOLS` (Read / Write /
       // Edit / Bash(curl *) / …). Callers that PASSED `[]` thinking they
-      // were saying "no tools" — `routine.hourly_check.triage` and Stage
+      // were saying "no tools" — `routine.activity_scan.triage` and Stage
       // B of the morning-routine pipeline (daily-journal-daemon-write.md
       // §3 corollary) — were getting the full surface, defeating their
       // structural-safety guarantee. The fix: `Array.isArray(...)`

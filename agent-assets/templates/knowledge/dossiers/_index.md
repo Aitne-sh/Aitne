@@ -14,7 +14,7 @@ Injected into prompts through the root-level context-index.md catalog.
 
 | File | Process key |
 |---|---|
-| `hourly.md` | `routine.hourly_check` |
+| `activity-scan.md` | `routine.activity_scan` |
 | `morning.md` | `routine.morning_routine`, `routine.morning_routine_today` |
 | `evening.md` | `routine.evening_review` |
 | `weekly.md` | `routine.weekly_review` |

@@ -7,6 +7,7 @@ import { useRegenerate } from "@/lib/hooks/use-regenerate";
 import { RegenerateButton } from "@/components/regenerate-button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { QueryResult, TableSkeleton } from "@/components/shared/query-result";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,14 +22,6 @@ import { CreateScheduleSheet } from "@/components/schedule/create-schedule-sheet
 import { ScheduleDetailSheet } from "@/components/schedule/schedule-detail-sheet";
 import { ScheduledDmsTable } from "@/components/schedule/scheduled-dms-table";
 import type { ScheduleRow } from "@/lib/api-types";
-
-const STATUS_COLORS: Record<string, "blue" | "amber" | "green" | "gray" | "red"> = {
-  pending: "blue",
-  running: "amber",
-  completed: "green",
-  skipped: "gray",
-  failed: "red",
-};
 
 const TYPE_COLORS: Record<string, "blue" | "green" | "purple"> = {
   wake: "blue",
@@ -227,16 +220,7 @@ export default function SchedulePage() {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <Badge variant={STATUS_COLORS[s.status] ?? "gray"}>
-                          {s.status === "running" ? (
-                            <span className="flex items-center gap-1">
-                              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
-                              {s.status}
-                            </span>
-                          ) : (
-                            s.status
-                          )}
-                        </Badge>
+                        <StatusBadge status={s.status} />
                       </td>
                       <td className="hidden whitespace-nowrap px-3 py-2 font-mono text-xs tabular-nums text-muted-foreground lg:table-cell">
                         <Tooltip>

@@ -86,7 +86,7 @@ function makeResult(overrides: Partial<AgentResult> = {}): AgentResult {
 
 /** Seed a minimal rules/management.md so `isAutonomousAllowed()` returns null.
  *  Tests that exercise autonomous pathways (routines, scheduled tasks,
- *  hourly_check) rely on the setup gate being open; tests that specifically
+ *  activity_scan) rely on the setup gate being open; tests that specifically
  *  want to verify gate behavior unlink this file explicitly.
  *
  *  Errors propagate: a silent fallback would leave the gate closed and
@@ -138,11 +138,11 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     character: "",
     timezone: "",
     dayBoundaryHour: 4,
-    hourlyCheckEnabled: true,
-    hourlyCheckIntervalMinutes: 60,
-    hourlyCheckActiveStartHour: 4,
-    hourlyCheckActiveEndHour: 24,
-    hourlyCheckMinObservations: 1,
+    activityScanEnabled: true,
+    activityScanIntervalMinutes: 60,
+    activityScanActiveStartHour: 4,
+    activityScanActiveEndHour: 24,
+    activityScanMinObservations: 1,
     schedulePollIntervalSeconds: 5,
     maxBriefingDelayMinutes: 30,
     maxNotificationsPerHour: 3,
@@ -196,7 +196,7 @@ describe("EventDispatcher", () => {
     // current agent-day so the pre-routine gate (sleep-skip recovery,
     // see `morningRoutineRanToday`) does not trip in tests that are not
     // specifically exercising it. Tests that want to verify the gate
-    // live in dispatcher-hourly-check.test.ts.
+    // live in dispatcher-activity-scan.test.ts.
     db
       .prepare(
         `INSERT INTO agent_actions
@@ -3079,9 +3079,9 @@ describe("EventDispatcher", () => {
     });
   });
 
-  describe("triggerHourlyCheck", () => {
-    it("queues routine.hourly_check when enough pending observations exist", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+  describe("triggerActivityScan", () => {
+    it("queues routine.activity_scan when enough pending observations exist", async () => {
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3099,18 +3099,18 @@ describe("EventDispatcher", () => {
         "INSERT INTO observations (source, ref, change_type, actor, payload) VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}')",
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(eventBus.size).toBe(1);
       const queued = await eventBus.get();
       expect(result).toMatchObject({ status: "queued", pendingCount: 1, forced: false });
-      expect(queued?.type).toBe("routine.hourly_check");
+      expect(queued?.type).toBe("routine.activity_scan");
       expect(queued?.source).toBe("cron");
       expect(queued?.data.pendingCount).toBe(1);
     });
 
     it("skips when pending observations are below the configured threshold", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 2 });
+      const config = makeConfig({ activityScanMinObservations: 2 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3128,14 +3128,14 @@ describe("EventDispatcher", () => {
         "INSERT INTO observations (source, ref, change_type, actor, payload) VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}')",
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(result).toMatchObject({ status: "skipped", reason: "below_threshold", pendingCount: 1, forced: false });
       expect(eventBus.size).toBe(0);
     });
 
     it("skips while a morning routine retry is pending", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3159,7 +3159,7 @@ describe("EventDispatcher", () => {
                  '{"routine":"morning_routine","retryCount":1}', 'pending')`,
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(result).toMatchObject({ status: "skipped", reason: "morning_routine_active", forced: false });
       expect(eventBus.size).toBe(0);
@@ -3170,7 +3170,7 @@ describe("EventDispatcher", () => {
       // false-positive on any wake task whose description happened to start
       // with the same prefix (e.g., a user-scheduled reminder). The new
       // JSON-path check must only match task_context.routine='morning_routine'.
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3193,14 +3193,14 @@ describe("EventDispatcher", () => {
                  '{"routine":"other_thing"}', 'pending')`,
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       // This should NOT skip — the task isn't actually a morning routine retry
       expect(result).toMatchObject({ status: "queued" });
     });
 
-    it("skips if a previous hourly check is still queued/in progress", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+    it("skips if a previous activity scan is still queued/in progress", async () => {
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3218,24 +3218,24 @@ describe("EventDispatcher", () => {
         "INSERT INTO observations (source, ref, change_type, actor, payload) VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}')",
       ).run();
 
-      const first = await dispatcher.triggerHourlyCheck("cron");
-      const second = await dispatcher.triggerHourlyCheck("manual");
+      const first = await dispatcher.triggerActivityScan("cron");
+      const second = await dispatcher.triggerActivityScan("manual");
 
       expect(first).toMatchObject({ status: "queued", forced: false });
-      expect(second).toMatchObject({ status: "skipped", reason: "hourly_check_in_progress", forced: false });
+      expect(second).toMatchObject({ status: "skipped", reason: "activity_scan_in_progress", forced: false });
       expect(eventBus.size).toBe(1);
     });
 
-    it("auto-clears a stale hourlyCheckInProgress flag after the max-age window so an EventBus drop does not stuck the gate", async () => {
+    it("auto-clears a stale activityScanInProgress flag after the max-age window so an EventBus drop does not stuck the gate", async () => {
       // Regression for the silent-stall pattern around EventBus eviction:
-      // - `triggerHourlyCheck` enqueues and flips the flag to true;
+      // - `triggerActivityScan` enqueues and flips the flag to true;
       // - the EventBus drops the event (queue saturation under maxSize)
       //   so `dispatchSafe`'s finally never runs;
       // - the flag stays true and every subsequent hourly tick short-
-      //   circuits with `hourly_check_in_progress` until process restart.
+      //   circuits with `activity_scan_in_progress` until process restart.
       // The flag now carries a wall-clock timestamp and the getter auto-
-      // clears entries older than HOURLY_CHECK_FLAG_MAX_AGE_MS.
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+      // clears entries older than ACTIVITY_SCAN_FLAG_MAX_AGE_MS.
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3256,7 +3256,7 @@ describe("EventDispatcher", () => {
       vi.useFakeTimers();
       try {
         vi.setSystemTime(new Date("2026-05-17T10:00:00.000Z"));
-        const first = await dispatcher.triggerHourlyCheck("cron");
+        const first = await dispatcher.triggerActivityScan("cron");
         expect(first).toMatchObject({ status: "queued" });
         // Drain the queued event WITHOUT going through dispatchSafe so
         // the flag stays true — this mirrors the EventBus-drop shape.
@@ -3264,10 +3264,10 @@ describe("EventDispatcher", () => {
 
         // Two minutes later: still inside the max-age window → skip.
         vi.setSystemTime(new Date("2026-05-17T10:02:00.000Z"));
-        const stillInWindow = await dispatcher.triggerHourlyCheck("manual");
+        const stillInWindow = await dispatcher.triggerActivityScan("manual");
         expect(stillInWindow).toMatchObject({
           status: "skipped",
-          reason: "hourly_check_in_progress",
+          reason: "activity_scan_in_progress",
         });
 
         // Insert another observation so the next attempt has work to do
@@ -3278,7 +3278,7 @@ describe("EventDispatcher", () => {
 
         // 31 minutes later: past the max-age window → auto-clear + queue.
         vi.setSystemTime(new Date("2026-05-17T10:31:00.000Z"));
-        const afterStale = await dispatcher.triggerHourlyCheck("manual");
+        const afterStale = await dispatcher.triggerActivityScan("manual");
         expect(afterStale).toMatchObject({ status: "queued" });
       } finally {
         vi.useRealTimers();
@@ -3291,7 +3291,7 @@ describe("EventDispatcher", () => {
       // threshold gate. Asserting via two visible side effects: the
       // refresh callback fires, and an observation it inserts before
       // resolving is included in `pendingCount`.
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3313,14 +3313,14 @@ describe("EventDispatcher", () => {
         ).run();
       });
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(refreshCalls).toBe(1);
       expect(result).toMatchObject({ status: "queued", pendingCount: 1 });
     });
 
     it("does not invoke the delegated-sync refresh when setup blocks the run", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3344,17 +3344,17 @@ describe("EventDispatcher", () => {
                  '{"routine":"morning_routine","retryCount":1}', 'pending')`,
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(result).toMatchObject({ status: "skipped", reason: "morning_routine_active" });
       expect(refreshCalls).toBe(0);
     });
 
-    it("proceeds with the hourly check when the delegated-sync refresh throws", async () => {
+    it("proceeds with the activity scan when the delegated-sync refresh throws", async () => {
       // A stuck cadence subprocess must not starve the entire hourly loop.
       // The dispatcher catches the error, logs a warn, and proceeds with
       // whatever observations exist in the table.
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3374,13 +3374,13 @@ describe("EventDispatcher", () => {
         "INSERT INTO observations (source, ref, change_type, actor, payload) VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}')",
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(result).toMatchObject({ status: "queued", pendingCount: 1 });
     });
 
     it("allows manual force-trigger even when below the minimum observation threshold", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 5 });
+      const config = makeConfig({ activityScanMinObservations: 5 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -3398,7 +3398,7 @@ describe("EventDispatcher", () => {
         "INSERT INTO observations (source, ref, change_type, actor, payload) VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}')",
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("manual:api", { force: true });
+      const result = await dispatcher.triggerActivityScan("manual:api", { force: true });
 
       expect(result).toMatchObject({ status: "queued", pendingCount: 1, forced: true });
       expect(eventBus.size).toBe(1);
@@ -3408,7 +3408,7 @@ describe("EventDispatcher", () => {
 
     it("gate logs a stage3 audit row and emits the gate_decision block", async () => {
       const config = makeConfig({
-        hourlyCheckMinObservations: 1,
+        activityScanMinObservations: 1,
       });
       const dispatcher = new EventDispatcher(
         eventBus,
@@ -3428,7 +3428,7 @@ describe("EventDispatcher", () => {
          VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}', 'done', 3, 'high', '2026-05-17T12:00:00Z')`,
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(result).toMatchObject({
         status: "queued",
@@ -3436,7 +3436,7 @@ describe("EventDispatcher", () => {
       });
       const auditRow = db
         .prepare(
-          "SELECT detail FROM agent_actions WHERE action_type = 'hourly_check.gate'",
+          "SELECT detail FROM agent_actions WHERE action_type = 'activity_scan.gate'",
         )
         .get() as { detail: string } | undefined;
       expect(auditRow).toBeDefined();
@@ -3445,7 +3445,7 @@ describe("EventDispatcher", () => {
 
       // Stage 3 event was enqueued with the gate decision block injected.
       const queued = await eventBus.get();
-      expect(queued?.type).toBe("routine.hourly_check");
+      expect(queued?.type).toBe("routine.activity_scan");
       expect(
         (queued?.data as { gateDecision?: { block?: string } }).gateDecision?.block,
       ).toContain("<gate_decision>");
@@ -3476,12 +3476,12 @@ describe("EventDispatcher", () => {
       // Seed a recent Stage-3 row so the heartbeat doesn't force a run.
       db.prepare(
         `INSERT INTO agent_actions (action_type, result, detail, started_at, completed_at)
-         VALUES ('hourly_check.gate', 'success', json(?), datetime('now', '-1 hour'), datetime('now', '-1 hour'))`,
+         VALUES ('activity_scan.gate', 'success', json(?), datetime('now', '-1 hour'), datetime('now', '-1 hour'))`,
       ).run(JSON.stringify({ stage_reached: "stage3" }));
 
       const config = {
         ...makeConfig({
-          hourlyCheckMinObservations: 1,
+          activityScanMinObservations: 1,
         }),
         dataDir,
       } as AgentConfig;
@@ -3504,7 +3504,7 @@ describe("EventDispatcher", () => {
         new (await import("./today-write-lock.js")).InMemoryTodayWriteLockManager(60_000),
       );
 
-      const result = await dispatcher.triggerHourlyCheck("cron", { force: true });
+      const result = await dispatcher.triggerActivityScan("cron", { force: true });
 
       expect(result).toMatchObject({
         status: "skipped",
@@ -3516,14 +3516,14 @@ describe("EventDispatcher", () => {
       expect(mockAgentCore.execute).not.toHaveBeenCalled();
 
       const updated = readFileSync(join(contextDir, "state", "today.md"), "utf-8");
-      expect(updated).toMatch(/\[hourly_check\] Quiet \(no_signals\)/);
+      expect(updated).toMatch(/\[activity_scan\] Quiet \(no_signals\)/);
 
       rmSync(dataDir, { recursive: true, force: true });
     });
 
     it("gate routes high-novelty observation to Stage 3 with gate_decision", async () => {
       const config = makeConfig({
-        hourlyCheckMinObservations: 1,
+        activityScanMinObservations: 1,
       });
       const dispatcher = new EventDispatcher(
         eventBus,
@@ -3546,10 +3546,10 @@ describe("EventDispatcher", () => {
       // branch is reached.
       db.prepare(
         `INSERT INTO agent_actions (action_type, result, detail, started_at, completed_at)
-         VALUES ('hourly_check.gate', 'success', json(?), datetime('now', '-1 hour'), datetime('now', '-1 hour'))`,
+         VALUES ('activity_scan.gate', 'success', json(?), datetime('now', '-1 hour'), datetime('now', '-1 hour'))`,
       ).run(JSON.stringify({ stage_reached: "stage3" }));
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
 
       expect(result.gateStage).toBe("stage3");
       expect(result.gateReason).toBe("high_novelty");
@@ -3565,7 +3565,7 @@ describe("EventDispatcher", () => {
   // ── Setup gate — regression suite for the "Customize Your Rules" bug ──
   //
   // Before the fix, setup mode was tracked in a `Map<sessionId, mode>` keyed
-  // by `conversation_sessions.id`. Whenever an hourly_check / morning routine
+  // by `conversation_sessions.id`. Whenever an activity_scan / morning routine
   // / any other autonomous turn patched today.md or roadmap.md during the
   // setup conversation, `onPromptContextChanged → markOwnerDmSessionStale`
   // fired, which closed the owner-DM session on the next user turn and
@@ -3599,12 +3599,12 @@ describe("EventDispatcher", () => {
 
     function makeHourlyEvent(): Event {
       const event = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "cron",
         priority: EventPriority.NORMAL,
       });
       Object.assign(event, {
-        routine: "hourly_check",
+        routine: "activity_scan",
         data: { pendingCount: 1 },
       });
       return event;
@@ -3632,7 +3632,7 @@ describe("EventDispatcher", () => {
       ).handleEvent(makeHourlyEvent());
 
       expect(mockAudit.logSkip).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "routine.hourly_check" }),
+        expect.objectContaining({ type: "routine.activity_scan" }),
         "offline",
         "autonomous",
         expect.objectContaining({
@@ -3791,7 +3791,7 @@ describe("EventDispatcher", () => {
 
       expect(spawnGateEvaluateMock).toHaveBeenCalledWith(["gemini"]);
       expect(mockAudit.logSkip).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "routine.hourly_check" }),
+        expect.objectContaining({ type: "routine.activity_scan" }),
         "auth_unhealthy",
         "autonomous",
         expect.anything(),
@@ -3973,9 +3973,9 @@ describe("EventDispatcher", () => {
       expect(dispatcher.isAutonomousAllowed()).toBeNull();
     });
 
-    it("triggerHourlyCheck skips with reason=setup_incomplete when rules file missing", async () => {
+    it("triggerActivityScan skips with reason=setup_incomplete when rules file missing", async () => {
       const emptyDataDir = mkdtempSync(join(tmpdir(), "pa-setup-cold-hourly-"));
-      const config = { ...makeConfig({ hourlyCheckMinObservations: 1 }), dataDir: emptyDataDir };
+      const config = { ...makeConfig({ activityScanMinObservations: 1 }), dataDir: emptyDataDir };
       rmSync(join(emptyDataDir, "context", "rules", "management.md"), { force: true });
 
       const dispatcher = new EventDispatcher(
@@ -3995,15 +3995,15 @@ describe("EventDispatcher", () => {
         "INSERT INTO observations (source, ref, change_type, actor, payload) VALUES ('obsidian:primary', 'notes/test.md', 'modified', 'user', '{}')",
       ).run();
 
-      const result = await dispatcher.triggerHourlyCheck("cron");
+      const result = await dispatcher.triggerActivityScan("cron");
       expect(result).toMatchObject({ status: "skipped", reason: "setup_incomplete" });
       expect(eventBus.size).toBe(0);
 
       rmSync(emptyDataDir, { recursive: true, force: true });
     });
 
-    it("triggerHourlyCheck skips with reason=setup_in_progress while a setup conversation is active", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+    it("triggerActivityScan skips with reason=setup_in_progress while a setup conversation is active", async () => {
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -4022,12 +4022,12 @@ describe("EventDispatcher", () => {
       ).run();
 
       dispatcher.beginSetupMode("update");
-      const blocked = await dispatcher.triggerHourlyCheck("cron");
+      const blocked = await dispatcher.triggerActivityScan("cron");
       expect(blocked).toMatchObject({ status: "skipped", reason: "setup_in_progress" });
       expect(eventBus.size).toBe(0);
 
       dispatcher.clearSetupMode();
-      const resumed = await dispatcher.triggerHourlyCheck("cron");
+      const resumed = await dispatcher.triggerActivityScan("cron");
       expect(resumed).toMatchObject({ status: "queued" });
     });
 
@@ -4438,8 +4438,8 @@ describe("EventDispatcher", () => {
       expect(dispatcher.isAutonomousAllowed()).toBeNull();
     });
 
-    it("triggerHourlyCheck skips with reason='user_paused' while paused", async () => {
-      const config = makeConfig({ hourlyCheckMinObservations: 1 });
+    it("triggerActivityScan skips with reason='user_paused' while paused", async () => {
+      const config = makeConfig({ activityScanMinObservations: 1 });
       const dispatcher = new EventDispatcher(
         eventBus,
         mockAgentCore,
@@ -4461,7 +4461,7 @@ describe("EventDispatcher", () => {
         source: "!stop",
         byPlatform: "slack",
       });
-      const blocked = await dispatcher.triggerHourlyCheck("cron");
+      const blocked = await dispatcher.triggerActivityScan("cron");
       expect(blocked).toMatchObject({
         status: "skipped",
         reason: "user_paused",
@@ -5241,7 +5241,7 @@ describe("EventDispatcher", () => {
         }
       ).handleEvent(makeMorningEvent({
         postCatchupRoutines: ["evening_review", "weekly_review"],
-        postCatchupHourlyCheck: true,
+        postCatchupActivityScan: true,
         deferPostMorningCatchupsUntilStartupReady: true,
       }));
 
@@ -5250,7 +5250,7 @@ describe("EventDispatcher", () => {
         .get() as { task_context: string };
       const ctx = JSON.parse(row.task_context);
       expect(ctx.postCatchupRoutines).toEqual(["evening_review", "weekly_review"]);
-      expect(ctx.postCatchupHourlyCheck).toBe(true);
+      expect(ctx.postCatchupActivityScan).toBe(true);
     });
 
     it("does NOT schedule a retry when today.md was generated", async () => {
@@ -5818,7 +5818,7 @@ describe("EventDispatcher", () => {
       }
     }
 
-    it("routine.hourly_check resolves the observations prompt and writes audit", async () => {
+    it("routine.activity_scan resolves the observations prompt and writes audit", async () => {
       mockAgentCore.execute = vi
         .fn()
         .mockResolvedValue(makeResult({ contextUpdated: true }));
@@ -5827,12 +5827,12 @@ describe("EventDispatcher", () => {
       const dispatcher = buildDispatcher();
 
       const hourlyEvent = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "cron",
         priority: EventPriority.NORMAL,
       });
       Object.assign(hourlyEvent, {
-        routine: "hourly_check",
+        routine: "activity_scan",
         data: { pendingCount: 3 },
       });
 
@@ -5841,11 +5841,11 @@ describe("EventDispatcher", () => {
       ).handleEvent(hourlyEvent);
 
       const call = captureLastExecuteCall();
-      expect(call.event.type).toBe("routine.hourly_check");
+      expect(call.event.type).toBe("routine.activity_scan");
       // requestedTier is NOT hardcoded — BackendRouter resolves it from
       // process-key defaults (light) or user-configured process_backend_config.
       expect(call.requestedTier).toBeUndefined();
-      expect(call.processKey).toBe("routine.hourly_check");
+      expect(call.processKey).toBe("routine.activity_scan");
       // docs/design/appendices/routine-data-acquisition.md Phase 3 R4 — the merged
       // observation read (the new Phase-3 default) AND the legacy
       // user-only triage query both surface in the prompt body; the
@@ -5861,10 +5861,10 @@ describe("EventDispatcher", () => {
       expect(mockAudit.logAction).toHaveBeenCalledWith(
         expect.objectContaining({
           contextUpdated: true,
-          event: expect.objectContaining({ type: "routine.hourly_check" }),
+          event: expect.objectContaining({ type: "routine.activity_scan" }),
         }),
       );
-      // Silent-by-default contract: hourly_check must NEVER auto-broadcast
+      // Silent-by-default contract: activity_scan must NEVER auto-broadcast
       // result.output as a user notification. The agent reaches the user
       // only via an explicit POST /api/notify from inside the run — which
       // does not go through notificationMgr.send here. This test is the
@@ -5872,7 +5872,7 @@ describe("EventDispatcher", () => {
       expect(mockNotificationMgr.send).not.toHaveBeenCalled();
     });
 
-    it("routine.hourly_check stays silent even when the agent returns a chatty summary", async () => {
+    it("routine.activity_scan stays silent even when the agent returns a chatty summary", async () => {
       // Even if the agent ignores the prompt and emits a long bookkeeping
       // summary as its final text, processResult must drop it on the
       // floor instead of forwarding to the user. The dispatcher is the
@@ -5891,12 +5891,12 @@ describe("EventDispatcher", () => {
       const dispatcher = buildDispatcher();
 
       const hourlyEvent = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "cron",
         priority: EventPriority.NORMAL,
       });
       Object.assign(hourlyEvent, {
-        routine: "hourly_check",
+        routine: "activity_scan",
         data: { pendingCount: 2 },
       });
 
@@ -5908,7 +5908,7 @@ describe("EventDispatcher", () => {
     });
 
     it("routine.evening_review does not auto-broadcast result.output (silent-by-default)", async () => {
-      // Symmetric with the hourly_check guard. `evening-review-slimdown.md`
+      // Symmetric with the activity_scan guard. `evening-review-slimdown.md`
       // §2.4 deleted the legacy Step 4 user-visible wrap-up; built-in steps
       // are now silent-by-default and any rulebook-driven nudge goes
       // through the user-defined `POST /api/notify` path explicitly. The
@@ -5972,12 +5972,12 @@ describe("EventDispatcher", () => {
       const dispatcher = buildDispatcher();
 
       const hourlyEvent = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "manual:test",
         priority: EventPriority.NORMAL,
       });
       Object.assign(hourlyEvent, {
-        routine: "hourly_check",
+        routine: "activity_scan",
         data: { pendingCount: 1, forced: true },
         requestedModel: "opus",
       });
@@ -5987,9 +5987,9 @@ describe("EventDispatcher", () => {
       ).handleEvent(hourlyEvent);
 
       expect(mockAgentCore.resolveBinding).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "routine.hourly_check" }),
+        expect.objectContaining({ type: "routine.activity_scan" }),
         expect.objectContaining({
-          processKey: "routine.hourly_check",
+          processKey: "routine.activity_scan",
           requestedTier: "high",
         }),
       );
@@ -6002,12 +6002,12 @@ describe("EventDispatcher", () => {
       const dispatcher = buildDispatcher();
 
       const hourlyEvent = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "manual:test",
         priority: EventPriority.NORMAL,
       });
       Object.assign(hourlyEvent, {
-        routine: "hourly_check",
+        routine: "activity_scan",
         data: { pendingCount: 1, forced: true },
         requestedModel: "sonnet",
       });
@@ -6017,9 +6017,9 @@ describe("EventDispatcher", () => {
       ).handleEvent(hourlyEvent);
 
       expect(mockAgentCore.resolveBinding).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "routine.hourly_check" }),
+        expect.objectContaining({ type: "routine.activity_scan" }),
         expect.objectContaining({
-          processKey: "routine.hourly_check",
+          processKey: "routine.activity_scan",
           requestedTier: "medium",
         }),
       );
@@ -6032,12 +6032,12 @@ describe("EventDispatcher", () => {
       const dispatcher = buildDispatcher();
 
       const hourlyEvent = createEvent({
-        type: "routine.hourly_check",
+        type: "routine.activity_scan",
         source: "cron",
         priority: EventPriority.NORMAL,
       });
       Object.assign(hourlyEvent, {
-        routine: "hourly_check",
+        routine: "activity_scan",
         data: { pendingCount: 1 },
       });
 
@@ -6050,7 +6050,7 @@ describe("EventDispatcher", () => {
       // none may carry requestedTier (the gate passes no options at all;
       // the dispatch-path call passes options without the tier).
       const calls = vi.mocked(mockAgentCore.resolveBinding).mock.calls.filter(
-        ([event]) => (event as { type?: string }).type === "routine.hourly_check",
+        ([event]) => (event as { type?: string }).type === "routine.activity_scan",
       );
       expect(calls.length).toBeGreaterThan(0);
       for (const call of calls) {
@@ -7118,11 +7118,11 @@ describe("EventDispatcher", () => {
 
       const event = {
         ...createEvent({
-          type: "routine.hourly_check",
+          type: "routine.activity_scan",
           source: "cron",
           priority: EventPriority.NORMAL,
         }),
-        routine: "hourly_check",
+        routine: "activity_scan",
       };
 
       expect(dispatcher.isReactive(event)).toBe(false);
@@ -7251,7 +7251,7 @@ describe("EventDispatcher", () => {
   });
 
   describe("isObserverEvent classification", () => {
-    it("classifies hourly_check as observer event", () => {
+    it("classifies activity_scan as observer event", () => {
       const config = makeConfig();
       const dispatcher = new EventDispatcher(
         eventBus,
@@ -7271,10 +7271,10 @@ describe("EventDispatcher", () => {
       }).resultProcessor;
       const isObs = resultProcessor.isObserverEvent.bind(resultProcessor);
 
-      // hourly_check
+      // activity_scan
       const hourly = {
-        ...createEvent({ type: "routine.hourly_check", source: "cron", priority: EventPriority.NORMAL }),
-        routine: "hourly_check",
+        ...createEvent({ type: "routine.activity_scan", source: "cron", priority: EventPriority.NORMAL }),
+        routine: "activity_scan",
       };
       expect(isObs(hourly)).toBe(true);
 

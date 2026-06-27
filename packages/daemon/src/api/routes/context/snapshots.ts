@@ -229,9 +229,6 @@ export function registerSnapshotsRoutes(
           { path, method: "RESTORE" },
         );
       }
-      if (path.startsWith("policies/routines/custom/")) {
-        deps.onCustomRoutinesChanged?.();
-      }
 
       const writtenStat = statSync(fullPath);
       logger.info(

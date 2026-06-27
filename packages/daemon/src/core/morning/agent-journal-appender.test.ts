@@ -414,10 +414,10 @@ describe("composeMorningRoutineJournalEntry — Actions line", () => {
       dailyJournalContent: DAILY_BODY,
       actionsSummary: {
         totalActions: 1,
-        actionsByType: [{ actionType: "hourly_check", count: 1 }],
+        actionsByType: [{ actionType: "activity_scan", count: 1 }],
       },
     });
-    expect(rendered).toContain("- Actions: 1 total (hourly_check: 1)\n");
+    expect(rendered).toContain("- Actions: 1 total (activity_scan: 1)\n");
   });
 });
 
@@ -757,7 +757,7 @@ describe("loadMorningRoutineActionRows", () => {
 
   it("ignores rows with non-stage action_type", () => {
     seedRow({ eventId: "corr-1", actionType: STAGE_A_ACTION_TYPE });
-    seedRow({ eventId: "corr-1", actionType: "hourly_check" });
+    seedRow({ eventId: "corr-1", actionType: "activity_scan" });
     expect(loadMorningRoutineActionRows(db, "corr-1").stageB).toBeNull();
   });
 
@@ -1399,8 +1399,8 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
        VALUES (?, 'success', ?, ?)`,
     );
     // All three rows fall inside the window `[2026-05-14 04:00:00, 2026-05-15 04:00:00)`.
-    insertAction.run("hourly_check", "2026-05-14 05:00:00", "2026-05-14 05:00:00");
-    insertAction.run("hourly_check", "2026-05-14 06:00:00", "2026-05-14 06:00:00");
+    insertAction.run("activity_scan", "2026-05-14 05:00:00", "2026-05-14 05:00:00");
+    insertAction.run("activity_scan", "2026-05-14 06:00:00", "2026-05-14 06:00:00");
     insertAction.run("evening_review", "2026-05-14 22:00:00", "2026-05-14 22:00:00");
 
     const result = await appendMorningRoutineJournalEntry(
@@ -1417,7 +1417,7 @@ describe("appendMorningRoutineJournalEntry — end-to-end", () => {
     );
     expect(result.ok).toBe(true);
     const journal = readFileSync(join(contextDir, "journal/agent.md"), "utf-8");
-    expect(journal).toContain("- Actions: 3 total (hourly_check: 2, evening_review: 1)\n");
+    expect(journal).toContain("- Actions: 3 total (activity_scan: 2, evening_review: 1)\n");
   });
 
   it("renders `Actions: (none)` when `agentDayWindow` is supplied but the window has zero matching rows", async () => {

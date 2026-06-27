@@ -54,7 +54,7 @@ describe("process-key helpers", () => {
       "routine.evening_review",
       "routine.weekly_review",
       "routine.monthly_review",
-      "routine.hourly_check",
+      "routine.activity_scan",
       "routine.roadmap_refresh",
       "routine.today_refresh",
       "wiki.ingest_url",
@@ -277,11 +277,11 @@ describe("process-key helpers", () => {
     expect(resolveProcessKey(morningEvent)).toBe("routine.morning_routine");
 
     const hourlyEvent = createEvent({
-      type: "routine.hourly_check",
+      type: "routine.activity_scan",
       source: "scheduler",
       priority: EventPriority.NORMAL,
     });
-    expect(resolveProcessKey(hourlyEvent)).toBe("routine.hourly_check");
+    expect(resolveProcessKey(hourlyEvent)).toBe("routine.activity_scan");
   });
 
   it("returns the raw event type for non-normalized events so callers can fall back to global defaults", () => {

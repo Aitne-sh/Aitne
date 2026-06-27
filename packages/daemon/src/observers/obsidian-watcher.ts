@@ -46,7 +46,7 @@ export interface ObsidianWatcherOptions {
  * **Agent-write suppression**: `AgentWriteTracker` pre-marks files the
  * agent writes via `/api/context/*`. When a watcher fires for one of
  * those, we silently drop the observation instead of recording it with
- * `actor='agent'`. Downstream consumers (hourly-check skill) already
+ * `actor='agent'`. Downstream consumers (activity-scan skill) already
  * filter by `actor='user'`, so an agent row has no consumer; leaving it
  * out of the table entirely prevents unbounded growth from the agent's
  * own write traffic.

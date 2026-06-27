@@ -61,6 +61,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { AgentConfig } from "../config.js";
 import { getContextDir } from "../config.js";
+import { getAgentEnabled } from "../db/agents-store.js";
 import {
   isSetupCompleted,
   isDegraded as readDegradedMode,
@@ -344,7 +345,7 @@ export async function createObservers(
         eventBus,
         // Threaded through so observations of agent-originated commits
         // flip to `actor='agent'` (C1). Without this, daemon-side
-        // commits would feed the hourly_check pending floor as user
+        // commits would feed the activity_scan pending floor as user
         // activity and re-invoke the agent in a loop.
         writeTracker,
         pushOverdueMinutes: config.gitPushOverdueMinutes,
@@ -480,8 +481,8 @@ export async function createObservers(
 
   // Each call returns a fresh observer so the integration-lifecycle
   // helper re-registers a new instance after a mode flip — picking up
-  // any gitPollIntervalSeconds / gitPushOverdueMinutes /
-  // hourlyCheckEnabled PATCH that landed while the cron was idle.
+  // any gitPollIntervalSeconds / gitPushOverdueMinutes PATCH (or an
+  // activity-scan agent toggle) that landed while the cron was idle.
   const buildGitDelegatedCronObserver = (): GitDelegatedCronObserver =>
     new GitDelegatedCronObserver({
       db,
@@ -490,7 +491,9 @@ export async function createObservers(
       githubRepos: selectGithubRepoSlugs(db),
       cadenceSeconds: config.gitPollIntervalSeconds,
       pushOverdueMinutes: config.gitPushOverdueMinutes,
-      hourlyCheckEnabled: config.hourlyCheckEnabled,
+      // Collision-avoidance hint only: the activity-scan agent row's enabled
+      // flag is the single switch (AGENTS_HUB_REDESIGN_PLAN.md §2).
+      activityScanEnabled: getAgentEnabled(db, "activity-scan", true),
     });
   if (hasActiveDelegatedGitLifecycleIntegration(db)) {
     observerManager.register(buildGitDelegatedCronObserver());
@@ -749,7 +752,7 @@ export async function createObservers(
   // ── 7.2 Observation summarizer (cost-reduction-structural §A) ──
   // Drains pending observation rows asynchronously: pre-filter →
   // per-source LLM call → `summary_text` + `novelty_score` written
-  // back to the row. The hourly_check skill consumes summaries instead
+  // back to the row. The activity_scan skill consumes summaries instead
   // of re-fetching raw content. Disabled cleanly via
   // `observationSummarizerEnabled` — when off, observations stay
   // pending and the skill drops to legacy fetch-on-doubt.
@@ -785,7 +788,7 @@ export async function createObservers(
       }
       // Codex / Gemini summarizer support is not yet implemented; the
       // worker translates `unsupported_backend` into a 'skipped' row so
-      // the hourly_check skill drops to its legacy fetch path.
+      // the activity_scan skill drops to its legacy fetch path.
       return new UnsupportedSummarizerClient(
         fallbackBackend as SummarizerLlmClient["backendId"],
         fallbackModel,

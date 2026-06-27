@@ -62,7 +62,7 @@ keywords:
 related:
   - features/integrations/git
   - features/integrations/github
-  - features/routines/hourly-check
+  - features/routines/activity-scan
   - concepts/observations
 ui_anchors:
   - /git
@@ -114,7 +114,7 @@ per repo (all open by default so the controls are visible at a glance):
    require the repository to have a `localPath`.
 3. **Daily git management** — opt-in per repo. Enabling it does three
    distinct kinds of work, on different cadences:
-   - On the first **Run init now** click, writes the curated
+   - On the first **Generate overview** click, writes the curated
      `knowledge/repos/<slug>/overview.md` skeleton, mirrors the source
      `README.*` to `knowledge/repos/<slug>/README.md`, and
      **automatically queues a one-shot Architecture refresh** so the AI
@@ -143,7 +143,7 @@ a Sonnet-class agent that reads the actual code.
 **When it's generated**
 
 - **First time** — automatically queued the moment you click
-  **Run init now**. Returns immediately with `architectureScheduleId`;
+  **Generate overview**. Returns immediately with `architectureScheduleId`;
   the agent runs in the background (typically 30 s – 2 min) and
   replaces the placeholder block with real analysis.
 - **On demand** — click **Refresh architecture** any time. The daemon
@@ -171,7 +171,7 @@ new Architecture body via the chokepoint
 `PUT /api/repositories/:id/architecture-section`; the daemon performs
 the marker-bracketed replacement so other sections (Notable Changes,
 Daily Activity Log, Open Threads) are preserved verbatim. Every write
-also snapshots the previous Architecture body to `md_file_snapshots`
+also snapshots the previous `overview.md` to `md_file_snapshots`
 for recovery.
 
 ## README Mirror
@@ -180,7 +180,7 @@ for recovery.
 the repository's `README.*` (whichever extension exists, with `.md`
 preferred). It is refreshed on:
 
-- Every **Run init now** (initial mirror).
+- Every **Generate overview** click (initial mirror).
 - Every **Refresh architecture** click (so the mirror tracks what the
   agent just analyzed).
 
@@ -197,21 +197,24 @@ README is rewritten.
 ## When It Runs / How It Is Triggered
 
 - **Polling** runs continuously on the per-repo cadence (or the global
-  default). Observations land in the `observations` table; the hourly
-  check coalesces them.
+  default). Observations land in the `observations` table; the activity
+  scan coalesces them.
 - **Triggers** fire when the matching event arrives on the EventBus.
 - **Daily git management** is dispatched by `RepositoryManagementCron`,
   which iterates the `repository_management` table once an hour and
-  emits a `scheduled.task` (`git.project.update`) for any enabled row
-  whose `last_scan_at` is more than 24 hours old.
+  runs the scan writer directly (an in-process daemon write — no agent
+  session) for any enabled row whose `last_scan_at` is more than
+  24 hours old.
 - **Architecture refresh** (`git.project.refresh_architecture`) is
   enqueued only on:
-  - Manual **Run init now** (auto-enqueue, first time only).
+  - **Generate overview** (auto-enqueue — skipped when a previous
+    analysis already landed, re-queued when the Architecture section
+    is still pending).
   - Manual **Refresh architecture** click.
+  - A scan (cron or manual) that finds `overview.md` missing and
+    re-creates the skeleton via the implicit init.
   
-  No cron, no observer fires this. The cron-driven implicit init
-  (when daily scan creates a missing skeleton) deliberately does NOT
-  auto-enqueue.
+  There is no recurring cron that re-runs the analysis on a timer.
 
 ## What It Outputs
 
@@ -231,8 +234,8 @@ trigger's process key.
 
 - **My Life → Git** (`/git`) — this page. Polling, Triggers, and Daily
   git management are all expanded by default. The Daily-git-management
-  panel's buttons appear in lifecycle order — **Run init now → Refresh
-  architecture → Run today's scan now** — and each surfaces an inline
+  panel's buttons appear in lifecycle order — **Generate overview →
+  Refresh architecture → Run today's scan now** — and each surfaces an inline
   green confirmation on success or a red error message on failure.
 - **Connections → Repositories** (`/connections/repositories`) —
   register a repo (link a `localPath` and/or `owner/repo`), rename,
@@ -289,9 +292,10 @@ repository has a `localPath`:
 - **The toggle is greyed out with "No local clone".** Add a
   `localPath` on **Connections → Repositories**, then return.
 - **`Last status` shows `failed` and `Failure streak` keeps climbing.**
-  The cron still iterates but the dispatched session is failing —
-  open the latest conversation under that repo's tile, or check
-  **Activity** for the `git.project.update` run. A high streak does
+  The cron still iterates but the in-process scan writer is failing —
+  check the daemon logs (`aitne logs`) for "Failed to run repository
+  management scan", or click **Run today's scan now** to surface the
+  error inline. A high streak does
   not prevent further scans (the cron retries on the next interval).
 - **`Last scan` is "never" but the row is enabled.** Either the cron
   has not ticked yet (default tick is 1 hour) or the row has no local
@@ -313,7 +317,7 @@ repository has a `localPath`:
   before clicking again.
 - **The README mirror went out of date** after the source repo's
   README was rewritten. Click **Refresh architecture** (which also
-  re-copies the README) or **Run init now** on the repo.
+  re-copies the README) or **Generate overview** on the repo.
 
 ## Related
 
@@ -322,5 +326,5 @@ repository has a `localPath`:
 - [GitHub integration](../integrations/github.md) — remote-side data
   (notifications, workflow runs) reachable via `gh` even without a
   local clone.
-- [Hourly check](../routines/hourly-check.md) — the routine that
+- [Activity scan](../routines/activity-scan.md) — the routine that
   consumes the observations this page's polling generates.

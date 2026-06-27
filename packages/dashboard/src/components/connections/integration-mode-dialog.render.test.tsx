@@ -232,9 +232,9 @@ describe("DialogBody — render smoke tests", () => {
     expect(html).toContain("poller");
     expect(html).toMatch(/credentials.+keychain/);
     // Connector-must-be-configured note is non-reversible (red dot — class
-    // marker bg-red-500 lives in the JSX literal).
+    // marker bg-destructive lives in the JSX literal).
     expect(html).toContain("connector configured");
-    expect(html).toContain("bg-red-500");
+    expect(html).toContain("bg-destructive");
   });
 
   it("renders to-native body from delegated source — different impact set + multiplier chip", () => {

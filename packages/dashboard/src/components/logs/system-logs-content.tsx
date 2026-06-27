@@ -23,11 +23,11 @@ const LEVEL_STYLES: Record<
   { badge: "blue" | "amber" | "red" | "gray" | "default"; text: string }
 > = {
   info: { badge: "blue", text: "text-foreground" },
-  warn: { badge: "amber", text: "text-amber-700 dark:text-amber-300" },
-  error: { badge: "red", text: "text-red-700 dark:text-red-300" },
+  warn: { badge: "amber", text: "text-warning" },
+  error: { badge: "red", text: "text-destructive" },
   fatal: {
     badge: "red",
-    text: "text-red-700 dark:text-red-300 font-semibold",
+    text: "text-destructive font-semibold",
   },
 };
 
@@ -61,9 +61,9 @@ const LogEntryRow = memo(function LogEntryRow({
       className={cn(
         "group border-b border-border/50 px-3 py-1.5 font-mono text-[13px] leading-relaxed hover:bg-muted/30 transition-colors",
         entry.level === "error" || entry.level === "fatal"
-          ? "bg-red-50/50 dark:bg-red-950/20"
+          ? "bg-destructive/10"
           : entry.level === "warn"
-            ? "bg-amber-50/30 dark:bg-amber-950/10"
+            ? "bg-warning/5"
             : "",
       )}
     >
@@ -217,7 +217,7 @@ export function SystemLogsContent({ enabled }: { enabled: boolean }) {
           <span
             className={cn(
               "h-2 w-2 rounded-full",
-              connected ? "bg-emerald-500" : "bg-gray-400",
+              connected ? "bg-success" : "bg-gray-400",
             )}
           />
           {connected ? "Connected" : "Disconnected"}
@@ -265,14 +265,14 @@ export function SystemLogsContent({ enabled }: { enabled: boolean }) {
           className={cn(
             "flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
             live
-              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+              ? "bg-success/15 text-success"
               : "bg-muted text-muted-foreground",
           )}
         >
           <span
             className={cn(
               "h-2 w-2 rounded-full",
-              live ? "bg-emerald-500 animate-pulse" : "bg-gray-400",
+              live ? "bg-success animate-pulse" : "bg-gray-400",
             )}
           />
           Live

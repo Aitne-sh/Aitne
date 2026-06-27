@@ -94,7 +94,7 @@ describe("sanitizeUntrustedTemplateValue", () => {
 
 describe("buildExecutionPrompt", () => {
   it("returns the resolved prompt without conversation history when empty", () => {
-    const event = makeBaseEvent({ type: "routine.hourly_check", source: "cron" });
+    const event = makeBaseEvent({ type: "routine.activity_scan", source: "cron" });
     const result = buildExecutionPrompt("Task: {context}", "ctx-text", event);
     expect(result).toBe("Task: ctx-text");
   });

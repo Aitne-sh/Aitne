@@ -303,6 +303,15 @@ export const browserHistoryClusterDeltaEntrySchema = z.object({
   meaningfulVisits: z.number().int().nonnegative(),
   meaningfulForegroundSec: z.number().int().nonnegative(),
   newDomains: z.array(browserHistoryDomainLabelSchema).max(10),
+  /**
+   * False only on the bucket for the current (still-accumulating) agent
+   * day — its visit counts grow until the next day boundary. The journal
+   * task flow (`routine.research_cluster_update`) appends complete days
+   * only: the journal is an append-only ledger, so writing a partial
+   * bucket would permanently freeze an undercounted day entry
+   * (RESEARCH_CLUSTER_COST_FIX_PLAN rev5).
+   */
+  complete: z.boolean(),
 });
 export const browserHistoryClusterDeltaResponseSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),

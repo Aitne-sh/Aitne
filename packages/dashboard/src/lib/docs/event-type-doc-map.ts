@@ -55,7 +55,7 @@ const EXACT: Record<string, string> = {
   // `features/routines/monthly-review` which was removed during the
   // doc cleanup. When the Mirror+Prune redesign re-enables monthly,
   // re-introduce the doc and restore the mapping.
-  "routine.hourly_check": "features/routines/hourly-check",
+  "routine.activity_scan": "features/routines/activity-scan",
   "routine.roadmap_refresh": "features/memory-files/roadmap",
   "routine.today_refresh": "features/memory-files/today",
   "routine.user_profile_sweep": "features/memory-files/user-profile",

@@ -34,7 +34,7 @@ export const TIPS: ReadonlyArray<Tip> = [
     title: "Voice messages, transcribed on-device",
     description:
       "Send a Telegram voice note or WhatsApp PTT and the daemon transcribes it locally with Whisper before the agent reads it. Audio never leaves your machine.",
-    href: "/settings/advanced",
+    href: "/settings/infrastructure",
     cta: "Turn on Voice mode",
   },
   {
@@ -50,7 +50,7 @@ export const TIPS: ReadonlyArray<Tip> = [
     title: "Different models for different jobs",
     description:
       "Route deep work like morning routines and DMs to Sonnet or Opus, and light triage like mail classification to Haiku — per ProcessKey, swappable any time.",
-    href: "/settings/processes",
+    href: "/settings/models",
     cta: "Tune process routing",
   },
   {
@@ -66,7 +66,7 @@ export const TIPS: ReadonlyArray<Tip> = [
     title: "DM the agent on your favorite app",
     description:
       "Pair Slack, Telegram, Discord, or WhatsApp with a single magic phrase and chat with the agent from there. Single-owner only by design — no group chats.",
-    href: "/settings/messaging",
+    href: "/connections/messaging",
     cta: "Set up messaging",
   },
   {
@@ -81,9 +81,9 @@ export const TIPS: ReadonlyArray<Tip> = [
     id: "routines",
     title: "Morning, evening, and weekly routines",
     description:
-      "Cron-driven routines reflect on your day, week, and month automatically — quiet hours respected, day boundary at 04:00 local. Fully customizable.",
-    href: "/settings/routines",
-    cta: "Customize routines",
+      "Cron-driven agents reflect on your day, week, and month automatically — quiet hours respected, day boundary at 04:00 local. Each one's schedule, limits, and rulebook are editable.",
+    href: "/agents",
+    cta: "Open the Agents hub",
   },
   {
     id: "mail",
@@ -114,7 +114,7 @@ export const TIPS: ReadonlyArray<Tip> = [
     title: "Notify and Approve safety tiers",
     description:
       "Reads are autonomous; writes are classified Notify (proceed after pinging you) or Approve (require explicit confirmation). Even Allow mode keeps the absolute-block layer.",
-    href: "/settings/advanced",
+    href: "/settings/safety",
     cta: "Review safety settings",
   },
 ];

@@ -135,9 +135,9 @@ instead).
 
 ## 5. Decision rules
 
-- **Hourly check is read-only.** Native variants inherit the
+- **Activity scan is read-only.** Native variants inherit the
   "External services are read-only this hour" constraint from
-  `routine.hourly_check.native.claude.md`. No creates, property
+  `routine.activity_scan.native.claude.md`. No creates, property
   updates, content patches, or archives during the hourly pass.
 - **Mass-update — ask first.** A page-creation call can take up to
   100 pages in one shot, and move / update batches can touch many
@@ -151,7 +151,7 @@ instead).
 
 ## 6. Persisting observations from native fetches
 
-When `routine.hourly_check.native.claude.md`'s Step 0c fetches recent
+When `routine.activity_scan.native.claude.md`'s Step 0c fetches recent
 Notion edits, POST each materialised page to `/api/observations`. The
 daemon computes `contentHash` server-side via
 `@aitne/shared/observations-hash.ts`; pass `payload` verbatim.

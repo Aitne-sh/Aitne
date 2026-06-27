@@ -26,7 +26,7 @@
  * and bridges into a handful of dispatcher / coordinator methods that
  * are still owned elsewhere (`rotateDayFiles`,
  * `diagnoseTodayMdState`, `isRoadmapStale`, `emitRoadmapRefresh`,
- * `triggerHourlyCheck`).
+ * `triggerActivityScan`).
  *
  * Dispatcher entry points served:
  *   - `EventDispatcher.dispatch` routes `routine === "morning_routine"`
@@ -38,7 +38,7 @@
  * Shared-state references held:
  *   - `setMorningRoutineInProgress` — setter callback. The flag is
  *     flipped to true at the start of the execute → executeWithRetry
- *     wrapper and reset in `finally` so the hourly check can resume.
+ *     wrapper and reset in `finally` so the activity scan can resume.
  */
 
 import type Database from "better-sqlite3";
@@ -133,10 +133,10 @@ export interface MorningRoutineRunnerDeps {
   /** Bridges into the dispatcher's roadmap-refresh emit. */
   emitRoadmapRefresh: (source: string) => void;
   /**
-   * Bridges into `EventDispatcher.triggerHourlyCheck` so the deferred
-   * post-morning hourly_check can fire from `emitPostMorningCatchups`.
+   * Bridges into `EventDispatcher.triggerActivityScan` so the deferred
+   * post-morning activity_scan can fire from `emitPostMorningCatchups`.
    */
-  triggerHourlyCheck: (source: string) => Promise<unknown>;
+  triggerActivityScan: (source: string) => Promise<unknown>;
   /**
    * morning-routine-optimization.md Phase 5/6/7 — the split-stage
    * pipeline orchestrator owns Stage A (today.md) + Stage B (daily
@@ -161,7 +161,7 @@ export class MorningRoutineRunner {
   private readonly diagnoseTodayMdState: () => TodayMdDiagnosis;
   private readonly isRoadmapStale: () => boolean;
   private readonly emitRoadmapRefresh: (source: string) => void;
-  private readonly triggerHourlyCheck: (source: string) => Promise<unknown>;
+  private readonly triggerActivityScan: (source: string) => Promise<unknown>;
   private readonly pipelineOrchestrator: MorningRoutinePipelineOrchestrator;
 
   constructor(deps: MorningRoutineRunnerDeps) {
@@ -176,7 +176,7 @@ export class MorningRoutineRunner {
     this.diagnoseTodayMdState = deps.diagnoseTodayMdState;
     this.isRoadmapStale = deps.isRoadmapStale;
     this.emitRoadmapRefresh = deps.emitRoadmapRefresh;
-    this.triggerHourlyCheck = deps.triggerHourlyCheck;
+    this.triggerActivityScan = deps.triggerActivityScan;
     this.pipelineOrchestrator = deps.pipelineOrchestrator;
   }
 
@@ -247,15 +247,15 @@ export class MorningRoutineRunner {
 
     // B2 fix + docs/design/appendices/routine-data-acquisition.md Phase 4 / D2 race fix:
     // flip `morningRoutineInProgress=true` BEFORE the pre-pass fires so
-    // hourly_check can't squeeze through the cold-start window
-    // (`hourlyCheck.trigger` skips when `isMorningRoutineActive()`
+    // activity_scan can't squeeze through the cold-start window
+    // (`activityScan.trigger` skips when `isMorningRoutineActive()`
     // returns true). The original B2 fix already widened the flag to
     // span the whole retry chain; the pre-pass shifts the boundary
     // earlier so the same guard covers context build + binding resolve
     // + Haiku fetcher cold-start, all of which precede the executor.
     // The flag is reset in `finally` regardless of whether the pre-pass,
     // context build, or main session throws — so a partial-failure path
-    // cannot leave the flag stuck `true` and starve hourly_check forever.
+    // cannot leave the flag stuck `true` and starve activity_scan forever.
     this.setMorningRoutineInProgress(true);
     // `pipelineRun` is non-null when the orchestrator completed and
     // Stage A produced an `AgentResult`. A null value means Stage A
@@ -322,7 +322,7 @@ export class MorningRoutineRunner {
       // `routine.morning_routine` success audit row is durable opens a
       // window where, for a cron-triggered (non-wake) run, both
       // `isMorningRoutineActive()` and `morningRoutineRanToday()` read
-      // false — an hourly_check tick would then take the
+      // false — an activity_scan tick would then take the
       // `morning_routine_pending_for_today` branch and enqueue a
       // spurious morning_routine wake. The flag is instead cleared in
       // the post-finally try/finally below, AFTER the journal append +
@@ -503,7 +503,7 @@ export class MorningRoutineRunner {
       // audit row is durable (journal append + emitParentAuditRow above).
       // Reached on every post-finally exit path — success/catchup,
       // retry-scheduled, and the `pipelineRun === null` branch — so a
-      // Stage-A failure cannot leak the flag and wedge hourly_check.
+      // Stage-A failure cannot leak the flag and wedge activity_scan.
       this.setMorningRoutineInProgress(false);
     }
   }
@@ -525,9 +525,9 @@ export class MorningRoutineRunner {
       } as RoutineEvent);
     }
 
-    if (event.data?.postCatchupHourlyCheck === true) {
-      logger.info("Triggering deferred hourly_check after morning catchup");
-      await this.triggerHourlyCheck("post_morning_catchup");
+    if (event.data?.postCatchupActivityScan === true) {
+      logger.info("Triggering deferred activity_scan after morning catchup");
+      await this.triggerActivityScan("post_morning_catchup");
     }
   }
 
@@ -610,7 +610,7 @@ export class MorningRoutineRunner {
       postCatchupRoutines: Array.isArray(event.data?.postCatchupRoutines)
         ? event.data.postCatchupRoutines
         : [],
-      postCatchupHourlyCheck: event.data?.postCatchupHourlyCheck === true,
+      postCatchupActivityScan: event.data?.postCatchupActivityScan === true,
       importance: "low",
     });
 

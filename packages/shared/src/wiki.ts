@@ -164,7 +164,7 @@ export interface WikiCostEstimateFile {
 // WIKI_BUILDER_DESIGN.md Phase 5 — bridge candidate proposal.
 //
 // `POST /api/wiki/:ws/bridge` accepts this shape from the DM-agent skill
-// or from in-process callers (the dispatcher's hourly check, a future
+// or from in-process callers (the dispatcher's activity scan, a future
 // `morning_routine` post-pass). The daemon decides whether to write,
 // dedup-drop, threshold-drop, or just log a candidate (measurement-only
 // mode). Trigger is hybrid — the agent may emit an `explicit` proposal

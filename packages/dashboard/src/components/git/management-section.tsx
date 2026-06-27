@@ -14,6 +14,7 @@ import {
   useRunRepoManagementScan,
   useSetRepositoryManagement,
 } from "@/lib/hooks/use-repositories";
+import { formatRelativeMs } from "@/lib/utils";
 
 const FIELD_LABEL =
   "text-[11px] font-medium uppercase tracking-wider text-muted-foreground";
@@ -134,7 +135,7 @@ export function ManagementSection({ repo }: { repo: RepositoryDTO }) {
             per day for this repository&apos;s git activity. Local-clone-bound for v1.
           </p>
           {localCloneRequired && (
-            <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+            <p className="mt-1 flex items-center gap-1 text-xs text-warning">
               <AlertTriangle className="h-3 w-3" />
               No local clone — link one to enable this feature.
             </p>
@@ -152,12 +153,12 @@ export function ManagementSection({ repo }: { repo: RepositoryDTO }) {
       </div>
 
       {error && (
-        <p className="rounded-md border border-red-200 bg-red-50/50 p-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
           {error}
         </p>
       )}
       {notice && (
-        <p className="rounded-md border border-emerald-200 bg-emerald-50/50 p-2 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+        <p className="rounded-md border border-success/40 bg-success/10 p-2 text-xs text-success">
           {notice}
         </p>
       )}
@@ -214,7 +215,7 @@ export function ManagementSection({ repo }: { repo: RepositoryDTO }) {
       </div>
 
       {archBusy && (
-        <p className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50/50 p-2 text-xs text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
+        <p className="flex items-center gap-2 rounded-md border border-primary/40 bg-primary/10 p-2 text-xs text-primary">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Architecture refresh in progress (schedule #{archInFlight?.scheduleId}, status: {archInFlight?.status}). Generate overview and Refresh architecture stay disabled until the agent run completes.
         </p>
@@ -347,17 +348,6 @@ function StatusTile({
       <p className="mt-1 text-sm font-medium text-foreground">{value}</p>
     </div>
   );
-}
-
-function formatRelativeMs(ms: number): string {
-  const diff = Date.now() - ms;
-  const sec = Math.floor(diff / 1000);
-  if (sec < 60) return "just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `${Math.floor(hr / 24)}d ago`;
 }
 
 function todayStamp(): string {

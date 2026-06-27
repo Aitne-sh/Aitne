@@ -19,6 +19,11 @@ export const PROACTIVE_FORWARD_TYPES = [
   // `notification_log` only and the user's follow-up reply would
   // have nothing to anchor to.
   "scheduled_dm",
+  // BACKGROUND_TASK_RUNNER_DESIGN.md Phase 1 — task.delivery records
+  // browser-task results and clarification prompts into owner-facing
+  // conversation history.
+  "task_result",
+  "task_clarification",
 ] as const;
 
 export type ProactiveForwardType = (typeof PROACTIVE_FORWARD_TYPES)[number];
@@ -38,11 +43,18 @@ export type ProactiveForwardType = (typeof PROACTIVE_FORWARD_TYPES)[number];
  *   embed the dispatch timestamp here: every line already carries the
  *   `[timestamp]` prefix added by the caller, so a second timestamp
  *   in the suffix would just duplicate that information.
+ * - `task_result` / `task_clarification` → task-delivery annotations
+ *   used by the DM agent to understand that a background task result or
+ *   clarification was already surfaced.
  */
 export function formatForwardSuffix(
   metadata: Record<string, unknown>,
 ): string {
   switch (getProactiveForwardType(metadata)) {
+    case "task_result":
+      return " (background task result delivered)";
+    case "task_clarification":
+      return " (background task clarification requested)";
     case "scheduled_dm":
       return " (scheduled DM dispatched)";
     case "proactive_forward":
@@ -117,6 +129,7 @@ export function recordProactiveForwardDeliveries(params: {
   dispatchIds?: string[];
   originSessionIds?: Array<number | null | undefined>;
   notificationType: ProactiveForwardType;
+  extraMetadata?: Record<string, unknown>;
 }): ProactiveForwardRecordResult {
   if (params.config.proactiveForwardChannelTimelineEnabled === false) {
     return { inserted: 0, sessionIds: [] };
@@ -147,6 +160,7 @@ export function recordProactiveForwardDeliveries(params: {
     notificationType: params.notificationType,
     dispatchIds,
     originSessionIds,
+    ...(params.extraMetadata ?? {}),
   };
 
   let inserted = 0;

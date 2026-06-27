@@ -443,16 +443,39 @@ function collapseFirstParagraph(chunk: string): string | null {
 }
 
 /**
- * Read the `cron` field from a linked custom routine's frontmatter.
- * Returns null when the routine file is missing or its frontmatter
- * cannot be parsed. Intentionally tolerant — the policy file is the
- * source of truth, the routine link is a convenience pointer.
+ * Read the cadence of a policy's linked execution vehicle. Post
+ * Agents-hub redesign (AGENTS_HUB_REDESIGN_PLAN.md §3) `linked.routine`
+ * names a recurring **Agent** — the cron comes from
+ * `policies/agents/<slug>/agent.md`'s `schedule.expression`. Legacy
+ * `policies/routines/custom/<slug>.md` files (inert, pre-migration) are
+ * still consulted as a fallback so old policy rows keep their cadence
+ * cell. Returns null when neither file resolves. Intentionally
+ * tolerant — the policy file is the source of truth, the link is a
+ * convenience pointer.
  */
 function readRoutineCron(
   contextDir: string,
   routineSlug: string,
 ): string | null {
-  const path = join(contextDir, CONTEXT_RELATIVE_PATHS.routines.customDir, `${routineSlug}.md`);
+  const agentPath = join(contextDir, "policies", "agents", routineSlug, "agent.md");
+  const fromAgent = readFrontmatterField(agentPath, /^\s*expression\s*:\s*(.*?)\s*$/);
+  if (fromAgent !== null) return fromAgent;
+  const legacyPath = join(
+    contextDir,
+    CONTEXT_RELATIVE_PATHS.routines.customDir,
+    `${routineSlug}.md`,
+  );
+  return readFrontmatterField(legacyPath, /^cron\s*:\s*(.*?)\s*$/);
+}
+
+/**
+ * Line-scalar frontmatter scan: first line inside the `---` fences
+ * matching `pattern` (capture group 1, quotes stripped), or null. For
+ * agent.md the `expression:` line lives nested under `schedule:`; a
+ * line-anchored match is sufficient because the definition schema emits
+ * exactly one `expression` key.
+ */
+function readFrontmatterField(path: string, pattern: RegExp): string | null {
   if (!existsSync(path)) return null;
   let content: string;
   try {
@@ -467,7 +490,7 @@ function readRoutineCron(
   );
   if (closeIndex < 0) return null;
   for (const rawLine of lines.slice(1, closeIndex)) {
-    const match = /^cron\s*:\s*(.*?)\s*$/.exec(rawLine);
+    const match = pattern.exec(rawLine);
     if (match) {
       return stripQuotes(match[1]) || null;
     }

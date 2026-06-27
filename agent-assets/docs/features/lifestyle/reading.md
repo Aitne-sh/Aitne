@@ -73,7 +73,7 @@ at `/reading`.
   `completed` stamps `completed_at` automatically; you can also set a 1–5
   `rating` or `notes`.
 - **Recommend** from the list during reactive turns, and refresh the
-  reading-taste profile during weekly and monthly reviews.
+  reading-taste profile during the weekly review.
 
 There is **no bare "add a book" endpoint** — new books arrive through the
 two Kindle import pipelines above (or are created internally during an
@@ -93,8 +93,10 @@ drives the list shape. The reading skill loads in two situations:
 
 - **Reactively**, when you mention a book or highlight in a DM.
 - **From existing routines** — the morning routine can mention what
-  you're currently reading, and the weekly and monthly reviews pull
-  reading progress and refresh the reading-taste profile.
+  you're currently reading, the weekly review refreshes the
+  reading-taste profile, and the monthly review pulls reading progress
+  for its reading report (it reads the existing taste profile but does
+  not re-derive it).
 
 ## What It Outputs
 

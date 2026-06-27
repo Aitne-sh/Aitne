@@ -253,7 +253,7 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // cost-reduction-structural §B — Stage 2 lite-tier triage. Strict
   // JSON-only output (~2K input / ~50 output) decides log_only vs
   // escalate. 1 turn / $0.05 mirrors observation.summarize.
-  "routine.hourly_check.triage": { maxTurns: 1, maxBudgetUsd: 0.05 },
+  "routine.activity_scan.triage": { maxTurns: 1, maxBudgetUsd: 0.05 },
   // docs/design/appendices/routine-data-acquisition.md §6.2 / §6.9 pre-pass fetcher.
   // The lite-tier nominal ($0.20) under-provisioned the morning fan-out
   // (2 mail providers × N accounts + calendar + notion) and tripped
@@ -271,17 +271,26 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // exploration depth) while clearing P99 with 2 turns of headroom.
   "routine.fetch_window": { maxTurns: 10, maxBudgetUsd: 0.5 },
   // BROWSER_HISTORY_INTEGRATION_PLAN P3 — keep these in lock-step with
-  // the schema seed rows. cluster_update is a tiny dispatcher (1 PUT
-  // + a list call), so the absolute floor of 5/$0.05 is the right
-  // envelope. research_offer_dm is even tighter — a single DM
-  // composition (GET /research-clusters/<slug> + POST /api/notify),
-  // 5/$0.02 leaves no room for runaway. research_dispatch carries the
-  // WebFetch fan-out; mirrors evening_review (50/$1.00).
-  // research_wiki_summary is tighter (30/$0.50) — it reads the cluster
-  // journal the agent already wrote and composes from it, with
-  // bounded external work.
-  "routine.research_cluster_update": { maxTurns: 5, maxBudgetUsd: 0.05 },
-  "routine.research_offer_dm": { maxTurns: 5, maxBudgetUsd: 0.02 },
+  // the schema seed rows (research_offer_dm has NO seed row — this
+  // entry is its only default, materialized on main-backend switch or
+  // Reset).
+  //
+  // cluster_update / offer_dm budgets are STOP-LOSSES sized to cover
+  // one cold-prompt-cache run, not per-run cost targets
+  // (RESEARCH_CLUSTER_COST_FIX_PLAN.md RC2/F3): the SDK budget check
+  // only fires between turns, and a cold run writes the full session
+  // prefix to prompt cache (~$0.13-0.30 observed on Haiku) before the
+  // check can abort — the original floor values ($0.05/$0.02) killed
+  // every cold run AFTER the money was spent and the journal was never
+  // written. With the F1 per-agent-day enqueue stamp, cluster_update
+  // runs at most once per cluster per day, so $0.50 bounds daily spend
+  // per cluster. Bumped for upgrading installs by migration 0012.
+  // research_dispatch carries the WebFetch fan-out; mirrors
+  // evening_review (50/$1.00). research_wiki_summary is tighter
+  // (30/$0.50) — it reads the cluster journal the agent already wrote
+  // and composes from it, with bounded external work.
+  "routine.research_cluster_update": { maxTurns: 5, maxBudgetUsd: 0.5 },
+  "routine.research_offer_dm": { maxTurns: 5, maxBudgetUsd: 0.15 },
   "routine.research_dispatch": { maxTurns: 50, maxBudgetUsd: 1.0 },
   "routine.research_wiki_summary": { maxTurns: 30, maxBudgetUsd: 0.5 },
   // BROWSER_TASK_REDESIGN_PLAN.md §5 — open-ended browser sub-agent.
@@ -293,6 +302,13 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // cost without tripping BackendQuotaError. Lock-step with the
   // schema-seed row.
   "browser_task": { maxTurns: 30, maxBudgetUsd: 1.0 },
+  // BACKGROUND_TASK_RUNNER_DESIGN.md §6 — generic detached worker. The
+  // medium-tier nominal (50/$1.00) is too tight for long-running research
+  // / multi-repo audits, so the seed picks 40 turns / $2.00 (the
+  // medium-tier base in background-task-budget.ts). Kept in lock-step
+  // with the schema-seed row so a force=true backend-switch reset
+  // preserves this envelope instead of clobbering it to the tier default.
+  "background_task": { maxTurns: 40, maxBudgetUsd: 2.0 },
 };
 
 /**

@@ -217,7 +217,7 @@ describe("integration-e2e lifecycle", () => {
     expect(body).toContain("| google_calendar | delegated | codex |");
 
     // ── Step 4: verify the post-Phase-D registry state.
-    //   `google_calendar.taskFlowsTouched` retains "routine.hourly_check"
+    //   `google_calendar.taskFlowsTouched` retains "routine.activity_scan"
     //   (so `selectTaskFlowVariantSuffix` picks the variant when
     //   CalendarPoller stops), but `delegatedIntegrationsForProcessKey`
     //   excludes calendar via `PROXY_DRIVEN_INTEGRATIONS`, so the

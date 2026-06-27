@@ -84,8 +84,8 @@ coordinates the high-level gather → analyze → write loop.
    see at morning review (e.g. "you'll be reminded about ESTA in 3 weeks").
 
 3. Fetch pending `roadmap_candidate` observations — weak signals queued
-   by `routine.hourly_check` (far-future calendar changes, user-edited
-   vault notes mentioning trips / deadlines, etc.) that the hourly flow
+   by `routine.activity_scan` (far-future calendar changes, user-edited
+   vault notes mentioning trips / deadlines, etc.) that the activity-scan flow
    deliberately did NOT write to roadmap directly:
    ```
    curl -s 'http://localhost:8321/api/observations?source=roadmap_candidate&pending=true&limit=50'

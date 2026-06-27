@@ -10,7 +10,7 @@
  *  1. Assemble the `ApiDependencies` record from typed inputs — translate
  *     subsystem instances (dispatcher, scheduler, messageHub, …) into the
  *     small closures the API surface consumes (`getHealthData`,
- *     `sendNotification`, `triggerHourlyCheck`, etc.).
+ *     `sendNotification`, `triggerActivityScan`, etc.).
  *  2. Construct WhatsApp / messaging-platform controls (Pattern-C; takes
  *     the adapter state holder + reload closures as deps).
  *  3. Invoke `createApp(apiDeps)` to mount every route module and the
@@ -57,7 +57,6 @@ import type { AuthRecovery } from "../core/backends/auth-recovery.js";
 import type { AuthTelemetry } from "../core/backends/auth-telemetry.js";
 import type { EventBus } from "../core/event-bus.js";
 import type { AgentScheduler } from "../core/scheduler.js";
-import type { CustomRoutineScheduler } from "../core/custom-routine-scheduler.js";
 import type { HealthMonitor } from "../core/health-monitor.js";
 import type { Heartbeat } from "../core/heartbeat.js";
 import type { MessageHub } from "../adapters/message-hub.js";
@@ -178,7 +177,6 @@ export interface BootstrapApiDeps {
    * it on an `enabled` change. Optional so partial test harnesses can omit it.
    */
   readonly agentEnabledCache?: import("../core/agents/loader.js").AgentEnabledCache;
-  readonly customRoutineScheduler: CustomRoutineScheduler;
   readonly healthMonitor: HealthMonitor;
   readonly heartbeat: Heartbeat;
   readonly messageHub: MessageHub;
@@ -203,6 +201,14 @@ export interface BootstrapApiDeps {
   readonly browserTaskRunner: import(
     "../services/browser-task/browser-task-runner.js"
   ).BrowserTaskRunner;
+  /** BACKGROUND_TASK_RUNNER_DESIGN.md §4 — generic background-task runner
+   *  + shared slot state, constructed in `event-pipeline.ts`. */
+  readonly backgroundTaskSlotStateRef: import(
+    "../services/background-task/background-task-runner.js"
+  ).BackgroundTaskSlotStateRef;
+  readonly backgroundTaskRunner: import(
+    "../services/background-task/background-task-runner.js"
+  ).BackgroundTaskRunner;
 
   // ── Safety / chat surfaces ────────────────────────────────────────────
   readonly writeTracker: AgentWriteTracker;
@@ -393,7 +399,6 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     dispatcher,
     scheduler,
     agentEnabledCache,
-    customRoutineScheduler,
     healthMonitor,
     heartbeat,
     messageHub,
@@ -745,6 +750,8 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     // race on the same value.
     browserTaskRunner: deps.browserTaskRunner,
     browserTaskSlotStateRef: deps.browserTaskSlotStateRef,
+    backgroundTaskRunner: deps.backgroundTaskRunner,
+    backgroundTaskSlotStateRef: deps.backgroundTaskSlotStateRef,
     onIntegrationModeChange,
     onMainBackendChange,
     onSetupStart: (mode) => {
@@ -767,15 +774,8 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
       // non-indexed paths is harmless.
       contextIndexReconciler.requestReconcile("manual");
     },
-    onCustomRoutinesChanged: () => {
-      try {
-        customRoutineScheduler.reload();
-      } catch (err) {
-        logger.error({ err }, "Custom routine reload failed");
-      }
-    },
-    triggerHourlyCheck: (source, options) =>
-      dispatcher.triggerHourlyCheck(source, options),
+    triggerActivityScan: (source, options) =>
+      dispatcher.triggerActivityScan(source, options),
     triggerRoadmapRefresh: (source, options) =>
       dispatcher.emitRoadmapRefresh(source, options),
     triggerRoadmapMaintenance: () => fireRoadmapMaintenance(),

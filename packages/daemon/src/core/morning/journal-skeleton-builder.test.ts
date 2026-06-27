@@ -68,9 +68,9 @@ describe("gatherJournalSkeletonFacts", () => {
   });
 
   it("counts and groups agent_actions, filters by the window, and orders by count desc then action_type asc", () => {
-    seedAction(db, { actionType: "hourly_check", startedAt: "2026-05-14 05:00:00" });
-    seedAction(db, { actionType: "hourly_check", startedAt: "2026-05-14 06:00:00" });
-    seedAction(db, { actionType: "hourly_check", startedAt: "2026-05-14 07:00:00" });
+    seedAction(db, { actionType: "activity_scan", startedAt: "2026-05-14 05:00:00" });
+    seedAction(db, { actionType: "activity_scan", startedAt: "2026-05-14 06:00:00" });
+    seedAction(db, { actionType: "activity_scan", startedAt: "2026-05-14 07:00:00" });
     seedAction(db, { actionType: "morning_routine", startedAt: "2026-05-14 04:01:00" });
     seedAction(db, { actionType: "evening_review", startedAt: "2026-05-14 23:00:00" });
     seedAction(db, { actionType: "evening_review", startedAt: "2026-05-14 23:30:00" });
@@ -82,7 +82,7 @@ describe("gatherJournalSkeletonFacts", () => {
     const facts = gatherJournalSkeletonFacts(db, WINDOW);
     expect(facts.totalActions).toBe(6);
     expect(facts.actionsByType).toEqual([
-      { actionType: "hourly_check", count: 3 },
+      { actionType: "activity_scan", count: 3 },
       { actionType: "evening_review", count: 2 },
       { actionType: "morning_routine", count: 1 },
     ]);
@@ -366,14 +366,14 @@ describe("buildJournalSkeleton — body sections", () => {
       ...EMPTY_FACTS,
       totalActions: 6,
       actionsByType: [
-        { actionType: "hourly_check", count: 3 },
+        { actionType: "activity_scan", count: 3 },
         { actionType: "evening_review", count: 2 },
         { actionType: "morning_routine", count: 1 },
       ],
     };
     const rendered = buildJournalSkeleton(BASE_INPUTS, facts);
     expect(rendered).not.toMatch(/^## Actions$/m);
-    expect(rendered).not.toContain("hourly_check: 3");
+    expect(rendered).not.toContain("activity_scan: 3");
   });
 
   it("renders ## Conversations summaries with HH:MM extracted from createdAt", () => {
@@ -614,7 +614,7 @@ describe("buildJournalSkeleton — full snapshot", () => {
     const facts: JournalSkeletonFacts = {
       totalActions: 6,
       actionsByType: [
-        { actionType: "hourly_check", count: 3 },
+        { actionType: "activity_scan", count: 3 },
         { actionType: "evening_review", count: 2 },
         { actionType: "morning_routine", count: 1 },
       ],

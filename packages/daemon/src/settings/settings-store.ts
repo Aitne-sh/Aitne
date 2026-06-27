@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import {
+  LEGACY_RUNTIME_SETTING_KEY_ALIASES,
   RUNTIME_SETTING_KEYS,
   isRuntimeSettingKey,
   runtimeSettingsSchema,
@@ -26,11 +27,19 @@ class SqliteSettingsStore implements SettingsStore {
 
     const rawValues: Partial<RuntimeSettings> = {};
     for (const row of rows) {
-      if (!isRuntimeSettingKey(row.key)) {
+      // Legacy rows (pre-rename key names) are read under their canonical
+      // key until migration 0010 has rewritten them — but never shadow a
+      // canonical row that already exists.
+      const aliased = LEGACY_RUNTIME_SETTING_KEY_ALIASES[row.key];
+      const key = aliased !== undefined ? aliased : row.key;
+      if (!isRuntimeSettingKey(key)) {
+        continue;
+      }
+      if (aliased !== undefined && key in rawValues) {
         continue;
       }
       try {
-        (rawValues as Record<string, unknown>)[row.key] = JSON.parse(row.value_json);
+        (rawValues as Record<string, unknown>)[key] = JSON.parse(row.value_json);
       } catch {
         continue;
       }

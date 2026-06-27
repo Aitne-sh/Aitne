@@ -249,7 +249,7 @@ export class ContextBuilder implements IContextBuilder {
           });
     // Self block is injected only when the surface opts in (`self`) AND the run
     // is bound to a resolved Agent slug (§5: "read … when the run is bound to a
-    // slug"). hourly_check keeps `self:false`, so its slim turn never doubles up.
+    // slug"). activity_scan keeps `self:false`, so its slim turn never doubles up.
     const wantSelfLessons =
       lessonsInjection?.self === true && boundAgentSlug !== null;
     const [userMd, rulesMd, todayMd, agentLessonsMd, selfLessonsMd] =

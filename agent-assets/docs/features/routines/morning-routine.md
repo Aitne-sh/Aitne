@@ -26,7 +26,7 @@ ask_examples:
   - What model does morning routine use?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-06-10
 keywords:
   - morning
   - day plan
@@ -42,7 +42,7 @@ related:
 prerequisites:
   - concepts/agent-day
 ui_anchors:
-  - /settings/routines
+  - /agents/morning-routine
   - /settings/models
   - /schedule
   - /activity
@@ -91,7 +91,7 @@ Within Stage A, the work proceeds in this order:
 2. Pull today's calendar events from any connected calendar integration.
 3. Scan recent unread mail and surface the few that need owner attention.
 4. Walk the roadmap for items whose **Preparation Timeline** rows fire today.
-5. Consume any pending observations the hourly check has already queued.
+5. Consume any pending observations the activity scan has already queued.
 6. Write the rebuilt `state/today.md`.
 7. Log a single status line to the dashboard activity feed.
 
@@ -126,6 +126,7 @@ through the parent `routine.morning_routine` envelope.)
 - **Schedule view** — the column for today is rebuilt against the new schedule file.
 - **Activity feed** — a `routine.morning_routine` row appears at the run timestamp.
 - **Settings → Models** — the routine's backend, model, max-turns, and budget cap are configured here.
+- **Agents → Morning Routine** (`/agents/morning-routine`) — the agent's Rulebook tab edits the morning rulebook (`policies/routines/morning.md`) plus the daily-journal Format and Export rules.
 
 ## Configuration
 

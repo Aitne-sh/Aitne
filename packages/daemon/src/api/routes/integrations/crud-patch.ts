@@ -485,6 +485,10 @@ export async function handleIntegrationPatch(
     parsed.data.nativeSyncEnabled === undefined
       ? previous.nativeSyncEnabled
       : parsed.data.nativeSyncEnabled;
+  const finalFetchTargets =
+    parsed.data.fetchTargets === undefined
+      ? (previous.fetchTargets ?? [])
+      : parsed.data.fetchTargets;
 
   // §14.7 — synchronously consult the cached probe before committing a
   // mode flip to delegated/native. Per §14.7 the PATCH response path
@@ -600,6 +604,7 @@ export async function handleIntegrationPatch(
       ...(finalNativeSyncEnabled === false
         ? { nativeSyncEnabled: false }
         : {}),
+      fetchTargets: finalFetchTargets,
       deniedTools: finalDeniedTools,
       lastChangedAt: stamped,
     });
@@ -641,7 +646,7 @@ export async function handleIntegrationPatch(
     // re-evaluation — the predicate
     // (`hasActiveDelegatedSyncIntegration`) ignores `nativeSyncEnabled`
     // because the worker has no role in native mode (see appendix
-    // §"Polling, observers, and the hourly-check threshold"). The
+    // §"Polling, observers, and the activity-scan threshold"). The
     // `nativeSyncEnabled` field is retained on the state row for
     // schema compatibility but toggling it is inert today.
     const syncChanged =

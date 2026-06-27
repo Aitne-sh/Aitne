@@ -27,10 +27,12 @@ export interface PolicySnapshotEntry {
   slug: string;
   status: PolicyStatus;
   /**
-   * Cron expression read from the linked `policies/routines/custom/<slug>.md`'s
-   * frontmatter. Null when no routine is linked or the routine file is
-   * missing. Frozen at snapshot time — manual cron edits to the routine
-   * propagate on the next reconcile pass.
+   * Cron expression read from the linked execution vehicle: the Agent's
+   * `policies/agents/<slug>/agent.md` `schedule.expression`, falling back to
+   * a legacy `policies/routines/custom/<slug>.md` `cron` (inert
+   * pre-migration files). Null when nothing is linked or neither file
+   * resolves. Frozen at snapshot time — edits propagate on the next
+   * reconcile pass.
    */
   cadence: string | null;
   /** Slug from `linked.routine` frontmatter, or null. */

@@ -677,7 +677,7 @@ function RunCounts({ counts }: { counts: NonNullable<RecentRun["counts"]> }) {
         return (
           <span
             key={key}
-            className={emphasise && value > 0 ? "text-amber-700 dark:text-amber-300" : undefined}
+            className={emphasise && value > 0 ? "text-warning" : undefined}
           >
             {value} {label}
           </span>

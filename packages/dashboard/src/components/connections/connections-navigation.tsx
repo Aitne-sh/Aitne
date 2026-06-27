@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   MessageSquare,
   GitBranch,
-  Brain,
+  BookText,
   Calendar,
   Mail,
   Server,
@@ -34,10 +34,10 @@ const NAV_ITEMS: NavItem[] = [
     description: "GitHub remotes and local clones",
   },
   {
-    href: "/connections/knowledge",
-    label: "Knowledge",
-    icon: Brain,
-    description: "Obsidian and Notion",
+    href: "/connections/notes",
+    label: "Notes",
+    icon: BookText,
+    description: "Obsidian vault and Notion pages",
   },
   {
     href: "/connections/calendar",

@@ -1,4 +1,4 @@
-import { parseCustomRoutineSpec } from "../custom-routine-scheduler.js";
+import { parseCustomRoutineSpec } from "../custom-routines.js";
 import { validateContextFileFrontmatter } from "../context-frontmatter.js";
 import {
   isAgentDefinitionPath,

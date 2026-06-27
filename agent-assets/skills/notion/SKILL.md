@@ -80,7 +80,7 @@ Moves to trash (~30 days). Restore via `PATCH` with `{ "in_trash": false }`.
 
 ## When NOT to act
 
-- During `routine.hourly_check` this skill is **read-only** — no creates,
+- During `routine.activity_scan` this skill is **read-only** — no creates,
   property updates, content patches, or archives.
 - No bulk operations without user confirmation: about to touch 3+ pages,
   stop and ask first. Single ops only.

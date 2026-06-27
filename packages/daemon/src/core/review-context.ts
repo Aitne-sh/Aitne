@@ -12,7 +12,7 @@ import { createLogger } from "../logging.js";
 const logger = createLogger("review-context");
 
 export type ReviewFlowSlug =
-  | "hourly"
+  | "activity-scan"
   | "morning"
   | "evening"
   | "weekly"
@@ -26,10 +26,10 @@ interface ReviewFlowConfig {
 }
 
 const REVIEW_FLOW_BY_PROCESS_KEY: Record<string, ReviewFlowConfig> = {
-  "routine.hourly_check": {
-    flow: "hourly",
-    dossierPath: dossierPath("hourly"),
-    dossierLabel: "Hourly dossier",
+  "routine.activity_scan": {
+    flow: "activity-scan",
+    dossierPath: dossierPath("activity-scan"),
+    dossierLabel: "Activity scan dossier",
   },
   "routine.morning_routine": {
     flow: "morning",
@@ -398,7 +398,11 @@ function reviewFlowsMatch(raw: string, flow: ReviewFlowSlug): boolean {
     .split(/[,;/\s]+/)
     .map((token) => token.trim())
     .filter(Boolean);
-  return tokens.includes(flow);
+  if (tokens.includes(flow)) return true;
+  // v0.1.10 → v0.1.11 rename: user-vault `_index.md` rows written before the
+  // rename tag the activity-scan flow as "hourly". Accept the legacy token
+  // until the index reconciler has naturally rewritten those rows.
+  return flow === "activity-scan" && tokens.includes("hourly");
 }
 
 function sanitizeContextIndexPath(rawPath: string): string | null {

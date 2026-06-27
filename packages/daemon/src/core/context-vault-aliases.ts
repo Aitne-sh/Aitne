@@ -84,6 +84,24 @@ export interface VaultPathAlias {
  */
 export const VAULT_PATH_ALIASES: readonly VaultPathAlias[] = [
   // Directory-prefix renames. Longest first.
+  // v0.1.10 → v0.1.11 "Hourly Check" → "Activity Scan" rename: the legacy
+  // pre-vault-v2 spellings must land on the NEW canonical file rather than
+  // the retired `…/hourly.md`, so these exact-file entries sit before the
+  // generic `routines/` / `dossiers/` prefix rules. The already-canonical
+  // old spellings (`policies/routines/hourly.md`, `knowledge/dossiers/
+  // hourly.md`) are handled by RENAMED_CANONICAL_FILES instead — the
+  // canonical fast-path in `aliasVaultPath` would short-circuit before
+  // this table is consulted.
+  {
+    fromPrefix: "routines/hourly",
+    toPrefix: "policies/routines/activity-scan",
+    exactOnly: true,
+  },
+  {
+    fromPrefix: "dossiers/hourly",
+    toPrefix: "knowledge/dossiers/activity-scan",
+    exactOnly: true,
+  },
   // `rules/policies/` (legacy capture dir) before `rules/`.
   { fromPrefix: "rules/policies/", toPrefix: "policies/management-captures/" },
   // `agent/scratch/` before `agent/`.
@@ -171,12 +189,33 @@ const DOMAIN_ENTITY_RE = new RegExp(
  * on disk — that is the caller's job (e.g. `safePath` for the HTTP
  * route). The job here is purely string translation.
  */
+/**
+ * Canonical-shaped paths that were RENAMED in place (same class, new file
+ * name). Checked before the canonical fast-path — a renamed file's old
+ * spelling is otherwise indistinguishable from a valid canonical path.
+ * v0.1.10 → v0.1.11: the "Hourly Check" agent became "Activity Scan";
+ * migration 0010 renames the files on disk, these entries keep old
+ * skill/curl paths working for a deprecation window.
+ */
+const RENAMED_CANONICAL_FILES: Readonly<Record<string, string>> = {
+  "policies/routines/hourly": "policies/routines/activity-scan",
+  "policies/routines/hourly.md": "policies/routines/activity-scan.md",
+  "knowledge/dossiers/hourly": "knowledge/dossiers/activity-scan",
+  "knowledge/dossiers/hourly.md": "knowledge/dossiers/activity-scan.md",
+};
+
 export function aliasVaultPath(relativePath: string): VaultPathAliasResult {
   // Defensive normalisation — strip a leading slash so the resolver can
   // be called with either form. Trailing slashes are preserved
   // (callers like the migration manifest use `state/inbox/` as a dir).
   const input =
     relativePath.startsWith("/") ? relativePath.slice(1) : relativePath;
+
+  // In-place file renames — must precede the canonical fast-path.
+  const renamed = RENAMED_CANONICAL_FILES[input];
+  if (renamed !== undefined) {
+    return { canonicalPath: renamed, legacyPath: input, aliased: true };
+  }
 
   // Already canonical — fast path.
   if (isCanonicalSixClassPath(input)) {

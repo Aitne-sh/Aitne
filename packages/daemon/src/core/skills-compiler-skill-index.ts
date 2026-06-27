@@ -227,8 +227,8 @@ export function refreshSkillIndexBlock(
  * @deprecated DELEGATED-PROXY-API-DESIGN.md §11 — after Phase D no in-tree
  * skill uses `{{> base }}`: mail / external-services unified their bodies
  * during Phase D, and the lone surviving `notion/SKILL.base.md` was
- * removed in Phase 9 (its hourly-check read-only constraint moved to
- * `routine.hourly_check.md` task-flow where the rule applies in every
+ * removed in Phase 9 (its activity-scan read-only constraint moved to
+ * `routine.activity_scan.md` task-flow where the rule applies in every
  * integration mode, including same-backend delegated where the skill
  * body is dropped). The helper is retained for future composition needs;
  * remove the call sites in `materializeClaudeSession` /

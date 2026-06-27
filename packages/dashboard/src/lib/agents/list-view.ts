@@ -27,7 +27,7 @@ export interface AgentListFilterState {
   status: "all" | "enabled" | "disabled";
   /**
    * Cadence shape: "all" | "interval" (fires every N min/hours, e.g.
-   * hourly-check) | "scheduled" (fixed daily/weekly time).
+   * activity-scan) | "scheduled" (fixed daily/weekly time).
    */
   cadence: "all" | "interval" | "scheduled";
 }

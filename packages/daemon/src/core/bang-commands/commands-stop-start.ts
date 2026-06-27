@@ -54,7 +54,7 @@ export const stopCommand: BangCommand = {
         "",
         "Halted:",
         "- Morning / evening / weekly / monthly review",
-        "- Hourly check, profile sweep",
+        "- Activity scan, profile sweep",
         "- Scheduled DMs",
         "",
         "Still running:",
@@ -74,7 +74,7 @@ export const startCommand: BangCommand = {
   describe: "Resume autonomous work paused by !stop.",
   details: [
     "Clears the user-paused state.",
-    "Queued observations are consumed by the next eligible hourly check.",
+    "Queued observations are consumed by the next eligible activity scan.",
   ],
   runsWhilePaused: true,
   handler: async (ctx) => {
@@ -96,7 +96,7 @@ export const startCommand: BangCommand = {
         "",
         `Was paused: ${formatLocalLong(prev.since, ctx.config)}`,
         "",
-        "Next hourly check will consume any observations",
+        "Next activity scan will consume any observations",
         "queued during the pause.",
       ].join("\n"),
     );

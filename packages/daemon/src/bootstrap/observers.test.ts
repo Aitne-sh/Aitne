@@ -185,7 +185,7 @@ function makeConfig(
     gitPushOverdueMinutes: 120,
     gitProjectUpdateDebounceMinutes: 5,
     githubPollIntervalSeconds: 60,
-    hourlyCheckEnabled: true,
+    activityScanEnabled: true,
     calendarPollIntervalSeconds: 60,
     googleCalendarId: "primary",
     notionPollIntervalSeconds: 60,

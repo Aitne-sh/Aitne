@@ -1370,7 +1370,7 @@ export const AGENT_ERROR_REGISTRY = {
   "observations.invalid_actor": {
     expected: "actor = 'user' | 'agent' | 'system'",
     hint:
-      "The `?actor=` filter accepts only `user`, `agent`, or `system`. `user` is the hourly-check default (excludes agent's own writes). Omit to get all observations.",
+      "The `?actor=` filter accepts only `user`, `agent`, or `system`. `user` is the activity-scan default (excludes agent's own writes). Omit to get all observations.",
     skillAnchor: "observations#actor-filter",
     legacyErrorCode: "invalid_actor",
     constraint: { type: "enum", enum: ["user", "agent", "system"] },
@@ -2061,12 +2061,12 @@ export const AGENT_ERROR_REGISTRY = {
     legacyErrorCode: "daemon_starting",
     retryable: true,
   },
-  "agent.hourly_check_unavailable": {
-    expected: "triggerHourlyCheck wired into the API server",
+  "agent.activity_scan_unavailable": {
+    expected: "triggerActivityScan wired into the API server",
     hint:
-      "POST /agent/run-now/hourly was called before the hourly-check engine was wired (typically only the first ~1s of boot). Wait ~3s and retry.",
+      "POST /api/agent/run-now was called before the activity-scan engine was wired (typically only the first ~1s of boot). Wait ~3s and retry.",
     skillAnchor: "agent#run-now",
-    legacyErrorCode: "hourly_check_unavailable",
+    legacyErrorCode: "activity_scan_unavailable",
     retryable: true,
   },
   "agent.roadmap_maintenance_unavailable": {

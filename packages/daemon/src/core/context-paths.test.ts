@@ -64,8 +64,8 @@ describe("context-paths (six-class layout)", () => {
   });
 
   it("exposes routine paths", () => {
-    expect(CONTEXT_RELATIVE_PATHS.routines.hourly).toBe(
-      "policies/routines/hourly.md",
+    expect(CONTEXT_RELATIVE_PATHS.routines.activityScan).toBe(
+      "policies/routines/activity-scan.md",
     );
     expect(CONTEXT_RELATIVE_PATHS.routines.morning).toBe(
       "policies/routines/morning.md",
