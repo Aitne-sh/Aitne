@@ -63,7 +63,7 @@ DESIGN.md
 # future docs matching these suffixes are auto-ignored without editing this file.
 /*_DESIGN.md
 /*_PLAN.md
-/*_AUDIT.md
+/*_AUDIT*.md
 /*_LIMITATIONS.md
 /*_STRATEGY.md
 /*_RESEARCH.md
