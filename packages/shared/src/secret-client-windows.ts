@@ -36,7 +36,10 @@ export class WindowsDpapiSecretClient implements PersonalAgentKeychainClient {
   constructor(secretsDir?: string, psBinary?: string) {
     this.secretsDir = secretsDir ?? join(homedir(), ".personal-agent", "secrets");
     this.psBinary = psBinary ?? "powershell.exe";
-    mkdirSync(this.secretsDir, { recursive: true });
+    // Restrictive mode for parity with the POSIX file client. On Windows the
+    // .dpapi files are already user-bound encrypted, so this is consistency
+    // hardening rather than the primary control.
+    mkdirSync(this.secretsDir, { recursive: true, mode: 0o700 });
   }
 
   private filePath(name: string): string {

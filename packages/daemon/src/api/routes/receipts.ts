@@ -222,7 +222,11 @@ export function createReceiptRoutes(deps: ApiDependencies): Hono {
     }
 
     c.header("Content-Type", row.mime_type);
-    c.header("Content-Disposition", `attachment; filename="${row.filename}"`);
+    // `row.filename` comes from email-attachment metadata (sender-controlled),
+    // so escape characters that could break out of the quoted header value or
+    // inject extra header lines — same discipline as the attachments route.
+    const safeFilename = row.filename.replace(/["\\\r\n]/g, "_");
+    c.header("Content-Disposition", `attachment; filename="${safeFilename}"`);
     return c.body(new Uint8Array(attachment.data));
   });
 

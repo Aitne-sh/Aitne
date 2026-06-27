@@ -449,13 +449,22 @@ describe("egress-denylist", () => {
       expect(decision.denied).toBe(false);
     });
 
-    it("treats a DNS lookup failure as 'allow' (fail-open on the resolve leg)", async () => {
+    it("fails CLOSED on a DNS lookup failure (closes the differential-resolver gap)", async () => {
       const decision = await shouldDenyEgress("http://anthropic.com/", {
         resolveIps: async () => {
           throw new Error("ENOTFOUND");
         },
       });
-      expect(decision.denied).toBe(false);
+      expect(decision.denied).toBe(true);
+      if (decision.denied) expect(decision.reason).toBe("resolve_error");
+    });
+
+    it("fails CLOSED when the resolver returns zero addresses", async () => {
+      const decision = await shouldDenyEgress("http://anthropic.com/", {
+        resolveIps: async () => [],
+      });
+      expect(decision.denied).toBe(true);
+      if (decision.denied) expect(decision.reason).toBe("resolve_error");
     });
 
     it("treats hostname denylist as primary even when DNS resolver succeeds", async () => {

@@ -11,6 +11,7 @@ import type { ServiceRegistry } from "../services/service-registry.js";
 import type { CalendarEvent } from "../services/calendar.js";
 import { readIntegrations } from "../db/integrations-store.js";
 import { createLogger } from "../logging.js";
+import { sanitizeUntrustedTemplateValue } from "./backends/prompt-utils.js";
 
 const logger = createLogger("context-builder-calendar");
 
@@ -309,8 +310,15 @@ function formatCalendarEvents(
     } else {
       for (const event of dayEvents) {
         const timeRange = formatTimeRange(deps, event);
-        const summary = event.summary ?? "Untitled";
-        const locationPart = event.location ? ` @ ${event.location}` : "";
+        // Calendar titles/locations are fully attacker-controlled — anyone
+        // who can send the user an invite controls them. They land inside
+        // the daemon-rendered `context` (which `resolveTemplate` does NOT
+        // sanitise), so escape `<`/`>` here so a crafted title cannot close
+        // the `<calendar_events_*>` fence and inject a forged directive.
+        const summary = sanitizeUntrustedTemplateValue(event.summary ?? "Untitled");
+        const locationPart = event.location
+          ? ` @ ${sanitizeUntrustedTemplateValue(event.location)}`
+          : "";
         lines.push(`- ${timeRange} ${summary}${locationPart}`);
       }
     }

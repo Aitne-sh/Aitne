@@ -9,6 +9,7 @@ import {
   formatSqliteTimestampForContext,
   truncateContextText,
 } from "./context-builder-format.js";
+import { sanitizeUntrustedTemplateValue } from "./backends/prompt-utils.js";
 
 const YESTERDAY_AGENT_ACTION_LIMIT = 40;
 const YESTERDAY_MESSAGE_LIMIT = 60;
@@ -312,7 +313,7 @@ function formatYesterdayAgentActions(
     const trigger = row.trigger ? ` (${row.trigger})` : "";
     const result = row.result ?? "unknown";
     const error = row.error
-      ? ` — error: ${truncateContextText(row.error, 140)}`
+      ? ` — error: ${sanitizeUntrustedTemplateValue(truncateContextText(row.error, 140))}`
       : "";
     lines.push(
       `- ${formatSqliteTimestampForContext(row.started_at, timezoneLabel)} [${result}] ${row.action_type}${trigger}${error}`,
@@ -341,7 +342,7 @@ function formatYesterdayMessages(
   }
   for (const row of rows) {
     lines.push(
-      `- ${formatSqliteTimestampForContext(row.timestamp, timezoneLabel)} [${row.platform}/${row.role}] ${truncateContextText(row.content, 180)}`,
+      `- ${formatSqliteTimestampForContext(row.timestamp, timezoneLabel)} [${row.platform}/${row.role}] ${sanitizeUntrustedTemplateValue(truncateContextText(row.content, 180))}`,
     );
   }
   return lines.join("\n");
@@ -369,7 +370,7 @@ function formatYesterdayDmConversationLog(
     const scopeKey =
       row.scope_key && row.scope_key.length > 0 ? `/${row.scope_key}` : "";
     lines.push(
-      `- ${formatSqliteTimestampForContext(row.created_at, timezoneLabel)} [${row.platform}:${row.scope}${scopeKey}] (${row.message_count} msgs) ${truncateContextText(row.summary, 220)}`,
+      `- ${formatSqliteTimestampForContext(row.created_at, timezoneLabel)} [${row.platform}:${row.scope}${scopeKey}] (${row.message_count} msgs) ${sanitizeUntrustedTemplateValue(truncateContextText(row.summary, 220))}`,
     );
   }
   return lines.join("\n");

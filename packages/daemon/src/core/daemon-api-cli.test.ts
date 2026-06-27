@@ -73,6 +73,110 @@ describe("daemon-api-cli", () => {
     expect(withoutToken.PATH?.split(":")[0]).toBe(join(sessionDir, ".pa/bin"));
   });
 
+  // SECURITY: the agent subprocess env is a copy of the daemon's process.env.
+  // Agents run with bypassPermissions + Bash, so `env`/`printenv` can leak
+  // anything in it. These tests pin the scrubbing of daemon-internal secrets
+  // and inactive-backend provider keys.
+  describe("sensitive-credential scrubbing", () => {
+    function withEnv(
+      vars: Record<string, string | undefined>,
+      fn: () => void,
+    ): void {
+      const saved: Record<string, string | undefined> = {};
+      for (const key of Object.keys(vars)) saved[key] = process.env[key];
+      try {
+        for (const [key, value] of Object.entries(vars)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        fn();
+      } finally {
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    }
+
+    function freshSessionDir(): string {
+      const dir = mkdtempSync(join(tmpdir(), "pa-daemon-api-env-"));
+      tempDirs.push(dir);
+      return dir;
+    }
+
+    it("never propagates PA_MASTER_PASSWORD to a child (active backend known)", () => {
+      const sessionDir = freshSessionDir();
+      withEnv({ PA_MASTER_PASSWORD: "super-secret-master" }, () => {
+        const env = buildDaemonApiCliEnv(sessionDir, 8321, {
+          sessionBackend: "claude",
+        });
+        expect(env.PA_MASTER_PASSWORD).toBeUndefined();
+      });
+    });
+
+    it("strips PA_MASTER_PASSWORD but leaves provider keys when no backend is set", () => {
+      const sessionDir = freshSessionDir();
+      withEnv({ PA_MASTER_PASSWORD: "x", OPENAI_API_KEY: "sk-openai" }, () => {
+        const env = buildDaemonApiCliEnv(sessionDir, 8321, {});
+        expect(env.PA_MASTER_PASSWORD).toBeUndefined();
+        // No backend known → provider-key scoping is skipped.
+        expect(env.OPENAI_API_KEY).toBe("sk-openai");
+      });
+    });
+
+    it("leaves provider keys when the backend id is unrecognised", () => {
+      const sessionDir = freshSessionDir();
+      withEnv({ PA_MASTER_PASSWORD: "x", OPENAI_API_KEY: "sk-openai" }, () => {
+        const env = buildDaemonApiCliEnv(sessionDir, 8321, {
+          sessionBackend: "not-a-real-backend",
+        });
+        expect(env.PA_MASTER_PASSWORD).toBeUndefined();
+        expect(env.OPENAI_API_KEY).toBe("sk-openai");
+      });
+    });
+
+    it("scopes provider keys to the active backend (a Claude session gets no OpenAI/Gemini key)", () => {
+      const sessionDir = freshSessionDir();
+      withEnv(
+        {
+          ANTHROPIC_API_KEY: "sk-ant",
+          OPENAI_API_KEY: "sk-openai",
+          GEMINI_API_KEY: "g-key",
+        },
+        () => {
+          const env = buildDaemonApiCliEnv(sessionDir, 8321, {
+            sessionBackend: "claude",
+          });
+          expect(env.ANTHROPIC_API_KEY).toBe("sk-ant"); // active backend keeps its own
+          expect(env.OPENAI_API_KEY).toBeUndefined(); // codex key stripped
+          expect(env.GEMINI_API_KEY).toBeUndefined(); // gemini key stripped
+        },
+      );
+    });
+
+    it("keeps a credential shared by the active backend, strips the rest", () => {
+      const sessionDir = freshSessionDir();
+      // GOOGLE_APPLICATION_CREDENTIALS is managed by both gemini (vertex) and
+      // claude (vertex). For a gemini session it must survive even though
+      // claude is an inactive backend that also lists it.
+      withEnv(
+        {
+          GOOGLE_APPLICATION_CREDENTIALS: "/path/to/creds.json",
+          ANTHROPIC_API_KEY: "sk-ant",
+          OPENAI_API_KEY: "sk-openai",
+        },
+        () => {
+          const env = buildDaemonApiCliEnv(sessionDir, 8321, {
+            sessionBackend: "gemini",
+          });
+          expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe("/path/to/creds.json");
+          expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+          expect(env.OPENAI_API_KEY).toBeUndefined();
+        },
+      );
+    });
+  });
+
   // DELEGATED-MODE-V2-DESIGN.md §4.2.3 — delegated-endpoint env pathway
   describe("session-identity env vars (sessionBackend / eventId / processKey)", () => {
     it("emits PA_SESSION_BACKEND when options.sessionBackend is provided", () => {

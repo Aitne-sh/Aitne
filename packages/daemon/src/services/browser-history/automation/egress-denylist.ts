@@ -431,7 +431,10 @@ export interface ResolveIps {
 export async function shouldDenyEgress(
   url: string,
   opts?: { resolveIps?: ResolveIps; hostnameDenylist?: ReadonlyArray<RegExp> },
-): Promise<{ denied: true; reason: "hostname" | "cidr" | "invalid_url" } | { denied: false }> {
+): Promise<
+  | { denied: true; reason: "hostname" | "cidr" | "invalid_url" | "resolve_error" }
+  | { denied: false }
+> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -458,15 +461,25 @@ export async function shouldDenyEgress(
     return { denied: false };
   }
   if (opts?.resolveIps) {
-    let resolved: readonly string[] = [];
+    let resolved: readonly string[];
     try {
       resolved = await opts.resolveIps(hostname);
     } catch {
-      // DNS failure → let the request through; if the lookup is broken
-      // here it will fail at the network layer too. Failing closed
-      // (treating a DNS error as a block) would brick every workflow
-      // during a temporary resolver outage.
-      return { denied: false };
+      // Fail CLOSED. This CIDR gate is the primary defence against egress to
+      // private / link-local / cloud-metadata IPs (the browser sandbox shares
+      // the host network namespace, so there is no packet-layer block behind
+      // it). The guard and Chromium resolve the hostname independently — a
+      // name that Node's resolver fails on but Chromium's resolver succeeds on
+      // (SERVFAIL / timeout / search-domain / IDN differences) would otherwise
+      // reach an internal address completely unchecked. Blocking on resolve
+      // failure closes that differential-resolver gap; a host that is
+      // genuinely unresolvable would fail at the network layer regardless.
+      return { denied: true, reason: "resolve_error" };
+    }
+    if (resolved.length === 0) {
+      // No addresses to vet is as unverifiable as a thrown lookup — don't let
+      // the host through to Chromium's independent resolution.
+      return { denied: true, reason: "resolve_error" };
     }
     for (const ip of resolved) {
       if (matchesCidrDenylist(ip)) {

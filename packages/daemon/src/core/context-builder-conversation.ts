@@ -547,7 +547,7 @@ export function renderRecentDmConversationLog(
     const scopeKey =
       row.scope_key && row.scope_key.length > 0 ? `/${row.scope_key}` : "";
     lines.push(
-      `- ${formatSqliteTimestampForContext(row.created_at, timezoneLabel)} [${row.platform}:${row.scope}${scopeKey}] (${row.message_count} msgs) ${truncateContextText(row.summary, 220)}`,
+      `- ${formatSqliteTimestampForContext(row.created_at, timezoneLabel)} [${row.platform}:${row.scope}${scopeKey}] (${row.message_count} msgs) ${sanitizeMessageContent(truncateContextText(row.summary, 220))}`,
     );
   }
   return lines.join("\n");

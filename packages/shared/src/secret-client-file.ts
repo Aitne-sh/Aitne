@@ -6,7 +6,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { PersonalAgentKeychainClient } from "./keychain-helper-client.js";
@@ -97,7 +97,18 @@ export class FileSecretClient implements PersonalAgentKeychainClient {
   constructor(masterPassword: string, secretsDir?: string) {
     this.masterPassword = masterPassword;
     this.secretsDir = secretsDir ?? join(homedir(), ".personal-agent", "secrets");
-    mkdirSync(this.secretsDir, { recursive: true });
+    // Owner-only directory: it holds the encrypted secret blobs and the
+    // `.master-hash` used to verify the master password. `mode` on mkdir is
+    // ignored when the directory already exists (the common upgrade case),
+    // so tighten existing dirs explicitly. Best-effort — the .enc/.master-hash
+    // files are themselves 0600, and some filesystems don't support chmod.
+    mkdirSync(this.secretsDir, { recursive: true, mode: 0o700 });
+    try {
+      chmodSync(this.secretsDir, 0o700);
+    } catch {
+      // perms hardening is best-effort; the per-file 0600 mode is the
+      // primary confidentiality control.
+    }
   }
 
   private filePath(secretName: string): string {

@@ -1,5 +1,10 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
+import {
+  BACKEND_IDS,
+  getManagedApiKeyEnvVars,
+  type BackendId,
+} from "@aitne/shared";
 
 export const SESSION_DAEMON_API_BIN_DIR = join(".pa", "bin");
 export const SESSION_DAEMON_API_CLI_REL_PATH = join(
@@ -741,6 +746,53 @@ export interface DaemonApiCliEnvOptions {
   eventCorrelationId?: string;
 }
 
+/**
+ * Daemon-internal secrets that must NEVER be inherited by an agent
+ * subprocess. Agents run with bypassPermissions and have Bash; `env` /
+ * `printenv` / `process.env` cannot be blocked at the tool layer, so a
+ * prompt-injected session could exfiltrate anything in its environment.
+ * `PA_MASTER_PASSWORD` decrypts the *entire* file-fallback secret store and
+ * has no legitimate use in a child process.
+ */
+const ALWAYS_STRIP_FROM_CHILD_ENV: readonly string[] = ["PA_MASTER_PASSWORD"];
+
+function isBackendId(value: string): value is BackendId {
+  return (BACKEND_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * Strip credentials a child agent must not see from a copied env:
+ *  - daemon-internal secrets (master password) — always.
+ *  - inactive backends' provider API keys — when the active backend is
+ *    known. The keychain mirror exports every configured backend's provider
+ *    key into the daemon's `process.env` globally, so without this a Claude
+ *    session's env also carries the user's OpenAI / Gemini / OpenCode
+ *    credentials. Scoping the keys to the backend that actually uses them
+ *    keeps a prompt-injected child from exfiltrating credentials it never
+ *    needs. Only applied when `sessionBackend` is a recognised backend id;
+ *    an absent/unknown value leaves the env untouched (no behaviour change
+ *    for non-agent spawns).
+ */
+function scrubSensitiveChildEnv(
+  env: Record<string, string>,
+  sessionBackend: string | undefined,
+): void {
+  for (const name of ALWAYS_STRIP_FROM_CHILD_ENV) {
+    delete env[name];
+  }
+  if (!sessionBackend || !isBackendId(sessionBackend)) return;
+  const activeVars = new Set(getManagedApiKeyEnvVars(sessionBackend));
+  for (const backendId of BACKEND_IDS) {
+    if (backendId === sessionBackend) continue;
+    for (const name of getManagedApiKeyEnvVars(backendId)) {
+      // Keep any var the active backend also relies on (shared across
+      // providers, e.g. a common cloud credential).
+      if (activeVars.has(name)) continue;
+      delete env[name];
+    }
+  }
+}
+
 export function buildDaemonApiCliEnv(
   sessionDir: string,
   apiPort: number,
@@ -766,6 +818,11 @@ export function buildDaemonApiCliEnv(
     PATH: pathParts.join(delimiter),
     [DAEMON_API_BASE_URL_ENV]: `http://127.0.0.1:${apiPort}`,
   };
+
+  // Remove daemon-internal secrets and inactive-backend provider keys before
+  // the child ever sees them. Must run after the process.env copy and before
+  // the PA_* identity vars below (which the child legitimately needs).
+  scrubSensitiveChildEnv(env, options.sessionBackend);
 
   if (options.readToken) {
     env[DAEMON_API_READ_TOKEN_ENV] = options.readToken;
