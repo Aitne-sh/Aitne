@@ -14,8 +14,6 @@ import { getBackendIds, type BackendId, type ExecutionPermissionMode } from "@ai
 
 export type ExecutionModeUi = "safe" | "allow";
 
-export const EXECUTION_MODE_UI_VALUES = ["safe", "allow"] as const;
-
 /**
  * Per-backend override as stored in form state. `null` means "follow the
  * top-level choice" — the accordion is collapsed-by-default and unchanged
@@ -29,10 +27,6 @@ export const EMPTY_OVERRIDES: PerBackendOverrides = {
   gemini: null,
   opencode: null,
 };
-
-export function uiToInternal(mode: ExecutionModeUi): ExecutionPermissionMode {
-  return mode === "safe" ? "strict" : "allow";
-}
 
 export function internalToUi(mode: ExecutionPermissionMode): ExecutionModeUi {
   return mode === "strict" ? "safe" : "allow";
@@ -130,19 +124,6 @@ function majorityMode(
     if (overrides[b] !== null) return overrides[b] as ExecutionModeUi;
   }
   return "safe";
-}
-
-/**
- * Resolve what mode a backend will effectively run in given the current
- * form state. Used by the advanced accordion to echo the actual mode a
- * row will be written with — including when "follow top-level" is active.
- */
-export function resolveEffectiveMode(
-  backend: BackendId,
-  topLevel: ExecutionModeUi,
-  overrides: PerBackendOverrides,
-): ExecutionModeUi {
-  return overrides[backend] ?? topLevel;
 }
 
 /**

@@ -63,25 +63,6 @@ export function useBooksSummary(months?: number) {
   });
 }
 
-export function usePatchBook() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      ...body
-    }: {
-      id: number;
-      status?: string;
-      rating?: number;
-      notes?: string;
-    }) => api.patch(`/books/${id}`, body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["books"] });
-      queryClient.invalidateQueries({ queryKey: ["books-summary"] });
-    },
-  });
-}
-
 export function useImportClippings() {
   const queryClient = useQueryClient();
   return useMutation({

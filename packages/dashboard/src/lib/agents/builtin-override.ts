@@ -33,17 +33,6 @@ export interface OverrideFieldSpec {
   help: string;
 }
 
-/**
- * Allow-listed paths that have NO standalone form field. `backend.backend_id`
- * is written together with `backend.model` by the model dropdown (the picked
- * option carries its owning backend), so rendering it separately would only
- * invite an inconsistent pair. Diff/validation logic still covers it via
- * `ALL_OVERRIDE_KEYS`.
- */
-export const HIDDEN_OVERRIDE_KEYS: readonly OverrideFieldKey[] = [
-  "backend.backend_id",
-] as const;
-
 /** Every editable path — displayed fields plus the hidden companions. */
 export const ALL_OVERRIDE_KEYS: readonly OverrideFieldKey[] = OVERRIDE_EDIT_PATHS;
 

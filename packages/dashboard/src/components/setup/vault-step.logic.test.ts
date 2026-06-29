@@ -3,7 +3,6 @@ import {
   buildVaultMigrationBody,
   canContinue,
   decideVaultMigration,
-  shouldRollbackToPlain,
   validatePrimaryVaultPathClient,
   vaultPathIssueMessage,
 } from "./vault-step.logic";
@@ -118,20 +117,6 @@ describe("vaultPathIssueMessage", () => {
       messages.add(m);
     }
     expect(messages.size).toBe(3);
-  });
-});
-
-describe("shouldRollbackToPlain", () => {
-  it("is true only for the plain ← obsidian transition", () => {
-    expect(shouldRollbackToPlain("plain", "obsidian")).toBe(true);
-    expect(shouldRollbackToPlain("plain", "plain")).toBe(false);
-    expect(shouldRollbackToPlain("obsidian", "plain")).toBe(false);
-    expect(shouldRollbackToPlain("obsidian", "obsidian")).toBe(false);
-  });
-
-  it("treats null/undefined current as not-obsidian", () => {
-    expect(shouldRollbackToPlain("plain", null)).toBe(false);
-    expect(shouldRollbackToPlain("plain", undefined)).toBe(false);
   });
 });
 

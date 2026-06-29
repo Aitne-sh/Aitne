@@ -63,18 +63,6 @@ export function vaultPathIssueMessage(issue: VaultPathIssue): string {
 }
 
 /**
- * True when the user picked "plain" while the daemon is still in
- * `obsidian` mode — the one case where VaultStep must call
- * `/setup/migrate-context` to walk the daemon back out of obsidian.
- */
-export function shouldRollbackToPlain(
-  pendingMode: VaultMode,
-  currentMode: VaultMode | null | undefined,
-): boolean {
-  return pendingMode === "plain" && currentMode === "obsidian";
-}
-
-/**
  * Continue-button enablement. Plain mode never blocks on path; obsidian
  * mode requires a valid (or at least non-empty) path. `saving` blocks
  * both branches.

@@ -18,36 +18,12 @@ import { Alert } from "@/components/ui/alert";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { ChevronDown, Plus, Trash2, Eye, EyeOff, CheckCircle2, BookOpen, ExternalLink } from "lucide-react";
 import { INTEGRATION_DESCRIPTORS } from "@aitne/shared";
-import { ConnectionCard, deriveIntegrationStatus } from "./connection-card";
-
-export function NotionCard() {
-  const { data: config } = useConfig();
-  const { data: health } = useHealth();
-
-  // Match the pre-split behavior: render nothing while config/health load so
-  // the setup wizard does not flash an empty Notion frame on first paint.
-  if (!config || !health) return null;
-
-  const notionStatus = health.integrations?.notion;
-
-  return (
-    <ConnectionCard
-      name="Notion"
-      icon={<BookOpen className="h-4 w-4" />}
-      status={deriveIntegrationStatus(notionStatus)}
-      error={notionStatus?.error}
-    >
-      <NotionDirectSettingsBody />
-    </ConnectionCard>
-  );
-}
 
 /**
  * API key + database mappings + setup notes, without a surrounding card frame.
- * Used standalone via {@link NotionCard} (which adds a ConnectionCard wrapper for
- * the setup wizard) and as `children` of the registry-driven `IntegrationCard`
- * on the Knowledge page so the Notion mode dropdown and credential fields
- * render inside a single card instead of two stacked ones.
+ * Composed as `children` of the registry-driven `IntegrationCard` on the
+ * Knowledge page so the Notion mode dropdown and credential fields render
+ * inside a single card instead of two stacked ones.
  */
 export function NotionDirectSettingsBody() {
   const { data: config } = useConfig();

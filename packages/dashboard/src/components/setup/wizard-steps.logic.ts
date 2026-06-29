@@ -106,8 +106,3 @@ export function filterInitialSteps(
 ): SetupStep[] {
   return [...baseSteps];
 }
-
-/** True for steps the Skip button should render. */
-export function isSkippable(step: SetupStep): boolean {
-  return !REQUIRED_STEPS.has(step);
-}

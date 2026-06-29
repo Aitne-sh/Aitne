@@ -28,10 +28,6 @@ interface EntitiesBySourceResponse {
   items: EntityRecord[];
 }
 
-interface EntityByPathResponse {
-  item: EntityRecord;
-}
-
 /**
  * Bias query (§7.6): list entities tagged with `source` so the entity
  * browser can group by app. Cheaper than scanning every domain.
@@ -75,15 +71,5 @@ export function useEntitiesByDomainTypeDate(args: {
     // loads, so the results pane doesn't flash a skeleton and reset its
     // scroll on each filter change.
     placeholderData: keepPreviousData,
-  });
-}
-
-export function useEntityByPath(path: string | null) {
-  return useQuery({
-    queryKey: ["entity-by-path", path],
-    queryFn: () =>
-      api.get<EntityByPathResponse>("/entities/by-path", { path: path! }),
-    enabled: !!path,
-    staleTime: 30_000,
   });
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { IntegrationKey } from "@aitne/shared";
 import type { IntegrationListItem } from "@/lib/api-types";
-import { buildModeExplainer, modeShortLabel } from "./mode-explainer.logic";
+import { buildModeExplainer } from "./mode-explainer.logic";
 
 const fakeDescriptor = (
   key: IntegrationKey,
@@ -177,18 +177,6 @@ describe("buildModeExplainer — interpolation", () => {
       // The integration-aware sentence must always be present (exhaustiveness).
       expect(copy.details.length).toBeGreaterThanOrEqual(4);
     }
-  });
-});
-
-describe("modeShortLabel", () => {
-  it("renders the canonical English label per mode", () => {
-    expect(modeShortLabel("direct")).toBe("Direct");
-    expect(modeShortLabel("delegated")).toBe("Delegated");
-    expect(modeShortLabel("disabled")).toBe("Disabled");
-  });
-
-  it("INTEGRATION_NATIVE_MODE_DESIGN.md §11.5 — covers native", () => {
-    expect(modeShortLabel("native")).toBe("Native");
   });
 });
 

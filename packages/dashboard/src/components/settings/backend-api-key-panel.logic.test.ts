@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  isPlausibleAnthropicApiKey,
+  isPlausibleGeminiApiKey,
+  isPlausibleOpenAiApiKey,
+} from "@aitne/shared";
+import {
   apiKeyEnvVarNames,
   apiKeyFormatHint,
   apiKeyStatusLabel,
@@ -10,10 +15,7 @@ import {
   isClearVisible,
   isConfigSaveEnabled,
   isDirectApiKeyProvider,
-  isPlausibleAnthropicApiKey,
   isPlausibleApiKey,
-  isPlausibleGeminiApiKey,
-  isPlausibleOpenAiApiKey,
   isSaveEnabled,
 } from "./backend-api-key-panel.logic";
 

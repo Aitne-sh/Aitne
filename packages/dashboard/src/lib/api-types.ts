@@ -11,7 +11,7 @@ import type {
   ProcessModelTier,
 } from "@aitne/shared";
 
-export type { Alert, AlertSeverity, AlertSource } from "@aitne/shared";
+export type { Alert, AlertSeverity } from "@aitne/shared";
 
 // ── Health ──
 export interface IntegrationStatus {
@@ -320,33 +320,6 @@ export interface BackendsResponse {
   defaultHighModel: string;
   pricingDataSource: PricingDataSourceStatus;
   backends: BackendStatusRow[];
-}
-
-/**
- * INTEGRATION_NATIVE_MODE_DESIGN.md §11.4 — one entry per integration row
- * cascaded from `native` to `disabled` because its prior `nativeBackend`
- * no longer matches the new main backend. Returned by
- * `PUT /api/backends/main` so the caller can render the "Re-configure"
- * banner inline without round-tripping `/integrations`.
- */
-export interface NativeUnboundEntry {
-  key: IntegrationKey;
-  priorNativeBackend: BackendId;
-  newMainBackend: BackendId;
-}
-
-/**
- * Shape of the `PUT /api/backends/main` response body, in the only
- * fields the dashboard reads. Carries any native-binding cascade
- * entries (§11.4) alongside the embedded `serializeBackends()` /
- * `serializeProcessConfigs()` payloads (typed loosely here because the
- * caller only needs `nativeUnbound` to surface the banner; the rest is
- * picked up by the next `useBackends()` refetch).
- */
-export interface SetMainBackendResponse {
-  status: "applied";
-  nativeUnbound: NativeUnboundEntry[];
-  defaultBackend?: BackendId;
 }
 
 // ── Messaging bang commands ──
@@ -1565,75 +1538,6 @@ export interface IntegrationPatchRequest {
 }
 
 /**
- * §7.7 — error shapes returned by `PATCH /api/integrations/:key` when
- * the proposed `deniedTools` list fails validation. Surfaced inline by
- * the Tool Permissions card so the user can react without round-tripping.
- */
-export interface IntegrationPatchUnknownToolError {
-  error: "unknown_tool";
-  key: IntegrationKey;
-  backend: BackendId;
-  tool: string;
-  knownTools: string[];
-  message: string;
-}
-
-export interface IntegrationPatchDenialBreaksRequiredError {
-  error: "denial_breaks_required_capability";
-  key: IntegrationKey;
-  backend: BackendId;
-  capability: string;
-  remainingTools: string[];
-  message: string;
-}
-
-/**
- * INTEGRATION_NATIVE_MODE_DESIGN.md §11.2 — returned by
- * `PATCH /api/integrations/:key` when a native flip names a backend that
- * has no registry connector for this integration (e.g. setting
- * `nativeBackend: "gemini"` for an integration whose `backendConnectors`
- * lacks a Gemini entry). The dashboard never reaches this state through
- * the wizard (the Native option is hidden when the main backend is not
- * in `supportedNativeBackends`); the error exists for out-of-band PATCH
- * callers (CLI, curl) and as a defense-in-depth surface.
- */
-export interface IntegrationPatchBackendNotSupportedNativeError {
-  error: "backend_not_supported_native";
-  key: IntegrationKey;
-  backend: BackendId;
-  supportedNativeBackends: BackendId[];
-  message: string;
-}
-
-/**
- * INTEGRATION_NATIVE_MODE_DESIGN.md §3.3 invariant — `nativeBackend` must
- * equal the current main backend. The daemon refuses a flip that violates
- * this, pointing the user at `PUT /api/backends/main`. The dashboard's
- * mode-flip dialog catches this and renders the suggested remediation.
- */
-export interface IntegrationPatchNativeBackendMismatchesMainError {
-  error: "native_backend_mismatches_main";
-  key: IntegrationKey;
-  nativeBackend: BackendId;
-  mainBackend: BackendId;
-  message: string;
-}
-
-/**
- * DELEGATED-PROXY-API-DESIGN.md §6.1 — surfaced when a `delegatedModel`
- * value is rejected because no model with that id is registered for the
- * effective backend. The dashboard renders `knownModels` as a hint.
- */
-export interface IntegrationPatchUnknownModelError {
-  error: "unknown_model";
-  key: IntegrationKey;
-  backend: BackendId;
-  model: string;
-  knownModels: string[];
-  message: string;
-}
-
-/**
  * Single entry in `GET /api/integrations/proxy-models/:backend.options`.
  * Mirrors `ProxyModelOption` on the daemon side; kept structurally minimal
  * because the dashboard only needs id + display + tier + pricing for the
@@ -1660,30 +1564,6 @@ export interface ProxyModelsResponse {
 export interface IntegrationPatchResponse {
   ok: true;
   integration: IntegrationStateDto;
-}
-
-/**
- * Shape of the `missing_variants` 400 from `PATCH /api/integrations/:key`
- * when a delegated or native flip's required skill/task-flow variants are
- * absent. The dashboard renders the file list so the authoring step is
- * mechanical. INTEGRATION_NATIVE_MODE_DESIGN.md §7.4 / §8.5 — the same
- * shape is returned for both modes; `mode` lets the UI use the correct
- * file-name hint (`SKILL.native.<backend>.md` vs
- * `SKILL.delegated.<backend>.md`).
- */
-export interface IntegrationPatchMissingVariantsError {
-  error: "missing_variants";
-  key: IntegrationKey;
-  backend: BackendId;
-  /**
-   * Present on native-flip responses (`mode === "native"`). Omitted from
-   * older delegated-only responses for wire-compat; treat absent as
-   * `"delegated"` to keep the file-name hint correct.
-   */
-  mode?: "delegated" | "native";
-  missingSkills: string[];
-  missingTaskFlows: string[];
-  message: string;
 }
 
 export interface IntegrationProbeCapabilityResult {

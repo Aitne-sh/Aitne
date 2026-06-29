@@ -102,32 +102,6 @@ export function usePatchIntegration() {
 }
 
 /**
- * POST /api/integrations/:key/probe — cached read (body has no `tools`).
- *
- * Returns the latest stored probe row for `(key, backend)` without launching
- * a subprocess. When the cache is empty, `result` is `null`. The setup
- * wizard and settings card read cached/default features by default and let
- * live probes refresh the matrix explicitly or in the background after Apply.
- *
- * `backend` can be omitted when the integration already has a
- * `delegatedBackend` — the daemon defaults to that value.
- */
-export function useIntegrationProbeCached(
-  key: IntegrationKey | null,
-  backend?: BackendId,
-) {
-  return useQuery({
-    queryKey: ["integration-probe", key, backend ?? null],
-    queryFn: () =>
-      api.post<IntegrationProbeResponse>(`/integrations/${key}/probe`, {
-        ...(backend !== undefined ? { backend } : {}),
-      }),
-    enabled: key !== null,
-    staleTime: 60_000,
-  });
-}
-
-/**
  * GET /api/agent/actions?kind=integration.native_unbound — recent main-backend
  * cascade rows (INTEGRATION_NATIVE_MODE_DESIGN.md §11.4). Drives the
  * IntegrationCard's "Re-configure" banner: when a row appears for `<key>`

@@ -216,19 +216,6 @@ export function canFlipToNative(
   return availableNativeBackends(descriptor).includes(mainBackend);
 }
 
-/**
- * True when `mode` is allowed for this integration given current connector
- * support. Delegated is allowed iff at least one backend has a connector.
- */
-export function modeIsAvailable(
-  descriptor: IntegrationListItem,
-  mode: IntegrationHealthEntry["mode"],
-): boolean {
-  if (!descriptor.supportedModes.includes(mode)) return false;
-  if (mode !== "delegated") return true;
-  return availableDelegatedBackends(descriptor).length > 0;
-}
-
 // ── Direct-mode credential presence (per-integration) ─────────────────────
 
 /**

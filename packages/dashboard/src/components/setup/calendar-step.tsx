@@ -1,7 +1,5 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { GoogleCard } from "@/components/connections/google-card";
 import { IntegrationCard } from "@/components/connections/integration-card";
 import { useHealth } from "@/lib/hooks/use-health";
@@ -55,6 +53,3 @@ export function CalendarStep({ onNext, onBack }: CalendarStepProps) {
     </WizardStepFrame>
   );
 }
-
-// Re-export for symmetry with other step files.
-export { ArrowRight, Button };

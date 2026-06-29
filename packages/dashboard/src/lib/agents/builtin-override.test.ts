@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { agentDefinitionSchema, OVERRIDE_EDIT_PATHS, type AgentDefinition } from "@aitne/shared";
 import {
   BUILTIN_OVERRIDE_FIELDS,
-  HIDDEN_OVERRIDE_KEYS,
   buildBuiltinPatchBody,
   buildOverrideResetBody,
   extractOverrideValues,
@@ -164,13 +163,13 @@ describe("overriddenFieldKeys", () => {
 });
 
 describe("BUILTIN_OVERRIDE_FIELDS", () => {
-  it("plus the hidden keys covers exactly the shared OVERRIDE_EDIT_PATHS allow-list", () => {
+  it("plus the hidden backend_id companion covers exactly the shared OVERRIDE_EDIT_PATHS allow-list", () => {
     // Assert against the imported constant (not a hardcoded copy) so adding an
     // 8th override path to @aitne/shared fails here until the form is updated.
     // `backend.backend_id` has no standalone field — the Model dropdown writes
-    // it together with `backend.model` (see HIDDEN_OVERRIDE_KEYS).
+    // it together with `backend.model`.
     const rendered = BUILTIN_OVERRIDE_FIELDS.map((f) => f.key);
-    expect([...rendered, ...HIDDEN_OVERRIDE_KEYS].sort()).toEqual(
+    expect([...rendered, "backend.backend_id"].sort()).toEqual(
       [...OVERRIDE_EDIT_PATHS].sort(),
     );
     expect(rendered).not.toContain("backend.backend_id");

@@ -166,17 +166,3 @@ export function buildModeExplainer(
       "Recommended when this integration is not relevant to you, or your main backend already covers it natively.",
   };
 }
-
-/**
- * Inline label for the currently-selected mode, used in places where the
- * mode badge is rendered alongside other elements (e.g. card header).
- *
- * Mirrors the existing `modeLabel` helper but reads from the explainer
- * copy so the two stay aligned without a second copy site.
- */
-export function modeShortLabel(mode: IntegrationMode): string {
-  if (mode === "direct") return "Direct";
-  if (mode === "delegated") return "Delegated";
-  if (mode === "native") return "Native";
-  return "Disabled";
-}

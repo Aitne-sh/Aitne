@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyFrequency,
-  previewRecurrenceLabel,
   recurrenceRulesEqual,
   toggleDayOfMonth,
   toggleDayOfWeek,
@@ -73,47 +72,6 @@ describe("validateRecurrenceRule", () => {
         daysOfWeek: [1, 3, 5],
       }),
     ).toBeNull();
-  });
-});
-
-describe("previewRecurrenceLabel", () => {
-  it("renders daily with optional timezone", () => {
-    expect(
-      previewRecurrenceLabel({ frequency: "daily", time: "10:00" }),
-    ).toBe("daily 10:00");
-    expect(
-      previewRecurrenceLabel({
-        frequency: "daily",
-        time: "10:00",
-        timezone: "Asia/Tokyo",
-      }),
-    ).toBe("daily 10:00 (Asia/Tokyo)");
-  });
-
-  it("renders weekly with sorted day labels", () => {
-    expect(
-      previewRecurrenceLabel({
-        frequency: "weekly",
-        time: "09:00",
-        daysOfWeek: [3, 1],
-      }),
-    ).toBe("weekly Mon,Wed 09:00");
-  });
-
-  it("renders monthly with sorted day numbers", () => {
-    expect(
-      previewRecurrenceLabel({
-        frequency: "monthly",
-        time: "12:00",
-        daysOfMonth: [15, 1],
-      }),
-    ).toBe("monthly day 1,15 12:00");
-  });
-
-  it("falls back gracefully when weekly has no daysOfWeek (validator catches it separately)", () => {
-    expect(
-      previewRecurrenceLabel({ frequency: "weekly", time: "09:00" }),
-    ).toBe("weekly 09:00");
   });
 });
 

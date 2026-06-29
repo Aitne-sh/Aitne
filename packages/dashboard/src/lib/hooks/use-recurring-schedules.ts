@@ -12,23 +12,6 @@ import type { ScheduleTier } from "@/lib/hooks/use-schedule-mutations";
 
 const KEY = ["recurring-schedules"] as const;
 
-export interface RecurringScheduleCreateInput {
-  /**
-   * Recurring schedules are `dm_session`-only — the daemon 410s any other
-   * taskType (recurring `agent.task` work moved to POST /api/agents). Pinned
-   * to the literal so a caller can't construct a body the API would reject.
-   */
-  taskType: "dm_session";
-  description: string;
-  /** Optional override for the agent body. Min 20 chars when set. */
-  prompt?: string;
-  recurrenceRule: RecurrenceRule;
-  /** Free-form model token (alias or registered id). Mutually exclusive with `tier`. */
-  model?: string;
-  tier?: ScheduleTier;
-  taskContext?: Record<string, unknown>;
-}
-
 export interface RecurringScheduleUpdateInput {
   id: number;
   description?: string;
@@ -50,12 +33,6 @@ export interface RecurringScheduleUpdateInput {
  * inline so the user sees model-deprecation and no-op-onMissingDay
  * advisories without round-tripping the audit log.
  */
-export interface RecurringScheduleCreateResponse {
-  status: "created";
-  item: RecurringScheduleDTO;
-  warnings: ScheduleWarningIssue[];
-}
-
 export interface RecurringScheduleUpdateResponse {
   status: "updated";
   item: RecurringScheduleDTO;
@@ -68,22 +45,6 @@ export function useRecurringSchedules() {
     queryFn: () =>
       api.get<RecurringSchedulesListResponse>("/recurring-schedules"),
     staleTime: 30_000,
-  });
-}
-
-export function useCreateRecurringSchedule() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: RecurringScheduleCreateInput) =>
-      api.post<RecurringScheduleCreateResponse>(
-        "/recurring-schedules",
-        input,
-      ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: KEY });
-      qc.invalidateQueries({ queryKey: ["schedule-list"] });
-      qc.invalidateQueries({ queryKey: ["schedule-next"] });
-    },
   });
 }
 

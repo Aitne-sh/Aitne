@@ -80,47 +80,6 @@ export function validateRecurrenceRule(
 }
 
 /**
- * Render a human-readable cadence label from a structured rule. Used
- * to seed the cadence label input when the user picks a structured
- * edit but hasn't typed a custom label. Mirrors the daemon's
- * `formatRecurrenceLabel` for the cases we surface to the user — kept
- * deliberately concise so two drafts that differ only in whitespace
- * don't churn the rendered §B Cadence column.
- */
-export function previewRecurrenceLabel(rule: RecurrenceRule): string {
-  const tz = rule.timezone ? ` (${rule.timezone})` : "";
-  // `rule.time` is forbidden on hourly rules but required on daily/weekly/
-  // monthly per the shared schema. The managed-task editor only emits the
-  // latter three, so coerce a defensive fallback when an `hourly` rule
-  // sneaks in (e.g. a future caller reuses this preview function).
-  const time = rule.time ?? "00:00";
-  switch (rule.frequency) {
-    case "hourly": {
-      const interval = rule.intervalHours ?? 1;
-      const minute = rule.minuteOfHour ?? 0;
-      const minuteLabel = String(minute).padStart(2, "0");
-      if (interval === 1) return `every hour at :${minuteLabel}${tz}`;
-      return `every ${interval} hours at :${minuteLabel}${tz}`;
-    }
-    case "daily":
-      return `daily ${time}${tz}`;
-    case "weekly": {
-      const days = (rule.daysOfWeek ?? []).slice().sort((a, b) => a - b);
-      const labels = days
-        .map((d) => WEEKDAY_LABELS[d])
-        .filter((l): l is string => Boolean(l));
-      if (labels.length === 0) return `weekly ${time}${tz}`;
-      return `weekly ${labels.join(",")} ${time}${tz}`;
-    }
-    case "monthly": {
-      const days = (rule.daysOfMonth ?? []).slice().sort((a, b) => a - b);
-      if (days.length === 0) return `monthly ${time}${tz}`;
-      return `monthly day ${days.join(",")} ${time}${tz}`;
-    }
-  }
-}
-
-/**
  * Coerce a frequency change so the optional fields stay consistent
  * with the daemon's mutually-exclusive invariant: `daysOfWeek` is
  * forbidden on `daily`/`monthly`, `daysOfMonth` is forbidden on

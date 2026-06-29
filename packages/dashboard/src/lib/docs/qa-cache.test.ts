@@ -45,7 +45,6 @@ beforeAll(() => {
 import type { DocsQAMessage, DocsQAState } from "./qa-cache";
 
 const {
-  clearDocsQASession,
   computeOrphanResetPatch,
   DOCS_QA_RESET_REASON_RECONNECT,
   DOCS_QA_RESET_REASON_STALE,
@@ -53,7 +52,6 @@ const {
   getDocsQASessionId,
   patchDocsQAState,
   prefillComposerWithSelection,
-  resetDocsQATranscript,
   shouldFireStaleBusy,
 } = await import("./qa-cache");
 
@@ -110,13 +108,6 @@ describe("qa-cache", () => {
     expect(a.length).toBeGreaterThan(0);
   });
 
-  it("clearDocsQASession rotates the session id", () => {
-    const before = getDocsQASessionId();
-    clearDocsQASession();
-    const after = getDocsQASessionId();
-    expect(after).not.toBe(before);
-  });
-
   it("patchDocsQAState merges fields and preserves untouched ones", () => {
     patchDocsQAState(queryClient, { scope: "current", composerDraft: "hi" });
     const sessionId = getDocsQASessionId();
@@ -136,32 +127,6 @@ describe("qa-cache", () => {
     expect(next.scope).toBe("current");
     expect(next.composerDraft).toBe("hi");
     expect(next.busy).toBe(true);
-  });
-
-  it("resetDocsQATranscript clears messages/draft/busy/error but keeps scope", () => {
-    patchDocsQAState(queryClient, {
-      scope: "category",
-      composerDraft: "draft",
-      busy: true,
-      error: "oops",
-    });
-    resetDocsQATranscript(queryClient);
-    const sessionId = getDocsQASessionId();
-    const after = queryClient.getQueryData([
-      "docs-qa",
-      sessionId,
-    ]) as {
-      scope: string;
-      composerDraft: string;
-      busy: boolean;
-      error: string | null;
-      messages: unknown[];
-    };
-    expect(after.scope).toBe("category");
-    expect(after.composerDraft).toBe("");
-    expect(after.busy).toBe(false);
-    expect(after.error).toBeNull();
-    expect(after.messages).toEqual([]);
   });
 
   describe("prefillComposerWithSelection", () => {

@@ -77,24 +77,6 @@ export function useAgent(slug: string | null | undefined) {
   });
 }
 
-export function useAgentExecutions(
-  slug: string | null | undefined,
-  opts?: { result?: string; before?: number; limit?: number },
-) {
-  return useQuery({
-    queryKey: agentExecutionsKey(slug ?? "", opts),
-    queryFn: () =>
-      api.get<AgentExecutionsResponse>(`/agents/${slug}/executions`, {
-        params: {
-          result: opts?.result,
-          before: opts?.before,
-          limit: opts?.limit,
-        },
-      }),
-    enabled: !!slug,
-  });
-}
-
 const EXECUTIONS_PAGE_SIZE = 50;
 
 /**

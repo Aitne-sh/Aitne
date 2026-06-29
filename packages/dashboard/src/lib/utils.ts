@@ -150,13 +150,6 @@ export function formatAmount(amount: number, currency: string): string {
   return `${amount} ${currency}`;
 }
 
-export function formatAmountWithPeriod(amount: number, currency: string, billingPeriod: string | null): string {
-  const base = formatAmount(amount, currency);
-  if (billingPeriod === "monthly") return `${base}/mo`;
-  if (billingPeriod === "yearly") return `${base}/yr`;
-  return base;
-}
-
 /**
  * Compact token formatter using Intl.NumberFormat default compact notation:
  * `5`, `999`, `1.2K`, `12K`, `123K`, `999K`, `1M`, `1.2M`, `12M`, `1B`.

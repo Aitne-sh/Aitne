@@ -60,11 +60,6 @@ export function getDocsQASessionId(): string {
   return readSessionId();
 }
 
-export function clearDocsQASession(): void {
-  if (typeof window === "undefined") return;
-  window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
-}
-
 function emptyState(sessionId: string): DocsQAState {
   return {
     sessionId,
@@ -116,16 +111,6 @@ export function patchDocsQAState(
     emptyState(sessionId);
   const next: DocsQAState = { ...current, ...patch, sessionId };
   queryClient.setQueryData(queryKey(sessionId), next);
-}
-
-/** Reset the conversation but keep the sessionId. */
-export function resetDocsQATranscript(queryClient: QueryClient): void {
-  patchDocsQAState(queryClient, {
-    messages: [],
-    composerDraft: "",
-    busy: false,
-    error: null,
-  });
 }
 
 /**

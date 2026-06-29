@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   formatAmount,
-  formatAmountWithPeriod,
   formatApiError,
   formatBytes,
   formatCurrency,
@@ -37,24 +36,6 @@ describe("formatAmount", () => {
 
   it("falls back to raw amount + currency code for unknown currencies", () => {
     expect(formatAmount(500, "KRW")).toBe("500 KRW");
-  });
-});
-
-describe("formatAmountWithPeriod", () => {
-  it("appends /mo for monthly", () => {
-    expect(formatAmountWithPeriod(1500, "USD", "monthly")).toBe("$15.00/mo");
-  });
-
-  it("appends /yr for yearly", () => {
-    expect(formatAmountWithPeriod(11800, "USD", "yearly")).toBe("$118.00/yr");
-  });
-
-  it("returns base amount when period is null", () => {
-    expect(formatAmountWithPeriod(1500, "USD", null)).toBe("$15.00");
-  });
-
-  it("returns base amount for unknown period", () => {
-    expect(formatAmountWithPeriod(999, "USD", "weekly")).toBe("$9.99");
   });
 });
 

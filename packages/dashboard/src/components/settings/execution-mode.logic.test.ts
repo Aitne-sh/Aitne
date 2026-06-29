@@ -5,14 +5,10 @@ import {
   canApply,
   hasDivergentOverride,
   internalToUi,
-  resolveEffectiveMode,
-  uiToInternal,
 } from "./execution-mode.logic";
 
-describe("uiToInternal / internalToUi", () => {
-  it("round-trips safe ↔ strict and allow ↔ allow", () => {
-    expect(uiToInternal("safe")).toBe("strict");
-    expect(uiToInternal("allow")).toBe("allow");
+describe("internalToUi", () => {
+  it("maps strict ↔ safe and allow ↔ allow", () => {
     expect(internalToUi("strict")).toBe("safe");
     expect(internalToUi("allow")).toBe("allow");
   });
@@ -135,25 +131,6 @@ describe("canApply", () => {
         opencode: "safe",
       }),
     ).toBe(true);
-  });
-});
-
-describe("resolveEffectiveMode", () => {
-  it("returns the override when set", () => {
-    expect(
-      resolveEffectiveMode("claude", "safe", {
-        claude: "allow",
-        codex: null,
-        gemini: null,
-      }),
-    ).toBe("allow");
-  });
-
-  it("falls back to top-level when override is null", () => {
-    expect(resolveEffectiveMode("codex", "safe", EMPTY_OVERRIDES)).toBe("safe");
-    expect(resolveEffectiveMode("codex", "allow", EMPTY_OVERRIDES)).toBe(
-      "allow",
-    );
   });
 });
 

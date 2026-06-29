@@ -13,7 +13,6 @@ import {
   formatRecentCallCost,
   formatRecentCallDuration,
   formatRecentCallTimestamp,
-  modeIsAvailable,
   modeLabel,
   PROXY_CALL_TOKEN_ESTIMATE,
   PROXY_MODEL_AUTO_VALUE,
@@ -180,38 +179,12 @@ describe("buildFeatureMatrix", () => {
   });
 });
 
-describe("availableDelegatedBackends + modeIsAvailable", () => {
+describe("availableDelegatedBackends", () => {
   it("lists both backends for gmail", () => {
     expect(availableDelegatedBackends(gmailDescriptor).sort()).toEqual([
       "claude",
       "codex",
     ]);
-  });
-
-  it("rejects delegated when no backend has a connector", () => {
-    const orphan: IntegrationListItem = {
-      ...gmailDescriptor,
-      backendConnectors: {},
-    };
-    expect(modeIsAvailable(orphan, "delegated")).toBe(false);
-  });
-
-  it("allows direct / disabled regardless of connectors", () => {
-    const orphan: IntegrationListItem = {
-      ...gmailDescriptor,
-      backendConnectors: {},
-    };
-    expect(modeIsAvailable(orphan, "direct")).toBe(true);
-    expect(modeIsAvailable(orphan, "disabled")).toBe(true);
-  });
-
-  it("respects supportedModes (descriptor might ship without disabled)", () => {
-    const narrow: IntegrationListItem = {
-      ...gmailDescriptor,
-      supportedModes: ["direct", "delegated"],
-    };
-    expect(modeIsAvailable(narrow, "disabled")).toBe(false);
-    expect(modeIsAvailable(narrow, "direct")).toBe(true);
   });
 });
 
@@ -282,7 +255,7 @@ describe("directCredentialsPresent", () => {
   });
 });
 
-describe("modeIsAvailable — Outlook descriptor regression (SETUP-FLOW-REDESIGN-PLAN §6.1)", () => {
+describe("availableDelegatedBackends — Outlook descriptor regression (SETUP-FLOW-REDESIGN-PLAN §6.1)", () => {
   // Build a synthetic Outlook descriptor matching the registry shape:
   // supportedModes excludes `delegated` and backendConnectors is empty.
   const outlookCalendarDescriptor: IntegrationListItem = {
@@ -292,15 +265,6 @@ describe("modeIsAvailable — Outlook descriptor regression (SETUP-FLOW-REDESIGN
     supportedModes: ["direct", "disabled"],
     backendConnectors: {},
   };
-
-  it("rejects delegated mode for Outlook because supportedModes excludes it", () => {
-    expect(modeIsAvailable(outlookCalendarDescriptor, "delegated")).toBe(false);
-  });
-
-  it("allows direct and disabled for Outlook", () => {
-    expect(modeIsAvailable(outlookCalendarDescriptor, "direct")).toBe(true);
-    expect(modeIsAvailable(outlookCalendarDescriptor, "disabled")).toBe(true);
-  });
 
   it("availableDelegatedBackends is empty when backendConnectors is empty (no Delegated radio shown)", () => {
     expect(availableDelegatedBackends(outlookCalendarDescriptor)).toEqual([]);

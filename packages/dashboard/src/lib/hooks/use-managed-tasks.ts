@@ -6,11 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type {
-  ManagedTask,
-  ManagedTaskCreate,
-  ManagedTaskPatch,
-} from "@aitne/shared";
+import type { ManagedTask, ManagedTaskPatch } from "@aitne/shared";
 import type { RecurrenceRule } from "@/lib/api-types";
 import { api } from "@/lib/api-client";
 
@@ -106,12 +102,6 @@ export function useManagedTaskRuns(id: string | null, limit = 25) {
   });
 }
 
-interface CreatedResponse {
-  status: "created" | "idempotent_replay";
-  item: ManagedTask;
-  render_status?: string;
-}
-
 interface UpdatedResponse {
   status: "updated";
   item: ManagedTask;
@@ -142,15 +132,6 @@ function invalidateAll(qc: ReturnType<typeof useQueryClient>): void {
   qc.invalidateQueries({ queryKey: ["schedule-next"] });
 }
 
-export function useCreateManagedTask() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: ManagedTaskCreate) =>
-      api.post<CreatedResponse>("/managed-tasks", input),
-    onSuccess: () => invalidateAll(qc),
-  });
-}
-
 export function useUpdateManagedTask() {
   const qc = useQueryClient();
   return useMutation({
@@ -169,60 +150,6 @@ export function useDeleteManagedTask() {
     mutationFn: (id: string) =>
       api.delete<DeletedResponse>(`/managed-tasks/${id}`),
     onSuccess: () => invalidateAll(qc),
-  });
-}
-
-/**
- * `/metrics/managed-tasks` (docs/design/21 §14.3).
- *
- * Returned shape mirrors `ManagementMetricsSnapshot` from the daemon
- * core. Kept structurally typed (Record<string, unknown>) so the
- * dashboard side does not import the daemon's `MetricsCollector`
- * types — tracking that across packages buys little compared with the
- * one source-of-truth type living next to the route.
- */
-export interface ManagementMetricsHistogram {
-  count: number;
-  sum: number;
-  min: number | null;
-  max: number | null;
-  avg: number | null;
-  p50: number | null;
-  p90: number | null;
-  p95: number | null;
-}
-
-export interface ManagementMetricsResponse {
-  collectedAt: string;
-  windowDays: number;
-  active: number;
-  softWarningThreshold: number;
-  hardCap: number;
-  runs: { ok: number; failed: number; skipped: number; unknown: number };
-  consecutiveFailures: { mtId: string; app: string; count: number }[];
-  failureNotifyThreshold: number;
-  failingNow: number;
-  managementMdRenderMs: ManagementMetricsHistogram;
-  activityViewRebuildMs: {
-    source: string;
-    histogram: ManagementMetricsHistogram;
-  }[];
-  entityMirrorLag: { lastMs: number | null; observedAt: string | null };
-}
-
-export function useManagementMetrics(windowDays = 30) {
-  return useQuery({
-    queryKey: ["management-metrics", windowDays],
-    queryFn: () =>
-      api.get<ManagementMetricsResponse>(
-        "/metrics/managed-tasks",
-        { days: windowDays },
-      ),
-    // Metrics are best-effort and reset on daemon restart — stale data
-    // is harmless. 60s mirrors the cadence of other dashboard metric
-    // hooks (use-cost.ts, use-metrics-timeseries.ts).
-    staleTime: 60_000,
-    refetchInterval: 60_000,
   });
 }
 

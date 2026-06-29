@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -192,6 +192,3 @@ export function BasicsStep({
     </WizardStepFrame>
   );
 }
-
-// Re-export for callers that still want the import surface.
-export { ArrowLeft };

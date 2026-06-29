@@ -5,7 +5,6 @@ import {
   STEP_LABELS,
   deriveVaultMode,
   filterInitialSteps,
-  isSkippable,
   type SetupStep,
 } from "./wizard-steps.logic";
 
@@ -89,7 +88,7 @@ describe("filterInitialSteps", () => {
   });
 });
 
-describe("REQUIRED_STEPS / isSkippable", () => {
+describe("REQUIRED_STEPS", () => {
   it("includes the four required collection steps + complete", () => {
     expect(REQUIRED_STEPS.has("basics")).toBe(true);
     expect(REQUIRED_STEPS.has("vault")).toBe(true);
@@ -103,12 +102,6 @@ describe("REQUIRED_STEPS / isSkippable", () => {
     expect(REQUIRED_STEPS.has("calendar")).toBe(false);
     expect(REQUIRED_STEPS.has("note")).toBe(false);
     expect(REQUIRED_STEPS.has("messaging")).toBe(false);
-  });
-
-  it("isSkippable agrees with REQUIRED_STEPS for every documented id", () => {
-    for (const step of BASE_INITIAL_STEPS) {
-      expect(isSkippable(step)).toBe(!REQUIRED_STEPS.has(step));
-    }
   });
 });
 

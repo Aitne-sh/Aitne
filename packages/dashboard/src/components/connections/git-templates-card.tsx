@@ -363,5 +363,3 @@ function RetemplateStatusGrid() {
     </div>
   );
 }
-
-export default GitTemplatesCard;

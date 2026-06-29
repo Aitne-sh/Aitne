@@ -24,14 +24,6 @@ import {
 
 export type ApiKeySource = "keychain" | "shell" | "none";
 
-// Re-exports so existing dashboard tests / callers keep their import
-// surface stable while the implementation is sourced from shared.
-export {
-  isPlausibleAnthropicApiKey,
-  isPlausibleOpenAiApiKey,
-  isPlausibleGeminiApiKey,
-};
-
 /**
  * Direct-API-key plausibility check used by the legacy single-field
  * form (provider === default direct provider for the backend).

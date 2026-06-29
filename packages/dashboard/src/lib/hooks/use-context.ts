@@ -114,27 +114,3 @@ export function useUpdateContextFile() {
     },
   });
 }
-
-/**
- * Delete a context file. Currently the daemon only exposes DELETE for
- * `policies/routines/custom/*` — other paths return 403.
- */
-export function useDeleteContextFile() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ path }: { path: string }) =>
-      api.delete<{ status: "deleted"; snapshotId: number }>(`/context/${path}`),
-    onSuccess: (_data, { path }) => {
-      qc.removeQueries({ queryKey: ["context", path] });
-      qc.invalidateQueries({ queryKey: ["snapshots", path] });
-      // Custom routine deletes can change two listings: the custom/ parent
-      // and the top-level routines/ directory. Invalidate both so the tree
-      // view on the routines page stays fresh.
-      const dir = path.includes("/") ? path.split("/")[0] : null;
-      if (dir) qc.invalidateQueries({ queryKey: ["context-list", dir] });
-      if (path.startsWith("policies/routines/custom/")) {
-        qc.invalidateQueries({ queryKey: ["context-list", "routines"] });
-      }
-    },
-  });
-}

@@ -18,13 +18,6 @@ export const LANGUAGE_TAG_RE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$/;
 /** UI-visible upper bound — keeps Slack/WhatsApp prefixes readable. */
 export const AGENT_DISPLAY_NAME_MAX_LENGTH = 40;
 
-export interface BasicsStepFields {
-  agentDisplayName: string;
-  language: string;
-  /** Optional second-input value for the "Other (BCP-47…)" custom case. */
-  customLanguage?: string;
-}
-
 export const SUPPORTED_LANGUAGES: ReadonlyArray<{
   tag: string;
   label: string;

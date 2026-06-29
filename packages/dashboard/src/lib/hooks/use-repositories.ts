@@ -168,15 +168,6 @@ export function useRepositories(filters?: RepositoryFilters) {
   });
 }
 
-export function useRepository(id: string | null | undefined) {
-  return useQuery({
-    queryKey: id ? repoKey(id) : [...REPOS_KEY, "missing"],
-    queryFn: () => api.get<{ repository: RepositoryDTO }>(`/repositories/${encodeURIComponent(id!)}`),
-    enabled: Boolean(id),
-    staleTime: 30_000,
-  });
-}
-
 export function useCreateRepository() {
   const qc = useQueryClient();
   return useMutation({
@@ -251,16 +242,6 @@ export function useLinkLocal() {
       void qc.invalidateQueries({ queryKey: REPOS_KEY });
       void qc.invalidateQueries({ queryKey: repoKey(vars.id) });
     },
-  });
-}
-
-export function useRunRepository() {
-  return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: RepositoryRunInput }) =>
-      api.post<{ status: "scheduled"; correlationId: string }>(
-        `/repositories/${encodeURIComponent(id)}/run`,
-        body,
-      ),
   });
 }
 

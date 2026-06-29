@@ -183,5 +183,3 @@ export function TaskFlowOverridesCard() {
     </ConnectionCard>
   );
 }
-
-export default TaskFlowOverridesCard;
