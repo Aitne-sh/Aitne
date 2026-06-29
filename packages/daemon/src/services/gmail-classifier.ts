@@ -6,7 +6,7 @@
  * remaining Gmail pipeline.
  */
 
-export type EmailCategory = "travel" | "kindle_notebook" | "unknown";
+type EmailCategory = "travel" | "kindle_notebook" | "unknown";
 
 export interface ClassifiedEmail {
   messageId: string;
