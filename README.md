@@ -18,6 +18,10 @@ npm install -g @aitne-sh/aitne@latest
 aitne start
 ```
 
+<video src="https://github.com/user-attachments/assets/d5297828-011d-4d57-80a0-60a5e46063bf" controls playsinline></video>
+
+<sub>▶︎ 40-second tour. If the player doesn't load, <a href="https://github.com/user-attachments/assets/d5297828-011d-4d57-80a0-60a5e46063bf">watch it here</a>.</sub>
+
 ![Aitne setup and dashboard walkthrough](./docs/assets/aitne-demo.gif)
 
 </div>
