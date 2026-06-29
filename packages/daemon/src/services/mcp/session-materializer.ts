@@ -7,7 +7,6 @@ import type { EncryptedBlobStore } from "../../secrets/encrypted-blob-store.js";
 import { createLogger } from "../../logging.js";
 import { listMcpServers, resolveMcpSecrets } from "./registry.js";
 import { generateMcpConfig } from "./generators/index.js";
-import { scopedEnvVarName } from "./generators/types.js";
 import type { McpServer } from "./types.js";
 import { buildMcpDisallowedTools } from "./risk.js";
 
@@ -458,10 +457,6 @@ function replaceOrAppendSection(path: string, body: string | null): void {
     writeFileSync(path, next, { encoding: "utf-8", mode: 0o600 });
   }
 }
-
-// Re-export for convenient use from agent cores that want to mint env var
-// names without depending on generators/types directly.
-export { scopedEnvVarName };
 
 /**
  * Recursively substitute `${VAR}` placeholders in string values using

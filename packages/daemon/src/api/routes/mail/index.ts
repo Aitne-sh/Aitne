@@ -11,10 +11,6 @@ import { createProviderResolver } from "./provider-resolver.js";
 import type { MailRouteDependencies } from "./dependencies.js";
 
 export type { MailRouteDependencies } from "./dependencies.js";
-// Re-exported so the `mail.test.ts` harness (and any external consumer)
-// can import the pure TTL helper from the public mail-routes surface
-// without reaching into the resolver module.
-export { computeAgentWriteTtlMs } from "./provider-resolver.js";
 
 /**
  * Multi-mail provider routes — /api/mail/* + /api/config/mail/*.

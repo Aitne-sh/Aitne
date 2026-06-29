@@ -7,7 +7,6 @@ import {
   type BackendId,
   type IntegrationKey,
 } from "@aitne/shared";
-import type { DelegatedToolCost } from "../core/agent-core.js";
 
 /**
  * DELEGATED-TASK-MODE-DESIGN.md §5 / §6 / §7 — shared helpers for the
@@ -29,34 +28,6 @@ import type { DelegatedToolCost } from "../core/agent-core.js";
  */
 
 // ── Public types ─────────────────────────────────────────────────────────────
-
-/**
- * §4.1 task-mode invocation parameters. Hard caps are enforced at the
- * route boundary against {@link DELEGATED_TASK_HARD_CAPS}; defaults are
- * filled by the route from `config.delegatedTaskDefault*` if the request
- * omitted them. By the time params reach this layer, every numeric field
- * is a concrete number that has passed the validation guards in §4.1.
- */
-export interface DelegatedTaskParams {
-  integrationKey: IntegrationKey;
-  task: string;
-  outputSchema: Record<string, unknown>;
-  /** Effective max tool calls (clamped to hard cap before this point). */
-  maxToolCalls: number;
-  /** Effective max budget USD (clamped to hard cap before this point). */
-  maxBudgetUsd: number;
-  /** Effective wall-clock timeout ms (clamped to hard cap before this point). */
-  timeoutMs: number;
-  allowDestructive: boolean;
-  /** Resolved model id for the delegated backend (light or heavy tier). */
-  modelId: string;
-  /** Pre-materialized session workdir; cleaned up by the invoker. */
-  sessionDir: string;
-  /** Combined caller / wall-clock abort signal. */
-  abortSignal?: AbortSignal;
-  /** Optional callback the core invokes once per `tool_use` event. */
-  onToolStep?: (step: DelegatedTaskToolStep) => void;
-}
 
 /**
  * §11.1 — one entry per `tool_use` / `tool_result` pair. Cores emit these
@@ -92,30 +63,6 @@ export type DelegatedTaskErrorClass =
   | "post_write_format_failure"
   | "loop_aborted"
   | "budget_exhausted";
-
-export type DelegatedTaskResult =
-  | {
-    ok: true;
-    /** Schema-validated parsed object. */
-    result: unknown;
-    /** True iff the subprocess emitted `{needsConfirmation: true, ...}`. */
-    needsConfirmation: boolean;
-    confirmationPlan: string | null;
-    cost: DelegatedToolCost;
-    trace: DelegatedTaskToolStep[];
-    /** Did the daemon issue the §6.2 single retry? Drives `detail.retried`. */
-    retried: boolean;
-  }
-  | {
-    ok: false;
-    errorClass: DelegatedTaskErrorClass;
-    message: string;
-    /** Raw assistant text when the failure was extraction / validation. */
-    raw?: string;
-    cost: DelegatedToolCost;
-    trace: DelegatedTaskToolStep[];
-    retried: boolean;
-  };
 
 // ── Schema validation ────────────────────────────────────────────────────────
 

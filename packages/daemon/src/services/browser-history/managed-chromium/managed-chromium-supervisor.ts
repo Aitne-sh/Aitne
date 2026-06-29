@@ -447,5 +447,3 @@ function pseudoProfileCandidate(
     // the typecheck will surface here.
   } as BrowserProfileCandidate;
 }
-
-export const __testing = { pseudoProfileCandidate, DM_TEMPLATES };

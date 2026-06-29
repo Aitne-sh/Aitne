@@ -196,14 +196,6 @@ export function resolveCanonicalDelegatedModel(
 }
 
 /**
- * @deprecated Renamed to `resolveCanonicalDelegatedModel` and reoriented
- * around the lite tier. Existing call sites should migrate; this alias
- * exists only to soften the rename inside the daemon while the dashboard
- * + tests catch up.
- */
-export const resolveCanonicalProxyModel = resolveCanonicalDelegatedModel;
-
-/**
  * Per-model preset entries for the dashboard's "model" dropdown in the
  * delegated-mode card. Returns the registered light-tier models first,
  * then heavy-tier (so heavy variants can also be picked when a user

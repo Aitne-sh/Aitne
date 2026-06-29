@@ -341,9 +341,6 @@ export const browserHistoryAcceptKindSchema = z.enum([
   "research_assist",
   "wiki_summary",
 ]);
-export type BrowserHistoryAcceptKind = z.infer<
-  typeof browserHistoryAcceptKindSchema
->;
 
 export const browserHistoryPendingOfferSchema = z.object({
   slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}[a-z0-9]$/),

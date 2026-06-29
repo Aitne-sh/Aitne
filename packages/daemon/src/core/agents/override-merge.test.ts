@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { type AgentDefinition, agentDefinitionSchema, OVERRIDE_EDIT_PATHS } from "@aitne/shared";
 import {
   MERGEABLE_OVERRIDE_PATHS,
-  isMergeableOverridePath,
   mergeAgentDefinition,
 } from "./override-merge.js";
 
@@ -26,7 +25,7 @@ function makeDefinition(overrides: Record<string, unknown> = {}): AgentDefinitio
   });
 }
 
-describe("MERGEABLE_OVERRIDE_PATHS / isMergeableOverridePath", () => {
+describe("MERGEABLE_OVERRIDE_PATHS", () => {
   it("is the frozen §6.4.1 allow-list", () => {
     expect([...MERGEABLE_OVERRIDE_PATHS]).toEqual([
       "enabled",
@@ -39,13 +38,6 @@ describe("MERGEABLE_OVERRIDE_PATHS / isMergeableOverridePath", () => {
       "limits.timeout_minutes",
       "on_error.notify_owner",
     ]);
-  });
-
-  it("recognises allow-listed paths and rejects others", () => {
-    expect(isMergeableOverridePath("limits.max_turns")).toBe(true);
-    expect(isMergeableOverridePath("backend.tier")).toBe(true);
-    expect(isMergeableOverridePath("slug")).toBe(false);
-    expect(isMergeableOverridePath("backend.process_key")).toBe(false);
   });
 
   it("is derived from the shared OVERRIDE_EDIT_PATHS (single source of truth) + the two enabled* keys", () => {

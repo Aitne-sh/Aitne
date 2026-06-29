@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  cheapestLiteFor,
   defaultModelForTier,
   estimateCostForUsage,
   estimateTextInputTokens,
@@ -118,7 +117,6 @@ describe("model-registry", () => {
     expect(latestLiteFor("codex")).toBe("gpt-5.4-mini");
     expect(latestMediumFor("codex")).toBe("gpt-5.4");
     expect(latestHighFor("codex")).toBe("gpt-5.5");
-    expect(cheapestLiteFor("codex")).toBe("gpt-5.4-mini");
     expect(defaultModelForTier("codex", "lite")).toBe("gpt-5.4-mini");
     expect(defaultModelForTier("codex", "medium")).toBe("gpt-5.4");
     expect(defaultModelForTier("codex", "high")).toBe("gpt-5.4");
@@ -154,7 +152,6 @@ describe("model-registry", () => {
     expect(latestLiteFor("opencode")).toBe("anthropic/claude-haiku-4-5");
     expect(latestMediumFor("opencode")).toBe("anthropic/claude-sonnet-4-6");
     expect(latestHighFor("opencode")).toBe("anthropic/claude-opus-4-8");
-    expect(cheapestLiteFor("opencode")).toBe("anthropic/claude-haiku-4-5");
     expect(defaultModelForTier("opencode", "lite")).toBe(
       "anthropic/claude-haiku-4-5",
     );
@@ -223,21 +220,6 @@ describe("model-registry", () => {
     // cacheCreate: 10 * 0.00375 = 0.0375
     // cacheRead: 5 * 0.0003 = 0.0015
     expect(cost).toBeCloseTo(0.057, 6);
-  });
-
-  it("cheapestLiteFor reduces over multi-candidate lite tier (gemini)", () => {
-    // Gemini has multiple non-deprecated lite-tier models with priced input —
-    // the reducer body only runs when the candidate array has 2+ entries.
-    // Both flash-lite-preview and 2.5-flash-lite tie at usdPer1kIn=0.0001;
-    // the reducer keeps the first encountered on a strict-less-than tie, so
-    // the canonical pick is the registry's leading entry.
-    expect(cheapestLiteFor("gemini")).toBe("gemini-3.1-flash-lite-preview");
-  });
-
-  it("cheapestLiteFor falls back to latestLiteFor when no lite has pricing", () => {
-    // Currently every claude-lite registry entry has usdPer1kIn, so the
-    // priced reducer wins. This test pins the canonical lite pick.
-    expect(cheapestLiteFor("claude")).toBe("claude-haiku-4-5-20251001");
   });
 
   it("estimateTextInputTokens approximates 4 bytes per token, minimum 1", () => {

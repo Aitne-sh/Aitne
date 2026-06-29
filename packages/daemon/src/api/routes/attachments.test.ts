@@ -8,7 +8,6 @@ import { applySchema } from "../../db/schema.js";
 import { AttachmentStore } from "../../services/attachments/store.js";
 import {
   createAttachmentRoutes,
-  resetInFlightCounter,
   ATTACHMENT_LIMITS,
 } from "./attachments.js";
 import type { AgentConfig } from "../../config.js";
@@ -91,7 +90,6 @@ function makeApp(): {
       },
     }),
   );
-  resetInFlightCounter();
   return {
     app,
     db,

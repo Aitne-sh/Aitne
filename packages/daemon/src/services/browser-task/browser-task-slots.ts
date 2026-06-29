@@ -50,12 +50,6 @@ export interface SlotTaskEntry {
   enqueuedAt: number;
 }
 
-/** Phase the task is currently in — distinguishes "holds a slot" from
- *  "queued without a slot" without re-encoding the full state machine.
- *  The runner translates the parked phases to the canonical state
- *  (`awaiting_user` / `final_confirm`) when fanning out. */
-export type SlotPhase = "pending" | "running" | "parked";
-
 interface ActiveSlotEntry extends SlotTaskEntry {
   phase: "running" | "parked";
   /** Wall-clock ms when the slot was acquired. `running_since` for

@@ -51,13 +51,6 @@ export const MERGEABLE_OVERRIDE_PATHS = [
 
 export type MergeableOverridePath = (typeof MERGEABLE_OVERRIDE_PATHS)[number];
 
-/** True when `path` is one of the allow-listed override keys. */
-export function isMergeableOverridePath(
-  path: string,
-): path is MergeableOverridePath {
-  return (MERGEABLE_OVERRIDE_PATHS as readonly string[]).includes(path);
-}
-
 // ── Per-path value guards (defence-in-depth; mirror agentDefinitionSchema) ──
 
 function isAgentTier(value: unknown): value is AgentTier {

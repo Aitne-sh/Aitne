@@ -19,7 +19,7 @@
  * for deterministic tests. Real callers use the no-arg defaults.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import type {
@@ -501,17 +501,4 @@ function bridgeAuditResult(
   if (outcome === "written") return "success";
   if (outcome === "candidate_logged" || outcome === "deduplicated") return "partial";
   return "skipped";
-}
-
-/**
- * Test helper — verify a vault tree has the bridge file. Pure read.
- * Used by integration tests that hit the API and then assert the
- * resulting file landed.
- */
-export function bridgeFileExists(
-  workspaceRoot: string,
-  relPath: string,
-): boolean {
-  if (!BRIDGE_FILE_RE.test(relPath)) return false;
-  return existsSync(resolve(workspaceRoot, relPath));
 }

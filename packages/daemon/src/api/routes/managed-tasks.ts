@@ -32,7 +32,6 @@ import { getContextDir } from "../../config.js";
 import { createLogger } from "../../logging.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
 import {
-  bootstrapManagementRegistry,
   readAndParseManagementMd,
   renderAndWriteManagementMd,
   type RenderOptions,
@@ -1198,13 +1197,6 @@ export function buildManagedTasksRoutesDepsFromApi(
     writeTracker: deps.writeTracker,
   };
 }
-
-/**
- * Re-export for the server wiring. The boot path (index.ts) calls
- * {@link bootstrapManagementRegistry} after this module's routes are
- * mounted, so the file converges to the fresh DB state on first run.
- */
-export { bootstrapManagementRegistry };
 
 function clampQueryLimit(
   raw: string | undefined,

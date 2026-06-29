@@ -114,16 +114,6 @@ export function countManagedTasks(db: Database.Database): number {
   return row.n;
 }
 
-export interface AllocateNextIdOptions {
-  /**
-   * On boot, the §12 "managed_tasks.id collision after restore from
-   * backup" recovery path passes `bootstrap=true` so the seq is
-   * guaranteed to advance past every existing id (a backup-restored
-   * database can outpace its seq counter).
-   */
-  bootstrap?: boolean;
-}
-
 /**
  * Allocate the next `mt_<n>` id atomically. Increments
  * `managed_task_seq.next_id` and returns the formatted id. The caller

@@ -40,13 +40,3 @@ export type RawOpencodeEvent = {
   type: string;
   properties?: unknown;
 };
-
-/**
- * Helper for callers that want to thread the structured-output (`format`)
- * option through `client.session.prompt({ body: … })`. The SDK's body
- * type does not list `format`, but the runtime accepts and honors it
- * (V4). Pass the resulting object to the SDK call via a single cast.
- */
-export type OpencodeAugmentedPromptBody =
-  import("@opencode-ai/sdk").SessionPromptData["body"]
-  & Partial<import("@opencode-ai/sdk").SessionPromptBodyAugmented>;

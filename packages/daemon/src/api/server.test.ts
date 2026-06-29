@@ -10,7 +10,7 @@ import { getAgentDayDateStr } from "@aitne/shared";
 import { applySchema } from "../db/schema.js";
 import { createApp, type ApiDependencies } from "./server.js";
 import { EventBroadcaster } from "./routes/sse.js";
-import { safePath } from "./routes/context/index.js";
+import { safePath } from "./routes/context/path-resolve.js";
 import type { AgentConfig } from "../config.js";
 import { ScopedReadSensitiveTokenManager } from "../core/read-sensitive-token-manager.js";
 import { createServiceRegistry } from "../services/service-registry.js";

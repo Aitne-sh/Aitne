@@ -24,7 +24,6 @@ import { createLogger } from "../logging.js";
 
 const logger = createLogger("management-md");
 
-const FILE_NAME = "integrations.md";
 const VAULT_RELATIVE_PATH = "policies/integrations.md";
 
 /**
@@ -71,9 +70,6 @@ export function getManagementMdPath(
   const root = contextDir ?? resolve(dataDir, "context");
   return resolve(root, VAULT_RELATIVE_PATH);
 }
-
-/** Filename portion only — preserved for callers that need to mirror it. */
-export const MANAGEMENT_MD_FILENAME = FILE_NAME;
 
 const pendingSelfWrites = new Set<string>();
 

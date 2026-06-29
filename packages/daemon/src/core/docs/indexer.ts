@@ -7,7 +7,7 @@ import {
   statSync,
 } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import * as chokidar from "chokidar";
 import {
@@ -523,7 +523,3 @@ async function listMarkdownFiles(root: string): Promise<string[]> {
   await walk(root);
   return out;
 }
-
-// Small re-export so tests that need to compose a path-style slug do not
-// need to re-implement the OS-separator rewrite.
-export const _internal = { sep, joinTokens };

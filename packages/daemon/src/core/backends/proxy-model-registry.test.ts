@@ -5,7 +5,7 @@ import {
   knownProxyModels,
   listProxyModelOptions,
   proxyModelIsKnown,
-  resolveCanonicalProxyModel,
+  resolveCanonicalDelegatedModel,
   resolveProcessKeyModel,
 } from "./proxy-model-registry.js";
 
@@ -86,15 +86,15 @@ describe("proxy-model-registry", () => {
     });
   });
 
-  describe("resolveCanonicalProxyModel", () => {
+  describe("resolveCanonicalDelegatedModel", () => {
     it("returns the registry's first lite-tier model for the backend", () => {
       // The registry order is lite → medium → high in the source listing;
       // the helper picks the first available lite entry. For Claude that's
       // currently `claude-haiku-4-5-20251001`; for Codex `gpt-5.4-mini`;
       // for Gemini `gemini-3.1-flash-lite-preview`.
-      expect(resolveCanonicalProxyModel("claude")).toBe("claude-haiku-4-5-20251001");
-      expect(resolveCanonicalProxyModel("codex")).toBe("gpt-5.4-mini");
-      expect(resolveCanonicalProxyModel("gemini")).toBe("gemini-3.1-flash-lite-preview");
+      expect(resolveCanonicalDelegatedModel("claude")).toBe("claude-haiku-4-5-20251001");
+      expect(resolveCanonicalDelegatedModel("codex")).toBe("gpt-5.4-mini");
+      expect(resolveCanonicalDelegatedModel("gemini")).toBe("gemini-3.1-flash-lite-preview");
     });
 
     it("respects backend_global_defaults.default_lite_model when delegatedBackend matches default_backend", () => {
@@ -107,7 +107,7 @@ describe("proxy-model-registry", () => {
            (singleton, default_backend, default_lite_model, default_medium_model, default_high_model, updated_at)
          VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       ).run("claude", "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-7");
-      expect(resolveCanonicalProxyModel("claude", db)).toBe(
+      expect(resolveCanonicalDelegatedModel("claude", db)).toBe(
         "claude-haiku-4-5-20251001",
       );
     });
@@ -121,7 +121,7 @@ describe("proxy-model-registry", () => {
            (singleton, default_backend, default_lite_model, default_medium_model, default_high_model, updated_at)
          VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       ).run("claude", "claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-7");
-      expect(resolveCanonicalProxyModel("codex", db)).toBe("gpt-5.4-mini");
+      expect(resolveCanonicalDelegatedModel("codex", db)).toBe("gpt-5.4-mini");
     });
 
     it("falls through to the registry pick when default_lite_model is not a registered lite model", () => {
@@ -133,12 +133,12 @@ describe("proxy-model-registry", () => {
          VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       ).run("claude", "claude-opus-4-7", "claude-sonnet-4-6", "claude-opus-4-7");
       // Opus is high, not lite — fall through to latestLiteFor("claude").
-      expect(resolveCanonicalProxyModel("claude", db)).toBe("claude-haiku-4-5-20251001");
+      expect(resolveCanonicalDelegatedModel("claude", db)).toBe("claude-haiku-4-5-20251001");
     });
 
     it("works without a db argument (registry-only)", () => {
-      expect(resolveCanonicalProxyModel("claude")).toBe("claude-haiku-4-5-20251001");
-      expect(resolveCanonicalProxyModel("claude", null)).toBe("claude-haiku-4-5-20251001");
+      expect(resolveCanonicalDelegatedModel("claude")).toBe("claude-haiku-4-5-20251001");
+      expect(resolveCanonicalDelegatedModel("claude", null)).toBe("claude-haiku-4-5-20251001");
     });
   });
 

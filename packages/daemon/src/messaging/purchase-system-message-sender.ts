@@ -41,7 +41,6 @@ import {
   PURCHASE_CONFIRMATION_HEADER,
   redactToken,
 } from "../services/browser-history/automation/purchase-tokens.js";
-import type { PurchaseCancelReason } from "../db/browser-automation-purchase-tokens-store.js";
 
 const logger = createLogger("purchase-system-message-sender");
 
@@ -245,43 +244,4 @@ export function createPurchaseSystemMessageSender(
       }
     },
   };
-}
-
-/**
- * Convenience helper for the cancellation follow-up's audit message —
- * exported so other daemon-internal cancel paths (the supervisor's
- * orphan sweep, the dashboard's "cancel pending" action) format the
- * cancel reason identically. Pure — no I/O.
- */
-export function describeCancelReason(reason: PurchaseCancelReason): string {
-  switch (reason) {
-    case "user_reply":
-      return "user replied with non-token content";
-    case "wrong_token":
-      return "user replied with a different token";
-    case "wrong_channel":
-      return "token typed on a non-delivered channel";
-    case "timeout":
-      return "5-minute confirmation window elapsed";
-    case "explicit":
-      return "user issued !cancel-purchase";
-    case "amount_mismatch":
-      return "cart total changed under the confirmation pause";
-    case "amount_exceeds_token":
-      return "displayed total exceeded the confirmed amount";
-    case "page_changed":
-      return "cart page mutated during the pause";
-    case "playwright_error":
-      return "browser-automation error before confirm";
-    case "daily_cap_exceeded":
-      return "per-day spend cap reached at resume";
-    case "b4_disabled":
-      return "B-4 master toggle was turned off";
-    case "site_not_enabled":
-      return "site B-4 was disabled mid-flight";
-    case "supervisor_orphan_sweep":
-      return "daemon restart cleaned up an in-flight token";
-    case "dashboard_cancel":
-      return "user clicked Cancel in the dashboard";
-  }
 }

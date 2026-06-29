@@ -17,10 +17,6 @@
 import type Database from "better-sqlite3";
 import { buildMatchExpression } from "../fts5.js";
 
-// Re-exported so existing imports (`./mail-search.js`) keep working — the
-// canonical definition lives in `../fts5.ts`.
-export { buildMatchExpression };
-
 export interface SearchMailHit {
   accountId: string;
   providerMsgId: string;

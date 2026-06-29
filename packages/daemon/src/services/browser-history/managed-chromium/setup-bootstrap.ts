@@ -495,9 +495,3 @@ function recordBootstrapTimeoutAudit(
     logger.warn({ err }, "failed to write bootstrap-timeout audit row");
   }
 }
-
-export const __testing = {
-  GOOGLE_SIGN_IN_URL,
-  isProfileSignedIn,
-  readSignedInUser,
-};

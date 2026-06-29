@@ -346,9 +346,6 @@ export type AzureOpenAiApiKeyConfig = z.infer<
   typeof azureOpenAiApiKeyConfigSchema
 >;
 export type GoogleApiKeyConfig = z.infer<typeof googleApiKeyConfigSchema>;
-export type GeminiVertexApiKeyConfig = z.infer<
-  typeof geminiVertexApiKeyConfigSchema
->;
 export type OpencodeServerApiKeyConfig = z.infer<
   typeof opencodeServerApiKeyConfigSchema
 >;

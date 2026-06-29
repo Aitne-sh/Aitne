@@ -97,5 +97,3 @@ export const DELEGATED_PROXY_DEFAULTS = {
   /** Default concurrent cap — overridden by `AgentConfig.delegatedProxyMaxConcurrent`. */
   defaultMaxConcurrent: 4,
 } as const;
-
-export type DelegatedProxyDefaults = typeof DELEGATED_PROXY_DEFAULTS;

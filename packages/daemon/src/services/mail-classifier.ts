@@ -20,7 +20,6 @@ import {
   extractTravel,
   processEmailBatch,
   type ClassifiedEmail,
-  type EmailCategory,
   type EmailInput,
   type TravelExtraction,
 } from "./gmail-classifier.js";
@@ -31,7 +30,7 @@ import type {
 } from "./mail/provider.js";
 import { htmlToPlainText } from "./mail/html-to-plaintext.js";
 
-export type { ClassifiedEmail, EmailCategory, TravelExtraction };
+export type { ClassifiedEmail, TravelExtraction };
 
 export function formatMailAddress(addr: MailAddress | null | undefined): string | null {
   if (!addr?.email) return null;

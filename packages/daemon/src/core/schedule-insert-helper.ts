@@ -20,7 +20,6 @@ const logger = createLogger("schedule-insert-helper");
  * counterpart elsewhere (today.md Agent Plan row, recurring_schedules entry,
  * morning-routine retry loop) so the roadmap refresh skips it.
  */
-export type ScheduleImportance = "transient" | "normal" | "strategic" | "low";
 
 export interface TriggerDecisionInput {
   scheduledFor: string;

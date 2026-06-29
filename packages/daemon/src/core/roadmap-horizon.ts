@@ -49,9 +49,6 @@ export type NormalizeLongTermPlanLineResult =
       message: string;
     };
 
-export const HORIZON_TAG_RE =
-  /^(?:\d{4}-(?:0[1-9]|1[0-2])|\d{4}-Q[1-4]|\d{4} (?:spring|summer|autumn|winter)|undated)$/;
-
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SOURCE_VALUES = new Set<LongTermPlanSource>([
   "dm",

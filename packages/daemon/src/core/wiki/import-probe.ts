@@ -5,7 +5,7 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 /**
  * Existing-vault import probe — WIKI_BUILDER_DESIGN.md §7.
@@ -318,8 +318,4 @@ function* walkMarkdown(rootDir: string): Generator<string> {
       yield full;
     }
   }
-}
-
-export function formatProbeRelativePath(rootPath: string, abs: string): string {
-  return relative(rootPath, abs).split(/[\\/]/).join("/");
 }

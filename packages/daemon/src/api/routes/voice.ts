@@ -63,21 +63,6 @@ let state: InstallState = {
   progress: null,
 };
 
-/** Test seam — let the test harness inspect state without exposing the full module. */
-export function __getVoiceInstallStateForTest(): InstallState {
-  return { ...state };
-}
-export function __resetVoiceInstallStateForTest(): void {
-  state = {
-    status: "idle",
-    startedAt: null,
-    finishedAt: null,
-    error: null,
-    installed: false,
-    progress: null,
-  };
-}
-
 /**
  * Resolve the configured Whisper model id, applying the env override
  * (advanced operators) on top of the package default. Single source of

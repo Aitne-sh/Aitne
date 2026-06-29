@@ -532,13 +532,6 @@ export function planCreate(
 
 // ── PATCH plan (§9.5) ────────────────────────────────────────────────────────
 
-// The built-in override allow-list is the shared `OVERRIDE_EDIT_PATHS` single
-// source of truth (== `MERGEABLE_OVERRIDE_PATHS` minus the two `enabled*` keys;
-// `enabled` is the `agents.enabled` column's authority, §6.4, toggled
-// separately and never an override-snapshot value). Re-exported so existing
-// `views.OVERRIDE_EDIT_PATHS` importers keep working.
-export { OVERRIDE_EDIT_PATHS };
-
 /**
  * Parent block → its editable leaf keys (everything else under it is read-only).
  * Derived structurally from the shared `OVERRIDE_EDIT_PATHS` so this PATCH edit

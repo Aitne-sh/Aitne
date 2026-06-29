@@ -111,31 +111,11 @@ const CHROMIUM_METADATA: Record<
   },
 };
 
-function readable(path: string): boolean {
-  try {
-    accessSync(path, constants.R_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function firstExisting(paths: string[]): string | null {
   for (const path of paths) {
     if (existsSync(path)) return path;
   }
   return null;
-}
-
-async function commandExists(command: string): Promise<boolean> {
-  try {
-    await execFileAsync("sh", ["-lc", `command -v ${JSON.stringify(command)}`], {
-      timeout: 1000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function expandHome(relative: string): string {
@@ -657,15 +637,4 @@ export function createHostProfile(): HostProfile {
       }
     },
   };
-}
-
-export async function resolveLinuxBinaryFromPath(key: ChromiumBrowserKey): Promise<string | null> {
-  for (const candidate of CHROMIUM_METADATA[key].linuxBins) {
-    if (await commandExists(candidate)) return candidate;
-  }
-  return null;
-}
-
-export function pathIsReadable(path: string): boolean {
-  return readable(path);
 }

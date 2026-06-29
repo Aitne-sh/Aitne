@@ -42,7 +42,6 @@ import { join } from "node:path";
 
 import { writeFileAtomically } from "../../../core/atomic-write.js";
 import { validateDailySkeletonFrontmatter } from "../../../core/context-frontmatter.js";
-import { CONTEXT_RELATIVE_PATHS } from "../../../core/context-paths.js";
 import { parseVaultFrontmatter } from "../../../core/context-validation/frontmatter.js";
 import { createLogger } from "../../../logging.js";
 import type { AgentWriteTracker } from "../../../safety/agent-write-tracker.js";
@@ -275,7 +274,3 @@ export function dailyJournalAbsolutePath(
 export function dailyJournalSnapshotKey(dateStr: string): string {
   return `journal/daily/${dateStr}`;
 }
-
-// Re-export so the agent-journal-appender (which shares the snapshot
-// trigger label) can keep importing the constant from one place.
-export const AGENT_JOURNAL_RELATIVE_PATH = CONTEXT_RELATIVE_PATHS.agent.journal;

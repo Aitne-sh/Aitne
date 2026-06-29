@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   DEFAULT_MANAGED_CHROMIUM_STATE,
   MANAGED_CHROMIUM_STATE_KEY,
-  type ManagedChromiumReauthKind,
   type ManagedChromiumState,
   type ManagedChromiumStateValue,
 } from "../services/browser-history/managed-chromium/types.js";
@@ -16,18 +15,6 @@ import {
 } from "./runtime-state.js";
 
 const logger = createLogger("managed-chromium-state");
-
-/**
- * Reauth kinds known to the state shape. Mirrors
- * `ManagedChromiumReauthKind` — kept in sync via the matching test.
- */
-const REAUTH_KINDS = [
-  "healthy",
-  "sync_silent",
-  "account_changed",
-  "corrupt_local_state",
-  "signed_out",
-] as const satisfies readonly ManagedChromiumReauthKind[];
 
 const STATE_VALUES = [
   "off",
@@ -124,9 +111,3 @@ export function updateManagedChromiumState(
 export function clearManagedChromiumState(db: Database.Database): void {
   deleteRuntimeState(db, MANAGED_CHROMIUM_STATE_KEY);
 }
-
-export const __testing = {
-  stateSchema,
-  REAUTH_KINDS,
-  STATE_VALUES,
-};

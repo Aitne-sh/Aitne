@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import cron from "node-cron";
-import { customRoutineKey, customRoutineSlugFromKey } from "@aitne/shared";
+import { customRoutineKey } from "@aitne/shared";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 
 /**
@@ -257,5 +257,3 @@ export function slugFromCustomRoutinePath(relativePath: string): string | null {
   if (slug.includes("/")) return null;
   return slug;
 }
-
-export { customRoutineSlugFromKey };

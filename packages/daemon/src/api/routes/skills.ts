@@ -270,10 +270,6 @@ function listSkillDetailsInRoot(
   return out;
 }
 
-// `resolveUserSkillsRoot` lives in `core/user-skills-root.ts` — re-export
-// from there so existing API consumers continue to import from this module.
-export { resolveUserSkillsRoot };
-
 export function createSkillsRoutes(deps: SkillsRouteDependencies): Hono {
   const app = new Hono();
   const { config } = deps;

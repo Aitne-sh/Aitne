@@ -70,7 +70,6 @@ import {
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("dispatcher");
-export type { IAgentCore, StreamCallbacks } from "./agent-core.js";
 export type { IAgentRouter } from "./backends/backend-router.js";
 
 // Phase D-1 split — shared types and zero-dependency helpers live in
@@ -79,7 +78,6 @@ export type { IAgentRouter } from "./backends/backend-router.js";
 // re-exports the public-surface members below so existing callers of
 // `dispatcher.js` continue to work unchanged.
 import {
-  parseStage2Verdict,
   buildLogErrorContext,
   type ReplyActivityHandle,
   type IDashboardStream,
@@ -91,15 +89,11 @@ import {
   type IAuditLogger,
   type BangCommandDetail,
   type DailyWriteAuditDetail,
-  type TriggerActivityScanSkipReason,
   type SetupMode,
   type TriggerActivityScanOptions,
   type TriggerActivityScanResult,
   type InFlightExecutionInfo,
 } from "./dispatcher-types.js";
-export {
-  parseStage2Verdict,
-};
 export type {
   ReplyActivityHandle,
   IDashboardStream,
@@ -111,7 +105,6 @@ export type {
   IAuditLogger,
   BangCommandDetail,
   DailyWriteAuditDetail,
-  TriggerActivityScanSkipReason,
   SetupMode,
   TriggerActivityScanOptions,
   TriggerActivityScanResult,
@@ -146,17 +139,12 @@ import {
   AutonomousSpawnGate,
   type SpawnGateDecision,
 } from "./spawn-gates.js";
-import {
-  ScheduledTaskRunner,
-  SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS,
-} from "./dispatcher-scheduled-tasks.js";
+import { ScheduledTaskRunner } from "./dispatcher-scheduled-tasks.js";
 import { MessageHandler } from "./dispatcher-message-handler.js";
 import {
   TASK_DELIVERY_GATE_KEYS,
   handleTaskDeliveryInsideGate,
 } from "./dispatcher-task-delivery.js";
-
-export { SKILL_CURATION_OPTIMIZER_ALLOWED_TOOLS };
 
 const CURRENT_SETUP_MODE_STATE_KEY = "current_setup_mode";
 

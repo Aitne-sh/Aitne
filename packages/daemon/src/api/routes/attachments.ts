@@ -448,8 +448,3 @@ export const ATTACHMENT_LIMITS = {
   PER_TURN_MAX_BYTES,
   CONCURRENT_UPLOADS_PER_KEY,
 } as const;
-
-/** Test-only: reset the in-flight counter. */
-export function resetInFlightCounter(): void {
-  inFlightPerKey.clear();
-}

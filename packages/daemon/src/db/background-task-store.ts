@@ -39,9 +39,6 @@ export type BackgroundTaskNotificationPolicy =
 
 export type BackgroundTaskTier = "lite" | "medium" | "high";
 
-export const BACKGROUND_TASK_TERMINAL_STATES: ReadonlySet<BackgroundTaskState> =
-  new Set(["completed", "failed", "timeout", "cancelled"]);
-
 export const BACKGROUND_TASK_NON_TERMINAL_STATES: ReadonlySet<BackgroundTaskState> =
   new Set(["pending", "running", "awaiting_user"]);
 

@@ -14,11 +14,8 @@ import { tmpdir } from "node:os";
 import { Hono } from "hono";
 import Database from "better-sqlite3";
 import { getAgentDayDateStr } from "@aitne/shared";
-import {
-  createContextRoutes,
-  resolveContextTarget,
-  safePath,
-} from "./context/index.js";
+import { createContextRoutes } from "./context/index.js";
+import { resolveContextTarget, safePath } from "./context/path-resolve.js";
 import { applySchema } from "../../db/schema.js";
 import { setDegradedMode, clearDegradedMode } from "../../db/runtime-state.js";
 import type { AgentConfig } from "../../config.js";

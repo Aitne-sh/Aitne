@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import type Database from "better-sqlite3";
-import type { ApiDependencies } from "../server.js";
 import { createLogger } from "../../logging.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
 import type { DocsIndexerHandle } from "../../core/docs/indexer.js";
@@ -851,17 +850,4 @@ function rebindDocsQASessionChannel(
         SET channel_id = ?
       WHERE scope = ? AND scope_key = ? AND status = 'active'`,
   ).run(newChannelId, DOCS_QA_SCOPE, DOCS_QA_SCOPE_KEY);
-}
-
-/**
- * Convenience binding helper for callers that only have an `ApiDependencies`
- * instance. Equivalent to `createDocsRoutes({ db: deps.db })` but kept as
- * a separate symbol so the call-site in `server.ts` mirrors how the rest
- * of the routes are mounted.
- */
-export function createDocsRoutesFromDeps(
-  deps: Pick<ApiDependencies, "db">,
-  extra: { indexer?: DocsIndexerHandle; docsQAAdapter?: DocsQAAdapter } = {},
-): Hono {
-  return createDocsRoutes({ db: deps.db, ...extra });
 }

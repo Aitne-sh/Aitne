@@ -253,10 +253,3 @@ export function listSiteBootstrapKeys(db: Database.Database): string[] {
   }
   return out;
 }
-
-export const __testing = {
-  siteConnectionSchema,
-  siteBootstrapSchema,
-  SITES_KEY_PREFIX,
-  SITE_BOOTSTRAP_KEY_PREFIX,
-};

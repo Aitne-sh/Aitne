@@ -20,10 +20,7 @@ export type {
   AgentErrorSeverity,
 } from "./agent-errors-types.js";
 
-export {
-  AGENT_ERROR_REGISTRY,
-  type AgentErrorCode,
-} from "./agent-errors-registry.js";
+export { AGENT_ERROR_REGISTRY } from "./agent-errors-registry.js";
 
 export {
   buildEnvelope,

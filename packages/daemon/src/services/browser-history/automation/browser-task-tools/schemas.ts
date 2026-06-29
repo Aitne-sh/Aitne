@@ -66,7 +66,6 @@ export const navigateArgsSchema = {
     ),
 };
 export const navigateArgsZod = z.object(navigateArgsSchema).strict();
-export type NavigateArgs = z.infer<typeof navigateArgsZod>;
 
 // ── 2. screenshot ────────────────────────────────────────────────────────
 export const screenshotArgsSchema = {
@@ -78,7 +77,6 @@ export const screenshotArgsSchema = {
     ),
 };
 export const screenshotArgsZod = z.object(screenshotArgsSchema).strict();
-export type ScreenshotArgs = z.infer<typeof screenshotArgsZod>;
 
 // ── 3. dom_snapshot ──────────────────────────────────────────────────────
 export const domSnapshotArgsSchema = {
@@ -94,14 +92,12 @@ export const domSnapshotArgsSchema = {
     ),
 };
 export const domSnapshotArgsZod = z.object(domSnapshotArgsSchema).strict();
-export type DomSnapshotArgs = z.infer<typeof domSnapshotArgsZod>;
 
 // ── 4. click ────────────────────────────────────────────────────────────
 export const clickArgsSchema = {
   target: selectorOrCoordsSchema,
 };
 export const clickArgsZod = z.object(clickArgsSchema).strict();
-export type ClickArgs = z.infer<typeof clickArgsZod>;
 
 // ── 5. type ──────────────────────────────────────────────────────────────
 export const typeArgsSchema = {
@@ -122,7 +118,6 @@ export const typeArgsSchema = {
     ),
 };
 export const typeArgsZod = z.object(typeArgsSchema).strict();
-export type TypeArgs = z.infer<typeof typeArgsZod>;
 
 // ── 6. press_key ─────────────────────────────────────────────────────────
 /** Allowlisted set of keys — narrow on purpose. The runner forwards
@@ -142,7 +137,6 @@ export const PRESS_KEY_ALLOWED = [
   "PageUp",
   "PageDown",
 ] as const;
-export type PressKeyName = (typeof PRESS_KEY_ALLOWED)[number];
 
 export const pressKeyArgsSchema = {
   key: z
@@ -153,7 +147,6 @@ export const pressKeyArgsSchema = {
     ),
 };
 export const pressKeyArgsZod = z.object(pressKeyArgsSchema).strict();
-export type PressKeyArgs = z.infer<typeof pressKeyArgsZod>;
 
 // ── 7. wait_for ──────────────────────────────────────────────────────────
 // §14.9 — no JS predicate. The shape below declares selector /
@@ -192,7 +185,6 @@ export const waitForArgsZod = z
       message: "wait_for requires at least one of: selector, urlPattern, timeoutMs",
     },
   );
-export type WaitForArgs = z.infer<typeof waitForArgsZod>;
 
 // ── 8. extract ───────────────────────────────────────────────────────────
 export const extractArgsSchema = {
@@ -223,7 +215,6 @@ export const extractArgsSchema = {
     ),
 };
 export const extractArgsZod = z.object(extractArgsSchema).strict();
-export type ExtractArgs = z.infer<typeof extractArgsZod>;
 
 // ── 9. ask_user ──────────────────────────────────────────────────────────
 export const askUserArgsSchema = {
@@ -251,7 +242,6 @@ export const askUserArgsSchema = {
     ),
 };
 export const askUserArgsZod = z.object(askUserArgsSchema).strict();
-export type AskUserArgs = z.infer<typeof askUserArgsZod>;
 
 // ── 10. yield_for_clarification ──────────────────────────────────────────
 export const yieldForClarificationArgsSchema = {
@@ -263,9 +253,6 @@ export const yieldForClarificationArgsSchema = {
 export const yieldForClarificationArgsZod = z
   .object(yieldForClarificationArgsSchema)
   .strict();
-export type YieldForClarificationArgs = z.infer<
-  typeof yieldForClarificationArgsZod
->;
 
 // ── 11. finish ───────────────────────────────────────────────────────────
 export const finishArgsSchema = {
@@ -286,7 +273,6 @@ export const finishArgsSchema = {
     ),
 };
 export const finishArgsZod = z.object(finishArgsSchema).strict();
-export type FinishArgs = z.infer<typeof finishArgsZod>;
 
 /** Tool-name catalogue. Exported so the runner's `allowedToolsOverride`
  *  list and the agent profile cross-reference cannot drift. */

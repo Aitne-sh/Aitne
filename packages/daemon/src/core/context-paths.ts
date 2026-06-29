@@ -179,15 +179,11 @@ export const CONTEXT_DIR_NAMES = [
   "policies/skills",
 ] as const;
 
-export type ContextDirName = (typeof CONTEXT_DIR_NAMES)[number];
-
 /**
  * File types permitted inside context/. `.md` for all human-editable
  * prose; `.base` for Obsidian Bases views.
  */
 export const CONTEXT_FILE_EXTENSIONS = [".md", ".base"] as const;
-
-export type ContextFileExtension = (typeof CONTEXT_FILE_EXTENSIONS)[number];
 
 /**
  * Relative paths that are stored on disk as `.base` files. The context
@@ -197,8 +193,6 @@ export type ContextFileExtension = (typeof CONTEXT_FILE_EXTENSIONS)[number];
 export const CONTEXT_BASE_FILE_STEMS = [
   CONTEXT_RELATIVE_PATHS.projects.activeBase.replace(/\.base$/, ""),
 ] as const;
-
-export type ContextBaseFileStem = (typeof CONTEXT_BASE_FILE_STEMS)[number];
 
 /**
  * Relative path to a daily synthesized journal file. The morning
@@ -390,5 +384,3 @@ export const CONTEXT_FRONTMATTER_TYPES = [
   "book",
   "note",
 ] as const;
-
-export type ContextFrontmatterType = (typeof CONTEXT_FRONTMATTER_TYPES)[number];

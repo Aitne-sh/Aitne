@@ -49,7 +49,6 @@ import {
 } from "../../db/browser-task-store.js";
 import { listBrowserTaskActionLog } from "../../db/browser-task-action-log-store.js";
 import {
-  createClarification,
   listClarificationsForTask,
   resolveClarification,
 } from "../../db/browser-task-clarifications-store.js";
@@ -731,11 +730,3 @@ export function createBrowserTaskRoutes(deps: ApiDependencies): Hono {
 
   return app;
 }
-
-/**
- * Stub `createClarification` exported here so a Phase 2 test fixture can
- * pre-seed an awaiting_user clarification without going through the
- * runner. Kept at the route module's edge so the route file is the
- * single touch-point for the clarify round-trip surface.
- */
-export { createClarification };

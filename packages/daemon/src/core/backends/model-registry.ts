@@ -37,7 +37,6 @@ export const DEFAULT_CLAUDE_HIGH_MODEL = "claude-opus-4-8";
 // /settings/models. See `SEED_HIGH_TIER_OVERRIDE` below.)
 export const DEFAULT_CODEX_LITE_MODEL = "gpt-5.4-mini";
 export const DEFAULT_CODEX_MEDIUM_MODEL = "gpt-5.4";
-export const DEFAULT_CODEX_HIGH_MODEL = "gpt-5.4";
 
 // Gemini (Google retired the dedicated "flash" mid-tier in the 3.1 series
 // and `gemini-2.5-flash` is deprecated, so the registry has no real
@@ -52,7 +51,6 @@ export const DEFAULT_CODEX_HIGH_MODEL = "gpt-5.4";
 // pinned to flash-lite for delegated proxy + fetch_window/triage surfaces.
 export const DEFAULT_GEMINI_LITE_MODEL = "gemini-3.1-flash-lite-preview";
 export const DEFAULT_GEMINI_MEDIUM_MODEL = "gemini-3.1-pro-preview";
-export const DEFAULT_GEMINI_HIGH_MODEL = "gemini-3.1-pro-preview";
 
 // OpenCode static fallback defaults use provider/model composite IDs. The
 // live OpenCode server may report different providers; runtime probing lands
@@ -569,37 +567,6 @@ export function latestLiteFor(backendId: BackendId): string | null {
   return match?.modelId ?? null;
 }
 /* c8 ignore stop */
-
-/**
- * Cheapest available lite-tier model for `backendId` by `usdPer1kIn`.
- * Used by surfaces that want "the budget pick" rather than the canonical
- * latest lite model — e.g. the docs Q&A picker. Falls back to
- * `latestLiteFor` when no lite model has pricing data.
- */
-export function cheapestLiteFor(backendId: BackendId): string | null {
-  const candidates = MODEL_REGISTRY.filter(
-    (model) =>
-      model.backendId === backendId
-      && model.tier === "lite"
-      && model.available
-      && !model.deprecated
-      && typeof model.usdPer1kIn === "number",
-  );
-  // Every backend has at least one lite model with priced input today;
-  // the `latestLiteFor` fallback is defensive against a future registry
-  // where every lite model is unpriced.
-  /* c8 ignore next */
-  if (candidates.length === 0) return latestLiteFor(backendId);
-  /* c8 ignore start — every gemini-lite entry has the same `usdPer1kIn`
-     today (no strict-less wins), so the `? model` branch and the
-     `?? Infinity` defensive legs are unreachable from current data. */
-  return candidates.reduce((cheapest, model) =>
-    (model.usdPer1kIn ?? Infinity) < (cheapest.usdPer1kIn ?? Infinity)
-      ? model
-      : cheapest,
-  ).modelId;
-  /* c8 ignore stop */
-}
 
 /**
  * Per-backend override for the high-tier *seeded default*. Keeps the

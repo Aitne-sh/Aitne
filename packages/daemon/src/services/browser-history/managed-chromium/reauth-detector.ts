@@ -29,7 +29,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
-  type ManagedChromiumReauthKind,
   type ManagedChromiumReauthState,
   SYNC_SILENT_THRESHOLD_MS,
 } from "./types.js";
@@ -222,4 +221,4 @@ export async function mostRecentSyncLevelDbWrite(
   return null;
 }
 
-export type { ManagedChromiumReauthKind, ManagedChromiumReauthState };
+export type { ManagedChromiumReauthState };

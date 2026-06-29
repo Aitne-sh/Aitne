@@ -1240,19 +1240,6 @@ export const HIGH_SENSITIVITY_INTEGRATIONS = new Set<IntegrationKey>([
 ]);
 
 /**
- * MANAGED_CHROMIUM_IMPLEMENTATION_PLAN.md §11 / §16.2 — integrations
- * that carry an additional opt-in surface for the daemon-supervised
- * Chromium ("managed mode"). Today only `browser_history` participates;
- * the set is exported so the dashboard consent banner and the manage-
- * chromium dashboard page can mirror the same gating logic without
- * hard-coding the integration key. Same shape as
- * `HIGH_SENSITIVITY_INTEGRATIONS`.
- */
-export const MANAGED_CHROMIUM_INTEGRATIONS = new Set<IntegrationKey>([
-  "browser_history",
-]);
-
-/**
  * BROWSER_HISTORY_INTEGRATION_PLAN §10.3 — backend safety floor.
  *
  * Each process key declares the backends that may run it. The router

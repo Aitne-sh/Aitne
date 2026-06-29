@@ -189,14 +189,3 @@ export async function probeCliNativeSkillSubcommand(
     "native_skill_discovery.subcommand_detected",
   );
 }
-
-/** Test-only: reset both dedupe sets so multiple probe invocations exercise
- *  the log path independently. */
-export function __resetNativeSkillDiscoveryProbe(): void {
-  reportedKeys.clear();
-  subcommandReportedKeys.clear();
-}
-
-/** Test-only — extracted for direct coverage of the help-text matcher
- *  without paying for a subprocess. */
-export const __test_helpTextLooksLikeSkillSubcommand = helpTextLooksLikeSkillSubcommand;

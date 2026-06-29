@@ -5,7 +5,6 @@ import {
   updateRecurringSchedule,
   deleteRecurringSchedule,
   getRecurringSchedule,
-  type RecurringScheduleDTO,
 } from "./recurring-schedules.js";
 
 /**
@@ -353,7 +352,3 @@ export function getCatalog(domain: TriggerDomain): { domain: TriggerDomain; even
   }
   return { domain, events: [] };
 }
-
-// Re-exported to keep the API route file lean. Returning the DTO shape so
-// the route layer doesn't need to import RecurrenceRule.
-export type { RecurringScheduleDTO };

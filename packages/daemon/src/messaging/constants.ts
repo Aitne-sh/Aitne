@@ -25,8 +25,6 @@ export const NOTIFICATION_DESTINATION_PLATFORMS = [
   "whatsapp",
 ] as const;
 
-export type SupportedMessagingPlatform =
-  (typeof SUPPORTED_MESSAGING_PLATFORMS)[number];
 export type NotificationDestinationPlatform =
   (typeof NOTIFICATION_DESTINATION_PLATFORMS)[number];
 

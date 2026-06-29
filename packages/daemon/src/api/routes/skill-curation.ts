@@ -42,7 +42,6 @@ import {
   EventPriority,
   ManualRunRequest,
   type RoutineEvent,
-  SECTION_KINDS,
   type SectionKind,
   SKILL_CURATION_BYTE_BUDGET,
   SkillCurationConfig,
@@ -833,7 +832,3 @@ function safeParse(s: string | null): unknown {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return null; }
 }
-
-// Reserved for future use — when the daemon needs to enumerate every kind
-// (e.g. for the `knowledge-map` query routing).
-export const SKILL_CURATION_KINDS = SECTION_KINDS;

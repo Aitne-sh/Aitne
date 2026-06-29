@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
 import type { AgentConfig } from "../../config.js";
-import { createMailRoutes, computeAgentWriteTtlMs } from "./mail/index.js";
+import { createMailRoutes } from "./mail/index.js";
+import { computeAgentWriteTtlMs } from "./mail/provider-resolver.js";
 import {
   MailAccountRegistry,
 } from "../../services/mail/account-registry.js";

@@ -81,7 +81,6 @@ import {
   createExtractCapState,
 } from "./extract-cap.js";
 import {
-  ACTION_VOCAB_REGEX,
   decideFinalConfirmGate,
   type FinalConfirmGateInput,
 } from "./final-confirm-gate.js";
@@ -1470,10 +1469,3 @@ async function performTargetClick(
   await runtime.pageRef.current.mouse.move(target.x, target.y);
   await runtime.pageRef.current.mouse.click(target.x, target.y, { button: "left" });
 }
-
-/** Exported for tests that want to verify the action-vocab regex is
- *  the one the runtime actually uses. */
-export const __testing = {
-  ACTION_VOCAB_REGEX,
-  parseUrlPattern,
-};

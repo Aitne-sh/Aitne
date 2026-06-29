@@ -28,12 +28,11 @@ import {
   listObservationsAwaitingSummary,
   setObservationEnqueueHook,
   updateObservationSummary,
-  type ObservationSummaryRow,
   type SummaryStatus,
 } from "../../db/observations.js";
 import type { Observer } from "../manager.js";
 import { createLogger } from "../../logging.js";
-import { preFilterObservation, type PreFilterConfig, type PreFilterDecision } from "./pre-filter.js";
+import { preFilterObservation, type PreFilterConfig } from "./pre-filter.js";
 import { buildSummarizerPrompt, type SummarizerPrompt } from "./summarizer-prompts.js";
 import { applyNoveltyFloor, parseSummarizerResponse, SUMMARY_MAX_CHARS } from "./response-parser.js";
 import type { SummarizerLlmClient } from "./summarizer-client.js";
@@ -418,6 +417,3 @@ function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, Math.floor(value)));
 }
-
-// Re-export the decision union for tests.
-export type { PreFilterDecision, ObservationSummaryRow };

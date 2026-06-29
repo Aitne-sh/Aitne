@@ -246,5 +246,3 @@ export function startChromiumInstall(): StartInstallResult {
   });
   return { ok: true };
 }
-
-export const __testing = { DEFAULT_STATUS, resolveCliPath };

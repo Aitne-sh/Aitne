@@ -945,14 +945,6 @@ export function verifyMoveCompleted(
 }
 
 /**
- * Expose the source manifest from a completed backup so the route can
- * re-verify post-move without re-walking the (now-empty) source.
- */
-export function getBackupManifest(backup: BackupResult): Manifest {
-  return backup.manifest;
-}
-
-/**
  * Reserved subdirectory inside a backup that holds target-side entries
  * the `overwrite_agent_files` policy is about to destroy. Kept as a
  * separate tree inside the backup so:

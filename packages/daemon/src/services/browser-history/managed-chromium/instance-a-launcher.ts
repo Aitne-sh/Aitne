@@ -41,7 +41,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type Database from "better-sqlite3";
 
 import { createLogger } from "../../../logging.js";
-import type { HostProfile, SandboxPrimitive } from "../types.js";
+import type { HostProfile } from "../types.js";
 import {
   anonProfileDir,
   authProfileDir,
@@ -275,7 +275,3 @@ async function waitForCdpReady(
   }
   return false;
 }
-
-// Re-export for type-narrowing convenience in callers that don't want
-// to thread the SandboxPrimitive type through their own imports.
-export type { SandboxPrimitive };

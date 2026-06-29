@@ -26,13 +26,6 @@ import { registerReadRoutes } from "./read.js";
 import { registerRepairRoutes } from "./repair.js";
 import { registerWriteRoutes } from "./write.js";
 
-// Re-exported so the consolidated `routes/context.test.ts` and
-// `api/server.test.ts` can keep importing from the same module specifier
-// after the split. Scope intentionally narrow: only the helpers that
-// outside test files actually invoke. The rest live at their source
-// modules (`./permissions.js`, `./path-resolve.js`).
-export { resolveContextTarget, safePath } from "./path-resolve.js";
-
 const logger = createLogger("context-api");
 
 /**

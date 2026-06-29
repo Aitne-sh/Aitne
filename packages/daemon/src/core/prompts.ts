@@ -20,11 +20,6 @@ import {
   type IntegrationKey,
   type IntegrationState,
 } from "@aitne/shared";
-import {
-  appendPolicyBlocks,
-  createPromptInjectionBudget,
-} from "./policy-files.js";
-import { appendReviewContextBlocks } from "./review-context.js";
 import { substituteIntegrationRoutingTables } from "./management-md.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -372,50 +367,6 @@ function resolveTaskFlowSource(
     if (custom !== null) return custom;
   }
   return loadFlow("default") ?? "";
-}
-
-/**
- * Assemble the final prompt by loading the task-flow template and
- * appending the configured set of vault policy blocks + review-context
- * (B-007 §5.8, B-004 Phase 1). The production dispatcher has its own
- * assembly path that threads runtime settings through; this module-level
- * helper exists for tests and tooling that need a self-contained prompt
- * builder. Caller must pass explicit B-004 flags — there is no runtime
- * settings reader here.
- */
-export function assemblePrompt(
-  eventType: string,
-  opts: {
-    backendId?: string;
-    processKey?: string;
-    contextDir?: string;
-    flags?: Record<string, unknown>;
-    reviewContextFlags?: {
-      useReviewDossiers: boolean;
-      useContextIndex: boolean;
-    };
-    integrations?: Partial<Record<IntegrationKey, IntegrationState>>;
-  } = {},
-): string {
-  const base = getTaskFlow(eventType, opts.backendId, opts.integrations);
-  if (!opts.contextDir) return base;
-  const budget = createPromptInjectionBudget();
-  const withPolicies = appendPolicyBlocks(base, {
-    contextDir: opts.contextDir,
-    processKey: opts.processKey ?? eventType,
-    flags: opts.flags,
-    budget,
-  });
-  const reviewFlags = opts.reviewContextFlags ?? {
-    useReviewDossiers: false,
-    useContextIndex: false,
-  };
-  return appendReviewContextBlocks(withPolicies, {
-    contextDir: opts.contextDir,
-    processKey: opts.processKey ?? eventType,
-    flags: reviewFlags,
-    budget,
-  });
 }
 
 /**
