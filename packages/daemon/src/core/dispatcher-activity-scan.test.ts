@@ -162,6 +162,7 @@ function makeCoordinator(opts: {
   const contextBuilder: IContextBuilder = {
     build: vi.fn().mockResolvedValue(""),
     buildResumeCatchupContext: vi.fn().mockResolvedValue(null),
+    buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
   };
   const fetchWindowRunner = opts.fetchWindowRunner ?? makeStubFetchWindowRunner();
   const queueWake = vi.fn(

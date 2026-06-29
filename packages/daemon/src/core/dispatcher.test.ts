@@ -228,6 +228,7 @@ describe("EventDispatcher", () => {
     mockContextBuilder = {
       build: vi.fn().mockResolvedValue("test context"),
       buildResumeCatchupContext: vi.fn().mockResolvedValue(null),
+      buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
     };
 
     mockGetTaskFlow = vi.fn().mockReturnValue("test prompt");
@@ -1914,6 +1915,90 @@ describe("EventDispatcher", () => {
     await eventBus.put(
       createEvent({ type: "dummy", source: "test", priority: EventPriority.LOW }),
     );
+    await Promise.race([runPromise, new Promise((r) => setTimeout(r, 100))]);
+  });
+
+  it("injects a FRESH pending-reminder block into the resume payload (stale-reminder fix)", async () => {
+    // Regression guard for the resume-path gap: build() is skipped on
+    // resume, so a <scheduled_reminders> snapshot left only in build()
+    // would freeze at session start — the agent could not see (and
+    // cancel) a reminder queued in an earlier turn of THIS session, which
+    // is the exact "owner already did it but the reminder still fires"
+    // case. The dispatcher must append a fresh block to the resume turn.
+    const config = makeConfig();
+    db.prepare(
+      `INSERT INTO conversation_sessions (
+         id, platform, channel_id, scope, scope_key, status, is_dm,
+         backend_session_id, started_at
+       )
+       VALUES (
+         1, 'owner', 'owner', 'owner_dm', 'owner', 'active', 1,
+         'sdk-session-1', datetime('now', '-10 minutes')
+       )`,
+    ).run();
+    mkdirSync(join(config.dataDir, "agent-sessions", "1"), { recursive: true });
+
+    vi.mocked(mockSessionMgr.getOrCreate).mockResolvedValue({
+      id: 1,
+      isActive: true,
+      sessionId: "sdk-session-1",
+      model: "opus",
+    });
+    vi.mocked(mockAgentCore.executeResume).mockResolvedValue(
+      makeResult({ output: "Cancelled it — removed the reminder." }),
+    );
+    // No proactive forwards here: the catchup builder returns null, so the
+    // reminder block must inject on its own, not piggy-back on that path.
+    vi.mocked(mockContextBuilder.buildResumeCatchupContext).mockResolvedValue(
+      null,
+    );
+    vi.mocked(mockContextBuilder.buildScheduledRemindersBlock).mockReturnValue(
+      "<scheduled_reminders>\n- #42 · 2026-06-28 14:30 · dm · Reminder: cancel your LinkedIn subscription\n</scheduled_reminders>",
+    );
+
+    const dispatcher = new EventDispatcher(
+      eventBus,
+      mockAgentCore,
+      mockContextBuilder,
+      mockGetTaskFlow,
+      mockNotificationMgr,
+      mockSessionMgr,
+      mockMessageRecorder,
+      mockAudit,
+      db,
+      config,
+    );
+
+    const runPromise = dispatcher.run();
+    await eventBus.put({
+      ...createEvent({
+        type: "message.received",
+        source: "slack",
+        priority: EventPriority.HIGH,
+      }),
+      sender: "user",
+      channel: "D123",
+      content: "I already cancelled LinkedIn",
+      platform: "slack",
+      threadId: null,
+      isDm: true,
+      isMention: false,
+    } as MessageEvent);
+
+    await new Promise((r) => setTimeout(r, 50));
+    dispatcher.stop();
+
+    expect(mockContextBuilder.buildScheduledRemindersBlock).toHaveBeenCalled();
+    const call = vi.mocked(mockAgentCore.executeResume).mock.calls[0][0];
+    expect(call.message).toContain("<scheduled_reminders>");
+    expect(call.message).toContain("#42");
+    expect(call.message).toContain("cancel your LinkedIn subscription");
+    expect(call.message).toContain("<current_user_message>");
+    expect(call.message).toContain("I already cancelled LinkedIn");
+    // Stands alone — no forward block, and no wide cached blocks bleed in.
+    expect(call.message).not.toContain("<proactive_forwards_since_last_turn>");
+    expect(call.message).not.toContain("<management_rules>");
+
     await Promise.race([runPromise, new Promise((r) => setTimeout(r, 100))]);
   });
 

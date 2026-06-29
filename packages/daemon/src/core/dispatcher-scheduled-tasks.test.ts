@@ -116,6 +116,7 @@ function makeRunner(opts: {
   const contextBuilder: IContextBuilder = {
     build: vi.fn().mockResolvedValue(""),
     buildResumeCatchupContext: vi.fn().mockResolvedValue(null),
+    buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
   };
   const prompt = new PromptAssembler({
     db: opts.db,

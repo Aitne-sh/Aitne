@@ -147,6 +147,7 @@ function makeFetcherRunner(opts: {
     opts.contextBuilder ?? {
       build: vi.fn().mockResolvedValue("<context/>"),
       buildResumeCatchupContext: vi.fn().mockResolvedValue(null),
+      buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
     };
   const prompt = new PromptAssembler({
     db: opts.db,
@@ -1723,6 +1724,7 @@ describe("RoutineFetchWindowRunner.run — failure paths (never throws)", () => 
   it("returns status='failed' when context build throws", async () => {
     const failingBuilder: IContextBuilder = {
       buildResumeCatchupContext: vi.fn(),
+      buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
       build: vi.fn().mockRejectedValue(new Error("context boom")),
     };
     const { router } = makeRouter();
@@ -1867,6 +1869,7 @@ describe("RoutineFetchWindowRunner.run — pre-pass progress broadcast (B2)", ()
     const router = opts.router ?? makeRouter().router;
     const contextBuilder: IContextBuilder = {
       buildResumeCatchupContext: vi.fn(),
+      buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
       build: vi.fn().mockResolvedValue("<context/>"),
     };
     const prompt = new PromptAssembler({
@@ -2185,6 +2188,7 @@ describe("RoutineFetchWindowRunner.run — fan-out subsession SSE symmetry (§7.
     const router = opts.router ?? makeRouter().router;
     const contextBuilder: IContextBuilder = {
       buildResumeCatchupContext: vi.fn(),
+      buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
       build: vi.fn().mockResolvedValue("<context/>"),
     };
     const prompt = new PromptAssembler({
@@ -2778,6 +2782,7 @@ describe("RoutineFetchWindowRunner.run — audit row carries detail.prePass on e
     const audit = makeAudit();
     const contextBuilder: IContextBuilder = {
       buildResumeCatchupContext: vi.fn(),
+      buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
       build: vi.fn().mockRejectedValue(new Error("context boom")),
     };
     const { runner } = makeFetcherRunner({

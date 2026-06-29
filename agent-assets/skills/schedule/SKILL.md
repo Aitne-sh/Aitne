@@ -25,11 +25,11 @@ user but compound into duplicate DMs/notifications at fire time.
 1. **Agent Plan check.** Scan `<today>` `## Agent Plan` for a row with
    HH:MM within ±15 min of your target AND an overlapping subject. If
    present, the plan is already in place — do NOT add a second one.
-2. **Pending schedule check.** `GET /api/schedule?status=pending,running`
-   and look for an item whose `scheduledFor` is within ±15 min of your
-   target with a matching `description` subject. If found, skip (or
-   PATCH the existing item if it needs updating — never register a
-   parallel second one).
+2. **Pending schedule check.** In a live owner DM pending one-off rows
+   appear in `<scheduled_reminders>` — dedup there and cancel/PATCH any
+   the conversation made moot. Else `GET
+   /api/schedule?status=pending,running` for one within ±15 min with a
+   matching `description`; if found, skip or PATCH.
 3. **Recurring check.** `GET /api/recurring-schedules?enabled=true` to
    confirm no recurring rule/Agent already covers this cadence (e.g. a
    daily 09:00 inbox triage, or the morning briefing). If covered, skip.

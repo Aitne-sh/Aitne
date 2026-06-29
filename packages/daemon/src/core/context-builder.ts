@@ -56,6 +56,7 @@ import {
   renderRecentDmConversationLog,
   renderRecentOtherSurfaceBlock,
   renderResumeCatchupContext,
+  renderScheduledRemindersBlock,
 } from "./context-builder-conversation.js";
 import { renderActiveProjectsSection } from "./context-builder-projects.js";
 import {
@@ -980,9 +981,46 @@ export class ContextBuilder implements IContextBuilder {
           `<recent_other_surface>\n${otherSurface}\n</recent_other_surface>`,
         );
       }
+
+      // Pending one-off reminders the agent queued earlier. On a FRESH
+      // execute (new session, turn 1) this snapshot rides in the cached
+      // turn-1 prompt; resumed turns get a fresh copy via
+      // `buildScheduledRemindersBlock` appended to the resume payload (the
+      // dispatcher's resume branch) — `build()` is not re-run on resume,
+      // so without that companion the list would freeze at session start.
+      const scheduledReminders = this.buildScheduledRemindersBlock(event);
+      if (scheduledReminders) {
+        sections.push(scheduledReminders);
+      }
     }
 
     return sections.join("\n\n");
+  }
+
+  /**
+   * Pending one-off `agent_schedule` rows surfaced into owner-DM context
+   * so a live turn can cancel/amend any reminder the conversation just
+   * made moot (e.g. owner says "I already cancelled LinkedIn") instead of
+   * letting a frozen `dm` reminder fire later. Returns the wrapped
+   * `<scheduled_reminders>` block, or `null` when there is nothing
+   * pending / the event is not a message.
+   *
+   * Used from TWO call sites so the data is fresh on EVERY owner-DM turn:
+   *   1. `build()` above — covers the fresh-execute path (new session).
+   *   2. the dispatcher's resume branch — `build()` is skipped on resume
+   *      (the SDK reuses the cached system prompt), so a snapshot left
+   *      only in `build()` would be stale on turns 2+. This companion is
+   *      appended to the resume payload, mirroring
+   *      `buildResumeCatchupContext`'s per-turn-delta role.
+   */
+  buildScheduledRemindersBlock(event: Event): string | null {
+    if (!isMessageEvent(event)) return null;
+    const inner = renderScheduledRemindersBlock(
+      { db: this.db, config: this.config },
+      event,
+    );
+    if (!inner) return null;
+    return `<scheduled_reminders>\n${inner}\n</scheduled_reminders>`;
   }
 
   /**

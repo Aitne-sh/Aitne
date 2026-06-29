@@ -69,6 +69,7 @@ function makeDispatcher(db: Database.Database, dataDir: string): {
   const contextBuilder: IContextBuilder = {
     build: vi.fn().mockResolvedValue(""),
     buildResumeCatchupContext: vi.fn().mockResolvedValue(null),
+    buildScheduledRemindersBlock: vi.fn().mockReturnValue(null),
   };
   const replyActivity: ReplyActivityHandle = { stop: vi.fn() };
   const notificationMgr: INotificationManager = {

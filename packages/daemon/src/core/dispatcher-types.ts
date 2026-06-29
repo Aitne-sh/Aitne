@@ -93,6 +93,16 @@ export interface IContextBuilder {
     event: Event,
     sessionStartedAtMs: number,
   ): Promise<string | null>;
+  /**
+   * Wrapped `<scheduled_reminders>` block (pending one-off
+   * `agent_schedule` rows) for owner-DM turns, or `null` when nothing is
+   * pending / the event is not a message. Unlike the always-cached
+   * `build()` blocks this is volatile per-turn state, so the resume
+   * branch appends it to the user-turn payload — `build()` is not re-run
+   * on resume, and a snapshot left only there would freeze at session
+   * start, defeating the stale-reminder fix.
+   */
+  buildScheduledRemindersBlock(event: Event): string | null;
 }
 
 /** Function type for resolving task flow templates by event type */

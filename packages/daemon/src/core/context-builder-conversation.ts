@@ -416,6 +416,98 @@ export function renderRecentOtherSurfaceBlock(
 }
 
 /**
+ * STALE-REMINDER-FIX — render the agent's pending *one-off* scheduled
+ * items (frozen DMs and agent wake-ups it queued earlier) so the live
+ * owner-DM agent can SEE what future notifications are already in flight
+ * and reconcile any the conversation has just made moot.
+ *
+ * The blind spot this closes: a frozen `dm` reminder ("remind me to
+ * cancel LinkedIn") is dispatched verbatim at fire time with no
+ * re-evaluation (scheduler `handleDirectDm`). When the owner reports the
+ * task done mid-conversation, the agent previously had no way to know a
+ * contradicting reminder was queued — pending `agent_schedule` rows were
+ * never injected into the live DM context, and the agent will not
+ * defensively `GET /api/schedule` every turn. Surfacing them here lets
+ * it `DELETE`/`PATCH` the stale row in the same turn (the cancellation
+ * machinery already exists), AND doubles as the schedule skill's
+ * mandatory dedup pre-check source so a second identical reminder isn't
+ * queued.
+ *
+ * Scope: only `recurring_schedule_id IS NULL` rows. Recurring
+ * occurrences are owned by their parent rule (`/agents`,
+ * `recurring-schedules`) and re-materialize if cancelled here, so
+ * showing them as ad-hoc-cancelable would mislead. Owner-facing DM
+ * surfaces only (`owner_dm` / `dashboard_chat`); `docs_qa` is research,
+ * not conversation, so it gets nothing — mirrors
+ * `renderRecentOtherSurfaceBlock`'s gate.
+ */
+export function renderScheduledRemindersBlock(
+  deps: ConversationDeps,
+  event: MessageEvent,
+): string | null {
+  if (!event.isDm || event.intent === "docs_qa") return null;
+  const { db, config } = deps;
+  const timezoneLabel = config.timezone || "system";
+
+  // Fetch one past the display cap so an overflow can be flagged rather
+  // than silently truncated — a hidden tail would let the dedup use of
+  // this block wrongly conclude "no duplicate exists".
+  const DISPLAY_LIMIT = 20;
+  const rows = db
+    .prepare(
+      `SELECT id, scheduled_for, task_type, task_description, task_prompt
+         FROM agent_schedule
+        WHERE status = 'pending' AND recurring_schedule_id IS NULL
+        ORDER BY scheduled_for ASC, id ASC
+        LIMIT ${DISPLAY_LIMIT + 1}`,
+    )
+    .all() as {
+    id: number;
+    scheduled_for: string;
+    task_type: string;
+    task_description: string | null;
+    task_prompt: string | null;
+  }[];
+
+  if (rows.length === 0) return null;
+
+  const overflow = rows.length > DISPLAY_LIMIT;
+  const lines = rows.slice(0, DISPLAY_LIMIT).map((r) => {
+    // `dm` rows carry the verbatim message in task_description; agent
+    // tasks carry an optional label there and the body in task_prompt.
+    const subject =
+      r.task_description && r.task_description.trim().length > 0
+        ? r.task_description
+        : (r.task_prompt ?? "");
+    const when = formatSqliteTimestampForContext(
+      r.scheduled_for,
+      timezoneLabel,
+    );
+    // task_type is a free-form provenance label; sanitize it alongside
+    // the subject so neither can break out of the wrapper tag.
+    return `- #${r.id} · ${when} · ${sanitizeMessageContent(r.task_type)} · ${sanitizeMessageContent(
+      truncateForBlock(subject, 140),
+    )}`;
+  });
+  if (overflow) {
+    lines.push(
+      `- …soonest ${DISPLAY_LIMIT} shown; more pending — GET /api/schedule?status=pending,running for the full list before assuming none match.`,
+    );
+  }
+
+  return [
+    "These one-off notifications/tasks are already queued to fire on your",
+    "behalf. If this conversation makes one unnecessary or wrong (the owner",
+    "already did it, cancelled, or changed plans), reconcile it THIS turn",
+    "via the schedule skill — DELETE /api/schedule/:id to cancel, or PATCH",
+    "to re-time/re-word — and update the matching state/today.md Agent Plan",
+    "row. A queued item left untouched WILL fire later. Also use this list",
+    "to avoid scheduling a duplicate.",
+    ...lines,
+  ].join("\n");
+}
+
+/**
  * Map a DM-scope identifier to the cross-surface scope/key pair the
  * other owner-facing surface listens on. `owner_dm` ↔ `dashboard_chat`;
  * anything else (e.g. `docs_qa`) returns `null` so callers can skip the

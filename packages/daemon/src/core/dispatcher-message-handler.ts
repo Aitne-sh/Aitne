@@ -1224,9 +1224,26 @@ export class MessageHandler {
         const resumeMessage = resumeStaged.length > 0 || resumeMissing.length > 0
           ? `${event.content}\n${this.prompt.buildAttachmentPromptBlock(resumeStaged, resumeTranscripts, resumeMissing)}`
           : event.content;
-        const resumeMessageWithForwardContext = proactiveForwardContext
-          ? `${resumeTurnContext}\n\n${proactiveForwardContext}\n\n<current_user_message>\n${resumeMessage}\n</current_user_message>`
-          : `${resumeTurnContext}\n\n${resumeMessage}`;
+        // Fresh per-turn snapshot of pending one-off reminders. build() is
+        // NOT re-run on resume, so the cached turn-1 <scheduled_reminders>
+        // is stale here — without this the agent can't see (and cancel) a
+        // reminder queued in an earlier turn of this same session, the
+        // exact "user already did it, but the reminder still fires" case.
+        // Rides the user-turn payload (not the cached prefix), mirroring
+        // the proactive-forward catchup delta above.
+        const resumeScheduledReminders =
+          this.contextBuilder.buildScheduledRemindersBlock(event);
+        const resumePreamble = [
+          resumeTurnContext,
+          proactiveForwardContext,
+          resumeScheduledReminders,
+        ]
+          .filter((part): part is string => part !== null)
+          .join("\n\n");
+        const resumeMessageWithForwardContext =
+          proactiveForwardContext || resumeScheduledReminders
+            ? `${resumePreamble}\n\n<current_user_message>\n${resumeMessage}\n</current_user_message>`
+            : `${resumeTurnContext}\n\n${resumeMessage}`;
 
         const resumeStagedForBackend = resumeStaged.length > 0
           ? resumeStaged.map((row) => ({
