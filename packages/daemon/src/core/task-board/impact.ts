@@ -202,10 +202,15 @@ export function computeImpact(ref: TaskRef, sources: ImpactSources): ImpactResul
       if (!a) {
         return { ref: ref.raw, found: false, summary: `${ref.raw} is not a live Agent.`, nodes: [] };
       }
+      // A built-in Agent is unconditionally undeletable (§9.8) — the preview
+      // must say "stop, never delete", not imply a keep_history:false hard-delete.
+      const isBuiltin = a.source === "builtin";
       const nodes: ImpactNode[] = [
         node(
           ref.raw,
-          `the Agent — disabled by default; deleted only when keep_history:false`,
+          isBuiltin
+            ? `the built-in Agent — cannot be deleted (409); only stopped/disabled with the stop-warning ack`
+            : `the Agent — disabled by default; deleted only when keep_history:false`,
           "self",
           false,
         ),
@@ -214,7 +219,9 @@ export function computeImpact(ref: TaskRef, sources: ImpactSources): ImpactResul
         nodes.push(
           node(
             formatTaskRef("rs", a.recurringScheduleId),
-            `the Agent's own recurring schedule — disabled with the Agent, removed only on hard-delete (not an IS-A wrapper)`,
+            isBuiltin
+              ? `the Agent's own recurring schedule — disabled when the Agent is stopped (a built-in is never deleted)`
+              : `the Agent's own recurring schedule — disabled with the Agent, removed only on hard-delete (not an IS-A wrapper)`,
             "owner_paired_schedule",
             false,
           ),
@@ -223,9 +230,10 @@ export function computeImpact(ref: TaskRef, sources: ImpactSources): ImpactResul
       return {
         ref: ref.raw,
         found: true,
-        summary:
-          `Editing/disabling ${ref.raw} affects the Agent and its recurring schedule; ` +
-          `history is retained unless keep_history:false.`,
+        summary: isBuiltin
+          ? `${ref.raw} is a built-in Agent — it cannot be deleted (409); stopping it needs the stop-warning ack, and its own schedule disables with it.`
+          : `Editing/disabling ${ref.raw} affects the Agent and its recurring schedule; ` +
+            `history is retained unless keep_history:false.`,
         nodes,
       };
     }

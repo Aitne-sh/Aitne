@@ -39,8 +39,12 @@ export interface ResearchClusterSummary {
 export interface InventorySources {
   /** `recurring_schedules WHERE task_type='dm_session'`. */
   recurringDmSessions: readonly RecurringScheduleDTO[];
-  /** `agents WHERE source='user'`. */
-  userAgents: readonly AgentDTO[];
+  /**
+   * All agents (built-in + user). Built-ins surface read-only with origin
+   * `system`; `origin` is derived per-row from `source`. Symmetric with the
+   * impact resolver, which already walks every agent.
+   */
+  agents: readonly AgentDTO[];
   /** `managed_tasks` (+ their recurring rows resolved via `recurringById`). */
   managedTasks: readonly ManagedTask[];
   /** Recurring rows keyed by id — resolves mt + agent cadence/next-run. */
@@ -108,7 +112,7 @@ function dmItems(sources: InventorySources): TaskBoardItem[] {
 }
 
 function agentItems(sources: InventorySources): TaskBoardItem[] {
-  return sources.userAgents
+  return sources.agents
     .map((a): TaskBoardItem => {
       const ref = formatTaskRef("agent", a.slug);
       const paired =
@@ -123,7 +127,8 @@ function agentItems(sources: InventorySources): TaskBoardItem[] {
         status,
         cadence: paired?.recurrenceLabel ?? a.scheduleExpression ?? null,
         fulfilledBy: ref,
-        origin: "user",
+        // Built-ins are system-seeded identities; user Agents are user-created.
+        origin: a.source === "builtin" ? "system" : "user",
         lastResult: null,
         lastRunAt: null,
         nextRunAt: paired?.nextRunAt ?? null,

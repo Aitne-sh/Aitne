@@ -16,8 +16,12 @@ function rs(id: number, over: Partial<RecurringScheduleDTO> = {}): RecurringSche
 function mt(id: string, scheduleId: number): ManagedTask {
   return { id, schedule_id: scheduleId } as ManagedTask;
 }
-function agent(slug: string, recurringScheduleId: number | null): AgentDTO {
-  return { slug, recurringScheduleId } as unknown as AgentDTO;
+function agent(
+  slug: string,
+  recurringScheduleId: number | null,
+  source: "builtin" | "user" = "user",
+): AgentDTO {
+  return { slug, recurringScheduleId, source } as unknown as AgentDTO;
 }
 function trigger(id: number, recurringScheduleId: number | null): AutomationTriggerDTO {
   return { id, recurringScheduleId } as unknown as AutomationTriggerDTO;
@@ -119,6 +123,21 @@ describe("computeImpact — agent target", () => {
   it("omits the schedule node when the agent has no paired schedule", () => {
     const result = computeImpact(ref("agent:lonely"), sources({ agents: [agent("lonely", null)] }));
     expect(result.nodes.map((n) => n.ref)).toEqual(["agent:lonely"]);
+  });
+
+  it("marks a built-in Agent undeletable (409 / stop-warning), not a keep_history delete", () => {
+    const result = computeImpact(
+      ref("agent:morning-routine"),
+      sources({ agents: [agent("morning-routine", 7, "builtin")] }),
+    );
+    expect(result.found).toBe(true);
+    expect(result.summary).toContain("cannot be deleted (409)");
+    expect(result.summary).not.toContain("keep_history:false");
+    expect(result.nodes.map((n) => n.ref)).toEqual(["agent:morning-routine", "rs:7"]);
+    expect(result.nodes.every((n) => n.removed === false)).toBe(true);
+    expect(result.nodes.find((n) => n.ref === "rs:7")).toMatchObject({
+      cascade: "owner_paired_schedule",
+    });
   });
 
   it("returns found:false for a missing agent", () => {

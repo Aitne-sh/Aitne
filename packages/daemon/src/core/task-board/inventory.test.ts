@@ -95,7 +95,7 @@ function cluster(over: Partial<ResearchClusterSummary>): ResearchClusterSummary 
 function emptySources(over: Partial<InventorySources>): InventorySources {
   return {
     recurringDmSessions: [],
-    userAgents: [],
+    agents: [],
     managedTasks: [],
     recurringById: new Map(),
     pendingOneOffs: [],
@@ -139,7 +139,7 @@ describe("assembleInventory — agent", () => {
     const paired = rs({ id: 51, taskType: "agent.task", recurrenceLabel: "Mon 09:00", nextRunAt: "2026-07-06 09:00:00" });
     const [item] = assembleInventory(
       emptySources({
-        userAgents: [agent({ recurringScheduleId: 51 })],
+        agents: [agent({ recurringScheduleId: 51 })],
         recurringById: new Map([[51, paired]]),
       }),
     );
@@ -147,17 +147,31 @@ describe("assembleInventory — agent", () => {
   });
 
   it("falls back to the cron expression when there is no paired row", () => {
-    const [item] = assembleInventory(emptySources({ userAgents: [agent({ recurringScheduleId: null })] }));
+    const [item] = assembleInventory(emptySources({ agents: [agent({ recurringScheduleId: null })] }));
     expect(item.cadence).toBe("0 9 * * 1");
     expect(item.nextRunAt).toBeNull();
   });
 
   it("falls back to null cadence and flags invalid/disabled agents", () => {
-    const invalid = assembleInventory(emptySources({ userAgents: [agent({ invalid: true, scheduleExpression: null })] }));
+    const invalid = assembleInventory(emptySources({ agents: [agent({ invalid: true, scheduleExpression: null })] }));
     expect(invalid[0].status).toBe("invalid");
     expect(invalid[0].cadence).toBeNull();
-    const disabled = assembleInventory(emptySources({ userAgents: [agent({ enabled: false })] }));
+    const disabled = assembleInventory(emptySources({ agents: [agent({ enabled: false })] }));
     expect(disabled[0].status).toBe("paused");
+  });
+
+  it("tags built-in agents origin:system and user agents origin:user", () => {
+    const items = assembleInventory(
+      emptySources({
+        agents: [
+          agent({ slug: "morning-routine", source: "builtin" }),
+          agent({ slug: "weekly-digest", source: "user" }),
+        ],
+      }),
+    );
+    const byRef = Object.fromEntries(items.map((i) => [i.ref, i]));
+    expect(byRef["agent:morning-routine"].origin).toBe("system");
+    expect(byRef["agent:weekly-digest"].origin).toBe("user");
   });
 });
 
@@ -261,7 +275,7 @@ describe("assembleInventory — ordering", () => {
     const items = assembleInventory(
       emptySources({
         recurringDmSessions: [rs({ id: 42 }), rs({ id: 7 })],
-        userAgents: [agent({ slug: "z" }), agent({ slug: "a" })],
+        agents: [agent({ slug: "z" }), agent({ slug: "a" })],
         researchClusters: [cluster({ slug: "c" })],
       }),
     );

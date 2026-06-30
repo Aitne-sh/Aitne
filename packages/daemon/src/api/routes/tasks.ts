@@ -101,7 +101,11 @@ function buildInventorySources(db: Database.Database): InventorySources {
   }));
   return {
     recurringDmSessions: allRecurring.filter((r) => r.taskType === "dm_session"),
-    userAgents: listAgents(db, { source: "user" }),
+    // ALL agents (built-in + user). The board is the single inventory of
+    // everything in motion, so built-ins are surfaced read-only (origin:system);
+    // any write still hits the owner's built-in guards (409-undeletable /
+    // stop-warning ack). Symmetric with buildImpactSources' agent resolver.
+    agents: listAgents(db),
     managedTasks: listManagedTasks(db),
     recurringById,
     pendingOneOffs,
