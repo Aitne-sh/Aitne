@@ -18,7 +18,13 @@ import type { RecurringScheduleDTO } from "../../db/recurring-schedules.js";
 import type { AgentDTO } from "../../db/agents-store.js";
 import type { ManagedTask } from "@aitne/shared";
 import type { AutomationTriggerDTO } from "../../db/automation-triggers.js";
-import type { ImpactCascade, ImpactNode, ImpactResult, TaskRef } from "./types.js";
+import type {
+  ImpactCascade,
+  ImpactNode,
+  ImpactResult,
+  TaskRef,
+  TaskRefPrefix,
+} from "./types.js";
 import { formatTaskRef } from "./refs.js";
 
 /** A pending/materialised occurrence and the recurring parent it links to. */
@@ -45,6 +51,28 @@ export interface ImpactSources {
   /** Active/dormant research-cluster slugs (existence for cluster: refs). */
   researchClusterSlugs: ReadonlySet<string>;
 }
+
+/**
+ * The {@link ImpactSources} fields each ref prefix's {@link computeImpact} branch
+ * actually reads. The route (`api/routes/tasks.ts`) consults this to fetch ONLY
+ * what a given ref needs: a `bt:`/`bx:`/`cluster:` existence check must not scan
+ * every recurring / agent / managed / trigger table, and an `rs:`/`agent:`/`mt:`
+ * query must not load the fulfiller id-sets. Kept here beside `computeImpact` so
+ * the two cannot drift, and proven a correct **superset** of what each branch
+ * reads by the "reads only declared sources" guard in `impact.test.ts` — a Proxy
+ * that throws if `computeImpact` touches a field absent from its prefix's set.
+ * `obj` is reserved (§5.5) and reads nothing.
+ */
+export const IMPACT_SOURCE_KEYS: Record<TaskRefPrefix, readonly (keyof ImpactSources)[]> = {
+  rs: ["recurringById", "managedTasks", "agents", "automationTriggers", "pendingOccurrences"],
+  mt: ["managedTasks", "agents", "automationTriggers", "pendingOccurrences"],
+  agent: ["agents"],
+  as: ["pendingOccurrences"],
+  bt: ["backgroundTaskIds"],
+  bx: ["browserTaskIds"],
+  cluster: ["researchClusterSlugs"],
+  obj: [],
+};
 
 function node(
   ref: string,

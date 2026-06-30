@@ -391,6 +391,15 @@ export const READ_SENSITIVE_API_PREFIXES = [
   "/api/observations",
   "/api/obsidian",
   "/api/receipts",
+  // docs/design/appendices/unified-task-board.md §5.2 — the unified Task Board
+  // inventory (GET /api/tasks) is ReadSensitive: it projects the `background_task`
+  // / `browser_task` content (title / brief / description / outcomeDetail) that
+  // the dedicated fulfiller GETs gate. The `board` skill body references
+  // `/api/tasks`, so a Codex DM session needs the read-token banner or its
+  // inventory read would 401 silently. (GET /api/tasks/impact + the write facade
+  // are Autonomous; matching `/api/tasks` here over-triggers the banner on the
+  // write-only `task` skill too — the documented low-risk "extra prefix" case.)
+  "/api/tasks",
   "/api/travel-bookings",
 ] as const;
 

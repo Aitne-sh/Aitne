@@ -682,6 +682,35 @@ describe("auditRiskClassifications — method case normalization", () => {
   });
 });
 
+// ── Unified Task Board (docs/design/appendices/unified-task-board.md) ──────
+// The board's READ tier asymmetry is load-bearing and easy to regress, so it
+// is pinned explicitly: the inventory GET aggregates ReadSensitive fulfiller
+// content (background_task / browser_task) and so must itself be
+// ReadSensitive, while the blast-radius GET (structure only) and the write
+// facade (re-dispatches → inner gate decides) stay Autonomous.
+describe("classifyRisk — Unified Task Board tiers", () => {
+  it("GET /api/tasks is ReadSensitive (aggregates ReadSensitive fulfiller content)", () => {
+    expect(classifyRisk("GET", "/api/tasks")).toBe(RiskTier.ReadSensitive);
+  });
+
+  it("GET /api/tasks/impact stays Autonomous (blast-radius structure, no fulfiller content)", () => {
+    expect(classifyRisk("GET", "/api/tasks/impact")).toBe(RiskTier.Autonomous);
+  });
+
+  it("the write facade stays Autonomous — the re-dispatched owner gate decides", () => {
+    expect(classifyRisk("POST", "/api/tasks")).toBe(RiskTier.Autonomous);
+    expect(classifyRisk("PATCH", "/api/tasks/rs:42")).toBe(RiskTier.Autonomous);
+    expect(classifyRisk("PATCH", "/api/tasks/agent:weekly-digest")).toBe(
+      RiskTier.Autonomous,
+    );
+    expect(classifyRisk("DELETE", "/api/tasks/mt_3")).toBe(RiskTier.Autonomous);
+  });
+
+  it("exposes /api/tasks on the ReadSensitive GET surface so the Codex banner covers the board skill", () => {
+    expect(listReadSensitiveGetPathKeys()).toContain("/api/tasks");
+  });
+});
+
 // ── listReadSensitiveGetPathKeys — drift-guard exposure surface ──────────
 // `skills-compiler` substring-matches user-skill bodies against this list
 // to render the Codex read-sensitive banner. The function output IS the

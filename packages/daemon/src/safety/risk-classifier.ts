@@ -78,17 +78,32 @@ const API_RISK: Record<string, RiskTier> = {
   "DELETE /api/recurring-schedules/": RiskTier.Autonomous,
 
   // ── Unified Task Board API (docs/design/appendices/unified-task-board.md) ──
-  // L0 reads (inventory + blast-radius) are structural schedule metadata — the
-  // same shape and tier as GET /api/recurring-schedules / /api/agents, so
-  // Autonomous. The L1 write facade is intentionally Autonomous: it re-dispatches
-  // each write through the OWNING route, which re-applies its own tier against
-  // the forwarded credentials. So a token-less agent can edit a briefing
-  // (rs: → /api/recurring-schedules, Autonomous) but is still 401'd on an agent
-  // edit (agent: → /api/agents PATCH/DELETE, Approve) exactly as at the owner —
-  // the inner gate decides, never a coarse outer one. The facade itself never
-  // mutates a row directly (it only forwards), so it has no blast radius of its
-  // own beyond what the owner enforces.
-  "GET /api/tasks": RiskTier.Autonomous,
+  // GET /api/tasks (inventory) is ReadSensitive — NOT Autonomous. Unlike the
+  // write facade it does NOT re-dispatch: it JOINs the owner rows directly, and
+  // that projection aggregates the ReadSensitive fulfiller surfaces
+  // (`background_task` / `browser_task`: title, brief/description, outcomeDetail
+  // — the very content that makes GET /api/background-task / GET /api/browser-task
+  // ReadSensitive below). A projection inherits the HIGHEST tier of its inputs:
+  // it must not be a token-less side-channel to content the dedicated GETs gate
+  // (`enforceReadToken` defaults true, so those 401 without a token). The agent's
+  // curl shim injects `x-read-token` unconditionally (`core/daemon-api-cli.ts`
+  // §READ_TOKEN_ENV), so this is transparent to skill prose; the dashboard reads
+  // via its Bearer proxy, exactly as the /browser-tasks page already does.
+  //
+  // GET /api/tasks/impact stays Autonomous: it returns blast-radius STRUCTURE
+  // only — row existence + cascade labels (slugs / task_type / trigger ids /
+  // pending counts), never fulfiller content — i.e. the same shape and tier as
+  // GET /api/recurring-schedules / GET /api/agents.
+  //
+  // The L1 write facade (POST/PATCH/DELETE) stays Autonomous on purpose: it
+  // re-dispatches each write through the OWNING route, which re-applies its own
+  // tier against the forwarded credentials (the auth middleware runs again on
+  // `app.fetch`). So a token-less agent can edit a briefing (rs: →
+  // /api/recurring-schedules, Autonomous) but is still 401'd on an agent edit
+  // (agent: → /api/agents PATCH/DELETE, Approve) exactly as at the owner — the
+  // inner gate decides, never a coarse outer one. The facade never mutates a row
+  // directly (it only forwards), so it has no blast radius of its own.
+  "GET /api/tasks": RiskTier.ReadSensitive,
   "GET /api/tasks/impact": RiskTier.Autonomous,
   "POST /api/tasks": RiskTier.Autonomous,
   "PATCH /api/tasks/": RiskTier.Autonomous,

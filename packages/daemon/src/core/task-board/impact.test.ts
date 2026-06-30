@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeImpact } from "./impact.js";
+import { computeImpact, IMPACT_SOURCE_KEYS } from "./impact.js";
 import type { ImpactSources } from "./impact.js";
 import { parseTaskRef } from "./refs.js";
 import type { TaskRef } from "./types.js";
@@ -178,4 +178,70 @@ describe("computeImpact — one-off + fulfillers + reserved", () => {
     expect(result).toMatchObject({ found: false, nodes: [] });
     expect(result.summary).toContain("reserved");
   });
+});
+
+describe("computeImpact — reads only the sources IMPACT_SOURCE_KEYS declares", () => {
+  // Scoped-fetch drift guard (§5.2b). The route fetches ONLY the sources
+  // `IMPACT_SOURCE_KEYS[prefix]` lists. If `computeImpact` ever read a field
+  // absent from that list it would silently see an empty collection in
+  // production and mis-label the blast radius. A Proxy turns that into a hard
+  // failure here. The reverse — asserting every declared key is actually read
+  // for a live target — keeps the declaration TIGHT (no needless fetch).
+  const ALL_KEYS: readonly (keyof ImpactSources)[] = [
+    "recurringById",
+    "managedTasks",
+    "agents",
+    "automationTriggers",
+    "pendingOccurrences",
+    "backgroundTaskIds",
+    "browserTaskIds",
+    "researchClusterSlugs",
+  ];
+  // One fully-populated source set whose target rows exist for EVERY prefix, so
+  // each branch traverses its full satellite walk and touches every field it
+  // legitimately needs.
+  const full = sources({
+    recurringById: new Map([[51, rs(51, { taskType: "managed_fetch" })]]),
+    managedTasks: [mt("mt_3", 51)],
+    agents: [agent("digest", 51)],
+    automationTriggers: [trigger(9, 51)],
+    pendingOccurrences: [
+      { id: 8190, recurringScheduleId: null },
+      { id: 1, recurringScheduleId: 51 },
+    ],
+    backgroundTaskIds: new Set(["u"]),
+    browserTaskIds: new Set(["v"]),
+    researchClusterSlugs: new Set(["c"]),
+  });
+  const liveRefFor: Record<keyof typeof IMPACT_SOURCE_KEYS, string> = {
+    rs: "rs:51",
+    mt: "mt_3",
+    agent: "agent:digest",
+    as: "as:8190",
+    bt: "bt:u",
+    bx: "bx:v",
+    cluster: "cluster:c",
+    obj: "obj:o1",
+  };
+
+  for (const prefix of Object.keys(IMPACT_SOURCE_KEYS) as (keyof typeof IMPACT_SOURCE_KEYS)[]) {
+    it(`prefix "${prefix}" touches no source outside its declared set, and reads every declared key`, () => {
+      const allowed = new Set<keyof ImpactSources>(IMPACT_SOURCE_KEYS[prefix]);
+      const read = new Set<keyof ImpactSources>();
+      const guarded = new Proxy(full, {
+        get(target, key) {
+          if (typeof key === "string" && (ALL_KEYS as readonly string[]).includes(key)) {
+            const k = key as keyof ImpactSources;
+            if (!allowed.has(k)) {
+              throw new Error(`computeImpact("${prefix}") read undeclared source "${key}"`);
+            }
+            read.add(k);
+          }
+          return Reflect.get(target, key);
+        },
+      });
+      expect(() => computeImpact(ref(liveRefFor[prefix]), guarded)).not.toThrow();
+      expect([...read].sort()).toEqual([...allowed].sort());
+    });
+  }
 });

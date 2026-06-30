@@ -35,8 +35,14 @@ import {
   type InventorySources,
   type PendingOneOff,
 } from "../../core/task-board/inventory.js";
-import { computeImpact, type ImpactSources } from "../../core/task-board/impact.js";
+import {
+  computeImpact,
+  IMPACT_SOURCE_KEYS,
+  type ImpactSources,
+} from "../../core/task-board/impact.js";
 import { parseTaskRef } from "../../core/task-board/refs.js";
+import type { TaskRef } from "../../core/task-board/types.js";
+import type { RecurringScheduleDTO } from "../../db/recurring-schedules.js";
 import {
   planCreateDispatch,
   planRefDispatch,
@@ -122,29 +128,48 @@ function buildInventorySources(db: Database.Database): InventorySources {
   };
 }
 
-function buildImpactSources(db: Database.Database): ImpactSources {
-  const allRecurring = listRecurringSchedules(db);
-  const occurrenceRows = db
-    .prepare(`SELECT id, recurring_schedule_id FROM agent_schedule WHERE status = 'pending'`)
-    .all() as OccurrenceRow[];
+/**
+ * Build ONLY the impact sources the target `ref` actually needs, per
+ * `IMPACT_SOURCE_KEYS` (the source-of-truth co-located with `computeImpact`,
+ * drift-guarded in `impact.test.ts`). A blast-radius query is per-ref, so an
+ * `rs:`/`agent:`/`mt:` lookup must not scan the fulfiller tables and a
+ * `bt:`/`bx:`/`cluster:` existence check must not scan the whole schedule
+ * spine. Fields outside the ref's declared set stay empty — and the drift guard
+ * proves `computeImpact` never reads them for that prefix.
+ */
+function buildImpactSources(db: Database.Database, ref: TaskRef): ImpactSources {
+  const need = new Set<keyof ImpactSources>(IMPACT_SOURCE_KEYS[ref.prefix]);
+  const occurrenceRows = need.has("pendingOccurrences")
+    ? (db
+        .prepare(`SELECT id, recurring_schedule_id FROM agent_schedule WHERE status = 'pending'`)
+        .all() as OccurrenceRow[])
+    : [];
   return {
-    recurringById: new Map(allRecurring.map((r) => [r.id, r])),
-    managedTasks: listManagedTasks(db),
+    recurringById: need.has("recurringById")
+      ? new Map(listRecurringSchedules(db).map((r) => [r.id, r]))
+      : new Map<number, RecurringScheduleDTO>(),
+    managedTasks: need.has("managedTasks") ? listManagedTasks(db) : [],
     // ALL agents (incl. builtins) — a delete preview must surface any agent
     // that references the schedule, not just user-created ones.
-    agents: listAgents(db),
-    automationTriggers: listTriggers(db),
+    agents: need.has("agents") ? listAgents(db) : [],
+    automationTriggers: need.has("automationTriggers") ? listTriggers(db) : [],
     pendingOccurrences: occurrenceRows.map((r) => ({
       id: r.id,
       recurringScheduleId: r.recurring_schedule_id ?? null,
     })),
-    backgroundTaskIds: new Set(
-      listBackgroundTasks(db, { states: [...BACKGROUND_TASK_NON_TERMINAL_STATES] }).map((t) => t.id),
-    ),
-    browserTaskIds: new Set(
-      listBrowserTasks(db, { states: [...BROWSER_TASK_NON_TERMINAL_STATES] }).map((t) => t.id),
-    ),
-    researchClusterSlugs: new Set(listBrowserResearchClusters(db).clusters.map((c) => c.slug)),
+    backgroundTaskIds: need.has("backgroundTaskIds")
+      ? new Set(
+          listBackgroundTasks(db, { states: [...BACKGROUND_TASK_NON_TERMINAL_STATES] }).map((t) => t.id),
+        )
+      : new Set<string>(),
+    browserTaskIds: need.has("browserTaskIds")
+      ? new Set(
+          listBrowserTasks(db, { states: [...BROWSER_TASK_NON_TERMINAL_STATES] }).map((t) => t.id),
+        )
+      : new Set<string>(),
+    researchClusterSlugs: need.has("researchClusterSlugs")
+      ? new Set(listBrowserResearchClusters(db).clusters.map((c) => c.slug))
+      : new Set<string>(),
   };
 }
 
@@ -174,7 +199,7 @@ export function createTasksRoutes(deps: TasksRoutesDeps): Hono {
     if (!ref) {
       return c.json({ error: "ref_invalid", message: `Unrecognised task ref "${raw}". ${REF_HINT}` }, 400);
     }
-    return c.json(computeImpact(ref, buildImpactSources(db)));
+    return c.json(computeImpact(ref, buildImpactSources(db, ref)));
   });
 
   // ── L1 — unified write facade (routes to the hardened owners) ──

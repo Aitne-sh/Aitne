@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import Database from "better-sqlite3";
 import { getAgentDayDateStr } from "@aitne/shared";
 import { applySchema } from "../db/schema.js";
+import { createRecurringSchedule } from "../db/recurring-schedules.js";
 import { createApp, type ApiDependencies } from "./server.js";
 import { EventBroadcaster } from "./routes/sse.js";
 import { safePath } from "./routes/context/path-resolve.js";
@@ -266,6 +267,70 @@ describe("Daemon API", () => {
     vi.restoreAllMocks();
     db.close();
     rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // ── Unified Task Board — L1 facade tier preservation via re-dispatch ──────
+  // docs/design/appendices/unified-task-board.md §5.3. The facade's load-bearing
+  // safety claim: a write to /api/tasks re-dispatches to the OWNING route through
+  // `app.fetch`, so the owner's auth tier re-applies against the FORWARDED
+  // credentials — the inner gate decides, not a coarse outer one. These tests run
+  // the REAL middleware (`createApp`), so they regress if auth is ever moved off
+  // `app` (where `app.fetch` re-dispatch would silently skip it) or if the facade
+  // stops forwarding credentials. They also pin the §5.2a read-tier asymmetry
+  // (GET /tasks ReadSensitive, /impact + writes Autonomous) end-to-end.
+  describe("Unified Task Board facade — owner tier re-applies on re-dispatch", () => {
+    it("enforces the Approve-tier owner through the facade — agent: delete with NO token is 401", async () => {
+      // DELETE /api/tasks/ is Autonomous (outer), but it re-dispatches to
+      // DELETE /api/agents/:slug (Approve). The inner gate fires BEFORE the owner
+      // handler, so even an unknown slug is 401 (the gate), not 404 (the handler).
+      const res = await app.request("/api/tasks/agent:any-user-agent", { method: "DELETE" });
+      expect(res.status).toBe(401);
+      const body = (await res.json()) as { dispatchedTo: string; result: { error: string } };
+      expect(body.dispatchedTo).toBe("/api/agents/any-user-agent");
+      expect(body.result.error).toBe("unauthorized");
+    });
+
+    it("forwards the Bearer to the inner Approve gate — same delete reaches the owner (404, not 401)", async () => {
+      const res = await app.request("/api/tasks/agent:any-user-agent", {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      // The forwarded Bearer satisfied the inner Approve gate; the owner then ran
+      // and 404'd the unknown slug. The 401→404 flip proves the inner gate — not
+      // the Autonomous outer route — decided.
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { dispatchedTo: string; result: { error: string } };
+      expect(body.dispatchedTo).toBe("/api/agents/any-user-agent");
+      expect(body.result.error).toBe("agent_not_found");
+    });
+
+    it("keeps an Autonomous-tier owner token-less through the facade — a briefing rs: edit needs no token", async () => {
+      const rsId = createRecurringSchedule(db, {
+        taskType: "dm_session",
+        description: "morning briefing",
+        recurrenceRule: { frequency: "daily", time: "08:00", timezone: "UTC" },
+        taskContext: { sub_flow: "morning_briefing" },
+      }).id;
+      const res = await app.request(`/api/tasks/rs:${rsId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { result: { status: string } }).result.status).toBe("updated");
+    });
+
+    it("GET /api/tasks is ReadSensitive end-to-end — 401 without a token, 200 with Bearer", async () => {
+      // enforceReadToken=true is the production default (config.ts); the shared
+      // harness leaves it unset (soft), so build a strict app to assert the hard
+      // 401. The inventory aggregates ReadSensitive fulfiller content (§5.2a).
+      const strictApp = createApp({ ...deps, enforceReadToken: true });
+      expect((await strictApp.request("/api/tasks")).status).toBe(401);
+      expect((await strictApp.request("/api/tasks", { headers: authHeaders() })).status).toBe(200);
+      // The blast-radius read stays Autonomous — reachable token-less even under
+      // read-token enforcement (it exposes structure, never fulfiller content).
+      expect((await strictApp.request("/api/tasks/impact?ref=rs:999999")).status).toBe(200);
+    });
   });
 
   describe("GET /api/health", () => {
