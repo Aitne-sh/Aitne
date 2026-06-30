@@ -94,15 +94,21 @@ function ensureMorningBriefingRecurring(
   // whichever is later so we never schedule inside quiet hours.
   const briefingTime = quietHoursEnd > "08:00" ? quietHoursEnd : "08:00";
 
-  const tz =
+  // Auto mode (no explicit operator zone) leaves the rule's `timezone` unset so
+  // `resolveRuleTimezone` falls back to the live system zone at every
+  // materialization — which the TimezoneWatcher keeps tracking the OS. Baking a
+  // concrete zone here (the prior behaviour) froze the briefing to the
+  // setup-time zone, so a laptop crossing timezones kept firing it at the old
+  // wall-clock time. An explicit zone is still stamped and stays pinned.
+  const explicitTz =
     typeof config.timezone === "string" && config.timezone.length > 0
       ? config.timezone
-      : Intl.DateTimeFormat().resolvedOptions().timeZone;
+      : undefined;
 
   const rule: RecurrenceRule = {
     frequency: "daily",
     time: briefingTime,
-    timezone: tz,
+    ...(explicitTz ? { timezone: explicitTz } : {}),
   };
 
   // Intentionally NOT passing `model` — leaves the column NULL so the
@@ -120,7 +126,7 @@ function ensureMorningBriefingRecurring(
     },
   });
   logger.info(
-    { taskType: "dm_session", time: briefingTime, timezone: tz },
+    { taskType: "dm_session", time: briefingTime, timezone: explicitTz ?? "system" },
     "Morning briefing recurring schedule seeded",
   );
 }

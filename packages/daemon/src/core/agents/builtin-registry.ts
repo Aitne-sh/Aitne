@@ -153,7 +153,7 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
     slug: "morning-routine",
     name: "Morning Routine",
     description:
-      "Regenerates state/today.md, creates the daily journal entry, and delivers the morning DM digest at the day boundary.",
+      "Regenerates state/today.md and creates the daily journal entry at the day boundary.",
     cronExpression: ({ dayBoundaryHour }) => `0 ${dayBoundaryHour} * * *`,
     processKey: "routine.morning_routine",
     defaultEnabled: true,
@@ -162,7 +162,6 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
       services_lost: [
         "Daily state/today.md regeneration",
         "Daily journal entry creation",
-        "Morning DM digest delivery",
       ],
       dependent_agents: ["evening-review", "weekly-review"],
       reactivation_hint:

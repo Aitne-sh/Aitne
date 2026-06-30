@@ -2,7 +2,7 @@
 # ── Identity ─────────────────────────────────────────────────────────────────
 slug: morning-routine
 name: Morning Routine
-description: "Regenerates state/today.md, creates the daily journal entry, and delivers the morning DM digest at the day boundary."
+description: "Regenerates state/today.md and creates the daily journal entry at the day boundary."
 kind: builtin
 version: 1
 enabled: true
@@ -43,8 +43,8 @@ outputs:
 # today.md is regenerated wholesale every morning, so a section-count floor is
 # a real check (it fails on a degenerate/empty regen). The daily journal is
 # written for the *previous* agent-day (`daily/<yesterday>.md`), which the
-# `{date}`-only evaluator cannot target, and the DM digest is conditional —
-# both are listed under `outputs` rather than asserted as criteria.
+# `{date}`-only evaluator cannot target, so it is listed under `outputs`
+# rather than asserted as a criterion.
 success_criteria:
   - id: today_md_populated
     kind: file_section_count
@@ -64,7 +64,6 @@ stop_warning:
   services_lost:
     - "Daily state/today.md regeneration"
     - "Daily journal entry creation"
-    - "Morning DM digest delivery"
   dependent_agents:
     - evening-review
     - weekly-review

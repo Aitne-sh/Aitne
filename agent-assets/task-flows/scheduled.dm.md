@@ -93,14 +93,18 @@ person at 9am than during the day."
 
 ## Sub-flow routing
 
-The specific dm_session task is selected by `{event_data[task]}`
-prefix matching. Find the matching sub-flow below and follow its
-content rules.
+The specific dm_session sub-flow is selected by the **structural**
+`sub_flow` field inside `<task_context>` — a value the daemon sets and
+the user never edits, so routing stays correct even after the task's
+prompt/content is freely edited (e.g. through the `task` board facade).
+Read `sub_flow` out of the JSON in the `<task_context>` block and match
+it below. If `sub_flow` is absent (legacy rows predating the field),
+fall back to `{event_data[task]}` prefix matching.
 
-- starts with `morning briefing` → see `## Morning briefing` below
-- starts with `task delivery:` → see `## Task delivery` below
-- starts with `profile_interview:` → see `## Profile interview` below
-- starts with `confirm:` → see `## Confirmation follow-up` below
+- `sub_flow` is `morning_briefing` (legacy fallback: task starts with `morning briefing`) → see `## Morning briefing` below
+- `sub_flow` is `task_delivery` (legacy fallback: task starts with `task delivery:`) → see `## Task delivery` below
+- `sub_flow` is `profile_interview` (legacy fallback: task starts with `profile_interview:`) → see `## Profile interview` below
+- `sub_flow` is `confirm` (legacy fallback: task starts with `confirm:`) → see `## Confirmation follow-up` below
 - (future sub-flows added here)
 
 If no sub-flow matches:
@@ -122,7 +126,8 @@ user verbatim — defeating the skip.
 
 ## Task delivery
 
-Triggered by `{event_data[task]}` starting with `task delivery:`.
+Triggered by `sub_flow` = `task_delivery` in `<task_context>` (legacy
+fallback: `{event_data[task]}` starts with `task delivery:`).
 
 Your final assistant turn IS the DM that delivers a background task
 artifact. The daemon has already decided that the owner is active in
@@ -171,7 +176,8 @@ Delivery rules:
 
 ## Morning briefing
 
-Triggered by `{event_data[task]}` starting with `morning briefing`.
+Triggered by `sub_flow` = `morning_briefing` in `<task_context>` (legacy
+fallback: `{event_data[task]}` starts with `morning briefing`).
 
 > Universal rules from the notify skill § Universal user-facing
 > message discipline apply on top of the contract below — particularly
@@ -417,8 +423,9 @@ inside the closer line.
 
 ## Profile interview
 
-Triggered by `{event_data[task]}` starting with `profile_interview:<id>
-— <ask-hint>`. This is the **fallback** path — the morning routine
+Triggered by `sub_flow` = `profile_interview` in `<task_context>` (legacy
+routing fallback: `{event_data[task]}` starts with `profile_interview:<id>
+— <ask-hint>`). This is the **fallback** path — the morning routine
 normally just lays the row latent and waits for an opportunity in DM /
 briefing. The evening sweep promotes a row to a scheduled DM only after
 3 days of no opportunity AND the user has been actively DMing.
@@ -483,7 +490,8 @@ row open.
 
 ## Confirmation follow-up
 
-Triggered by `{event_data[task]}` starting with `confirm:`. The DM
+Triggered by `sub_flow` = `confirm` in `<task_context>` (legacy fallback:
+`{event_data[task]}` starts with `confirm:`). The DM
 handler scheduled this row because a gate (e.g. project-creation, a
 managed-task duplicate, a long-horizon ambiguity) was triggered during
 an earlier DM but could not be asked then — either the conversation

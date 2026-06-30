@@ -886,6 +886,59 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0015-morning-briefing-follow-system-timezone",
+    description:
+      "(timezone OS-tracking) — the morning-briefing recurring row used to bake "
+      + "a concrete `recurrence_rule.timezone` at setup (the resolved system "
+      + "zone when the operator left timezone on auto), freezing the briefing to "
+      + "the setup-time zone. Drop that baked zone so `resolveRuleTimezone` "
+      + "falls back to the live system zone (kept current by TimezoneWatcher) "
+      + "and the briefing tracks an OS timezone change. PROVENANCE-SAFE: only "
+      + "runs while the operator's `timezone` setting is empty/unset (auto "
+      + "mode) — a pinned zone is left untouched, since it may be the intended "
+      + "fixed zone. Idempotent: a fresh DB has no briefing row yet (setup seeds "
+      + "it without a zone post-fix), and a re-run finds the key already gone.",
+    up(db) {
+      if (!tableExists(db, "recurring_schedules")) return;
+      // Honor an explicit operator pin: setup.ts only bakes the system zone
+      // when `config.timezone` is empty, so a currently-pinned zone means the
+      // row's zone may be a deliberate choice — don't clear it. Mirror config.ts
+      // resolution precedence: a persisted `settings.timezone` row wins (even
+      // when empty = explicit auto), otherwise the `PA_TIMEZONE` env var is the
+      // source (config.ts:189 `envOrDefault("TIMEZONE", "")` → `PA_TIMEZONE`).
+      // `null` here means "no settings row yet → defer to the env var".
+      let effectiveTz: string | null = null;
+      if (tableExists(db, "settings")) {
+        const row = db
+          .prepare("SELECT value_json FROM settings WHERE key = 'timezone'")
+          .get() as { value_json: string } | undefined;
+        if (row) {
+          try {
+            const value = JSON.parse(row.value_json) as unknown;
+            effectiveTz = typeof value === "string" ? value : "";
+          } catch {
+            // Corrupt value_json — treat as auto (and keep boot from crashing).
+            effectiveTz = "";
+          }
+        }
+      }
+      if (effectiveTz === null) {
+        effectiveTz = process.env.PA_TIMEZONE ?? "";
+      }
+      if (effectiveTz.length > 0) return; // pinned — leave the row's zone alone
+      // Auto mode: strip the baked zone from the briefing row(s). `json_remove`
+      // on a rule without the key is a no-op; the WHERE guard keeps re-runs
+      // from churning the row.
+      db.prepare(
+        `UPDATE recurring_schedules
+            SET recurrence_rule = json_remove(recurrence_rule, '$.timezone')
+          WHERE task_type = 'dm_session'
+            AND json_extract(task_context, '$.sub_flow') = 'morning_briefing'
+            AND json_extract(recurrence_rule, '$.timezone') IS NOT NULL`,
+      ).run();
+    },
+  },
 ];
 
 export interface MigrationRunResult {

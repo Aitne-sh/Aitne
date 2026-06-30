@@ -81,6 +81,7 @@ import {
   createEntitiesRoutes,
 } from "./routes/entities.js";
 import { createActivitySourcesRoutes } from "./routes/activity-sources.js";
+import { createTasksRoutes } from "./routes/tasks.js";
 import { createIntegrationRouteGate } from "./integration-route-gate.js";
 import { createMcpRoutes } from "./routes/mcp.js";
 import { createAttachmentRoutes } from "./routes/attachments.js";
@@ -1060,6 +1061,14 @@ export function createApp(deps: ApiDependencies): Hono {
     buildEntitiesRoutesDepsFromApi(deps),
   );
   const activitySourcesRoutes = createActivitySourcesRoutes({ db: deps.db });
+  // Unified Task Board — docs/design/appendices/unified-task-board.md.
+  // L0 read endpoints + L1 write facade. The facade re-dispatches through the
+  // top-level `app` so each owner route's auth tier / dedup / cascade still
+  // applies; `app.fetch` runs the full middleware pipeline on the inner request.
+  const tasksRoutes = createTasksRoutes({
+    db: deps.db,
+    dispatch: (req) => app.fetch(req),
+  });
 
   app.route("/api", healthRoutes);
   app.route("/api", contextRoutes);
@@ -1086,6 +1095,7 @@ export function createApp(deps: ApiDependencies): Hono {
   app.route("/api", sotBindingsRoutes);
   app.route("/api", entitiesRoutes);
   app.route("/api", activitySourcesRoutes);
+  app.route("/api", tasksRoutes);
   app.route("/api", triggerRoutes);
   app.route("/api", travelBookingRoutes);
   app.route("/api", receiptRoutes);

@@ -275,6 +275,14 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // correctly absent here — no prior task can be parked on the very
     // first DM of a session — exactly as `browser-history-respond` is.
     "background-task",
+    // Unified Task Board (docs/design/appendices/unified-task-board.md). `board`
+    // is the read/inventory + blast-radius surface; `task` is the unified write
+    // facade (one path, not six). Loaded on the first DM too — "show me what's
+    // running" and "set up X" are valid opening asks. DM-agent-exclusive, like
+    // browser-task / background-task; no conditional gate (the read skill no-ops
+    // on an empty board and the in-context cost is small).
+    "board",
+    "task",
   ],
   "message.received.dm": [
     "context",
@@ -334,6 +342,10 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // endpoints have nothing to act on, and the in-context cost is small.
     "background-task",
     "background-task-reply",
+    // Unified Task Board — read board + unified write facade
+    // (docs/design/appendices/unified-task-board.md). See the dm_first note.
+    "board",
+    "task",
   ],
   // ── Task events ──
   "schedule.approaching": [
@@ -605,6 +617,10 @@ export const ALL_SKILLS = [
   // Agents. This skill teaches the DM agent to author a detailed recurring
   // Agent (`POST /api/agents`) when the user asks for an ongoing cadence.
   "agent-create",
+  // Unified Task Board (docs/design/appendices/unified-task-board.md). `board`
+  // = read inventory + blast-radius (L0); `task` = unified write facade (L1).
+  "board",
+  "task",
 ];
 
 const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {

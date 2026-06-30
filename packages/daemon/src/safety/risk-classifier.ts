@@ -77,6 +77,23 @@ const API_RISK: Record<string, RiskTier> = {
   "PATCH /api/recurring-schedules/": RiskTier.Autonomous,
   "DELETE /api/recurring-schedules/": RiskTier.Autonomous,
 
+  // ── Unified Task Board API (docs/design/appendices/unified-task-board.md) ──
+  // L0 reads (inventory + blast-radius) are structural schedule metadata — the
+  // same shape and tier as GET /api/recurring-schedules / /api/agents, so
+  // Autonomous. The L1 write facade is intentionally Autonomous: it re-dispatches
+  // each write through the OWNING route, which re-applies its own tier against
+  // the forwarded credentials. So a token-less agent can edit a briefing
+  // (rs: → /api/recurring-schedules, Autonomous) but is still 401'd on an agent
+  // edit (agent: → /api/agents PATCH/DELETE, Approve) exactly as at the owner —
+  // the inner gate decides, never a coarse outer one. The facade itself never
+  // mutates a row directly (it only forwards), so it has no blast radius of its
+  // own beyond what the owner enforces.
+  "GET /api/tasks": RiskTier.Autonomous,
+  "GET /api/tasks/impact": RiskTier.Autonomous,
+  "POST /api/tasks": RiskTier.Autonomous,
+  "PATCH /api/tasks/": RiskTier.Autonomous,
+  "DELETE /api/tasks/": RiskTier.Autonomous,
+
   // ── Automation Triggers API (docs/design/19-dashboard-ia-and-triggers.md) ──
   // Dashboard-driven only — the agent does not configure its own triggers
   // (the user defines them in the Git/<domain> page UI). Approve tier for

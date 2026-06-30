@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -2151,5 +2151,160 @@ describe("0014-background-task-significance-criteria", () => {
     expect(result.applied).toEqual([
       "0014-background-task-significance-criteria",
     ]);
+  });
+});
+
+describe("0015-morning-briefing-follow-system-timezone", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0015-morning-briefing-follow-system-timezone",
+  );
+
+  // The migration consults PA_TIMEZONE when no settings row pins the zone.
+  // Neutralize any ambient value so the auto-mode cases behave deterministically.
+  let savedPaTimezone: string | undefined;
+  beforeEach(() => {
+    savedPaTimezone = process.env.PA_TIMEZONE;
+    delete process.env.PA_TIMEZONE;
+  });
+  afterEach(() => {
+    if (savedPaTimezone === undefined) delete process.env.PA_TIMEZONE;
+    else process.env.PA_TIMEZONE = savedPaTimezone;
+  });
+
+  function seedBriefing(db: Database.Database, timezone: string): void {
+    db.prepare(
+      `INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled)
+       VALUES ('dm_session', 'morning briefing', json(?), json(?), 1)`,
+    ).run(
+      JSON.stringify({ sub_flow: "morning_briefing", pin_to_quiet_hours_end: true }),
+      JSON.stringify({ frequency: "daily", time: "08:00", timezone }),
+    );
+  }
+
+  function briefingTz(db: Database.Database): string | null {
+    const row = db
+      .prepare(
+        `SELECT json_extract(recurrence_rule, '$.timezone') AS tz
+           FROM recurring_schedules
+          WHERE json_extract(task_context, '$.sub_flow') = 'morning_briefing'`,
+      )
+      .get() as { tz: string | null } | undefined;
+    return row?.tz ?? null;
+  }
+
+  function setTimezoneSetting(db: Database.Database, value: string): void {
+    db.prepare(
+      "INSERT INTO settings (key, value_json) VALUES ('timezone', ?)",
+    ).run(JSON.stringify(value));
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("strips the baked zone from the briefing row in auto mode", () => {
+    const db = openDb();
+    applySchema(db);
+    seedBriefing(db, "America/Los_Angeles");
+    expect(briefingTz(db)).toBe("America/Los_Angeles");
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0015-morning-briefing-follow-system-timezone"]);
+    // Zone removed → resolveRuleTimezone falls back to the live system zone.
+    expect(briefingTz(db)).toBeNull();
+  });
+
+  it("treats an empty timezone setting as auto mode", () => {
+    const db = openDb();
+    applySchema(db);
+    setTimezoneSetting(db, "");
+    seedBriefing(db, "Asia/Tokyo");
+
+    runMigrations(db, [migration!]);
+    expect(briefingTz(db)).toBeNull();
+  });
+
+  it("leaves the briefing zone untouched when a zone is pinned", () => {
+    const db = openDb();
+    applySchema(db);
+    setTimezoneSetting(db, "America/New_York");
+    seedBriefing(db, "America/New_York");
+
+    runMigrations(db, [migration!]);
+    expect(briefingTz(db)).toBe("America/New_York");
+  });
+
+  it("treats a corrupt timezone setting as auto mode (defensive)", () => {
+    const db = openDb();
+    applySchema(db);
+    // Hand-corrupted value_json that JSON.parse cannot read — the migration
+    // must not crash boot and falls back to the auto-mode strip.
+    db.prepare(
+      "INSERT INTO settings (key, value_json) VALUES ('timezone', 'not-valid-json')",
+    ).run();
+    seedBriefing(db, "Asia/Tokyo");
+
+    runMigrations(db, [migration!]);
+    expect(briefingTz(db)).toBeNull();
+  });
+
+  it("treats a non-string timezone setting as auto mode (defensive)", () => {
+    const db = openDb();
+    applySchema(db);
+    // Valid JSON but not a string (e.g. a corrupted numeric value) → auto.
+    db.prepare(
+      "INSERT INTO settings (key, value_json) VALUES ('timezone', '123')",
+    ).run();
+    seedBriefing(db, "Asia/Tokyo");
+
+    runMigrations(db, [migration!]);
+    expect(briefingTz(db)).toBeNull();
+  });
+
+  it("honors a PA_TIMEZONE env pin when no settings row exists", () => {
+    const db = openDb();
+    applySchema(db); // settings table exists but has no 'timezone' row
+    process.env.PA_TIMEZONE = "America/New_York";
+    seedBriefing(db, "America/New_York");
+
+    runMigrations(db, [migration!]);
+    // Env-pinned → the baked zone is the operator's choice; leave it.
+    expect(briefingTz(db)).toBe("America/New_York");
+  });
+
+  it("strips in auto mode even when the settings table is absent", () => {
+    const db = openDb();
+    applySchema(db);
+    seedBriefing(db, "Europe/Berlin");
+    // Simulate a partial DB with no settings table; PA_TIMEZONE unset → auto.
+    db.exec("DROP TABLE settings");
+
+    runMigrations(db, [migration!]);
+    expect(briefingTz(db)).toBeNull();
+  });
+
+  it("is idempotent — a re-run finds the key already gone", () => {
+    const db = openDb();
+    applySchema(db);
+    seedBriefing(db, "Europe/Paris");
+
+    runMigrations(db, [migration!]);
+    expect(briefingTz(db)).toBeNull();
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(briefingTz(db)).toBeNull();
+  });
+
+  it("is a recorded no-op on a fresh DB with no briefing row", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0015-morning-briefing-follow-system-timezone"]);
+  });
+
+  it("is a recorded no-op when recurring_schedules is absent", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0015-morning-briefing-follow-system-timezone"]);
   });
 });

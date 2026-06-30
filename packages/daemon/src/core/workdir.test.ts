@@ -218,7 +218,9 @@ describe("getSkillsForEvent", () => {
     // user asks for an ongoing cadence; `/schedule` is one-shot only) → 29.
     // BACKGROUND_TASK_RUNNER_DESIGN.md §5 / Phase 3 adds `background-task`
     // (spawn) + `background-task-reply` (clarify relay) → 31.
-    expect(skills).toHaveLength(31);
+    // unified-task-board.md L0/L1 adds `board` (read inventory + blast-radius)
+    // + `task` (unified write facade) → 33.
+    expect(skills).toHaveLength(33);
     expect(skills).toContain("background-task");
     expect(skills).toContain("background-task-reply");
     expect(skills).toContain("agent-create");
@@ -2274,6 +2276,11 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       // them like browser-task.
       "background-task",
       "background-task-reply",
+      // unified-task-board.md L0/L1 — the read board + unified write facade.
+      // Unconditional on `message.received.dm` (like browser-task /
+      // background-task), so the conservative-include matrix carries them.
+      "board",
+      "task",
       // NB: `agent-create` is conditionally loaded (recurring-work cadence +
       // verb in the message) — the matrix passes no message text, so it is
       // correctly dropped here. Its conditional gate is tested in

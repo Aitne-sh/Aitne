@@ -387,18 +387,48 @@ Auto-maintained by the daemon (do not edit). Source: rules/policies/*.
 
     const rows = db
       .prepare(
-        `SELECT task_type, json_extract(task_context, '$.sub_flow') AS sub_flow
+        `SELECT task_type,
+                json_extract(task_context, '$.sub_flow') AS sub_flow,
+                json_extract(recurrence_rule, '$.timezone') AS tz
          FROM recurring_schedules`,
       )
-      .all() as { task_type: string; sub_flow: string | null }[];
+      .all() as { task_type: string; sub_flow: string | null; tz: string | null }[];
     expect(rows).toHaveLength(1);
     expect(rows[0].task_type).toBe("dm_session");
     expect(rows[0].sub_flow).toBe("morning_briefing");
+    // Auto mode (config.timezone unset) → the rule must NOT bake a concrete
+    // zone, so the briefing follows the live system zone (and OS changes).
+    expect(rows[0].tz).toBeNull();
 
     const after = readFileSync(rulesPath(), "utf-8");
     expect(after).toContain("## Default Schedules");
     expect(after).toContain("Morning briefing");
     expect(after).toContain("pinned to quiet_hours_end");
+  });
+
+  it("bakes an explicit operator timezone into the briefing rule", async () => {
+    // A pinned zone is the operator's deliberate choice and must persist on
+    // the rule (it should NOT follow the OS).
+    const pinnedConfig = {
+      ...makeSaveRulesConfig(),
+      timezone: "America/New_York",
+    } as unknown as AgentConfig;
+    const pinnedApp = createSetupRoutes(makeDeps(db, pinnedConfig));
+    const res = await pinnedApp.request("/setup/save-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: WIZARD_PAYLOAD }),
+    });
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare(
+        `SELECT json_extract(recurrence_rule, '$.timezone') AS tz
+           FROM recurring_schedules
+          WHERE json_extract(task_context, '$.sub_flow') = 'morning_briefing'`,
+      )
+      .get() as { tz: string | null };
+    expect(row.tz).toBe("America/New_York");
   });
 
   it("does not duplicate the morning briefing recurring on a second save-rules", async () => {

@@ -508,13 +508,21 @@ function upsertResolved(
   const definitionHash = sha256(resolved.hashSource);
   const enabled = resolveEnabled(resolved.baseEnabled, existing, resolved.fileMtimeMs);
   const hashChanged = !existing || existing.definitionHash !== definitionHash;
+  const scheduleTimezone = resolveTimezone(def.schedule.timezone, opts.timezone);
 
   // Efficiency (§6.1): skip the write entirely when nothing the loader owns
   // changed — keeps `updated_at` meaning "last definition change".
   const enabledFlip = !existing || existing.enabled !== enabled;
   const recurringFlip =
     !existing || existing.recurringScheduleId !== resolved.recurringScheduleId;
-  if (existing && !hashChanged && !enabledFlip && !recurringFlip) {
+  // An OS-timezone change (auto mode) re-resolves `scheduleTimezone` without
+  // touching the file hash / enabled / pairing, so without this the agents row
+  // would keep displaying the boot-time zone while its recurring row already
+  // fires in the new one — the exact "silently wrong zone" the column guards
+  // against (schema.ts). Fold it into the guard so the displayed zone tracks
+  // the move. No churn: a stable zone resolves identically each pass.
+  const timezoneFlip = !existing || existing.scheduleTimezone !== scheduleTimezone;
+  if (existing && !hashChanged && !enabledFlip && !recurringFlip && !timezoneFlip) {
     return;
   }
 
@@ -538,7 +546,7 @@ function upsertResolved(
     processKey: def.backend.process_key,
     scheduleKind: def.schedule.kind,
     scheduleExpression: resolveScheduleExpression(def, opts.dayBoundaryHour),
-    scheduleTimezone: resolveTimezone(def.schedule.timezone, opts.timezone),
+    scheduleTimezone,
     tags: def.tags,
     stopWarning: def.stop_warning ?? null,
     recurringScheduleId: resolved.recurringScheduleId,

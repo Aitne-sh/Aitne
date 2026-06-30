@@ -470,6 +470,26 @@ describe("loadAgents: user agents", () => {
     expect(row.recurringScheduleId).toBeNull();
   });
 
+  it("rewrites schedule_timezone when only the resolved zone changes (OS move)", () => {
+    // Auto-mode agent: no `schedule.timezone`, so the row's zone resolves from
+    // the daemon's effective zone (here driven via opts.timezone). An OS move
+    // changes that without touching the file hash / enabled / pairing.
+    writeAgentFile(
+      userDir,
+      "auto-zone-agent",
+      userFrontmatter("auto-zone-agent", {
+        schedule: { kind: "cron", expression: "0 21 * * 0" },
+      }),
+    );
+    loadAgents(db, baseOptions({ timezone: "America/Los_Angeles", now: () => 1000 }));
+    expect(getAgent(db, "auto-zone-agent")!.scheduleTimezone).toBe("America/Los_Angeles");
+
+    loadAgents(db, baseOptions({ timezone: "Asia/Tokyo", now: () => 2000 }));
+    const row = getAgent(db, "auto-zone-agent")!;
+    expect(row.scheduleTimezone).toBe("Asia/Tokyo"); // followed the move
+    expect(row.updatedAt).toBe(2000); // row was rewritten, not skipped
+  });
+
   it("persists an invalid user file as a disabled row in invalid[]", () => {
     writeAgentFile(userDir, "broken", { slug: "broken", kind: "user" });
     const result = loadAgents(db, baseOptions());

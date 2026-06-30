@@ -814,6 +814,79 @@ describe("background-task skill wiring (BACKGROUND_TASK_RUNNER_DESIGN Phase 3)",
   });
 });
 
+describe("Task Board skill wiring (unified-task-board.md L0/L1)", () => {
+  const BOARD_PATH = join(SKILLS_DIR, "board", "SKILL.md");
+  const TASK_PATH = join(SKILLS_DIR, "task", "SKILL.md");
+
+  test.each([
+    ["board", BOARD_PATH],
+    ["task", TASK_PATH],
+  ])("%s SKILL.md exists with name + Bash(curl *) allowed-tool", (slug, path) => {
+    expect(existsSync(path)).toBe(true);
+    const fm = readFileSync(path, "utf-8").match(/^---\n([\s\S]+?)\n---/);
+    expect(fm, "missing YAML frontmatter").toBeTruthy();
+    expect(fm![1]).toMatch(new RegExp(`^name:\\s*${slug}\\s*$`, "m"));
+    expect(fm![1]).toMatch(/allowed-tools:[\s\S]*Bash\(curl \*\)/);
+  });
+
+  test.each(["board", "task"])("ALL_SKILLS includes %s", (slug) => {
+    expect(ALL_SKILLS).toContain(slug);
+  });
+
+  test.each(["board", "task"])("'%s' loaded for the DM event sets (dm + dm_first)", (slug) => {
+    for (const ev of ["message.received.dm", "message.received.dm_first"]) {
+      expect(EVENT_SKILL_SETS[ev], `event '${ev}' has no manifest`).toBeDefined();
+      expect(EVENT_SKILL_SETS[ev]).toContain(slug);
+    }
+  });
+
+  test.each(["board", "task"])(
+    "'%s' loaded for message.dm + dashboard.chat process keys",
+    (slug) => {
+      expect(getSkillsForProcess("message.dm")).toContain(slug);
+      expect(getSkillsForProcess("dashboard.chat")).toContain(slug);
+      expect(resolveSkillManifestForProcess("message.dm")).toContain(slug);
+    },
+  );
+
+  test.each([
+    "message.received", // shared-channel surface — DM-only management stays off
+    "scheduled.dm",
+    "scheduled.task",
+    "routine.morning_routine",
+  ])("Task Board skills NOT loaded for non-DM-chat event '%s'", (eventType) => {
+    const slugs = EVENT_SKILL_SETS[eventType];
+    expect(slugs, `event '${eventType}' has no manifest`).toBeDefined();
+    expect(slugs).not.toContain("board");
+    expect(slugs).not.toContain("task");
+  });
+
+  test("board skill teaches the read surfaces + delegates writes to `task`", () => {
+    const body = readFileSync(BOARD_PATH, "utf-8");
+    expect(body).toMatch(/GET\s+\/api\/tasks\b/);
+    expect(body).toMatch(/\/api\/tasks\/impact/);
+    // The real cascade vocabulary the blast-radius preview labels with.
+    expect(body).toMatch(/is_a_cascade/);
+    expect(body).toMatch(/set_null_satellite/);
+    expect(body).toMatch(/`task`/); // delegates writes
+    expect(body).toContain("127.0.0.1:8321");
+    expect(body.toLowerCase()).toMatch(/read-only/);
+  });
+
+  test("task skill teaches the facade kinds + ref grammar + the dm_session guard", () => {
+    const body = readFileSync(TASK_PATH, "utf-8");
+    expect(body).toMatch(/POST\s+\/api\/tasks\b/);
+    for (const kind of ["reminder", "dm", "agent", "app_fetch", "background"]) {
+      expect(body, `kind '${kind}' must be documented`).toContain(kind);
+    }
+    expect(body).toMatch(/PATCH[\s\S]*\/api\/tasks\/<ref>/);
+    expect(body).toMatch(/DELETE[\s\S]*\/api\/tasks/);
+    // The §9.17/§9.32 guard — a dm create can never become agent.task.
+    expect(body).toMatch(/dm_session/);
+    expect(body).toContain("127.0.0.1:8321");
+  });
+});
+
 describe("background-task-reply skill wiring (BACKGROUND_TASK_RUNNER_DESIGN Phase 3)", () => {
   const SKILL_PATH = join(SKILLS_DIR, "background-task-reply", "SKILL.md");
 
@@ -2120,7 +2193,17 @@ describe("DM manifest body byte budget (P4)", () => {
   // detached background runner shipped in Phase 2; the spawn body was kept
   // lean (smaller than browser-task) before bumping. The 80 KB design
   // target still stands.
-  const REGRESSION_CEILING_BYTES = 150 * 1024;
+  // unified-task-board.md L0/L1 — bumped 150 KB → 160 KB to admit the two
+  // new DM-agent skills: `board` (~4 KB, the read inventory + blast-radius
+  // surface) and `task` (~4 KB, the unified write facade — "one path, not
+  // six"). The facade's value is being *available* as the single front door
+  // (L1's stated goal), so it is loaded ungated like browser-task /
+  // background-task; both bodies were kept lean (smaller than either of
+  // those) before bumping. Note the design's per-turn cost concern (§5.2)
+  // is about the rejected always-on `<task_board>` CONTEXT block — NOT
+  // shipped — not the skill body, which is the normal per-DM-skill cost.
+  // The 80 KB design target still stands.
+  const REGRESSION_CEILING_BYTES = 160 * 1024;
 
   test("message.received.dm total SKILL.md bytes ≤ regression ceiling", () => {
     const slugs = EVENT_SKILL_SETS["message.received.dm"];

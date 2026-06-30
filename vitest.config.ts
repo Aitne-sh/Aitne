@@ -173,6 +173,15 @@ export default defineConfig({
         // in their own peers.
         "packages/daemon/src/api/routes/agent-schedule.ts",
         "packages/daemon/src/api/routes/agent.ts",
+        // Unified Task Board glue: DB reads for the inventory/impact projection
+        // + the L1 facade's in-process re-dispatch. All decision logic (ref
+        // grammar, projection, blast-radius, the §9 dispatch guards) lives in
+        // the 100%-covered pure peers under core/task-board/*; the route body is
+        // read-orchestration + a Request forward (the dispatch-unavailable 501,
+        // header copy, and owner-response passthrough are I/O-shaped, matching
+        // the agent-schedule.ts / managed-tasks.ts rationale). Peer
+        // `routes/tasks.test.ts` pins the happy GET + facade routing paths.
+        "packages/daemon/src/api/routes/tasks.ts",
         "packages/daemon/src/api/routes/books.ts",
         "packages/daemon/src/api/routes/integrations-reconcile.ts",
         "packages/daemon/src/api/routes/managed-tasks.ts",

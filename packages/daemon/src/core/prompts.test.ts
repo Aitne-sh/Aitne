@@ -679,6 +679,21 @@ describe("getTaskFlow", () => {
     expect(flow).toContain("skipped (premise gone)");
   });
 
+  // unified-task-board.md §5.1 (Prereq) — sub-flow routing must key off the
+  // STRUCTURAL `sub_flow` field, not the editable task-description prefix, so
+  // the `task` board facade can freely edit a briefing's content (task_prompt)
+  // without breaking which sub-flow it routes to. The `{event_data[task]}`
+  // prefix survives only as a documented legacy fallback for pre-field rows.
+  it("scheduled.dm routes sub-flows by structural sub_flow, not the editable prefix", () => {
+    const flow = getTaskFlow("scheduled.dm");
+    // Routing is driven by sub_flow from <task_context>.
+    expect(flow).toMatch(/`sub_flow`\s+is\s+`morning_briefing`/);
+    expect(flow).toMatch(/selected by the \*\*structural\*\*\s*\n?\s*`sub_flow`/);
+    // The old editable-prefix routing is retained only as a legacy fallback.
+    expect(flow).toContain("legacy fallback");
+    expect(flow).toContain("`{event_data[task]}` prefix matching");
+  });
+
   // `evening-review-slimdown.md` §2.4 — the old Step 4 (user-facing
   // wrap-up) was deleted entirely. FEEDBACK_LEARNING_LOOP_DESIGN.md §4
   // (Phase 2) later reclaimed the Step-4 slot for *internal* feedback

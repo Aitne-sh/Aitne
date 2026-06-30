@@ -11,6 +11,7 @@ import {
   BarChart3,
   Clock,
   Bot,
+  ListChecks,
   Brain,
   Settings,
   PanelLeftClose,
@@ -221,6 +222,9 @@ export function AppSidebar() {
       label: "Automation",
       items: [
         { label: "Agents", href: "/agents", icon: Bot },
+        // Unified Task Board — read-only overview of everything in motion
+        // (docs/design/appendices/unified-task-board.md).
+        { label: "Tasks", href: "/tasks", icon: ListChecks },
         { label: "Schedule", href: "/schedule", icon: Clock },
         {
           // /browser hub fronts every browser surface (history integration,

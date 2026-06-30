@@ -79,6 +79,7 @@ import { runRoadmapMechanicalMaintenance } from "./core/roadmap-maintenance.js";
 import { fanoutResearchClusterUpdates } from "./core/browser-history/research-cluster-fanout.js";
 import { runDayBoundaryTasks } from "./core/day-boundary.js";
 import { SleepInhibitor } from "./core/sleep-inhibitor.js";
+import { TimezoneWatcher } from "./core/timezone-watcher.js";
 import { safeRunPreMorningDigestJob } from "./core/browser-history/pre-morning-digest-job.js";
 import { shouldStartObserversFor } from "./core/integration-lifecycle.js";
 import { sweepExpiredMigrationBackups } from "./api/routes/setup-migrate.js";
@@ -1194,9 +1195,34 @@ async function startup(): Promise<void> {
   // `agents` table, builds the live enabled cache the scheduler's per-built-in
   // gate consults, and starts the user-root watcher for live dashboard edits.
   // Crash-proof by contract — a bad YAML never aborts boot.
-  const { enabledCache: agentEnabledCache, watcher: agentsWatcher } =
-    bootstrapAgents({ db, config, eventBroadcaster });
+  const {
+    enabledCache: agentEnabledCache,
+    watcher: agentsWatcher,
+    reloadAgents,
+  } = bootstrapAgents({ db, config, eventBroadcaster });
   scheduler.setAgentEnabledCache(agentEnabledCache);
+
+  // Track OS-timezone changes for the daemon's lifetime. When the operator
+  // hasn't pinned a zone (`config.timezone` empty = auto/follow-OS), a laptop
+  // crossing timezones must update the agent's notion of "now" — but Node/V8
+  // caches the host zone at first use for the whole process, so nothing
+  // re-detects it. The watcher flushes that cache each poll (see
+  // detectSystemTimezone) and, on an actual change:
+  //   • `reloadCrons()` re-anchors the built-in node-cron jobs (their
+  //     precomputed next-fire times were computed against the old zone), and
+  //   • `reloadAgents()` re-resolves user Agents whose recurring rows carry a
+  //     concrete auto-resolved zone (the same loader pass the agent.md watcher
+  //     runs), so DB-materialized schedules track the move too.
+  // Constructed after `bootstrapAgents` for `reloadAgents`; started after
+  // `scheduler.start()`.
+  const timezoneWatcher = new TimezoneWatcher({
+    getConfiguredTimezone: () => config.timezone,
+    onChange: (next, previous) => {
+      logger.info({ previous, next }, "OS timezone changed — reloading schedules");
+      scheduler.reloadCrons();
+      reloadAgents();
+    },
+  });
 
   // ── 11. Hono HTTP Server ──
   // Enable webhook fallback: when GitHub webhook is configured at boot,
@@ -1496,6 +1522,7 @@ async function startup(): Promise<void> {
   await messageHub.startAll();
   adapterWatchdog.start();
   scheduler.start();
+  timezoneWatcher.start();
   signalDetector.start();
   const registeredPlatforms = messageHub.getPlatforms();
   // Single-app installs (Telegram-only / Discord-only / etc.) would
@@ -1692,6 +1719,7 @@ async function startup(): Promise<void> {
     dispatcher.stop(); // Signals dispatcher to exit run() loop
     adapterWatchdog.stop();
     scheduler.stop();
+    timezoneWatcher.stop();
     healthMonitor.stop();
     heartbeat.stop();
     sleepInhibitor.stop();

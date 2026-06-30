@@ -55,6 +55,14 @@ export interface BootstrapAgentsResult {
   result: LoadAgentsResult;
   enabledCache: AgentEnabledCache;
   watcher: AgentsWatcherHandle | null;
+  /**
+   * Re-run the loader against the same options (re-resolving each Agent's
+   * schedule timezone and reconciling its recurring row) and invalidate the
+   * enabled cache — the exact pass the filesystem watcher fires on an
+   * `agent.md` edit, exposed so an OS-timezone change can refresh auto-mode
+   * Agents whose recurring rows carry a concrete resolved zone. Never throws.
+   */
+  reloadAgents: () => void;
 }
 
 /** Resolve the loader's port set + dirs from daemon config. */
@@ -158,5 +166,22 @@ export function bootstrapAgents(deps: BootstrapAgentsDeps): BootstrapAgentsResul
     logger.warn({ err }, "Agent definitions watcher failed to start — edits apply on next restart");
   }
 
-  return { result, enabledCache, watcher };
+  const reloadAgents = (): void => {
+    try {
+      const reloaded = loadAgents(deps.db, opts);
+      enabledCache.invalidate();
+      opts.events?.emit("agent.updated", {
+        reason: "timezone_change",
+        upserted: reloaded.upserted,
+      });
+      logger.info(
+        { upserted: reloaded.upserted.length },
+        "Agents re-resolved after OS timezone change",
+      );
+    } catch (err) {
+      logger.error({ err }, "Agent re-resolve after timezone change failed");
+    }
+  };
+
+  return { result, enabledCache, watcher, reloadAgents };
 }
