@@ -1653,7 +1653,7 @@ export const AGENT_ERROR_REGISTRY = {
   "repositories.model_invalid": {
     expected: "model registered for the chosen backend in process_backend_config",
     hint:
-      "The (backend, model) pair is rejected because the model isn't listed in the backend's model registry. GET /api/backends/models?backend=<backend> to list valid models for that backend. Common: passing 'sonnet' alias to codex/gemini — they need full ids like 'claude-sonnet-4-6' or 'gemini-2.5-pro'.",
+      "The (backend, model) pair is rejected because the model isn't listed in the backend's model registry. GET /api/backends/models?backend=<backend> to list valid models for that backend. Common: passing 'sonnet' alias to codex/gemini — they need full ids like 'claude-sonnet-5' or 'gemini-2.5-pro'.",
     skillAnchor: "repositories#run",
     legacyErrorCode: "model_invalid",
     retryable: false,

@@ -939,6 +939,60 @@ export const MIGRATIONS: readonly Migration[] = [
       ).run();
     },
   },
+  {
+    id: "0016-sonnet-5-medium-default-bump",
+    description:
+      "(Sonnet 5 launch, v0.1.11→next) — forward-track the Claude medium-tier "
+      + "default from claude-sonnet-4-6 to claude-sonnet-5 for upgrading "
+      + "installs. Sonnet 5 shipped 2026-06-30; DEFAULT_CLAUDE_MEDIUM_MODEL is "
+      + "now claude-sonnet-5 and the schema seed interpolates it, so FRESH "
+      + "installs already land on Sonnet 5. This migration only moves "
+      + "PRE-EXISTING rows still sitting on the old seeded default: "
+      + "backend_global_defaults.default_medium_model (claude-sonnet-4-6, or "
+      + "opencode anthropic/claude-sonnet-4-6) and every "
+      + "process_backend_config.main_model whose updated_by is a non-user seed "
+      + "source ('preset' / 'cascade'). Operator-pinned rows "
+      + "(updated_by='user') and any default the operator changed away from the "
+      + "old value are left untouched. The conversation_sessions 'sonnet' alias "
+      + "DEFAULT and agent_schedule 'sonnet' rows resolve at runtime and need no "
+      + "migration; a literal agent_schedule.model='claude-sonnet-4-6' pin is a "
+      + "deliberate operator choice and stays. Literals are point-in-time "
+      + "snapshots (NOT the DEFAULT_CLAUDE_MEDIUM_MODEL constant) so a future "
+      + "bump can't retarget this migration. Idempotent: the WHERE clauses match "
+      + "only the old model, so after the bump nothing matches, and the recorded "
+      + "id short-circuits a re-run anyway.",
+    up(db) {
+      // Empty-DB safety: a bare :memory: DB (e.g. the runner's own unit tests)
+      // may not have run applySchema. Guard each table independently — the
+      // runner still records the id so a later boot does not re-evaluate.
+      if (tableExists(db, "backend_global_defaults")) {
+        db.prepare(
+          `UPDATE backend_global_defaults
+              SET default_medium_model = 'claude-sonnet-5'
+            WHERE default_medium_model = 'claude-sonnet-4-6'`,
+        ).run();
+        db.prepare(
+          `UPDATE backend_global_defaults
+              SET default_medium_model = 'anthropic/claude-sonnet-5'
+            WHERE default_medium_model = 'anthropic/claude-sonnet-4-6'`,
+        ).run();
+      }
+      if (tableExists(db, "process_backend_config")) {
+        db.prepare(
+          `UPDATE process_backend_config
+              SET main_model = 'claude-sonnet-5'
+            WHERE main_model = 'claude-sonnet-4-6'
+              AND updated_by IN ('preset', 'cascade')`,
+        ).run();
+        db.prepare(
+          `UPDATE process_backend_config
+              SET main_model = 'anthropic/claude-sonnet-5'
+            WHERE main_model = 'anthropic/claude-sonnet-4-6'
+              AND updated_by IN ('preset', 'cascade')`,
+        ).run();
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

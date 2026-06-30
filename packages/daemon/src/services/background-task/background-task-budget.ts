@@ -26,7 +26,7 @@ import type { BackgroundTaskTier } from "../../db/background-task-store.js";
 
 /** Fallback model when the `process_backend_config` row is missing or
  *  carries an empty `main_model`. Mirrors the seed default. */
-export const BACKGROUND_TASK_FALLBACK_CLAUDE_MODEL = "claude-sonnet-4-6";
+export const BACKGROUND_TASK_FALLBACK_CLAUDE_MODEL = "claude-sonnet-5";
 
 export const BACKGROUND_TASK_DEFAULT_TIER: BackgroundTaskTier = "medium";
 

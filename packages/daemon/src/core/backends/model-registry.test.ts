@@ -150,22 +150,25 @@ describe("model-registry", () => {
 
   it("registers OpenCode provider/model composite defaults", () => {
     expect(latestLiteFor("opencode")).toBe("anthropic/claude-haiku-4-5");
-    expect(latestMediumFor("opencode")).toBe("anthropic/claude-sonnet-4-6");
+    expect(latestMediumFor("opencode")).toBe("anthropic/claude-sonnet-5");
     expect(latestHighFor("opencode")).toBe("anthropic/claude-opus-4-8");
     expect(defaultModelForTier("opencode", "lite")).toBe(
       "anthropic/claude-haiku-4-5",
     );
     expect(defaultModelForTier("opencode", "medium")).toBe(
-      "anthropic/claude-sonnet-4-6",
+      "anthropic/claude-sonnet-5",
     );
     expect(defaultModelForTier("opencode", "high")).toBe(
       "anthropic/claude-opus-4-8",
     );
 
-    const model = findRegisteredModel("opencode", "anthropic/claude-sonnet-4-6");
-    expect(model?.backendId).toBe("opencode");
-    expect(model?.usdPer1kIn).toBe(0.003);
-    expect(model?.usdPer1kOut).toBe(0.015);
+    // Sonnet 4.6 stays registered with correct pricing but flagged legacy so
+    // `latestMediumFor` skips it in favor of Sonnet 5.
+    const legacy = findRegisteredModel("opencode", "anthropic/claude-sonnet-4-6");
+    expect(legacy?.backendId).toBe("opencode");
+    expect(legacy?.deprecated).toBe(true);
+    expect(legacy?.usdPer1kIn).toBe(0.003);
+    expect(legacy?.usdPer1kOut).toBe(0.015);
   });
 
   it("registers claude-opus-4-8 as the canonical high-tier model with Opus-4 pricing", () => {
@@ -186,6 +189,24 @@ describe("model-registry", () => {
     // Superseded Opus generations remain available but flagged legacy.
     expect(findRegisteredModel("claude", "claude-opus-4-7")?.deprecated).toBe(true);
     expect(findRegisteredModel("claude", "claude-opus-4-6")?.deprecated).toBe(true);
+  });
+
+  it("registers claude-sonnet-5 as the canonical medium-tier default with Sonnet 4.6 legacy", () => {
+    // Sonnet 5 is the current Claude medium-tier (main-agent) default. 4.6
+    // stays registered but flagged deprecated so existing pins keep resolving
+    // with correct pricing while `latestMediumFor` skips it.
+    expect(latestMediumFor("claude")).toBe("claude-sonnet-5");
+    expect(defaultModelForTier("claude", "medium")).toBe("claude-sonnet-5");
+
+    const model = findRegisteredModel("claude", "claude-sonnet-5");
+    expect(model?.tier).toBe("medium");
+    expect(model?.deprecated).toBeUndefined();
+    expect(model?.usdPer1kIn).toBe(0.003);
+    expect(model?.usdPer1kOut).toBe(0.015);
+    expect(model?.maxOutputTokens).toBe(128_000);
+
+    // Superseded Sonnet generation remains available but flagged legacy.
+    expect(findRegisteredModel("claude", "claude-sonnet-4-6")?.deprecated).toBe(true);
   });
 
   it("collapses cache-create cost to 0 when the model lacks usdPer1kCacheCreate", () => {
@@ -236,7 +257,7 @@ describe("model-registry", () => {
   });
 
   it("getModelLabel returns the canonical label or the raw modelId fallback", () => {
-    expect(getModelLabel("claude", "claude-sonnet-4-6")).toBe("Claude Sonnet 4.6");
+    expect(getModelLabel("claude", "claude-sonnet-4-6")).toBe("Claude Sonnet 4.6 (legacy)");
     expect(getModelLabel("claude", "unregistered-model")).toBe("unregistered-model");
     // Cross-backend miss falls back to raw id.
     expect(getModelLabel("codex", "claude-sonnet-4-6")).toBe("claude-sonnet-4-6");

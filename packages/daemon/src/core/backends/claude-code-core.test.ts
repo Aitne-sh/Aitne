@@ -2212,7 +2212,7 @@ describe("ClaudeCodeCore", () => {
     });
 
     it("resolves sonnet alias to light model", () => {
-      expect((core as any).resolveActualModelId("sonnet")).toBe("claude-sonnet-4-6");
+      expect((core as any).resolveActualModelId("sonnet")).toBe("claude-sonnet-5");
     });
 
     it("passes through explicit model IDs", () => {

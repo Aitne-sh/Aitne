@@ -319,7 +319,7 @@ describe("applySchema", () => {
     expect(row).toEqual({
       default_backend: "claude",
       default_lite_model: "claude-haiku-4-5-20251001",
-      default_medium_model: "claude-sonnet-4-6",
+      default_medium_model: "claude-sonnet-5",
       default_high_model: "claude-opus-4-8",
       advisor_enabled: 0,
     });
@@ -331,7 +331,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.morning_routine'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(morning.main_model).toBe("claude-sonnet-4-6");
+    expect(morning.main_model).toBe("claude-sonnet-5");
     expect(morning.max_turns).toBe(50);
     expect(morning.max_budget_usd).toBe(2.0);
 
@@ -346,7 +346,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.morning_routine_today'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(morningStageA.main_model).toBe("claude-sonnet-4-6");
+    expect(morningStageA.main_model).toBe("claude-sonnet-5");
     expect(morningStageA.max_turns).toBe(50);
     expect(morningStageA.max_budget_usd).toBe(1.5);
 
@@ -364,7 +364,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.today_refresh'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(todayRefresh.main_model).toBe("claude-sonnet-4-6");
+    expect(todayRefresh.main_model).toBe("claude-sonnet-5");
     expect(todayRefresh.max_turns).toBe(20);
     expect(todayRefresh.max_budget_usd).toBe(0.5);
 
@@ -381,7 +381,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.roadmap_refresh'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(roadmapRefresh.main_model).toBe("claude-sonnet-4-6");
+    expect(roadmapRefresh.main_model).toBe("claude-sonnet-5");
     expect(roadmapRefresh.max_turns).toBe(60);
     expect(roadmapRefresh.max_budget_usd).toBe(3.0);
 
@@ -390,7 +390,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'message.dm'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(dm.main_model).toBe("claude-sonnet-4-6");
+    expect(dm.main_model).toBe("claude-sonnet-5");
     expect(dm.max_turns).toBe(50);
     // Wider $5.00 per-turn ceiling than the $1.00 medium nominal — DM
     // turns re-process the full history and tipped over $1.00 mid-turn.
@@ -406,7 +406,7 @@ describe("applySchema", () => {
     // can pin Opus per-row from /settings/models when they want deeper
     // reasoning on a one-shot init. The $1 cap is sized so it binds first
     // on Sonnet (matching the original Opus-era effective bound).
-    expect(gitProjectInit.main_model).toBe("claude-sonnet-4-6");
+    expect(gitProjectInit.main_model).toBe("claude-sonnet-5");
     expect(gitProjectInit.max_turns).toBe(50);
     expect(gitProjectInit.max_budget_usd).toBe(1.0);
 
@@ -415,7 +415,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'git.project.update'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(gitProjectUpdate.main_model).toBe("claude-sonnet-4-6");
+    expect(gitProjectUpdate.main_model).toBe("claude-sonnet-5");
     expect(gitProjectUpdate.max_turns).toBe(30);
     expect(gitProjectUpdate.max_budget_usd).toBe(0.5);
 
@@ -428,7 +428,7 @@ describe("applySchema", () => {
         "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'browser_task'",
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
-    expect(browserTask.main_model).toBe("claude-sonnet-4-6");
+    expect(browserTask.main_model).toBe("claude-sonnet-5");
     expect(browserTask.max_turns).toBe(30);
     expect(browserTask.max_budget_usd).toBe(1.0);
 

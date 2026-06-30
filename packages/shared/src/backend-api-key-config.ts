@@ -157,17 +157,17 @@ export const RECOMMENDED_PINNED_MODELS_BY_PROVIDER: Record<
 > = {
   bedrock: {
     defaultOpusModel: "us.anthropic.claude-opus-4-7",
-    defaultSonnetModel: "us.anthropic.claude-sonnet-4-6",
+    defaultSonnetModel: "us.anthropic.claude-sonnet-5",
     defaultHaikuModel: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   },
   vertex: {
     defaultOpusModel: "claude-opus-4-7",
-    defaultSonnetModel: "claude-sonnet-4-6",
+    defaultSonnetModel: "claude-sonnet-5",
     defaultHaikuModel: "claude-haiku-4-5@20251001",
   },
   foundry: {
     defaultOpusModel: "claude-opus-4-7",
-    defaultSonnetModel: "claude-sonnet-4-6",
+    defaultSonnetModel: "claude-sonnet-5",
     defaultHaikuModel: "claude-haiku-4-5",
   },
 };

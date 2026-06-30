@@ -303,7 +303,7 @@ describe("/api/docs/* routes", () => {
     // an operator pick Opus and bypass the dashboard.docs_qa TIER_LOCK via
     // the dispatcher's hard-override path.
     const ids = body.availableModels.map((m) => m.modelId);
-    expect(ids).toContain("claude-sonnet-4-6");
+    expect(ids).toContain("claude-sonnet-5");
     expect(ids).not.toContain("claude-opus-4-7");
     expect(ids).not.toContain("claude-opus-4-6");
   });

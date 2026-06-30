@@ -55,13 +55,13 @@ describe("RECOMMENDED_PINNED_MODELS_BY_PROVIDER", () => {
   it("provides Vertex-format IDs for vertex", () => {
     const r = RECOMMENDED_PINNED_MODELS_BY_PROVIDER.vertex;
     expect(r.defaultOpusModel).toBe("claude-opus-4-7");
-    expect(r.defaultSonnetModel).toBe("claude-sonnet-4-6");
+    expect(r.defaultSonnetModel).toBe("claude-sonnet-5");
     expect(r.defaultHaikuModel).toMatch(/^claude-haiku-4-5@/);
   });
   it("provides Foundry-format IDs for foundry", () => {
     const r = RECOMMENDED_PINNED_MODELS_BY_PROVIDER.foundry;
     expect(r.defaultOpusModel).toBe("claude-opus-4-7");
-    expect(r.defaultSonnetModel).toBe("claude-sonnet-4-6");
+    expect(r.defaultSonnetModel).toBe("claude-sonnet-5");
     expect(r.defaultHaikuModel).toBe("claude-haiku-4-5");
   });
 });

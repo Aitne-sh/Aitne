@@ -77,7 +77,7 @@ describe("process-config cascade-write", () => {
     });
 
     const inheritor = readRow("dashboard.docs_qa");
-    expect(inheritor?.main_model).toBe("claude-sonnet-4-6");
+    expect(inheritor?.main_model).toBe("claude-sonnet-5");
   });
 
   it("respects user-pinned inheritor rows (does not cascade over them)", () => {
@@ -241,7 +241,7 @@ describe("process-config cascade-write internals", () => {
       // getModelsForBackend("codex"). Any registered codex medium model
       // is fine; we just assert it's not the claude default.
       const model = _internals.resolveTierModel(db, "codex", "medium");
-      expect(model).not.toBe("claude-sonnet-4-6");
+      expect(model).not.toBe("claude-sonnet-5");
       expect(model.length).toBeGreaterThan(0);
     });
 
@@ -257,7 +257,7 @@ describe("process-config cascade-write internals", () => {
       ).run();
       const model = _internals.resolveTierModel(db, "claude", "medium");
       // Falls through, finds the actual medium-tier model in the registry.
-      expect(model).toBe("claude-sonnet-4-6");
+      expect(model).toBe("claude-sonnet-5");
     });
   });
 

@@ -101,13 +101,13 @@ interface SettingsResponse {
 }
 
 const DEFAULT_MODEL_BY_BACKEND: Record<Backend, string> = {
-  claude: "claude-sonnet-4-6",
+  claude: "claude-sonnet-5",
   codex: "gpt-5.4",
   gemini: "gemini-2.5-flash",
   // docs/design/appendices/opencode-backend.md §6.1.1 — opencode model IDs are
   // `provider/model` composites; the registry's medium-tier default is
   // Anthropic's Sonnet through opencode's Anthropic provider.
-  opencode: "anthropic/claude-sonnet-4-6",
+  opencode: "anthropic/claude-sonnet-5",
 };
 
 // When the operator first turns the optimizer ON we auto-scope it to the

@@ -204,7 +204,7 @@ describe("DelegatedSyncWorker", () => {
     expect(invoker.invoke).toHaveBeenCalledTimes(1);
     const firstCallParams = (invoker.invoke as ReturnType<typeof vi.fn>).mock
       .calls[0][0] as InvokeParams;
-    expect(firstCallParams.modelOverride).toBe("claude-sonnet-4-6");
+    expect(firstCallParams.modelOverride).toBe("claude-sonnet-5");
   });
 
   it("starts idempotently, reports running status, and stops cleanly", async () => {

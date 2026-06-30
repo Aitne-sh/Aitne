@@ -403,7 +403,7 @@ describe("Dashboard API", () => {
       const data = (await res.json()) as Record<string, any>;
       expect(data.defaultBackend).toBe("claude");
       expect(data.defaultLiteModel).toBe("claude-haiku-4-5-20251001");
-      expect(data.defaultMediumModel).toBe("claude-sonnet-4-6");
+      expect(data.defaultMediumModel).toBe("claude-sonnet-5");
       expect(data.defaultHighModel).toBe("claude-opus-4-8");
       expect(data.pricingDataSource).toMatchObject({
         source: "hardcoded",

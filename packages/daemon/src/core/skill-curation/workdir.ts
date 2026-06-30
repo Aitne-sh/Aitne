@@ -146,7 +146,7 @@ export async function materializeOptimizerWorkdir(
       `INSERT INTO skill_curation_runs (id, started_at, cadence, backend, model, target_skills_json, status, is_manual)
        VALUES (?, ?, ?, ?, ?, ?, 'running', ?)`,
     )
-    .run(runId, Date.now(), params.cadence, "claude", "claude-sonnet-4-6", JSON.stringify(targetSkills), manual ? 1 : 0);
+    .run(runId, Date.now(), params.cadence, "claude", "claude-sonnet-5", JSON.stringify(targetSkills), manual ? 1 : 0);
 
   // Knowledge-map snapshot.
   const snapshot = buildKnowledgeMap(params.contextDir);

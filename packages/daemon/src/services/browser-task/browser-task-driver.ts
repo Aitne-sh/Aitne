@@ -106,7 +106,7 @@ export const BROWSER_TASK_BLOCKED_REQUEST_ABORT_THRESHOLD = 100;
 /** Default Claude model id the driver falls back to when the DB row is
  *  missing or carries an empty `main_model`. Mirrors the seed default
  *  (`DEFAULT_CLAUDE_MEDIUM_MODEL`). */
-const BROWSER_TASK_FALLBACK_CLAUDE_MODEL = "claude-sonnet-4-6";
+const BROWSER_TASK_FALLBACK_CLAUDE_MODEL = "claude-sonnet-5";
 
 interface BrowserTaskBackendBinding {
   modelId: string;

@@ -324,11 +324,11 @@ function TriggerEditorContent({
                   list={`models-${backend}`}
                   placeholder={
                     backend === "claude"
-                      ? "claude-sonnet-4-6"
+                      ? "claude-sonnet-5"
                       : backend === "codex"
                         ? "gpt-5.4-medium"
                         : backend === "opencode"
-                          ? "anthropic/claude-sonnet-4-6"
+                          ? "anthropic/claude-sonnet-5"
                           : "gemini-2.0-flash"
                   }
                 />

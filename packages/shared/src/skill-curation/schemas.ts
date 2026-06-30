@@ -214,7 +214,7 @@ export const SkillCurationConfig = z.object({
   enabled: z.boolean().default(false),
   cadence: z.enum(["daily", "weekly", "monthly"]).default("weekly"),
   backend: z.enum(BACKEND_IDS).default("claude"),
-  model: z.string().min(1).max(120).default("claude-sonnet-4-6"),
+  model: z.string().min(1).max(120).default("claude-sonnet-5"),
   excluded_skills: z.array(z.string().min(1).max(80)).default([]),
 });
 
@@ -224,7 +224,7 @@ export const DEFAULT_SKILL_CURATION_CONFIG: SkillCurationConfigValue = {
   enabled: false,
   cadence: "weekly",
   backend: "claude",
-  model: "claude-sonnet-4-6",
+  model: "claude-sonnet-5",
   excluded_skills: [],
 };
 

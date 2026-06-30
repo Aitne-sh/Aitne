@@ -2308,3 +2308,160 @@ describe("0015-morning-briefing-follow-system-timezone", () => {
     expect(result.applied).toEqual(["0015-morning-briefing-follow-system-timezone"]);
   });
 });
+
+// `0016-sonnet-5-medium-default-bump`, same CLAUDE.md non-negotiable #4
+// contract as the budget bumps: fresh DB (no target tables) → no-op + id
+// recorded; rows already at sonnet-5 → untouched; pre-migration preset/cascade
+// rows at claude-sonnet-4-6 (or opencode anthropic/claude-sonnet-4-6) → bumped
+// to sonnet-5; operator-pinned ('user') rows + defaults changed off the old
+// value → untouched; re-run → no second bump.
+describe("0016-sonnet-5-medium-default-bump", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0016-sonnet-5-medium-default-bump",
+  );
+
+  function seedDefaultsTable(db: Database.Database, mediumModel: string): void {
+    db.exec(`
+      CREATE TABLE backend_global_defaults (
+        singleton            INTEGER PRIMARY KEY,
+        default_medium_model TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      "INSERT INTO backend_global_defaults (singleton, default_medium_model) VALUES (1, ?)",
+    ).run(mediumModel);
+  }
+
+  function mediumDefaultOf(db: Database.Database): string {
+    return (
+      db
+        .prepare<[], { default_medium_model: string }>(
+          "SELECT default_medium_model FROM backend_global_defaults WHERE singleton = 1",
+        )
+        .get() as { default_medium_model: string }
+    ).default_medium_model;
+  }
+
+  function seedProcessConfigTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE process_backend_config (
+        process_key  TEXT PRIMARY KEY,
+        main_backend TEXT NOT NULL,
+        main_model   TEXT NOT NULL,
+        updated_by   TEXT NOT NULL
+      );
+    `);
+  }
+
+  function insertProcRow(
+    db: Database.Database,
+    processKey: string,
+    mainModel: string,
+    updatedBy: string,
+    backend = "claude",
+  ): void {
+    db.prepare(
+      `INSERT INTO process_backend_config
+         (process_key, main_backend, main_model, updated_by)
+       VALUES (?, ?, ?, ?)`,
+    ).run(processKey, backend, mainModel, updatedBy);
+  }
+
+  function mainModelOf(db: Database.Database, processKey: string): string {
+    return (
+      db
+        .prepare<[string], { main_model: string }>(
+          "SELECT main_model FROM process_backend_config WHERE process_key = ?",
+        )
+        .get(processKey) as { main_model: string }
+    ).main_model;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a recorded no-op when the target tables do not exist (fresh/empty DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0016-sonnet-5-medium-default-bump"]);
+    const recorded = db
+      .prepare<[string], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0016-sonnet-5-medium-default-bump");
+    expect(recorded).toEqual({ id: "0016-sonnet-5-medium-default-bump" });
+  });
+
+  it("is a no-op on a fresh install already seeded at sonnet-5", () => {
+    const db = openDb();
+    seedDefaultsTable(db, "claude-sonnet-5");
+    seedProcessConfigTable(db);
+    insertProcRow(db, "message.dm", "claude-sonnet-5", "preset");
+    runMigrations(db, [migration!]);
+    expect(mediumDefaultOf(db)).toBe("claude-sonnet-5");
+    expect(mainModelOf(db, "message.dm")).toBe("claude-sonnet-5");
+  });
+
+  it("bumps the global medium default claude-sonnet-4-6 → claude-sonnet-5", () => {
+    const db = openDb();
+    seedDefaultsTable(db, "claude-sonnet-4-6");
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0016-sonnet-5-medium-default-bump"]);
+    expect(mediumDefaultOf(db)).toBe("claude-sonnet-5");
+  });
+
+  it("bumps an opencode global medium default to anthropic/claude-sonnet-5", () => {
+    const db = openDb();
+    seedDefaultsTable(db, "anthropic/claude-sonnet-4-6");
+    runMigrations(db, [migration!]);
+    expect(mediumDefaultOf(db)).toBe("anthropic/claude-sonnet-5");
+  });
+
+  it("leaves a global default the operator changed off the old value untouched", () => {
+    const db = openDb();
+    seedDefaultsTable(db, "claude-opus-4-8");
+    runMigrations(db, [migration!]);
+    expect(mediumDefaultOf(db)).toBe("claude-opus-4-8");
+  });
+
+  it("bumps preset and cascade process rows (claude + opencode)", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertProcRow(db, "message.dm", "claude-sonnet-4-6", "preset", "claude");
+    insertProcRow(db, "dashboard.docs_qa", "claude-sonnet-4-6", "cascade", "claude");
+    insertProcRow(db, "routine.evening_review", "anthropic/claude-sonnet-4-6", "preset", "opencode");
+    runMigrations(db, [migration!]);
+    expect(mainModelOf(db, "message.dm")).toBe("claude-sonnet-5");
+    expect(mainModelOf(db, "dashboard.docs_qa")).toBe("claude-sonnet-5");
+    expect(mainModelOf(db, "routine.evening_review")).toBe("anthropic/claude-sonnet-5");
+  });
+
+  it("leaves operator-pinned ('user') process rows untouched even at the old model", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertProcRow(db, "message.dm", "claude-sonnet-4-6", "user", "claude");
+    runMigrations(db, [migration!]);
+    expect(mainModelOf(db, "message.dm")).toBe("claude-sonnet-4-6");
+  });
+
+  it("leaves a process row already at a custom model untouched", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertProcRow(db, "message.dm", "claude-opus-4-8", "preset", "claude");
+    runMigrations(db, [migration!]);
+    expect(mainModelOf(db, "message.dm")).toBe("claude-opus-4-8");
+  });
+
+  it("is idempotent — re-running does not re-apply", () => {
+    const db = openDb();
+    seedDefaultsTable(db, "claude-sonnet-4-6");
+    seedProcessConfigTable(db);
+    insertProcRow(db, "message.dm", "claude-sonnet-4-6", "preset", "claude");
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(mediumDefaultOf(db)).toBe("claude-sonnet-5");
+    expect(mainModelOf(db, "message.dm")).toBe("claude-sonnet-5");
+  });
+});

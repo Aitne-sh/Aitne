@@ -23,7 +23,7 @@ import type {
 
 // Claude
 export const DEFAULT_CLAUDE_LITE_MODEL = "claude-haiku-4-5-20251001";
-export const DEFAULT_CLAUDE_MEDIUM_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_CLAUDE_MEDIUM_MODEL = "claude-sonnet-5";
 export const DEFAULT_CLAUDE_HIGH_MODEL = "claude-opus-4-8";
 
 // Codex (gpt-5.4-mini is the lite-tier pick; gpt-5.4 is the medium-tier
@@ -56,20 +56,44 @@ export const DEFAULT_GEMINI_MEDIUM_MODEL = "gemini-3.1-pro-preview";
 // live OpenCode server may report different providers; runtime probing lands
 // in a later phase, so Phase 1 seeds Anthropic-compatible safe defaults.
 export const DEFAULT_OPENCODE_LITE_MODEL = "anthropic/claude-haiku-4-5";
-export const DEFAULT_OPENCODE_MEDIUM_MODEL = "anthropic/claude-sonnet-4-6";
+export const DEFAULT_OPENCODE_MEDIUM_MODEL = "anthropic/claude-sonnet-5";
 export const DEFAULT_OPENCODE_HIGH_MODEL = "anthropic/claude-opus-4-8";
 
 const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
   {
     backendId: "claude",
-    modelId: "claude-sonnet-4-6",
-    label: "Claude Sonnet 4.6",
-    displayName: "Claude Sonnet 4.6",
+    modelId: "claude-sonnet-5",
+    label: "Claude Sonnet 5",
+    displayName: "Claude Sonnet 5",
     tier: "medium",
     available: true,
     supportsToolUse: true,
     supportsStreaming: true,
     supportsPromptCaching: true,
+    // Anthropic Sonnet tier: $3/$15/$0.30/$3.75 per MTok in/out/cache-read/cache-create.
+    // Introductory pricing of $2/$10 in/out applies through 2026-08-31; we list the
+    // standard rate so the estimate needs no scheduled revert (the SDK's
+    // `total_cost_usd` is the real billed figure during the intro window).
+    usdPer1kIn: 0.003,
+    usdPer1kOut: 0.015,
+    usdPer1kCacheRead: 0.0003,
+    usdPer1kCacheCreate: 0.00375,
+    maxInputTokens: 1_000_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    backendId: "claude",
+    modelId: "claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6 (legacy)",
+    displayName: "Claude Sonnet 4.6 (legacy)",
+    tier: "medium",
+    available: true,
+    deprecated: true,
+    supportsToolUse: true,
+    supportsStreaming: true,
+    supportsPromptCaching: true,
+    // Demoted to legacy when Sonnet 5 shipped; kept available so existing pins
+    // keep resolving with correct pricing.
     usdPer1kIn: 0.003,
     usdPer1kOut: 0.015,
     usdPer1kCacheRead: 0.0003,
@@ -176,11 +200,30 @@ const MODEL_REGISTRY: ReadonlyArray<BackendModel> = [
   },
   {
     backendId: "opencode",
-    modelId: "anthropic/claude-sonnet-4-6",
-    label: "OpenCode Claude Sonnet 4.6",
-    displayName: "Claude Sonnet 4.6",
+    modelId: "anthropic/claude-sonnet-5",
+    label: "OpenCode Claude Sonnet 5",
+    displayName: "Claude Sonnet 5",
     tier: "medium",
     available: true,
+    supportsToolUse: true,
+    supportsStreaming: true,
+    supportsPromptCaching: true,
+    // Standard Sonnet tier $3/$15 per MTok (intro $2/$10 through 2026-08-31).
+    usdPer1kIn: 0.003,
+    usdPer1kOut: 0.015,
+    usdPer1kCacheRead: 0.0003,
+    usdPer1kCacheCreate: 0.00375,
+    maxInputTokens: 1_000_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    backendId: "opencode",
+    modelId: "anthropic/claude-sonnet-4-6",
+    label: "OpenCode Claude Sonnet 4.6 (legacy)",
+    displayName: "Claude Sonnet 4.6 (legacy)",
+    tier: "medium",
+    available: true,
+    deprecated: true,
     supportsToolUse: true,
     supportsStreaming: true,
     supportsPromptCaching: true,
@@ -536,9 +579,11 @@ export function latestHighFor(backendId: BackendId): string | null {
   return match?.modelId ?? null;
 }
 
-/* c8 ignore start — registry has no `available:false` or deprecated medium
-   model today; the predicates and `?? null` fallback exist so the lookup
-   degrades cleanly when one is added (e.g. retired Sonnet generation). */
+/* c8 ignore start — claude-sonnet-4-6 / anthropic/claude-sonnet-4-6 are now
+   deprecated medium models, but each is preceded in array order by its
+   non-deprecated successor (Sonnet 5), so `.find` matches before the
+   `!deprecated` skip or the `?? null` fallback are exercised. Both stay for the
+   day a backend's only medium model is retired and `available:false`. */
 /** Mirror of `latestHighFor` for the medium tier (main agent surfaces). */
 export function latestMediumFor(backendId: BackendId): string | null {
   const match = MODEL_REGISTRY.find(

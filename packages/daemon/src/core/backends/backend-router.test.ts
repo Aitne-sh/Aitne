@@ -137,7 +137,7 @@ describe("BackendRouter", () => {
     expect(binding.resolvedTier).toBe("medium");
     expect(binding.main).toEqual({
       backendId: "claude",
-      modelId: "claude-sonnet-4-6",
+      modelId: "claude-sonnet-5",
       maxTurns: 50,
       maxBudgetUsd: 1.0,
     });
@@ -287,7 +287,7 @@ describe("BackendRouter", () => {
       requestedTier: "medium",
     });
 
-    expect(binding.main.modelId).toBe("claude-sonnet-4-6");
+    expect(binding.main.modelId).toBe("claude-sonnet-5");
   });
 
   it("unknown pinned model is PRESERVED under explicit requestedTier (regression guard)", () => {
@@ -755,7 +755,7 @@ describe("BackendRouter", () => {
     expect(core.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         event,
-        modelId: "claude-sonnet-4-6",
+        modelId: "claude-sonnet-5",
         maxTurns: 50,
         maxBudgetUsd: 1.0,
       }),
