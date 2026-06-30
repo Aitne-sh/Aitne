@@ -196,7 +196,7 @@ vault on Opus 4.8 and a parenting journal on Haiku 4.5 at the same
 time, you cannot — the `wiki.ask` row resolves to one backend/model for
 every workspace. The pragmatic shape is:
 
-- Bind `wiki.ask` to its medium-tier default (Sonnet 4.6), a sensible
+- Bind `wiki.ask` to its medium-tier default (Sonnet 5), a sensible
   cross-workspace balance of cost and quality.
 - Keep cost differences per workspace through each workspace's own
   full-compile approval threshold (see above).

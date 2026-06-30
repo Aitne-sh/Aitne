@@ -79,7 +79,7 @@ persisted under the chat session.
 
 Like a DM, `dashboard.chat` is a **reactive** ProcessKey: it runs on
 demand when you send, never on a schedule. Its default tier is
-**medium** (Claude Sonnet 4.6 by default) — the same tier as
+**medium** (Claude Sonnet 5 by default) — the same tier as
 `message.dm`.
 
 ## Where in the Dashboard

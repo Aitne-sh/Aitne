@@ -143,7 +143,7 @@ subscription. Anthropic in particular currently prohibits using the
 Claude Agent SDK with a Claude Pro / Max subscription.
 
 Per-process model bindings are seeded with fixed defaults: **Claude
-Sonnet 4.6** (`claude-sonnet-4-6`) for owner-facing work and **Claude
+Sonnet 5** (`claude-sonnet-5`) for owner-facing work and **Claude
 Haiku 4.5** (`claude-haiku-4-5-20251001`) for delegated/simple
 polling. Opus (`claude-opus-4-8`) is registered but not seeded — opt
 in per row. There are no subscription-plan questions. Change the

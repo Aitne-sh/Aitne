@@ -228,10 +228,11 @@ dashboard page.
 
 Operator-facing umbrella for the two non-heavy lanes on each backend:
 
-- **Medium / Main** (Claude Sonnet 4.6, `gpt-5.4` on Codex,
-  `gemini-3.1-pro-preview` on Gemini, Sonnet 4.6 via OpenCode) —
+- **Medium / Main** (Claude Sonnet 5, `gpt-5.4` on Codex,
+  `gemini-3.1-pro-preview` on Gemini, Sonnet 5 via OpenCode) —
   default for owner DMs, dashboard chat, the activity scan, and the
-  morning / evening / weekly review routines.
+  morning / evening / weekly review routines. (Sonnet 4.6 became a
+  `(legacy)` pin when Sonnet 5 shipped on 2026-06-30.)
 - **Lite / Delegated** (Claude Haiku 4.5, `gpt-5.4-mini` on Codex,
   `gemini-3.1-flash-lite-preview` on Gemini, Haiku 4.5 via OpenCode) —
   reserved for mechanical / delegated surfaces: Gmail classification,

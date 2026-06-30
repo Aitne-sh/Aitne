@@ -76,7 +76,7 @@ delegated routine onto Gemini to save Claude quota.
 
 To give the evening review deeper reasoning, set
 `routine.evening_review` → main `claude`, tier `high`. The next evening
-run resolves to **Opus 4.8** instead of the default Sonnet 4.6. The
+run resolves to **Opus 4.8** instead of the default Sonnet 5. The
 execution budget for that run also scales with the tier (high tier
 carries a larger turn / cost envelope than medium).
 

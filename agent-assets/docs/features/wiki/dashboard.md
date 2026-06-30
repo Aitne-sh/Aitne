@@ -222,7 +222,7 @@ The full configuration:
   model, turn limit, and per-run budget on each `wiki.*` process key
   (`wiki.ingest_url`, `wiki.compile`, `wiki.ask`, `wiki.lint`,
   `wiki.trace`, `wiki.connect`). All six default to the medium tier
-  (Claude Sonnet 4.6) with a sensible `maxTurns` / `maxBudgetUsd`; you
+  (Claude Sonnet 5) with a sensible `maxTurns` / `maxBudgetUsd`; you
   can override per key.
 - **Archive / delete** — archive keeps the row but flips `active=0`;
   delete drops the row (data on disk is untouched on external mode).

@@ -85,7 +85,7 @@ tiers. The per-backend defaults seeded at install time are:
 
 | Tier | Claude | Codex | Gemini | OpenCode |
 |---|---|---|---|---|
-| **medium** (main) | Sonnet 4.6 | GPT-5.4 | Gemini 3.1 Pro (preview) | Sonnet 4.6 |
+| **medium** (main) | Sonnet 5 | GPT-5.4 | Gemini 3.1 Pro (preview) | Sonnet 5 |
 | **lite** (delegated) | Haiku 4.5 | GPT-5.4 Mini | Gemini 3.1 Flash Lite (preview) | Haiku 4.5 |
 | **high** (heavy) | Opus 4.8 | GPT-5.4¹ | Gemini 3.1 Pro (preview)¹ | Opus 4.8 |
 
@@ -194,10 +194,13 @@ Claude's quota is exhausted, or use Gemini for cheap polling tasks.
 - **Tier**: `lite`, `medium`, or `high`. `high` maps to the strongest
   model class (Opus-class — Opus 4.8 on Claude and OpenCode; on Codex
   and Gemini the seeded high binding collapses to the medium model).
-  `medium` (Sonnet-class — Sonnet 4.6 and equivalents) is the
+  `medium` (Sonnet-class — Sonnet 5 and equivalents) is the
   operator's day-to-day tier for owner-facing work; `lite`
   (Haiku-class — Haiku 4.5 and equivalents) is reserved for
-  mechanical / delegated surfaces.
+  mechanical / delegated surfaces. Sonnet 5 became the seeded medium
+  default on 2026-06-30; the prior **Sonnet 4.6** is retained as a
+  `(legacy)` model — hidden from the pickers but still resolvable for
+  any row already pinned to it.
 - **Main / Fallback**: each ProcessKey has a `main` backend and a
   `fallback`. The router fails over on `BackendQuotaError` /
   `BackendDecisiveFailure`.
@@ -206,13 +209,13 @@ Claude's quota is exhausted, or use Gemini for cheap polling tasks.
 
 | ProcessKey | Default main | Seeded model |
 |---|---|---|
-| `routine.morning_routine` | claude | Sonnet 4.6 |
-| `routine.evening_review` | claude | Sonnet 4.6 |
-| `routine.weekly_review` | claude | Sonnet 4.6 |
-| `routine.activity_scan` | claude | Sonnet 4.6 |
-| `message.dm` | claude | Sonnet 4.6 |
-| `dashboard.chat` | claude | Sonnet 4.6 |
-| `dashboard.docs_qa` | inherits from `message.dm` | Sonnet 4.6 (locked to medium) |
+| `routine.morning_routine` | claude | Sonnet 5 |
+| `routine.evening_review` | claude | Sonnet 5 |
+| `routine.weekly_review` | claude | Sonnet 5 |
+| `routine.activity_scan` | claude | Sonnet 5 |
+| `message.dm` | claude | Sonnet 5 |
+| `dashboard.chat` | claude | Sonnet 5 |
+| `dashboard.docs_qa` | inherits from `message.dm` | Sonnet 5 (locked to medium) |
 | `gmail_classify` | claude | Haiku 4.5 |
 | `github.*` | claude | Haiku 4.5 |
 | `git.push.detected` (and other git-poll keys) | claude | Haiku 4.5 |

@@ -144,7 +144,7 @@ You have three levers, all on `/settings/wiki`:
   recompiles keep stalling on a confirmation you'd always grant.
 - **Use a cheaper model.** In the **Commands & models** section, point
   `wiki.compile` at a lite-tier model. It defaults to the medium tier
-  (Claude Sonnet 4.6), whose per-token cost is the dominant variable in
+  (Claude Sonnet 5), whose per-token cost is the dominant variable in
   the estimate.
 - **Trim the raw layer.** The estimate scans `10_raw/` and approximates
   tokens per file from on-disk content, so the cost tracks the actual

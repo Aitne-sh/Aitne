@@ -181,7 +181,7 @@ dashboard surfaces a warning whenever a backend is running on
 subscription auth.
 
 Each kind of work is mapped to a backend and a tier — most work runs
-on medium (Claude Sonnet 4.6 by default) and quick triage on lite
+on medium (Claude Sonnet 5 by default) and quick triage on lite
 (Claude Haiku 4.5). The high tier (Claude Opus 4.8) is registered but
 left unseeded; you opt into it per task from the dashboard. You can
 change any of this mapping at any time.

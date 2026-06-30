@@ -146,7 +146,7 @@ Full rebuilds touch every wiki note and are the most expensive
 command in the wiki surface. The flow:
 
 1. The bang handler estimates the cost (per raw note, an on-disk
-   char→token approximation × Sonnet 4.6 input price, bracketed
+   char→token approximation × Sonnet 5 input price, bracketed
    optimistic 0.5× / expected 1× / pessimistic 2×).
 2. On an external git-tracked vault with **Auto-commit before
    `!compile full`** enabled and a clean working tree, Aitne runs

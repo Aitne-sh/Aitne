@@ -91,9 +91,11 @@ Per-file token approximation is script-aware: ~4 characters per token
 for Latin/prose, ~1.5 for majority-CJK files, with a 200-token floor
 per file so empty or one-line stubs still account for the fixed
 per-call overhead (system prompt, skills bundle, tool docs). The unit
-cost (`$0.003` per 1k tokens) matches Claude Sonnet 4.6's ~$3 /
-Mtoken input price. The bracket lets you see a worst case before
-approving.
+cost (`$0.003` per 1k tokens) matches Claude Sonnet 5's ~$3 /
+Mtoken standard input price. (An introductory $2 / Mtoken rate runs
+through 2026-08-31; the estimate lists the standard rate, while the
+SDK's billed `total_cost_usd` reflects the intro price during the
+window.) The bracket lets you see a worst case before approving.
 
 > The dashboard surfaces the top raw files by estimated token count,
 > so you can see which sources dominate the bill before approving.
