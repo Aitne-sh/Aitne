@@ -8,6 +8,7 @@ import type {
   MessageAdapter,
   OnMessageCallback,
   OutboundAttachmentRef,
+  ProcessingIndicatorHandle,
 } from "./types.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
@@ -67,6 +68,11 @@ const MEDIA_GROUP_DEBOUNCE_MS = 400;
 // the media-group flush timer never fires. 30s is generous for 20 MB
 // attachments over slow links.
 const TELEGRAM_HTTP_TIMEOUT_MS = 30_000;
+// Telegram clears a `sendChatAction` state after ~5s (or when the next
+// message from the bot lands), so a long-running turn needs the action
+// re-fired to keep the "typing…" bubble visible. Refresh just under the
+// 5s expiry. Mirrors WhatsApp's presence-refresh loop.
+const TELEGRAM_CHAT_ACTION_REFRESH_MS = 4_000;
 
 export interface TelegramBotInfo {
   id: number;
@@ -167,6 +173,15 @@ export class TelegramAdapter implements MessageAdapter {
 
   /** Buffers for Telegram media albums (media_group_id → accumulated items). */
   private readonly mediaGroupBuffers: Map<string, MediaGroupEntry> = new Map();
+
+  /**
+   * Refresh timer for the "typing…" chat action, tracked on the instance so
+   * both the indicator's own `stop()` and adapter teardown (`stop()`) can
+   * cancel it. Only one indicator is live at a time (the dispatcher begins
+   * one per inbound message and awaits its stop before the next), so a
+   * single field suffices. Mirrors WhatsApp's `presenceInterval`.
+   */
+  private chatActionInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: TelegramAdapterOptions) {
     this.botToken = opts.botToken;
@@ -319,6 +334,14 @@ export class TelegramAdapter implements MessageAdapter {
       this.bot.stop("SIGTERM");
       this.bot = null;
     }
+    // Cancel any typing-refresh interval still in flight so sendChatAction
+    // doesn't keep firing against the torn-down bot. The indicator closure
+    // owns its own `stopped` flag, so a later stop() from its caller is a
+    // safe no-op after this.
+    if (this.chatActionInterval) {
+      clearInterval(this.chatActionInterval);
+      this.chatActionInterval = null;
+    }
     // Cancel any pending media-group debounce timers.
     for (const [, entry] of this.mediaGroupBuffers) {
       clearTimeout(entry.timer);
@@ -422,6 +445,62 @@ export class TelegramAdapter implements MessageAdapter {
     }
 
     return { messageId: lastMessageId };
+  }
+
+  /**
+   * Show Telegram's "typing…" indicator to the user while a reply is being
+   * composed. Telegram exposes this via `sendChatAction(chatId, "typing")`,
+   * which the client renders as "typing…" under the bot's name and clears
+   * automatically after ~5s or when the bot's next message arrives. Because
+   * of that auto-expiry we re-fire on an interval for the duration of the
+   * turn; the returned handle's `stop()` cancels the interval (the pending
+   * message send then clears the bubble, so no explicit "stop typing" call
+   * is needed). Failures are swallowed — a missing typing bubble must never
+   * break reply delivery.
+   */
+  async beginProcessingIndicator(params: {
+    channel: string;
+    threadId?: string;
+  }): Promise<ProcessingIndicatorHandle> {
+    let stopped = false;
+    const sendTyping = async (): Promise<void> => {
+      if (!this.bot) return;
+      try {
+        await this.bot.telegram.sendChatAction(params.channel, "typing");
+      } catch (err) {
+        logger.debug(
+          {
+            channel: params.channel,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "Failed to send Telegram typing action",
+        );
+      }
+    };
+
+    await sendTyping();
+    // Defensively clear any previously-active interval before claiming the
+    // slot — see WhatsAppAdapter.beginProcessingIndicator for the rationale
+    // (guards against a prior indicator whose stop() was skipped).
+    if (this.chatActionInterval) {
+      clearInterval(this.chatActionInterval);
+    }
+    const interval = setInterval(() => {
+      void sendTyping();
+    }, TELEGRAM_CHAT_ACTION_REFRESH_MS);
+    interval.unref?.();
+    this.chatActionInterval = interval;
+
+    return {
+      stop: async () => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(interval);
+        if (this.chatActionInterval === interval) {
+          this.chatActionInterval = null;
+        }
+      },
+    };
   }
 
   // ── Inbound message handling ───────────────────────────────────────────

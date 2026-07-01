@@ -811,6 +811,126 @@ describe("TelegramAdapter stop()", () => {
   });
 });
 
+describe("TelegramAdapter beginProcessingIndicator (typing…)", () => {
+  function withMockBot(sendChatAction = vi.fn().mockResolvedValue(undefined)) {
+    const adapter = makeAdapter({ ownerChatId: "CHAT1" });
+    const mockBot = { telegram: { sendChatAction }, stop: vi.fn() };
+    (adapter as unknown as { bot: unknown }).bot = mockBot;
+    return { adapter, mockBot, sendChatAction };
+  }
+
+  it("fires a 'typing' chat action immediately on begin", async () => {
+    const { adapter, sendChatAction } = withMockBot();
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+
+    expect(sendChatAction).toHaveBeenCalledWith("CHAT1", "typing");
+    expect(sendChatAction).toHaveBeenCalledTimes(1);
+    await handle.stop();
+  });
+
+  it("re-fires the chat action on the refresh interval until stopped", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendChatAction } = withMockBot();
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    expect(sendChatAction).toHaveBeenCalledTimes(1); // immediate
+
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(sendChatAction).toHaveBeenCalledTimes(2); // one refresh
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(sendChatAction).toHaveBeenCalledTimes(3); // two refreshes
+
+    await handle.stop();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(sendChatAction).toHaveBeenCalledTimes(3); // no more after stop
+
+    vi.useRealTimers();
+  });
+
+  it("stop() is idempotent — a second call is a no-op", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendChatAction } = withMockBot();
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    await handle.stop();
+    const afterFirst = sendChatAction.mock.calls.length;
+    await handle.stop();
+    expect(sendChatAction.mock.calls.length).toBe(afterFirst);
+
+    vi.useRealTimers();
+  });
+
+  it("swallows a sendChatAction rejection and still returns a working handle", async () => {
+    vi.useFakeTimers();
+    const sendChatAction = vi.fn().mockRejectedValue(new Error("chat not found"));
+    const { adapter } = withMockBot(sendChatAction);
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    // Refresh tick also rejects — must not throw.
+    await vi.advanceTimersByTimeAsync(4_000);
+    await expect(handle.stop()).resolves.toBeUndefined();
+
+    vi.useRealTimers();
+  });
+
+  it("swallows a non-Error rejection (String(err) branch)", async () => {
+    const sendChatAction = vi.fn().mockRejectedValue("boom");
+    const { adapter } = withMockBot(sendChatAction);
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    await handle.stop();
+    expect(sendChatAction).toHaveBeenCalled();
+  });
+
+  it("is a no-op sender when the bot is not started", async () => {
+    const adapter = makeAdapter({ ownerChatId: "CHAT1" });
+    // bot stays null
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("adapter stop() cancels an in-flight typing interval", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendChatAction } = withMockBot();
+
+    await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    expect(
+      (adapter as unknown as { chatActionInterval: unknown }).chatActionInterval,
+    ).not.toBeNull();
+
+    await adapter.stop();
+    expect(
+      (adapter as unknown as { chatActionInterval: unknown }).chatActionInterval,
+    ).toBeNull();
+
+    const callsAtStop = sendChatAction.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(sendChatAction.mock.calls.length).toBe(callsAtStop); // interval cancelled
+
+    vi.useRealTimers();
+  });
+
+  it("defensively clears a stranded prior interval when a new indicator begins", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendChatAction } = withMockBot();
+
+    // First indicator whose stop() never ran (simulated stranded interval).
+    await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+    // Second indicator claims the slot — the first interval must be cleared,
+    // so we never see two refresh ticks stacking per period.
+    await adapter.beginProcessingIndicator({ channel: "CHAT1" });
+
+    const baseline = sendChatAction.mock.calls.length; // 2 immediate begins
+    await vi.advanceTimersByTimeAsync(4_000);
+    // Exactly one refresh tick (not two) — the stranded interval was cleared.
+    expect(sendChatAction.mock.calls.length).toBe(baseline + 1);
+
+    vi.useRealTimers();
+  });
+});
+
 describe("TelegramAdapter start() dynamic import paths", () => {
   it("throws a helpful error when telegraf cannot be imported", async () => {
     vi.doMock("telegraf", () => { throw new Error("MODULE_NOT_FOUND"); });

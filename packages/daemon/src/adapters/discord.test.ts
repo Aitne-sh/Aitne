@@ -648,6 +648,130 @@ describe("DiscordAdapter sendMessage", () => {
   });
 });
 
+describe("DiscordAdapter beginProcessingIndicator (…is typing)", () => {
+  function withChannel(sendTyping = vi.fn().mockResolvedValue(undefined)) {
+    const adapter = makeAdapter({ ownerUserId: "U1" });
+    const fetch = vi.fn().mockResolvedValue({ sendTyping });
+    (adapter as unknown as {
+      client: { channels: { fetch: (id: string) => Promise<unknown> } };
+    }).client.channels = { fetch };
+    return { adapter, fetch, sendTyping };
+  }
+
+  it("fires sendTyping immediately on begin", async () => {
+    const { adapter, sendTyping } = withChannel();
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CH1" });
+
+    expect(sendTyping).toHaveBeenCalledTimes(1);
+    await handle.stop();
+  });
+
+  it("re-fires sendTyping on the refresh interval until stopped", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendTyping } = withChannel();
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CH1" });
+    expect(sendTyping).toHaveBeenCalledTimes(1); // immediate
+
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(sendTyping).toHaveBeenCalledTimes(2); // one refresh
+
+    await handle.stop();
+    await vi.advanceTimersByTimeAsync(24_000);
+    expect(sendTyping).toHaveBeenCalledTimes(2); // no more after stop
+
+    vi.useRealTimers();
+  });
+
+  it("stop() is idempotent — a second call is a no-op", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendTyping } = withChannel();
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CH1" });
+    await handle.stop();
+    const afterFirst = sendTyping.mock.calls.length;
+    await handle.stop();
+    expect(sendTyping.mock.calls.length).toBe(afterFirst);
+
+    vi.useRealTimers();
+  });
+
+  it("swallows a channel-fetch rejection and still returns a working handle", async () => {
+    const adapter = makeAdapter({ ownerUserId: "U1" });
+    (adapter as unknown as {
+      client: { channels: { fetch: (id: string) => Promise<unknown> } };
+    }).client.channels = {
+      fetch: vi.fn().mockRejectedValue(new Error("Unknown Channel")),
+    };
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CH1" });
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("skips a channel that has no sendTyping (voice channel guard)", async () => {
+    const adapter = makeAdapter({ ownerUserId: "U1" });
+    (adapter as unknown as {
+      client: { channels: { fetch: (id: string) => Promise<unknown> } };
+    }).client.channels = {
+      fetch: vi.fn().mockResolvedValue({ id: "voice-ch" }), // no sendTyping
+    };
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "VOICE" });
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("adapter stop() cancels an in-flight typing interval", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendTyping } = withChannel();
+
+    await adapter.beginProcessingIndicator({ channel: "CH1" });
+    expect(
+      (adapter as unknown as { typingInterval: unknown }).typingInterval,
+    ).not.toBeNull();
+
+    await adapter.stop();
+    expect(
+      (adapter as unknown as { typingInterval: unknown }).typingInterval,
+    ).toBeNull();
+
+    const callsAtStop = sendTyping.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(24_000);
+    expect(sendTyping.mock.calls.length).toBe(callsAtStop);
+
+    vi.useRealTimers();
+  });
+
+  it("swallows a non-Error rejection (String(err) branch)", async () => {
+    const adapter = makeAdapter({ ownerUserId: "U1" });
+    (adapter as unknown as {
+      client: { channels: { fetch: (id: string) => Promise<unknown> } };
+    }).client.channels = {
+      fetch: vi.fn().mockRejectedValue("boom"), // non-Error
+    };
+
+    const handle = await adapter.beginProcessingIndicator({ channel: "CH1" });
+    await expect(handle.stop()).resolves.toBeUndefined();
+  });
+
+  it("defensively clears a stranded prior interval when a new indicator begins", async () => {
+    vi.useFakeTimers();
+    const { adapter, sendTyping } = withChannel();
+
+    // First indicator whose stop() never ran (stranded interval), then a
+    // second indicator claims the slot — the first interval must be cleared
+    // so refresh ticks never stack two-per-period.
+    await adapter.beginProcessingIndicator({ channel: "CH1" });
+    await adapter.beginProcessingIndicator({ channel: "CH1" });
+
+    const baseline = sendTyping.mock.calls.length; // 2 immediate begins
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(sendTyping.mock.calls.length).toBe(baseline + 1); // exactly one tick
+
+    vi.useRealTimers();
+  });
+});
+
 describe("DiscordAdapter resolveUserChannel", () => {
   it("returns null when no owner is configured", async () => {
     const adapter = makeAdapter({ ownerUserId: null });

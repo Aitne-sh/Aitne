@@ -15,6 +15,7 @@ import type {
   MessageAdapter,
   OnMessageCallback,
   OutboundAttachmentRef,
+  ProcessingIndicatorHandle,
 } from "./types.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import { createLogger } from "../logging.js";
@@ -29,6 +30,11 @@ const DISCORD_INBOUND_MAX_BYTES = 25 * 1024 * 1024;
 // stalls the raw-packet handler and blocks subsequent DMs. 30s is
 // generous for 25 MB attachments over slow links.
 const DISCORD_HTTP_TIMEOUT_MS = 30_000;
+// Discord clears a typing indicator after ~10s (or when the bot's next
+// message lands), so a long-running turn needs `sendTyping()` re-fired to
+// keep the "…is typing" state visible. Refresh comfortably under the 10s
+// expiry. Mirrors WhatsApp's presence-refresh loop.
+const DISCORD_TYPING_REFRESH_MS = 8_000;
 
 const logger = createLogger("discord-adapter");
 
@@ -121,6 +127,15 @@ export class DiscordAdapter implements MessageAdapter {
   private startCompleted = false;
   private pairingChallenge: DiscordPairingChallenge | null = null;
   private readonly attachmentStore: AttachmentStore | null;
+
+  /**
+   * Refresh timer for the "…is typing" indicator, tracked on the instance
+   * so both the indicator's own `stop()` and adapter teardown (`stop()`)
+   * can cancel it. Only one indicator is live at a time (the dispatcher
+   * begins one per inbound message and awaits its stop before the next),
+   * so a single field suffices. Mirrors WhatsApp's `presenceInterval`.
+   */
+  private typingInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: DiscordAdapterOptions) {
     this.botToken = opts.botToken;
@@ -292,6 +307,14 @@ export class DiscordAdapter implements MessageAdapter {
 
   async stop(): Promise<void> {
     this.startCompleted = false;
+    // Cancel any typing-refresh interval still in flight so sendTyping()
+    // doesn't keep firing against the destroyed client. The indicator
+    // closure owns its own `stopped` flag, so a later stop() from its
+    // caller is a safe no-op after this.
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+      this.typingInterval = null;
+    }
     this.client.destroy();
     logger.info("Discord adapter disconnected");
   }
@@ -394,6 +417,63 @@ export class DiscordAdapter implements MessageAdapter {
       logger.error({ err, channel: params.channel }, "Failed to send Discord message");
       throw err;
     }
+  }
+
+  /**
+   * Show Discord's "…is typing" indicator while a reply is being composed.
+   * discord.js exposes this via `channel.sendTyping()`, which the client
+   * renders for ~10s or until the bot's next message lands. Because of that
+   * auto-expiry we re-fire on an interval for the duration of the turn; the
+   * returned handle's `stop()` cancels the interval (the pending message
+   * send then clears the indicator, so no explicit "stop typing" call is
+   * needed). Failures are swallowed — a missing typing indicator must never
+   * break reply delivery.
+   */
+  async beginProcessingIndicator(params: {
+    channel: string;
+    threadId?: string;
+  }): Promise<ProcessingIndicatorHandle> {
+    let stopped = false;
+    const sendTyping = async (): Promise<void> => {
+      try {
+        const ch = await this.client.channels.fetch(params.channel);
+        if (ch && "sendTyping" in ch) {
+          await (ch as TextChannel | DMChannel).sendTyping();
+        }
+      } catch (err) {
+        logger.debug(
+          {
+            channel: params.channel,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "Failed to send Discord typing indicator",
+        );
+      }
+    };
+
+    await sendTyping();
+    // Defensively clear any previously-active interval before claiming the
+    // slot — see WhatsAppAdapter.beginProcessingIndicator for the rationale
+    // (guards against a prior indicator whose stop() was skipped).
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+    }
+    const interval = setInterval(() => {
+      void sendTyping();
+    }, DISCORD_TYPING_REFRESH_MS);
+    interval.unref?.();
+    this.typingInterval = interval;
+
+    return {
+      stop: async () => {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(interval);
+        if (this.typingInterval === interval) {
+          this.typingInterval = null;
+        }
+      },
+    };
   }
 
   private async handleRawMessage(data: RawMessagePayload): Promise<void> {
