@@ -993,6 +993,61 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0017-evening-review-budget-bump",
+    description:
+      "(v0.1.11→next) — raise the routine.evening_review per-turn budget "
+      + "ceiling from the seeded $1.00 to $2.00 for upgrading installs still "
+      + "on the seeded default. evening_review is a medium-tier, connector-"
+      + "capable (it reaches the calendar connector in native / delegated-"
+      + "same-backend modes, like morning_routine), many-turn bookkeeping "
+      + "routine: its ~130 K cached prefix (full preset + the ~25 K user-scope "
+      + "claude.ai connector schemas + the untruncated <today> Agent Log) is "
+      + "re-read on every one of its ~28 curl-driven turns, so a busy day tips "
+      + "the bare $1.00 medium nominal mid-turn and surfaces "
+      + "BackendQuotaError(max_budget_usd) with no fallback (claude is the only "
+      + "binding). Realigned to $2.00, matching its morning_routine sibling "
+      + "(also medium, connector-capable, many-turn). Backend-aware: "
+      + "applyDefaultPresets stores the post-hoc-scaled budget (codex/gemini "
+      + "medium x1.5), so the OLD default is $1.00 on claude/opencode and $1.50 "
+      + "on codex/gemini, and the NEW default is the $2.00 base scaled the same "
+      + "way -> $2.00 / $3.00. Fresh installs already get the new value from the "
+      + "schema seed + the per-process envelope-overrides map; this migration "
+      + "only touches pre-existing installs. Gated so it ONLY moves preset rows "
+      + "still at the OLD per-backend default — operator-pinned rows "
+      + "(updated_by='user') and rows already at a custom value are left "
+      + "untouched. Idempotent: after the bump no row sits in the old band, and "
+      + "the recorded id short-circuits a re-run anyway.",
+    up(db) {
+      // Empty-DB safety (e.g. the runner's own unit tests run on a bare
+      // :memory: db): if applySchema never ran, the table is absent — the
+      // runner still records the id so a later boot does not re-evaluate.
+      if (!tableExists(db, "process_backend_config")) return;
+      // The NEW per-backend value mirrors what `resolveDefaultBindingFor`
+      // now produces for routine.evening_review: the $2.00 base x the medium
+      // post-hoc factor (1.5 for codex/gemini, 1.0 for claude/opencode). The
+      // 3.0 literal is that product at migration time — a migration is a
+      // point-in-time snapshot, so the literal is correct even if the factor
+      // later changes. The old-default bands ([0.99,1.01] / [1.49,1.51]) keep
+      // us from clobbering a row already moved to a custom value while still
+      // tolerating float dust.
+      db.prepare(
+        `UPDATE process_backend_config
+            SET max_budget_usd = CASE
+              WHEN main_backend IN ('codex', 'gemini') THEN 3.0
+              ELSE 2.0
+            END
+          WHERE process_key = 'routine.evening_review'
+            AND updated_by = 'preset'
+            AND (
+              (main_backend IN ('codex', 'gemini')
+                 AND max_budget_usd >= 1.49 AND max_budget_usd <= 1.51)
+              OR (main_backend NOT IN ('codex', 'gemini')
+                 AND max_budget_usd >= 0.99 AND max_budget_usd <= 1.01)
+            )`,
+      ).run();
+    },
+  },
 ];
 
 export interface MigrationRunResult {

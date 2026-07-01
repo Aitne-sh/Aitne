@@ -2364,7 +2364,7 @@ VALUES
     -- Keep in lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in
     -- plan-presets.ts.
     ('routine.today_refresh',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  20,  0.50, 'preset'),
-    ('routine.evening_review',  'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
+    ('routine.evening_review',  'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  2.00, 'preset'),
     ('routine.weekly_review',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     -- routine.monthly_review: row seeded but the routine is gated OFF by
     -- default (see runtime-settings.ts:monthlyReviewEnabled). The row is
@@ -2484,9 +2484,9 @@ VALUES
     --     outright, so the seeded claude row is the only eligible
     --     binding until the operator widens via /settings/models.
     --   research_dispatch — accept path. Medium tier (Sonnet). Uses
-    --     WebSearch + WebFetch for parallel external research; budget
-    --     mirrors evening_review (50/$1.00) since the work shape is
-    --     similar (multi-source synthesis + structured write).
+    --     WebSearch + WebFetch for parallel external research; sits at
+    --     the bare medium nominal (50/$1.00) for multi-source synthesis
+    --     + structured write.
     --   research_wiki_summary — accept path for wiki summary. Medium
     --     tier; smaller envelope (30/$0.50) — the agent composes from
     --     the cluster journal it already wrote, so WebFetch fan-out is

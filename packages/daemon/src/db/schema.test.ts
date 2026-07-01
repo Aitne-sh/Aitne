@@ -335,6 +335,19 @@ describe("applySchema", () => {
     expect(morning.max_turns).toBe(50);
     expect(morning.max_budget_usd).toBe(2.0);
 
+    // routine.evening_review — realigned to $2.00 (migration 0017) to match
+    // its morning_routine sibling; a connector-capable, many-turn medium
+    // routine. Lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in
+    // plan-presets.ts.
+    const eveningReview = db
+      .prepare(
+        "SELECT main_model, max_turns, max_budget_usd FROM process_backend_config WHERE process_key = 'routine.evening_review'",
+      )
+      .get() as { main_model: string; max_turns: number; max_budget_usd: number };
+    expect(eveningReview.main_model).toBe("claude-sonnet-5");
+    expect(eveningReview.max_turns).toBe(50);
+    expect(eveningReview.max_budget_usd).toBe(2.0);
+
     // morning-routine-optimization.md Phase 5 — Stage A / Stage B seed
     // rows. Stage B's $0.30 cap is the realigned value after production
     // observed Stage B's ~21 KB prompt + Haiku cache_creation tripping

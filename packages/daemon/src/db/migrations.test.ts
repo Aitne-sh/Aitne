@@ -1065,6 +1065,163 @@ describe("0009-today-refresh-budget-bump", () => {
   });
 });
 
+// `0017-evening-review-budget-bump` — same CLAUDE.md non-negotiable #4
+// contract as 0006 / 0009: fresh DB (no table) → no-op + id recorded; fresh
+// install already seeded at the new $2.00 → untouched; pre-migration
+// preset-default row at $1.00 (claude/opencode) or $1.50 (codex/gemini
+// scaled) → bumped to $2.00 / $3.00 + id recorded; operator-pinned ('user')
+// or already-custom rows → untouched; sibling keys → untouched; re-run → no
+// second bump.
+describe("0017-evening-review-budget-bump", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0017-evening-review-budget-bump",
+  );
+
+  function seedProcessConfigTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE process_backend_config (
+        process_key    TEXT PRIMARY KEY,
+        main_backend   TEXT NOT NULL,
+        main_model     TEXT NOT NULL,
+        max_turns      INTEGER NOT NULL,
+        max_budget_usd REAL NOT NULL,
+        updated_by     TEXT NOT NULL
+      );
+    `);
+  }
+
+  function insertRow(
+    db: Database.Database,
+    processKey: string,
+    maxBudgetUsd: number,
+    updatedBy: string,
+    backend = "claude",
+  ): void {
+    db.prepare(
+      `INSERT INTO process_backend_config
+         (process_key, main_backend, main_model, max_turns, max_budget_usd, updated_by)
+       VALUES (?, ?, 'seed-model', 50, ?, ?)`,
+    ).run(processKey, backend, maxBudgetUsd, updatedBy);
+  }
+
+  function budgetOf(db: Database.Database, processKey: string): number {
+    return (
+      db
+        .prepare<[string], { max_budget_usd: number }>(
+          "SELECT max_budget_usd FROM process_backend_config WHERE process_key = ?",
+        )
+        .get(processKey) as { max_budget_usd: number }
+    ).max_budget_usd;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when process_backend_config does not exist (fresh/empty DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0017-evening-review-budget-bump"]);
+    const recorded = db
+      .prepare<[string], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0017-evening-review-budget-bump");
+    expect(recorded).toEqual({ id: "0017-evening-review-budget-bump" });
+  });
+
+  it("is a no-op on a fresh install where the seed already wrote the new $2.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 2.0, "preset", "claude");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(2.0);
+  });
+
+  it("bumps a claude preset-default evening_review row from $1.00 to $2.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.0, "preset", "claude");
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0017-evening-review-budget-bump"]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(2.0);
+  });
+
+  it("bumps an opencode preset-default evening_review row from $1.00 to $2.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.0, "preset", "opencode");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(2.0);
+  });
+
+  it("bumps a codex preset row from the scaled $1.50 to $3.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.5, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(3.0);
+  });
+
+  it("bumps a gemini preset row from the scaled $1.50 to $3.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.5, "preset", "gemini");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(3.0);
+  });
+
+  it("does not bump a codex preset row sitting at the claude $1.00 band", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.0, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(1.0);
+  });
+
+  it("leaves a codex operator-pinned ('user') row untouched even at $1.50", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.5, "user", "codex");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(1.5);
+  });
+
+  it("leaves operator-pinned ('user') rows untouched even at $1.00", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.0, "user");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(1.0);
+  });
+
+  it("leaves a preset row already at a custom value untouched", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 4.0, "preset");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(4.0);
+  });
+
+  it("does not touch sibling routine rows (routine.weekly_review at the same $1.00 band)", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.weekly_review", 1.0, "preset");
+    runMigrations(db, [migration!]);
+    expect(budgetOf(db, "routine.weekly_review")).toBe(1.0);
+  });
+
+  it("is idempotent — re-running does not bump again", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.evening_review", 1.0, "preset");
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(budgetOf(db, "routine.evening_review")).toBe(2.0);
+  });
+});
+
 // AGENT_DEFINITIONS_DESIGN.md §5 — peer test for the `0007-agent-identity`
 // migration. The two new tables (agents / agent_executions) are created by
 // applySchema, so the migration body carries ONLY the agent_actions ALTER +

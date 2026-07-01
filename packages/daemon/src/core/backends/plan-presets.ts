@@ -173,6 +173,17 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // synthesis in one session and tripped $1 on Sonnet. Lock-step with
   // the schema-seed row.
   "routine.morning_routine": { maxTurns: 50, maxBudgetUsd: 2.0 },
+  // routine.evening_review — medium tier, but connector-capable (it reaches
+  // the calendar connector in native / delegated-same-backend modes, like
+  // morning_routine) and many-turn: its ~130 K cached prefix (full preset +
+  // the ~25 K user-scope claude.ai connector schemas + the untruncated
+  // <today> Agent Log) is re-read on every one of its ~28 curl-driven turns,
+  // so a busy day tips the bare $1.00 medium nominal mid-turn and surfaces
+  // BackendQuotaError(max_budget_usd). Realigned to $2.00 to match its
+  // morning_routine sibling (also medium, connector-capable, many-turn).
+  // Bumped for upgrading installs by migration 0017; keep in lock-step with
+  // the schema-seed row.
+  "routine.evening_review": { maxTurns: 50, maxBudgetUsd: 2.0 },
   // morning-routine-optimization.md Phase 5 — Stage A of the split
   // pipeline. Originally seeded at $0.50 on the projection that the
   // Stage A task-flow would shrink to 6-8 KB (~40-50% off the
@@ -285,8 +296,8 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // written. With the F1 per-agent-day enqueue stamp, cluster_update
   // runs at most once per cluster per day, so $0.50 bounds daily spend
   // per cluster. Bumped for upgrading installs by migration 0012.
-  // research_dispatch carries the WebFetch fan-out; mirrors
-  // evening_review (50/$1.00). research_wiki_summary is tighter
+  // research_dispatch carries the WebFetch fan-out; sits at the bare
+  // medium nominal (50/$1.00). research_wiki_summary is tighter
   // (30/$0.50) — it reads the cluster journal the agent already wrote
   // and composes from it, with bounded external work.
   "routine.research_cluster_update": { maxTurns: 5, maxBudgetUsd: 0.5 },

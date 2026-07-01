@@ -310,7 +310,7 @@ describe("checkEveningReviewTokenEnvelope", () => {
   });
 
   it("warns when avg cost ≥ 50% of envelope budget", () => {
-    insertAction({ costUsd: 0.7, numTurns: 8, startedAt: nowAgoSqlDt(3600) });
+    insertAction({ costUsd: 1.5, numTurns: 8, startedAt: nowAgoSqlDt(3600) });
     const result = checkEveningReviewTokenEnvelope(db, { windowDays: 7 });
     expect(result.status).toBe("warn");
     expect(result.detail).toContain("avg cost");

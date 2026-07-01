@@ -8,7 +8,7 @@
  *      `agent_actions.action_type='roadmap_mechanical_maintenance'` row
  *      per agent-day.
  *   2. `routine.evening_review` sessions stay inside the seeded
- *      envelope (50 turns / $1.00) — token counts dropped after the
+ *      envelope (50 turns / $2.00) — token counts dropped after the
  *      `travel` skill + Step 4 prose were removed.
  *   3. `resolveSkillManifest` correctly gates `notify` on the rulebook
  *      predicate (5 vs 6 skills depending on `policies/routines/evening.md`
@@ -38,7 +38,7 @@ import {
 } from "./skills-manifest.js";
 
 /** envelope seeded in `process_backend_config` for routine.evening_review */
-export const EVENING_REVIEW_ENVELOPE_BUDGET_USD = 1.0;
+export const EVENING_REVIEW_ENVELOPE_BUDGET_USD = 2.0;
 export const EVENING_REVIEW_ENVELOPE_MAX_TURNS = 50;
 /** danger threshold — half of cap. Slim shape sits well below this. */
 export const ENVELOPE_DANGER_FRACTION = 0.5;
