@@ -33,6 +33,7 @@ import {
   listBuiltinSkillDirs,
   resolveBuiltinSkillDir,
 } from "./skill-source-paths.js";
+import { PLAYBOOK_REGISTRY, PLAYBOOK_SLUGS } from "@aitne/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../../");
@@ -452,6 +453,55 @@ describe("skills-manifest integrity", () => {
       "utf-8",
     );
     expect(schedule).toEqual(managedTasks);
+  });
+
+  /**
+   * AGENT_PROMPT_QUALITY_DESIGN.md Phase 1 §4 step 2 — the canonical prompt
+   * frame + clarify-back is shared between `agent-create` (recurring Agents)
+   * and `schedule` (one-off tasks) so the two authoring surfaces cannot drift.
+   * `{{> ref: }}` is intra-skill only, so two copies are required; pin them
+   * byte-identical (same precedent as `recurrence-rule.md` above). The
+   * extended frame is `agent-create`-only and is deliberately NOT shared.
+   */
+  test("prompt-frame.md is byte-identical across agent-create and schedule", () => {
+    const agentCreate = readFileSync(
+      join(SKILLS_DIR, "agent-create", "references", "prompt-frame.md"),
+      "utf-8",
+    );
+    const schedule = readFileSync(
+      join(SKILLS_DIR, "schedule", "references", "prompt-frame.md"),
+      "utf-8",
+    );
+    expect(schedule).toEqual(agentCreate);
+  });
+
+  /**
+   * AGENT_PROMPT_QUALITY_DESIGN.md Phase 2 §4 step 2 — the shared
+   * `PLAYBOOK_SLUGS` / `PLAYBOOK_REGISTRY` (in `@aitne/shared`) is the single
+   * source of truth the schema enum + fire-time injector + authoring lint all
+   * key off. Pin it 1:1 against the on-disk `agent-assets/playbooks/` content
+   * files (playbooks are injection-only, NOT a skill — see the "injection is the
+   * single delivery" block below) so a new/renamed file can never silently
+   * diverge from the registry (same precedent as the recurrence-rule pin).
+   */
+  test("PLAYBOOK_SLUGS mirrors the agent-assets/playbooks content-file stems 1:1", () => {
+    const contentDir = join(REPO_ROOT, "agent-assets", "playbooks");
+    const diskStems = readdirSync(contentDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.replace(/\.md$/, ""))
+      .sort();
+    expect(diskStems).toEqual([...PLAYBOOK_SLUGS].sort());
+  });
+
+  test("each PLAYBOOK_REGISTRY entry resolves to a content file whose name: matches", () => {
+    const contentDir = join(REPO_ROOT, "agent-assets", "playbooks");
+    for (const slug of PLAYBOOK_SLUGS) {
+      const meta = PLAYBOOK_REGISTRY[slug];
+      expect(meta.referenceFile).toBe(`${slug}.md`);
+      const raw = readFileSync(join(contentDir, meta.referenceFile), "utf-8");
+      // The content file declares `name: <slug>` in its frontmatter.
+      expect(raw).toMatch(new RegExp(`^name: ${slug}$`, "m"));
+    }
   });
 
   /**
@@ -2491,5 +2541,89 @@ describe("composeSkillSet", () => {
       "schedule",
       "ghost-skill",
     ]);
+  });
+});
+
+/**
+ * AGENT_PROMPT_QUALITY_DESIGN.md §4 "Injection is the single delivery" — the
+ * curated operating playbooks (research / markdown-note / monitoring) are NOT a
+ * session skill. They live at `agent-assets/playbooks/<slug>.md` and are
+ * delivered ONLY by the dispatcher's fire-time injection for a recurring Agent
+ * that declares `playbooks:` (read daemon-side by `playbook-injection.ts`).
+ * Materializing them as a skill too would inject the same text into the agent's
+ * context a second time; these pins guard against that regression.
+ */
+describe("operating playbooks — injection-only, not a skill", () => {
+  const PLAYBOOKS_CONTENT_DIR = join(REPO_ROOT, "agent-assets", "playbooks");
+
+  test("ships each playbook as a flat content file under agent-assets/playbooks", () => {
+    for (const name of ["research", "markdown-note", "monitoring"]) {
+      expect(existsSync(join(PLAYBOOKS_CONTENT_DIR, `${name}.md`))).toBe(true);
+    }
+  });
+
+  test("is NOT registered as a skill (no double copy in the agent context)", () => {
+    expect(ALL_SKILLS).not.toContain("playbooks");
+    // Never materialized into any deployed-agent session (would duplicate the
+    // injected copy). agent.task aliases to the scheduled.task manifest.
+    expect(EVENT_SKILL_SETS["scheduled.task"]).not.toContain("playbooks");
+    expect(getSkillsForProcess("scheduled.task")).not.toContain("playbooks");
+    expect(getSkillsForProcess("agent.task")).not.toContain("playbooks");
+    expect(resolveSkillManifestForProcess("agent.task")).not.toContain("playbooks");
+  });
+
+  test("no leftover skill directory under agent-assets/skills", () => {
+    expect(existsSync(join(SKILLS_DIR, "playbooks"))).toBe(false);
+  });
+});
+
+/**
+ * AGENT_PROMPT_QUALITY_DESIGN.md Phase 1 — the authoring skills (`agent-create`,
+ * `schedule`) must reference the shared core frame, and `agent-create` must also
+ * carry the operational extended frame. Pin the directives so a future SKILL.md
+ * edit can't silently drop the frame and regress to a free-text skeleton.
+ */
+describe("prompt-frame wiring — AGENT_PROMPT_QUALITY_DESIGN Phase 1", () => {
+  test("agent-create SKILL.md references both the core and the extended frame", () => {
+    const body = readFileSync(join(SKILLS_DIR, "agent-create", "SKILL.md"), "utf-8");
+    expect(body).toContain("{{> ref:prompt-frame }}");
+    expect(body).toContain("{{> ref:prompt-frame-extended }}");
+  });
+
+  test("schedule SKILL.md references the core frame (and NOT the extended one)", () => {
+    const body = readFileSync(join(SKILLS_DIR, "schedule", "SKILL.md"), "utf-8");
+    expect(body).toContain("{{> ref:prompt-frame }}");
+    expect(body).not.toContain("{{> ref:prompt-frame-extended }}");
+  });
+
+  test("the shared core frame names the three operating playbooks + clarify-back", () => {
+    const frame = readFileSync(
+      join(SKILLS_DIR, "agent-create", "references", "prompt-frame.md"),
+      "utf-8",
+    );
+    for (const playbook of ["research", "markdown-note", "monitoring"]) {
+      expect(frame).toContain(playbook);
+    }
+    expect(frame.toLowerCase()).toContain("clarify-back");
+    // The frame skeleton's four core sections.
+    for (const section of ["# Role", "# Important", "# Instruction", "# Output"]) {
+      expect(frame).toContain(section);
+    }
+  });
+
+  test("the extended frame carries the operational sections + Execution Mode", () => {
+    const ext = readFileSync(
+      join(SKILLS_DIR, "agent-create", "references", "prompt-frame-extended.md"),
+      "utf-8",
+    );
+    for (const section of [
+      "# Scope",
+      "# Execution Mode",
+      "# Requirements",
+      "# Constraints",
+      "# Verification",
+    ]) {
+      expect(ext).toContain(section);
+    }
   });
 });

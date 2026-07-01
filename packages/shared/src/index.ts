@@ -402,6 +402,21 @@ export type {
   OverrideEditPath,
 } from "./agent-definitions.js";
 
+// Operating playbooks — registry of curated methodology fragments a recurring
+// Agent can declare (AGENT_PROMPT_QUALITY_DESIGN.md Phase 2). Injected by the
+// daemon dispatcher at fire time; validated by the shared schema enum.
+export { PLAYBOOK_SLUGS, PLAYBOOK_REGISTRY, isPlaybookSlug } from "./playbooks.js";
+export type { PlaybookSlug, PlaybookMeta } from "./playbooks.js";
+
+// Deterministic Agent-definition lint (the "verify-agent-definitions" assembler
+// step) — non-blocking authoring warnings surfaced to the DM agent on create.
+export { lintAgentDefinition } from "./agent-lint.js";
+export type {
+  AgentLintIssue,
+  AgentLintCode,
+  AgentLintSeverity,
+} from "./agent-lint.js";
+
 // Log entry types (shared between daemon buffer and dashboard)
 export type { LogEntry, SystemLogsResponse } from "./log-entry.js";
 

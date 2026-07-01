@@ -258,8 +258,21 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
     deps.agentEnabledCache?.invalidate();
     emit("agent.updated", { slug: plan.slug, source: "user" });
     recordAudit("agent.created", plan.slug, { source: "user" });
-    logger.info({ slug: plan.slug }, "Agent created via POST /api/agents");
-    return c.json({ status: "created", slug: plan.slug }, 201);
+    logger.info(
+      { slug: plan.slug, warnings: plan.warnings.length },
+      "Agent created via POST /api/agents",
+    );
+    // AGENT_PROMPT_QUALITY_DESIGN.md §3.5 — surface the deterministic lint's
+    // non-blocking authoring warnings so the DM agent can fix them or ask the
+    // user. Omitted when clean so the common response shape is unchanged.
+    return c.json(
+      {
+        status: "created",
+        slug: plan.slug,
+        ...(plan.warnings.length > 0 ? { warnings: plan.warnings } : {}),
+      },
+      201,
+    );
   });
 
   // ── GET /agents/:slug (§9.2) ────────────────────────────────────────────

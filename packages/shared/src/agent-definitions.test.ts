@@ -347,6 +347,7 @@ describe("agentDefinitionSchema", () => {
     expect(parsed.tools).toEqual({ allowed: [], skills: [], skills_replace: false });
     expect(parsed.outputs).toEqual([]);
     expect(parsed.success_criteria).toEqual([]);
+    expect(parsed.playbooks).toEqual([]);
     expect(parsed.on_error).toEqual({ retries: 0, retry_delay_seconds: 30, notify_owner: false });
     expect(parsed.schedule.timezone).toBeUndefined();
     expect(parsed.backend).toEqual({
@@ -520,6 +521,24 @@ describe("agentDefinitionSchema", () => {
         userAgent({ limits: { max_turns: 0, max_budget_usd: 0.1, timeout_minutes: 8 } }),
       ).success,
     ).toBe(false);
+  });
+
+  // ── playbooks[] (AGENT_PROMPT_QUALITY_DESIGN.md Phase 2) ──
+  it("accepts a valid playbooks[] of registry slugs", () => {
+    const parsed = agentDefinitionSchema.parse(
+      userAgent({ playbooks: ["research", "markdown-note"] }),
+    );
+    expect(parsed.playbooks).toEqual(["research", "markdown-note"]);
+  });
+
+  it("rejects an unknown playbook slug (enum-validated against the registry)", () => {
+    const result = agentDefinitionSchema.safeParse(
+      userAgent({ playbooks: ["research", "not-a-playbook"] }),
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((i) => i.path[0] === "playbooks")).toBe(true);
+    }
   });
 });
 

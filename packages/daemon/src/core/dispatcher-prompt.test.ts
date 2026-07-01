@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { applySchema } from "../db/schema.js";
 import { setDegradedMode } from "../db/runtime-state.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
@@ -11,10 +12,10 @@ import type { AttachmentStore, StoreAttachmentRow } from "../services/attachment
 import type { VoiceTranscriber } from "../services/voice/transcriber.js";
 import type { GetTaskFlow } from "./dispatcher-types.js";
 
-function fakeConfig(dataDir: string): AgentConfig {
+function fakeConfig(dataDir: string, workspaceDir?: string): AgentConfig {
   return {
     dataDir,
-    workspaceDir: join(dataDir, "workdirs"),
+    workspaceDir: workspaceDir ?? join(dataDir, "workdirs"),
     apiPort: 0,
     timezone: "UTC",
     dayBoundaryHour: 4,
@@ -29,6 +30,7 @@ function fakeConfig(dataDir: string): AgentConfig {
 function makeAssembler(opts: {
   db: Database.Database;
   dataDir: string;
+  workspaceDir?: string;
   getTaskFlow?: GetTaskFlow;
   attachmentStore?: AttachmentStore | null;
   voiceTranscriber?: VoiceTranscriber | null;
@@ -37,7 +39,7 @@ function makeAssembler(opts: {
   const activeTurnTokens = opts.activeTurnTokens ?? new Map<string, number>();
   const prompt = new PromptAssembler({
     db: opts.db,
-    config: fakeConfig(opts.dataDir),
+    config: fakeConfig(opts.dataDir, opts.workspaceDir),
     getTaskFlow: opts.getTaskFlow ?? (() => "task-flow-template"),
     activeTurnTokens,
     getAttachmentStore: () => opts.attachmentStore ?? null,
@@ -355,5 +357,56 @@ describe("PromptAssembler — assemble", () => {
       getTaskFlow: () => "BASE_TEMPLATE",
     });
     expect(prompt.assemble("evt", "process", "claude", {})).toBe("BASE_TEMPLATE");
+  });
+});
+
+describe("PromptAssembler — assemble playbook injection (Phase 2)", () => {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  // packages/daemon/src/core → repo root (has agent-assets/)
+  const REPO_ROOT = resolve(__dirname, "../../../../");
+  let db: Database.Database;
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "pa-prompt-pb-"));
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("injects a declared playbook's content from the daemon bundle", () => {
+    const { prompt } = makeAssembler({
+      db,
+      dataDir,
+      workspaceDir: REPO_ROOT,
+      getTaskFlow: () => "BASE_TEMPLATE",
+    });
+    const out = prompt.assemble("scheduled.task", "agent.task", "claude", undefined, [
+      "research",
+    ]);
+    expect(out.startsWith("BASE_TEMPLATE")).toBe(true);
+    expect(out).toContain("## Operating playbooks");
+    expect(out).toContain("### Research playbook (`playbooks:research`)");
+    // Frontmatter of the reference file must not leak into the prompt.
+    expect(out).not.toContain("kind: reference");
+  });
+
+  it("is a no-op when the firing declares no playbooks", () => {
+    const { prompt } = makeAssembler({
+      db,
+      dataDir,
+      workspaceDir: REPO_ROOT,
+      getTaskFlow: () => "BASE_TEMPLATE",
+    });
+    const withNone = prompt.assemble("scheduled.task", "agent.task", "claude", undefined, []);
+    const withUndef = prompt.assemble("scheduled.task", "agent.task", "claude");
+    expect(withNone).not.toContain("## Operating playbooks");
+    expect(withUndef).not.toContain("## Operating playbooks");
+    expect(withNone).toBe(withUndef);
   });
 });

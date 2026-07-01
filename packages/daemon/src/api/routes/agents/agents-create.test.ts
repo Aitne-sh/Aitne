@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -97,6 +97,49 @@ describe("POST /api/agents", () => {
     const recurring = listRecurringSchedules(h.db);
     expect(recurring.length).toBe(1);
     expect(recurring[0].id).toBe(dto.recurringScheduleId);
+  });
+
+  it("surfaces non-blocking lint warnings on the 201 (Phase 2)", async () => {
+    // Prompt names a playbook but the body doesn't declare it in playbooks:.
+    const res = await postAgent(h.app, {
+      ...CRON_BODY,
+      slug: "research-digest",
+      prompt:
+        "# Role\nResearcher.\n\n# Important\n- Follow the research playbook.\n\n# Instruction\n1. Do it.",
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      status: string;
+      slug: string;
+      warnings?: Array<{ code: string; playbook?: string }>;
+    };
+    expect(json.status).toBe("created");
+    expect(json.warnings?.some((w) => w.code === "playbook_referenced_not_declared")).toBe(true);
+    // The Agent is still created (warnings are non-blocking).
+    expect(getAgent(h.db, "research-digest")?.invalid).toBe(false);
+  });
+
+  it("declaring the playbook clears the warning and persists it to the file", async () => {
+    const res = await postAgent(h.app, {
+      ...CRON_BODY,
+      slug: "research-digest-2",
+      playbooks: ["research"],
+      prompt:
+        "# Role\nResearcher.\n\n# Important\n- Follow the research playbook.\n\n# Instruction\n1. Do it.",
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { status: string; warnings?: unknown };
+    // Clean create → no `warnings` key at all.
+    expect("warnings" in json).toBe(false);
+    const filePath = join(
+      h.tmp,
+      "context",
+      "policies",
+      "agents",
+      "research-digest-2",
+      "agent.md",
+    );
+    expect(readFileSync(filePath, "utf-8")).toContain("research");
   });
 
   it("creates a structured hourly Agent (201) and pairs an hourly recurring row", async () => {

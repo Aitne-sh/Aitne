@@ -367,6 +367,11 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     // For non-managed scheduled tasks the skill is inert (its when_to_use
     // disambiguator points back at scheduled.task.md).
     "scheduled-managed-task",
+    // NOTE: operating playbooks (research / markdown-note / monitoring) are NOT
+    // a session skill. They are delivered by the dispatcher's *fire-time
+    // injection* (AGENT_PROMPT_QUALITY_DESIGN.md §4) for a recurring Agent that
+    // declares them in `playbooks:`, which is the single copy in the prompt.
+    // Materializing them as a skill here too would inject the same text twice.
   ],
   // SCHEDULED-DM-IMPLEMENTATION-PLAN §5.4 — DM-tone scheduled sessions.
   //   `context` + `today` for reading the day's data
@@ -621,6 +626,11 @@ export const ALL_SKILLS = [
   // = read inventory + blast-radius (L0); `task` = unified write facade (L1).
   "board",
   "task",
+  // NOTE: `playbooks` is intentionally NOT a skill. Operating-playbook
+  // methodology is delivered only by the dispatcher's fire-time injection for a
+  // recurring Agent that declares `playbooks:` (AGENT_PROMPT_QUALITY_DESIGN.md
+  // §4) — the single copy in the prompt. It lives at `agent-assets/playbooks/`,
+  // read daemon-side by `playbook-injection.ts`, not materialized into sessions.
 ];
 
 const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {

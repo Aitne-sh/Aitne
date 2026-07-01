@@ -74,14 +74,16 @@ record, create the recurring work/DM per the "Recurring" section below.
 
 > **The wake-up agent has NO memory of why it was scheduled.** A `scheduled.task` session is self-contained: it receives only `state/today.md` (which carries the day's schedule and state) plus the `prompt` + `taskContext` you provide — **NOT** `identity/profile.md` or `policies/management.md` (the `scheduled.task` injection policy opts those out). Nothing else. (`description` is just an optional list label — never the agent body.)
 
-Include all four elements in the `prompt`:
+Author the `prompt` with the **core frame** below. A one-shot task rarely needs the
+extended (operational) sections; if a one-shot *does* mutate code or state, add two
+sections on top of the core frame — `# Scope` (WHERE it may act: the editable
+surface, and what it must not touch) and `# Verification` (which checks confirm the
+change is good, and "don't claim success unless they passed").
 
-| Element | What it answers |
-|---|---|
-| **What** | Specific verb + object (notify, check, update, prepare) |
-| **Why** | The trigger or reason (meeting approaching, deadline, user request) |
-| **Who/What** | Concrete names, IDs, URLs, filenames |
-| **Expected output** | What "success" looks like (notification sent, file updated) |
+{{> ref:prompt-frame }}
+
+For a simple one-shot — a timed reminder — the frame collapses to one tight,
+self-contained brief:
 
 **Good:** `"15-minute reminder for the 14:00 design review. Attendees: Sarah, Mike. Agenda: API v2 breaking changes. Prepare the meeting-note template and notify the user via Slack."`
 

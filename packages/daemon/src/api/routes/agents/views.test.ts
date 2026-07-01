@@ -1003,4 +1003,64 @@ describe("planCreate (POST /api/agents)", () => {
     // The frontmatter still renders; body is just blank.
     expect(plan.markdown).toContain("slug: daily-triage");
   });
+
+  // ── playbooks[] + lint warnings (AGENT_PROMPT_QUALITY_DESIGN.md Phase 2) ──
+  it("passes declared playbooks through to the rendered agent.md", () => {
+    const plan = planCreate(cronBody({ playbooks: ["research", "markdown-note"] }), NONE);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.markdown).toContain("playbooks:");
+    expect(plan.markdown).toContain("research");
+    expect(plan.markdown).toContain("markdown-note");
+  });
+
+  it("rejects an unknown playbook slug as invalid_definition on field playbooks", () => {
+    const plan = planCreate(cronBody({ playbooks: ["research", "nope"] }), NONE);
+    if (plan.ok || plan.status !== 400) throw new Error("expected a 400 invalid_definition plan");
+    expect(plan.error).toBe("invalid_definition");
+    expect(plan.issues!.some((i) => i.field.startsWith("playbooks"))).toBe(true);
+  });
+
+  it("returns no warnings for a clean definition (default fixture)", () => {
+    const plan = planCreate(cronBody(), NONE);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("warns when the prompt names a playbook it doesn't declare", () => {
+    const plan = planCreate(
+      cronBody({
+        prompt: "# Role\nResearcher.\n\n# Important\n- Follow the research playbook.\n\n# Instruction\n1. Do it.",
+      }),
+      NONE,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(
+      plan.warnings.some(
+        (w) => w.code === "playbook_referenced_not_declared" && w.playbook === "research",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not warn when the referenced playbook is also declared", () => {
+    const plan = planCreate(
+      cronBody({
+        playbooks: ["research"],
+        prompt: "# Role\nResearcher.\n\n# Important\n- Follow the research playbook.\n\n# Instruction\n1. Do it.",
+      }),
+      NONE,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("warns on an empty prompt body", () => {
+    const plan = planCreate(cronBody({ prompt: "" }), NONE);
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.warnings.map((w) => w.code)).toContain("empty_prompt");
+  });
 });

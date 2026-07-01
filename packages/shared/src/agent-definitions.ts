@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BACKEND_IDS } from "./backend.js";
+import { PLAYBOOK_SLUGS } from "./playbooks.js";
 
 /**
  * Agent Definitions — shared contract (AGENT_DEFINITIONS_DESIGN.md §4.3).
@@ -226,6 +227,18 @@ export const agentDefinitionSchema = z
     // ── Expected outputs (drive success-criteria defaults + dashboard) ──
     outputs: z.array(z.string().min(1)).default([]),
     success_criteria: z.array(successCriterionSchema).default([]),
+
+    // ── Operating playbooks (AGENT_PROMPT_QUALITY_DESIGN.md Phase 2) ──
+    // Curated methodology fragments the dispatcher injects into this Agent's
+    // prompt *by content* at fire time — the single, hard-guaranteed delivery
+    // path for playbook methodology (no by-reference skill copy). Validated against
+    // the `PLAYBOOK_SLUGS` registry so a typo can't silently declare a
+    // non-existent playbook (and the loader/injector re-read this off disk each
+    // firing, so a live edit takes effect next run — no capture-once staleness).
+    // Not persisted to a column: like `tools`/`outputs`/`success_criteria`, it
+    // lives in `agent.md` and is re-parsed at fire time. Defaults to `[]`, so
+    // every pre-Phase-2 Agent (whose file has no `playbooks:` key) is a no-op.
+    playbooks: z.array(z.enum(PLAYBOOK_SLUGS)).default([]),
 
     // ── Error handling ──
     on_error: z

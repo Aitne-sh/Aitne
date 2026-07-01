@@ -46,6 +46,7 @@
 
 import type Database from "better-sqlite3";
 import type {
+  AgentDefinition,
   AgentTaskEvent,
   BackendId,
   Event,
@@ -726,8 +727,15 @@ export class ScheduledTaskRunner {
       requestedTier,
       ...internalBackendOverride,
     });
+    // AGENT_DEFINITIONS_DESIGN.md §4.2 + AGENT_PROMPT_QUALITY_DESIGN.md Phase 2 —
+    // re-read the firing Agent's effective definition off disk ONCE and derive
+    // both its skill override and its declared operating playbooks from it (a
+    // live edit to either takes effect next firing; no capture-once staleness).
+    // `null` for every non-Agent firing (managed task, git doc, automation).
+    const firingDefinition = this.loadFiringAgentDefinition(taskCtx);
+    const agentPlaybooks = firingDefinition?.playbooks ?? [];
     const reassemblePrompt = (bid: BackendId): string =>
-      this.prompt.assemble(promptKey, processKey, bid);
+      this.prompt.assemble(promptKey, processKey, bid, undefined, agentPlaybooks);
     const prompt = reassemblePrompt(binding.main.backendId);
     // Daily-git-management safety clamp — see
     // `REFRESH_ARCHITECTURE_ALLOWED_TOOLS` JSDoc. The check is on
@@ -780,7 +788,7 @@ export class ScheduledTaskRunner {
     // `tools.skills` onto the process-key skill bundle. `undefined` for every
     // non-Agent firing (managed task, git project doc, automation trigger) and
     // for Agents declaring no extra skills, so the common path is unchanged.
-    const agentSkillOverride = this.resolveAgentSkillOverride(taskCtx);
+    const agentSkillOverride = this.resolveAgentSkillOverride(firingDefinition);
     const result = await this.errorRouter.executeWithRetry(
       () =>
         this.agentRouter.execute({
@@ -807,21 +815,21 @@ export class ScheduledTaskRunner {
   }
 
   /**
-   * AGENT_DEFINITIONS_DESIGN.md §4.2 — resolve the firing Agent's
-   * `tools.skills` override for a `scheduled.task` firing.
+   * Re-read a firing Agent's effective definition from its `agent.md` on disk.
    *
-   * Returns `undefined` for every firing that is NOT a user Agent run, and for
-   * Agents that declare no extra skills, so the common dispatch path stays a
-   * pure no-op. Only firings carrying a stamped `task_context.agent_id` (§7.2)
-   * or a `recurring_schedule_id` that joins an Agent row resolve a slug —
-   * built-in routines (which manage skills via the process-key manifest, not
-   * `tools.skills`) and legacy/managed/automation tasks fall through to
-   * `null`. The effective definition is re-read from the Agent's `agent.md` on
-   * disk, so a live `tools.skills` edit takes effect on the next firing.
+   * Returns `null` for every firing that is NOT a user Agent run — built-in
+   * routines (which manage skills via the process-key manifest) and
+   * legacy/managed/automation tasks carry no resolvable `agent_id`, so the
+   * common dispatch path stays a pure no-op. Only firings carrying a stamped
+   * `task_context.agent_id` (§7.2) or a `recurring_schedule_id` that joins an
+   * Agent row resolve a slug. Reading off disk (not a captured snapshot) is
+   * deliberate: a live edit to `tools.skills` / `playbooks` takes effect on the
+   * next firing. Callers derive both the skill override and the declared
+   * playbooks from this single read.
    */
-  private resolveAgentSkillOverride(
+  private loadFiringAgentDefinition(
     taskCtx: AgentTaskEvent["taskContext"],
-  ): { extraSkills: readonly string[]; skillsReplace: boolean } | undefined {
+  ): AgentDefinition | null {
     const ctx =
       taskCtx && typeof taskCtx === "object"
         ? (taskCtx as Record<string, unknown>)
@@ -834,9 +842,9 @@ export class ScheduledTaskRunner {
           ? ctx.recurringScheduleId
           : null,
     });
-    if (!agentId) return undefined;
+    if (!agentId) return null;
     const dto = getAgent(this.db, agentId);
-    if (!dto) return undefined;
+    if (!dto) return null;
     const { definition } = loadEffectiveDefinition(dto, {
       readFile: (path) => {
         try {
@@ -847,6 +855,20 @@ export class ScheduledTaskRunner {
       },
       dayBoundaryHour: this.config.dayBoundaryHour ?? 4,
     });
+    return definition ?? null;
+  }
+
+  /**
+   * AGENT_DEFINITIONS_DESIGN.md §4.2 — resolve the firing Agent's
+   * `tools.skills` override from its (pre-loaded) effective definition.
+   *
+   * Returns `undefined` for a non-Agent firing (`definition === null`) or an
+   * Agent that declares no extra skills, so the common dispatch path stays a
+   * pure no-op.
+   */
+  private resolveAgentSkillOverride(
+    definition: AgentDefinition | null,
+  ): { extraSkills: readonly string[]; skillsReplace: boolean } | undefined {
     const skills = definition?.tools.skills ?? [];
     if (skills.length === 0) return undefined;
     return {

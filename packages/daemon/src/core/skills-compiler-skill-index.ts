@@ -31,8 +31,13 @@ export function stripUnconfiguredServices(
   );
 }
 
-/** Strip YAML frontmatter (--- ... ---) from markdown content. */
-function stripFrontmatter(content: string): string {
+/**
+ * Strip YAML frontmatter (--- ... ---) from markdown content. Exported so the
+ * playbook injector (`playbook-injection.ts`) strips a bundled playbook's
+ * frontmatter with the same helper the skill compiler uses to inline
+ * reference includes — one frontmatter convention, one implementation.
+ */
+export function stripFrontmatter(content: string): string {
   if (!content.startsWith("---")) return content;
   const endIdx = content.indexOf("\n---", 3);
   if (endIdx < 0) return content;

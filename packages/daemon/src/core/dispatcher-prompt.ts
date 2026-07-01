@@ -42,6 +42,7 @@ import {
   appendPolicyBlocks,
   createPromptInjectionBudget,
 } from "./policy-files.js";
+import { appendPlaybookBlocks } from "./playbook-injection.js";
 import { appendReviewContextBlocks } from "./review-context.js";
 import { anyMcpServerEnabled } from "../services/mcp/registry.js";
 import { readIntegrations } from "../db/integrations-store.js";
@@ -106,6 +107,7 @@ export class PromptAssembler {
     processKey: string,
     backendId?: string,
     flags?: Record<string, unknown>,
+    playbooks?: readonly string[],
   ): string {
     const integrations = readIntegrations(this.db);
     const base = this.getTaskFlow(eventType, backendId, integrations);
@@ -132,13 +134,26 @@ export class PromptAssembler {
       flags: mergedFlags,
       budget,
     });
-    return appendReviewContextBlocks(withPolicies, {
+    const withReview = appendReviewContextBlocks(withPolicies, {
       contextDir,
       processKey,
       flags: {
         useReviewDossiers: this.config.useReviewDossiers,
         useContextIndex: this.config.useContextIndex,
       },
+      budget,
+    });
+    // AGENT_PROMPT_QUALITY_DESIGN.md Phase 2 — inject the firing Agent's declared
+    // operating playbooks by content (the hard, platform-enforced guarantee).
+    // `playbooks` is undefined/empty for every non-Agent firing and for Agents
+    // that declare none, so the common path is unchanged. Reads from the
+    // daemon bundle (agent-assets), not the vault, sharing the same budget.
+    if (!playbooks || playbooks.length === 0) {
+      return withReview;
+    }
+    return appendPlaybookBlocks(withReview, {
+      workspaceDir: this.config.workspaceDir,
+      playbooks,
       budget,
     });
   }

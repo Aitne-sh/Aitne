@@ -1,5 +1,5 @@
-import type { AgentDefinition, AgentTier, StopWarning, OverrideEditPath } from "@aitne/shared";
-import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS, agentDefinitionSchema, recurrenceRuleSchema } from "@aitne/shared";
+import type { AgentDefinition, AgentLintIssue, AgentTier, StopWarning, OverrideEditPath } from "@aitne/shared";
+import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS, agentDefinitionSchema, lintAgentDefinition, recurrenceRuleSchema } from "@aitne/shared";
 
 import type {
   AgentPolicyFile,
@@ -383,7 +383,7 @@ export interface CreateIssue {
 export type CreatePlan =
   | { ok: false; status: 400; error: string; hint?: string; field?: string; issues?: CreateIssue[] }
   | { ok: false; status: 409; error: "slug_collision"; slug: string }
-  | { ok: true; slug: string; markdown: string };
+  | { ok: true; slug: string; markdown: string; warnings: AgentLintIssue[] };
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
@@ -506,6 +506,11 @@ export function planCreate(
     ...(body.success_criteria !== undefined
       ? { success_criteria: body.success_criteria }
       : {}),
+    // AGENT_PROMPT_QUALITY_DESIGN.md Phase 2 — pass the declared operating
+    // playbooks through to schema validation (enum-checked) + the rendered
+    // agent.md. Dropped from the allow-list means the field never reaches the
+    // schema; the schema's `.default([])` covers callers that omit it.
+    ...(body.playbooks !== undefined ? { playbooks: body.playbooks } : {}),
   };
 
   const parsed = agentDefinitionSchema.safeParse(frontmatter);
@@ -527,7 +532,21 @@ export function planCreate(
   }
 
   const prompt = asString(body.prompt) ?? "";
-  return { ok: true, slug, markdown: renderAgentMarkdown(frontmatter, prompt) };
+  // AGENT_PROMPT_QUALITY_DESIGN.md §3.5 — the deterministic "verify-agent-
+  // definitions" step. Non-blocking authoring warnings (empty prompt / missing
+  // # Instruction / a playbook the prompt names but doesn't declare) returned to
+  // the DM agent so it can fix them or ask the user. Never blocks a create.
+  const warnings = lintAgentDefinition({
+    prompt,
+    playbooks: parsed.data.playbooks,
+    tags: parsed.data.tags,
+  });
+  return {
+    ok: true,
+    slug,
+    markdown: renderAgentMarkdown(frontmatter, prompt),
+    warnings,
+  };
 }
 
 // ── PATCH plan (§9.5) ────────────────────────────────────────────────────────

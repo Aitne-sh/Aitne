@@ -100,6 +100,13 @@ Fields:
   the standalone control that works). `process_key` defaults to `agent.task`;
   omit unless you know you need another. (Pinning a backend *engine* without a
   `model` is a known no-op — prefer `tier`.)
+- **`playbooks`** — optional array of operating-playbook slugs to inject into the
+  Agent's prompt at fire time: `research`, `markdown-note`, `monitoring`. Declaring
+  one makes the daemon inject that playbook's full methodology into every run — a
+  hard guarantee, and the only way the methodology reaches the Agent (there is no
+  separate skill copy). **Declare every playbook you name in the prompt's
+  `# Important`** — a bare mention is not injected on its own. An unknown slug is
+  rejected as `invalid_definition` on field `playbooks`.
 - **`prompt`** — the Agent's instructions (the Markdown body). **This is the most
   important field. Write it in detail.**
 
@@ -110,40 +117,35 @@ Fields:
 > management rules). It does NOT remember this conversation or why you created
 > it. An under-specified prompt produces a vague, drifting Agent.
 
-Write the prompt as a self-contained brief covering all four:
+Author every Agent prompt with the **canonical frame** below, and resolve any
+missing required slot with the user *before* you `POST /api/agents` (clarify-back).
 
-| Element | What it must answer |
-|---|---|
-| **Requirements / preconditions** | What must be true / what inputs to read first (files, APIs, accounts). What to do if a precondition is missing. |
-| **Goal** | The single outcome this Agent exists to produce, stated concretely. |
-| **Process** | The ordered steps to run each firing — specific verbs, endpoints, filenames, decision rules. |
-| **Expected output** | What "done" looks like: which file/section is written, whether/when to DM the user, what NOT to do. |
+{{> ref:prompt-frame }}
 
-**Good prompt (excerpt):**
-```
-## Goal
-Each morning, surface inbox items that need the user's decision today.
+### Declare the playbooks you reference
 
-## Requirements
-- Read state/today.md for the day's agenda before triaging.
-- Mail access via the mail skill endpoints; if mail is unreachable, log the gap
-  to the Agent Log and exit without DMing.
+Whenever the prompt's `# Important` names a playbook, ALSO list its slug in the
+top-level `playbooks` field so the daemon injects that methodology into every
+firing as a hard guarantee — not just a by-reference skill the Agent might skip:
 
-## Process
-1. GET unread mail from the last 24h.
-2. Classify: actionable-today / FYI / ignore (rules: …).
-3. Append a "## Inbox triage" section to state/today.md with the actionable set.
-4. DM the user ONLY if ≥1 item is time-sensitive today.
-
-## Output
-- today.md updated with the triage section.
-- At most one DM, sent only for time-sensitive items.
+```json
+"playbooks": ["research", "markdown-note"]
 ```
 
-**Bad prompt:** `"Triage my inbox."` — no requirements, no steps, no output
-contract; the Agent will improvise differently every day.
+Valid slugs: `research`, `markdown-note`, `monitoring`. If you name a playbook in
+the prompt but forget to declare it, the create response returns a `warnings[]`
+entry (`playbook_referenced_not_declared`) — read it and add the missing slug.
 
-The Expected-output decision feeds one schedule field: if the output contract
+### Operational (state-mutating) Agents — extend the frame
+
+Most Agents are content / knowledge agents (research, monitoring, note) and the
+core frame above is the right shape. When the Agent instead **mutates code, files,
+or system state** — the general-purpose archetype — extend the frame with scope,
+a run-time autonomy boundary, and a verification receipt:
+
+{{> ref:prompt-frame-extended }}
+
+The `# Output` decision feeds one schedule field: if the output contract
 includes DMing the user, also set `schedule.defer_in_quiet_hours: true` so a
 firing inside quiet hours waits for the window's end instead of producing a
 message that would be held anyway.
@@ -151,7 +153,10 @@ message that would be held anyway.
 ## Responses & errors
 
 - `201 { "status": "created", "slug": "…" }` — the Agent is live; its recurring
-  schedule is paired and it will fire on the next matching tick.
+  schedule is paired and it will fire on the next matching tick. The response may
+  also carry `warnings[]` (non-blocking authoring lint — e.g. an empty prompt, a
+  missing `# Instruction` section, or a playbook you named but didn't declare);
+  the Agent is still created, but fix the flagged issues and re-save its `agent.md`.
 - `400 one_shot_not_supported` — the schedule was not `cron`/`recurring`. Use the
   `schedule` skill for one-time tasks.
 - `400 invalid_recurrence` — a `kind:"recurring"` schedule carried a malformed

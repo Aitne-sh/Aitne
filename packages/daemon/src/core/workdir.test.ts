@@ -220,6 +220,8 @@ describe("getSkillsForEvent", () => {
     // (spawn) + `background-task-reply` (clarify relay) → 31.
     // unified-task-board.md L0/L1 adds `board` (read inventory + blast-radius)
     // + `task` (unified write facade) → 33.
+    // NOTE: operating playbooks are NOT a skill (AGENT_PROMPT_QUALITY_DESIGN.md
+    // §4 — injection is the single delivery), so they add nothing to this count.
     expect(skills).toHaveLength(33);
     expect(skills).toContain("background-task");
     expect(skills).toContain("background-task-reply");
@@ -2311,6 +2313,7 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
   },
   {
     // `agent.task` → `scheduled.task`. 9 slugs; runs on the task profile.
+    // (Operating playbooks are injection-only, NOT a skill, so they add no slug.)
     processKey: "agent.task",
     eventType: "scheduled.task",
     expectedSkills: [
@@ -2323,6 +2326,8 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       "notion",
       "roadmap",
       "scheduled-managed-task",
+      // NOTE: operating playbooks are NOT a skill (injection-only) — see
+      // AGENT_PROMPT_QUALITY_DESIGN.md §4; they are not materialized here.
     ],
     expectedProfileHeading: "# Task Agent",
   },
