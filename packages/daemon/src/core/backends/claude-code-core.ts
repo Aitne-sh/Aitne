@@ -189,22 +189,39 @@ const CLAUDE_SDK_SETTING_SOURCES: readonly SettingSource[] = ["user", "project"]
  */
 
 /**
- * Slim keys whose Claude SDK session ALSO sheds the daemon user's `~/.claude`
+ * Process keys whose Claude SDK session sheds the daemon user's `~/.claude`
  * scope: `settingSources` drops to `["project"]` and `strictMcpConfig` is
  * forced on. On a dev machine the `"user"` source pulls in the user's plugin
  * SKILL.md tree (~178 files) + the ~25 K-token user-scope claude.ai MCP
  * connector schemas (`mcp__claude_ai_*`) into EVERY session's prompt-cache
- * prefix (RESEARCH_CLUSTER_COST_FIX_PLAN.md RC4). Dropping it is pure win
- * for a key that reaches no integration through those connectors.
+ * prefix (RESEARCH_CLUSTER_COST_FIX_PLAN.md RC4). Dropping it is pure win for
+ * a key that reaches no integration through those connectors — and for a long,
+ * many-turn session that re-reads the cached prefix on every turn the saving
+ * compounds (the ~25 K is paid once as a cache write, then again as a cache
+ * read on each turn).
  *
- * This is a STRICT SUBSET of the slim-system-prompt keys, NOT the same set:
- * a key only qualifies when it serves NO native-mode integration. In native
- * integration mode the fetcher reaches Gmail / Calendar / Notion precisely
- * through the user-scope claude.ai connectors, so `routine.fetch_window` keeps
- * `["user", "project"]` and is deliberately ABSENT here even though it has a
- * slim system prompt. `routine.research_cluster_update` only ever curls the
- * daemon's own browser-history + context REST API (no claude.ai connector),
- * so shedding the user scope cannot starve it.
+ * The ONLY prerequisite for shedding is connector-independence: the key must
+ * reach no Gmail / Calendar / Notion / etc. through a user-scope
+ * `mcp__claude_ai_*` connector. This is INDEPENDENT of the slim-system-prompt
+ * lever (`core/slim-system-prompt-loader.ts`): the two optimizations are
+ * decoupled in code — `buildSystemPrompt` gates only on the slim registry,
+ * while `resolveSettingSources` / `resolveStrictMcpConfig` gate only on this
+ * set — so a key may sit in either, both, or neither:
+ *   - `routine.fetch_window` — slim, NOT shed. In native integration mode the
+ *     fetcher reaches Gmail / Calendar / Notion precisely through the
+ *     user-scope claude.ai connectors, so it must keep `["user", "project"]`.
+ *   - `routine.research_cluster_update` — slim AND shed. Only ever curls the
+ *     daemon's own browser-history + context REST API (no connector).
+ *   - `routine.evening_review` — shed, NOT slim. Drives everything through
+ *     `curl` to the local daemon REST API (`localhost:8321`) and reaches no
+ *     connector, so shedding cannot starve it. It is deliberately NOT slim: a
+ *     medium-tier, skill-heavy routine that loads six skills via the `Skill`
+ *     tool (context / today / user-profile / notify / roadmap /
+ *     management-policy), which the slim prompt drops — so it keeps the full
+ *     `preset: "claude_code"`. Those skills are materialized under the
+ *     *project* scope (`<sessionDir>/.claude/skills/`) and survive the drop to
+ *     `["project"]`; only the owner's personal plugin skills + unused claude.ai
+ *     connector schemas are shed.
  *
  * `strictMcpConfig` is defense-in-depth on top of the `settingSources` drop:
  * it shuts out any settings-file-sourced MCP server, while the daemon's own
@@ -215,6 +232,7 @@ const CLAUDE_SDK_SETTING_SOURCES: readonly SettingSource[] = ["user", "project"]
  */
 const USER_SCOPE_SHED_PROCESS_KEYS: ReadonlySet<ProcessKey> = new Set<ProcessKey>([
   "routine.research_cluster_update",
+  "routine.evening_review",
 ]);
 
 /**

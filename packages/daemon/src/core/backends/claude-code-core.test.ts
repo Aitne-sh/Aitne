@@ -2559,8 +2559,12 @@ describe("ClaudeCodeCore", () => {
     describe("resolveSettingSources / resolveStrictMcpConfig (unit)", () => {
       const core = new ClaudeCodeCore(makeConfig());
 
-      it("sheds the user scope only for research_cluster_update", () => {
+      it("sheds the user scope for connector-independent keys (research_cluster_update, evening_review)", () => {
         expect((core as any).resolveSettingSources("routine.research_cluster_update"))
+          .toEqual(["project"]);
+        // evening_review is shed-but-not-slim: curl-only (no claude.ai
+        // connector) so it sheds, but keeps the full preset (skill-heavy).
+        expect((core as any).resolveSettingSources("routine.evening_review"))
           .toEqual(["project"]);
         // fetch_window has a slim PROMPT but keeps the user scope (native-mode
         // connectors) — it must NOT be shed.
@@ -2572,9 +2576,10 @@ describe("ClaudeCodeCore", () => {
         expect((core as any).resolveSettingSources()).toEqual(["user", "project"]);
       });
 
-      it("forces strictMcpConfig only for research_cluster_update", () => {
+      it("forces strictMcpConfig for the shed keys (research_cluster_update, evening_review)", () => {
         expect((core as any).resolveStrictMcpConfig("routine.research_cluster_update"))
           .toBe(true);
+        expect((core as any).resolveStrictMcpConfig("routine.evening_review")).toBe(true);
         expect((core as any).resolveStrictMcpConfig("routine.fetch_window")).toBe(false);
         expect((core as any).resolveStrictMcpConfig("message.dm")).toBe(false);
         expect((core as any).resolveStrictMcpConfig()).toBe(false);
@@ -2612,6 +2617,20 @@ describe("ClaudeCodeCore", () => {
         // Still slim on the prompt axis.
         expect(typeof opts.systemPrompt).toBe("string");
         expect(opts.systemPrompt).toMatch(/routine\.fetch_window pre-pass/);
+      });
+
+      it("evening_review sheds to settingSources=['project'] + strictMcpConfig but keeps the full preset (shed, not slim)", async () => {
+        const opts = await captureExecuteOptions(
+          "routine.evening_review",
+          "claude-sonnet-5",
+        );
+        expect(opts.settingSources).toEqual(["project"]);
+        expect(opts.strictMcpConfig).toBe(true);
+        // Shed but NOT slim: a skill-heavy medium-tier routine keeps the
+        // preset so its six skills stay loadable via the Skill tool.
+        const sp = opts.systemPrompt as { type?: string; preset?: string };
+        expect(sp?.type).toBe("preset");
+        expect(sp?.preset).toBe("claude_code");
       });
 
       it("message.dm keeps the full settingSources, omits strictMcpConfig, keeps the preset", async () => {
