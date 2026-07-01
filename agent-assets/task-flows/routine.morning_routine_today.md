@@ -467,7 +467,8 @@ Global rules (apply at every step):
 
     Skip this step on recurring days — the row already exists.
 
-    a. **Pre-flight.** `GET /api/recurring-schedules?enabled=true`
+    a. **Pre-flight.** `GET
+       /api/recurring-schedules?enabled=true&includeClaimed=true`
        and scan for an item with `taskType === "dm_session"` AND
        `taskContext.sub_flow === "morning_briefing"`. If found, skip
        the rest of this step — duplicate insertion would cause

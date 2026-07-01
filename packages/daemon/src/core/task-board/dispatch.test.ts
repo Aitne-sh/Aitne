@@ -53,6 +53,8 @@ describe("planRefDispatch", () => {
     expect(planRefDispatch(ref("mt_3"))).toEqual({ editable: true, ownerPath: "/api/managed-tasks/mt_3" });
     expect(planRefDispatch(ref("agent:wd"))).toEqual({ editable: true, ownerPath: "/api/agents/wd" });
     expect(planRefDispatch(ref("as:8"))).toEqual({ editable: true, ownerPath: "/api/schedule/8" });
+    // Trigger writes forward to the owner, whose Approve tier still applies.
+    expect(planRefDispatch(ref("trigger:9"))).toEqual({ editable: true, ownerPath: "/api/triggers/9" });
   });
 
   it("rejects read-only fulfillers and reserved refs with a reason", () => {

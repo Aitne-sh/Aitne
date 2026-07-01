@@ -160,7 +160,7 @@ Schedules go through this daemon — never through any cloud-hosted scheduled-ag
 
 **Default schedules** (morning briefing, etc.) are stored as `recurring_schedules` rows. When the user asks to disable / change time / skip today / re-enable — e.g. "turn off morning briefing", "move it to 7:30", "skip today's briefing":
 
-1. `GET /api/recurring-schedules` — locate the row by matching `task_context.sub_flow` (e.g. `morning_briefing`).
+1. `GET /api/recurring-schedules?includeClaimed=true` — locate the row by matching `task_context.sub_flow` (e.g. `morning_briefing`). If the matched row carries `claimedByAgentSlug`, it is an Agent's cadence satellite — apply the change via `PATCH /api/agents/<slug>` instead of the row (a direct PATCH/DELETE is 409).
 2. Apply the change:
    - **Disable** → `PATCH /api/recurring-schedules/:id` `{"enabled": false}`, then `DELETE /api/schedule/:id` for any pending instance scheduled for today.
    - **Change time** → `PATCH /api/recurring-schedules/:id` with `{"recurrenceRule": {...}, "taskContext": {"sub_flow": "<unchanged>", "pin_to_quiet_hours_end": false}}`. Setting `pin_to_quiet_hours_end: false` is mandatory — without it, the next quiet-hours change overwrites the user's pinned time.

@@ -117,6 +117,9 @@ const PUBLIC_CONFIG_RUNTIME_KEYS = [
   "feedbackLessonMaxBytesPerAgent",
   "feedbackLessonStaleDays",
   "feedbackSignalRetentionDays",
+  // Opt-in toggle: push backend-execution-failure operator diagnostics to
+  // the owner DM (default off — failures stay on the dashboard Activity feed).
+  "backendFailureDmAlerts",
   "primaryLanguage",
   "vaultMode",
 ] as const;

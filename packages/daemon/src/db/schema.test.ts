@@ -468,9 +468,12 @@ describe("applySchema", () => {
       )
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
     expect(fetchWindow.main_model).toBe("claude-haiku-4-5-20251001");
-    // 20 → 10 per PREPASS_COST_REDUCTION_PLAN.md N4 (live P99 = 8 turns
-    // over 502 per-integration fan-out runs).
-    expect(fetchWindow.max_turns).toBe(10);
+    // 10 → 20 per FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.3 (the N4 cut to
+    // 10 sat below one install's measured max=11 and produced deterministic
+    // error_max_turns kills + 3× retry burn elsewhere; $0.50 budget stays
+    // the stop-loss). Lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY +
+    // migration 0021.
+    expect(fetchWindow.max_turns).toBe(20);
     expect(fetchWindow.max_budget_usd).toBe(0.5);
   });
 

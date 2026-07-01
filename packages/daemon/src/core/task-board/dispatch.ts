@@ -84,6 +84,11 @@ const REF_POLICY: Record<TaskRefPrefix, RefPolicy> = {
   mt: { writable: true },
   agent: { writable: true },
   as: { writable: true },
+  // Owner routes exist (PATCH/DELETE /api/triggers/:id) and carry their own
+  // Approve tier — the facade forwards, the owner still demands the bearer.
+  // Creation stays on the owner (no facade create kind): triggers are
+  // dashboard-driven Approve-tier config, not agent-authored work.
+  trigger: { writable: true },
   bt: {
     writable: false,
     reason: "Background tasks are read-only from the board; manage them on the background-task surface.",

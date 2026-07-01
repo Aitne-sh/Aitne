@@ -34,6 +34,7 @@
 import type Database from "better-sqlite3";
 
 import {
+  addBrowserTaskCost,
   getBrowserTask,
   markRunning,
   markRunningFromParked,
@@ -41,6 +42,7 @@ import {
   type BrowserTaskRow,
 } from "../../db/browser-task-store.js";
 import { resolveClarification } from "../../db/browser-task-clarifications-store.js";
+import { recordTaskRunSpend } from "../task-spend-ledger.js";
 import { createLogger } from "../../logging.js";
 import {
   prepareDriverHandle,
@@ -401,8 +403,11 @@ export function createBrowserTaskRunner(
 
   /**
    * Reconcile a single driver-run outcome with the DB state machine
-   * + the parked map. Idempotent — safe to invoke from the post-run
-   * branch AND from a `cancel()` race.
+   * + the parked map. NOT idempotent since the spend recording below —
+   * call it EXACTLY ONCE per driver leg (each call site awaits its own
+   * fresh `DriverRunResult`; `cancel()` unwinds via the in-flight run's
+   * abort → single `cancelled` reconcile, or walks the terminal path
+   * directly for parked handles — never by re-invoking this).
    */
   async function reconcileDriverOutcome(input: {
     taskId: string;
@@ -410,6 +415,30 @@ export function createBrowserTaskRunner(
     result: DriverRunResult;
   }): Promise<RunResult> {
     const { taskId, handle, result } = input;
+
+    // Persist this leg's spend BEFORE branching: every outcome — parks
+    // included — has already spent its driver run. Task-row rollup +
+    // per-run agent_actions ledger row (the driver used to compute
+    // `costUsd` and this function silently dropped it).
+    addBrowserTaskCost(deps.db, taskId, result.costUsd);
+    recordTaskRunSpend(deps.db, {
+      taskKind: "browser_task",
+      taskId,
+      result:
+        result.outcome === "completed"
+          ? "success"
+          : result.outcome === "yielded_for_clarification" ||
+              result.outcome === "yielded_for_final_confirm"
+            ? "partial"
+            : result.outcome === "cancelled"
+              ? "skipped"
+              : "failed",
+      costUsd: result.costUsd,
+      numTurns: result.numTurns,
+      durationMs: result.durationMs,
+      completedAt: now(),
+      modelUsed: result.modelId ?? null,
+    });
 
     // PARK paths — keep the BrowserContext alive in `parkedHandles`.
     // The DB row already shows the parked state; do NOT call markTerminal
@@ -647,6 +676,7 @@ export function createBrowserTaskRunner(
         costUsd: 0,
         numTurns: 0,
         durationMs: 0,
+        modelId: null,
       };
     }
     return reconcileDriverOutcome({ taskId, handle, result });
@@ -945,6 +975,7 @@ export function createBrowserTaskRunner(
         costUsd: 0,
         numTurns: 0,
         durationMs: 0,
+        modelId: null,
       };
     }
     return reconcileDriverOutcome({

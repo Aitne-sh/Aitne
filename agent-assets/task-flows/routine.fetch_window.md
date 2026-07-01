@@ -50,6 +50,27 @@ terminate.
 
 {integration_partial}
 
+### Turn efficiency
+
+This sub-session runs under a hard `max_turns` cap — every model turn is one
+round-trip, and a run that wanders past the cap is killed mid-fetch, so its
+window is retried from scratch. Collapse the work into as few turns as you can:
+
+- **Load tool schemas in ONE `ToolSearch` call.** On a Claude backend the
+  connector tools this integration uses are deferred, so their schemas must be
+  loaded before the first call. Load every schema you need in a single
+  `ToolSearch` (its `select:` query accepts a comma-separated list); never spend
+  one `ToolSearch` turn per tool.
+- **Issue independent fetches together in one turn.** When `<acquisition-plan>`
+  carries several `<fetch>` rows (multiple windows or accounts), emit their
+  independent read calls in the SAME turn instead of one-per-turn — the rows do
+  not depend on each other, so serialising them only burns turns.
+- **Never fetch per-item detail.** The search/list response already carries the
+  compact subset you submit (see the partial's `raw` shape). Do NOT make a
+  follow-up per-item call (`get_thread`, `get_event`, a per-message body fetch,
+  …) for data the list response already returned — that is one wasted turn per
+  item. Submit straight from the list response.
+
 ### Step 2 — Emit a single JSON line and terminate
 
 After every row has been processed (success, duplicate, or recorded

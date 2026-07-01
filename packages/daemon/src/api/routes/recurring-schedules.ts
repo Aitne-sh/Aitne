@@ -11,6 +11,8 @@ import {
   updateRecurringSchedule,
   deleteRecurringSchedule,
 } from "../../db/recurring-schedules.js";
+import { listAgents } from "../../db/agents-store.js";
+import { claimedRecurringScheduleAgents } from "../../core/task-board/inventory.js";
 import { createLogger } from "../../logging.js";
 import type { ApiDependencies } from "../server.js";
 import { readJsonBody } from "../json-body.js";
@@ -174,6 +176,47 @@ function recurringAgentTaskGone(action: "create" | "update" | "delete"): {
   };
 }
 
+/**
+ * Canonical-owner write guard — a dm_session row an Agent references (its
+ * cadence satellite; see `claimedRecurringScheduleAgents`) must not be edited
+ * or deleted out from under that Agent: a direct PATCH desyncs `enabled` from
+ * the Agent card (the one-way Agent→row mirror never repairs it), and a direct
+ * DELETE SET-NULLs `agents.recurring_schedule_id`, leaving an Agent that
+ * silently never fires. 409 with a pointer to the owning Agent.
+ */
+function recurringClaimedByAgent(
+  action: "update" | "delete",
+  slug: string,
+): { error: string; hint: string } {
+  const pointer =
+    action === "update"
+      ? `Manage it via PATCH /api/agents/${slug} (e.g. {"enabled": false} to pause, or schedule_window to retime).`
+      : `DELETE /api/agents/${slug} disables the Agent; add {"keep_history": false} to hard-delete it along with this schedule row.`;
+  return {
+    error: "recurring_schedule_claimed_by_agent",
+    hint: `This dm_session row is the cadence satellite of Agent '${slug}' (its canonical owner). ${pointer}`,
+  };
+}
+
+/**
+ * An automation trigger's paired recurring row is stamped by `createTrigger`
+ * (`task_context.triggerSource = 'automation_trigger'`, plus the owning
+ * `triggerId`). The trigger is its canonical owner — the board lists it as
+ * `trigger:<id>` — so the list hides it by default, symmetric with
+ * agent-claimed dm_sessions.
+ */
+function isTriggerOwned(it: { taskContext: Record<string, unknown> | null }): boolean {
+  return it.taskContext?.triggerSource === "automation_trigger";
+}
+
+/** The owning trigger id for annotation, or null when not trigger-owned
+ *  (or the back-patched id is missing — theoretical, same-txn write). */
+function owningTriggerId(it: { taskContext: Record<string, unknown> | null }): number | null {
+  if (!isTriggerOwned(it)) return null;
+  const id = it.taskContext?.triggerId;
+  return typeof id === "number" ? id : null;
+}
+
 export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
   const app = new Hono();
   const { db, config } = deps;
@@ -302,8 +345,39 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
   // GET /recurring-schedules — List recurring schedules
   app.get("/recurring-schedules", (c) => {
     const enabledOnly = c.req.query("enabled") === "true";
+    const includeClaimed = c.req.query("includeClaimed") === "true";
     const items = listRecurringSchedules(db, { enabledOnly });
-    return c.json({ items });
+    // Canonical-owner dedup, two families:
+    // - A `dm_session` row an Agent references (its cadence satellite) is
+    //   managed through that Agent (`claimedRecurringScheduleAgents`, shared
+    //   with the Task-board inventory dedup).
+    // - An automation trigger's paired `agent.task` row is managed through the
+    //   trigger (surfaced on the board as `trigger:<id>`); its `task_context`
+    //   carries `triggerSource`/`triggerId` from `createTrigger`.
+    // Both are hidden here by default so they aren't double-listed on
+    // /schedule (also shown as an Agent card / a board trigger item).
+    // `?includeClaimed=true` returns them annotated with `claimedByAgentSlug`
+    // / `claimedByTriggerId` instead — the schedule skill's dedup pre-check
+    // needs to SEE covered cadences or it re-creates them (duplicate DMs at
+    // fire time). Writes stay guarded either way (dm_session: the PATCH/DELETE
+    // 409 below; agent.task: the 410 split gate).
+    const claimedByAgent = claimedRecurringScheduleAgents(listAgents(db));
+    if (includeClaimed) {
+      const annotated = items.map((it) => {
+        const owner =
+          it.taskType === "dm_session" ? claimedByAgent.get(it.id) : undefined;
+        if (owner) return { ...it, claimedByAgentSlug: owner.slug };
+        const triggerId = owningTriggerId(it);
+        return triggerId !== null ? { ...it, claimedByTriggerId: triggerId } : it;
+      });
+      return c.json({ items: annotated });
+    }
+    const visible = items.filter(
+      (it) =>
+        !(it.taskType === "dm_session" && claimedByAgent.has(it.id)) &&
+        !isTriggerOwned(it),
+    );
+    return c.json({ items: visible });
   });
 
   // GET /recurring-schedules/:id — Get a single recurring schedule
@@ -328,6 +402,15 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
       ]);
     }
 
+    // Surface the canonical owner on a direct fetch, so a caller holding a
+    // stale `rs:<id>` learns it is Agent-managed (409 guards below) or
+    // trigger-managed (410 split gate) before attempting the write.
+    if (dto.taskType === "dm_session") {
+      const owner = claimedRecurringScheduleAgents(listAgents(db)).get(dto.id);
+      if (owner) return c.json({ ...dto, claimedByAgentSlug: owner.slug });
+    }
+    const triggerId = owningTriggerId(dto);
+    if (triggerId !== null) return c.json({ ...dto, claimedByTriggerId: triggerId });
     return c.json(dto);
   });
 
@@ -356,6 +439,13 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
     }
     if (target.taskType !== "dm_session") {
       return c.json(recurringAgentTaskGone("update"), 410);
+    }
+    // Canonical-owner guard — an agent-claimed satellite row is edited through
+    // its Agent, never directly (a direct PATCH desyncs enabled/cadence from
+    // the Agent card with no mirror to repair it).
+    const patchOwner = claimedRecurringScheduleAgents(listAgents(db)).get(id);
+    if (patchOwner) {
+      return c.json(recurringClaimedByAgent("update", patchOwner.slug), 409);
     }
 
     const parsedBody = await readJsonBody(c);
@@ -485,6 +575,17 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
     const target = getRecurringSchedule(db, id);
     if (target && target.taskType !== "dm_session") {
       return c.json(recurringAgentTaskGone("delete"), 410);
+    }
+    // Canonical-owner guard — deleting a claimed satellite row SET-NULLs
+    // `agents.recurring_schedule_id` and leaves an Agent that silently never
+    // fires. The agent-delete code path (which cleans up both rows) is the only
+    // legitimate remover; it calls `deleteRecurringSchedule` directly and never
+    // passes through this route.
+    if (target) {
+      const deleteOwner = claimedRecurringScheduleAgents(listAgents(db)).get(id);
+      if (deleteOwner) {
+        return c.json(recurringClaimedByAgent("delete", deleteOwner.slug), 409);
+      }
     }
 
     const deleted = deleteRecurringSchedule(db, id);

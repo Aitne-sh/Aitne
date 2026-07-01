@@ -526,6 +526,18 @@ export const runtimeSettingsSchema = z.object({
    * machinery to autonomous forwards for operators who want it.
    */
   autonomousForwardNaturalDelivery: z.boolean().default(false),
+  /**
+   * When `true`, backend-execution-failure operator diagnostics
+   * ("Backend execution failed: routine.X stopped due to …", plus
+   * fallback-switch / both-fallbacks-failed notices) are pushed to the
+   * owner's configured notification destination(s). Default `false`: these
+   * are operator diagnostics already recorded in `agent_actions` and shown
+   * on the dashboard Activity → Events panel, so DM delivery is opt-in to
+   * avoid flooding the owner DM one-message-per-failure. See
+   * BackendRouter.shouldDmBackendFailure. The interactive user-facing
+   * failure reply (live DM/chat turns) is independent of this flag.
+   */
+  backendFailureDmAlerts: z.boolean().default(false),
   // DEPRECATED (Agents-hub redesign, AGENTS_HUB_REDESIGN_PLAN.md §2): the
   // activity-scan AGENT row's `enabled` is the single switch now (a one-time
   // boot reconcile carries a persisted `false` onto the agent row). The
@@ -1139,6 +1151,7 @@ export const RUNTIME_SETTING_KEYS = [
   "backgroundTaskDedupWindowMinutes",
   "backgroundTaskResumeAcrossRestart",
   "autonomousForwardNaturalDelivery",
+  "backendFailureDmAlerts",
   "activityScanEnabled",
   "activityScanIntervalMinutes",
   "activityScanActiveStartHour",

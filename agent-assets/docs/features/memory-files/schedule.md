@@ -42,7 +42,7 @@ related:
   - features/memory-files/agent-journal
   - concepts/agent-day
 ui_anchors:
-  - /schedule
+  - /tasks
   - /agents/morning-routine?tab=rulebook
 process_keys:
   - routine.morning_routine_journal

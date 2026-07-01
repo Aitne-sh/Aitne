@@ -31,6 +31,9 @@ const REDIRECTS: Record<string, string> = {
   // Notion) moved from "Knowledge" to "Notes"; the agent's own primary
   // vault is managed from Settings → Management Mode.
   "/connections/knowledge": "/connections/notes",
+  // DASHBOARD_AUTOMATION_IA_REDESIGN §2 — the Schedule page merged into the
+  // Tasks hub (queue + scheduled-DM rules live there now).
+  "/schedule": "/tasks?tab=queue",
 };
 
 export function middleware(request: NextRequest) {
@@ -65,5 +68,6 @@ export const config = {
     "/approvals",
     "/metrics",
     "/connections/knowledge",
+    "/schedule",
   ],
 };

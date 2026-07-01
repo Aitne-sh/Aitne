@@ -607,6 +607,31 @@ describe("loadAgents: user agents", () => {
     expect("recurrence" in lastPatch).toBe(false);
   });
 
+  it("re-enables a drifted paused row when the resolved Agent enabled is true (drift self-heal, §6.4)", () => {
+    // Regression guard for the enabled-drift state: the paired row is paused
+    // while the Agent (YAML, no fresh dashboard override) resolves enabled —
+    // the schedule would silently never fire (the reconciler gates on
+    // recurring_schedules.enabled). Migration 0020 reconciles pre-existing
+    // pairs once (OFF wins, honouring a possibly-deliberate pause); from then
+    // on THIS reconcile is the ongoing repair layer: with claimed rows
+    // write-guarded (409), the Agent's resolved enabled is the only legitimate
+    // author, so the next boot/reload re-aligns the row. A deliberate pause is
+    // expressed on the Agent (dashboard override or YAML enabled:false) — both
+    // flip resolvedEnabled and are pinned by the disable test above. The
+    // mechanism is taskType-agnostic: a legacy dm_session satellite
+    // (`imported-<id>`) heals identically (port.get has no taskType filter).
+    writeAgentFile(userDir, "weekly-bookmarks", userFrontmatter("weekly-bookmarks"));
+    loadAgents(db, baseOptions()); // no port → recurringScheduleId stays null
+    const { port, updated } = fakePort([
+      makeRow({ id: 7, enabled: false, description: "User Agent" }),
+    ]);
+    setRecurringId(db, "weekly-bookmarks", 7); // FK now resolves
+    loadAgents(db, baseOptions({ recurring: port }));
+    const patch = updated.find((u) => u.id === 7)!.patch as { enabled?: boolean };
+    expect(patch.enabled).toBe(true);
+    expect(getAgent(db, "weekly-bookmarks")!.enabled).toBe(true);
+  });
+
   it("reconcile is a no-op when nothing diverged — no agent_schedule churn on an unchanged reload (§6.1 step 5)", () => {
     // Regression guard for §11.3.2 step 1: an unchanged-on-disk paired Agent
     // reloaded across a restart must not re-fire the cancel+re-materialise

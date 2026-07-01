@@ -32,6 +32,8 @@ function makeRow(overrides: Partial<BrowserTaskRow> = {}): BrowserTaskRow {
     effectiveAllowlistRegex: null,
     blockedRequestsCount: 0,
     extractCharsTotal: 0,
+    origin: "agent",
+    costUsd: null,
     createdAt: 1_700_000_000_000,
     startedAt: null,
     finishedAt: null,

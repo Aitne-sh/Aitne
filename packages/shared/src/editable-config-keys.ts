@@ -69,6 +69,8 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "backgroundTaskResumeAcrossRestart",
   // Phase 4 — opt-in: route autonomous forwards through the delivery machinery.
   "autonomousForwardNaturalDelivery",
+  // Opt-in: push backend-execution-failure operator diagnostics to the owner DM.
+  "backendFailureDmAlerts",
   "activityScanEnabled", "activityScanIntervalMinutes",
   "activityScanActiveStartHour", "activityScanActiveEndHour", "activityScanMinObservations",
   // cost-reduction-structural §B — three-stage gate knobs.

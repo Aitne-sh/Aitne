@@ -58,6 +58,28 @@ export const OBSERVATIONS_MCP_SERVER_NAME = "aitne-observations";
 export const OBSERVATIONS_MCP_TOOL_NAME =
   `mcp__${OBSERVATIONS_MCP_SERVER_NAME}__submit_observations`;
 
+/**
+ * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — per-batch tally callback.
+ *
+ * When the pre-pass fan-out runner builds a sub-session-scoped observations
+ * server it passes one of these. The handler invokes it with the counts of
+ * every batch the daemon actually recorded, giving the runner a
+ * ground-truth ledger of durable progress that is independent of the
+ * agent's closing JSON line — the line a max-turns / budget kill leaves
+ * unemitted. The runner reads its accumulated tally after `execute`
+ * returns OR throws, and on a hard-stop kill synthesises an honest
+ * `partial` report from it instead of discarding the work as `failed`.
+ *
+ * `fetched` mirrors the batch's input length; `posted` counts
+ * created + modified rows; `duplicates` counts (source, ref) hits already
+ * present — the same fields `processObservationsBatch` returns.
+ */
+export type PrePassObservationsSink = (delta: {
+  fetched: number;
+  posted: number;
+  duplicates: number;
+}) => void;
+
 /** zod schema for a single observation row — mirrors the shapes
  *  validated by {@link validateBatchItem}. Kept loose on `payload`
  *  (z.any) because integration partials emit per-kind shapes that
@@ -108,6 +130,13 @@ const OBSERVATION_ITEM_SCHEMA = {
  */
 export function createObservationsMcpServer(
   db: Database.Database,
+  /**
+   * P2.2 — optional per-sub-session tally sink. Present only on the
+   * fan-out-scoped server the runner builds per pre-pass execute; the
+   * shared boot-time server (all other Claude sessions) passes nothing and
+   * the handler behaves exactly as before.
+   */
+  onBatch?: PrePassObservationsSink,
 ): McpSdkServerConfigWithInstance {
   return createSdkMcpServer({
     name: OBSERVATIONS_MCP_SERVER_NAME,
@@ -149,6 +178,24 @@ export function createObservationsMcpServer(
           // `<fetch_report>` can branch.
           try {
             const result = processObservationsBatch(db, observations);
+            // P2.2 — feed the runner's ground-truth ledger BEFORE returning.
+            // Defensive try/catch: the sink is runner-owned but a throwing
+            // sink must never turn a successful write into a tool error (the
+            // observations are already durably committed at this point).
+            if (onBatch) {
+              try {
+                onBatch({
+                  fetched: result.fetched,
+                  posted: result.posted,
+                  duplicates: result.duplicates,
+                });
+              } catch (sinkErr) {
+                logger.warn(
+                  { err: sinkErr },
+                  "Pre-pass observations tally sink threw; ignoring (batch already committed)",
+                );
+              }
+            }
             logger.info(
               {
                 count: observations.length,

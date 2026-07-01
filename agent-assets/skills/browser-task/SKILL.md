@@ -81,6 +81,8 @@ Body:
   pre-generated id you use for status GETs).
 - `requireFinalConfirm` (default `true`) — keep `true` unless the user
   explicitly asks to skip the gate for a reversible flow.
+- `origin` — Task Board provenance: `"user"` when the user asked for this
+  work, `"agent"` (default) for your own initiative.
 
 Immediate response carries `taskId`, `status`, and `queueState`; then ack
 once and stop (Hard rule 2). If `queueState.waitingForSlot === true`, the

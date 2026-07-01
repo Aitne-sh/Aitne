@@ -30,10 +30,9 @@ user but compound into duplicate DMs/notifications at fire time.
    the conversation made moot. Else `GET
    /api/schedule?status=pending,running` for one within ±15 min with a
    matching `description`; if found, skip or PATCH.
-3. **Recurring check.** `GET /api/recurring-schedules?enabled=true` to
-   confirm no recurring rule/Agent already covers this cadence (e.g. a
-   daily 09:00 inbox triage, or the morning briefing). If covered, skip.
-   (How recurring work/DMs are created — see "Recurring" below.)
+3. **Recurring check.** `GET /api/recurring-schedules?enabled=true&includeClaimed=true`
+   — confirm no recurring rule/Agent covers this cadence (a `claimedByAgentSlug`
+   row is Agent-owned and counts). If covered, skip (see "Recurring" below).
 4. **`confirm_dedup_key` check (mandatory for `confirm:` sub-flow rows
    only).** When scheduling a `dm_session` row with
    `taskContext.sub_flow="confirm"`, run the dedup pre-check + shape
@@ -222,7 +221,9 @@ model, batch) are in the errors reference below.
   (its fire time can track quiet-hours; PATCH/DELETE edit it). The morning
   briefing is one of these.
 
-`GET /api/recurring-schedules` stays read-only for the dedup pre-check.
+`GET /api/recurring-schedules` stays read-only for the dedup pre-check; `includeClaimed=true`
+keeps Agent-claimed (`claimedByAgentSlug`) + trigger-owned (`claimedByTriggerId`) rows visible.
+Writes on claimed rows: **409** → `/api/agents/<slug>`; trigger-owned → `/api/triggers/<id>`.
 
 ### recurrenceRule grammar — the shared recurrence engine
 

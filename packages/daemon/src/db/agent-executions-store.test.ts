@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { applySchema } from "./schema.js";
-import { upsertAgent, type AgentUpsertInput } from "./agents-store.js";
+import { setLastExecutionId, upsertAgent, type AgentUpsertInput } from "./agents-store.js";
 import {
   byErrorKind,
   completeExecution,
   getExecution,
   listExecutions,
+  listInFlightAgentIds,
+  listLastExecutionsByAgent,
   metricsWindow,
   startExecution,
   sweepAbandoned,
@@ -312,6 +314,50 @@ describe("agent-executions-store", () => {
       const id = startExecution(db, { agentId: "deploy-watch", trigger: "cron" });
       completeExecution(db, { executionId: id, result: "success" });
       expect(byErrorKind(db, "deploy-watch", 7)).toEqual({});
+    });
+  });
+
+  describe("listLastExecutionsByAgent / listInFlightAgentIds", () => {
+    it("maps each agent's last_execution_id pointer to its execution, keyed by slug", () => {
+      seedAgent(db, "second-agent");
+      const a1 = startExecution(db, { agentId: "deploy-watch", trigger: "cron" }, 100);
+      completeExecution(
+        db,
+        { executionId: a1, result: "success", outputSummary: "shipped" },
+        150,
+      );
+      setLastExecutionId(db, "deploy-watch", a1, 150);
+      // second-agent has history but no pointer — it must NOT appear.
+      const a2 = startExecution(db, { agentId: "second-agent", trigger: "cron" }, 200);
+      completeExecution(db, { executionId: a2, result: "error" }, 210);
+
+      const map = listLastExecutionsByAgent(db);
+      expect([...map.keys()]).toEqual(["deploy-watch"]);
+      expect(map.get("deploy-watch")).toMatchObject({
+        id: a1,
+        result: "success",
+        outputSummary: "shipped",
+        endedAt: 150,
+      });
+    });
+
+    it("returns an empty map when no agent has a recorded execution", () => {
+      expect(listLastExecutionsByAgent(db).size).toBe(0);
+    });
+
+    it("reports agents with an in-flight (result NULL) execution, deduped", () => {
+      startExecution(db, { agentId: "deploy-watch", trigger: "cron" }, 100);
+      startExecution(db, { agentId: "deploy-watch", trigger: "manual" }, 110);
+      const done = startExecution(db, { agentId: "deploy-watch", trigger: "cron" }, 50);
+      completeExecution(db, { executionId: done, result: "success" }, 60);
+
+      expect([...listInFlightAgentIds(db)]).toEqual(["deploy-watch"]);
+    });
+
+    it("reports no in-flight agents once every execution completed", () => {
+      const id = startExecution(db, { agentId: "deploy-watch", trigger: "cron" }, 100);
+      completeExecution(db, { executionId: id, result: "success" }, 110);
+      expect(listInFlightAgentIds(db).size).toBe(0);
     });
   });
 

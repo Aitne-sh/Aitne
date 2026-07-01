@@ -82,6 +82,9 @@ describe("describeCron", () => {
     // Interval within a bounded active window (activity-scan placeholder shape).
     expect(describeCron("*/30 4-23 * * *")).toBe("Every 30m, 04:00–24:00");
     expect(describeCron("* 9-17 * * *")).toBe("Every minute, 09:00–18:00");
+    // Stepped hour range — every N hours within a daytime window (Activity Scan).
+    expect(describeCron("0 4-22/2 * * *")).toBe("Every 2h, 04:00–22:00");
+    expect(describeCron("30 6-18/3 * * *")).toBe("Every 3h at :30, 06:00–18:00");
   });
 
   it("falls back to the raw expression for unsupported shapes", () => {

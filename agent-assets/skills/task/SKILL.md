@@ -44,8 +44,11 @@ the front door; the specialised skills are the manual.
 ## Edit / delete — `PATCH` / `DELETE /api/tasks/<ref>`
 
 Address the row by its typed `ref` from the board (`rs:<id>`, `mt_<n>`,
-`agent:<slug>`, `as:<id>`). PATCH forwards your patch body to the owning edit
-endpoint; DELETE forwards to the owning delete (cascade preserved).
+`agent:<slug>`, `as:<id>`, `trigger:<id>`). PATCH forwards your patch body to
+the owning edit endpoint; DELETE forwards to the owning delete (cascade
+preserved). A `trigger:` write routes to `/api/triggers/<id>` (Approve tier;
+`401` = needs the dashboard's authorization; no facade create kind) and its
+delete removes the paired recurring schedule too.
 
 ```bash
 curl --silent --fail -X PATCH -H 'Content-Type: application/json' \

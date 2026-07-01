@@ -320,6 +320,10 @@ export interface DriverRunResult {
   costUsd: number;
   numTurns: number;
   durationMs: number;
+  /** Model the leg ran under (binding.modelId) — feeds the spend ledger's
+   *  by-model split. Optional telemetry: absent/null on runner-synthesized
+   *  results and legacy test mocks (no SDK leg ran). */
+  modelId?: string | null;
 }
 
 /**
@@ -608,6 +612,7 @@ export async function resumeDriver(
       costUsd: 0,
       numTurns: 0,
       durationMs: 0,
+      modelId: null,
     };
   }
   const startMs = (deps.nowFn ?? (() => Date.now()))();
@@ -855,6 +860,7 @@ async function runQuery(input: RunQueryInput): Promise<DriverRunResult> {
     costUsd,
     numTurns,
     durationMs,
+    modelId: binding.modelId,
   };
 }
 

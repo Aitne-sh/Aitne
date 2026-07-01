@@ -104,6 +104,10 @@ const postBodySchema = z.object({
     .datetime({ offset: true })
     .optional(),
   requireFinalConfirm: z.boolean().optional(),
+  // Task Board provenance (migration 0022): 'user' = the user asked for
+  // this, 'agent' = autonomous spawn, 'system' = daemon-internal. The
+  // spawning agent declares it; omitted keeps the historical assumption.
+  origin: z.enum(["user", "agent", "system"]).optional().default("agent"),
 });
 
 /** Clarify body — answer to a pending ask_user round-trip. */
@@ -131,6 +135,8 @@ function toWire(row: BrowserTaskRow): {
   effectiveAllowlistRegex: string | null;
   blockedRequestsCount: number;
   extractCharsTotal: number;
+  origin: "user" | "agent" | "system";
+  costUsd: number | null;
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -149,6 +155,8 @@ function toWire(row: BrowserTaskRow): {
     effectiveAllowlistRegex: row.effectiveAllowlistRegex,
     blockedRequestsCount: row.blockedRequestsCount,
     extractCharsTotal: row.extractCharsTotal,
+    origin: row.origin,
+    costUsd: row.costUsd,
     createdAt: row.createdAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
@@ -319,6 +327,9 @@ export function createBrowserTaskRoutes(deps: ApiDependencies): Hono {
         extraAllowedHosts: [] as string[],
         originatingChannel: resolvedChannel,
         requireFinalConfirm: input.requireFinalConfirm ?? true,
+        // Threaded to fire-time createBrowserTask; the board's reminder
+        // lane also reads it while the one-off is pending.
+        origin: input.origin,
       };
       const correlationId = randomUUID();
       const browserDirective = input.description.slice(0, 200);
@@ -362,6 +373,7 @@ export function createBrowserTaskRoutes(deps: ApiDependencies): Hono {
       scheduleRowId: null,
       requireFinalConfirm: input.requireFinalConfirm ?? true,
       effectiveAllowlistRegex: allowlist.composedSource,
+      origin: input.origin,
       createdAt,
     });
     // Shape B initial insert — emit so the dashboard list invalidates

@@ -26,6 +26,10 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     character: "",
     disallowedTools: [],
     allowedToolsOverride: null,
+    // Backend-failure operator diagnostics are opt-in DMs (default off).
+    // The notification-assertion tests below flip this on explicitly.
+    backendFailureDmAlerts: true,
+    ...overrides,
   } as unknown as AgentConfig;
 }
 
@@ -566,8 +570,8 @@ describe("BackendRouter", () => {
 
     it("inherits maxTurns / maxBudgetUsd from process_backend_config", () => {
       applySchema(db);
-      // routine.fetch_window's seed: max_turns=10 (N4: 20 → 10),
-      // max_budget_usd=0.50.
+      // routine.fetch_window's seed: max_turns=20
+      // (FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.3), max_budget_usd=0.50.
       const codexCore = makeCore({
         backendId: "codex",
         listModels: () => [
@@ -588,7 +592,7 @@ describe("BackendRouter", () => {
       });
 
       // Envelope from the seed row — backend swap doesn't reset caps.
-      expect(binding.main.maxTurns).toBe(10);
+      expect(binding.main.maxTurns).toBe(20);
       expect(binding.main.maxBudgetUsd).toBe(0.5);
     });
 
@@ -1081,6 +1085,82 @@ describe("BackendRouter", () => {
         destinationMode: "configured_only",
       }),
     );
+  });
+
+  it("suppresses the operator failure DM when backendFailureDmAlerts is off (interactive user-facing reply still fires)", async () => {
+    applySchema(db);
+    const notifier = makeNotifier();
+    const mainCore = makeCore({
+      execute: vi.fn().mockRejectedValue(
+        new BackendQuotaError("claude", "rate_limited", null, "quota exceeded"),
+      ),
+    });
+
+    const router = new BackendRouter(
+      db,
+      makeConfig({ backendFailureDmAlerts: false } as Partial<AgentConfig>),
+      [mainCore],
+      notifier,
+    );
+
+    await expect(
+      router.execute({
+        event: makeDmEvent(),
+        prompt: "prompt",
+        context: "context",
+        processKey: "dashboard.chat",
+      }),
+    ).rejects.toBeInstanceOf(BackendRouterHandledError);
+
+    // Only the interactive user-facing reply goes out; the operator
+    // "No fallback is configured" diagnostic is gated off (default).
+    expect(notifier.send).toHaveBeenCalledTimes(1);
+    expect(notifier.send).toHaveBeenCalledWith(
+      expect.stringContaining("usage limit"),
+      expect.any(Object),
+    );
+    expect(notifier.send).not.toHaveBeenCalledWith(
+      expect.stringContaining("No fallback is configured"),
+      expect.any(Object),
+      expect.anything(),
+    );
+  });
+
+  it("never DMs transient transport failures (ENOTFOUND) even when opted in", async () => {
+    applySchema(db);
+    const notifier = makeNotifier();
+    // Non-interactive routine failing on a DNS/connectivity blip — the
+    // dominant real cause of the flood. Even with alerts opted in, this
+    // must not notify: it's self-healing, not an actionable backend problem.
+    const mainCore = makeCore({
+      execute: vi.fn().mockRejectedValue(
+        new BackendDecisiveFailure(
+          "claude",
+          "other_non_retryable",
+          new Error(
+            "Claude Code returned an error result: API Error: Unable to connect to API (ENOTFOUND)",
+          ),
+        ),
+      ),
+    });
+
+    const router = new BackendRouter(
+      db,
+      makeConfig({ backendFailureDmAlerts: true } as Partial<AgentConfig>),
+      [mainCore],
+      notifier,
+    );
+
+    await expect(
+      router.execute({
+        event: makeDmEvent(),
+        prompt: "prompt",
+        context: "context",
+        processKey: "routine.fetch_window",
+      }),
+    ).rejects.toBeInstanceOf(BackendRouterHandledError);
+
+    expect(notifier.send).not.toHaveBeenCalled();
   });
 
   it("replies once and sends a high-priority alert when fallback also fails", async () => {

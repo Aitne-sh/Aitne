@@ -158,6 +158,13 @@ export class AuditLogger implements IAuditLogger {
       retryReason: string;
       fallbackTriggered?: boolean;
       requestedBackend?: BackendId;
+      /**
+       * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope
+       * (`max_turns`) the pre-pass attempt ran under. Persisted as the
+       * denominator the dashboard renders as "turn limit (numTurns/maxTurns)"
+       * and reads for headroom on healthy pre-pass rows.
+       */
+      maxTurns?: number;
     };
     dailyWrite?: DailyWriteAuditDetail | null;
   }): void {
@@ -317,6 +324,9 @@ export class AuditLogger implements IAuditLogger {
             : {}),
           ...(prePass.requestedBackend !== undefined
             ? { requestedBackend: prePass.requestedBackend }
+            : {}),
+          ...(typeof prePass.maxTurns === "number"
+            ? { maxTurns: prePass.maxTurns }
             : {}),
         };
       }
@@ -698,6 +708,9 @@ export class AuditLogger implements IAuditLogger {
         retryReason: string;
         fallbackTriggered?: boolean;
         requestedBackend?: BackendId;
+        /** FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — turn envelope the killed
+         * attempt ran under; the "turn limit (numTurns/maxTurns)" denominator. */
+        maxTurns?: number;
       };
       dailyWrite?: DailyWriteAuditDetail | null;
     },
@@ -818,6 +831,9 @@ export class AuditLogger implements IAuditLogger {
             : {}),
           ...(context.prePass.requestedBackend !== undefined
             ? { requestedBackend: context.prePass.requestedBackend }
+            : {}),
+          ...(typeof context.prePass.maxTurns === "number"
+            ? { maxTurns: context.prePass.maxTurns }
             : {}),
         };
       }

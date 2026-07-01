@@ -3,6 +3,8 @@ import Database from "better-sqlite3";
 import { applySchema } from "../../db/schema.js";
 import { createRecurringScheduleRoutes } from "./recurring-schedules.js";
 import { createRecurringSchedule } from "../../db/recurring-schedules.js";
+import { createTrigger } from "../../db/automation-triggers.js";
+import { upsertAgent } from "../../db/agents-store.js";
 import type { ApiDependencies } from "../server.js";
 import type { AgentConfig } from "../../config.js";
 
@@ -43,6 +45,22 @@ function seedAgentTaskRow(db: Database.Database): number {
     description: "A recurring agent.task row (now Agent-owned territory)",
     recurrenceRule: { frequency: "daily", time: "09:00", timezone: "America/New_York" },
   }).id;
+}
+
+/** Make an `imported-<id>` user Agent claim a dm_session row as its satellite. */
+function claimByAgent(db: Database.Database, rsId: number, slug = `imported-${rsId}`): void {
+  upsertAgent(db, {
+    slug,
+    name: "Evening daily summary",
+    source: "user",
+    definitionPath: `agents/${slug}/agent.md`,
+    definitionHash: "hash",
+    enabled: true,
+    scheduleKind: "cron",
+    scheduleExpression: "0 19 * * *",
+    scheduleTimezone: "America/New_York",
+    recurringScheduleId: rsId,
+  });
 }
 
 describe("recurring-schedules routes (dm_session-only after the split)", () => {
@@ -179,6 +197,125 @@ describe("recurring-schedules routes (dm_session-only after the split)", () => {
     it("returns 404 for a missing id and 400 for a bad id", async () => {
       expect((await app.request("/recurring-schedules/999")).status).toBe(404);
       expect((await app.request("/recurring-schedules/abc")).status).toBe(400);
+    });
+
+    it("hides a dm_session row an Agent already owns (no /schedule double-listing)", async () => {
+      // Legacy artifact: an `imported-<id>` user Agent references a dm_session row.
+      const id = ((await (await post(DM_BODY)).json()) as { item: { id: number } }).item.id;
+      claimByAgent(db, id);
+      const res = await app.request("/recurring-schedules");
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { items: unknown[] }).items).toHaveLength(0);
+    });
+
+    it("?includeClaimed=true returns the claimed row annotated with its owning Agent", async () => {
+      // The schedule skill's dedup pre-check must SEE covered cadences, or it
+      // re-creates them → duplicate DMs at fire time.
+      const id = ((await (await post(DM_BODY)).json()) as { item: { id: number } }).item.id;
+      claimByAgent(db, id);
+      const res = await app.request("/recurring-schedules?enabled=true&includeClaimed=true");
+      expect(res.status).toBe(200);
+      const items = ((await res.json()) as {
+        items: Array<{ id: number; claimedByAgentSlug?: string }>;
+      }).items;
+      expect(items).toHaveLength(1);
+      expect(items[0].id).toBe(id);
+      expect(items[0].claimedByAgentSlug).toBe(`imported-${id}`);
+    });
+
+    it("hides a trigger-owned agent.task row (managed as trigger:<id> on the board)", async () => {
+      const trigger = createTrigger(db, {
+        domain: "git",
+        eventType: "cron.daily",
+        prompt: "Sweep stale branches",
+        time: "09:00",
+        configTimezone: "America/New_York",
+      });
+      const res = await app.request("/recurring-schedules");
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+      // The dedup pre-check still SEES the covered cadence, annotated.
+      const claimed = await app.request("/recurring-schedules?includeClaimed=true");
+      const items = ((await claimed.json()) as {
+        items: Array<{ claimedByTriggerId?: number }>;
+      }).items;
+      expect(items).toHaveLength(1);
+      expect(items[0].claimedByTriggerId).toBe(trigger.id);
+    });
+
+    it("GET /:id surfaces the owning trigger on its paired row", async () => {
+      const trigger = createTrigger(db, {
+        domain: "git",
+        eventType: "cron.daily",
+        prompt: "Sweep stale branches",
+        time: "09:00",
+        configTimezone: "America/New_York",
+      });
+      const res = await app.request(`/recurring-schedules/${trigger.recurringScheduleId}`);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { claimedByTriggerId?: number }).claimedByTriggerId).toBe(
+        trigger.id,
+      );
+    });
+
+    it("GET /:id surfaces the owning Agent on a claimed row", async () => {
+      const id = ((await (await post(DM_BODY)).json()) as { item: { id: number } }).item.id;
+      claimByAgent(db, id);
+      const res = await app.request(`/recurring-schedules/${id}`);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { claimedByAgentSlug?: string }).claimedByAgentSlug).toBe(
+        `imported-${id}`,
+      );
+      // Unclaimed rows carry no annotation.
+      const id2 = ((await (await post({ ...DM_BODY, taskContext: {} })).json()) as {
+        item: { id: number };
+      }).item.id;
+      const res2 = await app.request(`/recurring-schedules/${id2}`);
+      expect(
+        ((await res2.json()) as { claimedByAgentSlug?: string }).claimedByAgentSlug,
+      ).toBeUndefined();
+    });
+  });
+
+  describe("canonical-owner write guard (claimed dm_session rows)", () => {
+    it("409s a PATCH on a claimed row with a pointer to the owning Agent", async () => {
+      const id = ((await (await post(DM_BODY)).json()) as { item: { id: number } }).item.id;
+      claimByAgent(db, id);
+      const res = await app.request(`/recurring-schedules/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(res.status).toBe(409);
+      const data = (await res.json()) as { error: string; hint: string };
+      expect(data.error).toBe("recurring_schedule_claimed_by_agent");
+      expect(data.hint).toContain(`PATCH /api/agents/imported-${id}`);
+    });
+
+    it("409s a DELETE on a claimed row (no SET-NULL orphaning of the Agent)", async () => {
+      const id = ((await (await post(DM_BODY)).json()) as { item: { id: number } }).item.id;
+      claimByAgent(db, id);
+      const res = await app.request(`/recurring-schedules/${id}`, { method: "DELETE" });
+      expect(res.status).toBe(409);
+      const data = (await res.json()) as { error: string; hint: string };
+      expect(data.error).toBe("recurring_schedule_claimed_by_agent");
+      expect(data.hint).toContain(`DELETE /api/agents/imported-${id}`);
+      // The row survives untouched.
+      expect((await app.request(`/recurring-schedules/${id}`)).status).toBe(200);
+    });
+
+    it("leaves unclaimed dm_session rows freely editable and deletable", async () => {
+      const id = ((await (await post(DM_BODY)).json()) as { item: { id: number } }).item.id;
+      const patched = await app.request(`/recurring-schedules/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(patched.status).toBe(200);
+      expect((await app.request(`/recurring-schedules/${id}`, { method: "DELETE" })).status).toBe(
+        200,
+      );
     });
   });
 

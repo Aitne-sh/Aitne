@@ -159,8 +159,10 @@ This rule applies regardless of integration mode (direct, same-backend delegated
      skip (log `skipped: already in User Tasks`).
    - For schedule registrations, also query:
      `GET /api/schedule?status=pending,running` AND
-     `GET /api/recurring-schedules?enabled=true`.
-     If a pending/recurring item covers the same trigger → skip.
+     `GET /api/recurring-schedules?enabled=true&includeClaimed=true`
+     (rows with `claimedByAgentSlug` are Agent-managed but still count
+     as coverage). If a pending/recurring item covers the same
+     trigger → skip.
 
    Only after dedup clears, route the observation:
    - New TODO for the user → append to ## User Tasks with the row shape in the

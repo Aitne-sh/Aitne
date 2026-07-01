@@ -96,13 +96,21 @@ import {
   type AcquisitionTimestamps,
   type BuildAcquisitionPlanInput,
 } from "./routine-acquisition-plan.js";
-import { extractBackendSpend } from "./agent-core.js";
+import {
+  BackendDecisiveFailure,
+  BackendQuotaError,
+  extractBackendSpend,
+} from "./agent-core.js";
 import { BackendRouterHandledError } from "./backends/backend-router.js";
+import type { PrePassObservationsSink } from "../services/mcp/sdk-observations-server.js";
 import type { AutonomousSpawnGate, SpawnGateDecision } from "./spawn-gates.js";
 import {
   RETRY_REASONS,
+  TURN_LIMIT_FAILURE_KIND,
   buildPriorAttemptHintBlock,
+  computePrePassMaxTurns,
   defaultRetryDecision,
+  widenPrePassMaxTurns,
   type RetryDecision,
   type RetryPolicy,
 } from "./routine-fetch-window-retry.js";
@@ -1175,6 +1183,78 @@ function recoverRouterErrorSpend(error: unknown): RecoveredFailureSpend | null {
   };
 }
 
+/**
+ * Unwrap a fan-out execute throw into the individual backend failures
+ * behind it. A `BackendRouterHandledError` carries the main failure plus
+ * an optional distinct fallback failure; anything else (a raw backend
+ * failure, a plain Error) is returned as a single-element list. The
+ * `is*RouterError` classifiers below `.every()` over this so a mixed
+ * fallback (main hit its cap, fallback timed out) is NOT treated as a
+ * pure hard-stop.
+ */
+function routerBackendFailures(error: unknown): unknown[] {
+  return error instanceof BackendRouterHandledError
+    ? [
+        error.mainFailure,
+        ...(error.fallbackFailure && error.fallbackFailure !== error.mainFailure
+          ? [error.fallbackFailure]
+          : []),
+      ]
+    : [error];
+}
+
+/**
+ * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.2 — true when EVERY backend
+ * attempt behind a fan-out execute throw was stopped by its max-turns
+ * envelope (`BackendDecisiveFailure(kind="max_turns")`). A retry
+ * re-dispatches the identical sub-plan under the identical envelope, so
+ * such a failure is deterministic and the attempt record is stamped
+ * `kind:"turn-limit"` instead of the generic `agent-execute-failed` —
+ * `defaultRetryDecision` then gives it one widened retry, then stops.
+ * When a fallback backend failed for a DIFFERENT reason (timeout, 5xx)
+ * this returns false: a retry could still succeed via that fallback, so
+ * the generic retry path keeps its shot.
+ */
+function isTurnLimitRouterError(error: unknown): boolean {
+  return routerBackendFailures(error).every(
+    (failure) =>
+      failure instanceof BackendDecisiveFailure && failure.kind === "max_turns",
+  );
+}
+
+/**
+ * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — true when EVERY backend
+ * attempt behind a fan-out execute throw was stopped by the SDK's
+ * `max_budget_usd` cap (`BackendQuotaError`, `originalCode ===
+ * "max_budget_usd"`). Like a turn-limit kill, a budget kill terminates
+ * the session before it can emit its closing JSON line, so a run that
+ * durably posted observations first is factually `partial`. Mixed causes
+ * (a fallback that failed differently) return false — the generic path
+ * keeps its retry shot.
+ */
+function isBudgetLimitRouterError(error: unknown): boolean {
+  return routerBackendFailures(error).every(
+    (failure) =>
+      failure instanceof BackendQuotaError
+      && failure.originalCode === "max_budget_usd",
+  );
+}
+
+/**
+ * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — a sub-session's ground-truth
+ * ledger of what it durably posted, accumulated from the in-process
+ * `submit_observations` handler across all its batches. Read after
+ * `execute` returns OR throws; the source of truth on a hard-stop kill
+ * where the agent's closing JSON line was never emitted.
+ */
+interface PrePassObservationsTally {
+  fetched: number;
+  posted: number;
+  duplicates: number;
+  /** Number of `submit_observations` calls the handler serviced. */
+  batches: number;
+}
+
 // ── Runner ────────────────────────────────────────────────────────────────
 
 export class RoutineFetchWindowRunner {
@@ -1956,6 +2036,37 @@ export class RoutineFetchWindowRunner {
       let result: AgentResult | null = null;
       let executeErr: unknown = undefined;
       let record: SubAttemptRecord;
+      // Audit `failureKind` for the throw path. Defaults to the generic
+      // execute-failure label; the P2.2 synthesis branch overrides it with
+      // the specific `${killKind}-partial` marker so the error feed
+      // distinguishes "killed but salvaged N" from a total loss.
+      let throwFailureKind = "agent-execute-failed";
+      // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope this
+      // attempt is dispatched under. Hoisted to the loop-iteration scope
+      // (default = the DB-resolved seed) so both the success and the
+      // failure audit rows carry the DENOMINATOR the dashboard renders as
+      // "turn limit (numTurns/maxTurns)" and the operator can read headroom
+      // on healthy runs too. The try below overwrites it with the P2.1
+      // dynamic / widened value once computed; if the try throws before that
+      // point, the seed is the honest cap that was in effect.
+      let envelopeMaxTurns = binding.main.maxTurns;
+      // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — ground-truth ledger of
+      // what THIS attempt durably posted, fed by the in-process
+      // `submit_observations` handler (Claude only; a no-op on other
+      // backends). Read in the catch to synthesise a `partial` on a
+      // hard-stop kill instead of discarding the progress as `failed`.
+      const observationsTally: PrePassObservationsTally = {
+        fetched: 0,
+        posted: 0,
+        duplicates: 0,
+        batches: 0,
+      };
+      const observationsSink: PrePassObservationsSink = (delta) => {
+        observationsTally.fetched += delta.fetched;
+        observationsTally.posted += delta.posted;
+        observationsTally.duplicates += delta.duplicates;
+        observationsTally.batches += 1;
+      };
       try {
         const priorAttemptHintBlock = buildPriorAttemptHintBlock(
           attempts,
@@ -2013,14 +2124,46 @@ export class RoutineFetchWindowRunner {
           binding.main.backendId,
         );
 
+        // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.1 — size THIS attempt's turn
+        // envelope from the sub-plan's fetch-row count and clone the binding
+        // so the router's `execute` reads the adjusted `maxTurns` (no new
+        // router API — it already reads `binding.main.maxTurns`). The DB
+        // envelope is the floor, so operator PUTs and the P1.3 default are
+        // preserved; the budget envelope is untouched. A turn-limit kill on
+        // a PRIOR attempt widens this attempt's envelope ×1.5 for its one
+        // sanctioned retry (`RETRY_REASONS.TURN_LIMIT_WIDEN`).
+        const seedMaxTurns = binding.main.maxTurns;
+        const priorTurnLimit = attempts.some((att) =>
+          att.errors.some(
+            (e) =>
+              e.type === "pre-pass-failed"
+              && e.kind === TURN_LIMIT_FAILURE_KIND,
+          ),
+        );
+        const baseMaxTurns = computePrePassMaxTurns(
+          seedMaxTurns,
+          input.subPlan.fetchRowCount,
+        );
+        envelopeMaxTurns = priorTurnLimit
+          ? widenPrePassMaxTurns(baseMaxTurns, seedMaxTurns)
+          : baseMaxTurns;
+        const executeBinding =
+          envelopeMaxTurns === binding.main.maxTurns
+            ? binding
+            : {
+                ...binding,
+                main: { ...binding.main, maxTurns: envelopeMaxTurns },
+              };
+
         result = await this.agentRouter.execute({
           prompt,
           context,
           event: fetcherEvent,
           processKey: FETCH_WINDOW_PROCESS_KEY,
-          preResolvedBinding: binding,
+          preResolvedBinding: executeBinding,
           reassemblePrompt,
           allowedToolsOverride,
+          observationsSink,
         });
         input.globalBudget.commit(globalReservation, result.costUsd);
         integrationBudget.commit(integrationReservation, result.costUsd);
@@ -2038,14 +2181,60 @@ export class RoutineFetchWindowRunner {
           failureSpend?.costUsd ?? 0,
         );
         executeErr = err;
-        record = this.failedAttemptRecord(
-          attempt,
-          fetcherEvent.correlationId,
-          startedAt,
-          "agent-execute-failed",
-          err,
-          failureSpend,
-        );
+        const turnLimited = isTurnLimitRouterError(err);
+        const budgetLimited = isBudgetLimitRouterError(err);
+        // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — server-side report
+        // synthesis. When a hard-stop kill (max-turns or budget) cut the
+        // session short AFTER it durably posted observations, the honest
+        // outcome is `partial`, not `failed`: the observations are already
+        // committed (in-process MCP write), so the agent's un-emitted
+        // closing JSON line is a cross-check we no longer depend on (R4/R5).
+        // The runner's own tally is ground truth. The retry matrix then
+        // reads it as partial-with-progress → no retry: a re-fetch would
+        // re-do the same work the envelope already capped, and server-side
+        // dedup would absorb the re-posts anyway.
+        if (
+          (turnLimited || budgetLimited)
+          && observationsTally.posted > 0
+        ) {
+          const killKind = turnLimited ? "turn-limit" : "budget-limit";
+          record = this.synthesizedPartialRecord(
+            attempt,
+            fetcherEvent.correlationId,
+            startedAt,
+            observationsTally,
+            failureSpend,
+            err,
+            killKind,
+          );
+          throwFailureKind = `${killKind}-partial`;
+        } else {
+          // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — stamp the audit
+          // `failureKind` with the specific turn-limit reason instead of the
+          // generic `agent-execute-failed`, so the dashboard categorises a
+          // total-loss turn-limit kill as "turn limit" rather than "Other" (the
+          // pre-P1 `other_non_retryable` symptom the operator saw). Mirrors the
+          // `turn-limit-partial` label the salvaged-partial branch above sets.
+          // Scoped to turn-limit deliberately: a budget kill keeps
+          // `agent-execute-failed` (it's the intended stop-loss, not a bug, and
+          // has no dedicated dashboard bucket). The RECORD's error kind (below)
+          // stays `turn-limit` / `agent-execute-failed` — that vocabulary drives
+          // the retry matrix (`isTurnLimitError`), independent of this
+          // display-only failureKind.
+          if (turnLimited) throwFailureKind = "turn-limit";
+          record = this.failedAttemptRecord(
+            attempt,
+            fetcherEvent.correlationId,
+            startedAt,
+            // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.2 / P2.1 — a max-turns
+            // kill (that posted nothing) is stamped so `defaultRetryDecision`
+            // gives it exactly ONE widened retry (`TURN_LIMIT_WIDEN`) and
+            // then stops, instead of burning every attempt at the same size.
+            turnLimited ? TURN_LIMIT_FAILURE_KIND : "agent-execute-failed",
+            err,
+            failureSpend,
+          );
+        }
       }
 
       attempts.push(record);
@@ -2058,6 +2247,7 @@ export class RoutineFetchWindowRunner {
           record,
           decision,
           binding.main.backendId,
+          envelopeMaxTurns,
         );
       } else {
         // §7.1 — when the SDK actually invoked a backend session and
@@ -2070,11 +2260,12 @@ export class RoutineFetchWindowRunner {
         // failure on `/metrics/pre-pass` alongside the other four
         // pre-execute failure modes).
         this.logFanOutFailure(input, fetcherEvent, record, decision, {
-          failureKind: "agent-execute-failed",
+          failureKind: throwFailureKind,
           err: executeErr,
           binding: binding.main,
           startedAt,
           spend: recoverRouterErrorSpend(executeErr),
+          maxTurns: envelopeMaxTurns,
         });
       }
       this.emitSubSessionCompleted(input, fetcherEvent.correlationId, attempt, record, decision);
@@ -2302,6 +2493,56 @@ export class RoutineFetchWindowRunner {
       posted: 0,
       duplicates: 0,
       errors: [{ type: "pre-pass-failed", kind, message, attempt }],
+      fetcherCorrelationId,
+      startedAt,
+      endedAt,
+      costUsd: spend?.costUsd ?? 0,
+      numTurns: spend?.numTurns ?? 0,
+    };
+  }
+
+  /**
+   * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — build a `partial` record for
+   * a hard-stop kill that durably posted observations before the envelope
+   * cut it off. The counts come from the runner's ground-truth tally, not
+   * the agent's un-emitted JSON line. The `pre-pass-truncated` error is
+   * deliberately a NEUTRAL type (not `budget-exhausted`, which would trip
+   * `defaultRetryDecision`'s terminal rule 3): a synthesized partial with
+   * `posted > 0` must flow to the `partial-with-progress` (no-retry) rule
+   * so the audit trail records the honest reason and the runner skips a
+   * wasteful re-fetch. Freshness is NOT written (status is `partial`, and
+   * only `success` stamps `pre_pass_last_run`), so the next tick still gets
+   * a full shot at the window the kill truncated.
+   */
+  private synthesizedPartialRecord(
+    attempt: number,
+    fetcherCorrelationId: string,
+    startedAt: string,
+    tally: PrePassObservationsTally,
+    spend: RecoveredFailureSpend | null,
+    err: unknown,
+    killKind: "turn-limit" | "budget-limit",
+  ): SubAttemptRecord {
+    const message = err instanceof Error ? err.message : String(err);
+    const endedAt = new Date().toISOString();
+    return {
+      attempt,
+      status: "partial",
+      fetched: tally.fetched,
+      posted: tally.posted,
+      duplicates: tally.duplicates,
+      errors: [
+        {
+          type: "pre-pass-truncated",
+          kind: killKind,
+          posted: tally.posted,
+          fetched: tally.fetched,
+          duplicates: tally.duplicates,
+          batches: tally.batches,
+          message,
+          attempt,
+        },
+      ],
       fetcherCorrelationId,
       startedAt,
       endedAt,
@@ -2598,6 +2839,13 @@ export class RoutineFetchWindowRunner {
        * the historical no-cost row (they are genuinely zero-cost).
        */
       spend?: RecoveredFailureSpend | null;
+      /**
+       * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope the
+       * killed attempt ran under (the DENOMINATOR the dashboard renders as
+       * "turn limit (numTurns/maxTurns)"). Absent for pre-execute failure
+       * modes (binding-resolve / budget-cap) where no session was dispatched.
+       */
+      maxTurns?: number;
     },
   ): void {
     try {
@@ -2649,6 +2897,9 @@ export class RoutineFetchWindowRunner {
           willRetry: decision.retry,
           retryReason: decision.reason,
           ...(options.binding ? { requestedBackend: options.binding.backendId } : {}),
+          ...(typeof options.maxTurns === "number"
+            ? { maxTurns: options.maxTurns }
+            : {}),
         },
       });
     } catch (logErr) {
@@ -2676,6 +2927,13 @@ export class RoutineFetchWindowRunner {
     record: SubAttemptRecord,
     decision: RetryDecision,
     requestedBackend: BackendId,
+    /**
+     * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope this
+     * attempt ran under, persisted on every pre-pass row (not just failures)
+     * so the dashboard can show `numTurns/maxTurns` headroom on healthy runs
+     * and `/metrics/pre-pass` sizing can be read against the cap in effect.
+     */
+    maxTurns: number,
   ): void {
     // §5 BackendQuotaError mitigation — set `fallbackTriggered` when the
     // backend that actually executed differs from the binding the runner
@@ -2724,6 +2982,7 @@ export class RoutineFetchWindowRunner {
           retryReason: decision.reason,
           ...(fallbackTriggered ? { fallbackTriggered: true } : {}),
           requestedBackend,
+          maxTurns,
         },
       });
     } catch (err) {

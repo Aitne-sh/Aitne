@@ -427,6 +427,13 @@ export interface IAuditLogger {
        * actual backend that executed is in the row's `backend` column.
        */
       requestedBackend?: BackendId;
+      /**
+       * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope
+       * (`max_turns`) the pre-pass attempt ran under. Persisted on every
+       * pre-pass row as the denominator the dashboard renders as
+       * "turn limit (numTurns/maxTurns)" and reads for turn-headroom.
+       */
+      maxTurns?: number;
     };
     /**
      * docs/design/appendices/daily-journal-daemon-write.md §4.11 — daily
@@ -499,6 +506,9 @@ export interface IAuditLogger {
         retryReason: string;
         fallbackTriggered?: boolean;
         requestedBackend?: BackendId;
+        /** FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — turn envelope the killed
+         * attempt ran under; the "turn limit (numTurns/maxTurns)" denominator. */
+        maxTurns?: number;
       };
       /**
        * See `logAction.dailyWrite` JSDoc. Mirrored on the failure path

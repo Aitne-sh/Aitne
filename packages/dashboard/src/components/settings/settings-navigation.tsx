@@ -175,6 +175,7 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "maxNotificationsPerHour", "maxNotificationsPerDay",
     "quietHoursStart", "quietHoursEnd", "batchIntervalMinutes",
     "defaultNotificationPlatforms", "primaryPlatform",
+    "backendFailureDmAlerts",
   ],
   "/settings/models": [
     "maxConcurrentSessions", "maxReactiveSessions", "delegatedProxyMaxConcurrent", "executeTimeoutMinutes",

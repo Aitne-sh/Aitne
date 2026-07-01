@@ -70,6 +70,7 @@ export const IMPACT_SOURCE_KEYS: Record<TaskRefPrefix, readonly (keyof ImpactSou
   as: ["pendingOccurrences"],
   bt: ["backgroundTaskIds"],
   bx: ["browserTaskIds"],
+  trigger: ["automationTriggers", "pendingOccurrences"],
   cluster: ["researchClusterSlugs"],
   obj: [],
 };
@@ -124,15 +125,15 @@ function recurringSatelliteNodes(
     }
   }
 
-  // NOTE (audit C6): the satellite node ids below (`trigger:<id>`,
-  // `rs:<id>#pending`) are human-readable DISPLAY labels, not parseable typed
-  // refs like `formatTaskRef(...)` above — a future clickable-impact UI must
-  // treat these as text, not feed them to `parseTaskRef` (they would 400).
+  // NOTE (audit C6): `trigger:<id>` is a real parseable ref since the board
+  // grew its `trigger` lane; only the `rs:<id>#pending` aggregate below remains
+  // a human-readable DISPLAY label — a clickable-impact UI must treat THAT one
+  // as text, not feed it to `parseTaskRef` (it would 400).
   for (const t of sources.automationTriggers) {
     if (t.recurringScheduleId === rsId) {
       nodes.push(
         node(
-          `trigger:${t.id}`,
+          formatTaskRef("trigger", t.id),
           `Automation trigger #${t.id} references this schedule and survives its deletion (FK SET NULL)`,
           "set_null_satellite",
           false,
@@ -298,6 +299,44 @@ export function computeImpact(ref: TaskRef, sources: ImpactSources): ImpactResul
         summary: `Cancelling ${ref.raw} removes one pending reminder; no cascade.`,
         nodes: [node(ref.raw, `pending one-off reminder — the target row`, "self", true)],
       };
+    }
+
+    case "trigger": {
+      const triggerId = Number(ref.id);
+      const t = sources.automationTriggers.find((x) => x.id === triggerId);
+      if (!t) {
+        return { ref: ref.raw, found: false, summary: `${ref.raw} is not a live automation trigger.`, nodes: [] };
+      }
+      const nodes: ImpactNode[] = [
+        node(ref.raw, `automation trigger (${t.domain}/${t.eventType}) — the target row`, "self", true),
+      ];
+      if (t.recurringScheduleId !== null) {
+        // deleteTrigger removes the paired schedule in its own code path — the
+        // same inverted direction as an Agent's paired schedule (§2.3), except
+        // the trigger delete is unconditional, so the schedule IS removed.
+        nodes.push(
+          node(
+            formatTaskRef("rs", t.recurringScheduleId),
+            `the trigger's own recurring schedule — deleted by the trigger-delete code path`,
+            "owner_paired_schedule",
+            true,
+          ),
+        );
+        const pending = sources.pendingOccurrences.filter(
+          (o) => o.recurringScheduleId === t.recurringScheduleId,
+        ).length;
+        if (pending > 0) {
+          nodes.push(
+            node(
+              `rs:${t.recurringScheduleId}#pending`,
+              `${pending} pending fire(s) are unlinked/skipped, not deleted (NO ACTION back-pointer)`,
+              "no_action_unlinked",
+              false,
+            ),
+          );
+        }
+      }
+      return { ref: ref.raw, found: true, summary: summarise(ref.raw, nodes), nodes };
     }
 
     case "bt":

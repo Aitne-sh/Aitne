@@ -101,10 +101,13 @@ export default function AgentsPage() {
             <strong>System</strong> routines (synthesis, monitoring, maintenance) and your own{" "}
             <strong>User</strong> Agents, each with its schedule, rulebook, limits, and recent
             health. The{" "}
-            <Link href="/schedule" className="underline underline-offset-2 hover:text-foreground">
-              queue view
+            <Link
+              href="/tasks?tab=queue"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              queue
             </Link>{" "}
-            shows what is about to fire.
+            on the Tasks page shows what is about to fire.
           </>
         }
         actions={

@@ -40,6 +40,7 @@ import { materializeMcpForSession } from "../../services/mcp/session-materialize
 import {
   OBSERVATIONS_MCP_SERVER_NAME,
   createObservationsMcpServer,
+  type PrePassObservationsSink,
 } from "../../services/mcp/sdk-observations-server.js";
 import { parseMcpToolName } from "../../services/mcp/risk.js";
 import { logMcpToolCall, updateMcpToolCallResult } from "../../services/mcp/tool-audit.js";
@@ -88,6 +89,7 @@ import {
   AgentTimeoutError,
   extractClaudeCodeQuotaResetHint,
   isClaudeCodeMaxBudgetError,
+  isClaudeCodeMaxTurnsError,
   isClaudeCodeQuotaError,
   type ClaudeCodeQuotaResetHint,
 } from "./claude-errors.js";
@@ -462,8 +464,20 @@ export class ClaudeCodeCore implements IAgentCore {
    * sessions; other sessions cannot invoke it under
    * `permissionMode: "dontAsk"`.
    */
-  private getObservationsMcpServer(): McpSdkServerConfigWithInstance | null {
+  private getObservationsMcpServer(
+    observationsSink?: PrePassObservationsSink,
+  ): McpSdkServerConfigWithInstance | null {
     if (!this.mcpContext) return null;
+    // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — a per-execute sink means a
+    // pre-pass fan-out sub-session that needs its own ground-truth tally
+    // ledger. Build a fresh sink-bound server for it (the SDK accepts a
+    // distinct `McpSdkServerConfigWithInstance` per `query()` call, and
+    // fan-out sub-sessions run concurrently on this one core, so a shared
+    // ambient sink would cross-attribute). Every OTHER Claude session
+    // (no sink) keeps the cached, sink-less boot-time server unchanged.
+    if (observationsSink) {
+      return createObservationsMcpServer(this.mcpContext.db, observationsSink);
+    }
     if (this.observationsMcpServer === null) {
       this.observationsMcpServer = createObservationsMcpServer(
         this.mcpContext.db,
@@ -487,8 +501,9 @@ export class ClaudeCodeCore implements IAgentCore {
    */
   private composeMcpServers(
     external: Record<string, unknown> | null,
+    observationsSink?: PrePassObservationsSink,
   ): Record<string, McpServerConfig> | null {
-    const observations = this.getObservationsMcpServer();
+    const observations = this.getObservationsMcpServer(observationsSink);
     const externalEntries = external && typeof external === "object" ? external : {};
     const merged: Record<string, McpServerConfig> = {
       ...(observations
@@ -897,7 +912,10 @@ export class ClaudeCodeCore implements IAgentCore {
                 ],
               }),
           ...(() => {
-            const mcpServers = this.composeMcpServers(mcp.claudeMcpServers);
+            const mcpServers = this.composeMcpServers(
+              mcp.claudeMcpServers,
+              params.observationsSink,
+            );
             return mcpServers ? { mcpServers } : {};
           })(),
           // RESEARCH_CLUSTER_COST_FIX_PLAN.md F4 — `USER_SCOPE_SHED_PROCESS_KEYS`
@@ -1245,6 +1263,21 @@ export class ClaudeCodeCore implements IAgentCore {
       return new BackendDecisiveFailure(
         this.backendId,
         "auth",
+        error,
+        partialSpend,
+      );
+    }
+    // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.1 safety net — the primary
+    // turn-limit capture throws a typed `max_turns` failure from
+    // `consumeStream` (returned as-is by the instanceof branch above).
+    // This message-shape match only fires when the SDK transport's wrapped
+    // throw arrived WITHOUT the terminal result message being observed;
+    // without it a turn-limit kill would fall through to the opaque
+    // `other_non_retryable`.
+    if (isClaudeCodeMaxTurnsError(error)) {
+      return new BackendDecisiveFailure(
+        this.backendId,
+        "max_turns",
         error,
         partialSpend,
       );
@@ -1760,6 +1793,40 @@ export class ClaudeCodeCore implements IAgentCore {
             logger.warn(
               { subtype: r.subtype, errors: "errors" in r ? r.errors : [] },
               "Agent session ended with error",
+            );
+          }
+
+          // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.1 — a turn-limit kill is
+          // an SDK *policy stop*, not a backend fault. The model gets no
+          // final turn, and after yielding this terminal result the SDK
+          // transport throws `Error("Claude Code returned an error result:
+          // Reached maximum number of turns (N)")` on the next readMessages
+          // step — which the outer catch would misclassify as
+          // `other_non_retryable`, hiding the real cause from the audit
+          // trail and the retry matrix (`claude-delegated.ts` fixed the
+          // same masking for the delegated path). Throw the typed failure
+          // here instead, carrying this result message's authoritative
+          // usage/cost — richer than the partial-usage accumulator the
+          // generic throw path would have to fall back on.
+          if (r.subtype === "error_max_turns") {
+            const sdkErrors =
+              "errors" in r && Array.isArray(r.errors) ? r.errors : [];
+            throw new BackendDecisiveFailure(
+              this.backendId,
+              "max_turns",
+              new Error(
+                sdkErrors.length > 0
+                  ? sdkErrors.join("; ")
+                  : `Claude Code stopped the session at the maximum number of turns (${r.num_turns})`,
+              ),
+              {
+                usage: { ...usage },
+                costUsd,
+                modelId: model,
+                numTurns,
+                durationMs: Date.now() - startMs,
+                costSource: "sdk",
+              },
             );
           }
         }

@@ -1222,6 +1222,141 @@ describe("0017-evening-review-budget-bump", () => {
   });
 });
 
+// `0021-fetch-window-max-turns-bump` — same CLAUDE.md non-negotiable #4
+// contract as 0006 / 0009 / 0017: fresh DB (no table) → no-op + id recorded;
+// fresh install already seeded at the new 20 → untouched; pre-migration
+// preset-default row at 10 → bumped to 20 + id recorded; operator-pinned
+// ('user', e.g. the documented PUT /api/process-config mitigation) or
+// already-custom rows → untouched; sibling keys at the same 10-turn band →
+// untouched; re-run → no second bump. Unlike 0017 there is no per-backend
+// band: applyBackendBudgetFactor scales only max_budget_usd, never
+// max_turns, so the old default is 10 on every backend.
+describe("0021-fetch-window-max-turns-bump", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0021-fetch-window-max-turns-bump",
+  );
+
+  function seedProcessConfigTable(db: Database.Database): void {
+    db.exec(`
+      CREATE TABLE process_backend_config (
+        process_key    TEXT PRIMARY KEY,
+        main_backend   TEXT NOT NULL,
+        main_model     TEXT NOT NULL,
+        max_turns      INTEGER NOT NULL,
+        max_budget_usd REAL NOT NULL,
+        updated_by     TEXT NOT NULL
+      );
+    `);
+  }
+
+  function insertRow(
+    db: Database.Database,
+    processKey: string,
+    maxTurns: number,
+    updatedBy: string,
+    backend = "claude",
+  ): void {
+    db.prepare(
+      `INSERT INTO process_backend_config
+         (process_key, main_backend, main_model, max_turns, max_budget_usd, updated_by)
+       VALUES (?, ?, 'seed-model', ?, 0.5, ?)`,
+    ).run(processKey, backend, maxTurns, updatedBy);
+  }
+
+  function turnsOf(db: Database.Database, processKey: string): number {
+    return (
+      db
+        .prepare<[string], { max_turns: number }>(
+          "SELECT max_turns FROM process_backend_config WHERE process_key = ?",
+        )
+        .get(processKey) as { max_turns: number }
+    ).max_turns;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op when process_backend_config does not exist (fresh/empty DB)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0021-fetch-window-max-turns-bump"]);
+    const recorded = db
+      .prepare<[string], { id: string }>(
+        "SELECT id FROM schema_migrations WHERE id = ?",
+      )
+      .get("0021-fetch-window-max-turns-bump");
+    expect(recorded).toEqual({ id: "0021-fetch-window-max-turns-bump" });
+  });
+
+  it("is a no-op on a fresh install where the seed already wrote the new 20", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 20, "preset");
+    runMigrations(db, [migration!]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(20);
+  });
+
+  it("bumps a preset-default fetch_window row from 10 to 20", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 10, "preset");
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0021-fetch-window-max-turns-bump"]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(20);
+  });
+
+  it("bumps a non-claude preset row too (max_turns has no per-backend scaling)", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 10, "preset", "codex");
+    runMigrations(db, [migration!]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(20);
+  });
+
+  it("leaves an operator-pinned ('user') row untouched even at 10 turns", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 10, "user");
+    runMigrations(db, [migration!]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(10);
+  });
+
+  it("leaves an operator-pinned ('user') row untouched at the mitigation value 20", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 20, "user");
+    runMigrations(db, [migration!]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(20);
+  });
+
+  it("leaves a preset row already at a custom value untouched", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 15, "preset");
+    runMigrations(db, [migration!]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(15);
+  });
+
+  it("does not touch sibling rows sitting at the same 10-turn band", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "gmail_classify", 10, "preset");
+    runMigrations(db, [migration!]);
+    expect(turnsOf(db, "gmail_classify")).toBe(10);
+  });
+
+  it("is idempotent — re-running does not bump again", () => {
+    const db = openDb();
+    seedProcessConfigTable(db);
+    insertRow(db, "routine.fetch_window", 10, "preset");
+    runMigrations(db, [migration!]);
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+    expect(turnsOf(db, "routine.fetch_window")).toBe(20);
+  });
+});
+
 // AGENT_DEFINITIONS_DESIGN.md §5 — peer test for the `0007-agent-identity`
 // migration. The two new tables (agents / agent_executions) are created by
 // applySchema, so the migration body carries ONLY the agent_actions ALTER +
@@ -2879,5 +3014,209 @@ describe("0019-backend-global-defaults-updated-by", () => {
     expect(result.applied).toEqual([
       "0019-backend-global-defaults-updated-by",
     ]);
+  });
+});
+
+describe("0020-reconcile-agent-claimed-dm-enabled-drift", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0020-reconcile-agent-claimed-dm-enabled-drift",
+  );
+
+  /** Seed a claimed pair: a recurring row + the Agent referencing it. */
+  function seedPair(
+    db: Database.Database,
+    slug: string,
+    opts: { agentEnabled: boolean; rsEnabled: boolean; taskType?: string },
+  ): number {
+    const rsId = Number(
+      db
+        .prepare(
+          `INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled)
+           VALUES (?, 'evening summary', json('{}'), json('{"frequency":"daily","time":"19:00"}'), ?)`,
+        )
+        .run(opts.taskType ?? "dm_session", opts.rsEnabled ? 1 : 0).lastInsertRowid,
+    );
+    db.prepare(
+      `INSERT INTO agents (id, name, source, definition_path, definition_hash, enabled,
+                           schedule_kind, schedule_expression, schedule_timezone,
+                           recurring_schedule_id, created_at, updated_at)
+       VALUES (?, ?, 'user', ?, 'hash', ?, 'cron', '0 19 * * *', 'UTC', ?, 1000, 1000)`,
+    ).run(slug, slug, `agents/${slug}/agent.md`, opts.agentEnabled ? 1 : 0, rsId);
+    return rsId;
+  }
+
+  function agentState(
+    db: Database.Database,
+    slug: string,
+  ): { enabled: number; enabled_overridden_at: number | null; updated_at: number } {
+    return db
+      .prepare(
+        "SELECT enabled, enabled_overridden_at, updated_at FROM agents WHERE id = ?",
+      )
+      .get(slug) as { enabled: number; enabled_overridden_at: number | null; updated_at: number };
+  }
+
+  function rsEnabled(db: Database.Database, id: number): number {
+    return (
+      db.prepare("SELECT enabled FROM recurring_schedules WHERE id = ?").get(id) as {
+        enabled: number;
+      }
+    ).enabled;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("row paused + Agent enabled → Agent pulled down, with the §6.4 override stamped", () => {
+    const db = openDb();
+    applySchema(db);
+    const rsId = seedPair(db, "imported-2", { agentEnabled: true, rsEnabled: false });
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0020-reconcile-agent-claimed-dm-enabled-drift"]);
+
+    const agent = agentState(db, "imported-2");
+    expect(agent.enabled).toBe(0);
+    // Without the stamp the loader's resolveEnabled would resurrect the YAML
+    // `enabled` on the next provision, silently undoing the reconcile.
+    expect(agent.enabled_overridden_at).not.toBeNull();
+    expect(agent.updated_at).toBeGreaterThan(1000);
+    expect(rsEnabled(db, rsId)).toBe(0);
+  });
+
+  it("Agent paused + row enabled → row pulled down (schedule stops firing for a paused Agent)", () => {
+    const db = openDb();
+    applySchema(db);
+    const rsId = seedPair(db, "imported-3", { agentEnabled: false, rsEnabled: true });
+
+    runMigrations(db, [migration!]);
+
+    expect(rsEnabled(db, rsId)).toBe(0);
+    // Direction 1 must NOT feed direction 2: the already-paused Agent keeps its
+    // un-stamped state (no spurious dashboard-override provenance).
+    const agent = agentState(db, "imported-3");
+    expect(agent.enabled).toBe(0);
+    expect(agent.enabled_overridden_at).toBeNull();
+    expect(agent.updated_at).toBe(1000);
+  });
+
+  it("leaves aligned pairs, non-dm_session pairs, and unclaimed rows untouched", () => {
+    const db = openDb();
+    applySchema(db);
+    const alignedOn = seedPair(db, "aligned-on", { agentEnabled: true, rsEnabled: true });
+    const alignedOff = seedPair(db, "aligned-off", { agentEnabled: false, rsEnabled: false });
+    // agent.task pairs are 410-write-gated since the split — out of scope.
+    const workPair = seedPair(db, "work-agent", {
+      agentEnabled: true,
+      rsEnabled: false,
+      taskType: "agent.task",
+    });
+    // Orphan disabled dm row claimed by nobody must not pull any Agent down.
+    const orphan = Number(
+      db
+        .prepare(
+          `INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled)
+           VALUES ('dm_session', 'orphan reminder', json('{}'), json('{"frequency":"daily","time":"09:00"}'), 0)`,
+        )
+        .run().lastInsertRowid,
+    );
+
+    runMigrations(db, [migration!]);
+
+    expect(agentState(db, "aligned-on").enabled).toBe(1);
+    expect(agentState(db, "aligned-on").enabled_overridden_at).toBeNull();
+    expect(rsEnabled(db, alignedOn)).toBe(1);
+    expect(agentState(db, "aligned-off").enabled).toBe(0);
+    expect(rsEnabled(db, alignedOff)).toBe(0);
+    expect(agentState(db, "work-agent").enabled).toBe(1);
+    expect(rsEnabled(db, workPair)).toBe(0);
+    expect(rsEnabled(db, orphan)).toBe(0);
+  });
+
+  it("is idempotent — a direct second run changes nothing", () => {
+    const db = openDb();
+    applySchema(db);
+    seedPair(db, "imported-2", { agentEnabled: true, rsEnabled: false });
+    runMigrations(db, [migration!]);
+    const after = agentState(db, "imported-2");
+
+    migration!.up(db);
+    expect(agentState(db, "imported-2")).toEqual(after);
+  });
+
+  it("is a recorded no-op when the tables are absent", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0020-reconcile-agent-claimed-dm-enabled-drift"]);
+  });
+
+  it("is a recorded no-op when agents predates recurring_schedule_id", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE agents (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE recurring_schedules (id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1);
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0020-reconcile-agent-claimed-dm-enabled-drift"]);
+  });
+});
+
+describe("0022-task-origin-and-cost", () => {
+  const migration = MIGRATIONS.find((m) => m.id === "0022-task-origin-and-cost");
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB where applySchema already created the columns", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0022-task-origin-and-cost"]);
+    for (const table of ["background_task", "browser_task"]) {
+      expect(columnExists(db, table, "origin")).toBe(true);
+      expect(columnExists(db, table, "cost_usd")).toBe(true);
+    }
+  });
+
+  it("adds origin + cost_usd to pre-migration tables, defaulting history to agent", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE background_task (
+        id TEXT PRIMARY KEY,
+        brief TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE browser_task (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO background_task (id, brief, state, created_at) VALUES ('bg-1', 'b', 'completed', 1);
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0022-task-origin-and-cost"]);
+    for (const table of ["background_task", "browser_task"]) {
+      expect(columnExists(db, table, "origin")).toBe(true);
+      expect(columnExists(db, table, "cost_usd")).toBe(true);
+    }
+    // Pre-existing history backfills to the historical assumption ('agent')
+    // with an honestly-unknown NULL cost, not a fake 0.
+    const row = db
+      .prepare("SELECT origin, cost_usd FROM background_task WHERE id = 'bg-1'")
+      .get() as { origin: string; cost_usd: number | null };
+    expect(row).toEqual({ origin: "agent", cost_usd: null });
+    // Direct re-run exercises the columnExists idempotency guards.
+    migration!.up(db);
+    expect(columnExists(db, "background_task", "origin")).toBe(true);
+  });
+
+  it("is a recorded no-op when the tables are absent (bare :memory: db)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0022-task-origin-and-cost"]);
   });
 });

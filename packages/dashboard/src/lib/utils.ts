@@ -67,24 +67,40 @@ export function formatUptime(seconds: number): string {
   return `${m}m`;
 }
 
-export function formatRelativeTime(date: string | Date): string {
+/** Placeholder for a missing / unparseable timestamp. */
+const INVALID_DATE_LABEL = "—";
+
+/**
+ * `parseUtcDate` but null/invalid-safe: returns null instead of throwing on a
+ * missing value (`.endsWith` on null) or producing an Invalid Date. The dashboard
+ * has no `error.tsx` boundaries, so a single null timestamp reaching a `format()`
+ * call throws and white-screens the whole page — the formatters below all route
+ * through this guard so a bad value degrades to `—` instead.
+ */
+function safeParseUtcDate(date: string | Date | null | undefined): Date | null {
+  if (date == null || date === "") return null;
   const d = parseUtcDate(date);
-  return formatDistanceToNowStrict(d, { addSuffix: true });
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function formatAbsoluteTime(date: string | Date): string {
-  const d = parseUtcDate(date);
-  return format(d, "yyyy-MM-dd HH:mm:ss");
+export function formatRelativeTime(date: string | Date | null | undefined): string {
+  const d = safeParseUtcDate(date);
+  return d ? formatDistanceToNowStrict(d, { addSuffix: true }) : INVALID_DATE_LABEL;
 }
 
-export function formatShortDateTime(date: string | Date): string {
-  const d = parseUtcDate(date);
-  return format(d, "MM-dd HH:mm");
+export function formatAbsoluteTime(date: string | Date | null | undefined): string {
+  const d = safeParseUtcDate(date);
+  return d ? format(d, "yyyy-MM-dd HH:mm:ss") : INVALID_DATE_LABEL;
 }
 
-export function formatDate(date: string | Date): string {
-  const d = parseUtcDate(date);
-  return format(d, "yyyy-MM-dd");
+export function formatShortDateTime(date: string | Date | null | undefined): string {
+  const d = safeParseUtcDate(date);
+  return d ? format(d, "MM-dd HH:mm") : INVALID_DATE_LABEL;
+}
+
+export function formatDate(date: string | Date | null | undefined): string {
+  const d = safeParseUtcDate(date);
+  return d ? format(d, "yyyy-MM-dd") : INVALID_DATE_LABEL;
 }
 
 /**

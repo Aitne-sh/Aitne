@@ -1051,6 +1051,7 @@ describe("AuditLogger", () => {
         retryReason: "",
         fallbackTriggered: true,
         requestedBackend: "claude",
+        maxTurns: 20,
       },
     });
     const row = db
@@ -1066,6 +1067,10 @@ describe("AuditLogger", () => {
       posted: 12,
       fallbackTriggered: true,
       requestedBackend: "claude",
+      // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope
+      // (denominator) round-trips into detail so the dashboard can render
+      // "turn limit (numTurns/maxTurns)".
+      maxTurns: 20,
     });
   });
 
@@ -1114,6 +1119,8 @@ describe("AuditLogger", () => {
     const parsed = JSON.parse(row.detail!) as { prePass: Record<string, unknown> };
     expect(parsed.prePass).not.toHaveProperty("fallbackTriggered");
     expect(parsed.prePass).not.toHaveProperty("requestedBackend");
+    // P3.2 — maxTurns is likewise omitted when the caller doesn't supply it.
+    expect(parsed.prePass).not.toHaveProperty("maxTurns");
     expect(parsed.prePass.status).toBe("skipped");
   });
 
@@ -1145,6 +1152,7 @@ describe("AuditLogger", () => {
         willRetry: false,
         retryReason: "max-attempts",
         fallbackTriggered: false,
+        maxTurns: 15,
       },
     });
     const row = db
@@ -1153,6 +1161,9 @@ describe("AuditLogger", () => {
     const parsed = JSON.parse(row.detail!) as { prePass: Record<string, unknown> };
     expect(parsed.prePass.fallbackTriggered).toBe(false);
     expect(parsed.prePass).not.toHaveProperty("requestedBackend");
+    // P3.2 — the turn envelope persists on the failure row too (the row the
+    // dashboard renders "turn limit (numTurns/maxTurns)" from).
+    expect(parsed.prePass.maxTurns).toBe(15);
   });
 
   it("logError persists detail.prePass so MetricsCollector.collectPrePassMetrics sees the failure", () => {

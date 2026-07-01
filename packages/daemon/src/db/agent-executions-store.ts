@@ -271,6 +271,39 @@ export function getExecution(
 }
 
 /**
+ * Every Agent's most recent COMPLETED execution, keyed by slug — one scan of
+ * the denormalised `agents.last_execution_id` pointers (kept in sync by the
+ * recorder, §8.2). Feeds the Task Board's `lastResult`/`lastRunAt` projection
+ * without a per-agent query fan-out.
+ */
+export function listLastExecutionsByAgent(
+  db: Database.Database,
+): Map<string, AgentExecutionDTO> {
+  const rows = db
+    .prepare(
+      `SELECT e.*
+         FROM agents a
+         JOIN agent_executions e ON e.id = a.last_execution_id`,
+    )
+    .all() as AgentExecutionRow[];
+  return new Map(rows.map((row) => [row.agent_id, rowToDTO(row)]));
+}
+
+/**
+ * Slugs of Agents with an execution currently IN FLIGHT (`result IS NULL` —
+ * opened by `startExecution`, closed by `completeExecution` or the boot
+ * janitor). Feeds the Task Board's `running` status.
+ */
+export function listInFlightAgentIds(db: Database.Database): Set<string> {
+  const rows = db
+    .prepare(
+      "SELECT DISTINCT agent_id FROM agent_executions WHERE result IS NULL",
+    )
+    .all() as Array<{ agent_id: string }>;
+  return new Set(rows.map((r) => r.agent_id));
+}
+
+/**
  * Paginated execution history for one Agent, newest first (§9.3). `before` is
  * a keyset cursor on `id`; `result` filters by terminal state.
  */

@@ -6,7 +6,7 @@ import { useConfig, useConfigDefaults } from "@/lib/hooks/use-config";
 import { useHealth } from "@/lib/hooks/use-health";
 import { useAgents } from "@/lib/hooks/use-agents";
 import { useDirtyFields } from "@/lib/hooks/use-dirty-fields";
-import { ConfigSection, EditableField } from "@/components/settings/editors";
+import { ConfigSection, EditableField, EditableBooleanField } from "@/components/settings/editors";
 import { PrimaryPlatformField } from "@/components/settings/composite-fields";
 import {
   TimeRangeRing,
@@ -191,6 +191,15 @@ export default function HoursSettingsPage() {
           value={dv("primaryPlatform", config.primaryPlatform)}
           defaultValue={df("primaryPlatform")}
           modified={dirtyFields.has("primaryPlatform")}
+          onSave={deferSave}
+        />
+        <EditableBooleanField
+          label="Backend failure alerts to DM"
+          value={dv("backendFailureDmAlerts", config.backendFailureDmAlerts)}
+          configKey="backendFailureDmAlerts"
+          modified={dirtyFields.has("backendFailureDmAlerts")}
+          defaultValue={df("backendFailureDmAlerts")}
+          description="Off by default. When on, low-level backend-execution failures (a routine's model hitting its budget, a transient API error, etc.) are also sent to your messaging app. These are operator diagnostics — they're always recorded on Activity → Events regardless — so leave this off unless you're actively debugging, or they'll arrive one message per failure. Transient network blips never notify even when on."
           onSave={deferSave}
         />
       </ConfigSection>

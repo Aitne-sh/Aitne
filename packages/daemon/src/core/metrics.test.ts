@@ -497,6 +497,33 @@ describe("groupErrorRows", () => {
     const categories = groups.map((g) => g.category).sort();
     expect(categories).toEqual(["auth", "network", "other"]);
   });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — a max-turns kill gets its own
+  // bucket instead of falling through to "other" (the pre-P1 symptom). Covers
+  // every string shape that can reach the error feed: the SDK's terminal
+  // message, the router's decisive-failure prefix, and the pre-pass failureKind.
+  it("classifies turn-limit kills into the turn_limit category, not other", () => {
+    const groups = groupErrorRows([
+      {
+        error: "Claude Code stopped the session at the maximum number of turns (20)",
+        model_used: "claude-haiku-4-5",
+        started_at: "2026-04-10 10:00:00",
+      },
+      {
+        error: "max_turns — backend hit the cap",
+        model_used: "claude-haiku-4-5",
+        started_at: "2026-04-10 11:00:00",
+      },
+      {
+        error: "pre-pass-failed: turn-limit",
+        model_used: "claude-haiku-4-5",
+        started_at: "2026-04-10 12:00:00",
+      },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].category).toBe("turn_limit");
+    expect(groups[0].count).toBe(3);
+  });
 });
 
 // DELEGATED-TASK-MODE-DESIGN.md §11.2 — task-mode metrics aggregation.
@@ -1017,6 +1044,7 @@ describe("aggregatePrePassMetrics", () => {
       cacheCreationTokens?: number | null;
       cacheReadTokens?: number | null;
       tokensInput?: number | null;
+      numTurns?: number | null;
     } = {},
   ) {
     // `??` over `||` so explicit `null` passes through (the
@@ -1041,6 +1069,8 @@ describe("aggregatePrePassMetrics", () => {
         "cacheReadTokens" in overrides ? overrides.cacheReadTokens ?? null : null,
       tokensInput:
         "tokensInput" in overrides ? overrides.tokensInput ?? null : null,
+      numTurns:
+        "numTurns" in overrides ? overrides.numTurns ?? null : null,
     };
   }
 
@@ -1366,6 +1396,76 @@ describe("aggregatePrePassMetrics", () => {
     expect(snap.inputTokensByBackend).toEqual([]);
     expect(snap.costUsdByBackend).toEqual([]);
   });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the num_turns distribution that
+  // turns envelope sizing off a one-install guess.
+  it("emits a snapshot-level numTurnsPerAttempt histogram across all backends", () => {
+    const snap = aggregatePrePassMetrics(
+      [
+        attempt({ actualBackend: "claude", numTurns: 3 }),
+        attempt({ pcid: "p2", actualBackend: "codex", numTurns: 6 }),
+        attempt({ pcid: "p3", actualBackend: "gemini", numTurns: 9 }),
+      ],
+      30,
+      "2026-05-13T00:00:00.000Z",
+    );
+    expect(snap.numTurnsPerAttempt.count).toBe(3);
+    expect(snap.numTurnsPerAttempt.min).toBe(3);
+    expect(snap.numTurnsPerAttempt.max).toBe(9);
+    expect(snap.numTurnsPerAttempt.sum).toBe(18);
+    expect(snap.numTurnsPerAttempt.p50).toBe(6);
+  });
+
+  it("splits numTurnsByBackend and sorts by actualBackend", () => {
+    const snap = aggregatePrePassMetrics(
+      [
+        attempt({ actualBackend: "claude", numTurns: 4 }),
+        attempt({ pcid: "p2", actualBackend: "codex", numTurns: 5 }),
+        attempt({ pcid: "p3", actualBackend: "codex", numTurns: 7 }),
+      ],
+      30,
+      "2026-05-13T00:00:00.000Z",
+    );
+    expect(snap.numTurnsByBackend.map((b) => b.actualBackend)).toEqual([
+      "claude",
+      "codex",
+    ]);
+    const codex = snap.numTurnsByBackend.find((b) => b.actualBackend === "codex");
+    expect(codex?.histogram.count).toBe(2);
+    expect(codex?.histogram.min).toBe(5);
+    expect(codex?.histogram.max).toBe(7);
+  });
+
+  it("drops null num_turns from both histograms, but keeps null-backend samples in the snapshot-level one", () => {
+    const snap = aggregatePrePassMetrics(
+      [
+        attempt({ actualBackend: "claude", numTurns: 5 }),
+        // null num_turns — dropped from BOTH histograms.
+        attempt({ pcid: "p2", actualBackend: "claude", numTurns: null }),
+        // null backend — counted in numTurnsPerAttempt, absent from per-backend.
+        attempt({ pcid: "p3", actualBackend: null, numTurns: 8 }),
+      ],
+      30,
+      "2026-05-13T00:00:00.000Z",
+    );
+    expect(snap.numTurnsPerAttempt.count).toBe(2);
+    expect(snap.numTurnsPerAttempt.sum).toBe(13);
+    expect(snap.numTurnsByBackend.map((b) => b.actualBackend)).toEqual(["claude"]);
+    expect(
+      snap.numTurnsByBackend.find((b) => b.actualBackend === "claude")?.histogram.count,
+    ).toBe(1);
+  });
+
+  it("returns empty num_turns surfaces when no attempt carries a turn count", () => {
+    const snap = aggregatePrePassMetrics(
+      [attempt({ numTurns: null })],
+      30,
+      "2026-05-13T00:00:00.000Z",
+    );
+    expect(snap.numTurnsPerAttempt.count).toBe(0);
+    expect(snap.numTurnsPerAttempt.p50).toBeNull();
+    expect(snap.numTurnsByBackend).toEqual([]);
+  });
 });
 
 describe("MetricsCollector.collectPrePassMetrics", () => {
@@ -1459,6 +1559,14 @@ describe("MetricsCollector.collectPrePassMetrics", () => {
     expect(snap.totalAttempts).toBe(2);
     expect(snap.chainsByStatus).toEqual([
       { routine: "routine.morning_routine", integrationKey: "gmail", status: "success", count: 1 },
+    ]);
+    // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — num_turns is SELECTed and
+    // flows through to the histograms (insertPrePassRow writes num_turns=1,
+    // backend='claude').
+    expect(snap.numTurnsPerAttempt.count).toBe(2);
+    expect(snap.numTurnsPerAttempt.max).toBe(1);
+    expect(snap.numTurnsByBackend).toEqual([
+      { actualBackend: "claude", histogram: expect.objectContaining({ count: 2 }) },
     ]);
   });
 

@@ -138,6 +138,24 @@ function parseHourRange(field: string): { start: number; end: number } | null {
 }
 
 /**
+ * A stepped hour range like `4-22/2` — fire every N hours within a daytime
+ * window (the shape the Activity Scan built-in uses). Returns the window bounds
+ * + step, or null for anything else.
+ */
+function parseSteppedHourRange(
+  field: string,
+): { start: number; end: number; step: number } | null {
+  const m = /^(\d+)-(\d+)\/(\d+)$/.exec(field);
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = Number(m[2]);
+  const step = Number(m[3]);
+  if (![start, end, step].every((n) => Number.isInteger(n))) return null;
+  if (start < 0 || end > 23 || start >= end || step <= 0) return null;
+  return { start, end, step };
+}
+
+/**
  * Sub-daily (interval) crons the built-ins / user Agents use — `*​/N` minute or
  * hour steps, uniform minute lists, `*` minute — rendered as "Every N …".
  * Returns null for anything that is not an everyday sub-daily cadence so the
@@ -170,6 +188,10 @@ function describeCronInterval(
   const minN = Number(min);
   if (!Number.isInteger(minN) || minN < 0 || minN >= 60) return null;
   const at = minN === 0 ? "" : ` at :${pad2(minN)}`;
+  const hourWindow = parseSteppedHourRange(hour);
+  if (hourWindow) {
+    return `Every ${hourWindow.step}h${at}, ${pad2(hourWindow.start)}:00–${pad2(hourWindow.end)}:00`;
+  }
   const hourStep = parseStep(hour);
   if (hourStep !== null) return `Every ${hourStep}h${at}`;
   if (hour === "*") return `Hourly${at}`;

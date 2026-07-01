@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { createEvent, EventPriority } from "@aitne/shared";
 import type { AgentResult, BackendId, RoutineEvent } from "@aitne/shared";
 import { applySchema } from "../db/schema.js";
-import { BackendQuotaError } from "./agent-core.js";
+import { BackendDecisiveFailure, BackendQuotaError } from "./agent-core.js";
+import { BackendRouterHandledError } from "./backends/backend-router.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import {
   getTaskFlow as realGetTaskFlow,
@@ -1375,6 +1376,11 @@ describe("RoutineFetchWindowRunner.run — fan-out coordinator (docs/design/appe
 
     const auditCall = (audit.logAction as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(auditCall.prePass.parentRoutine).toBe("routine.morning_routine");
+    // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the turn envelope is stamped
+    // on healthy pre-pass rows too (floored at the seed), so the dashboard can
+    // show numTurns/maxTurns headroom and /metrics/pre-pass sizing reads
+    // against the cap in effect.
+    expect(auditCall.prePass.maxTurns).toBeGreaterThanOrEqual(20);
   });
 
   it("short-circuits the second sub-session when the global budget cap is exhausted after the first sub-session commits", async () => {
@@ -2994,6 +3000,366 @@ describe("RoutineFetchWindowRunner — N2 spawn gate + N1 failure spend + N3 dro
         numTurns: 9,
       }),
     );
+  });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.1 — pre-P1 a turn-limit kill
+  // surfaced as a generic agent-execute-failed and burned all 3 attempts at
+  // the SAME envelope. Since P2.1 it retries EXACTLY once under a widened
+  // (×1.5) envelope, then stops deterministically — materially different
+  // work on the retry, not the identical re-run the old path wasted budget on.
+  it("retries a turn-limit kill ONCE under a widened envelope, then stops (kind=turn-limit)", async () => {
+    const spend = {
+      usage: {
+        inputTokens: 10,
+        outputTokens: 32,
+        cacheCreationInputTokens: 102_000,
+        cacheReadInputTokens: 608_000,
+      },
+      costUsd: 0.19,
+      modelId: "claude-haiku-4-5",
+      numTurns: 20,
+      durationMs: 37_300,
+      costSource: "sdk" as const,
+    };
+    const turnLimitKill = new BackendDecisiveFailure(
+      "claude",
+      "max_turns",
+      new Error("Reached maximum number of turns (20)"),
+      spend,
+    );
+    const routerThrow = new BackendRouterHandledError(
+      'Backend "claude" failed without fallback: max_turns — Reached maximum number of turns (20)',
+      turnLimitKill,
+      turnLimitKill,
+    );
+    const { router, execute } = makeRouter(routerThrow as unknown as Error);
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [seedMailAccount()],
+      config: {
+        prePassMaxAttemptsPerIntegration: 3,
+        prePassBackoffMs: [0, 0],
+      },
+    });
+    const { report } = await runner.run(morningEvent());
+
+    // Exactly one widened retry: attempt 1 (widen) + attempt 2 (deterministic
+    // stop). Attempt 3 is never spawned even though maxAttempts=3.
+    expect(execute).toHaveBeenCalledTimes(2);
+    const sub = (report.perIntegration ?? [])[0];
+    expect(sub?.status).toBe("failed");
+    expect(sub?.attempts).toHaveLength(2);
+    expect(sub?.attempts[0]?.errors[0]).toMatchObject({
+      type: "pre-pass-failed",
+      kind: "turn-limit",
+    });
+    // P2.1 — the retry envelope is strictly wider than attempt 1's, and
+    // attempt 1's is floored at the seed (20).
+    const turns1 = execute.mock.calls[0]![0].preResolvedBinding.main
+      .maxTurns as number;
+    const turns2 = execute.mock.calls[1]![0].preResolvedBinding.main
+      .maxTurns as number;
+    expect(turns1).toBeGreaterThanOrEqual(20);
+    expect(turns2).toBeGreaterThan(turns1);
+    // Spend from the typed failure still lands on each attempt record.
+    expect(sub?.attempts[0]?.costUsd).toBeCloseTo(0.19, 4);
+    expect(sub?.attempts[0]?.numTurns).toBe(20);
+    // Attempt 1 audit → willRetry with the widen reason; attempt 2 → the
+    // deterministic stop.
+    expect(audit.logError).toHaveBeenCalledTimes(2);
+    expect(audit.logError).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      expect.any(Error),
+      "autonomous",
+      expect.objectContaining({
+        // P3.2 — a total-loss turn-limit kill is labelled `turn-limit`, not the
+        // generic `agent-execute-failed`, so the dashboard buckets it as a
+        // turn limit rather than "Other".
+        failureKind: "turn-limit",
+        prePass: expect.objectContaining({
+          integrationKey: "gmail",
+          willRetry: true,
+          retryReason: "turn-limit-widen",
+          // P3.2 — the envelope (the "turn limit (N/maxTurns)" denominator) is
+          // persisted, and equals the turn budget this attempt ran under.
+          maxTurns: turns1,
+        }),
+      }),
+    );
+    expect(audit.logError).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      expect.any(Error),
+      "autonomous",
+      expect.objectContaining({
+        failureKind: "turn-limit",
+        prePass: expect.objectContaining({
+          integrationKey: "gmail",
+          willRetry: false,
+          retryReason: "deterministic-failure",
+          // The widened retry's envelope is persisted on attempt 2's row.
+          maxTurns: turns2,
+        }),
+      }),
+    );
+  });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — server-side report synthesis.
+  // A turn-limit kill that durably posted observations BEFORE the envelope
+  // cut it off is factually `partial`, not `failed`. The runner reconciles
+  // against its own ground-truth tally (fed by the in-process
+  // submit_observations handler), synthesises a partial-with-progress, and
+  // skips the wasteful re-fetch — the un-emitted closing JSON line no longer
+  // decides the outcome (R4/R5).
+  it("synthesises a partial from the observations tally on a turn-limit kill that posted (no retry)", async () => {
+    const spend = {
+      usage: {
+        inputTokens: 10,
+        outputTokens: 8,
+        cacheCreationInputTokens: 50_000,
+        cacheReadInputTokens: 300_000,
+      },
+      costUsd: 0.12,
+      modelId: "claude-haiku-4-5",
+      numTurns: 20,
+      durationMs: 30_000,
+      costSource: "sdk" as const,
+    };
+    const turnLimitKill = new BackendDecisiveFailure(
+      "claude",
+      "max_turns",
+      new Error("Reached maximum number of turns (20)"),
+      spend,
+    );
+    const routerThrow = new BackendRouterHandledError(
+      'Backend "claude" failed without fallback: max_turns — Reached maximum number of turns (20)',
+      turnLimitKill,
+      turnLimitKill,
+    );
+    // Custom execute: the sub-session posts two batches through the sink
+    // (mirroring the in-process MCP handler) and is THEN killed at the turn
+    // cap before it could emit its closing JSON line.
+    const execute = vi.fn().mockImplementation(async (params) => {
+      params.observationsSink?.({ fetched: 120, posted: 100, duplicates: 20 });
+      params.observationsSink?.({ fetched: 30, posted: 25, duplicates: 5 });
+      throw routerThrow;
+    });
+    const router: IAgentRouter = {
+      execute,
+      executeResume: vi.fn(),
+      summarize: vi.fn(),
+      resolveBinding: vi.fn().mockReturnValue(makeBinding()),
+    } as unknown as IAgentRouter;
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [seedMailAccount()],
+      config: {
+        prePassMaxAttemptsPerIntegration: 3,
+        prePassBackoffMs: [0, 0],
+      },
+    });
+    const { report } = await runner.run(morningEvent());
+
+    // posted > 0 → partial-with-progress → the re-fetch is skipped entirely.
+    expect(execute).toHaveBeenCalledTimes(1);
+    const sub = (report.perIntegration ?? [])[0];
+    expect(sub?.status).toBe("partial");
+    // Counts come from the tally (sum of both batches), NOT the agent's
+    // (never-emitted) JSON.
+    expect(sub?.fetched).toBe(150);
+    expect(sub?.posted).toBe(125);
+    expect(sub?.duplicates).toBe(25);
+    expect(sub?.attempts[0]?.errors[0]).toMatchObject({
+      type: "pre-pass-truncated",
+      kind: "turn-limit",
+      posted: 125,
+      batches: 2,
+    });
+    // Recovered spend still lands on the record.
+    expect(sub?.attempts[0]?.costUsd).toBeCloseTo(0.12, 4);
+    // Audit row records the honest disposition.
+    expect(audit.logError).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      expect.any(Error),
+      "autonomous",
+      expect.objectContaining({
+        failureKind: "turn-limit-partial",
+        prePass: expect.objectContaining({
+          integrationKey: "gmail",
+          status: "partial",
+          posted: 125,
+          willRetry: false,
+          retryReason: "partial-with-progress",
+        }),
+      }),
+    );
+  });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — the SECOND hard-stop kind.
+  // A `max_budget_usd` cap (BackendQuotaError) also terminates the session
+  // before it can emit its closing JSON line, so a run that durably posted
+  // observations first is factually `partial`. Same synthesis path as the
+  // turn-limit kill, but stamped `killKind:"budget-limit"` /
+  // `failureKind:"budget-limit-partial"` so the error feed distinguishes the
+  // two hard stops. (The posted=0 budget kill above stays `failed`; this is
+  // the posted>0 salvage the earlier N1 test does not exercise.)
+  it("synthesises a partial from the tally on a BUDGET kill that posted (no retry)", async () => {
+    const spend = {
+      usage: {
+        inputTokens: 10,
+        outputTokens: 8,
+        cacheCreationInputTokens: 40_000,
+        cacheReadInputTokens: 280_000,
+      },
+      costUsd: 0.5,
+      modelId: "claude-haiku-4-5",
+      numTurns: 14,
+      durationMs: 42_000,
+      costSource: "sdk_partial" as const,
+    };
+    const budgetKill = new BackendQuotaError(
+      "claude",
+      "max_budget_usd",
+      null,
+      "max budget exceeded",
+      spend,
+    );
+    const routerThrow = new BackendRouterHandledError(
+      'Backend "claude" failed without fallback: quota — max budget exceeded',
+      budgetKill,
+      budgetKill,
+    );
+    // Custom execute: the sub-session posts one batch through the sink
+    // (mirroring the in-process MCP handler) and is THEN killed at the
+    // budget cap before it could emit its closing JSON line.
+    const execute = vi.fn().mockImplementation(async (params) => {
+      params.observationsSink?.({ fetched: 80, posted: 70, duplicates: 10 });
+      throw routerThrow;
+    });
+    const router: IAgentRouter = {
+      execute,
+      executeResume: vi.fn(),
+      summarize: vi.fn(),
+      resolveBinding: vi.fn().mockReturnValue(makeBinding()),
+    } as unknown as IAgentRouter;
+    const audit = makeAudit();
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      audit,
+      mailAccounts: [seedMailAccount()],
+      config: {
+        prePassMaxAttemptsPerIntegration: 3,
+        prePassBackoffMs: [0, 0],
+      },
+    });
+    const { report } = await runner.run(morningEvent());
+
+    // posted > 0 → partial-with-progress → the re-fetch is skipped entirely.
+    expect(execute).toHaveBeenCalledTimes(1);
+    const sub = (report.perIntegration ?? [])[0];
+    expect(sub?.status).toBe("partial");
+    expect(sub?.fetched).toBe(80);
+    expect(sub?.posted).toBe(70);
+    expect(sub?.duplicates).toBe(10);
+    expect(sub?.attempts[0]?.errors[0]).toMatchObject({
+      type: "pre-pass-truncated",
+      kind: "budget-limit",
+      posted: 70,
+      batches: 1,
+    });
+    expect(sub?.attempts[0]?.costUsd).toBeCloseTo(0.5, 4);
+    expect(audit.logError).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "routine.fetch_window" }),
+      expect.any(Error),
+      "autonomous",
+      expect.objectContaining({
+        failureKind: "budget-limit-partial",
+        prePass: expect.objectContaining({
+          integrationKey: "gmail",
+          status: "partial",
+          posted: 70,
+          willRetry: false,
+          retryReason: "partial-with-progress",
+        }),
+      }),
+    );
+  });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.1 — the happy path also gets a
+  // right-sized envelope: attempt 1's maxTurns is derived from the plan's
+  // fetch-row count, floored at the seed (20) and capped at 30.
+  it("sizes attempt-1 maxTurns dynamically within [seed, ceiling]", async () => {
+    const { router, execute } = makeRouter(
+      makeAgentResult('{"fetched":2,"posted":2,"duplicates":0,"errors":[]}'),
+    );
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      mailAccounts: [seedMailAccount()],
+    });
+    await runner.run(morningEvent());
+
+    expect(execute).toHaveBeenCalled();
+    const turns = execute.mock.calls[0]![0].preResolvedBinding.main
+      .maxTurns as number;
+    expect(turns).toBeGreaterThanOrEqual(20);
+    expect(turns).toBeLessThanOrEqual(30);
+  });
+
+  it("keeps retrying when only the MAIN failure is max_turns but the fallback failed differently", async () => {
+    // isTurnLimitRouterError requires EVERY executed backend to have hit
+    // its turn cap — a fallback that failed transiently (timeout, 5xx)
+    // could still succeed on retry, so the generic retry path keeps going.
+    const mainKill = new BackendDecisiveFailure(
+      "claude",
+      "max_turns",
+      new Error("Reached maximum number of turns (10)"),
+      null,
+    );
+    const fallbackKill = new BackendDecisiveFailure(
+      "codex",
+      "timeout",
+      new Error("wall-clock timeout"),
+      null,
+    );
+    const routerThrow = new BackendRouterHandledError(
+      'Fallback backend "codex" failed after "claude"',
+      fallbackKill,
+      mainKill,
+      fallbackKill,
+    );
+    const { router, execute } = makeRouter(routerThrow as unknown as Error);
+    const { runner } = makeFetcherRunner({
+      db,
+      dataDir,
+      router,
+      mailAccounts: [seedMailAccount()],
+      config: {
+        prePassMaxAttemptsPerIntegration: 2,
+        prePassBackoffMs: [0],
+      },
+    });
+    const { report } = await runner.run(morningEvent());
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    const sub = (report.perIntegration ?? [])[0];
+    expect(sub?.attempts).toHaveLength(2);
+    expect(sub?.attempts[0]?.errors[0]).toMatchObject({
+      type: "pre-pass-failed",
+      kind: "agent-execute-failed",
+    });
   });
 
   it("writes one plan_drop audit row per dropped integration×reason group (N3)", async () => {

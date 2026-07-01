@@ -106,6 +106,20 @@ describe("formatRelativeTime", () => {
   });
 });
 
+describe("date formatters degrade to — instead of throwing", () => {
+  // The dashboard has no error.tsx boundaries; a null/invalid timestamp reaching
+  // format() would white-screen the page, so the formatters must not throw.
+  it.each([null, undefined, "", "not-a-date"])("formatShortDateTime(%s) → —", (v) => {
+    expect(formatShortDateTime(v as unknown as string)).toBe("—");
+  });
+
+  it("formatAbsoluteTime / formatRelativeTime / formatDate also degrade", () => {
+    expect(formatAbsoluteTime(null as unknown as string)).toBe("—");
+    expect(formatRelativeTime(undefined as unknown as string)).toBe("—");
+    expect(formatDate("not-a-date")).toBe("—");
+  });
+});
+
 describe("formatTokenCount", () => {
   it("renders sub-1k counts verbatim", () => {
     expect(formatTokenCount(0)).toBe("0");

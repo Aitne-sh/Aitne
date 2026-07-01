@@ -15,6 +15,7 @@ import {
   AgentTimeoutError,
   extractClaudeCodeQuotaResetHint,
   isClaudeCodeMaxBudgetError,
+  isClaudeCodeMaxTurnsError,
   isClaudeCodeQuotaError,
 } from "./claude-errors.js";
 
@@ -102,6 +103,50 @@ describe("isClaudeCodeMaxBudgetError", () => {
   it("returns false for unrelated errors", () => {
     expect(isClaudeCodeMaxBudgetError(new Error("rate limited"))).toBe(false);
     expect(isClaudeCodeMaxBudgetError(42)).toBe(false);
+  });
+});
+
+// FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.1 — safety-net matcher for the SDK
+// transport's wrapped turn-limit throw. The primary capture is the typed
+// `BackendDecisiveFailure("max_turns")` thrown from `consumeStream`; this
+// matcher only backs up `classifyExecutionError` when the terminal result
+// message was never observed.
+describe("isClaudeCodeMaxTurnsError", () => {
+  it("matches the SDK transport's wrapped turn-limit message", () => {
+    expect(
+      isClaudeCodeMaxTurnsError(
+        new Error(
+          "Claude Code returned an error result: Reached maximum number of turns (10)",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("matches 'max turns' shorthand and the error_max_turns subtype spelling", () => {
+    expect(isClaudeCodeMaxTurnsError(new Error("hit max turns"))).toBe(true);
+    expect(isClaudeCodeMaxTurnsError(new Error("session ended: error_max_turns"))).toBe(true);
+    expect(
+      isClaudeCodeMaxTurnsError(Object.assign(new Error(""), { type: "error_max_turns" })),
+    ).toBe(true);
+  });
+
+  it("handles non-Error inputs (string fallback)", () => {
+    expect(isClaudeCodeMaxTurnsError("Reached maximum number of turns (20)")).toBe(true);
+  });
+
+  it("does not match budget or quota phrasing", () => {
+    expect(isClaudeCodeMaxTurnsError(new Error("max budget exceeded"))).toBe(false);
+    expect(isClaudeCodeMaxTurnsError(new Error("max_budget_usd hit"))).toBe(false);
+    expect(isClaudeCodeMaxTurnsError(new Error("rate limit reached"))).toBe(false);
+  });
+
+  it("returns false for unrelated errors and non-string inputs", () => {
+    expect(isClaudeCodeMaxTurnsError(new Error("ECONNREFUSED"))).toBe(false);
+    expect(isClaudeCodeMaxTurnsError(null)).toBe(false);
+    expect(isClaudeCodeMaxTurnsError(42)).toBe(false);
+    expect(
+      isClaudeCodeMaxTurnsError(Object.assign(new Error(""), { type: [] })),
+    ).toBe(false);
   });
 });
 

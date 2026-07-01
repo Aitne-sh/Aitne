@@ -1,12 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { assembleInventory } from "./inventory.js";
-import type {
-  InventorySources,
-  PendingOneOff,
-  ResearchClusterSummary,
-} from "./inventory.js";
+import type { InventorySources, PendingOneOff } from "./inventory.js";
 import type { RecurringScheduleDTO } from "../../db/recurring-schedules.js";
 import type { AgentDTO } from "../../db/agents-store.js";
+import type { AgentExecutionDTO } from "../../db/agent-executions-store.js";
+import type { AutomationTriggerDTO } from "../../db/automation-triggers.js";
 import type { ManagedTask } from "@aitne/shared";
 import type { BackgroundTaskRow } from "../../db/background-task-store.js";
 import type { BrowserTaskRow } from "../../db/browser-task-store.js";
@@ -88,20 +86,45 @@ function bx(over: Partial<BrowserTaskRow>): BrowserTaskRow {
   } as unknown as BrowserTaskRow;
 }
 
-function cluster(over: Partial<ResearchClusterSummary>): ResearchClusterSummary {
-  return { slug: "flights-jun", displayName: "Flight-price research", status: "active", lastActivityAt: null, ...over };
+function trg(over: Partial<AutomationTriggerDTO>): AutomationTriggerDTO {
+  return {
+    id: 9,
+    domain: "git",
+    eventType: "cron.daily",
+    prompt: "Sweep stale branches across active repos",
+    enabled: true,
+    recurringScheduleId: 51,
+    nextRunAt: "2026-07-02 09:00:00",
+    lastRunStartedAt: "2026-07-01 09:00:00",
+    lastRunResult: "success",
+    ...over,
+  } as unknown as AutomationTriggerDTO;
+}
+
+function exec(over: Partial<AgentExecutionDTO>): AgentExecutionDTO {
+  return {
+    id: 1,
+    agentId: "weekly-digest",
+    result: "success",
+    outputSummary: "3 repos swept",
+    startedAt: 1751200000000,
+    endedAt: 1751200060000,
+    ...over,
+  } as unknown as AgentExecutionDTO;
 }
 
 function emptySources(over: Partial<InventorySources>): InventorySources {
   return {
     recurringDmSessions: [],
     agents: [],
+    lastExecutionByAgent: new Map(),
+    inFlightAgentSlugs: new Set(),
+    automationTriggers: [],
     managedTasks: [],
     recurringById: new Map(),
     pendingOneOffs: [],
     backgroundTasks: [],
     browserTasks: [],
-    researchClusters: [],
     ...over,
   };
 }
@@ -132,6 +155,33 @@ describe("assembleInventory — dm", () => {
     expect(item.status).toBe("paused");
     expect(item.origin).toBe("user");
   });
+
+  it("drops a dm_session already owned by an Agent (no double-listing)", () => {
+    // An auto-imported `imported-<id>` Agent references the same dm_session row.
+    // The board must surface it once, via the Agent (canonical owner), not twice.
+    const items = assembleInventory(
+      emptySources({
+        recurringDmSessions: [rs({ id: 2, description: "Evening daily summary" })],
+        agents: [agent({ slug: "imported-2", recurringScheduleId: 2 })],
+        recurringById: new Map([[2, rs({ id: 2, recurrenceLabel: "Daily at 19:00" })]]),
+      }),
+    );
+    expect(items.map((i) => i.ref)).toEqual(["agent:imported-2"]);
+    expect(items.filter((i) => i.kind === "dm")).toHaveLength(0);
+    expect(items[0].cadence).toBe("Daily at 19:00");
+  });
+
+  it("keeps an orphan dm_session that no Agent references", () => {
+    const items = assembleInventory(
+      emptySources({
+        recurringDmSessions: [rs({ id: 2 }), rs({ id: 9 })],
+        // An Agent referencing a *different* schedule must not shadow rs:2/rs:9.
+        agents: [agent({ slug: "weekly-digest", recurringScheduleId: 77 })],
+        recurringById: new Map([[77, rs({ id: 77, taskType: "agent.task" })]]),
+      }),
+    );
+    expect(items.filter((i) => i.kind === "dm").map((i) => i.ref)).toEqual(["rs:2", "rs:9"]);
+  });
 });
 
 describe("assembleInventory — agent", () => {
@@ -160,6 +210,30 @@ describe("assembleInventory — agent", () => {
     expect(disabled[0].status).toBe("paused");
   });
 
+  it("shows paused when the paired row is disabled, even if the Agent flag is on", () => {
+    // The scheduler fires from the paired row's `enabled`; an enabled Agent
+    // whose satellite row is paused does not run. With the satellite hidden by
+    // the dedup, the Agent item is the only surface left — it must not claim
+    // "active" for a schedule that never fires.
+    const [item] = assembleInventory(
+      emptySources({
+        agents: [agent({ enabled: true, recurringScheduleId: 51 })],
+        recurringById: new Map([[51, rs({ id: 51, taskType: "agent.task", enabled: false })]]),
+      }),
+    );
+    expect(item.status).toBe("paused");
+  });
+
+  it("stays active when both the Agent and its paired row are enabled", () => {
+    const [item] = assembleInventory(
+      emptySources({
+        agents: [agent({ enabled: true, recurringScheduleId: 51 })],
+        recurringById: new Map([[51, rs({ id: 51, taskType: "agent.task", enabled: true })]]),
+      }),
+    );
+    expect(item.status).toBe("active");
+  });
+
   it("tags built-in agents origin:system and user agents origin:user", () => {
     const items = assembleInventory(
       emptySources({
@@ -172,6 +246,92 @@ describe("assembleInventory — agent", () => {
     const byRef = Object.fromEntries(items.map((i) => [i.ref, i]));
     expect(byRef["agent:morning-routine"].origin).toBe("system");
     expect(byRef["agent:weekly-digest"].origin).toBe("user");
+  });
+
+  it("shows running while an execution is in flight — even mid-disable", () => {
+    // A run already in motion is the truth of "what is happening now";
+    // it outranks the enabled flags (but never the invalid flag).
+    const [running] = assembleInventory(
+      emptySources({
+        agents: [agent({ enabled: false })],
+        inFlightAgentSlugs: new Set(["weekly-digest"]),
+      }),
+    );
+    expect(running.status).toBe("running");
+    const [invalid] = assembleInventory(
+      emptySources({
+        agents: [agent({ invalid: true })],
+        inFlightAgentSlugs: new Set(["weekly-digest"]),
+      }),
+    );
+    expect(invalid.status).toBe("invalid");
+  });
+
+  it("projects the last execution's summary + end time (data /api/agents always had)", () => {
+    const [item] = assembleInventory(
+      emptySources({
+        agents: [agent({})],
+        lastExecutionByAgent: new Map([["weekly-digest", exec({})]]),
+      }),
+    );
+    expect(item.lastResult).toBe("3 repos swept");
+    expect(item.lastRunAt).toBe(new Date(1751200060000).toISOString());
+  });
+
+  it("falls back to the result word without a summary, and start time without an end", () => {
+    const [item] = assembleInventory(
+      emptySources({
+        agents: [agent({})],
+        lastExecutionByAgent: new Map([
+          ["weekly-digest", exec({ outputSummary: null, result: "error", endedAt: null })],
+        ]),
+      }),
+    );
+    expect(item.lastResult).toBe("error");
+    expect(item.lastRunAt).toBe(new Date(1751200000000).toISOString());
+  });
+});
+
+describe("assembleInventory — trigger", () => {
+  it("projects an automation trigger through its paired schedule", () => {
+    const [item] = assembleInventory(
+      emptySources({
+        automationTriggers: [trg({})],
+        recurringById: new Map([
+          [51, rs({ id: 51, taskType: "agent.task", recurrenceLabel: "daily 09:00" })],
+        ]),
+      }),
+    );
+    expect(item).toMatchObject({
+      ref: "trigger:9",
+      kind: "trigger",
+      status: "active",
+      cadence: "daily 09:00",
+      fulfilledBy: "rs:51",
+      origin: "user",
+      lastResult: "success",
+      lastRunAt: "2026-07-01 09:00:00",
+      nextRunAt: "2026-07-02 09:00:00",
+    });
+    expect(item.title).toBe("Sweep stale branches across active repos");
+  });
+
+  it("paused when disabled; self-fulfilled with a title fallback when the schedule ref was severed", () => {
+    const [item] = assembleInventory(
+      emptySources({
+        automationTriggers: [
+          trg({ enabled: false, recurringScheduleId: null, prompt: "", nextRunAt: null }),
+        ],
+      }),
+    );
+    expect(item).toMatchObject({
+      ref: "trigger:9",
+      status: "paused",
+      cadence: null,
+      fulfilledBy: "trigger:9",
+      nextRunAt: null,
+    });
+    expect(item.title).toBe("git automation");
   });
 });
 
@@ -238,6 +398,24 @@ describe("assembleInventory — reminder", () => {
     );
     expect(fromPrompt[0].title).toBe("ping me");
   });
+
+  it("honours an explicit ctx.origin (deferred background/browser one-offs carry one)", () => {
+    const explicit = assembleInventory(
+      emptySources({
+        pendingOneOffs: [
+          { ...base, taskType: "background_task", taskContext: { origin: "user", preGeneratedTaskId: "x" } },
+        ],
+      }),
+    );
+    expect(explicit[0].origin).toBe("user");
+    // A bogus value falls back to the sub_flow heuristic, not a crash.
+    const bogus = assembleInventory(
+      emptySources({
+        pendingOneOffs: [{ ...base, taskContext: { origin: "martian", sub_flow: "confirm" } }],
+      }),
+    );
+    expect(bogus[0].origin).toBe("agent");
+  });
 });
 
 describe("assembleInventory — fulfillers", () => {
@@ -262,11 +440,16 @@ describe("assembleInventory — fulfillers", () => {
     expect(item.title.length).toBeLessThanOrEqual(101);
   });
 
-  it("projects research clusters; string + null lastActivityAt pass through", () => {
-    const withStr = assembleInventory(emptySources({ researchClusters: [cluster({ lastActivityAt: "2026-06-29T00:00:00Z" })] }));
-    expect(withStr[0]).toMatchObject({ ref: "cluster:flights-jun", kind: "research", cadence: "nightly", status: "active", lastRunAt: "2026-06-29T00:00:00Z" });
-    const withNull = assembleInventory(emptySources({ researchClusters: [cluster({ lastActivityAt: null })] }));
-    expect(withNull[0].lastRunAt).toBeNull();
+  it("reads the recorded origin off the row, defaulting legacy rows to agent", () => {
+    const items = assembleInventory(
+      emptySources({
+        backgroundTasks: [bg({ origin: "user" })],
+        // Pre-migration row shape without the column → historical assumption.
+        browserTasks: [bx({})],
+      }),
+    );
+    expect(items.find((i) => i.kind === "background")?.origin).toBe("user");
+    expect(items.find((i) => i.kind === "browser")?.origin).toBe("agent");
   });
 });
 
@@ -276,9 +459,17 @@ describe("assembleInventory — ordering", () => {
       emptySources({
         recurringDmSessions: [rs({ id: 42 }), rs({ id: 7 })],
         agents: [agent({ slug: "z" }), agent({ slug: "a" })],
-        researchClusters: [cluster({ slug: "c" })],
+        automationTriggers: [trg({ id: 9, recurringScheduleId: null })],
+        browserTasks: [bx({ id: "c" })],
       }),
     );
-    expect(items.map((i) => i.ref)).toEqual(["rs:7", "rs:42", "agent:a", "agent:z", "cluster:c"]);
+    expect(items.map((i) => i.ref)).toEqual([
+      "rs:7",
+      "rs:42",
+      "agent:a",
+      "agent:z",
+      "trigger:9",
+      "bx:c",
+    ]);
   });
 });

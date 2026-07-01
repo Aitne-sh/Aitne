@@ -48,6 +48,9 @@ const taskContextSchema = z.object({
   tier: z.enum(["lite", "medium", "high"]).nullable().optional(),
   maxBudgetUsd: z.number().positive().max(15).nullable().optional(),
   originatingChannel: z.string().nullable().optional(),
+  // Provenance threaded from the deferring POST (migration 0022); absent on
+  // rows scheduled before the column existed → the store defaults 'agent'.
+  origin: z.enum(["user", "agent", "system"]).optional(),
 });
 
 export type ScheduledBackgroundTaskOutcome =
@@ -102,6 +105,7 @@ export async function handleScheduledBackgroundTask(
     scheduleRowId: event.scheduleId,
     tier: ctx.tier ?? null,
     maxBudgetUsd: ctx.maxBudgetUsd ?? null,
+    origin: ctx.origin,
     createdAt: now(),
   });
 

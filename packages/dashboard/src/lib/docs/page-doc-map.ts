@@ -28,7 +28,10 @@ export const PAGE_DOC_MAP: ReadonlyArray<PageDocMapEntry> = [
   { match: { path: "/chat" },                                       docId: "features/messaging/dashboard-chat" },
   { match: { path: /^\/activity/ },                                 docId: "features/operations/activity-and-conversations" },
   { match: { path: /^\/conversations(\/|$)/ },                      docId: "features/operations/activity-and-conversations" },
-  { match: { path: "/schedule" },                                   docId: "features/memory-files/schedule" },
+  // /schedule redirect()s to /tasks?tab=queue (DASHBOARD_AUTOMATION_IA_REDESIGN
+  // §2) and never renders, so it must not appear here; the Tasks hub (board +
+  // queue + scheduled DMs) reuses the schedule doc until a dedicated one exists.
+  { match: { path: "/tasks" },                                      docId: "features/memory-files/schedule" },
   // Agents hub (AGENTS_HUB_REDESIGN_PLAN §4) — documented built-ins get
   // their routine doc; the catch-all regex covers the index, user Agents,
   // undocumented built-ins (monthly-review, sweeps, …) and /executions

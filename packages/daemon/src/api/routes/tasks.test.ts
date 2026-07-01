@@ -4,7 +4,9 @@ import { Hono } from "hono";
 import { applySchema } from "../../db/schema.js";
 import { createTasksRoutes } from "./tasks.js";
 import { createRecurringScheduleRoutes } from "./recurring-schedules.js";
+import { createTriggerRoutes } from "./triggers.js";
 import { createRecurringSchedule } from "../../db/recurring-schedules.js";
+import { createTrigger, getTrigger } from "../../db/automation-triggers.js";
 import type { ApiDependencies } from "../server.js";
 import type { AgentConfig } from "../../config.js";
 
@@ -44,6 +46,15 @@ function seedPendingOneOff(db: Database.Database): void {
      VALUES (?, 'dm_session', ?, 'pending')`,
   ).run("2026-06-30 15:00:00", "call dentist");
 }
+function seedTrigger(db: Database.Database): number {
+  return createTrigger(db, {
+    domain: "git",
+    eventType: "cron.daily",
+    prompt: "Sweep stale branches",
+    time: "09:00",
+    configTimezone: "Asia/Tokyo",
+  }).id;
+}
 
 describe("GET /tasks — inventory", () => {
   let db: Database.Database;
@@ -74,6 +85,19 @@ describe("GET /tasks — inventory", () => {
   it("returns an empty board when nothing is scheduled", async () => {
     const res = await board.request("/tasks");
     expect(await res.json()).toMatchObject({ items: [], total: 0 });
+  });
+
+  it("surfaces an automation trigger — recurring autonomous work that used to be invisible", async () => {
+    const triggerId = seedTrigger(db);
+    const res = await board.request("/tasks");
+    const body = (await res.json()) as {
+      items: { ref: string; kind: string; fulfilledBy: string; status: string }[];
+    };
+    const item = body.items.find((i) => i.ref === `trigger:${triggerId}`);
+    expect(item).toMatchObject({ kind: "trigger", status: "active" });
+    // Its paired recurring row is the fulfiller — and must NOT double-list.
+    expect(item?.fulfilledBy).toMatch(/^rs:\d+$/);
+    expect(body.items.filter((i) => i.kind === "dm")).toHaveLength(0);
   });
 });
 
@@ -182,6 +206,37 @@ describe("L1 facade — routes to the hardened owner", () => {
     });
     expect(res.status).toBe(422);
     expect(((await res.json()) as { error: string }).error).toBe("ref_not_editable");
+  });
+
+  it("PATCH/DELETE trigger:<id> round-trip through the real /api/triggers owner", async () => {
+    // Compose the REAL triggers owner so the round-trip proves the facade
+    // reaches its validation + paired-schedule cascade, not a reimplementation.
+    const deps = makeDeps(db);
+    const owner = new Hono();
+    owner.route("/api", createRecurringScheduleRoutes(deps));
+    owner.route("/api", createTriggerRoutes(deps));
+    const tasks = createTasksRoutes({ db, dispatch: (req) => owner.fetch(req) });
+    const triggerApp = new Hono();
+    triggerApp.route("/api", tasks);
+
+    const triggerId = seedTrigger(db);
+    const patch = await triggerApp.request(`/api/tasks/trigger:${triggerId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(patch.status).toBe(200);
+    expect((await patch.json()) as object).toMatchObject({
+      ok: true,
+      dispatchedTo: `/api/triggers/${triggerId}`,
+    });
+    expect(getTrigger(db, triggerId)?.enabled).toBe(false);
+
+    const del = await triggerApp.request(`/api/tasks/trigger:${triggerId}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    expect(getTrigger(db, triggerId)).toBeNull();
+    // The owner's cascade removed the paired recurring row too.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM recurring_schedules").get()).toMatchObject({ n: 0 });
   });
 
   it("400s on an unknown kind, a missing kind, or a malformed ref", async () => {

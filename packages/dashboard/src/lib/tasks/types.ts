@@ -8,10 +8,10 @@ export type TaskKind =
   | "dm"
   | "app_fetch"
   | "agent"
+  | "trigger"
   | "reminder"
   | "background"
-  | "browser"
-  | "research";
+  | "browser";
 
 export type TaskOrigin = "system" | "user" | "agent";
 

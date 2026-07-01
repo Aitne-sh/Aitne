@@ -13,16 +13,23 @@
  * Board "kind" — aligned 1:1 with the L1 facade `kind` vocabulary so the read
  * projection (L0) and the write facade (L1) speak the same words. `dm`,
  * `app_fetch`, `agent`, `reminder`, `background` are facade-writable; `browser`
- * and `research` are read-only fulfillers surfaced for visibility (§12 OQ#1).
+ * is a read-only fulfiller surfaced for visibility (§12 OQ#1). (Browser-history
+ * research clusters were dropped from the board — see `assembleInventory` — so
+ * `research` is no longer a board kind, though `cluster:` stays a valid ref
+ * prefix for `/tasks/impact`.) `trigger` is an automation-trigger rule
+ * (`automation_triggers`) — recurring autonomous work that previously fired with
+ * no board representation; it is create-owned by `/api/triggers` (Approve tier,
+ * dashboard-driven), so it is edit/delete-able by ref but has no facade create
+ * kind.
  */
 export type TaskKind =
   | "dm"
   | "app_fetch"
   | "agent"
+  | "trigger"
   | "reminder"
   | "background"
-  | "browser"
-  | "research";
+  | "browser";
 
 /** Who set the task in motion. Heuristic, best-effort, English-only (§9.30). */
 export type TaskOrigin = "system" | "user" | "agent";
@@ -32,7 +39,9 @@ export type TaskOrigin = "system" | "user" | "agent";
  * id is the literal `mt_<n>`; `obj` is RESERVED for `objective_task` (§5.5) —
  * the board recognises it in the grammar but does not yet resolve it. `bx`
  * extends the grammar for in-flight browser tasks (the design's prefix list
- * predates surfacing browser_task; see refs.ts).
+ * predates surfacing browser_task; see refs.ts). `trigger` promotes the
+ * blast-radius preview's former display-only `trigger:<id>` satellite label
+ * (audit C6) into a real parseable ref backed by `automation_triggers`.
  */
 export type TaskRefPrefix =
   | "rs"
@@ -42,6 +51,7 @@ export type TaskRefPrefix =
   | "cluster"
   | "bt"
   | "bx"
+  | "trigger"
   | "obj";
 
 /**

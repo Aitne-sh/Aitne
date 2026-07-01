@@ -70,6 +70,10 @@ const postBodySchema = z.object({
   originatingChannel: z.string().optional(),
   correlationId: z.string().optional(),
   scheduleAt: z.string().datetime({ offset: true }).optional(),
+  // Task Board provenance (migration 0022): 'user' = the user asked for
+  // this, 'agent' = autonomous spawn, 'system' = daemon-internal. The
+  // spawning agent declares it; omitted keeps the historical assumption.
+  origin: z.enum(["user", "agent", "system"]).optional().default("agent"),
 });
 
 const clarifyBodySchema = z.object({
@@ -100,6 +104,8 @@ function toWire(row: BackgroundTaskRow): Record<string, unknown> {
     scheduleRowId: row.scheduleRowId,
     tier: row.tier,
     maxBudgetUsd: row.maxBudgetUsd,
+    origin: row.origin,
+    costUsd: row.costUsd,
     createdAt: row.createdAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
@@ -190,6 +196,9 @@ export function createBackgroundTaskRoutes(deps: ApiDependencies): Hono {
         tier: input.tier ?? null,
         maxBudgetUsd: input.maxBudgetUsd ?? null,
         originatingChannel: resolvedChannel,
+        // Threaded to fire-time createBackgroundTask; the board's reminder
+        // lane also reads it while the one-off is pending.
+        origin: input.origin,
       };
       const correlationId = input.correlationId ?? randomUUID();
       const label = title ?? input.brief.slice(0, 200);
@@ -263,6 +272,7 @@ export function createBackgroundTaskRoutes(deps: ApiDependencies): Hono {
       scheduleRowId: null,
       tier: input.tier ?? null,
       maxBudgetUsd: input.maxBudgetUsd ?? null,
+      origin: input.origin,
       createdAt,
     });
     transitionEmitter.emitFromRow(row, createdAt);

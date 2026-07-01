@@ -1676,6 +1676,17 @@ CREATE TABLE IF NOT EXISTS browser_task (
     -- yield_for_clarification.
     extract_chars_total         INTEGER NOT NULL DEFAULT 0
         CHECK (extract_chars_total >= 0),
+    -- Who set the task in motion: 'user' (explicit user request), 'agent'
+    -- (autonomous DM-agent spawn — the historical assumption, kept as the
+    -- default), 'system' (daemon-internal). A display/provenance hint for the
+    -- Task Board, not a security boundary. Mirrors migration 0022.
+    origin                      TEXT NOT NULL DEFAULT 'agent'
+        CHECK (origin IN ('user', 'agent', 'system')),
+    -- Cumulative USD spend across every driver run of this task (a parked →
+    -- resumed task accrues per leg). NULL = no run recorded a cost yet.
+    -- The per-run ledger row lands in agent_actions; this is the task-level
+    -- rollup. Mirrors migration 0022.
+    cost_usd                    REAL,
     created_at                  INTEGER NOT NULL,
     started_at                  INTEGER,
     finished_at                 INTEGER,
@@ -1919,6 +1930,17 @@ CREATE TABLE IF NOT EXISTS background_task (
     -- Parked worker SDK session id (resume after /clarify). Captured from
     -- the init message; null until the first turn streams.
     backend_session_id  TEXT,
+    -- Who set the task in motion: 'user' (explicit user request), 'agent'
+    -- (autonomous DM-agent spawn — the historical assumption, kept as the
+    -- default), 'system' (daemon-internal). A display/provenance hint for
+    -- the Task Board, not a security boundary. Mirrors migration 0022.
+    origin              TEXT NOT NULL DEFAULT 'agent'
+        CHECK (origin IN ('user', 'agent', 'system')),
+    -- Cumulative USD spend across every driver run of this task (a parked →
+    -- resumed task accrues per leg). NULL = no run recorded a cost yet.
+    -- The per-run ledger row lands in agent_actions; this is the task-level
+    -- rollup. Mirrors migration 0022.
+    cost_usd            REAL,
     created_at          INTEGER NOT NULL,
     started_at          INTEGER,
     finished_at         INTEGER,
@@ -2477,12 +2499,16 @@ VALUES
     -- real morning fan-outs and tripped BackendQuotaError(max_budget_usd)
     -- mid-fetch, so this envelope is widened via the per-process
     -- override in plan-presets.ts (ENVELOPE_OVERRIDES_BY_PROCESS_KEY).
-    -- max_turns 20 → 10 (PREPASS_COST_REDUCTION_PLAN.md N4): with the
-    -- per-integration fan-out each session handles ONE partial; live
-    -- P99 over 502 runs is 8 turns. Lock-step with plan-presets.ts.
-    -- Seed-only change — existing installs keep their row (INSERT is
-    -- ignore-on-conflict) until they re-apply defaults.
-    ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 10,  0.50, 'preset'),
+    -- max_turns 10 → 20 (FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.3): the
+    -- N4 cut to 10 was sized from one install's tail whose measured
+    -- max=11 already exceeded the cap; other installs' turn demand sits
+    -- further right (item volume, Haiku thread-detail wandering,
+    -- ToolSearch schema loads) and the SDK's error_max_turns kill leaves
+    -- no final turn for the closing JSON line. The $0.50 budget stays
+    -- the stop-loss. Bumped for upgrading installs by migration 0021;
+    -- keep in lock-step with ENVELOPE_OVERRIDES_BY_PROCESS_KEY in
+    -- plan-presets.ts.
+    ('routine.fetch_window',    'claude', '${DEFAULT_CLAUDE_LITE_MODEL}', 20,  0.50, 'preset'),
     -- BROWSER_HISTORY_INTEGRATION_PLAN P3:
     --   research_cluster_update — nightly per-cluster journal append.
     --     Lite tier (Haiku-class) — a small curl flow against the

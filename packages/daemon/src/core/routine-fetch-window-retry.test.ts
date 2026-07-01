@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { SubAttemptRecord } from "./routine-fetch-window-runner.js";
 import {
+  PREPASS_TURN_ENVELOPE,
   RETRY_REASONS,
   buildPriorAttemptHintBlock,
+  computePrePassMaxTurns,
   cumulativeAttemptCost,
   defaultRetryDecision,
+  widenPrePassMaxTurns,
   type RetryPolicy,
 } from "./routine-fetch-window-retry.js";
 
@@ -272,6 +275,100 @@ describe("defaultRetryDecision — §4.4 decision matrix", () => {
     );
     expect(decision.retry).toBe(false);
     expect(decision.reason).toBe(RETRY_REASONS.DETERMINISTIC_FAILURE);
+  });
+
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.1 — a max-turns kill earns ONE
+  // retry under a widened envelope (the runner applies ×1.5 to maxTurns).
+  // The FIRST turn-limit therefore retries; a SECOND (a prior attempt
+  // already carried a turn-limit error → the widened envelope also
+  // overflowed) stops deterministically instead of throwing budget at a
+  // genuine runaway.
+  it("retries a FIRST turn-limit kill once with reason=turn-limit-widen", () => {
+    const decision = defaultRetryDecision(
+      attempt({
+        attempt: 1,
+        status: "failed",
+        errors: [
+          {
+            type: "pre-pass-failed",
+            kind: "turn-limit",
+            message:
+              'Backend "claude" failed without fallback: max_turns — Reached maximum number of turns (20)',
+          },
+        ],
+      }),
+      1,
+      BASE_POLICY,
+      [],
+    );
+    expect(decision.retry).toBe(true);
+    expect(decision.reason).toBe(RETRY_REASONS.TURN_LIMIT_WIDEN);
+  });
+
+  it("does NOT retry a SECOND turn-limit kill (widened envelope also overflowed)", () => {
+    const priorTurnLimit = attempt({
+      attempt: 1,
+      status: "failed",
+      errors: [{ type: "pre-pass-failed", kind: "turn-limit", message: "turns 20" }],
+    });
+    const decision = defaultRetryDecision(
+      attempt({
+        attempt: 2,
+        status: "failed",
+        errors: [
+          { type: "pre-pass-failed", kind: "turn-limit", message: "turns 30" },
+        ],
+      }),
+      2,
+      BASE_POLICY,
+      [priorTurnLimit],
+    );
+    expect(decision.retry).toBe(false);
+    expect(decision.reason).toBe(RETRY_REASONS.DETERMINISTIC_FAILURE);
+  });
+
+  it("still RETRIES a status=failed pre-pass error whose kind is not turn-limit", () => {
+    // Guard against over-matching: the generic agent-execute-failed path
+    // (transport crash, timeout, quota) keeps its FAILED_STATUS retry.
+    const decision = defaultRetryDecision(
+      attempt({
+        attempt: 1,
+        status: "failed",
+        errors: [
+          {
+            type: "pre-pass-failed",
+            kind: "agent-execute-failed",
+            message: "execute boom",
+          },
+        ],
+      }),
+      1,
+      BASE_POLICY,
+      [],
+    );
+    expect(decision.retry).toBe(true);
+    expect(decision.reason).toBe(RETRY_REASONS.FAILED_STATUS);
+  });
+
+  it("a turn-limit error co-present with a 5xx keeps the retry (5xx side may progress)", () => {
+    // Defensive contract test: the runner emits single-error records for
+    // execute throws, so this shape shouldn't occur in production — but
+    // the matrix is pure and the 5xx-wins rule must hold for any input.
+    const decision = defaultRetryDecision(
+      attempt({
+        attempt: 1,
+        status: "failed",
+        errors: [
+          { type: "pre-pass-failed", kind: "turn-limit", message: "max turns" },
+          { type: "fetch-failed", status: 503 },
+        ],
+      }),
+      1,
+      BASE_POLICY,
+      [],
+    );
+    expect(decision.retry).toBe(true);
+    expect(decision.reason).toBe(RETRY_REASONS.FAILED_STATUS);
   });
 
   it("RETRIES when deterministic error is paired with a 5xx (mixed report)", () => {
@@ -610,12 +707,37 @@ describe("buildPriorAttemptHintBlock", () => {
     expect(block).toContain('status="failed"');
   });
 
-  it("always carries the generic MVP hint prose pointing back at the partial", () => {
+  it("carries the generic argument-shape hint for non-turn-limit errors", () => {
     const block = buildPriorAttemptHintBlock(
       [attempt({ attempt: 1, errors: [{ type: "fetch-failed", status: 400 }] })],
       "gmail",
     );
     expect(block).toContain("partial is the source of truth");
+  });
+
+  it("swaps in the turn-compression hint for a turn-limit prior attempt (P2.1)", () => {
+    // The widened retry's success condition is "same work, fewer turns" —
+    // the argument-shape prose would misdirect it (plan §1 step 7).
+    const block = buildPriorAttemptHintBlock(
+      [
+        attempt({
+          attempt: 1,
+          status: "failed",
+          errors: [
+            {
+              type: "pre-pass-failed",
+              kind: "turn-limit",
+              message: "Claude Code stopped the session at the maximum number of turns (20)",
+            },
+          ],
+        }),
+      ],
+      "gmail",
+    );
+    expect(block).toContain("<pre_pass_failed ");
+    expect(block).toContain('kind="turn-limit"');
+    expect(block).toContain("ONE ToolSearch call");
+    expect(block).not.toContain("argument shape");
   });
 
   it("renders <unknown /> when err.type is not a string (defensive fallback)", () => {
@@ -649,5 +771,64 @@ describe("buildPriorAttemptHintBlock", () => {
     // No double-spaced separator (`<fetch_failed  />`) and no stray attr-like
     // residue (a wrong false-branch would leave ` ` from " " + "").
     expect(block).not.toMatch(/<fetch_failed\s\s+\/>/);
+  });
+});
+
+// ── Dynamic turn-envelope sizing (FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.1) ──
+
+describe("computePrePassMaxTurns", () => {
+  const { base, perRow, batchAllowance, ceiling } = PREPASS_TURN_ENVELOPE;
+
+  it("floors at the seed envelope for a small plan (formula < seed)", () => {
+    // base(8) + perRow(2)*0 + batchAllowance(4) = 12 < seed 20 → floored to 20.
+    expect(computePrePassMaxTurns(20, 0)).toBe(20);
+  });
+
+  it("scales above the seed with fetch-row count", () => {
+    // 8 + 2*6 + 4 = 24, within [20, 30].
+    expect(computePrePassMaxTurns(20, 6)).toBe(24);
+  });
+
+  it("caps at the ceiling for a high-row plan", () => {
+    // 8 + 2*20 + 4 = 52 → clamped to ceiling 30.
+    expect(computePrePassMaxTurns(20, 20)).toBe(ceiling);
+  });
+
+  it("honours an operator seed ABOVE the ceiling as both floor and ceiling", () => {
+    // Operator PUT maxTurns=40: the formula (12) can't trim below it, and the
+    // ceiling is raised to the seed so the override isn't clamped away.
+    expect(computePrePassMaxTurns(40, 0)).toBe(40);
+    expect(computePrePassMaxTurns(40, 100)).toBe(40);
+  });
+
+  it("treats a negative / fractional row count as zero rows", () => {
+    expect(computePrePassMaxTurns(20, -5)).toBe(20);
+    // 8 + 2*trunc(3.9)=6 + 4 = 18 < 20 → floored to 20.
+    expect(computePrePassMaxTurns(20, 3.9)).toBe(20);
+  });
+
+  it("uses the documented constants (guards accidental tuning drift)", () => {
+    expect({ base, perRow, batchAllowance, ceiling }).toEqual({
+      base: 8,
+      perRow: 2,
+      batchAllowance: 4,
+      ceiling: 30,
+    });
+  });
+});
+
+describe("widenPrePassMaxTurns", () => {
+  it("widens ×1.5 rounded up, bounded by 1.5× the effective ceiling", () => {
+    // 20 → ceil(30) = 30; cap = ceil(30*1.5)=45 → 30.
+    expect(widenPrePassMaxTurns(20, 20)).toBe(30);
+    // 24 → ceil(36) = 36.
+    expect(widenPrePassMaxTurns(24, 20)).toBe(36);
+    // 30 (ceiling) → ceil(45) = 45, at the cap.
+    expect(widenPrePassMaxTurns(30, 20)).toBe(45);
+  });
+
+  it("lets a raised operator seed govern the widen cap", () => {
+    // seed 40 → effective ceiling 40 → cap ceil(60)=60; 40 → ceil(60)=60.
+    expect(widenPrePassMaxTurns(40, 40)).toBe(60);
   });
 });

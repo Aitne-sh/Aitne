@@ -33,6 +33,9 @@ export const BROWSER_TASK_TERMINAL_STATES: ReadonlySet<BrowserTaskState> =
 export const BROWSER_TASK_NON_TERMINAL_STATES: ReadonlySet<BrowserTaskState> =
   new Set(["pending", "running", "awaiting_user", "final_confirm"]);
 
+/** Who set the task in motion — a Task Board provenance hint (migration 0022). */
+export type BrowserTaskOrigin = "user" | "agent" | "system";
+
 export interface BrowserTaskRow {
   id: string;
   description: string;
@@ -47,6 +50,9 @@ export interface BrowserTaskRow {
   effectiveAllowlistRegex: string | null;
   blockedRequestsCount: number;
   extractCharsTotal: number;
+  origin: BrowserTaskOrigin;
+  /** Cumulative USD spend across every driver leg; null = none recorded. */
+  costUsd: number | null;
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -67,6 +73,8 @@ interface BrowserTaskDbRow {
   effective_allowlist_regex: string | null;
   blocked_requests_count: number;
   extract_chars_total: number;
+  origin: BrowserTaskOrigin;
+  cost_usd: number | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
@@ -99,6 +107,8 @@ function fromDbRow(row: BrowserTaskDbRow): BrowserTaskRow {
     effectiveAllowlistRegex: row.effective_allowlist_regex,
     blockedRequestsCount: row.blocked_requests_count,
     extractCharsTotal: row.extract_chars_total,
+    origin: row.origin,
+    costUsd: row.cost_usd,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -115,6 +125,8 @@ export interface CreateBrowserTaskInput {
   scheduleRowId: number | null;
   requireFinalConfirm: boolean;
   effectiveAllowlistRegex: string | null;
+  /** Provenance hint; omitted ⇒ 'agent' (the historical assumption). */
+  origin?: BrowserTaskOrigin;
   createdAt: number;
 }
 
@@ -129,9 +141,9 @@ export function createBrowserTask(
        (id, description, site_key, extra_allowed_hosts_json,
         originating_channel, schedule_row_id, require_final_confirm,
         state, outcome_detail, report, effective_allowlist_regex,
-        blocked_requests_count, extract_chars_total,
+        blocked_requests_count, extract_chars_total, origin,
         created_at, started_at, finished_at, delivered_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, 0, 0, ?, NULL, NULL, NULL)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, ?, 0, 0, ?, ?, NULL, NULL, NULL)`,
   ).run(
     input.id,
     input.description,
@@ -141,6 +153,7 @@ export function createBrowserTask(
     input.scheduleRowId,
     input.requireFinalConfirm ? 1 : 0,
     input.effectiveAllowlistRegex,
+    input.origin ?? "agent",
     input.createdAt,
   );
   const row = getBrowserTask(db, input.id);
@@ -159,7 +172,7 @@ export function getBrowserTask(
       `SELECT id, description, site_key, extra_allowed_hosts_json,
               originating_channel, schedule_row_id, require_final_confirm,
               state, outcome_detail, report, effective_allowlist_regex,
-              blocked_requests_count, extract_chars_total,
+              blocked_requests_count, extract_chars_total, origin, cost_usd,
               created_at, started_at, finished_at, delivered_at
          FROM browser_task
         WHERE id = ?`,
@@ -197,7 +210,7 @@ export function listBrowserTasks(
   const sql = `SELECT id, description, site_key, extra_allowed_hosts_json,
                       originating_channel, schedule_row_id, require_final_confirm,
                       state, outcome_detail, report, effective_allowlist_regex,
-                      blocked_requests_count, extract_chars_total,
+                      blocked_requests_count, extract_chars_total, origin, cost_usd,
                       created_at, started_at, finished_at, delivered_at
                  FROM browser_task
                ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
@@ -358,7 +371,7 @@ export function listUndeliveredBrowserTaskReports(
       `SELECT id, description, site_key, extra_allowed_hosts_json,
               originating_channel, schedule_row_id, require_final_confirm,
               state, outcome_detail, report, effective_allowlist_regex,
-              blocked_requests_count, extract_chars_total,
+              blocked_requests_count, extract_chars_total, origin, cost_usd,
               created_at, started_at, finished_at, delivered_at
          FROM browser_task
         WHERE state = 'completed'
@@ -369,6 +382,22 @@ export function listUndeliveredBrowserTaskReports(
     )
     .all(limit);
   return rows.map(fromDbRow);
+}
+
+/** Accumulate one driver leg's USD spend onto the task's rollup (migration
+ *  0022). A parked → resumed task calls this once per leg; no-op for a
+ *  zero/negative delta so a costless bail never fabricates a 0 rollup. */
+export function addBrowserTaskCost(
+  db: Database.Database,
+  id: string,
+  deltaUsd: number,
+): void {
+  if (!(deltaUsd > 0)) return;
+  db.prepare(
+    `UPDATE browser_task
+        SET cost_usd = COALESCE(cost_usd, 0) + ?
+      WHERE id = ?`,
+  ).run(deltaUsd, id);
 }
 
 /** Increment the per-task CDP-blocked counter. Atomic. */

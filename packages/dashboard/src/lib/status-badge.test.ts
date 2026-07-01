@@ -34,6 +34,12 @@ describe("statusBadgeVariant", () => {
     expect(statusBadgeVariant("skipped")).toBe("gray");
   });
 
+  it("colors the Task-board enablement states (active=green, paused=gray, invalid=red)", () => {
+    expect(statusBadgeVariant("active")).toBe("green");
+    expect(statusBadgeVariant("paused")).toBe("gray");
+    expect(statusBadgeVariant("invalid")).toBe("red");
+  });
+
   it("falls back to gray for unknown statuses", () => {
     expect(statusBadgeVariant("definitely-not-a-status")).toBe("gray");
   });

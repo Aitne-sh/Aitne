@@ -9,7 +9,6 @@ import {
   MessageSquare,
   History,
   BarChart3,
-  Clock,
   Bot,
   ListChecks,
   Brain,
@@ -222,10 +221,10 @@ export function AppSidebar() {
       label: "Automation",
       items: [
         { label: "Agents", href: "/agents", icon: Bot },
-        // Unified Task Board — read-only overview of everything in motion
-        // (docs/design/appendices/unified-task-board.md).
+        // Tasks is the operations hub: the Unified Task Board inventory plus
+        // the run queue and scheduled-DM rules that used to live on the
+        // retired /schedule page (DASHBOARD_AUTOMATION_IA_REDESIGN.md).
         { label: "Tasks", href: "/tasks", icon: ListChecks },
-        { label: "Schedule", href: "/schedule", icon: Clock },
         {
           // /browser hub fronts every browser surface (history integration,
           // managed Chromium, B-4, task list) — BROWSER_HUB_CONSOLIDATION_DESIGN.md.

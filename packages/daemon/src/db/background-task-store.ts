@@ -39,6 +39,9 @@ export type BackgroundTaskNotificationPolicy =
 
 export type BackgroundTaskTier = "lite" | "medium" | "high";
 
+/** Who set the task in motion — a Task Board provenance hint (migration 0022). */
+export type BackgroundTaskOrigin = "user" | "agent" | "system";
+
 export const BACKGROUND_TASK_NON_TERMINAL_STATES: ReadonlySet<BackgroundTaskState> =
   new Set(["pending", "running", "awaiting_user"]);
 
@@ -65,6 +68,9 @@ export interface BackgroundTaskRow {
   tier: BackgroundTaskTier | null;
   maxBudgetUsd: number | null;
   backendSessionId: string | null;
+  origin: BackgroundTaskOrigin;
+  /** Cumulative USD spend across every driver leg; null = none recorded. */
+  costUsd: number | null;
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
@@ -90,6 +96,8 @@ interface BackgroundTaskDbRow {
   tier: BackgroundTaskTier | null;
   max_budget_usd: number | null;
   backend_session_id: string | null;
+  origin: BackgroundTaskOrigin;
+  cost_usd: number | null;
   created_at: number;
   started_at: number | null;
   finished_at: number | null;
@@ -100,6 +108,7 @@ const SELECT_COLUMNS = `id, brief, title, state, notification_policy,
         significance_criteria, report, draft, notify, significance,
         artifact_path, outcome_detail, originating_channel, correlation_id,
         schedule_row_id, tier, max_budget_usd, backend_session_id,
+        origin, cost_usd,
         created_at, started_at, finished_at, delivered_at`;
 
 /** Parse the persisted `significance_criteria` JSON. Tolerant: a malformed
@@ -137,6 +146,8 @@ function fromDbRow(row: BackgroundTaskDbRow): BackgroundTaskRow {
     tier: row.tier,
     maxBudgetUsd: row.max_budget_usd,
     backendSessionId: row.backend_session_id,
+    origin: row.origin,
+    costUsd: row.cost_usd,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
@@ -157,6 +168,8 @@ export interface CreateBackgroundTaskInput {
   scheduleRowId: number | null;
   tier: BackgroundTaskTier | null;
   maxBudgetUsd: number | null;
+  /** Provenance hint; omitted ⇒ 'agent' (the historical assumption). */
+  origin?: BackgroundTaskOrigin;
   createdAt: number;
 }
 
@@ -175,12 +188,12 @@ export function createBackgroundTask(
        (id, brief, title, state, notification_policy, significance_criteria,
         report, draft, notify, significance, artifact_path,
         outcome_detail, originating_channel, correlation_id, schedule_row_id,
-        tier, max_budget_usd, backend_session_id,
+        tier, max_budget_usd, backend_session_id, origin,
         created_at, started_at, finished_at, delivered_at)
      VALUES (?, ?, ?, 'pending', ?, ?,
              NULL, NULL, NULL, NULL, NULL,
              NULL, ?, ?, ?,
-             ?, ?, NULL,
+             ?, ?, NULL, ?,
              ?, NULL, NULL, NULL)`,
   ).run(
     input.id,
@@ -193,6 +206,7 @@ export function createBackgroundTask(
     input.scheduleRowId,
     input.tier,
     input.maxBudgetUsd,
+    input.origin ?? "agent",
     input.createdAt,
   );
   const row = getBackgroundTask(db, input.id);
@@ -410,6 +424,22 @@ export function markTerminal(
       input.id,
     );
   return result.changes > 0 ? getBackgroundTask(db, input.id) : null;
+}
+
+/** Accumulate one driver leg's USD spend onto the task's rollup (migration
+ *  0022). A parked → resumed task calls this once per leg; no-op for a
+ *  zero/negative delta so a costless bail never fabricates a 0 rollup. */
+export function addBackgroundTaskCost(
+  db: Database.Database,
+  id: string,
+  deltaUsd: number,
+): void {
+  if (!(deltaUsd > 0)) return;
+  db.prepare(
+    `UPDATE background_task
+        SET cost_usd = COALESCE(cost_usd, 0) + ?
+      WHERE id = ?`,
+  ).run(deltaUsd, id);
 }
 
 /** Capture the SDK session id once the first turn streams it, so a

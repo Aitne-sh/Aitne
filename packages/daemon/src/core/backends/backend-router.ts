@@ -30,6 +30,7 @@ import {
   type StagedAttachment,
   type StreamCallbacks,
 } from "../agent-core.js";
+import type { PrePassObservationsSink } from "../../services/mcp/sdk-observations-server.js";
 import {
   DEFAULT_CLAUDE_HIGH_MODEL,
   DEFAULT_CLAUDE_LITE_MODEL,
@@ -218,6 +219,14 @@ export interface RouterExecuteParams {
   extraSkills?: readonly string[];
   /** AGENT_DEFINITIONS_DESIGN.md §4.2 — see `AgentExecuteParams.skillsReplace`. */
   skillsReplace?: boolean;
+  /**
+   * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — see
+   * `AgentExecuteParams.observationsSink`. Forwarded verbatim on both the
+   * main and fallback execute paths so the pre-pass tally ledger keeps
+   * counting across a Claude → fallback swap (fetch_window ships without a
+   * fallback today, so this is defensive symmetry, matching
+   * `allowedToolsOverride`). */
+  observationsSink?: PrePassObservationsSink;
 }
 
 export interface RouterResumeParams {
@@ -423,6 +432,9 @@ export class BackendRouter implements IAgentRouter {
             ? { extraSkills: params.extraSkills }
             : {}),
           ...(params.skillsReplace ? { skillsReplace: true } : {}),
+          ...(params.observationsSink
+            ? { observationsSink: params.observationsSink }
+            : {}),
         },
         streamCallbacks,
       );
@@ -682,6 +694,9 @@ export class BackendRouter implements IAgentRouter {
             ? { extraSkills: params.extraSkills }
             : {}),
           ...(params.skillsReplace ? { skillsReplace: true } : {}),
+          ...(params.observationsSink
+            ? { observationsSink: params.observationsSink }
+            : {}),
         },
         streamCallbacks,
       );
@@ -1697,6 +1712,9 @@ export class BackendRouter implements IAgentRouter {
     failure: BackendFailure,
   ): Promise<void> {
     await this.maybeSendUserFacingFailure(event, processKey, failure);
+    if (!this.shouldDmBackendFailure(failure)) {
+      return;
+    }
     await this.notifyConfiguredChannel(
       this.buildNoFallbackMessage(processKey, main, failure),
       event,
@@ -1714,6 +1732,9 @@ export class BackendRouter implements IAgentRouter {
     fallbackFailure: BackendFailure,
   ): Promise<void> {
     await this.maybeSendUserFacingFailure(event, processKey, fallbackFailure);
+    if (!this.shouldDmBackendFailure(fallbackFailure)) {
+      return;
+    }
     await this.notifyConfiguredChannel(
       this.buildFallbackFailureMessage(
         processKey,
@@ -1735,6 +1756,9 @@ export class BackendRouter implements IAgentRouter {
     mainFailure: BackendFailure,
     fallback: ResolvedBackendBinding,
   ): Promise<void> {
+    if (!this.shouldDmBackendFailure(mainFailure)) {
+      return;
+    }
     await this.notifyConfiguredChannel(
       this.buildFallbackSuccessMessage(processKey, main, mainFailure, fallback),
       event,
@@ -1804,6 +1828,51 @@ export class BackendRouter implements IAgentRouter {
       return "quota";
     }
     return failure.kind;
+  }
+
+  /**
+   * Should a backend-failure operator diagnostic (no-fallback /
+   * fallback-failed / fallback-switched) be pushed to the owner's
+   * configured DM destination?
+   *
+   * Default OFF. These messages ("Backend execution failed: routine.X
+   * stopped due to …") are operator diagnostics, not user-facing content:
+   * every failure is already recorded in `agent_actions` and surfaced on
+   * the dashboard Activity → Events panel (filter result=failed), so the
+   * DM copy is pure duplication. They were invisible for months only
+   * because the sole configured destination happened to be undeliverable;
+   * the moment a real destination exists (e.g. the owner switches their
+   * messaging app) they flood the DM one-per-failure. The owner opts back
+   * in via `backendFailureDmAlerts`.
+   *
+   * Transient transport blips (DNS / connectivity — the dominant real
+   * cause) never DM even when opted in: they reflect a flaky network, not
+   * an actionable backend problem, and would otherwise re-alarm every time
+   * the machine sleeps or loses Wi-Fi. The interactive user-facing message
+   * (see `maybeSendUserFacingFailure`) is unaffected — a live DM/chat turn
+   * that fails still tells the user directly, regardless of this flag.
+   */
+  private shouldDmBackendFailure(failure: BackendFailure): boolean {
+    if (!this.config.backendFailureDmAlerts) {
+      return false;
+    }
+    return !this.isTransientTransportFailure(failure);
+  }
+
+  /**
+   * True when the failure is a transient network/transport blip rather
+   * than an actionable backend problem — DNS resolution failure, dropped
+   * connection, momentary auth handshake reset. These are inherently
+   * self-healing (the next scheduled run reconnects) and must not alarm.
+   */
+  private isTransientTransportFailure(failure: BackendFailure): boolean {
+    const message =
+      failure instanceof BackendDecisiveFailure && failure.cause instanceof Error
+        ? failure.cause.message
+        : failure.message;
+    return /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|Unable to connect to API|fetch failed|socket hang up|network (?:error|timeout)/i.test(
+      message,
+    );
   }
 
   private buildFallbackSuccessMessage(

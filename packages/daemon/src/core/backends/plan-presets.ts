@@ -273,14 +273,21 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // worst-case fan-out. Keep in lock-step with the corresponding
   // schema-seed row.
   //
-  // maxTurns 20 → 10 (PREPASS_COST_REDUCTION_PLAN.md N4, 2026-06-10):
-  // measured over 502 fetch_window runs on a live install, num_turns
-  // P50=3 / P95=6 / P99=8 / max=11 (avg 3.08). The per-integration
-  // fan-out means each session handles ONE partial, so the original
-  // "~6 partials × 3 tool calls" sizing no longer applies. 10 bounds
-  // budget-cap wander (a stuck session now stops at half the previous
-  // exploration depth) while clearing P99 with 2 turns of headroom.
-  "routine.fetch_window": { maxTurns: 10, maxBudgetUsd: 0.5 },
+  // maxTurns 10 → 20 (FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.3, 2026-07-01):
+  // the N4 cut to 10 was sized from ONE install's tail (P50=3 / P95=6 /
+  // P99=8 over 502 runs) whose measured max=11 already exceeded the cap.
+  // Turn demand is data-dependent — item volume (>200 items → multiple
+  // submit_observations batches), per-item thread-detail wandering on
+  // Haiku, pagination, ToolSearch schema loads — and a different install's
+  // distribution sits to the right of the reference one: production runs
+  // were killed by the SDK at `error_max_turns` with no final turn to emit
+  // the closing JSON, then retried 3× at full cost (~$0.57/tick wasted).
+  // N4's own rationale stands: turns bound WANDER, not cost —
+  // max_budget_usd $0.50 remains the stop-loss, and a wander session at
+  // ~$0.02/turn trips the budget cap long before 20 runaway turns matter.
+  // Bumped for upgrading installs by migration 0021; keep in lock-step
+  // with the schema-seed row.
+  "routine.fetch_window": { maxTurns: 20, maxBudgetUsd: 0.5 },
   // BROWSER_HISTORY_INTEGRATION_PLAN P3 — keep these in lock-step with
   // the schema seed rows (research_offer_dm has NO seed row — this
   // entry is its only default, materialized on main-backend switch or

@@ -6,6 +6,7 @@ describe("parseTaskRef", () => {
   it("parses colon-form refs with numeric ids", () => {
     expect(parseTaskRef("rs:42")).toEqual({ prefix: "rs", id: "42", raw: "rs:42" });
     expect(parseTaskRef("as:8190")).toEqual({ prefix: "as", id: "8190", raw: "as:8190" });
+    expect(parseTaskRef("trigger:9")).toEqual({ prefix: "trigger", id: "9", raw: "trigger:9" });
   });
 
   it("parses slug + uuid refs", () => {
@@ -48,6 +49,7 @@ describe("parseTaskRef", () => {
     expect(parseTaskRef(":42")).toBeNull(); // colon at position 0
     expect(parseTaskRef("bogus:1")).toBeNull(); // unknown prefix
     expect(parseTaskRef("rs:abc")).toBeNull(); // numeric prefix needs digits
+    expect(parseTaskRef("trigger:abc")).toBeNull(); // numeric prefix needs digits
     expect(parseTaskRef("agent:")).toBeNull(); // empty id
     expect(parseTaskRef("agent:a/b")).toBeNull(); // path separator
     expect(parseTaskRef("agent:..")).toBeNull(); // traversal
@@ -69,7 +71,7 @@ describe("formatTaskRef", () => {
   });
 
   it("round-trips with parseTaskRef", () => {
-    for (const raw of ["rs:1", "mt_9", "agent:x", "as:2", "cluster:c", "bt:u", "bx:v", "obj:o"]) {
+    for (const raw of ["rs:1", "mt_9", "agent:x", "as:2", "cluster:c", "bt:u", "bx:v", "trigger:9", "obj:o"]) {
       const parsed = parseTaskRef(raw) as TaskRef;
       expect(formatTaskRef(parsed.prefix, parsed.id)).toBe(parsed.raw);
     }
@@ -84,6 +86,7 @@ describe("ownerRouteForRef", () => {
     expect(ownerRouteForRef(parseTaskRef("as:8") as TaskRef)).toBe("/api/schedule/8");
     expect(ownerRouteForRef(parseTaskRef("bt:u") as TaskRef)).toBe("/api/background-task/u");
     expect(ownerRouteForRef(parseTaskRef("bx:v") as TaskRef)).toBe("/api/browser-task/v");
+    expect(ownerRouteForRef(parseTaskRef("trigger:9") as TaskRef)).toBe("/api/triggers/9");
   });
 
   it("returns null for read-only / reserved prefixes", () => {

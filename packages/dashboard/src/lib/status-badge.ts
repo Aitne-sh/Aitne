@@ -24,6 +24,11 @@ export type StatusBadgeVariant =
   | "pink";
 
 export const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
+  // Enablement lifecycle (Task board: agents / recurring DMs). active = on and
+  // healthy, paused = intentionally inert, invalid = broken definition.
+  active: "green",
+  paused: "gray",
+  invalid: "red",
   // Run lifecycle (schedule queue, browser tasks, git re-template runs)
   pending: "blue",
   started: "blue",

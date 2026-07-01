@@ -69,6 +69,9 @@ const taskContextSchema = z.object({
   extraAllowedHosts: z.array(z.string()).max(5).optional(),
   originatingChannel: z.string().nullable().optional(),
   requireFinalConfirm: z.boolean().optional(),
+  // Provenance threaded from the deferring POST (migration 0022); absent on
+  // rows scheduled before the column existed → the store defaults 'agent'.
+  origin: z.enum(["user", "agent", "system"]).optional(),
 });
 
 export type ScheduledBrowserTaskOutcome =
@@ -199,6 +202,7 @@ export async function handleScheduledBrowserTask(
         scheduleRowId: event.scheduleId,
         requireFinalConfirm: ctx.requireFinalConfirm ?? true,
         effectiveAllowlistRegex: null,
+        origin: ctx.origin,
         createdAt: now(),
       });
       markTerminal(deps.db, {
@@ -232,6 +236,7 @@ export async function handleScheduledBrowserTask(
       scheduleRowId: event.scheduleId,
       requireFinalConfirm: ctx.requireFinalConfirm ?? true,
       effectiveAllowlistRegex: null,
+      origin: ctx.origin,
       createdAt: now(),
     });
     markTerminal(deps.db, {
@@ -281,6 +286,7 @@ export async function handleScheduledBrowserTask(
     scheduleRowId: event.scheduleId,
     requireFinalConfirm: ctx.requireFinalConfirm ?? true,
     effectiveAllowlistRegex: allowlist.composedSource,
+    origin: ctx.origin,
     createdAt: now(),
   });
 

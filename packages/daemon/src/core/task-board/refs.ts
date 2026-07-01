@@ -22,11 +22,12 @@ const PREFIXES: ReadonlySet<TaskRefPrefix> = new Set([
   "cluster",
   "bt",
   "bx",
+  "trigger",
   "obj",
 ]);
 
 /** Prefixes whose id is a positive integer (a DB rowid). */
-const NUMERIC_ID_PREFIXES: ReadonlySet<TaskRefPrefix> = new Set(["rs", "as"]);
+const NUMERIC_ID_PREFIXES: ReadonlySet<TaskRefPrefix> = new Set(["rs", "as", "trigger"]);
 
 /**
  * Id shape per prefix. Numeric for rowid-backed rows; a path-safe token (no
@@ -90,7 +91,10 @@ export function formatTaskRef(prefix: TaskRefPrefix, id: string | number): strin
  * Base API route that owns each prefix. `null` ⇒ the prefix is read-only from
  * the board's perspective (no create/edit/delete owner the facade dispatches
  * to): research clusters are managed via their own status helper, and `obj` is
- * reserved until `objective_task` ships (§5.5).
+ * reserved until `objective_task` ships (§5.5). NB: research clusters are no
+ * longer *listed* on the board (an unbounded browsing-analytics artifact — see
+ * `assembleInventory`); `cluster:` stays in the grammar only so an explicit
+ * `/tasks/impact?ref=cluster:<slug>` still resolves.
  */
 const OWNER_BASE_PATH: Record<TaskRefPrefix, string | null> = {
   rs: "/api/recurring-schedules",
@@ -99,6 +103,7 @@ const OWNER_BASE_PATH: Record<TaskRefPrefix, string | null> = {
   as: "/api/schedule",
   bt: "/api/background-task",
   bx: "/api/browser-task",
+  trigger: "/api/triggers",
   cluster: null,
   obj: null,
 };

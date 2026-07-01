@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AlertCircle, CheckCircle2, Clock, KeyRound, Wifi, HelpCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, KeyRound, Wifi, HelpCircle, Gauge } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -37,6 +37,11 @@ const CATEGORY_META: Record<string, CategoryMeta> = {
     docId: "troubleshooting/auth-failed",
   },
   network: { label: "Network", icon: Wifi, badgeVariant: "amber" },
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — a max-turns kill is a policy
+  // stop, not an outage. Its own bucket keeps it out of "Other" (the pre-P1
+  // `other_non_retryable` symptom) so a recurring turn-limit shows as a
+  // countable, named class the operator can act on (raise the envelope).
+  turn_limit: { label: "Turn Limit", icon: Gauge, badgeVariant: "amber" },
   other: { label: "Other", icon: HelpCircle, badgeVariant: "gray" },
 };
 

@@ -130,6 +130,8 @@ Body:
   The eventual *result delivery* is what respects quiet hours, not the run.
   `202` with `{ taskId, status:"scheduled", scheduledFor, scheduleRowId }`.
   A time more than 60s in the past is rejected `400`.
+- `origin` — Task Board provenance: `"user"` when the user asked for this
+  work, `"agent"` (default) for your own initiative.
 
 Immediate response carries `taskId` and `status`. Then ack once and stop
 (Hard rule 2).

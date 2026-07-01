@@ -24,7 +24,12 @@ function agent(
   return { slug, recurringScheduleId, source } as unknown as AgentDTO;
 }
 function trigger(id: number, recurringScheduleId: number | null): AutomationTriggerDTO {
-  return { id, recurringScheduleId } as unknown as AutomationTriggerDTO;
+  return {
+    id,
+    recurringScheduleId,
+    domain: "git",
+    eventType: "cron.daily",
+  } as unknown as AutomationTriggerDTO;
 }
 
 function sources(over: Partial<ImpactSources>): ImpactSources {
@@ -145,6 +150,45 @@ describe("computeImpact — agent target", () => {
   });
 });
 
+describe("computeImpact — trigger target", () => {
+  it("removes the trigger and its paired schedule, counts unlinked fires", () => {
+    const result = computeImpact(
+      ref("trigger:9"),
+      sources({
+        automationTriggers: [trigger(9, 51)],
+        pendingOccurrences: [
+          { id: 1, recurringScheduleId: 51 },
+          { id: 2, recurringScheduleId: 99 },
+        ],
+      }),
+    );
+    expect(result.found).toBe(true);
+    const byRef = Object.fromEntries(result.nodes.map((n) => [n.ref, n]));
+    expect(byRef["trigger:9"]).toMatchObject({ cascade: "self", removed: true });
+    // The trigger delete is unconditional — unlike an Agent's, its paired
+    // schedule IS removed by the trigger-delete code path.
+    expect(byRef["rs:51"]).toMatchObject({ cascade: "owner_paired_schedule", removed: true });
+    expect(byRef["rs:51#pending"]).toMatchObject({ cascade: "no_action_unlinked", removed: false });
+    expect(result.summary).toContain("removes 2 row(s)");
+    expect(result.summary).toContain("touches 1");
+  });
+
+  it("omits the pending node when the paired schedule has no pending fires", () => {
+    const result = computeImpact(ref("trigger:9"), sources({ automationTriggers: [trigger(9, 51)] }));
+    expect(result.nodes.map((n) => n.ref)).toEqual(["trigger:9", "rs:51"]);
+  });
+
+  it("reports only the trigger row when its schedule reference was severed", () => {
+    const result = computeImpact(ref("trigger:9"), sources({ automationTriggers: [trigger(9, null)] }));
+    expect(result.nodes.map((n) => n.ref)).toEqual(["trigger:9"]);
+    expect(result.summary).toBe("Deleting trigger:9 removes 1 row(s).");
+  });
+
+  it("returns found:false for a missing trigger", () => {
+    expect(computeImpact(ref("trigger:404"), sources({})).found).toBe(false);
+  });
+});
+
 describe("computeImpact — one-off + fulfillers + reserved", () => {
   it("cancels a single pending reminder with no cascade", () => {
     const result = computeImpact(ref("as:8190"), sources({ pendingOccurrences: [{ id: 8190, recurringScheduleId: null }] }));
@@ -233,6 +277,7 @@ describe("computeImpact — reads only the sources IMPACT_SOURCE_KEYS declares",
     as: "as:8190",
     bt: "bt:u",
     bx: "bx:v",
+    trigger: "trigger:9",
     cluster: "cluster:c",
     obj: "obj:o1",
   };

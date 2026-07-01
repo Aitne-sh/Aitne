@@ -275,6 +275,32 @@ export interface PrePassMetricsSnapshot {
    * cross-backend cost number would not be actionable.
    */
   costUsdByBackend: PrePassPerBackendBucket[];
+  /**
+   * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — per-attempt histogram of
+   * `num_turns` across every `routine.fetch_window` attempt in the window.
+   * This is the surface that turns envelope sizing (the
+   * `process_backend_config` `max_turns` seed and the P2.1 dynamic
+   * `computePrePassMaxTurns` formula) from a one-install guess into a
+   * measured decision: `p95` / `max` state the real turn demand the envelope
+   * must cover. R1 was root-caused by a single install's tail (P50=3 / P95=6 /
+   * P99=8 / max=11) being extrapolated to the cap; this histogram lets an
+   * operator read their OWN distribution instead. Attempts whose row has a
+   * NULL `num_turns` (failure rows written before any spend was recovered)
+   * are dropped, mirroring the token-histogram null-drop rule.
+   */
+  numTurnsPerAttempt: HistogramSummary;
+  /**
+   * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the same `num_turns`
+   * distribution split by resolved backend. Turn demand is backend-shaped
+   * (the P2.1 `base` / `perRow` / `ceiling` constants are Haiku-calibrated;
+   * Codex / Gemini fetchers spend turns on different tool-call shapes), so a
+   * per-backend split is what an operator needs to size a NON-Claude envelope
+   * without diluting it with the Claude sample. Same NULL-drop rule as
+   * `numTurnsPerAttempt`; attempts with an unknown (`NULL`) backend are
+   * dropped from the per-backend view but still counted in the snapshot-level
+   * `numTurnsPerAttempt`.
+   */
+  numTurnsByBackend: PrePassPerBackendBucket[];
 }
 
 // ── Management-registry metrics (docs/design/21 §14.3, P8) ──
@@ -764,6 +790,7 @@ export class MetricsCollector {
       duration_ms: number | null;
       backend: string | null;
       detail: string | null;
+      num_turns: number | null;
       tokens_input: number | null;
       cache_creation_tokens: number | null;
       cache_read_tokens: number | null;
@@ -771,7 +798,7 @@ export class MetricsCollector {
     try {
       rows = this.db
         .prepare(
-          `SELECT cost_usd, duration_ms, backend, detail,
+          `SELECT cost_usd, duration_ms, backend, detail, num_turns,
                   tokens_input, cache_creation_tokens, cache_read_tokens
              FROM agent_actions
             WHERE action_type = 'routine.fetch_window'
@@ -795,6 +822,7 @@ export class MetricsCollector {
       fallbackTriggered: boolean;
       requestedBackend: string | null;
       actualBackend: string | null;
+      numTurns: number | null;
       tokensInput: number | null;
       cacheCreationTokens: number | null;
       cacheReadTokens: number | null;
@@ -831,6 +859,7 @@ export class MetricsCollector {
         fallbackTriggered: pp.fallbackTriggered === true,
         requestedBackend: typeof pp.requestedBackend === "string" ? pp.requestedBackend : null,
         actualBackend: row.backend,
+        numTurns: row.num_turns,
         tokensInput: row.tokens_input,
         cacheCreationTokens: row.cache_creation_tokens,
         cacheReadTokens: row.cache_read_tokens,
@@ -1385,6 +1414,22 @@ function categorizeError(error: string): string {
   if (lower.includes("network") || lower.includes("econnrefused") || lower.includes("enotfound") || lower.includes("fetch failed")) {
     return "network";
   }
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — a max-turns kill is a policy
+  // stop, not a backend fault. Give it its own bucket so the error feed stops
+  // lumping it under "Other" (the pre-P1 `other_non_retryable` symptom the
+  // operator saw as an opaque flood). Vocabulary mirrors
+  // `isClaudeCodeMaxTurnsError` (claude-errors.ts), the router's `max_turns`
+  // decisive-failure prefix, and the pre-pass fan-out's `turn-limit`
+  // failureKind — every path that can surface a turn-limit error string here.
+  if (
+    lower.includes("maximum number of turns")
+    || lower.includes("max_turns")
+    || lower.includes("error_max_turns")
+    || lower.includes("turn-limit")
+    || lower.includes("turn limit")
+  ) {
+    return "turn_limit";
+  }
   return "other";
 }
 
@@ -1477,6 +1522,14 @@ interface PrePassParsedAttempt {
    * the cache columns.
    */
   tokensInput: number | null;
+  /**
+   * Per-attempt `num_turns` from `agent_actions.num_turns`. Feeds the
+   * `numTurnsPerAttempt` (snapshot-level) and `numTurnsByBackend`
+   * (per-backend) histograms — the FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2
+   * observability surface for envelope sizing. `null` on failure rows the
+   * spend accumulator never populated; dropped from both histograms.
+   */
+  numTurns: number | null;
 }
 
 function emptyPrePassSnapshot(
@@ -1507,6 +1560,8 @@ function emptyPrePassSnapshot(
     cacheReadTokensPerAttempt: emptyHistogram,
     inputTokensByBackend: [],
     costUsdByBackend: [],
+    numTurnsPerAttempt: emptyHistogram,
+    numTurnsByBackend: [],
   };
 }
 
@@ -1737,6 +1792,12 @@ export function aggregatePrePassMetrics(
   // OpenCode, so input-tokens directly observe Phase 1.5's reduction.
   const inputTokensByBackend = new Map<string, number[]>();
   const costUsdByBackend = new Map<string, number[]>();
+  // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — `num_turns` distribution. The
+  // snapshot-level array spans ALL backends (the headline "how many turns does
+  // the fetcher really need" number); the per-backend map answers the same
+  // question per envelope-sizing target. NULL rows drop from both.
+  const numTurnsSamples: number[] = [];
+  const numTurnsByBackend = new Map<string, number[]>();
   for (const att of attempts) {
     if (att.actualBackend === "claude") {
       if (typeof att.cacheCreationTokens === "number") {
@@ -1744,6 +1805,17 @@ export function aggregatePrePassMetrics(
       }
       if (typeof att.cacheReadTokens === "number") {
         cacheReadSamples.push(att.cacheReadTokens);
+      }
+    }
+    if (typeof att.numTurns === "number") {
+      // Snapshot-level sample is backend-agnostic on purpose — the envelope
+      // cap is a single scalar applied before the backend resolves, so the
+      // cross-backend distribution is the honest sizing signal.
+      numTurnsSamples.push(att.numTurns);
+      if (att.actualBackend !== null) {
+        const samples = numTurnsByBackend.get(att.actualBackend);
+        if (samples) samples.push(att.numTurns);
+        else numTurnsByBackend.set(att.actualBackend, [att.numTurns]);
       }
     }
     if (att.actualBackend === null) continue;
@@ -1775,6 +1847,13 @@ export function aggregatePrePassMetrics(
   costUsdByBackendBuckets.sort((a, b) =>
     a.actualBackend.localeCompare(b.actualBackend),
   );
+  const numTurnsByBackendBuckets: PrePassPerBackendBucket[] = [];
+  for (const [actualBackend, samples] of numTurnsByBackend.entries()) {
+    numTurnsByBackendBuckets.push({ actualBackend, histogram: summarize(samples) });
+  }
+  numTurnsByBackendBuckets.sort((a, b) =>
+    a.actualBackend.localeCompare(b.actualBackend),
+  );
 
   return {
     windowDays,
@@ -1790,4 +1869,6 @@ export function aggregatePrePassMetrics(
     cacheReadTokensPerAttempt: summarize(cacheReadSamples),
     inputTokensByBackend: inputTokensByBackendBuckets,
     costUsdByBackend: costUsdByBackendBuckets,
+    numTurnsPerAttempt: summarize(numTurnsSamples),
+    numTurnsByBackend: numTurnsByBackendBuckets,
   };}

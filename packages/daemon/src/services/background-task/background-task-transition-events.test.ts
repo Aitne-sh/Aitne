@@ -27,6 +27,8 @@ function row(overrides: Partial<BackgroundTaskRow> = {}): BackgroundTaskRow {
     tier: "medium",
     maxBudgetUsd: null,
     backendSessionId: null,
+    origin: "agent",
+    costUsd: null,
     createdAt: 1000,
     startedAt: 1100,
     finishedAt: 2000,

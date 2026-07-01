@@ -86,6 +86,33 @@ export function isClaudeCodeMaxBudgetError(error: unknown): boolean {
   );
 }
 
+/**
+ * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.1 — matches the SDK transport's
+ * wrapped turn-limit error, `Error("Claude Code returned an error result:
+ * Reached maximum number of turns (N)")`. The primary capture happens in
+ * `consumeStream` (the terminal `error_max_turns` result message throws a
+ * typed `BackendDecisiveFailure("max_turns")` with the SDK's authoritative
+ * spend before the transport can throw); this matcher is the safety net
+ * for any path where the result message was never observed — it lets
+ * `classifyExecutionError` map the raw transport throw to `max_turns`
+ * instead of the opaque `other_non_retryable`.
+ */
+export function isClaudeCodeMaxTurnsError(error: unknown): boolean {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : "";
+  const type =
+    typeof error === "object" && error !== null && typeof (error as ErrorLike).type === "string"
+      ? (error as ErrorLike).type
+      : "";
+
+  return /max(?:imum)?[ -](?:number of )?turns|error_max_turns/i.test(
+    `${message} ${type}`,
+  );
+}
+
 export function extractClaudeCodeQuotaResetHint(
   error: unknown,
 ): ClaudeCodeQuotaResetHint | null {

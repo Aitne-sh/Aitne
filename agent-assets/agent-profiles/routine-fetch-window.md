@@ -79,6 +79,17 @@ return the same result shape:
   `routine.fetch_window`. If you hit the cap, record what's left as
   `{"type":"budget-exhausted","remaining":[…]}` in `errors`.
 
+## Turn efficiency
+
+This run is turn-capped; a run that overruns the cap is killed mid-fetch.
+Minimise round-trips — every model turn is one:
+- Load every deferred connector schema in ONE `ToolSearch` call (a
+  comma-separated `select:` list) — never one `ToolSearch` per tool.
+- Emit independent `<fetch>` rows' read calls in the SAME turn; they don't
+  depend on each other.
+- Never call per-item detail tools (`get_thread`, `get_event`, …) — the
+  list response already carries the compact subset you submit.
+
 ## Output format
 
 Print exactly one JSON line on stdout, then terminate:

@@ -98,8 +98,8 @@ export const TIPS: ReadonlyArray<Tip> = [
     title: "It schedules itself",
     description:
       "Say 'remind me Friday at 4pm' or 'every Monday morning summarize my open PRs' — the agent owns its own schedule rows and wakes itself when the time comes.",
-    href: "/schedule",
-    cta: "View schedule",
+    href: "/tasks?tab=queue",
+    cta: "View the queue",
   },
   {
     id: "lifestyle",

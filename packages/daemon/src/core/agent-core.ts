@@ -6,6 +6,7 @@ import type {
   IntegrationKey,
   ProcessKey,
 } from "@aitne/shared";
+import type { PrePassObservationsSink } from "../services/mcp/sdk-observations-server.js";
 
 /** Callbacks for streaming agent responses to a client (e.g., dashboard SSE). */
 export interface StreamCallbacks {
@@ -128,6 +129,23 @@ export interface AgentExecuteParams {
   extraSkills?: readonly string[];
   /** AGENT_DEFINITIONS_DESIGN.md §4.2 — `tools.skills_replace`. See `extraSkills`. */
   skillsReplace?: boolean;
+  /**
+   * FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P2.2 — per-execute observations
+   * tally sink. Set ONLY by the pre-pass fan-out runner. When present, the
+   * `ClaudeCodeCore` builds a sub-session-scoped
+   * `mcp__aitne-observations__submit_observations` server bound to this
+   * sink (instead of the shared boot-time one), so every batch the agent
+   * durably posts is counted into the runner's ledger. The runner reads
+   * that ledger after `execute` returns OR throws and, on a max-turns /
+   * budget kill, synthesises an honest `partial` report from it rather
+   * than discarding real progress as `failed`.
+   *
+   * Backend support is Claude-only — codex / gemini pre-pass sessions post
+   * via curl (no in-process MCP server), so the sink never fires and the
+   * runner falls back to the agent's self-reported JSON (accepted gap,
+   * same asymmetry as the observations MCP tool itself).
+   */
+  observationsSink?: PrePassObservationsSink;
 }
 
 export interface AgentResumeParams {

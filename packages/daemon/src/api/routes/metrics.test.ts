@@ -468,10 +468,15 @@ describe("GET /metrics/pre-pass", () => {
       // surface their zero-count shape.
       inputTokensByBackend: [],
       costUsdByBackend: [],
+      // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — the num_turns distribution
+      // surfaces (empty on a fresh DB) so envelope-sizing consumers can iterate
+      // without a null guard.
+      numTurnsByBackend: [],
     });
     expect(typeof body.collectedAt).toBe("string");
     expect(body.cacheCreationTokensPerAttempt).toMatchObject({ count: 0, p50: null });
     expect(body.cacheReadTokensPerAttempt).toMatchObject({ count: 0, p50: null });
+    expect(body.numTurnsPerAttempt).toMatchObject({ count: 0, p50: null });
   });
 
   it("aggregates seeded fan-out rows into chain-level counts", async () => {

@@ -1129,6 +1129,132 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0020-reconcile-agent-claimed-dm-enabled-drift",
+    description:
+      "(task-board canonical-owner dedup) — an agent-claimed dm_session "
+      + "recurring row is now hidden from /schedule and /tasks (surfaced only "
+      + "through its owning Agent) and write-guarded (PATCH/DELETE 409). The "
+      + "scheduler, however, materializes occurrences from the ROW's `enabled` "
+      + "(reconcileRecurringSchedules gates on `rs.enabled = 1`), and the "
+      + "Agent→row mirror is one-way — so a pre-existing drifted pair (row "
+      + "paused on the old /schedule queue while its Agent stayed enabled, or "
+      + "vice versa) would upgrade into an invisible dead schedule: the Agent "
+      + "card says active, the paused row is hidden everywhere, nothing fires. "
+      + "Reconcile with OFF-WINS: either side paused → both paused. OFF wins "
+      + "because resurrecting (rs.enabled=1) could silently revive DMs the user "
+      + "deliberately paused, while a visibly paused Agent is one dashboard "
+      + "toggle from repair (a real OFF→ON transition re-mirrors both flags). "
+      + "Direction 2 stamps `enabled_overridden_at` — without it the loader's "
+      + "§6.4 resolution treats the DB flag as non-overridden and the next "
+      + "provision resurrects the YAML `enabled`, undoing the reconcile. Scoped "
+      + "to dm_session claimed pairs (the dedup's scope; agent.task rows have "
+      + "been 410-write-gated since the split, so they carry no such legacy "
+      + "drift). Idempotent: both UPDATEs match only misaligned pairs, and the "
+      + "recorded id short-circuits a re-run anyway.",
+    up(db) {
+      if (!tableExists(db, "agents") || !tableExists(db, "recurring_schedules")) {
+        return;
+      }
+      if (!columnExists(db, "agents", "recurring_schedule_id")) return;
+      // Direction 1: Agent paused, claimed row still enabled → pull the row
+      // down so the schedule stops firing for a paused Agent.
+      db.prepare(
+        `UPDATE recurring_schedules
+            SET enabled = 0
+          WHERE enabled = 1
+            AND task_type = 'dm_session'
+            AND id IN (SELECT recurring_schedule_id FROM agents
+                        WHERE enabled = 0 AND recurring_schedule_id IS NOT NULL)`,
+      ).run();
+      // Direction 2: claimed row paused, Agent still enabled → pull the Agent
+      // down so the pause is visible and repairable from the Agent card.
+      // (Direction 1 cannot feed this: it only touches rows whose agent is
+      // already disabled, which the `enabled = 1` filter here skips.)
+      const now = Date.now();
+      db.prepare(
+        `UPDATE agents
+            SET enabled = 0,
+                enabled_overridden_at = ?,
+                updated_at = ?
+          WHERE enabled = 1
+            AND recurring_schedule_id IN (SELECT id FROM recurring_schedules
+                                           WHERE enabled = 0 AND task_type = 'dm_session')`,
+      ).run(now, now);
+    },
+  },
+  {
+    id: "0021-fetch-window-max-turns-bump",
+    description:
+      "(v0.1.12→next, FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.3) — raise the "
+      + "routine.fetch_window max_turns envelope from the seeded 10 to 20 for "
+      + "upgrading installs still on the seeded default. The 10-turn cap "
+      + "(PREPASS_COST_REDUCTION_PLAN.md N4) was sized from a single install "
+      + "whose measured max=11 already exceeded it; on installs whose turn "
+      + "demand sits further right (item volume, per-item thread-detail "
+      + "wandering on Haiku, ToolSearch schema loads) the SDK kills the "
+      + "pre-pass at error_max_turns with no final turn for the closing JSON "
+      + "line, and the fan-out runner then retried the identical plan under "
+      + "the identical envelope 3x (~$0.57 pure waste per tick per affected "
+      + "integration). Turns bound wander, not cost — max_budget_usd $0.50 "
+      + "stays the stop-loss. Backend-agnostic: applyBackendBudgetFactor "
+      + "scales ONLY max_budget_usd, never max_turns, so the old default is "
+      + "10 on every backend and no per-backend CASE is needed (contrast "
+      + "migration 0017). Gated so it ONLY moves preset rows still at the old "
+      + "default — operator-pinned rows (updated_by='user', e.g. the "
+      + "documented PUT /api/process-config mitigation) and rows already at a "
+      + "custom value are left untouched. Fresh installs get 20 from the "
+      + "schema seed + ENVELOPE_OVERRIDES_BY_PROCESS_KEY. The literals are "
+      + "point-in-time snapshots so a future resize cannot retarget this "
+      + "migration. Idempotent: after the bump no row matches max_turns=10, "
+      + "and the recorded id short-circuits a re-run anyway.",
+    up(db) {
+      // Empty-DB safety (e.g. unit tests on a bare :memory: db): if
+      // applySchema never ran, the table is absent — the runner still
+      // records the id so a later boot does not re-evaluate.
+      if (!tableExists(db, "process_backend_config")) return;
+      db.prepare(
+        `UPDATE process_backend_config
+            SET max_turns = 20
+          WHERE process_key = 'routine.fetch_window'
+            AND updated_by = 'preset'
+            AND max_turns = 10`,
+      ).run();
+    },
+  },
+  {
+    id: "0022-task-origin-and-cost",
+    description:
+      "(tier-2 worker audit) — add `origin` + `cost_usd` to background_task "
+      + "and browser_task. `origin` ('user'|'agent'|'system', DEFAULT 'agent') "
+      + "records who set the task in motion; the Task Board previously "
+      + "hardcoded every worker's origin to 'agent', so the provenance was "
+      + "unrecoverable. The ALTER default matches the CREATE-TABLE default "
+      + "(both 'agent' — the historical assumption for every pre-existing "
+      + "row), unlike 0019's deliberately divergent pair. `cost_usd` is the "
+      + "task-level spend rollup: the drivers have ALWAYS computed a per-run "
+      + "costUsd and the runners then discarded it — workers bypass the "
+      + "agent_actions ledger entirely, so their spend appeared on no surface. "
+      + "The runners now accumulate it here per driver leg AND write a per-run "
+      + "agent_actions row so `GET /cost` finally includes detached-worker "
+      + "spend. NULL = no run recorded a cost yet (pre-migration history stays "
+      + "NULL, honestly unknown rather than a fake 0). Idempotent via "
+      + "columnExists guards.",
+    up(db) {
+      for (const table of ["background_task", "browser_task"] as const) {
+        if (!tableExists(db, table)) continue;
+        if (!columnExists(db, table, "origin")) {
+          db.exec(
+            `ALTER TABLE ${table} ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent' `
+            + `CHECK (origin IN ('user', 'agent', 'system'))`,
+          );
+        }
+        if (!columnExists(db, table, "cost_usd")) {
+          db.exec(`ALTER TABLE ${table} ADD COLUMN cost_usd REAL`);
+        }
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

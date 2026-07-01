@@ -12,6 +12,7 @@ import { parseModelUsage } from "@/lib/backend-ui";
 import type { EventRow } from "@/lib/api-types";
 import { DocsLearnMore } from "@/components/docs/docs-learn-more";
 import { docIdForEventType } from "@/lib/docs/event-type-doc-map";
+import { turnsCell } from "@/lib/logs/turns";
 
 interface EventDetailSheetProps {
   event: EventRow | null;
@@ -139,9 +140,24 @@ function EventDetailSheetContent({ event }: { event: EventRow }) {
               </DetailRow>
             </>
           )}
-          <DetailRow label="Turns">
-            <span className="text-sm font-mono">{event.num_turns}</span>
-          </DetailRow>
+          {(() => {
+            // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P3.2 — show "used / cap" with a
+            // "turn limit" flag when a (pre-pass) row spent its whole envelope,
+            // instead of a bare count that reads identically to a healthy run.
+            const turns = turnsCell(event);
+            return (
+              <DetailRow label="Turns">
+                <span className="text-sm font-mono">
+                  {turns.label}
+                  {turns.atLimit && (
+                    <Badge variant="amber" className="ml-2 text-[10px]">
+                      turn limit
+                    </Badge>
+                  )}
+                </span>
+              </DetailRow>
+            );
+          })()}
           <DetailRow label="Cost">
             <span className="text-sm font-mono">{formatCurrency(event.cost_usd)}</span>
           </DetailRow>

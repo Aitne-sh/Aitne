@@ -24,6 +24,7 @@
 import type Database from "better-sqlite3";
 
 import {
+  addBackgroundTaskCost,
   appendResolvedClarificationToBrief,
   getBackgroundTask,
   markRunning,
@@ -32,6 +33,7 @@ import {
   resetSingleForBootRedispatch,
   type BackgroundTaskRow,
 } from "../../db/background-task-store.js";
+import { recordTaskRunSpend } from "../task-spend-ledger.js";
 import {
   getClarification,
   getOpenClarificationForTask,
@@ -265,6 +267,29 @@ export function createBackgroundTaskRunner(
   }): Promise<RunResult> {
     const { taskId, handle, result } = input;
 
+    // Persist this leg's spend BEFORE branching: every outcome — park
+    // included — has already spent its driver run. Task-row rollup +
+    // per-run agent_actions ledger row (the driver used to compute
+    // `costUsd` and this function silently dropped it).
+    addBackgroundTaskCost(deps.db, taskId, result.costUsd);
+    recordTaskRunSpend(deps.db, {
+      taskKind: "background_task",
+      taskId,
+      result:
+        result.outcome === "completed"
+          ? "success"
+          : result.outcome === "yielded_for_clarification"
+            ? "partial"
+            : result.outcome === "cancelled"
+              ? "skipped"
+              : "failed",
+      costUsd: result.costUsd,
+      numTurns: result.numTurns,
+      durationMs: result.durationMs,
+      completedAt: now(),
+      modelUsed: result.modelId ?? null,
+    });
+
     // PARK — keep the handle alive for /clarify. The ask_user tool
     // already moved the row to `awaiting_user`; enqueue the clarification
     // delivery so the owner sees the question.
@@ -465,6 +490,7 @@ export function createBackgroundTaskRunner(
         costUsd: 0,
         numTurns: 0,
         durationMs: 0,
+        modelId: null,
       };
     }
     return reconcileDriverOutcome({ taskId, handle, result });
@@ -664,6 +690,7 @@ export function createBackgroundTaskRunner(
         costUsd: 0,
         numTurns: 0,
         durationMs: 0,
+        modelId: null,
       };
     }
     if (result.outcome === "resume_unavailable") {
@@ -769,6 +796,7 @@ export function createBackgroundTaskRunner(
         costUsd: 0,
         numTurns: 0,
         durationMs: 0,
+        modelId: null,
       };
     }
     if (result.outcome === "resume_unavailable") {

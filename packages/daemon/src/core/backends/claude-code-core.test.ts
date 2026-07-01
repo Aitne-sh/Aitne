@@ -2013,12 +2013,12 @@ describe("ClaudeCodeCore", () => {
       });
     });
 
-    it("handles result with subtype !== success", async () => {
+    it("handles result with subtype !== success (non-turn-limit subtypes stay on the soft path)", async () => {
       const stream = playback([
         makeSystemInit(),
         {
           type: "result",
-          subtype: "error_max_turns",
+          subtype: "error_during_execution",
           result: "",
           session_id: "sess-1",
           total_cost_usd: 0.1,
@@ -2027,8 +2027,8 @@ describe("ClaudeCodeCore", () => {
           num_turns: 3,
           duration_api_ms: 500,
           is_error: true,
-          stop_reason: "max_turns",
-          errors: ["Hit max turns"],
+          stop_reason: "error",
+          errors: ["execution blew up"],
         },
       ]);
 
@@ -2038,7 +2038,124 @@ describe("ClaudeCodeCore", () => {
         Date.now(),
       );
       expect(result.isError).toBe(true);
-      expect(result.stopReason).toBe("max_turns");
+      expect(result.stopReason).toBe("error");
+    });
+
+    // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.1 — the terminal
+    // `error_max_turns` result is an SDK policy stop with no final turn for
+    // the model; pre-fix consumeStream kept iterating, the SDK transport
+    // threw its wrapped generic Error, and the failure surfaced as
+    // `other_non_retryable` with the result message's usage discarded.
+    // Post-fix consumeStream throws the typed failure directly, carrying
+    // the terminal result's authoritative spend.
+    it("throws BackendDecisiveFailure(max_turns) carrying the terminal result's spend on error_max_turns", async () => {
+      const stream = playback([
+        makeSystemInit(),
+        {
+          type: "result",
+          subtype: "error_max_turns",
+          result: "",
+          session_id: "sess-1",
+          total_cost_usd: 0.19,
+          usage: {
+            input_tokens: 10,
+            output_tokens: 32,
+            cache_creation_input_tokens: 102_000,
+            cache_read_input_tokens: 608_000,
+          },
+          modelUsage: {},
+          num_turns: 10,
+          duration_api_ms: 500,
+          is_error: true,
+          stop_reason: "max_turns",
+          errors: ["Reached maximum number of turns (10)"],
+        },
+      ]);
+
+      let thrown: unknown;
+      try {
+        await (core as any).consumeStream(stream, "claude-haiku-4-5", Date.now());
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toBeInstanceOf(BackendDecisiveFailure);
+      const failure = thrown as BackendDecisiveFailure;
+      expect(failure.kind).toBe("max_turns");
+      expect(failure.backendId).toBe("claude");
+      expect((failure.cause as Error).message).toContain(
+        "Reached maximum number of turns (10)",
+      );
+      // Authoritative spend from the terminal result message — not the
+      // partial-usage reconstruction the generic throw path falls back on.
+      expect(failure.spend).toMatchObject({
+        costUsd: 0.19,
+        modelId: "claude-haiku-4-5",
+        numTurns: 10,
+        costSource: "sdk",
+        usage: {
+          inputTokens: 10,
+          outputTokens: 32,
+          cacheCreationInputTokens: 102_000,
+          cacheReadInputTokens: 608_000,
+        },
+      });
+    });
+
+    it("synthesizes a cause message from num_turns when the SDK errors array is empty", async () => {
+      const stream = playback([
+        makeSystemInit(),
+        {
+          type: "result",
+          subtype: "error_max_turns",
+          result: "",
+          session_id: "sess-1",
+          total_cost_usd: 0.01,
+          usage: { input_tokens: 10, output_tokens: 5 },
+          modelUsage: {},
+          num_turns: 10,
+          duration_api_ms: 500,
+          is_error: true,
+          stop_reason: "max_turns",
+          errors: [],
+        },
+      ]);
+
+      await expect(
+        (core as any).consumeStream(stream, "claude-haiku-4-5", Date.now()),
+      ).rejects.toMatchObject({
+        kind: "max_turns",
+        cause: expect.objectContaining({
+          message: expect.stringContaining("maximum number of turns (10)"),
+        }),
+      });
+    });
+
+    it("still calls onEnd when error_max_turns throws the typed failure", async () => {
+      const onEnd = vi.fn();
+      const stream = playback([
+        makeSystemInit(),
+        {
+          type: "result",
+          subtype: "error_max_turns",
+          result: "",
+          session_id: "sess-1",
+          total_cost_usd: 0.01,
+          usage: { input_tokens: 10, output_tokens: 5 },
+          modelUsage: {},
+          num_turns: 10,
+          duration_api_ms: 500,
+          is_error: true,
+          stop_reason: "max_turns",
+          errors: [],
+        },
+      ]);
+
+      await expect(
+        (core as any).consumeStream(stream, "claude-haiku-4-5", Date.now(), {
+          onEnd,
+        }),
+      ).rejects.toBeInstanceOf(BackendDecisiveFailure);
+      expect(onEnd).toHaveBeenCalledTimes(1);
     });
 
     it("populates usage fields from result", async () => {
@@ -2896,6 +3013,32 @@ describe("ClaudeCodeCore", () => {
       expect(classified).toMatchObject({
         backendId: "claude",
         originalCode: "max_budget_usd",
+      });
+    });
+
+    // FETCH_WINDOW_TURN_LIMIT_FIX_PLAN.md P1.1 safety net — the primary
+    // capture throws a typed failure from consumeStream when the terminal
+    // `error_max_turns` result message is observed; when only the SDK
+    // transport's wrapped throw arrives, the classifier must still map it
+    // to `max_turns` instead of the opaque `other_non_retryable` that
+    // masked the failure class pre-fix.
+    it("classifies the SDK transport's wrapped turn-limit throw as BackendDecisiveFailure(max_turns)", () => {
+      const classified = (
+        core as unknown as {
+          classifyExecutionError: (
+            error: unknown,
+          ) => BackendQuotaError | BackendDecisiveFailure;
+        }
+      ).classifyExecutionError(
+        new Error(
+          "Claude Code returned an error result: Reached maximum number of turns (10)",
+        ),
+      );
+
+      expect(classified).toBeInstanceOf(BackendDecisiveFailure);
+      expect(classified).toMatchObject({
+        backendId: "claude",
+        kind: "max_turns",
       });
     });
 

@@ -176,6 +176,7 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     proactiveForwardChannelTimelineEnabled: parseBooleanOrDefault(env("PROACTIVE_FORWARD_CHANNEL_TIMELINE_ENABLED"), true),
     proactiveForwardForceFreshSession: parseBooleanOrDefault(env("PROACTIVE_FORWARD_FORCE_FRESH_SESSION"), false),
     feedbackLearningEnabled: parseBooleanOrDefault(env("FEEDBACK_LEARNING_ENABLED"), true),
+    backendFailureDmAlerts: parseBooleanOrDefault(env("BACKEND_FAILURE_DM_ALERTS"), false),
     // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §6 — Phase 3 actuation gate.
     // Default false = shadow mode (recommend + verdict only, no actuation).
     selfTuningEnabled: parseBooleanOrDefault(env("SELF_TUNING_ENABLED"), false),

@@ -19,6 +19,10 @@ import { Hono } from "hono";
 import type Database from "better-sqlite3";
 import { listRecurringSchedules } from "../../db/recurring-schedules.js";
 import { listAgents } from "../../db/agents-store.js";
+import {
+  listInFlightAgentIds,
+  listLastExecutionsByAgent,
+} from "../../db/agent-executions-store.js";
 import { listManagedTasks } from "../../db/managed-tasks-store.js";
 import {
   listBackgroundTasks,
@@ -112,6 +116,12 @@ function buildInventorySources(db: Database.Database): InventorySources {
     // any write still hits the owner's built-in guards (409-undeletable /
     // stop-warning ack). Symmetric with buildImpactSources' agent resolver.
     agents: listAgents(db),
+    lastExecutionByAgent: listLastExecutionsByAgent(db),
+    inFlightAgentSlugs: listInFlightAgentIds(db),
+    // Automation triggers fire recurring agent.task work but are neither
+    // dm_session, agent-claimed, nor managed-task-paired — without this lane
+    // that autonomous work had NO board representation.
+    automationTriggers: listTriggers(db),
     managedTasks: listManagedTasks(db),
     recurringById,
     pendingOneOffs,
@@ -119,12 +129,10 @@ function buildInventorySources(db: Database.Database): InventorySources {
       states: [...BACKGROUND_TASK_NON_TERMINAL_STATES],
     }),
     browserTasks: listBrowserTasks(db, { states: [...BROWSER_TASK_NON_TERMINAL_STATES] }),
-    researchClusters: listBrowserResearchClusters(db).clusters.map((c) => ({
-      slug: c.slug,
-      displayName: c.displayName,
-      status: c.status,
-      lastActivityAt: c.lastActivityAt ?? null,
-    })),
+    // Browser-history research clusters are deliberately NOT on the board:
+    // unbounded browsing-analytics artifacts with no board-managed owner. They
+    // live on the browser-history surface. `listBrowserResearchClusters` is
+    // still imported for the `/tasks/impact` cluster-ref existence check below.
   };
 }
 
@@ -174,7 +182,7 @@ function buildImpactSources(db: Database.Database, ref: TaskRef): ImpactSources 
 }
 
 const REF_HINT =
-  "Expected <prefix>:<id> with prefix in rs|mt|agent|as|cluster|bt|bx|obj (managed tasks use mt_<n>).";
+  "Expected <prefix>:<id> with prefix in rs|mt|agent|as|cluster|bt|bx|trigger|obj (managed tasks use mt_<n>).";
 
 export function createTasksRoutes(deps: TasksRoutesDeps): Hono {
   const app = new Hono();

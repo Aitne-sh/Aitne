@@ -1,6 +1,6 @@
 ---
 name: board
-description: Read-only Task Board — list everything in motion (recurring DMs, Agents, app-fetch, reminders, background/browser/research) via GET /api/tasks, and preview a delete's blast radius via GET /api/tasks/impact. For writes use the `task` skill.
+description: Read-only Task Board — list everything in motion (recurring DMs, Agents, app-fetch, automation triggers, reminders, background/browser work) via GET /api/tasks, and preview a delete's blast radius via GET /api/tasks/impact. For writes use the `task` skill.
 allowed-tools:
   - Bash(curl *)
   - Read
@@ -11,8 +11,9 @@ allowed-tools:
 One place to answer two questions the user actually asks:
 
 1. **"What do I have running / set up?"** — a single inventory across every
-   creation path (recurring DMs, Agents, app-fetch managed tasks, pending
-   one-off reminders, and in-flight background / browser / research work).
+   creation path (recurring DMs, Agents, app-fetch managed tasks, automation
+   triggers, pending one-off reminders, and in-flight background / browser
+   work).
 2. **"What breaks if I delete / change X?"** — the blast radius, with each
    affected row labelled by its real cascade.
 
@@ -40,10 +41,10 @@ Returns `{ items, total, generatedAt }`. Each item:
 
 | Field | Meaning |
 |---|---|
-| `ref` | typed handle — `rs:<id>` (recurring DM), `mt_<n>` (app-fetch), `agent:<slug>`, `as:<id>` (one-off reminder), `bt:<id>` (background), `bx:<id>` (browser), `cluster:<slug>` (research) |
+| `ref` | typed handle — `rs:<id>` (recurring DM), `mt_<n>` (app-fetch), `agent:<slug>`, `trigger:<id>` (automation trigger), `as:<id>` (one-off reminder), `bt:<id>` (background), `bx:<id>` (browser) |
 | `title` | human label — passed through verbatim from the owning row |
-| `kind` | `dm` / `agent` / `app_fetch` / `reminder` / `background` / `browser` / `research` |
-| `status` | `active` / `paused` / `pending` / a fulfiller state (`running`, `awaiting_user`, …) |
+| `kind` | `dm` / `agent` / `app_fetch` / `trigger` / `reminder` / `background` / `browser` |
+| `status` | `active` / `paused` / `pending` / `running` (incl. an Agent with a turn in flight) / a fulfiller state (`awaiting_user`, …) |
 | `cadence` | human schedule label, or null for one-shot work |
 | `fulfilledBy` | typed ref of the row that actually executes (for `app_fetch`, its `rs:` schedule) |
 | `origin` | `system` / `user` / `agent` |
@@ -87,7 +88,5 @@ specialised skills (`agent-create`, `managed-tasks`, `schedule`,
 
 1. **Localhost only.** `http://localhost:8321/api/tasks*`.
 2. **Read-only.** This skill issues only GETs. Never mutate from here.
-3. **Never reactivate a muted/concluded research cluster** by listing it — the
-   board only surfaces active/dormant clusters and `impact` never changes status.
-4. **Never read or relay a browser-task final-confirm token.** The board surfaces
+3. **Never read or relay a browser-task final-confirm token.** The board surfaces
    only safe fields (`status`/`ref`); a pending `!~xxxxxxxx` token is never shown.

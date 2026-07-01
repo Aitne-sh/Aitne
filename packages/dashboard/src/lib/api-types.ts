@@ -815,6 +815,8 @@ export interface ConfigResponse {
   // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5) —
   // tuned from the Lessons settings page.
   feedbackLearningEnabled: boolean;
+  // Opt-in: push backend-execution-failure operator diagnostics to the owner DM.
+  backendFailureDmAlerts: boolean;
   feedbackPromotionThreshold: number;
   feedbackLessonMaxBytesGlobal: number;
   feedbackLessonMaxBytesPerAgent: number;
