@@ -10,6 +10,7 @@ import {
   formatDurationShort,
   formatIntervalEvery,
   formatPercent,
+  formatRelativeTime,
   isIntervalSchedule,
   kindLabel,
   resultBadgeVariant,
@@ -276,5 +277,29 @@ describe("formatDurationSeconds", () => {
   it("treats the input as seconds", () => {
     expect(formatDurationSeconds(512)).toBe("8m 32s");
     expect(formatDurationSeconds(null)).toBe("—");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = Date.parse("2026-06-30T12:00:00.000Z");
+
+  it("bucketises past spans into a compact label", () => {
+    expect(formatRelativeTime("2026-06-30T11:59:30.000Z", now)).toBe("just now");
+    expect(formatRelativeTime("2026-06-30T11:55:00.000Z", now)).toBe("5m ago");
+    expect(formatRelativeTime("2026-06-30T10:00:00.000Z", now)).toBe("2h ago");
+    expect(formatRelativeTime("2026-06-27T12:00:00.000Z", now)).toBe("3d ago");
+    expect(formatRelativeTime("2026-06-16T12:00:00.000Z", now)).toBe("2w ago");
+    expect(formatRelativeTime("2026-05-25T12:00:00.000Z", now)).toBe("1mo ago");
+    expect(formatRelativeTime("2025-06-30T12:00:00.000Z", now)).toBe("1y ago");
+  });
+
+  it("collapses future timestamps to just now", () => {
+    expect(formatRelativeTime("2026-06-30T12:05:00.000Z", now)).toBe("just now");
+  });
+
+  it("returns null for absent or unparseable input", () => {
+    expect(formatRelativeTime(null, now)).toBeNull();
+    expect(formatRelativeTime(undefined, now)).toBeNull();
+    expect(formatRelativeTime("nonsense", now)).toBeNull();
   });
 });
