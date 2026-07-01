@@ -2468,10 +2468,14 @@ describe("0015-morning-briefing-follow-system-timezone", () => {
 
 // `0016-sonnet-5-medium-default-bump`, same CLAUDE.md non-negotiable #4
 // contract as the budget bumps: fresh DB (no target tables) → no-op + id
-// recorded; rows already at sonnet-5 → untouched; pre-migration preset/cascade
-// rows at claude-sonnet-4-6 (or opencode anthropic/claude-sonnet-4-6) → bumped
-// to sonnet-5; operator-pinned ('user') rows + defaults changed off the old
-// value → untouched; re-run → no second bump.
+// recorded; process_backend_config preset/cascade rows at claude-sonnet-4-6 (or
+// opencode anthropic/claude-sonnet-4-6) → bumped to sonnet-5; operator-pinned
+// ('user') rows + models changed off the old value → untouched; re-run → no
+// second bump. backend_global_defaults is DELIBERATELY left untouched (audit
+// A1) — it has no updated_by column, so a value-only bump can't tell a seed
+// default from a deliberate pin; those rows forward-track lazily via setup /
+// Reset-to-defaults, and migration 0019 adds the provenance column so a future
+// bump can guard them.
 describe("0016-sonnet-5-medium-default-bump", () => {
   const migration = MIGRATIONS.find(
     (m) => m.id === "0016-sonnet-5-medium-default-bump",
@@ -2560,22 +2564,24 @@ describe("0016-sonnet-5-medium-default-bump", () => {
     expect(mainModelOf(db, "message.dm")).toBe("claude-sonnet-5");
   });
 
-  it("bumps the global medium default claude-sonnet-4-6 → claude-sonnet-5", () => {
+  it("leaves the global medium default claude-sonnet-4-6 UNTOUCHED (audit A1 — no provenance column)", () => {
     const db = openDb();
     seedDefaultsTable(db, "claude-sonnet-4-6");
     const result = runMigrations(db, [migration!]);
     expect(result.applied).toEqual(["0016-sonnet-5-medium-default-bump"]);
-    expect(mediumDefaultOf(db)).toBe("claude-sonnet-5");
+    // A value-only bump can't tell a seed default from a deliberate pin, so the
+    // row is left alone; it forward-tracks lazily via setup / Reset-to-defaults.
+    expect(mediumDefaultOf(db)).toBe("claude-sonnet-4-6");
   });
 
-  it("bumps an opencode global medium default to anthropic/claude-sonnet-5", () => {
+  it("leaves an opencode global medium default UNTOUCHED too", () => {
     const db = openDb();
     seedDefaultsTable(db, "anthropic/claude-sonnet-4-6");
     runMigrations(db, [migration!]);
-    expect(mediumDefaultOf(db)).toBe("anthropic/claude-sonnet-5");
+    expect(mediumDefaultOf(db)).toBe("anthropic/claude-sonnet-4-6");
   });
 
-  it("leaves a global default the operator changed off the old value untouched", () => {
+  it("leaves any global default (even a custom one) untouched", () => {
     const db = openDb();
     seedDefaultsTable(db, "claude-opus-4-8");
     runMigrations(db, [migration!]);
@@ -2618,7 +2624,260 @@ describe("0016-sonnet-5-medium-default-bump", () => {
     runMigrations(db, [migration!]);
     const second = runMigrations(db, [migration!]);
     expect(second.applied).toEqual([]);
-    expect(mediumDefaultOf(db)).toBe("claude-sonnet-5");
+    // Global default untouched (audit A1); the process row forward-tracked.
+    expect(mediumDefaultOf(db)).toBe("claude-sonnet-4-6");
     expect(mainModelOf(db, "message.dm")).toBe("claude-sonnet-5");
+  });
+});
+
+// audit A3 — the UNSCOPED generalization of 0015: strip the baked timezone from
+// EVERY auto-mode dm_session recurring row (not just the morning briefing), so a
+// user's recurring reminder tracks the OS zone after travel.
+describe("0018-recurring-dm-follow-system-timezone-backfill", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0018-recurring-dm-follow-system-timezone-backfill",
+  );
+
+  let savedPaTimezone: string | undefined;
+  beforeEach(() => {
+    savedPaTimezone = process.env.PA_TIMEZONE;
+    delete process.env.PA_TIMEZONE;
+  });
+  afterEach(() => {
+    if (savedPaTimezone === undefined) delete process.env.PA_TIMEZONE;
+    else process.env.PA_TIMEZONE = savedPaTimezone;
+  });
+
+  function seedDm(
+    db: Database.Database,
+    subFlow: string,
+    timezone: string,
+  ): number {
+    return Number(
+      db
+        .prepare(
+          `INSERT INTO recurring_schedules (task_type, task_description, task_context, recurrence_rule, enabled)
+           VALUES ('dm_session', 'reminder', json(?), json(?), 1)`,
+        )
+        .run(
+          JSON.stringify({ sub_flow: subFlow }),
+          JSON.stringify({ frequency: "daily", time: "09:00", timezone }),
+        ).lastInsertRowid,
+    );
+  }
+
+  function tzOf(db: Database.Database, id: number): string | null {
+    const row = db
+      .prepare(
+        `SELECT json_extract(recurrence_rule, '$.timezone') AS tz FROM recurring_schedules WHERE id = ?`,
+      )
+      .get(id) as { tz: string | null } | undefined;
+    return row?.tz ?? null;
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("strips the baked zone from a GENERIC dm_session row in auto mode (not just the briefing)", () => {
+    const db = openDb();
+    applySchema(db);
+    const briefing = seedDm(db, "morning_briefing", "America/Los_Angeles");
+    const reminder = seedDm(db, "custom_reminder", "America/Los_Angeles");
+    expect(tzOf(db, reminder)).toBe("America/Los_Angeles");
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0018-recurring-dm-follow-system-timezone-backfill",
+    ]);
+    expect(tzOf(db, briefing)).toBeNull();
+    expect(tzOf(db, reminder)).toBeNull();
+  });
+
+  it("leaves all zones untouched when an operator zone is pinned", () => {
+    const db = openDb();
+    applySchema(db);
+    db.prepare("INSERT INTO settings (key, value_json) VALUES ('timezone', ?)").run(
+      JSON.stringify("America/New_York"),
+    );
+    const reminder = seedDm(db, "custom_reminder", "America/New_York");
+    runMigrations(db, [migration!]);
+    expect(tzOf(db, reminder)).toBe("America/New_York");
+  });
+
+  it("honors a PA_TIMEZONE env pin", () => {
+    const db = openDb();
+    applySchema(db);
+    process.env.PA_TIMEZONE = "Asia/Tokyo";
+    const reminder = seedDm(db, "custom_reminder", "Asia/Tokyo");
+    runMigrations(db, [migration!]);
+    expect(tzOf(db, reminder)).toBe("Asia/Tokyo");
+  });
+
+  it("treats a corrupt timezone setting as auto mode (defensive)", () => {
+    const db = openDb();
+    applySchema(db);
+    db.prepare(
+      "INSERT INTO settings (key, value_json) VALUES ('timezone', 'not-valid-json')",
+    ).run();
+    const reminder = seedDm(db, "custom_reminder", "Asia/Tokyo");
+    runMigrations(db, [migration!]);
+    expect(tzOf(db, reminder)).toBeNull();
+  });
+
+  it("treats a non-string timezone setting as auto mode (defensive)", () => {
+    const db = openDb();
+    applySchema(db);
+    db.prepare(
+      "INSERT INTO settings (key, value_json) VALUES ('timezone', '123')",
+    ).run();
+    const reminder = seedDm(db, "custom_reminder", "Asia/Tokyo");
+    runMigrations(db, [migration!]);
+    expect(tzOf(db, reminder)).toBeNull();
+  });
+
+  it("strips in auto mode even when the settings table is absent", () => {
+    const db = openDb();
+    applySchema(db);
+    const reminder = seedDm(db, "custom_reminder", "Europe/Berlin");
+    db.exec("DROP TABLE settings"); // partial DB; PA_TIMEZONE unset → auto
+    runMigrations(db, [migration!]);
+    expect(tzOf(db, reminder)).toBeNull();
+  });
+
+  it("is idempotent — a re-run is a recorded no-op", () => {
+    const db = openDb();
+    applySchema(db);
+    const reminder = seedDm(db, "custom_reminder", "Europe/Paris");
+    const first = runMigrations(db, [migration!]);
+    expect(first.applied).toEqual([
+      "0018-recurring-dm-follow-system-timezone-backfill",
+    ]);
+    expect(tzOf(db, reminder)).toBeNull();
+    const second = runMigrations(db, [migration!]);
+    expect(second.applied).toEqual([]);
+  });
+
+  it("is a recorded no-op when recurring_schedules is absent", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0018-recurring-dm-follow-system-timezone-backfill",
+    ]);
+  });
+});
+
+// audit A1 — adds the updated_by provenance column to backend_global_defaults so
+// a future default-bump migration can guard it symmetrically with
+// process_backend_config.
+describe("0019-backend-global-defaults-updated-by", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0019-backend-global-defaults-updated-by",
+  );
+
+  function hasUpdatedByColumn(db: Database.Database): boolean {
+    const cols = db
+      .prepare("PRAGMA table_info(backend_global_defaults)")
+      .all() as { name: string }[];
+    return cols.some((c) => c.name === "updated_by");
+  }
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("adds the column and backfills an existing (pre-column) row to 'user'", () => {
+    const db = openDb();
+    // Old-shape table, with the row an upgrading install would carry.
+    db.exec(`
+      CREATE TABLE backend_global_defaults (
+        singleton INTEGER PRIMARY KEY,
+        default_backend TEXT NOT NULL,
+        default_lite_model TEXT NOT NULL,
+        default_medium_model TEXT NOT NULL,
+        default_high_model TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    db.prepare(
+      `INSERT INTO backend_global_defaults (singleton, default_backend, default_lite_model, default_medium_model, default_high_model)
+       VALUES (1, 'claude', 'claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-opus-4-8')`,
+    ).run();
+    expect(hasUpdatedByColumn(db)).toBe(false);
+
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0019-backend-global-defaults-updated-by",
+    ]);
+    expect(hasUpdatedByColumn(db)).toBe(true);
+    // Ambiguous pre-existing row → protected as 'user' (matches 0016's decision).
+    const row = db
+      .prepare(
+        "SELECT updated_by FROM backend_global_defaults WHERE singleton = 1",
+      )
+      .get() as { updated_by: string };
+    expect(row.updated_by).toBe("user");
+  });
+
+  it("upgrade boot: applySchema's seed does NOT crash on a pre-column table, then 0019 protects the row", () => {
+    // Regression guard for the applySchema-runs-before-migrations ordering: the
+    // seed must not reference `updated_by` (added by THIS migration), or an
+    // upgrading DB — table present WITHOUT the column — crashes at boot.
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE backend_global_defaults (
+        singleton INTEGER PRIMARY KEY,
+        default_backend TEXT NOT NULL,
+        default_lite_model TEXT NOT NULL,
+        default_medium_model TEXT NOT NULL,
+        default_high_model TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        advisor_enabled INTEGER NOT NULL DEFAULT 0,
+        advisor_model TEXT
+      );
+    `);
+    db.prepare(
+      `INSERT INTO backend_global_defaults (singleton, default_backend, default_lite_model, default_medium_model, default_high_model)
+       VALUES (1, 'claude', 'claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-opus-4-8')`,
+    ).run();
+
+    // The seed's INSERT OR IGNORE hits the row-exists path; it must prepare
+    // cleanly against the pre-column table (would throw "no such column" before
+    // the fix).
+    expect(() => applySchema(db)).not.toThrow();
+
+    // 0019 then adds the column and protects the ambiguous pre-existing row.
+    runMigrations(db, [migration!]);
+    const row = db
+      .prepare(
+        "SELECT updated_by FROM backend_global_defaults WHERE singleton = 1",
+      )
+      .get() as { updated_by: string };
+    expect(row.updated_by).toBe("user");
+  });
+
+  it("is idempotent when the column already exists (fresh install via applySchema)", () => {
+    const db = openDb();
+    applySchema(db); // CREATE TABLE already includes updated_by; seed row is 'preset'
+    expect(hasUpdatedByColumn(db)).toBe(true);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0019-backend-global-defaults-updated-by",
+    ]);
+    const row = db
+      .prepare(
+        "SELECT updated_by FROM backend_global_defaults WHERE singleton = 1",
+      )
+      .get() as { updated_by: string } | undefined;
+    // The fresh seed is 'preset' (forward-trackable), NOT the column default.
+    expect(row?.updated_by).toBe("preset");
+  });
+
+  it("is a recorded no-op when the table is absent", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual([
+      "0019-backend-global-defaults-updated-by",
+    ]);
   });
 });

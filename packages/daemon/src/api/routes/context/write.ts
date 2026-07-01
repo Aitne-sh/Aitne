@@ -17,6 +17,7 @@ import {
 } from "@aitne/shared";
 import { writeFileAtomically } from "../../../core/atomic-write.js";
 import { serializeContextFileWrite } from "../../../core/context-file-serializer.js";
+import { lintAgentDefinitionMarkdown } from "../../../core/agents/validate-agent-md.js";
 import {
   clearEntriesBefore,
   findSection,
@@ -157,6 +158,21 @@ function readPath(
     cur = (cur as Record<PropertyKey, unknown>)[seg];
   }
   return cur;
+}
+
+/**
+ * Non-blocking prompt-quality warnings to attach to a SUCCESSFUL context write
+ * of an `agent.md` (audit B5). Returns `{}` for every non-agent path, so the
+ * response shape for today.md / roadmap / etc. is byte-identical to before; only
+ * an agent.md write can add a `warnings` array (mirroring the create route's
+ * 201 shape). Runs strictly on the success side — never turns a write into a 400.
+ */
+function agentMdWriteWarnings(
+  relativePath: string,
+  content: string,
+): { warnings?: unknown } {
+  const warnings = lintAgentDefinitionMarkdown(relativePath, content);
+  return warnings.length > 0 ? { warnings } : {};
 }
 
 export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
@@ -425,6 +441,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
         status: "updated",
         snapshotId: writeResult.snapshotId ?? 0,
         lastModified: writtenStat.mtime.toISOString(),
+        ...agentMdWriteWarnings(`${path}${target.ext}`, contentToWrite),
       });
     });
   });
@@ -644,7 +661,10 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           );
         }
         logger.info({ path, method: "PATCH", mode }, "Content appended to file");
-        return c.json({ status: "appended" });
+        return c.json({
+          status: "appended",
+          ...agentMdWriteWarnings(`${path}${target.ext}`, prepared.content),
+        });
       }
 
       // ── frontmatterMerge: deep-merge a partial frontmatter object ──
@@ -723,7 +743,10 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           });
         }
         logger.info({ path, method: "PATCH", mode }, "Frontmatter merged");
-        return c.json({ status: "merged" });
+        return c.json({
+          status: "merged",
+          ...agentMdWriteWarnings(`${path}${target.ext}`, prepared.content),
+        });
       }
 
       // ── Section-based modes: require section lookup ──
@@ -855,7 +878,12 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       deps.onIndexableContextChange?.(`${path}${target.ext}`);
       const resultStatus = mode === "append" ? "appended" : mode === "replace" ? "replaced" : "cleared";
       logger.info({ path, method: "PATCH", section, mode, removedCount, trimmedCount }, "Context section " + resultStatus);
-      return c.json({ status: resultStatus, removedCount, trimmedCount });
+      return c.json({
+        status: resultStatus,
+        removedCount,
+        trimmedCount,
+        ...agentMdWriteWarnings(`${path}${target.ext}`, prepared.content),
+      });
     });
   });
 

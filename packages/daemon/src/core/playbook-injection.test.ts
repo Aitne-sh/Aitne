@@ -9,7 +9,11 @@ import {
   playbookReferencePath,
   renderPlaybookBlocks,
 } from "./playbook-injection.js";
-import { createPromptInjectionBudget } from "./policy-files.js";
+import {
+  createPromptInjectionBudget,
+  PLAYBOOK_TOTAL_MAX_BYTES,
+} from "./policy-files.js";
+import { PLAYBOOK_SLUGS } from "@aitne/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // packages/daemon/src/core → repo root
@@ -182,5 +186,24 @@ describe("appendPlaybookBlocks", () => {
       playbooks: [],
     });
     expect(out).toBe("BASE");
+  });
+
+  // audit B6 — the dispatcher gives playbooks their OWN PLAYBOOK_TOTAL_MAX_BYTES
+  // budget so a heavy policy/review bundle can never starve a declared playbook
+  // (the "hard, platform-enforced guarantee"). That guarantee is only real if
+  // the WHOLE curated set fits the dedicated budget — this locks the sizing so a
+  // future playbook that pushes the total over the cap fails here, not silently
+  // at fire time. Reads the REAL bundled reference files (REPO_ROOT).
+  it("admits every curated playbook within the dedicated 16 KiB budget", () => {
+    const budget = createPromptInjectionBudget(PLAYBOOK_TOTAL_MAX_BYTES);
+    const out = appendPlaybookBlocks("BASE", {
+      workspaceDir: REPO_ROOT,
+      playbooks: [...PLAYBOOK_SLUGS],
+      budget,
+    });
+    for (const slug of PLAYBOOK_SLUGS) {
+      expect(out).toContain(`playbooks:${slug}`);
+    }
+    expect(budget.usedBytes).toBeLessThan(PLAYBOOK_TOTAL_MAX_BYTES);
   });
 });

@@ -41,6 +41,7 @@ import { getContextDir } from "../config.js";
 import {
   appendPolicyBlocks,
   createPromptInjectionBudget,
+  PLAYBOOK_TOTAL_MAX_BYTES,
 } from "./policy-files.js";
 import { appendPlaybookBlocks } from "./playbook-injection.js";
 import { appendReviewContextBlocks } from "./review-context.js";
@@ -151,10 +152,15 @@ export class PromptAssembler {
     if (!playbooks || playbooks.length === 0) {
       return withReview;
     }
+    // Playbooks get their OWN budget (audit B6), NOT the shared policy+review
+    // one — otherwise a heavy policy/review bundle could exhaust the 128 KiB cap
+    // and silently drop a declared playbook, contradicting the documented "hard,
+    // platform-enforced guarantee." A dedicated 16 KiB budget makes it real.
+    const playbookBudget = createPromptInjectionBudget(PLAYBOOK_TOTAL_MAX_BYTES);
     return appendPlaybookBlocks(withReview, {
       workspaceDir: this.config.workspaceDir,
       playbooks,
-      budget,
+      budget: playbookBudget,
     });
   }
 

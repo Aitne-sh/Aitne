@@ -19,7 +19,8 @@ function fakeOptions(): ScheduleOptionsResponse {
     models: {
       claude: [
         { id: "claude-haiku-4-5-20251001", tier: "lite", deprecated: false },
-        { id: "claude-sonnet-4-6", tier: "medium", deprecated: false },
+        { id: "claude-sonnet-5", tier: "medium", deprecated: false },
+        { id: "claude-sonnet-4-6", tier: "medium", deprecated: true },
         { id: "claude-opus-4-6", tier: "high", deprecated: true },
         { id: "claude-opus-4-7", tier: "high", deprecated: false },
       ],

@@ -76,7 +76,12 @@ function normalizeTs(value: string | number | null | undefined): string | null {
   return value;
 }
 
-/** Sub-flows the daemon seeds itself — used to tag origin `system`. */
+/**
+ * Sub-flows the daemon seeds itself — used to tag origin `system`. Intentionally
+ * a small explicit allowlist (audit C9): only `morning_briefing` is daemon-seeded
+ * today, and origin is a display hint, not a security boundary — add new seeded
+ * sub-flows here as they appear rather than inferring from a broader heuristic.
+ */
 const SYSTEM_SUB_FLOWS: ReadonlySet<string> = new Set(["morning_briefing"]);
 
 function subFlowOf(ctx: Record<string, unknown>): string | null {

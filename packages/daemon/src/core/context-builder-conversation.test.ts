@@ -874,6 +874,16 @@ describe("context-builder-conversation", () => {
         .filter((l) => l.startsWith("- #"));
       expect(itemLines).toHaveLength(20);
       expect(out).toContain("soonest 20 shown; more pending");
+      // audit C5 — the overflow hint must match the query (pending only), not
+      // advertise a status the block never surfaces.
+      expect(out).toContain("status=pending for the full list");
+      expect(out).not.toContain("status=pending,running");
+    });
+
+    it("carries the supersede note so a stale cached copy is ignored (audit B2)", () => {
+      seedSchedule({ scheduledFor: sqliteMinutesAhead(15), taskDescription: "x" });
+      const out = renderScheduledRemindersBlock(deps(), makeDmEvent())!;
+      expect(out).toContain("supersedes any earlier <scheduled_reminders> block");
     });
 
     it("sanitizes structural close tags in the subject", () => {

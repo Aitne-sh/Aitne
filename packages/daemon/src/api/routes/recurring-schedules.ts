@@ -98,14 +98,24 @@ function applyRecurringIssueOverrides(
   });
 }
 
-/** Resolve the effective timezone for a recurrence rule. */
+/**
+ * Resolve the timezone to STAMP on a recurrence rule, or `undefined` to omit
+ * the key. An explicit per-rule zone or an operator config zone is stamped and
+ * stays pinned; in auto mode (no per-rule zone, empty config) we return
+ * `undefined` so the `timezone` key is omitted and `resolveRuleTimezone`
+ * re-resolves the LIVE OS zone at every materialization — self-healing, the
+ * same behaviour the morning-briefing seed relies on (TimezoneWatcher keeps
+ * `Intl` current). Baking a concrete OS zone here froze a rule to its
+ * create-time zone, so a laptop crossing timezones kept firing at the old
+ * wall-clock time (audit finding A3).
+ */
 function resolveTimezone(
   rule: { timezone?: string },
   configTimezone: string,
-): string {
+): string | undefined {
   if (rule.timezone) return rule.timezone;
   if (configTimezone) return configTimezone;
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return undefined;
 }
 
 /**
@@ -247,10 +257,12 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
       return respondWithAgentError(c, 400, resolved.errors);
     }
 
-    // Auto-fill timezone from daemon config if not provided
+    // Stamp an explicit per-rule / operator-config zone; OMIT the key in auto
+    // mode so the rule tracks the live OS zone at fire time (audit A3).
+    const resolvedTimezone = resolveTimezone(recurrenceRule, config.timezone);
     const resolvedRule: RecurrenceRule = {
       ...recurrenceRule,
-      timezone: resolveTimezone(recurrenceRule, config.timezone),
+      ...(resolvedTimezone !== undefined ? { timezone: resolvedTimezone } : {}),
     };
 
     const dto = createRecurringSchedule(db, {
@@ -409,11 +421,18 @@ export function createRecurringScheduleRoutes(deps: ApiDependencies): Hono {
       updateData.backendId = patchResolved.backendId.value;
     }
 
-    // Auto-fill timezone on recurrenceRule update
+    // Stamp an explicit per-rule / operator-config zone; OMIT the key in auto
+    // mode so the rule tracks the live OS zone at fire time (audit A3).
     if (updateData.recurrenceRule) {
+      const resolvedTimezone = resolveTimezone(
+        updateData.recurrenceRule,
+        config.timezone,
+      );
       updateData.recurrenceRule = {
         ...updateData.recurrenceRule,
-        timezone: resolveTimezone(updateData.recurrenceRule, config.timezone),
+        ...(resolvedTimezone !== undefined
+          ? { timezone: resolvedTimezone }
+          : {}),
       };
     }
 

@@ -154,6 +154,19 @@ describe("computeImpact — one-off + fulfillers + reserved", () => {
     expect(result.summary).toContain("no cascade");
   });
 
+  it("labels a materialized recurring occurrence as a fire of its parent rs (audit B4)", () => {
+    const result = computeImpact(
+      ref("as:8190"),
+      sources({ pendingOccurrences: [{ id: 8190, recurringScheduleId: 51 }] }),
+    );
+    expect(result).toMatchObject({ found: true });
+    expect(result.nodes).toHaveLength(1);
+    expect(result.nodes[0]).toMatchObject({ cascade: "self", removed: true });
+    // Honest label: it is one fire of rs:51, not a standalone one-off.
+    expect(result.summary).toContain("materialized fire of rs:51");
+    expect(result.nodes[0].label).toContain("rs:51");
+  });
+
   it("returns found:false for a missing one-off", () => {
     expect(computeImpact(ref("as:1"), sources({})).found).toBe(false);
   });

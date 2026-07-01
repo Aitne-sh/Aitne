@@ -84,6 +84,90 @@ describe("recurring-schedules routes (dm_session-only after the split)", () => {
     });
   });
 
+  // audit A3 — auto mode (empty config zone) must OMIT the baked `timezone`
+  // key so the rule tracks the live OS zone at fire time; an explicit per-rule
+  // zone or a set operator config zone is still stamped and stays pinned.
+  describe("timezone stamping (A3)", () => {
+    const persistedTz = (scheduleId: number): string | null =>
+      (
+        db
+          .prepare(
+            "SELECT json_extract(recurrence_rule, '$.timezone') AS tz FROM recurring_schedules WHERE id = ?",
+          )
+          .get(scheduleId) as { tz: string | null }
+      ).tz;
+
+    const autoApp = () =>
+      createRecurringScheduleRoutes({
+        db,
+        config: makeConfig(""),
+      } as unknown as ApiDependencies);
+
+    const createOn = (
+      target: ReturnType<typeof createRecurringScheduleRoutes>,
+      body: unknown,
+    ) =>
+      target.request("/recurring-schedules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    // A generic user reminder — NOT the morning briefing — to prove the fix
+    // generalises to every dm_session row, not only the seeded briefing.
+    const genericAutoBody = {
+      taskType: "dm_session",
+      description: "Daily 9am reminder — generic user reminder, no baked zone",
+      recurrenceRule: { frequency: "daily", time: "09:00" },
+      taskContext: { sub_flow: "custom_reminder" },
+    };
+
+    it("OMITS the timezone key on create in auto mode (empty config zone)", async () => {
+      const res = await createOn(autoApp(), genericAutoBody);
+      expect(res.status).toBe(201);
+      const id = ((await res.json()) as { item: { id: number } }).item.id;
+      expect(persistedTz(id)).toBeNull();
+    });
+
+    it("STAMPS an explicit per-rule zone even in auto mode", async () => {
+      const res = await createOn(autoApp(), {
+        ...genericAutoBody,
+        recurrenceRule: { frequency: "daily", time: "09:00", timezone: "Asia/Tokyo" },
+      });
+      const id = ((await res.json()) as { item: { id: number } }).item.id;
+      expect(persistedTz(id)).toBe("Asia/Tokyo");
+    });
+
+    it("STAMPS the operator config zone when set and no per-rule zone", async () => {
+      // `post` uses the default app whose config zone is America/New_York.
+      const res = await post({
+        ...genericAutoBody,
+        recurrenceRule: { frequency: "daily", time: "09:00" },
+      });
+      const id = ((await res.json()) as { item: { id: number } }).item.id;
+      expect(persistedTz(id)).toBe("America/New_York");
+    });
+
+    it("OMITS the timezone key on a recurrenceRule PATCH in auto mode", async () => {
+      const app2 = autoApp();
+      const id = (
+        (await (await createOn(app2, genericAutoBody)).json()) as {
+          item: { id: number };
+        }
+      ).item.id;
+      expect(persistedTz(id)).toBeNull();
+      const patch = await app2.request(`/recurring-schedules/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recurrenceRule: { frequency: "daily", time: "10:00" },
+        }),
+      });
+      expect(patch.status).toBe(200);
+      expect(persistedTz(id)).toBeNull();
+    });
+  });
+
   describe("GET", () => {
     it("lists rows", async () => {
       await post(DM_BODY);

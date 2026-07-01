@@ -157,6 +157,11 @@ function playbookReferenced(
   slug: PlaybookSlug,
 ): boolean {
   if (tags.has(slug)) return true;
+  // The `<slug> playbook` phrasing is the realistic one and does the work. The
+  // `<label> playbook` branch is a best-effort secondary matcher for a
+  // multi-word label; it is redundant for slug-like labels (e.g. "Research")
+  // and a no-op for labels that never appear verbatim in prose (e.g.
+  // "Monitoring / digest") — harmless either way (audit C7).
   const label = PLAYBOOK_REGISTRY[slug].label.toLowerCase();
   return (
     normalizedPrompt.includes(`${slug} playbook`)

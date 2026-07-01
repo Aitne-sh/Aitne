@@ -191,6 +191,67 @@ describe("L1 facade — routes to the hardened owner", () => {
   });
 });
 
+describe("L1 facade — DELETE forwards the caller body (audit A2)", () => {
+  let db: Database.Database;
+  let app: Hono;
+  let forwarded: { method: string; path: string; body: string } | null;
+
+  beforeEach(() => {
+    db = makeDb();
+    forwarded = null;
+    // Spy dispatcher — capture the request the facade forwards to the owner.
+    const dispatch = async (req: Request): Promise<Response> => {
+      forwarded = {
+        method: req.method,
+        path: new URL(req.url).pathname,
+        body: await req.text(),
+      };
+      return new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+    const tasks = createTasksRoutes({ db, dispatch });
+    app = new Hono();
+    app.route("/api", tasks);
+  });
+  afterEach(() => db.close());
+
+  it("forwards {keep_history:false} to the agent owner so its hard-delete branch is reachable", async () => {
+    // Before the fix the facade dropped the body, so the agent owner always saw
+    // keepHistory=true (disable) and a board-driven hard-delete was impossible.
+    const res = await app.request("/api/tasks/agent:my-agent", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keep_history: false }),
+    });
+    expect(res.status).toBe(200);
+    expect(forwarded).not.toBeNull();
+    expect(forwarded!.method).toBe("DELETE");
+    expect(forwarded!.path).toBe("/api/agents/my-agent");
+    expect(JSON.parse(forwarded!.body)).toEqual({ keep_history: false });
+  });
+
+  it("forwards NO body for a body-less DELETE (rs/mt/as owners read the path id only)", async () => {
+    const res = await app.request("/api/tasks/rs:1", { method: "DELETE" });
+    expect(res.status).toBe(200);
+    expect(forwarded).not.toBeNull();
+    expect(forwarded!.path).toBe("/api/recurring-schedules/1");
+    expect(forwarded!.body).toBe(""); // absent body → undefined → not forwarded
+  });
+
+  it("400s a PRESENT-but-malformed DELETE body without dispatching (consistent with PATCH)", async () => {
+    const res = await app.request("/api/tasks/agent:my-agent", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: "{not valid json",
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe("invalid_json_body");
+    expect(forwarded).toBeNull(); // never reached the owner
+  });
+});
+
 describe("L1 facade — disabled when no dispatch is wired", () => {
   it("returns 501 for a write when the facade has no dispatcher", async () => {
     const db = makeDb();

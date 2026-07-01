@@ -725,7 +725,8 @@ describe("applyDefaultPresets falls back to claude when readActiveBackend throws
         default_lite_model TEXT,
         default_medium_model TEXT,
         default_high_model TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        updated_by TEXT NOT NULL DEFAULT 'user'
       )`,
     );
     const realPrepare = db.prepare.bind(db);

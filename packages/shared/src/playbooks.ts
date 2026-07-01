@@ -36,8 +36,10 @@ export interface PlaybookMeta {
   /** Registry slug (== reference-file stem, == what an Agent declares). */
   readonly slug: PlaybookSlug;
   /**
-   * Human label for the injected block header (`### <label> playbook`) and any
-   * dashboard chips rendered from a definition's `playbooks:` list.
+   * Human label for the injected block header (`### <label> playbook`). Also
+   * intended for dashboard chips rendered from a definition's `playbooks:` list,
+   * but no such playbook UI exists yet (audit C8) — today `label` is consumed
+   * only by the injector header and the authoring lint's label-match branch.
    */
   readonly label: string;
   /** Content filename under `agent-assets/playbooks/`. */

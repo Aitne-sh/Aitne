@@ -411,10 +411,12 @@ const API_RISK: Record<string, RiskTier> = {
   // the dashboard's bearer token is required. `{*}` matches the `:slug`
   // segment; the executions + run-now patterns carry an extra trailing literal.
   // POST /api/agents (create) is Autonomous: it is the agent-facing replacement
-  // for the now-410 `POST /api/recurring-schedules` (also Autonomous) — the
-  // `agent-create` skill teaches the DM agent to create a recurring Agent for an
-  // ongoing cadence, the same recurring-task capability it already had. The
-  // loader rejects a one_shot/event definition; planCreate validates the rest.
+  // for recurring LLM-work creates, which `POST /api/recurring-schedules` now
+  // 410s (that route still serves dm_session recurring rows like the morning
+  // briefing, also Autonomous) — the `agent-create` skill teaches the DM agent
+  // to create a recurring Agent for an ongoing cadence, the same recurring-task
+  // capability it already had. The loader rejects a one_shot/event definition;
+  // planCreate validates the rest.
   "GET /api/agents": RiskTier.Autonomous,
   "POST /api/agents": RiskTier.Autonomous,
   "GET /api/agents/{*}": RiskTier.Autonomous,

@@ -1,4 +1,5 @@
-import { agentDefinitionSchema } from "@aitne/shared";
+import { agentDefinitionSchema, lintAgentDefinition } from "@aitne/shared";
+import type { AgentLintIssue } from "@aitne/shared";
 import { AgentFrontmatterError, parseAgentFrontmatter } from "./agent-frontmatter.js";
 
 /**
@@ -68,4 +69,40 @@ export function validateAgentDefinitionMarkdown(
   }
 
   return null;
+}
+
+/**
+ * Non-blocking prompt-quality lint for an `agent.md` payload at the context-vault
+ * write boundary (AGENT_PROMPT_QUALITY_DESIGN.md §3.5 / audit B5). Mirrors the
+ * `POST /api/agents` create-path lint (`planCreate`, views.ts) so that editing an
+ * agent's prompt/`playbooks:` via the raw-`agent.md` PATCH/PUT path — the
+ * recommended way to change them — gets the same authoring feedback the create
+ * path does, instead of silently drifting.
+ *
+ * Returns `[]` for a non-agent path, unparseable frontmatter, or schema-invalid
+ * frontmatter — those cases are already hard-rejected (400) upstream by
+ * `validateAgentDefinitionMarkdown`, so this runs strictly on the SUCCESS side of
+ * a write and NEVER turns a PATCH/PUT into a 400. The `agent.md` body is the
+ * deployed Agent's prompt (see `renderAgentMarkdown`), so it is passed verbatim
+ * as the lint's `prompt`.
+ */
+export function lintAgentDefinitionMarkdown(
+  relativePath: string,
+  content: string,
+): AgentLintIssue[] {
+  if (!AGENT_DEFINITION_PATH_RE.test(relativePath)) return [];
+  let frontmatter: unknown;
+  let body: string;
+  try {
+    ({ frontmatter, body } = parseAgentFrontmatter(content));
+  } catch {
+    return [];
+  }
+  const parsed = agentDefinitionSchema.safeParse(frontmatter);
+  if (!parsed.success) return [];
+  return lintAgentDefinition({
+    prompt: body,
+    playbooks: parsed.data.playbooks,
+    tags: parsed.data.tags,
+  });
 }

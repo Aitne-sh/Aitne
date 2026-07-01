@@ -212,6 +212,10 @@ export function createTasksRoutes(deps: TasksRoutesDeps): Hono {
     body: unknown | undefined,
     extra: { kind?: string },
   ): Promise<Response> {
+    // Defensive only (audit C9): `server.ts` always supplies `dispatch`, so this
+    // 501 is unreachable in production. It stays as a guard for a standalone
+    // `createTasksRoutes({ db })` (e.g. the read-only board in a test) that
+    // routes a write — better a clear 501 than a null-deref.
     if (!deps.dispatch) {
       return c.json(
         { error: "facade_unavailable", message: "The task write facade is not enabled on this daemon." },
@@ -220,7 +224,11 @@ export function createTasksRoutes(deps: TasksRoutesDeps): Hono {
     }
     const url = new URL(c.req.url);
     url.pathname = ownerPath;
-    url.search = "";
+    // Preserve the caller's query string on the forwarded request. No facade-
+    // routed WRITE owner reads a query param today (every `c.req.query` hit is
+    // a GET/list handler), but forwarding it keeps a future query-reading write
+    // owner from being silently starved (audit B3). The pathname swap above is
+    // the only rewrite the owner route needs.
     // Forward the caller's headers verbatim so the owner route re-applies the
     // exact same auth tier / host gate against the same credentials. Drop the
     // caller's `content-length`: the forwarded body is re-serialized (POST
@@ -297,7 +305,22 @@ export function createTasksRoutes(deps: TasksRoutesDeps): Hono {
     if (!plan.editable) {
       return c.json({ error: "ref_not_deletable", message: plan.reason }, 422);
     }
-    return forward(c, "DELETE", plan.ownerPath, undefined, { kind: ref.prefix });
+    // Forward the caller's DELETE body so a `{keep_history:false}` hard-delete
+    // reaches the agent owner — without this the facade always disabled (never
+    // hard-deleted) a user Agent (audit A2). An ABSENT body → `undefined`, which
+    // `forward()` omits, preserving current behaviour for the rs/mt/as owners
+    // (they read the path id only). A PRESENT but malformed body is a 400,
+    // matching the PATCH handler rather than silently soft-disabling.
+    const rawBody = await c.req.text();
+    let body: unknown;
+    if (rawBody.trim().length > 0) {
+      try {
+        body = JSON.parse(rawBody);
+      } catch {
+        return c.json({ error: "invalid_json_body", message: "Request body must be valid JSON." }, 400);
+      }
+    }
+    return forward(c, "DELETE", plan.ownerPath, body, { kind: ref.prefix });
   });
 
   return app;

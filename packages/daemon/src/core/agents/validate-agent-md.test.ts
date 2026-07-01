@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAgentDefinitionPath,
+  lintAgentDefinitionMarkdown,
   validateAgentDefinitionMarkdown,
 } from "./validate-agent-md.js";
 
@@ -83,5 +84,59 @@ describe("validateAgentDefinitionMarkdown", () => {
     expect(message).toBe(
       'agent definition slug "different" must match the directory name "say-hi".',
     );
+  });
+});
+
+describe("lintAgentDefinitionMarkdown (audit B5 — non-blocking edit-path lint)", () => {
+  const PATH = "policies/agents/say-hi/agent.md";
+
+  it("returns [] for a well-formed agent.md with no authoring issues", () => {
+    expect(lintAgentDefinitionMarkdown(PATH, validAgentMarkdown())).toEqual([]);
+  });
+
+  it("flags a playbook the body names but does not declare", () => {
+    const content = validAgentMarkdown().replace(
+      "Send a friendly greeting.",
+      "Follow the research playbook when gathering context.",
+    );
+    const issues = lintAgentDefinitionMarkdown(PATH, content);
+    const referenced = issues.find(
+      (i) => i.code === "playbook_referenced_not_declared",
+    );
+    expect(referenced).toBeDefined();
+    expect(referenced?.playbook).toBe("research");
+  });
+
+  it("does NOT flag the playbook once it is declared in playbooks:", () => {
+    const content = validAgentMarkdown()
+      .replace(
+        "Send a friendly greeting.",
+        "Follow the research playbook when gathering context.",
+      )
+      .replace(
+        "  timeout_minutes: 5\n---",
+        "  timeout_minutes: 5\nplaybooks:\n  - research\n---",
+      );
+    expect(lintAgentDefinitionMarkdown(PATH, content)).toEqual([]);
+  });
+
+  it("flags an empty prompt body", () => {
+    const content = validAgentMarkdown().replace(
+      "# Say Hi\n\nSend a friendly greeting.\n",
+      "",
+    );
+    expect(
+      lintAgentDefinitionMarkdown(PATH, content).map((i) => i.code),
+    ).toContain("empty_prompt");
+  });
+
+  it("returns [] for a non-agent path — safe to call on any write success", () => {
+    expect(lintAgentDefinitionMarkdown("state/today.md", "anything")).toEqual([]);
+  });
+
+  it("returns [] for schema-invalid or unparseable frontmatter (already 400'd upstream)", () => {
+    const invalid = validAgentMarkdown().replace("name: Say Hi\n", "");
+    expect(lintAgentDefinitionMarkdown(PATH, invalid)).toEqual([]);
+    expect(lintAgentDefinitionMarkdown(PATH, "no frontmatter\n# x")).toEqual([]);
   });
 });

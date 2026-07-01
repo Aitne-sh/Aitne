@@ -325,21 +325,26 @@ export function createBackendRoutes(deps: ApiDependencies): Hono {
     highModel: string,
   ): void {
     db.prepare(
+      // updated_by='user' — this is an explicit operator write via
+      // PUT /api/backends/defaults, so mark the row as a deliberate pin that a
+      // future value-only default bump must NOT silently override (audit A1).
       `INSERT INTO backend_global_defaults (
          singleton,
          default_backend,
          default_lite_model,
          default_medium_model,
          default_high_model,
-         updated_at
+         updated_at,
+         updated_by
        )
-       VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'user')
        ON CONFLICT(singleton) DO UPDATE SET
          default_backend = excluded.default_backend,
          default_lite_model = excluded.default_lite_model,
          default_medium_model = excluded.default_medium_model,
          default_high_model = excluded.default_high_model,
-         updated_at = CURRENT_TIMESTAMP`,
+         updated_at = CURRENT_TIMESTAMP,
+         updated_by = 'user'`,
     ).run(backendId, liteModel, mediumModel, highModel);
   }
 

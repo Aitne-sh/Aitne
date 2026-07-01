@@ -453,6 +453,13 @@ export function renderScheduledRemindersBlock(
   // than silently truncated — a hidden tail would let the dedup use of
   // this block wrongly conclude "no duplicate exists".
   const DISPLAY_LIMIT = 20;
+  // SINGLE-OWNER INVARIANT (audit B1): `agent_schedule` is architecturally
+  // single-tenant — it has no owner column — and owner scope is enforced
+  // UPSTREAM: every adapter drops non-owner senders before an event reaches
+  // `build()`, and the only non-owner surface (docs-QA) is excluded by the
+  // `intent === "docs_qa"` gate above. So this unscoped SELECT cannot leak
+  // another owner's rows. If multi-tenancy is ever added, this query MUST gain
+  // an owner predicate or it silently becomes a cross-tenant leak.
   const rows = db
     .prepare(
       `SELECT id, scheduled_for, task_type, task_description, task_prompt
@@ -491,11 +498,16 @@ export function renderScheduledRemindersBlock(
   });
   if (overflow) {
     lines.push(
-      `- …soonest ${DISPLAY_LIMIT} shown; more pending — GET /api/schedule?status=pending,running for the full list before assuming none match.`,
+      `- …soonest ${DISPLAY_LIMIT} shown; more pending — GET /api/schedule?status=pending for the full list before assuming none match.`,
     );
   }
 
   return [
+    // audit B2 — a turn-1 copy of this block rides in the cached prefix and is
+    // never superseded, so on resume it can disagree with this fresh copy. The
+    // supersede line tells the agent to trust only the most recent list.
+    "This list supersedes any earlier <scheduled_reminders> block in this",
+    "conversation — ignore prior copies; only this most recent one is current.",
     "These one-off notifications/tasks are already queued to fire on your",
     "behalf. If this conversation makes one unnecessary or wrong (the owner",
     "already did it, cancelled, or changed plans), reconcile it THIS turn",

@@ -22,6 +22,18 @@ export const POLICY_FILE_MAX_BYTES = 32 * 1024;
 export const POLICY_TOTAL_MAX_BYTES = 128 * 1024;
 
 /**
+ * Dedicated aggregate cap for operating-playbook injection (audit B6). Playbooks
+ * are documented as a "hard, platform-enforced guarantee" (AGENT_PROMPT_QUALITY
+ * _DESIGN.md Phase 2), but they inject LAST, so sharing the 128 KiB policy+review
+ * budget let a heavy policy/review bundle silently starve a declared playbook —
+ * best-effort, not guaranteed. Giving playbooks their own budget makes the
+ * guarantee real. 16 KiB is comfortable headroom: the registry is a fixed set of
+ * three curated playbooks totalling ~5.3 KiB, each also bounded by the 32 KiB
+ * per-file cap.
+ */
+export const PLAYBOOK_TOTAL_MAX_BYTES = 16 * 1024;
+
+/**
  * Shared byte budget threaded through `appendPolicyBlocks` and the
  * review-context injector so a single aggregate cap covers both. Callers
  * at prompt-assembly time instantiate one budget and pass it to every

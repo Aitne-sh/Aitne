@@ -15,7 +15,7 @@
  *      — runtime-config zod refine
  *   2. `packages/daemon/src/api/routes/backends.ts`
  *      — `PUT /api/backends/advisor` body schema
- *   3. `packages/dashboard/src/components/settings/backends-and-plans-section.tsx`
+ *   3. `packages/dashboard/src/components/settings/backends-section.tsx`
  *      — dropdown filter + form fallback default
  *
  * Update them by bumping this list. The first element is the canonical

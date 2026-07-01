@@ -124,6 +124,10 @@ function recurringSatelliteNodes(
     }
   }
 
+  // NOTE (audit C6): the satellite node ids below (`trigger:<id>`,
+  // `rs:<id>#pending`) are human-readable DISPLAY labels, not parseable typed
+  // refs like `formatTaskRef(...)` above — a future clickable-impact UI must
+  // treat these as text, not feed them to `parseTaskRef` (they would 400).
   for (const t of sources.automationTriggers) {
     if (t.recurringScheduleId === rsId) {
       nodes.push(
@@ -271,6 +275,22 @@ export function computeImpact(ref: TaskRef, sources: ImpactSources): ImpactResul
       const occ = sources.pendingOccurrences.find((o) => o.id === asId);
       if (!occ) {
         return { ref: ref.raw, found: false, summary: `${ref.raw} is not a live pending reminder.`, nodes: [] };
+      }
+      // A pending agent_schedule row is either a genuine one-off OR one
+      // materialized fire of a recurring schedule. The board inventory only
+      // lists UNLINKED one-offs, so label a linked occurrence honestly (audit
+      // B4): cancelling it drops just this fire — the parent rs regenerates
+      // its next occurrence.
+      const parentRs = occ.recurringScheduleId;
+      if (parentRs !== null) {
+        return {
+          ref: ref.raw,
+          found: true,
+          summary: `Cancelling ${ref.raw} removes ONE materialized fire of rs:${parentRs}; the recurring schedule regenerates its next occurrence (no cascade).`,
+          nodes: [
+            node(ref.raw, `one materialized fire of rs:${parentRs} — the target row`, "self", true),
+          ],
+        };
       }
       return {
         ref: ref.raw,

@@ -947,36 +947,33 @@ export const MIGRATIONS: readonly Migration[] = [
       + "installs. Sonnet 5 shipped 2026-06-30; DEFAULT_CLAUDE_MEDIUM_MODEL is "
       + "now claude-sonnet-5 and the schema seed interpolates it, so FRESH "
       + "installs already land on Sonnet 5. This migration only moves "
-      + "PRE-EXISTING rows still sitting on the old seeded default: "
-      + "backend_global_defaults.default_medium_model (claude-sonnet-4-6, or "
-      + "opencode anthropic/claude-sonnet-4-6) and every "
-      + "process_backend_config.main_model whose updated_by is a non-user seed "
-      + "source ('preset' / 'cascade'). Operator-pinned rows "
+      + "PRE-EXISTING process_backend_config.main_model rows whose updated_by is "
+      + "a non-user seed source ('preset' / 'cascade'); operator-pinned rows "
       + "(updated_by='user') and any default the operator changed away from the "
-      + "old value are left untouched. The conversation_sessions 'sonnet' alias "
-      + "DEFAULT and agent_schedule 'sonnet' rows resolve at runtime and need no "
-      + "migration; a literal agent_schedule.model='claude-sonnet-4-6' pin is a "
-      + "deliberate operator choice and stays. Literals are point-in-time "
-      + "snapshots (NOT the DEFAULT_CLAUDE_MEDIUM_MODEL constant) so a future "
-      + "bump can't retarget this migration. Idempotent: the WHERE clauses match "
-      + "only the old model, so after the bump nothing matches, and the recorded "
-      + "id short-circuits a re-run anyway.",
+      + "old value are left untouched. backend_global_defaults is DELIBERATELY "
+      + "NOT touched here (audit A1): at the time this migration shipped that "
+      + "table had no updated_by column, so a stored claude-sonnet-4-6 is "
+      + "ambiguous between a seed default and a deliberate operator pin — a "
+      + "value-only UPDATE would silently override the pin. Those rows "
+      + "forward-track lazily instead, the next time the operator hits setup or "
+      + "'Reset to defaults' (both resolve via DEFAULT_CLAUDE_MEDIUM_MODEL). "
+      + "Migration 0019 adds the provenance column so a FUTURE bump can guard "
+      + "backend_global_defaults symmetrically. The conversation_sessions "
+      + "'sonnet' alias DEFAULT and agent_schedule 'sonnet' rows resolve at "
+      + "runtime and need no migration; a literal "
+      + "agent_schedule.model='claude-sonnet-4-6' pin is a deliberate operator "
+      + "choice and stays. Literals are point-in-time snapshots (NOT the "
+      + "DEFAULT_CLAUDE_MEDIUM_MODEL constant) so a future bump can't retarget "
+      + "this migration. Idempotent: the WHERE clause matches only the old "
+      + "model, so after the bump nothing matches, and the recorded id "
+      + "short-circuits a re-run anyway.",
     up(db) {
       // Empty-DB safety: a bare :memory: DB (e.g. the runner's own unit tests)
-      // may not have run applySchema. Guard each table independently — the
-      // runner still records the id so a later boot does not re-evaluate.
-      if (tableExists(db, "backend_global_defaults")) {
-        db.prepare(
-          `UPDATE backend_global_defaults
-              SET default_medium_model = 'claude-sonnet-5'
-            WHERE default_medium_model = 'claude-sonnet-4-6'`,
-        ).run();
-        db.prepare(
-          `UPDATE backend_global_defaults
-              SET default_medium_model = 'anthropic/claude-sonnet-5'
-            WHERE default_medium_model = 'anthropic/claude-sonnet-4-6'`,
-        ).run();
-      }
+      // may not have run applySchema. Guard the table — the runner still
+      // records the id so a later boot does not re-evaluate. NOTE:
+      // backend_global_defaults is intentionally NOT updated here (see the
+      // description) — it has no updated_by column at this migration, so a
+      // value-only bump can't tell a seed default from a deliberate pin.
       if (tableExists(db, "process_backend_config")) {
         db.prepare(
           `UPDATE process_backend_config
@@ -1046,6 +1043,90 @@ export const MIGRATIONS: readonly Migration[] = [
                  AND max_budget_usd >= 0.99 AND max_budget_usd <= 1.01)
             )`,
       ).run();
+    },
+  },
+  {
+    id: "0018-recurring-dm-follow-system-timezone-backfill",
+    description:
+      "(timezone OS-tracking, audit A3 — UNSCOPED backfill) — migration 0015 "
+      + "stripped the baked `recurrence_rule.timezone` only from the morning-"
+      + "briefing row. The same write-path bug baked a concrete OS zone into "
+      + "EVERY auto-mode `dm_session` recurring row created before the "
+      + "resolveTimezone fix, freezing each to its create-time zone (a laptop "
+      + "crossing timezones kept firing the reminder at the old wall-clock). "
+      + "Strip the baked zone from ALL `dm_session` rows so `resolveRuleTimezone` "
+      + "re-resolves the live system zone (kept current by TimezoneWatcher). "
+      + "PROVENANCE TRADEOFF: a pre-fix row carries NO marker distinguishing an "
+      + "auto-baked zone from a deliberately API-pinned per-rule zone — they are "
+      + "byte-identical — so this cannot preserve an intentionally pinned zone in "
+      + "auto mode; it clears every dm_session zone while auto mode is active. "
+      + "Accepted because (a) in auto mode a pinned zone and the live OS zone "
+      + "usually coincide, and (b) tracking the OS is the safer failure mode than "
+      + "a silently frozen wall-clock. GLOBAL GATE (mirrors 0015): runs ONLY "
+      + "while the operator `timezone` setting is empty/unset (auto mode); if any "
+      + "operator zone is pinned, every row is left untouched. Idempotent: the "
+      + "`$.timezone IS NOT NULL` guard makes a re-run a no-op, and the recorded "
+      + "id short-circuits re-evaluation.",
+    up(db) {
+      if (!tableExists(db, "recurring_schedules")) return;
+      // Auto-mode gate — identical resolution precedence to 0015: a persisted
+      // settings.timezone row (even empty = explicit auto) wins, else PA_TIMEZONE.
+      let effectiveTz: string | null = null;
+      if (tableExists(db, "settings")) {
+        const row = db
+          .prepare("SELECT value_json FROM settings WHERE key = 'timezone'")
+          .get() as { value_json: string } | undefined;
+        if (row) {
+          try {
+            const value = JSON.parse(row.value_json) as unknown;
+            effectiveTz = typeof value === "string" ? value : "";
+          } catch {
+            // Corrupt value_json — treat as auto (and keep boot from crashing).
+            effectiveTz = "";
+          }
+        }
+      }
+      if (effectiveTz === null) {
+        effectiveTz = process.env.PA_TIMEZONE ?? "";
+      }
+      if (effectiveTz.length > 0) return; // pinned — leave all rows alone
+      db.prepare(
+        `UPDATE recurring_schedules
+            SET recurrence_rule = json_remove(recurrence_rule, '$.timezone')
+          WHERE task_type = 'dm_session'
+            AND json_extract(recurrence_rule, '$.timezone') IS NOT NULL`,
+      ).run();
+    },
+  },
+  {
+    id: "0019-backend-global-defaults-updated-by",
+    description:
+      "(audit A1) — add the `updated_by` provenance column to "
+      + "backend_global_defaults so a FUTURE value-only default-bump migration "
+      + "can guard it symmetrically with process_backend_config (the gap that let "
+      + "migration 0016 originally threaten to silently override an operator "
+      + "pin). This ONLY runs on an UPGRADING install (the column is absent): the "
+      + "ALTER's OWN default is 'user' — DISTINCT from the CREATE-TABLE default "
+      + "'preset' — so every PRE-EXISTING row backfills to 'user'. A row already "
+      + "present is ambiguous between a seed default and a deliberate pin, so mark "
+      + "it a pin (protect it) — the conservative choice that matches 0016's "
+      + "decision to leave these rows alone. On a FRESH install applySchema "
+      + "already created the column (default 'preset', a forward-trackable seed) "
+      + "so this migration is SKIPPED; operator writes (upsertDefaults) and preset "
+      + "re-seeds (applyDefaultPresets, setMainBackend INSERT) stamp it going "
+      + "forward. Idempotent: the columnExists guard makes it a recorded no-op "
+      + "once the column is present.",
+    up(db) {
+      if (!tableExists(db, "backend_global_defaults")) return;
+      // NB: the ALTER default 'user' is INTENTIONALLY different from the
+      // CREATE-TABLE default 'preset' (schema.ts). CREATE-TABLE 'preset' marks a
+      // fresh seed forward-trackable; this 'user' protects an ambiguous
+      // pre-existing upgrade row. Do not "reconcile" the two.
+      if (!columnExists(db, "backend_global_defaults", "updated_by")) {
+        db.exec(
+          "ALTER TABLE backend_global_defaults ADD COLUMN updated_by TEXT NOT NULL DEFAULT 'user'",
+        );
+      }
     },
   },
 ];

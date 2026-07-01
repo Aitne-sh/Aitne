@@ -406,20 +406,25 @@ export function applyDefaultPresets(
 
   const transaction = db.transaction(() => {
     db.prepare(
+      // updated_by='preset' — this re-seeds the model columns from the preset
+      // table, so their provenance is system-seeded, NOT an operator pin (audit
+      // A1). A future value-only default bump may forward-track a 'preset' row.
       `INSERT INTO backend_global_defaults (
          singleton,
          default_backend,
          default_lite_model,
          default_medium_model,
          default_high_model,
-         updated_at
-       ) VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         updated_at,
+         updated_by
+       ) VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'preset')
        ON CONFLICT(singleton) DO UPDATE SET
          default_backend = excluded.default_backend,
          default_lite_model = excluded.default_lite_model,
          default_medium_model = excluded.default_medium_model,
          default_high_model = excluded.default_high_model,
-         updated_at = CURRENT_TIMESTAMP`,
+         updated_at = CURRENT_TIMESTAMP,
+         updated_by = 'preset'`,
     ).run(
       targetBackend,
       liteModelFor(targetBackend),
@@ -494,14 +499,20 @@ export function setMainBackend(
 ): void {
   const tx = db.transaction(() => {
     db.prepare(
+      // On INSERT (no row yet) the models are seeded from the preset table →
+      // updated_by='preset'. On CONFLICT only default_backend changes; the model
+      // columns (and thus their provenance) are left as-is, so updated_by is NOT
+      // overwritten — switching the active backend must not silently re-classify
+      // an operator's model pin (audit A1).
       `INSERT INTO backend_global_defaults (
          singleton,
          default_backend,
          default_lite_model,
          default_medium_model,
          default_high_model,
-         updated_at
-       ) VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         updated_at,
+         updated_by
+       ) VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'preset')
        ON CONFLICT(singleton) DO UPDATE SET
          default_backend = excluded.default_backend,
          updated_at = CURRENT_TIMESTAMP`,

@@ -718,6 +718,18 @@ CREATE TABLE IF NOT EXISTS backend_global_defaults (
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     advisor_enabled INTEGER NOT NULL DEFAULT 0,
     advisor_model TEXT,
+    -- Provenance of the model columns (audit A1). 'user' = a deliberate operator
+    -- pin (protect from value-only default bumps); 'preset'/'cascade' = a
+    -- system-seeded default a future default-bump migration may forward-track
+    -- (symmetric with process_backend_config.updated_by).
+    --   • CREATE-TABLE default is 'preset': the seed below omits this column so a
+    --     FRESH install's seed row lands as a forward-trackable system default.
+    --   • The seed MUST NOT list updated_by — it runs inside applySchema, which
+    --     executes BEFORE migration 0019, so on an UPGRADING DB (table present
+    --     without this column) naming it here would fail to prepare and crash
+    --     boot. Migration 0019 adds the column for upgrades with its OWN default
+    --     'user', so PRE-EXISTING rows (ambiguous seed-vs-pin) are protected.
+    updated_by TEXT NOT NULL DEFAULT 'preset',
     FOREIGN KEY (default_backend) REFERENCES backends(id)
 );
 
@@ -2242,6 +2254,11 @@ VALUES
     ('gemini',   0, 'unknown', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     ('opencode', 0, 'unknown', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
+-- NOTE (audit A1): this seed intentionally OMITS the updated_by column. That
+-- column is migration-added (0019), and this INSERT runs inside applySchema
+-- BEFORE migrations — naming a not-yet-present column would crash an upgrading
+-- boot. Omitting it means a fresh install's row takes the CREATE-TABLE default
+-- ('preset', a forward-trackable system seed); upgrading rows are handled by 0019.
 INSERT OR IGNORE INTO backend_global_defaults
     (singleton, default_backend, default_lite_model, default_medium_model, default_high_model, advisor_enabled, updated_at)
 VALUES
