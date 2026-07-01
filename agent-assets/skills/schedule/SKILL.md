@@ -167,7 +167,7 @@ curl -s -X PATCH http://localhost:8321/api/schedule/42 \
   -H 'Content-Type: application/json' \
   -d '{"time":"2026-04-06T17:00:00-04:00"}'
 ```
-Fields: `time` (ISO 8601), `prompt` (the agent instruction, ≤8000 chars, non-dm only, OR `null` to clear on a legacy row), `description` (optional label ≤200 chars, non-dm only), `message` (dm only), `tier` (`lite`/`medium`/`high` OR `null` to clear), `model` (registered id / alias / composite OR `null` to clear), `taskContext`. At least one required. Only `pending` items editable. `description`/`message` mutually exclusive; `prompt`/`message` mutually exclusive. Tier ↔ model swap form is in the model-selection reference above. Response: `{ "status":"updated", "id":42, "warnings":[] }` / 404 / 409 — surface `warnings[]` (e.g. `schedule.model_deprecated`) to the next turn.
+Fields: `time` (ISO 8601), `prompt` (the agent instruction, ≤8000 chars, non-dm only — cannot be cleared; a row must always carry a non-empty prompt), `description` (optional label ≤200 chars, non-dm only), `message` (dm only), `tier` (`lite`/`medium`/`high` OR `null` to clear), `model` (registered id / alias / composite OR `null` to clear), `taskContext`. At least one required. Only `pending` items editable. `description`/`message` mutually exclusive; `prompt`/`message` mutually exclusive. Tier ↔ model swap form is in the model-selection reference above. Response: `{ "status":"updated", "id":42, "warnings":[] }` / 404 / 409 — surface `warnings[]` (e.g. `schedule.model_deprecated`) to the next turn.
 
 ### GET /api/schedule — List scheduled items
 ```bash

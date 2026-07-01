@@ -704,7 +704,7 @@ describe("browser-task skill wiring (BROWSER_TASK_REDESIGN_PLAN Phase 5)", () =>
 
   test("body declares localhost-only contract (regression guard for the curl chokepoint)", () => {
     const body = readFileSync(SKILL_PATH, "utf-8");
-    expect(body).toContain("127.0.0.1:8321");
+    expect(body).toContain("localhost:8321");
     // The "localhost only" rule must be explicit prose, not just a
     // curl example — otherwise a future agent edit could quote the
     // example as "the daemon URL" while widening to a non-loopback
@@ -859,7 +859,7 @@ describe("background-task skill wiring (BACKGROUND_TASK_RUNNER_DESIGN Phase 3)",
 
   test("body declares the localhost-only chokepoint", () => {
     const body = readFileSync(SKILL_PATH, "utf-8");
-    expect(body).toContain("127.0.0.1:8321");
+    expect(body).toContain("localhost:8321");
     expect(body.toLowerCase()).toMatch(/localhost only/i);
   });
 });
@@ -919,7 +919,7 @@ describe("Task Board skill wiring (unified-task-board.md L0/L1)", () => {
     expect(body).toMatch(/is_a_cascade/);
     expect(body).toMatch(/set_null_satellite/);
     expect(body).toMatch(/`task`/); // delegates writes
-    expect(body).toContain("127.0.0.1:8321");
+    expect(body).toContain("localhost:8321");
     expect(body.toLowerCase()).toMatch(/read-only/);
   });
 
@@ -933,7 +933,7 @@ describe("Task Board skill wiring (unified-task-board.md L0/L1)", () => {
     expect(body).toMatch(/DELETE[\s\S]*\/api\/tasks/);
     // The §9.17/§9.32 guard — a dm create can never become agent.task.
     expect(body).toMatch(/dm_session/);
-    expect(body).toContain("127.0.0.1:8321");
+    expect(body).toContain("localhost:8321");
   });
 });
 
@@ -995,7 +995,7 @@ describe("background-task-reply skill wiring (BACKGROUND_TASK_RUNNER_DESIGN Phas
     // The never-cold-call guard — relay only when a task is genuinely
     // parked AND the conversation shows the question was asked.
     expect(body.toLowerCase()).toMatch(/never cold-call|no-op/);
-    expect(body).toContain("127.0.0.1:8321");
+    expect(body).toContain("localhost:8321");
   });
 });
 

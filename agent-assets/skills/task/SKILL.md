@@ -32,7 +32,7 @@ them). Pick the kind:
 ```bash
 curl --silent --fail -X POST -H 'Content-Type: application/json' \
   -d '{"kind":"reminder","time":"2026-07-01T15:00:00+09:00","message":"call the dentist"}' \
-  http://127.0.0.1:8321/api/tasks
+  http://localhost:8321/api/tasks
 ```
 
 For anything beyond the simple case — authoring a full recurring Agent, an
@@ -49,9 +49,9 @@ endpoint; DELETE forwards to the owning delete (cascade preserved).
 
 ```bash
 curl --silent --fail -X PATCH -H 'Content-Type: application/json' \
-  -d '{"enabled":false}' http://127.0.0.1:8321/api/tasks/rs:42
+  -d '{"enabled":false}' http://localhost:8321/api/tasks/rs:42
 
-curl --silent --fail -X DELETE http://127.0.0.1:8321/api/tasks/mt_3
+curl --silent --fail -X DELETE http://localhost:8321/api/tasks/mt_3
 ```
 
 ## Response envelope
@@ -62,7 +62,7 @@ Every dispatch returns the owner's HTTP status with
 
 ## Hard rules
 
-1. **Localhost only.** `http://127.0.0.1:8321/api/tasks*`.
+1. **Localhost only.** `http://localhost:8321/api/tasks*`.
 2. **A `dm` create is always a `dm_session` row.** You cannot create recurring
    autonomous *work* through `kind:"dm"` — that is `kind:"agent"`. The facade
    enforces this (it never opens the 410'd recurring agent-task door, and never

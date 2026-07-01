@@ -21,7 +21,7 @@ B-4 purchase tokens, or workflow approvals — those live under
 
 ## Hard rules
 
-1. **Localhost only.** `http://127.0.0.1:8321/api/browser-task/*`.
+1. **Localhost only.** `http://localhost:8321/api/browser-task/*`.
 2. **POST, ack, end the turn. NEVER poll for completion.** After a
    successful POST, reply once ("Started — I'll report back when it's
    done.") and stop. Do not GET `/:id` in a loop, "wait and check", or
@@ -64,7 +64,7 @@ B-4 purchase tokens, or workflow approvals — those live under
 ```bash
 curl --silent --fail -X POST -H 'Content-Type: application/json' \
   -d '{"description":"Post \"Hello world\" to twitter.com"}' \
-  http://127.0.0.1:8321/api/browser-task
+  http://localhost:8321/api/browser-task
 ```
 
 Body:

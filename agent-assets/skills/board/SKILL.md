@@ -33,7 +33,7 @@ the board when the user *asks* to look, not as a standing checklist.
 ## Inventory — `GET /api/tasks`
 
 ```bash
-curl --silent --fail http://127.0.0.1:8321/api/tasks
+curl --silent --fail http://localhost:8321/api/tasks
 ```
 
 Returns `{ items, total, generatedAt }`. Each item:
@@ -56,7 +56,7 @@ verbatim from the owning row.
 ## Blast radius — `GET /api/tasks/impact?ref=<ref>`
 
 ```bash
-curl --silent --fail "http://127.0.0.1:8321/api/tasks/impact?ref=mt_3"
+curl --silent --fail "http://localhost:8321/api/tasks/impact?ref=mt_3"
 ```
 
 Returns `{ ref, found, summary, nodes }`. Each node is a row a delete/modify
@@ -85,7 +85,7 @@ specialised skills (`agent-create`, `managed-tasks`, `schedule`,
 
 ## Hard rules
 
-1. **Localhost only.** `http://127.0.0.1:8321/api/tasks*`.
+1. **Localhost only.** `http://localhost:8321/api/tasks*`.
 2. **Read-only.** This skill issues only GETs. Never mutate from here.
 3. **Never reactivate a muted/concluded research cluster** by listing it — the
    board only surfaces active/dormant clusters and `impact` never changes status.

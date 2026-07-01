@@ -15,7 +15,7 @@ their own destination policy — see the cluster-update flow below.
 ## Hard rules
 
 1. **Localhost only.** Every request goes to
-   `http://127.0.0.1:8321/api/browser-history/*` (or `localhost`).
+   `http://localhost:8321/api/browser-history/*`.
    A curl to any other host is a contract violation and the daemon's
    absolute-block layer will reject it.
 2. **No raw SQLite.** Never invoke `sqlite3`, never `Read` a path under
@@ -75,7 +75,7 @@ so do NOT add an auth header to it.)
 
 ```bash
 curl --silent --show-error \
-  http://127.0.0.1:8321/api/browser-history/research-clusters
+  http://localhost:8321/api/browser-history/research-clusters
 ```
 
 Use `--silent --show-error` (not `--fail`): the agent's `curl` runs
@@ -94,7 +94,7 @@ curl --silent --show-error \
   -X POST \
   -H 'Content-Type: application/json' \
   -d '{"kind":"research_assist"}' \
-  http://127.0.0.1:8321/api/browser-history/offers/quantum-mechanics/accept
+  http://localhost:8321/api/browser-history/offers/quantum-mechanics/accept
 ```
 
 ## Flow: routine.research_cluster_update

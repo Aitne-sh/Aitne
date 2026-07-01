@@ -65,7 +65,7 @@ user-visible text** (token hygiene). The GET is the authoritative source.
 ```bash
 curl --silent --fail -X POST -H 'Content-Type: application/json' \
   -d '{"clarificationId":"<uuid>","answer":"api first"}' \
-  http://127.0.0.1:8321/api/background-task/<taskId>/clarify
+  http://localhost:8321/api/background-task/<taskId>/clarify
 ```
 
 - `answer` (1..8192) — the owner's reply, verbatim and faithful. Do not
@@ -96,5 +96,5 @@ Status codes — handle each, don't retry blindly:
 
 ## Localhost only
 
-`http://127.0.0.1:8321/api/background-task/*`. JSON body in single quotes
+`http://localhost:8321/api/background-task/*`. JSON body in single quotes
 (project convention) so the daemon hooks classify the payload as data.

@@ -87,15 +87,15 @@ pre-summarise.
 
 ```bash
 curl --silent --fail \
-  http://127.0.0.1:8321/api/browser-history/offers/pending
+  http://localhost:8321/api/browser-history/offers/pending
 
 curl --silent --fail -X POST \
   -H 'Content-Type: application/json' \
   -d '{"kind":"research_assist"}' \
-  http://127.0.0.1:8321/api/browser-history/offers/<slug>/accept
+  http://localhost:8321/api/browser-history/offers/<slug>/accept
 
 curl --silent --fail -X POST \
-  http://127.0.0.1:8321/api/browser-history/offers/<slug>/decline
+  http://localhost:8321/api/browser-history/offers/<slug>/decline
 ```
 
 JSON body in single quotes (project convention) so the daemon hooks

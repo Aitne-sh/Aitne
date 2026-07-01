@@ -90,7 +90,7 @@ Clarifications are answered with the **`background-task-reply`** skill.
 
 ## Hard rules
 
-1. **Localhost only.** `http://127.0.0.1:8321/api/background-task/*`.
+1. **Localhost only.** `http://localhost:8321/api/background-task/*`.
 2. **POST, ack, end the turn. NEVER poll for completion.** After a
    successful POST, reply once and stop. Do NOT GET `/:id` in a loop or
    "wait and check". Ending your turn has zero effect on the detached
@@ -110,7 +110,7 @@ Clarifications are answered with the **`background-task-reply`** skill.
 ```bash
 curl --silent --fail -X POST -H 'Content-Type: application/json' \
   -d '{"brief":"Audit these repos for a red main-branch CI build: aitne/daemon, aitne/web. \"Failing\" = the latest default-branch run concluded failure. Summary in English. Only notify if at least one repo is red. Output: one line per failing repo with the job.","title":"CI audit","notificationPolicy":"if_significant"}' \
-  http://127.0.0.1:8321/api/background-task
+  http://localhost:8321/api/background-task
 ```
 
 Body:
@@ -149,7 +149,7 @@ detail it didn't include ("what exactly did it find on repo X?", "show me
 the numbers"), do a **single** read and answer from the verbatim `report`:
 
 ```bash
-curl --silent --fail http://127.0.0.1:8321/api/background-task/<taskId>
+curl --silent --fail http://localhost:8321/api/background-task/<taskId>
 ```
 
 `report` is the full, unparaphrased result. Quote from it; don't invent
@@ -162,7 +162,7 @@ A `silent` / unmet-`if_significant` result is filed (`notify=false`), not
 pushed. When the user asks whether a backgrounded task ran:
 
 ```bash
-curl --silent --fail "http://127.0.0.1:8321/api/background-task?state=completed&notify=false&sinceHours=168"
+curl --silent --fail "http://localhost:8321/api/background-task?state=completed&notify=false&sinceHours=168"
 ```
 
 Each row carries `title`, `significance`, and `report`. Summarize

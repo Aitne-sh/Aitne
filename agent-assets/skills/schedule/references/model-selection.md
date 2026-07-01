@@ -25,7 +25,7 @@ even after `/settings/models` re-routes the process key). The two are
   route to `tier:"medium"` / `tier:"high"`; the alias is not stored
   verbatim.
 - **Registered model ids** — any id from `MODEL_REGISTRY` across the
-  four backends. Examples: `claude-opus-4-8`, `claude-sonnet-4-6`,
+  four backends. Examples: `claude-opus-4-8`, `claude-sonnet-5`,
   `claude-haiku-4-5-20251001`, `gpt-5.4`, `gemini-3.1-pro-preview`.
   The row persists `(model, backend_id)` together so the dispatcher
   honors the pin at fire time.
