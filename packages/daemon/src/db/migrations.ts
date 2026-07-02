@@ -1275,6 +1275,54 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0024-source-documents",
+    description:
+      "(source library) — create `source_documents` and add "
+      + "`chat_attachments.source_id`. User-sent documents (PDF/PPTX/DOCX…) "
+      + "previously lived only in the message-lifecycle-coupled "
+      + "chat_attachments store, so message pruning (ON DELETE CASCADE) and "
+      + "the 24h orphan reaper silently destroyed them. source_documents is "
+      + "the durable library ledger for <dataDir>/sources/<id>/ binaries: "
+      + "sha256-deduped, status-driven lifecycle (unfiled/filed/archived), "
+      + "and deliberately NO foreign key into the message graph — an FK "
+      + "would re-import the retention problem this table exists to escape. "
+      + "`chat_attachments.source_id` is a plain-TEXT breadcrumb from an "
+      + "ingested attachment to its captured source so the DM prompt block "
+      + "can announce the library id. Idempotent via IF NOT EXISTS + "
+      + "columnExists guards. See SOURCE_LIBRARY_DESIGN.md.",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS source_documents (
+            id TEXT PRIMARY KEY,
+            sha256 TEXT NOT NULL UNIQUE,
+            path TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            safe_filename TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'unfiled'
+                CHECK (status IN ('unfiled', 'filed', 'archived')),
+            card_path TEXT,
+            provenance TEXT NOT NULL,
+            origin_attachment_id TEXT,
+            caption TEXT,
+            received_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_received_at TEXT NOT NULL DEFAULT (datetime('now')),
+            receive_count INTEGER NOT NULL DEFAULT 1,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_source_documents_status
+            ON source_documents(status);
+      `);
+      if (
+        tableExists(db, "chat_attachments")
+        && !columnExists(db, "chat_attachments", "source_id")
+      ) {
+        db.exec(`ALTER TABLE chat_attachments ADD COLUMN source_id TEXT`);
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

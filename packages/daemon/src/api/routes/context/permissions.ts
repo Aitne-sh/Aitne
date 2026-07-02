@@ -95,6 +95,15 @@ export const CONTEXT_WRITE_PERMISSIONS: Record<string, string[]> = {
   "knowledge/entities/{domain}/_index": ["PUT", "PATCH"],
   "knowledge/entities/{domain}/{typePlural}/{slug}": ["PUT", "PATCH"],
 
+  // Source-document cards (SOURCE_LIBRARY_DESIGN.md). The wildcard covers
+  // both flat cards and `<collection>/<slug>` depth. DELETE is allowed —
+  // unlike policy captures there is no history to preserve in a card
+  // (provenance lives in the `source_documents` ledger, and every delete
+  // still snapshots first), and reorganizing collections is an explicit
+  // design goal: move = PUT new card + DELETE old + PATCH the library row.
+  "knowledge/sources/_index": ["PUT", "PATCH"],
+  "knowledge/sources/*": ["PUT", "PATCH", "DELETE"],
+
   // research/ — browser-history research-cluster journals
   // (BROWSER_HISTORY_INTEGRATION_PLAN). The routine.research_dispatch /
   // research_wiki_summary / research_cluster_update task-flows persist the

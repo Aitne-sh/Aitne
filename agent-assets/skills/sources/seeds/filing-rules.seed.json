@@ -1,0 +1,25 @@
+{
+  "kind": "convention_notes",
+  "notes": [
+    {
+      "topic": "Card slug",
+      "rule": "Lowercase [a-z0-9._-], descriptive of the document content, not the filename (strip dates/version noise unless meaningful).",
+      "example": "knowledge/sources/acme-launch/pitch-deck.md for 'Acme_Pitch_FINAL_v3 (2).pdf'"
+    },
+    {
+      "topic": "One card per source",
+      "rule": "Exactly one card per src_ id; on dedup (same file re-sent) update the existing card's `updated:` instead of writing a second card.",
+      "example": "receive_count > 1 on GET /api/sources/<id> means the user re-sent the same bytes"
+    },
+    {
+      "topic": "Collection choice",
+      "rule": "Prefer a collection matching an active project slug; use a topical collection for project-less documents; reserve `inbox` for the genuinely unclassifiable.",
+      "example": "a tax PDF with no project goes to knowledge/sources/finance/, not inbox"
+    },
+    {
+      "topic": "Project cross-link",
+      "rule": "When a source supports a project, the project file gets a `## Sources` bullet linking the card — the card alone is not discoverable from the project side.",
+      "example": "plans/projects/acme-launch.md gains: - [[knowledge/sources/acme-launch/pitch-deck|Pitch deck]]"
+    }
+  ]
+}

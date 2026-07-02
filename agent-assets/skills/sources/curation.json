@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "source-collections",
+      "kind": "knowledge_layout",
+      "anchor": "<!-- CURATION:knowledge_layout id=\"source-collections\" -->",
+      "human_label": "Source collection taxonomy",
+      "description": "Current collections under knowledge/sources/ and what belongs in each",
+      "scope_paths": ["knowledge/sources/**"]
+    },
+    {
+      "id": "filing-rules",
+      "kind": "convention_notes",
+      "anchor": "<!-- CURATION:convention_notes id=\"filing-rules\" -->",
+      "human_label": "Source filing conventions",
+      "description": "Card slug grammar, card body shape, and project cross-linking rules",
+      "scope_paths": ["knowledge/sources/**"]
+    }
+  ]
+}

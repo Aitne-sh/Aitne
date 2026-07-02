@@ -840,3 +840,30 @@ describe("findExplicitRiskClassification — prefix match respects path-segment 
     expect(findExplicitRiskClassification("GET", "/api/mailbox")).toBeNull();
   });
 });
+
+describe("source library routes (SOURCE_LIBRARY_DESIGN.md)", () => {
+  it("agent-facing verbs are Autonomous", () => {
+    expect(classifyRisk("GET", "/api/sources")).toBe(RiskTier.Autonomous);
+    expect(classifyRisk("GET", "/api/sources/src_abc")).toBe(
+      RiskTier.Autonomous,
+    );
+    expect(classifyRisk("GET", "/api/sources/src_abc/file")).toBe(
+      RiskTier.Autonomous,
+    );
+    expect(classifyRisk("POST", "/api/sources/promote")).toBe(
+      RiskTier.Autonomous,
+    );
+    expect(classifyRisk("PATCH", "/api/sources/src_abc")).toBe(
+      RiskTier.Autonomous,
+    );
+    expect(classifyRisk("POST", "/api/sources/src_abc/export")).toBe(
+      RiskTier.Autonomous,
+    );
+  });
+
+  it("hard DELETE is Approve — permanent byte destruction stays an owner action", () => {
+    expect(classifyRisk("DELETE", "/api/sources/src_abc")).toBe(
+      RiskTier.Approve,
+    );
+  });
+});

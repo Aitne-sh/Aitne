@@ -168,7 +168,7 @@ async function startup(): Promise<void> {
   // ── 3. Database ──
   // Schema apply + boot-time backfills + settings merge + delegated-task-mode
   // default-correction. See `bootstrap/db.ts` for the per-step rationale.
-  const { db, settingsStore, persistedSettings, attachmentStore } = initDatabase({
+  const { db, settingsStore, persistedSettings, attachmentStore, sourceLibrary } = initDatabase({
     config,
   });
 
@@ -1288,6 +1288,7 @@ async function startup(): Promise<void> {
     writeTracker,
     auditLogger,
     attachmentStore,
+    sourceLibrary,
     dashboardAdapter,
     docsQAAdapter,
     docsIndexer,
@@ -1453,7 +1454,6 @@ async function startup(): Promise<void> {
         feedbackLessonStaleDays: config.feedbackLessonStaleDays,
         feedbackLessonConfidenceFloor: config.feedbackLessonConfidenceFloor,
         feedbackContradictionGuardCf: config.feedbackContradictionGuardCf,
-        timezone: config.timezone || undefined,
       },
       writeTracker,
       onIndexableContextChange: () =>

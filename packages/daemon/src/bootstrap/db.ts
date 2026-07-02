@@ -79,6 +79,7 @@ import {
 } from "../settings/settings-store.js";
 import type { RuntimeSettings } from "../settings/runtime-settings.js";
 import { AttachmentStore } from "../services/attachments/store.js";
+import { SourceLibrary } from "../services/sources/store.js";
 import { createLogger } from "../logging.js";
 
 const logger = createLogger("daemon-bootstrap-db");
@@ -92,6 +93,7 @@ export interface BootstrapDbResult {
   readonly settingsStore: SettingsStore;
   readonly persistedSettings: Partial<RuntimeSettings>;
   readonly attachmentStore: AttachmentStore;
+  readonly sourceLibrary: SourceLibrary;
 }
 
 /**
@@ -413,6 +415,11 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
   // can reference it in closure without TypeScript "used before declaration"
   // issues at the `index.ts` call site.
   const attachmentStore = new AttachmentStore(db, config.dataDir);
+  // Source library BEFORE the orphan reap: capture happens at ingest time,
+  // so ordering here only matters for symmetry, but the library must be
+  // connected before any adapter can ingest (SOURCE_LIBRARY_DESIGN.md).
+  const sourceLibrary = new SourceLibrary(db, config.dataDir);
+  attachmentStore.setSourceLibrary(sourceLibrary);
   attachmentStore.reapOrphans(24);
 
   void new PriceFetcher(config.dataDir, db).refresh();
@@ -446,7 +453,7 @@ export function initDatabase(deps: BootstrapDbDeps): BootstrapDbResult {
   // discover and PATCH them.
   surfaceLegacyModelRows(db);
 
-  return { db, settingsStore, persistedSettings, attachmentStore };
+  return { db, settingsStore, persistedSettings, attachmentStore, sourceLibrary };
 }
 
 export interface WikiWorkspaceTokens {

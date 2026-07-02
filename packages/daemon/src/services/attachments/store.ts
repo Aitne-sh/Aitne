@@ -19,6 +19,7 @@ import {
   normalizeMimeType,
 } from "./sanitize.js";
 import { hardLinkOrCopy } from "./hardlink.js";
+import { isAutoCaptureMime } from "../sources/document-mimes.js";
 import { createLogger } from "../../logging.js";
 
 const logger = createLogger("attachment-store");
@@ -50,6 +51,7 @@ export interface StoreAttachmentRow {
   sizeBytes: number;
   turnToken: string | null;
   caption: string | null;
+  sourceId: string | null;
   createdAt: string;
 }
 
@@ -66,6 +68,7 @@ interface ChatAttachmentDbRow {
   size_bytes: number;
   turn_token: string | null;
   caption: string | null;
+  source_id: string | null;
   created_at: string;
 }
 
@@ -83,6 +86,7 @@ function mapRow(row: ChatAttachmentDbRow): StoreAttachmentRow {
     sizeBytes: row.size_bytes,
     turnToken: row.turn_token,
     caption: row.caption,
+    sourceId: row.source_id,
     createdAt: row.created_at,
   };
 }
@@ -110,6 +114,28 @@ export interface IngestResult {
   mimeType: string;
   sizeBytes: number;
   caption?: string;
+  /** Source-library id when this inbound attachment was auto-captured
+   *  (document-class MIME); null otherwise. */
+  sourceId: string | null;
+}
+
+/**
+ * Structural slice of `SourceLibrary` (services/sources/store.ts) the
+ * attachment store needs for ingest-time auto-capture. An interface —
+ * not the concrete class — so the two services stay import-acyclic
+ * (sources/store.ts already imports our hardlink helper).
+ */
+export interface SourceCaptureHook {
+  captureFromFile(params: {
+    filePath: string;
+    originalFilename: string;
+    safeFilename: string;
+    mimeType: string;
+    sizeBytes: number;
+    provenance: string;
+    caption?: string | null;
+    originAttachmentId?: string | null;
+  }): { id: string; deduped: boolean };
 }
 
 export class IngestRejectedError extends Error {
@@ -138,12 +164,22 @@ export class IngestRejectedError extends Error {
 export class AttachmentStore {
   private readonly rootDir: string;
 
+  private sourceLibrary: SourceCaptureHook | null = null;
+
   constructor(
     private readonly db: Database.Database,
     dataDir: string,
   ) {
     this.rootDir = join(dataDir, "attachments");
     mkdirSync(this.rootDir, { recursive: true });
+  }
+
+  /** Connect the source library for ingest-time auto-capture of
+   *  document-class inbound attachments (wired in bootstrap/db.ts).
+   *  Stores without a library (e.g. retention's throwaway instance)
+   *  simply never capture. */
+  setSourceLibrary(hook: SourceCaptureHook): void {
+    this.sourceLibrary = hook;
   }
 
   /** Absolute path to the directory that contains this attachment's bytes. */
@@ -328,6 +364,39 @@ export class AttachmentStore {
         params.caption ?? null,
       );
 
+    // Ingest-time auto-capture: document-class inbound bytes are duplicated
+    // into the durable source library BEFORE message binding, so a crashed
+    // turn / orphan reap / message prune can no longer destroy the user's
+    // document. Capture failure must never fail the ingest itself.
+    let sourceId: string | null = null;
+    if (
+      this.sourceLibrary
+      && params.direction === "inbound"
+      && isAutoCaptureMime(resolvedMime)
+    ) {
+      try {
+        const captured = this.sourceLibrary.captureFromFile({
+          filePath: finalPath,
+          originalFilename: params.originalFilename,
+          safeFilename,
+          mimeType: resolvedMime,
+          sizeBytes: totalBytes,
+          provenance: params.provenance,
+          caption: params.caption ?? null,
+          originAttachmentId: id,
+        });
+        sourceId = captured.id;
+        this.db
+          .prepare(`UPDATE chat_attachments SET source_id = ? WHERE id = ?`)
+          .run(sourceId, id);
+      } catch (err) {
+        logger.warn(
+          { id, mime: resolvedMime, err },
+          "source-library auto-capture failed — attachment ingest unaffected",
+        );
+      }
+    }
+
     return {
       id,
       path: finalPath,
@@ -336,7 +405,18 @@ export class AttachmentStore {
       mimeType: resolvedMime,
       sizeBytes: totalBytes,
       caption: params.caption,
+      sourceId,
     };
+  }
+
+  /** Record the source-library breadcrumb on an attachment row after an
+   *  explicit promote (`POST /api/sources/promote`). Auto-capture sets it
+   *  inline during ingest; this is the out-of-band path for media types
+   *  the agent promotes deliberately. */
+  setSourceId(attachmentId: string, sourceId: string): void {
+    this.db
+      .prepare(`UPDATE chat_attachments SET source_id = ? WHERE id = ?`)
+      .run(sourceId, attachmentId);
   }
 
   get(id: string): StoreAttachmentRow | null {

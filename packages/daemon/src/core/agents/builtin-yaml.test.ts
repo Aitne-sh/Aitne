@@ -23,7 +23,7 @@ import { checkCronDrift, substituteCron, validateCronExpression } from "./cron-s
  * Phase 4 — shipped built-in `agent.md` definitions (×10).
  *
  * Asserts the on-disk `agent-assets/agents/<slug>/agent.md` files are the
- * faithful, schema-valid source for the 10 built-ins and stay in lock-step with
+ * faithful, schema-valid source for the 11 built-ins and stay in lock-step with
  * `BUILTIN_AGENT_REGISTRY` (the fallback identity + cron/stop-warning
  * authority). This is the test the Phase 3 `builtin-registry.test.ts` deferred
  * via `it.todo("... Phase 4")`.
@@ -90,9 +90,9 @@ describe("built-in agent.md files — bijection with the registry", () => {
     expect(dirs).toEqual(registrySlugs);
   });
 
-  it("ships exactly 11 built-in definitions", () => {
-    expect(listAgentDirs()).toHaveLength(11);
-    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(11);
+  it("ships exactly 12 built-in definitions", () => {
+    expect(listAgentDirs()).toHaveLength(12);
+    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(12);
   });
 });
 

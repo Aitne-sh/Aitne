@@ -366,12 +366,12 @@ describe("validateDefinition", () => {
 // ── loadAgents — registry fallback + built-in files ─────────────────────────
 
 describe("loadAgents: built-ins", () => {
-  it("synthesises all 11 built-ins from the registry when no files exist", () => {
+  it("synthesises all 12 built-ins from the registry when no files exist", () => {
     const result = loadAgents(db, baseOptions({ now: () => 1000 }));
-    expect(result.upserted).toHaveLength(11);
-    expect(result.warnings.filter((w) => /missing/.test(w))).toHaveLength(11);
+    expect(result.upserted).toHaveLength(12);
+    expect(result.warnings.filter((w) => /missing/.test(w))).toHaveLength(12);
     const rows = listAgents(db, { source: "builtin" });
-    expect(rows).toHaveLength(11);
+    expect(rows).toHaveLength(12);
     expect(getAgent(db, "monthly-review")!.enabled).toBe(false);
     expect(getAgent(db, "morning-routine")!.enabled).toBe(true);
     expect(getAgent(db, "morning-routine")!.metadata.version_counter).toBe(1);
@@ -876,6 +876,6 @@ function setRecurringId(database: Database.Database, slug: string, id: number): 
 }
 
 // Reference the registry export so an accidental empty registry fails loudly.
-it("ships exactly 11 registry entries", () => {
-  expect(BUILTIN_AGENT_REGISTRY).toHaveLength(11);
+it("ships exactly 12 registry entries", () => {
+  expect(BUILTIN_AGENT_REGISTRY).toHaveLength(12);
 });

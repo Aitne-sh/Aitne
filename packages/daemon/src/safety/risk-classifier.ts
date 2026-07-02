@@ -459,6 +459,20 @@ const API_RISK: Record<string, RiskTier> = {
   // agent_actions for the on-demand retrospective.
   "POST /api/chat/outbound-attachments": RiskTier.Autonomous,
 
+  // ── Source library (SOURCE_LIBRARY_DESIGN.md) ──
+  // Agent-facing verbs are Autonomous: the DM agent and the librarian
+  // routine curl these from session workdirs without a Bearer token
+  // (same posture as outbound-attachments — user-document bytes stay on
+  // loopback). Hard DELETE is the one destructive verb: Approve tier so
+  // the middleware demands Bearer, keeping permanent byte destruction a
+  // dashboard/owner action rather than an agent one.
+  "GET /api/sources": RiskTier.Autonomous,
+  "GET /api/sources/": RiskTier.Autonomous,
+  "POST /api/sources/promote": RiskTier.Autonomous,
+  "PATCH /api/sources/": RiskTier.Autonomous,
+  "POST /api/sources/{*}/export": RiskTier.Autonomous,
+  "DELETE /api/sources/": RiskTier.Approve,
+
   // ── Context File API ──
   // GET reads contain personal notes, schedule, user profile — ReadSensitive.
   // Writes remain Autonomous (agent's own memory operations).

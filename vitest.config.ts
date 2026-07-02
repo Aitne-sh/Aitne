@@ -442,6 +442,12 @@ export default defineConfig({
         "packages/daemon/src/api/routes/attachments.ts",           // Hono multipart handler (busboy + fs streaming)
         "packages/daemon/src/services/attachments/store.ts",       // fs + SQLite attachment store
 
+        // ── Source library (SOURCE_LIBRARY_DESIGN.md) — same I/O shape as the
+        // attachments pair above. `document-mimes.ts` stays in the covered set
+        // as pure logic (as does `core/sources/maintenance-prefilter.ts`).
+        "packages/daemon/src/api/routes/sources.ts",               // Hono handler (fs streaming + DB)
+        "packages/daemon/src/services/sources/store.ts",           // fs + SQLite source library
+
         // ── Files with partial coverage, added without exclusion entries ──
         // These are I/O-heavy, framework-level, or interactive — not pure-logic.
         "packages/daemon/src/config.ts",                           // FS-probe branches (existsSync/statSync/mkdirSync error paths)

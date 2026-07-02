@@ -27,7 +27,6 @@ import {
   trimBulletEntries,
   type ContentWriteValidationOptions,
 } from "../../../core/context-validation/index.js";
-import { buildRepromoteGuard } from "../../../core/feedback/lesson-contradiction.js";
 import { createLogger } from "../../../logging.js";
 import {
   composeIssue,
@@ -196,15 +195,11 @@ function lessonNormalizationFor(
   return {
     previousContent,
     nowIso: new Date().toISOString(),
-    today: localDateStr(new Date(), config.timezone || undefined),
     promotionThreshold: config.feedbackPromotionThreshold,
     enactExpiration: true,
     staleDays: config.feedbackLessonStaleDays,
     confidenceFloor: config.feedbackLessonConfidenceFloor,
-    repromoteGuard: buildRepromoteGuard({
-      guardCf: config.feedbackContradictionGuardCf,
-      threshold: config.feedbackPromotionThreshold,
-    }),
+    contradictionGuardCf: config.feedbackContradictionGuardCf,
   };
 }
 

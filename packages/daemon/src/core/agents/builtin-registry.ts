@@ -474,6 +474,31 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
     category: "maintenance",
     policyFiles: [],
   },
+  {
+    slug: "source-librarian",
+    name: "Source Librarian",
+    description:
+      "Weekly triage of unfiled source documents into knowledge/sources/ cards, taxonomy upkeep, and library-vault consistency checks.",
+    // Saturday morning — the week's documents have accumulated and the
+    // slot avoids the weekday routine cluster. A no-LLM prefilter in the
+    // scheduler block skips the firing when there is nothing to do.
+    cronExpression: () => "0 9 * * 6",
+    processKey: "routine.source_maintenance",
+    defaultEnabled: true,
+    stopWarning: {
+      level: "normal",
+      services_lost: [
+        "Weekly filing of unfiled source documents into knowledge/sources/",
+        "Source library and vault consistency checks",
+      ],
+      dependent_agents: [],
+      reactivation_hint:
+        "Re-enable from /agents/source-librarian. Resumes on the next Saturday 09:00 firing.",
+    },
+    schedulerFn: { kind: "emit_routine", routine: "source_maintenance" },
+    category: "maintenance",
+    policyFiles: [],
+  },
 ];
 
 /** Slug → entry, for O(1) lookup from the loader and the scheduler gate. */

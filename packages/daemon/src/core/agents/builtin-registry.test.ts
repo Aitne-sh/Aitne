@@ -10,8 +10,9 @@ import {
   resolveRuntimeWindowCadence,
 } from "./builtin-registry.js";
 
-// The 11 frozen built-in slugs (design §5.5.1; `lesson-maintenance` added by
-// SELF_IMPROVEMENT_PHASE2 / QUALITY_LOOP_IMPROVEMENT_PLAN_2026-07 WP1). The
+// The 12 frozen built-in slugs (design §5.5.1; `lesson-maintenance` added by
+// SELF_IMPROVEMENT_PHASE2 / QUALITY_LOOP_IMPROVEMENT_PLAN_2026-07 WP1;
+// `source-librarian` added by SOURCE_LIBRARY_DESIGN.md). The
 // registry MUST contain exactly these; the per-slug expectations below mirror
 // the frozen firing-path table verified against scheduler.ts.
 const EXPECTED_SLUGS = [
@@ -26,11 +27,12 @@ const EXPECTED_SLUGS = [
   "lesson-maintenance",
   "context-index-reconcile",
   "skill-curation",
+  "source-librarian",
 ] as const;
 
 describe("BUILTIN_AGENT_REGISTRY — structure", () => {
-  it("contains exactly the 11 frozen built-in slugs", () => {
-    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(11);
+  it("contains exactly the 12 frozen built-in slugs", () => {
+    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(12);
     expect(BUILTIN_AGENT_REGISTRY.map((e) => e.slug).sort()).toEqual(
       [...EXPECTED_SLUGS].sort(),
     );
@@ -187,6 +189,11 @@ describe("BUILTIN_AGENT_REGISTRY — frozen firing paths (§5.5.1)", () => {
       cron: "0 3 * * *",
       scheduler: { kind: "emit_routine", routine: "skill_curation" },
     },
+    "source-librarian": {
+      processKey: "routine.source_maintenance",
+      cron: "0 9 * * 6",
+      scheduler: { kind: "emit_routine", routine: "source_maintenance" },
+    },
   };
 
   for (const entry of BUILTIN_AGENT_REGISTRY) {
@@ -315,6 +322,7 @@ describe("hub metadata — category + policyFiles (AGENTS_HUB_REDESIGN_PLAN §1)
       "lesson-maintenance": "maintenance",
       "context-index-reconcile": "maintenance",
       "skill-curation": "maintenance",
+      "source-librarian": "maintenance",
     });
   });
 

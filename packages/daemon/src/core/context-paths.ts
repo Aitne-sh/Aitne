@@ -120,6 +120,17 @@ export const CONTEXT_RELATIVE_PATHS = {
     dir: "knowledge/dossiers",
   },
 
+  // ── knowledge/sources/ — source-document cards ────────────────
+  // Markdown cards describing binaries in the <dataDir>/sources/
+  // library, organized into agent-managed collections
+  // (SOURCE_LIBRARY_DESIGN.md). The binaries themselves never live
+  // in the vault — cards carry `source_id` frontmatter pointing at
+  // the library row.
+  sources: {
+    index: "knowledge/sources/_index.md",
+    dir: "knowledge/sources",
+  },
+
   // ── state/ subpaths ──────────────────────────────────────────
   inbox: { dir: "state/inbox" },
 
@@ -172,6 +183,7 @@ export const CONTEXT_DIR_NAMES = [
   "knowledge/wiki",
   "knowledge/repos",
   "knowledge/entities",
+  "knowledge/sources",
   "policies",
   "policies/routines",
   "policies/routines/custom",
@@ -274,6 +286,15 @@ export function agentLessonsPath(slug: string): string {
  */
 export function dossierPath(flowSlug: string): string {
   return `knowledge/dossiers/${flowSlug}.md`;
+}
+
+/**
+ * Relative path to a source-document card (SOURCE_LIBRARY_DESIGN.md).
+ * Collections are agent-managed and usually mirror a project slug;
+ * this helper does not re-validate slug grammar.
+ */
+export function sourceCardPath(collection: string, slug: string): string {
+  return `knowledge/sources/${collection}/${slug}.md`;
 }
 
 /**
@@ -383,4 +404,6 @@ export const CONTEXT_FRONTMATTER_TYPES = [
   "receipt",
   "book",
   "note",
+  // Source-document cards under knowledge/sources/ (SOURCE_LIBRARY_DESIGN.md).
+  "source",
 ] as const;

@@ -209,6 +209,29 @@ describe("PromptAssembler — buildAttachmentPromptBlock", () => {
     expect(block).toContain('caption: "test caption"');
   });
 
+  it("announces the source-library id for auto-captured documents", () => {
+    const { prompt } = makeAssembler({ db, dataDir });
+    const captured: StoreAttachmentRow = {
+      id: "att",
+      sizeBytes: 4096,
+      safeFilename: "deck.pdf",
+      mimeType: "application/pdf",
+      caption: null,
+      sourceId: "src_abc123",
+    } as StoreAttachmentRow;
+    const block = prompt.buildAttachmentPromptBlock([captured]);
+    expect(block).toContain("Saved to the source library as src_abc123");
+    expect(block).toContain("`sources`");
+
+    const uncaptured: StoreAttachmentRow = {
+      ...captured,
+      sourceId: null,
+    } as StoreAttachmentRow;
+    expect(prompt.buildAttachmentPromptBlock([uncaptured])).not.toContain(
+      "source library",
+    );
+  });
+
   it("annotates audio rows without transcripts when the transcriber is enabled", () => {
     const transcriber = {
       isAudio: (mt: string) => mt.startsWith("audio/"),

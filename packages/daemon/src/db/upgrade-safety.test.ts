@@ -48,6 +48,7 @@ const BUILTIN_SLUGS = [
   "lesson-maintenance",
   "context-index-reconcile",
   "skill-curation",
+  "source-librarian",
 ].sort();
 
 const MIGRATION_0007 = "0007-agent-identity";

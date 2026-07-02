@@ -85,6 +85,7 @@ import { createTasksRoutes } from "./routes/tasks.js";
 import { createIntegrationRouteGate } from "./integration-route-gate.js";
 import { createMcpRoutes } from "./routes/mcp.js";
 import { createAttachmentRoutes } from "./routes/attachments.js";
+import { createSourceRoutes } from "./routes/sources.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
 import type { EventBus } from "../core/event-bus.js";
 import type {
@@ -479,6 +480,12 @@ export interface ApiDependencies {
    * is not mounted.
    */
   attachmentStore?: AttachmentStore;
+  /**
+   * Durable source library (SOURCE_LIBRARY_DESIGN.md). Optional — when
+   * absent (unit-test harnesses), `/api/sources` is not mounted.
+   * Requires `attachmentStore` for the promote verb.
+   */
+  sourceLibrary?: import("../services/sources/store.js").SourceLibrary;
   /**
    * Audit logger for attachment uploads. Paired with `attachmentStore` —
    * index.ts supplies the same `AuditLogger` the dispatcher uses so
@@ -1130,6 +1137,18 @@ export function createApp(deps: ApiDependencies): Hono {
       ...(deps.auditLogger ? { audit: deps.auditLogger } : {}),
     });
     app.route("/api", attachmentRoutes);
+  }
+
+  // ── Source library (SOURCE_LIBRARY_DESIGN.md) ──
+  if (deps.sourceLibrary && deps.attachmentStore) {
+    const sourceRoutes = createSourceRoutes({
+      sourceLibrary: deps.sourceLibrary,
+      attachmentStore: deps.attachmentStore,
+      getContextDir: () => getContextDir(deps.config, deps.db),
+      obsidianService: deps.services.obsidian,
+      writeTracker: deps.writeTracker ?? null,
+    });
+    app.route("/api", sourceRoutes);
   }
 
   // ── MCP server CRUD + probe (B-003 Phase 2) ──

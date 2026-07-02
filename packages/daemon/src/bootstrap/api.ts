@@ -79,6 +79,7 @@ import type { ScopedReadSensitiveTokenManager } from "../core/read-sensitive-tok
 import type { AgentWriteTracker } from "../safety/agent-write-tracker.js";
 import type { AuditLogger } from "../safety/audit.js";
 import type { AttachmentStore } from "../services/attachments/store.js";
+import type { SourceLibrary } from "../services/sources/store.js";
 import type { DashboardAdapter } from "../adapters/dashboard-adapter.js";
 import type { DocsQAAdapter } from "../adapters/docs-qa-adapter.js";
 import type { DocsIndexerHandle } from "../core/docs/indexer.js";
@@ -224,6 +225,7 @@ export interface BootstrapApiDeps {
   readonly writeTracker: AgentWriteTracker;
   readonly auditLogger: AuditLogger;
   readonly attachmentStore: AttachmentStore;
+  readonly sourceLibrary: SourceLibrary;
   readonly dashboardAdapter: DashboardAdapter;
   readonly docsQAAdapter: DocsQAAdapter;
   readonly docsIndexer: DocsIndexerHandle | null;
@@ -421,6 +423,7 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     writeTracker,
     auditLogger,
     attachmentStore,
+    sourceLibrary,
     dashboardAdapter,
     eventBroadcaster,
     getIntegrationStatus,
@@ -821,6 +824,7 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     dashboardAdapter,
     eventBroadcaster,
     attachmentStore,
+    sourceLibrary,
     auditLogger,
     validateAttachmentTurnToken: (token: string) =>
       dispatcher.validateAttachmentTurnToken(token),

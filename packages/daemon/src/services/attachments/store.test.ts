@@ -15,6 +15,7 @@ import { Readable } from "node:stream";
 import { applySchema } from "../../db/schema.js";
 import { AttachmentStore, IngestRejectedError } from "./store.js";
 import { hardLinkOrCopy, resetHardLinkLogCache } from "./hardlink.js";
+import { SourceLibrary } from "../sources/store.js";
 
 function pngBytes(): Buffer {
   // 1x1 PNG - minimal viable with magic bytes file-type can recognize.
@@ -413,5 +414,131 @@ describe("AttachmentStore.stageIntoWorkdir + hardLinkOrCopy", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("AttachmentStore source-library auto-capture", () => {
+  let ctx: Awaited<ReturnType<typeof makeStore>>;
+  let library: SourceLibrary;
+
+  function pdfBytes(marker = "test"): Buffer {
+    return Buffer.from(
+      `%PDF-1.4\n1 0 obj\n<< /Marker (${marker}) >>\nendobj\ntrailer\n<< >>\n%%EOF\n`,
+      "ascii",
+    );
+  }
+
+  async function ingestPdf(
+    overrides: Partial<Parameters<AttachmentStore["ingestStream"]>[0]> = {},
+  ) {
+    return await ctx.store.ingestStream({
+      stream: streamOf(pdfBytes()),
+      declaredMimeType: "application/pdf",
+      originalFilename: "report.pdf",
+      direction: "inbound",
+      provenance: "user_telegram",
+      maxSizeBytes: 25 * 1024 * 1024,
+      ...overrides,
+    });
+  }
+
+  beforeEach(async () => {
+    ctx = await makeStore();
+    library = new SourceLibrary(ctx.db, ctx.dir);
+    ctx.store.setSourceLibrary(library);
+  });
+
+  afterEach(() => ctx.cleanup());
+
+  it("captures an inbound PDF into the library and records the breadcrumb", async () => {
+    const result = await ingestPdf();
+    expect(result.sourceId).toMatch(/^src_/);
+
+    const attachment = ctx.store.get(result.id);
+    expect(attachment?.sourceId).toBe(result.sourceId);
+
+    const source = library.get(result.sourceId!);
+    expect(source?.status).toBe("unfiled");
+    expect(source?.provenance).toBe("user_telegram");
+    expect(source?.originAttachmentId).toBe(result.id);
+    expect(existsSync(source!.path)).toBe(true);
+  });
+
+  it("does not capture images, outbound documents, or without a wired library", async () => {
+    const image = await ctx.store.ingestStream({
+      stream: streamOf(pngBytes()),
+      declaredMimeType: "image/png",
+      originalFilename: "dot.png",
+      direction: "inbound",
+      provenance: "user_telegram",
+      maxSizeBytes: 5 * 1024 * 1024,
+    });
+    expect(image.sourceId).toBeNull();
+
+    const outbound = await ingestPdf({
+      direction: "outbound",
+      provenance: "agent",
+      turnToken: "turn-1",
+    });
+    expect(outbound.sourceId).toBeNull();
+
+    const bare = await makeStore();
+    try {
+      const noLibrary = await bare.store.ingestStream({
+        stream: streamOf(pdfBytes()),
+        declaredMimeType: "application/pdf",
+        originalFilename: "report.pdf",
+        direction: "inbound",
+        provenance: "user_telegram",
+        maxSizeBytes: 25 * 1024 * 1024,
+      });
+      expect(noLibrary.sourceId).toBeNull();
+    } finally {
+      bare.cleanup();
+    }
+  });
+
+  it("a capture failure never fails the ingest", async () => {
+    ctx.store.setSourceLibrary({
+      captureFromFile: () => {
+        throw new Error("boom");
+      },
+    });
+    const result = await ingestPdf();
+    expect(result.sourceId).toBeNull();
+    expect(ctx.store.get(result.id)).not.toBeNull();
+  });
+
+  it("the source survives message pruning and every attachment reaper (retention independence)", async () => {
+    ctx.db.exec(`
+      INSERT INTO conversation_sessions
+        (id, platform, channel_id, thread_id, scope, scope_key, status, is_dm)
+      VALUES (42, 'telegram', 'test', NULL, 'owner_dm', 'telegram', 'active', 1);
+      INSERT INTO messages (id, session_id, role, content, platform, timestamp)
+      VALUES (7, 42, 'user', 'here is the deck', 'telegram', CURRENT_TIMESTAMP);
+    `);
+    const result = await ingestPdf();
+    ctx.store.bindInbound({
+      attachmentIds: [result.id],
+      sessionId: 42,
+      messageId: 7,
+    });
+
+    // Message pruning cascades the attachment row away…
+    ctx.db.prepare(`DELETE FROM messages WHERE id = 7`).run();
+    expect(ctx.store.get(result.id)).toBeNull();
+
+    // …and the reapers clean the attachment dir…
+    ctx.store.reapDanglingMessageRefs();
+    ctx.store.reapOrphans(0);
+    ctx.store.reapUntrackedDirs({ minAgeHours: 0 });
+    expect(existsSync(ctx.store.dirFor(result.id))).toBe(false);
+
+    // …but the captured source row AND bytes are untouched (hardlink
+    // semantics: unlinking the attachment path leaves the inode alive).
+    const source = library.get(result.sourceId!);
+    expect(source).not.toBeNull();
+    const bytes = readFileSync(source!.path);
+    expect(bytes.subarray(0, 5).toString("ascii")).toBe("%PDF-");
   });
 });

@@ -278,6 +278,16 @@ export class PromptAssembler {
       const size = `${Math.max(1, Math.round(row.sizeBytes / 1024))} KB`;
       const captionPart = row.caption ? ` — caption: ${JSON.stringify(row.caption)}` : "";
       lines.push(`- ${rel} (${row.mimeType}, ${size})${captionPart}`);
+      if (row.sourceId) {
+        // SOURCE_LIBRARY_DESIGN.md — document-class inbound attachments are
+        // auto-captured at ingest; tell the agent the durable id so it can
+        // file the source immediately when the user gives instructions.
+        lines.push(
+          `  Saved to the source library as ${row.sourceId} (status: unfiled).`,
+          "  If the user says where it belongs, file it now with the `sources`",
+          "  skill; otherwise leave it for the weekly librarian pass.",
+        );
+      }
       const transcript = transcripts?.get(row.id);
       if (transcript) {
         const langPart = transcript.language

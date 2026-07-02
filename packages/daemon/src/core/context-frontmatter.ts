@@ -59,6 +59,7 @@ export function shouldValidateContextFileFrontmatter(
     relativePath.startsWith("journal/weekly/") ||
     relativePath.startsWith("journal/monthly/") ||
     relativePath.startsWith("knowledge/dossiers/") ||
+    relativePath.startsWith("knowledge/sources/") ||
     relativePath === CONTEXT_RELATIVE_PATHS.contextIndex ||
     relativePath === CONTEXT_RELATIVE_PATHS.rootIndex
   );
@@ -455,6 +456,15 @@ export function expectedFrontmatterForPath(
   }
   if (relativePath.startsWith("knowledge/dossiers/")) {
     return { type: "dossier", owners: ["agent"] };
+  }
+  // Source-document cards (SOURCE_LIBRARY_DESIGN.md) — agent-authored
+  // summaries of binaries in the <dataDir>/sources/ library. The index
+  // rule must precede the subtree catch-all; first match wins.
+  if (relativePath === CONTEXT_RELATIVE_PATHS.sources.index) {
+    return { type: "index", owners: ["agent"] };
+  }
+  if (relativePath.startsWith("knowledge/sources/")) {
+    return { type: "source", owners: ["agent"] };
   }
   // contextIndex and rootIndex collapse to the same `_index.md` after
   // CONTEXT_VAULT_REDESIGN. The file is mixed-authorship (V15) — user

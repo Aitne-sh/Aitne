@@ -222,7 +222,7 @@ describe("getSkillsForEvent", () => {
     // + `task` (unified write facade) → 33.
     // NOTE: operating playbooks are NOT a skill (AGENT_PROMPT_QUALITY_DESIGN.md
     // §4 — injection is the single delivery), so they add nothing to this count.
-    expect(skills).toHaveLength(33);
+    expect(skills).toHaveLength(34);
     expect(skills).toContain("background-task");
     expect(skills).toContain("background-task-reply");
     expect(skills).toContain("agent-create");
@@ -2257,6 +2257,9 @@ const MATRIX_CASES: ReadonlyArray<MatrixCase> = [
       "user-profile",
       "notify",
       "attach",
+      // SOURCE_LIBRARY_DESIGN.md — filing surface for auto-captured
+      // document attachments; unconditional on `message.received.dm`.
+      "sources",
       "schedule",
       "external-services",
       "mail",

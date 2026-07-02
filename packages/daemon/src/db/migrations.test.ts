@@ -3268,3 +3268,69 @@ describe("0023-background-task-verification", () => {
     expect(result.applied).toEqual(["0023-background-task-verification"]);
   });
 });
+
+describe("0024-source-documents", () => {
+  const migration = MIGRATIONS.find((m) => m.id === "0024-source-documents");
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB where applySchema already created everything", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0024-source-documents"]);
+    expect(tableExists(db, "source_documents")).toBe(true);
+    expect(columnExists(db, "chat_attachments", "source_id")).toBe(true);
+  });
+
+  it("creates the table and adds source_id to a pre-migration chat_attachments", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE chat_attachments (
+        id TEXT PRIMARY KEY,
+        direction TEXT NOT NULL,
+        provenance TEXT NOT NULL,
+        path TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        safe_filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL
+      );
+      INSERT INTO chat_attachments
+        (id, direction, provenance, path, original_filename, safe_filename, mime_type, size_bytes)
+      VALUES ('att-1', 'inbound', 'user_telegram', '/x', 'a.pdf', 'a.pdf', 'application/pdf', 3);
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0024-source-documents"]);
+    expect(tableExists(db, "source_documents")).toBe(true);
+    // Pre-existing attachments have no captured source — honestly NULL.
+    const row = db
+      .prepare("SELECT source_id FROM chat_attachments WHERE id = 'att-1'")
+      .get() as { source_id: string | null };
+    expect(row).toEqual({ source_id: null });
+    // Direct re-run exercises both idempotency guards.
+    migration!.up(db);
+    expect(tableExists(db, "source_documents")).toBe(true);
+  });
+
+  it("enforces the status CHECK and sha256 uniqueness on the migrated table", () => {
+    const db = openDb();
+    runMigrations(db, [migration!]);
+    const insert = db.prepare(`
+      INSERT INTO source_documents
+        (id, sha256, path, original_filename, safe_filename, mime_type, size_bytes, provenance)
+      VALUES (?, ?, '/p', 'a.pdf', 'a.pdf', 'application/pdf', 3, 'user_telegram')
+    `);
+    insert.run("src_1", "hash-a");
+    expect(() => insert.run("src_2", "hash-a")).toThrow(/UNIQUE/);
+    expect(() =>
+      db
+        .prepare(
+          `UPDATE source_documents SET status = 'lost' WHERE id = 'src_1'`,
+        )
+        .run(),
+    ).toThrow(/CHECK/);
+  });
+});

@@ -1,0 +1,20 @@
+{
+  "kind": "knowledge_layout",
+  "files": [
+    {
+      "path": "knowledge/sources/_index.md",
+      "purpose": "Directory of collections — one line per collection with its one-phrase scope",
+      "sections": [
+        { "heading": "## Collections", "contains": "bullet list: - [[<collection>]] — what belongs there" }
+      ]
+    },
+    {
+      "path": "knowledge/sources/*/*.md",
+      "purpose": "One card per stored source document; collections usually mirror an active project slug from plans/projects/",
+      "sections": [
+        { "heading": "# <Title>", "contains": "H1 naming the document in plain words" },
+        { "heading": "(body)", "contains": "one-paragraph summary, why the user sent it, and a Project: [[<slug>]] link when one applies" }
+      ]
+    }
+  ]
+}

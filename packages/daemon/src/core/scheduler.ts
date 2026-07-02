@@ -17,6 +17,8 @@ import {
   type ScheduledDmEvent,
 } from "@aitne/shared";
 import type { AgentConfig } from "../config.js";
+import { getContextDir } from "../config.js";
+import { evaluateSourceMaintenancePrefilter } from "./sources/maintenance-prefilter.js";
 import type { EventBus } from "./event-bus.js";
 import { runRetentionCleanup } from "./retention.js";
 import { cleanupSessionWorkdir, cleanupStaleWorkdirs, getSessionWorkdirPath } from "./workdir.js";
@@ -1496,6 +1498,39 @@ export class AgentScheduler {
         { timezone: tz },
       );
       this.cronJobs.push(skillCurationJob);
+    }
+
+    // SOURCE_LIBRARY_DESIGN.md — weekly source-librarian pass (Sat 09:00).
+    // The prefilter is a no-LLM DB+fs scan: zero unfiled sources, zero
+    // library↔vault inconsistencies, and no unconsumed `sources`-skill
+    // drift signals ⇒ skip the whole session (most weeks cost nothing).
+    {
+      const sourceLibrarianJob = cron.schedule(
+        "0 9 * * 6",
+        () => {
+          if (!this.isAgentEnabledForFiring("source-librarian", "source_maintenance")) return;
+          const gateReason = this.autonomousGate();
+          if (gateReason !== null) {
+            this.logGateBlock(gateReason, { cron: "source_maintenance" });
+            return;
+          }
+          const prefilter = evaluateSourceMaintenancePrefilter(
+            this.db,
+            getContextDir(this.config, this.db),
+          );
+          if (!prefilter.shouldRun) {
+            logger.info(prefilter, "source_maintenance skipped — nothing to do");
+            return;
+          }
+          this.emitRoutine("source_maintenance", {
+            unfiledCount: prefilter.unfiledCount,
+            inconsistencyCount: prefilter.inconsistencyCount,
+            driftSignalCount: prefilter.driftSignalCount,
+          });
+        },
+        { timezone: tz },
+      );
+      this.cronJobs.push(sourceLibrarianJob);
     }
 
     {

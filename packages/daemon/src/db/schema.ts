@@ -1096,6 +1096,7 @@ CREATE TABLE IF NOT EXISTS chat_attachments (
     size_bytes INTEGER NOT NULL,
     turn_token TEXT,
     caption TEXT,
+    source_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (session_id) REFERENCES conversation_sessions(id) ON DELETE SET NULL,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
@@ -1121,6 +1122,36 @@ CREATE TABLE IF NOT EXISTS voice_transcripts (
     transcript TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── Source Documents (durable source library) ────────────────────────────────
+-- User-sent documents promoted out of the message-lifecycle-coupled
+-- chat_attachments store into <dataDir>/sources/<id>/. Deliberately NO
+-- foreign key into the message graph: chat_attachments rows cascade away
+-- with message pruning, and the whole point of this table is that sources
+-- survive it. origin_attachment_id is an unconstrained breadcrumb.
+-- Rows are never reaped; lifecycle is status-driven (archived, not deleted).
+-- See SOURCE_LIBRARY_DESIGN.md.
+CREATE TABLE IF NOT EXISTS source_documents (
+    id TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL UNIQUE,
+    path TEXT NOT NULL,
+    original_filename TEXT NOT NULL,
+    safe_filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'unfiled'
+        CHECK (status IN ('unfiled', 'filed', 'archived')),
+    card_path TEXT,
+    provenance TEXT NOT NULL,
+    origin_attachment_id TEXT,
+    caption TEXT,
+    received_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_received_at TEXT NOT NULL DEFAULT (datetime('now')),
+    receive_count INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_source_documents_status
+    ON source_documents(status);
 
 -- ── Integration Delegation ────────────────────────────────────────────────────
 
@@ -2482,6 +2513,13 @@ VALUES
     -- per-run rate limit (max 20 proposals) keeps this bounded even on a
     -- runaway prompt.
     ('routine.skill_curation',  'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  60,  0.50, 'preset'),
+    -- SOURCE_LIBRARY_DESIGN.md — weekly source-librarian pass. Bare medium
+    -- envelope (matches ENVELOPE_BY_TIER.medium, so no plan-presets
+    -- override row): filing is metadata-shaped work; the scheduler's
+    -- no-LLM prefilter already skips zero-work weeks, and oversized
+    -- reorgs are delegated to a background task rather than widening
+    -- this envelope.
+    ('routine.source_maintenance', 'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50, 1.00, 'preset'),
     -- cost-reduction-structural §A — per-observation summarizer. Lite tier
     -- (Haiku-class) with a tight 1-turn / $0.05 envelope. The summarizer
     -- is a single non-tool model call per observation; turns/budget are

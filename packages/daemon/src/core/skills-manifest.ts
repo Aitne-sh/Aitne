@@ -202,6 +202,13 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "user-profile",
     "user-interview",
   ],
+  // SOURCE_LIBRARY_DESIGN.md — weekly source-librarian maintenance pass.
+  // `sources` carries the library API + filing conventions (the curated
+  // taxonomy anchors), `context` the card write path, `notify` the DM
+  // shape for irrecoverable-inconsistency reports. Deliberately narrow:
+  // the background-task delegation curl for oversized reorgs is inlined
+  // in the task-flow (precedent: routine.research_offer_dm).
+  "routine.source_maintenance": ["context", "sources", "notify"],
   // ── Conversational events ──
   // Note: the SDK's server-side advisor tool (when enabled via
   // backend_global_defaults.advisor_model) is registered by Anthropic with its
@@ -214,6 +221,12 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "user-profile",
     "notify",
     "attach",
+    // SOURCE_LIBRARY_DESIGN.md — file auto-captured document attachments
+    // into knowledge/sources/ cards when the user gives filing
+    // instructions ("save this under project X"), promote images, or
+    // send a stored source back. No conditional gate: the skill body is
+    // small and inert when the turn carries no attachments or source ask.
+    "sources",
     "schedule",
     "external-services",
     "mail",
@@ -243,6 +256,10 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "user-profile",
     "notify",
     "attach",
+    // SOURCE_LIBRARY_DESIGN.md — see the `message.received` note. Loaded
+    // on the first DM too: "here's the deck, keep it with project X" is
+    // a valid opening message.
+    "sources",
     "schedule",
     "external-services",
     "mail",
@@ -290,6 +307,8 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "user-profile",
     "notify",
     "attach",
+    // SOURCE_LIBRARY_DESIGN.md — see the `message.received` note.
+    "sources",
     "schedule",
     "external-services",
     "mail",
@@ -569,6 +588,10 @@ export const ALL_SKILLS = [
   "schedule",
   "observations",
   "attach",
+  // SOURCE_LIBRARY_DESIGN.md — durable source-document library. Loaded on
+  // DM surfaces (filing on instruction) and routine.source_maintenance
+  // (the weekly librarian pass).
+  "sources",
   "external-services",
   "mail",
   "notion",
@@ -643,6 +666,7 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
   "routine.evening_review": "routine.evening_review",
   "routine.weekly_review": "routine.weekly_review",
   "routine.monthly_review": "routine.monthly_review",
+  "routine.source_maintenance": "routine.source_maintenance",
   "routine.activity_scan": "routine.activity_scan",
   "routine.roadmap_refresh": "routine.roadmap_refresh",
   "routine.today_refresh": "routine.today_refresh",

@@ -750,3 +750,36 @@ describe("YAML scalar parser — quoted-string and inline-comment edge cases", (
     ).toBeNull();
   });
 });
+
+describe("knowledge/sources cards (SOURCE_LIBRARY_DESIGN.md)", () => {
+  it("validates the subtree and pins expected type/owner", () => {
+    expect(shouldValidateContextFileFrontmatter("knowledge/sources/acme/deck.md")).toBe(true);
+    expect(expectedFrontmatterForPath("knowledge/sources/_index.md")).toEqual({
+      type: "index",
+      owners: ["agent"],
+    });
+    expect(
+      expectedFrontmatterForPath("knowledge/sources/acme-launch/pitch-deck.md"),
+    ).toEqual({ type: "source", owners: ["agent"] });
+  });
+
+  it("accepts a well-formed source card and rejects a mistyped one", () => {
+    const card = [
+      "---",
+      "type: source",
+      "owner: agent",
+      "updated: 2026-07-01",
+      "source_id: src_123",
+      "---",
+      "# Pitch deck",
+    ].join("\n");
+    expect(
+      validateContextFileFrontmatter(card, "knowledge/sources/acme/pitch-deck.md"),
+    ).toBeNull();
+
+    const wrongType = card.replace("type: source", "type: note");
+    expect(
+      validateContextFileFrontmatter(wrongType, "knowledge/sources/acme/pitch-deck.md"),
+    ).toMatchObject({ code: "invalid_type" });
+  });
+});

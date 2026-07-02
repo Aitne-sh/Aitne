@@ -73,6 +73,12 @@ export const CONFIGURABLE_PROCESS_KEYS = [
   // with allowedTools = curl(skill-curation API) + Read only — no Edit/Write.
   // Operator-configurable from /settings/self-learning.
   "routine.skill_curation",
+  // SOURCE_LIBRARY_DESIGN.md — weekly source-librarian maintenance pass:
+  // triages unfiled source documents into knowledge/sources/ cards, reviews
+  // the collection taxonomy, and repairs library↔vault inconsistencies. A
+  // no-LLM scheduler prefilter skips the firing entirely when there is
+  // nothing to do, so the configured tier only pays out on real work.
+  "routine.source_maintenance",
   // cost-reduction-structural §A — per-observation summarizer. Listed as
   // configurable so `applyDefaultPresets` re-seeds it on a main-backend
   // switch (the install seed pins to claude+Haiku, but a Gemini-only
@@ -384,6 +390,10 @@ const DEFAULT_PROCESS_TIERS: Record<KnownProcessKey, ProcessModelTier> = {
   // /settings/self-learning if they observe systematic low-quality
   // proposals.
   "routine.skill_curation": "medium",
+  // Source-librarian filing: summarize-and-organize work over document
+  // metadata (and occasional PDF skims) — squarely medium-tier shaped,
+  // same reasoning as skill_curation above.
+  "routine.source_maintenance": "medium",
   // Knowledge import is one-shot, generative, and quality-sensitive
   // (mistakes here corrupt user/*.md). Medium tier (Sonnet) by default
   // to align with Aitne's "no Opus by default" cost posture; the

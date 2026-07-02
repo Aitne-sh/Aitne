@@ -2260,7 +2260,16 @@ describe("DM manifest body byte budget (P4)", () => {
   // "user Agents ship with zero success_criteria → criteriaHitRate is null"
   // quality-signal gap, paired with the non-blocking `no_success_criteria`
   // lint. The 80 KB design target still stands.
-  const REGRESSION_CEILING_BYTES = 162 * 1024;
+  // SOURCE_LIBRARY_DESIGN.md — bumped 162 KB → 167 KB to admit the
+  // `sources` skill (~4.3 KB): the filing surface for auto-captured
+  // document attachments (list unfiled → write knowledge/sources/ card →
+  // PATCH cardPath → project cross-link) plus promote/send-back. Loaded
+  // ungated on DM surfaces because "here's the file, save it under X" is
+  // a first-class DM ask and the auto-capture announcement in the
+  // [Attached files] block points the agent at this skill by name. The
+  // taxonomy detail lives in curated anchors (spliced overlay-or-seed),
+  // keeping the static body lean. The 80 KB design target still stands.
+  const REGRESSION_CEILING_BYTES = 167 * 1024;
 
   test("message.received.dm total SKILL.md bytes ≤ regression ceiling", () => {
     const slugs = EVENT_SKILL_SETS["message.received.dm"];

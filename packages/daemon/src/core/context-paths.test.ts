@@ -15,6 +15,7 @@ import {
   customRoutinePath,
   dossierPath,
   policyPath,
+  sourceCardPath,
   agentScratchPath,
   inboxPath,
   activityViewPath,
@@ -127,6 +128,9 @@ describe("context-paths (six-class layout)", () => {
     );
     expect(dossierPath("weekly-review")).toBe(
       "knowledge/dossiers/weekly-review.md",
+    );
+    expect(sourceCardPath("acme-launch", "pitch-deck")).toBe(
+      "knowledge/sources/acme-launch/pitch-deck.md",
     );
     expect(policyPath("morning-finance-check")).toBe(
       "policies/management-captures/morning-finance-check.md",
