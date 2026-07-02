@@ -67,7 +67,6 @@ export interface AlertInputs {
 
   // Config / commands / templates
   templatesPending: Array<{ path: string; from: number; to: number }>;
-  docsAssetConflicts: string[];
   skillConflicts: string[];
   builtInCommandNames: string[];
   userCommands: Array<{ id: number; name: string; command: string }>;
@@ -188,25 +187,6 @@ function detectTemplateUpgrades(inputs: AlertInputs): Alert[] {
       dismissable: true,
       detectedAt: iso(inputs.now),
       fingerprint,
-    },
-  ];
-}
-
-function detectDocsAssetConflicts(inputs: AlertInputs): Alert[] {
-  if (inputs.docsAssetConflicts.length === 0) return [];
-  const sorted = [...inputs.docsAssetConflicts].sort();
-  const count = sorted.length;
-  return [
-    {
-      id: "config.docs.conflicts",
-      severity: "warning",
-      title: `${count} doc${count === 1 ? "" : "s"} need update review`,
-      description: `User-edited docs were preserved during release sync: ${sorted.slice(0, 3).join(", ")}${count > 3 ? `, and ${count - 3} more` : ""}.`,
-      href: "/docs",
-      source: "config",
-      dismissable: true,
-      detectedAt: iso(inputs.now),
-      fingerprint: sorted.join("|"),
     },
   ];
 }
@@ -382,7 +362,6 @@ export function aggregateAlerts(inputs: AlertInputs): Alert[] {
     ...detectContextFilesMissing(inputs),
     ...detectMailAttention(inputs),
     ...detectTemplateUpgrades(inputs),
-    ...detectDocsAssetConflicts(inputs),
     ...detectSkillConflicts(inputs),
     ...detectCommandConflicts(inputs),
     ...detectAuthHealth(inputs),

@@ -284,7 +284,6 @@ export function createHealthRoutes(deps: ApiDependencies): Hono {
       mailAccounts,
       gmailDelegated,
       templatesPending: templatesPendingRecord?.pending ?? [],
-      docsAssetConflicts: releaseAssets?.docs?.conflicts.map((conflict) => conflict.path) ?? [],
       skillConflicts: releaseAssets?.skills?.builtinShadowedUserSkills ?? [],
       builtInCommandNames,
       userCommands,

@@ -11,7 +11,6 @@ function baseInputs(overrides: Partial<AlertInputs> = {}): AlertInputs {
     mailAccounts: [],
     gmailDelegated: false,
     templatesPending: [],
-    docsAssetConflicts: [],
     skillConflicts: [],
     builtInCommandNames: [],
     userCommands: [],
@@ -163,25 +162,6 @@ describe("aggregateAlerts", () => {
     });
     expect(alerts[0].title).toContain("1 custom command");
     expect(alerts[0].fingerprint).toBe("7:!deploy");
-  });
-
-  it("flags release docs conflicts without blocking startup", () => {
-    const alerts = aggregateAlerts(
-      baseInputs({
-        docsAssetConflicts: [
-          "guides/setup-wizard.md",
-          "reference/api.md",
-        ],
-      }),
-    );
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0]).toMatchObject({
-      id: "config.docs.conflicts",
-      severity: "warning",
-      href: "/docs",
-      dismissable: true,
-    });
-    expect(alerts[0].fingerprint).toBe("guides/setup-wizard.md|reference/api.md");
   });
 
   it("flags user skills shadowed by newly shipped built-ins", () => {
@@ -396,32 +376,6 @@ describe("aggregateAlerts", () => {
     );
     const severities = alerts.map((a) => a.severity);
     expect(severities).toEqual(["error", "error", "warning", "info"]);
-  });
-
-  it("uses singular 'doc' when exactly one docs asset conflict is present", () => {
-    // Pins the `count === 1 ? "" : "s"` true branch in detectDocsAssetConflicts.
-    const alerts = aggregateAlerts(
-      baseInputs({ docsAssetConflicts: ["reference/api.md"] }),
-    );
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].title).toBe("1 doc need update review");
-  });
-
-  it("collapses long docs conflict lists into a `, and N more` tail", () => {
-    // Pins the `count > 3 ? ...` true branch in detectDocsAssetConflicts.
-    const alerts = aggregateAlerts(
-      baseInputs({
-        docsAssetConflicts: [
-          "reference/api.md",
-          "guides/setup.md",
-          "guides/git.md",
-          "getting-started/01.md",
-        ],
-      }),
-    );
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].title).toBe("4 docs need update review");
-    expect(alerts[0].description).toContain("and 1 more");
   });
 
   it("uses singular 'skill' when exactly one skill conflict is present", () => {
