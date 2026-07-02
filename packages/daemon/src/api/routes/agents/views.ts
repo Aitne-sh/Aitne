@@ -371,7 +371,10 @@ export function planRunNow(
     taskDescription: dto.name,
     // Built-ins drive their prompt from the routine/process key; user Agents
     // carry the recurring row's prompt so the manual run does the real task.
-    taskPrompt: dto.source === "user" ? opts.taskPrompt ?? null : null,
+    // The agent_prompt_placeholder guard above already rejects a null / empty /
+    // placeholder prompt for user source, so past it opts.taskPrompt is a real
+    // string — hence the assertion rather than a (dead) `?? null` fallback.
+    taskPrompt: dto.source === "user" ? opts.taskPrompt! : null,
     taskContext,
     // Routing pins ride along ONLY for user Agents — mirrors the cron path
     // (`generateNextScheduleRow` copies the recurring row's backend_id / model /

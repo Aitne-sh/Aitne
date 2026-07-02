@@ -1612,6 +1612,17 @@ describe("SessionManager", () => {
 
   describe("dashboard session timeout", () => {
     it("uses the longer dashboard timeout for dashboard platform", async () => {
+      // Pin the clock to mid-agent-day so the 90-minute idle window under
+      // test never straddles the 04:00 day boundary — otherwise this test
+      // flakes when it happens to run in the 04:00–05:30 UTC window (the
+      // `datetime('now','-90 minutes')` timestamp lands in the *previous*
+      // agent day and the session expires on the boundary, not the timeout).
+      // Mirrors the deterministic fake-timer pattern used by the DM
+      // day-boundary tests above.
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-04-22T12:00:00.000Z"));
+      mgr = new SessionManager(db, makeConfig({ timezone: "UTC" }));
+
       // Dashboard timeout is 120 min in test config
       const first = await mgr.getOrCreate({
         platform: "dashboard",
@@ -1621,10 +1632,11 @@ describe("SessionManager", () => {
       });
       await mgr.updateSession(first.id, "session-abc", "opus");
 
-      // Set last_message_at to 90 minutes ago (within 120 min timeout)
+      // Set last_message_at to 90 minutes ago (within 120 min timeout,
+      // still the same agent day as the pinned now).
       db.prepare(
-        "UPDATE conversation_sessions SET last_message_at = datetime('now', '-90 minutes') WHERE id = ?",
-      ).run(first.id);
+        "UPDATE conversation_sessions SET last_message_at = ? WHERE id = ?",
+      ).run("2026-04-22 10:30:00", first.id);
 
       const second = await mgr.getOrCreate({
         platform: "dashboard",

@@ -490,6 +490,36 @@ describe("recurring-schedules DB", () => {
       expect(row.task_prompt).toBe("drifted");
     });
 
+    it("resync falls back to empty strings when the rule row carries neither description nor prompt", () => {
+      // The public API always writes a non-null task_description, but the
+      // column is nullable (RecurringScheduleRow.task_description: string | null),
+      // and the `?? ""` guards on the in-place resync mirror
+      // generateNextScheduleRow so a degenerate rule row can never write SQL
+      // NULL into the pending agent_schedule text. Reproduce that state
+      // directly to pin the guards.
+      const created = createRecurringSchedule(db, {
+        taskType: "agent.task",
+        description: "Seed description so a pending row materialises",
+        prompt: "seed prompt",
+        recurrenceRule: makeRule(),
+      });
+      // Null BOTH text columns on the parent rule — a state the schema permits
+      // but the CRUD API can't reach on its own.
+      db.prepare(
+        "UPDATE recurring_schedules SET task_description = NULL, task_prompt = NULL WHERE id = ?",
+      ).run(created.id);
+
+      // Clearing the prompt (null) triggers the in-place resync; with both
+      // source columns null, both fall through to "".
+      updateRecurringSchedule(db, created.id, { prompt: null });
+
+      const row = db.prepare(
+        "SELECT task_description, task_prompt FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+      ).get(created.id) as { task_description: string | null; task_prompt: string | null };
+      expect(row.task_description).toBe("");
+      expect(row.task_prompt).toBe("");
+    });
+
     // SCHEDULE_API_REDESIGN_PLAN §4.3a — PATCH updates that flip an
     // alias-pinned row to a registered-id pin (or vice versa) must
     // move BOTH `model` and `backend_id` in lockstep. Clearing one
