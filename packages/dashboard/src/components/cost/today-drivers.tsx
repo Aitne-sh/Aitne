@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Info } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { EventRow } from "@/components/logs/event-row";
@@ -118,20 +119,28 @@ export function TodayDrivers({ breakdown, todayCostUsd, todaySessions }: TodayDr
           )}
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden p-0">
+          <div className="border-b border-border p-5 py-4">
             <CardTitle>Today at a Glance</CardTitle>
-          </CardHeader>
-          <dl className="space-y-3">
+          </div>
+          {/* Hairline-tiled stat grid: the `gap-px` over a `bg-border` parent
+              draws crisp 1px dividers between `bg-card` tiles, so each figure
+              reads as its own scannable cell instead of a cramped list row. */}
+          <dl className="grid grid-cols-2 gap-px bg-border">
             <GlanceStat
               label="Cache hit rate"
               value={formatShare(cacheHitRate)}
               hint="Cache-read share of all input-side tokens. Cache reads bill at a fraction of fresh input — a falling rate makes the same workload cost more."
             />
             <GlanceStat
-              label="Autonomous spend share"
+              label="Autonomous share"
               value={formatShare(autonomousShare)}
               hint="Share of today's cost from background runs (routines, scans, scheduled tasks) rather than your own messages."
+            />
+            <GlanceStat
+              label="Avg cost / run"
+              value={avgCostPerRun != null ? formatCurrency(avgCostPerRun) : "—"}
+              hint="Today's total divided by the number of costed runs."
             />
             <GlanceStat
               label="Failed-run spend"
@@ -144,22 +153,38 @@ export function TodayDrivers({ breakdown, todayCostUsd, todaySessions }: TodayDr
                   : undefined
               }
             />
-            <GlanceStat
-              label="Avg cost per run"
-              value={avgCostPerRun != null ? formatCurrency(avgCostPerRun) : "—"}
-              hint="Today's total divided by the number of costed runs."
-            />
-            <GlanceStat
-              label="Tokens today"
-              value={`${formatTokenCount(
-                breakdown.tokens.input + breakdown.tokens.cacheCreation + breakdown.tokens.cacheRead,
-              )} in / ${formatTokenCount(breakdown.tokens.output)} out`}
+            <TokensStat
+              inValue={formatTokenCount(
+                breakdown.tokens.input +
+                  breakdown.tokens.cacheCreation +
+                  breakdown.tokens.cacheRead,
+              )}
+              outValue={formatTokenCount(breakdown.tokens.output)}
               hint="Total input-side tokens (fresh + cache write + cache read) and output tokens across today's costed runs."
             />
           </dl>
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * Uppercase micro-label carrying the stat's tooltip. A small info glyph is
+ * the hover affordance (replacing the old dotted underline, which read as a
+ * broken link); the whole label is the trigger so the target stays large.
+ */
+function StatLabel({ label, hint }: { label: string; hint: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger className="inline-flex cursor-default items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+        <Info className="h-3 w-3 opacity-50" aria-hidden />
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 font-normal normal-case tracking-normal">
+        {hint}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -177,21 +202,66 @@ function GlanceStat({
   valueClassName?: string;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <dt className="text-xs text-muted-foreground">
-        <Tooltip>
-          <TooltipTrigger className="cursor-default underline decoration-dotted underline-offset-2">
-            {label}
-          </TooltipTrigger>
-          <TooltipContent className="max-w-64">{hint}</TooltipContent>
-        </Tooltip>
+    <div className="flex flex-col gap-1.5 bg-card p-4">
+      <dt>
+        <StatLabel label={label} hint={hint} />
       </dt>
-      <dd className="text-right">
-        <span className={cn("text-sm font-semibold tabular-nums text-foreground", valueClassName)}>
+      <dd>
+        {/* No tabular-nums: Fraunces (font-display) ships no `tnum` feature —
+            see CardValue. Figures render with its proportional digits. */}
+        <span
+          className={cn(
+            "font-display text-2xl font-semibold leading-none tracking-tight text-foreground",
+            valueClassName,
+          )}
+        >
           {value}
         </span>
-        {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="mt-1.5 text-[11px] text-muted-foreground">{sub}</p>}
       </dd>
     </div>
+  );
+}
+
+/**
+ * Full-width tokens row: input and output are distinct magnitudes, so they
+ * get their own figures rather than being crammed into one "X in / Y out"
+ * string that overflowed the narrow column.
+ */
+function TokensStat({
+  inValue,
+  outValue,
+  hint,
+}: {
+  inValue: string;
+  outValue: string;
+  hint: string;
+}) {
+  return (
+    <div className="col-span-2 flex items-center justify-between gap-4 bg-card p-4">
+      <dt>
+        <StatLabel label="Tokens today" hint={hint} />
+      </dt>
+      <dd className="flex items-baseline gap-5">
+        <TokenLeg value={inValue} caption="in" />
+        <span className="text-border" aria-hidden>
+          /
+        </span>
+        <TokenLeg value={outValue} caption="out" />
+      </dd>
+    </div>
+  );
+}
+
+function TokenLeg({ value, caption }: { value: string; caption: string }) {
+  return (
+    <span className="flex items-baseline gap-1">
+      <span className="font-display text-xl font-semibold tracking-tight text-foreground">
+        {value}
+      </span>
+      <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        {caption}
+      </span>
+    </span>
   );
 }

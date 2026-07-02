@@ -14,7 +14,6 @@ import { InlineApprovals } from "@/components/overview/inline-approvals";
 import { NotificationsPanel } from "@/components/overview/notifications-panel";
 import { DraftsAwaitingCard } from "@/components/overview/drafts-awaiting-card";
 import { StatusBar } from "@/components/overview/status-bar";
-import { YourLife } from "@/components/overview/your-life";
 import { TipsCard } from "@/components/overview/tips-card";
 import { useConfirm } from "@/components/shared/confirm-dialog";
 import { CardSkeleton } from "@/components/shared/query-result";
@@ -189,7 +188,12 @@ export default function OverviewPage() {
             runNowFeedback={runNowFeedback}
           />
 
-          {/* ③ Activity (left) + today's context and system detail (right) */}
+          {/* ③ One rotating capability hint — surfaced up top (below the
+              status strip) so it's actually seen instead of buried at the
+              bottom of the page. Full-width, matches the StatusBar width. */}
+          <TipsCard />
+
+          {/* ④ Activity (left) + today's context and system detail (right) */}
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="space-y-6 lg:col-span-2">
               <RecentEventsCard />
@@ -201,10 +205,6 @@ export default function OverviewPage() {
               <CostSummaryCard />
             </div>
           </div>
-
-          {/* ④ Your Life shortcuts + one rotating capability hint */}
-          <YourLife />
-          <TipsCard />
         </>
       )}
     </div>
