@@ -7,6 +7,7 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { stream as honoStream } from "hono/streaming";
@@ -38,6 +39,20 @@ function isSafeCardPath(cardPath: string): boolean {
 
 function isSourceStatus(value: string): value is SourceStatus {
   return (SOURCE_STATUSES as readonly string[]).includes(value);
+}
+
+/** True when `path` is a readable regular file whose bytes hash to
+ *  `sha256`. Unreadable/missing paths are simply "no match" — the
+ *  export falls back to copying. */
+function fileMatchesSha256(path: string, sha256: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    return (
+      createHash("sha256").update(readFileSync(path)).digest("hex") === sha256
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Structural slice of `ObsidianService` the export verb needs — kept as an
@@ -312,14 +327,22 @@ export function createSourceRoutes(deps: SourceRoutesDeps): Hono {
     try {
       const destDir = join(vaultPath, "sources");
       mkdirSync(destDir, { recursive: true });
-      // Plain filename when free; the id-prefixed form otherwise. The
-      // prefixed name is unique per source, so re-exports are idempotent
-      // overwrites rather than an ever-growing collision chain.
+      // Idempotent re-export: a vault file already holding these exact
+      // bytes (sha256 match) is reused instead of piling up prefixed
+      // copies. Only a genuinely different file keeps the plain name for
+      // itself; ours then takes the id-prefixed form, which is unique per
+      // source and therefore safe to overwrite.
       let destName = row.safeFilename;
-      if (existsSync(join(destDir, destName))) {
+      if (
+        existsSync(join(destDir, destName))
+        && !fileMatchesSha256(join(destDir, destName), row.sha256)
+      ) {
         destName = `${row.id}-${row.safeFilename}`;
       }
-      copyFileSync(row.path, join(destDir, destName));
+      const dest = join(destDir, destName);
+      if (!fileMatchesSha256(dest, row.sha256)) {
+        copyFileSync(row.path, dest);
+      }
 
       // Companion note (default on): card body when the source is filed,
       // else a minimal stub — plus the `![[…]]` embed Obsidian renders.

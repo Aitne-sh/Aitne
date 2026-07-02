@@ -39,6 +39,12 @@ For inconsistencies the prefilter counted:
 ### Phase 4: Learn
 
 - If the shipped taxonomy/filing anchors in the `sources` skill have drifted from how you actually filed things this run, submit a skill-curation proposal against those anchors (`POST /api/skill-curation/proposals`) so next week's pass starts from the better rules.
-- Friction worth remembering (a collection rule that misfires, a provenance that always needs bytes fetched) → record it through the feedback surface as a `self_critique` signal; your per-agent lessons are injected automatically next run.
+- Friction worth remembering (a collection rule that misfires, a provenance that always needs bytes fetched) → record one `self_critique` signal per distinct lesson; the consolidation loop folds it into your per-agent lessons, which are injected automatically next run:
+
+```bash
+curl -s -X POST http://localhost:8321/api/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"source":"self_critique","valence":"negative","scope_type":"agent_slug","scope_ref":"source-librarian","summary":"<one-line lesson, e.g. WhatsApp PDFs never carry captions - always fetch bytes before filing>"}'
+```
 
 Silent by default: no user notification unless Phase 3 found something irrecoverable or a delegated reorg was spawned (one short DM via `/api/notify`, priority low).

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import Database from "better-sqlite3";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -345,6 +345,15 @@ describe("/api/sources export → external Obsidian vault", () => {
     expect(body.noteCreated).toBe(false);
     expect(body.noteSkippedReason).toBe("disabled_by_request");
     expect(created).toHaveLength(0);
+  });
+
+  it("re-export reuses the identical vault file instead of duplicating it", async () => {
+    const { sourceId } = await ingest(ctx, pdfBytes(), "application/pdf", "deck.pdf");
+    const first = (await (await exportSource(sourceId!, { note: false })).json()) as Record<string, unknown>;
+    expect(first.file).toBe("sources/deck.pdf");
+    const second = (await (await exportSource(sourceId!, { note: false })).json()) as Record<string, unknown>;
+    expect(second.file).toBe("sources/deck.pdf");
+    expect(readdirSync(join(vaultDir, "sources"))).toEqual(["deck.pdf"]);
   });
 
   it("still copies the binary when Obsidian is not running (note skipped)", async () => {

@@ -3,6 +3,7 @@ name: sources
 description: Load to manage the durable source library (user-sent PDFs/PPTX/docs) — list unfiled sources, file them as knowledge/sources/ cards, promote images, or send a stored source back. SKIP for delivering files you generated this turn (attach) or general vault edits (context).
 allowed-tools:
   - Bash(curl *)
+  - Bash(unzip *)
   - Read
   - Write
 ---
@@ -11,7 +12,7 @@ allowed-tools:
 
 Document attachments the user sends (PDF, PPTX, DOCX, XLSX, ODT) are captured automatically into a durable library the moment they arrive — they survive chat pruning. Each source is a ledger row (`src_…` id) plus the original bytes. Your job is the *organization* layer: write a markdown **card** for each source under `knowledge/sources/<collection>/`, link it to projects, and keep the collections tidy.
 
-- **curl with literal strings only.** No `$VAR` / `$(...)` / pipes / chained commands — pre-compute values and write literals.
+- **Bash is limited to `curl` and `unzip`, literal arguments only.** No `$VAR` / `$(...)` / pipes / chained commands — anything else is silently denied. Pre-compute values and write literals.
 - Cards are written via the `context` API (this skill shows the calls); the library API below only records metadata and bindings.
 
 ## API (all on `http://localhost:8321`)
@@ -30,7 +31,7 @@ Errors use the standard agent-error envelope; `404 sources.not_found` means a st
 ## Filing a source (the core loop)
 
 1. `GET /api/sources?status=unfiled` — pick a source.
-2. Understand it. PDFs: fetch the bytes to the workdir and `Read` the file directly. PPTX/DOCX: best-effort text peek without new tools, e.g. `unzip -p ./src-deck.pptx ppt/slides/slide1.xml` (a .pptx is a zip of XML; strip tags mentally). Often the filename + caption suffice.
+2. Understand it. PDFs: fetch the bytes to the workdir and `Read` the file directly. PPTX/DOCX are zip archives of XML — best-effort text peek with `unzip -p ./src-deck.pptx ppt/slides/slide1.xml` (one file per call, no pipes; read the text between the XML tags in the output). If `unzip` is unavailable on this platform, fall back to filename + caption — they often suffice.
 3. Choose a collection per the taxonomy below (create a new one only when nothing fits).
 4. Write the card:
 

@@ -8,6 +8,7 @@
     { "path": "journal/monthly/*.md", "purpose": "monthly review snapshots (YYYY-MM)", "sections": [{ "heading": "## Theme", "contains": "the month's overall theme" }] },
     { "path": "policies/*.md", "purpose": "user-controlled policy files", "sections": [{ "heading": "## Why", "contains": "rationale for the rule" }, { "heading": "## How", "contains": "concrete rule shape" }] },
     { "path": "identity/*.md", "purpose": "user identity and preferences dictionary", "sections": [{ "heading": "## Identity", "contains": "name role tz" }] },
-    { "path": "journal/agent.md", "purpose": "agent-owned weekly + monthly self-critique", "sections": [{ "heading": "## Weekly", "contains": "what worked, what slipped, improvements" }] }
+    { "path": "journal/agent.md", "purpose": "agent-owned weekly + monthly self-critique", "sections": [{ "heading": "## Weekly", "contains": "what worked, what slipped, improvements" }] },
+    { "path": "knowledge/sources/*/*.md", "purpose": "source-document cards: summaries of user-sent files (PDF/PPTX/docs) stored in the source library; write via the sources skill", "sections": [{ "heading": "# <Title>", "contains": "summary + source_id frontmatter + project link" }] }
   ]
 }
