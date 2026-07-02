@@ -12,6 +12,13 @@ import {
   ledgerStateKey,
   type TuningLedgerBlob,
 } from "../../core/feedback/tuning-actuator.js";
+import {
+  TUNING_CYCLE_HISTORY_STATE_KEY,
+  TUNING_GRADUATION_CYCLES,
+  TUNING_GRADUATION_NOTIFIED_STATE_KEY,
+  type TuningCycleHistory,
+  type TuningCycleHistoryEntry,
+} from "../../core/feedback/tuning-graduation.js";
 import { createTuningRoutes } from "./tuning.js";
 
 function makeDb(): Database.Database {
@@ -91,6 +98,51 @@ async function postVerdicts(
 const R1_ID = "2026-06-09:R1:activityScanPrePassFreshnessMinutes";
 const R2_ID = "2026-06-09:R2:notification:reminder";
 
+/** WP5 — a graduation-history entry; defaults to the seeded pending cycle. */
+function historyEntry(
+  over: Partial<TuningCycleHistoryEntry> = {},
+): TuningCycleHistoryEntry {
+  return {
+    cycleId: "2026-06-09",
+    generatedAt: "2026-06-09T05:00:00.000Z",
+    recommendationCount: 2,
+    verdicts: { apply: 0, reject: 0, defer: 0 },
+    ...over,
+  };
+}
+
+/** A fully-approved past cycle — one qualifying step of the streak. */
+function qualifyingEntry(cycleId: string): TuningCycleHistoryEntry {
+  return historyEntry({
+    cycleId,
+    generatedAt: `${cycleId}T05:00:00.000Z`,
+    recommendationCount: 1,
+    verdicts: { apply: 1, reject: 0, defer: 0 },
+  });
+}
+
+function seedHistory(
+  db: Database.Database,
+  entries: TuningCycleHistory,
+): void {
+  writeRuntimeState(db, TUNING_CYCLE_HISTORY_STATE_KEY, entries);
+}
+
+function readHistory(db: Database.Database): TuningCycleHistory | null {
+  return readRuntimeState<TuningCycleHistory>(
+    db,
+    TUNING_CYCLE_HISTORY_STATE_KEY,
+  );
+}
+
+function graduatedAudits(db: Database.Database): Array<{ detail: string }> {
+  return db
+    .prepare(
+      `SELECT detail FROM agent_actions WHERE action_type = 'self_tuning.graduated'`,
+    )
+    .all() as Array<{ detail: string }>;
+}
+
 describe("tuning routes", () => {
   describe("GET /tuning/pending", () => {
     it("returns null when no cycle has been generated yet", async () => {
@@ -101,6 +153,35 @@ describe("tuning routes", () => {
         cycle: null,
         selfTuningEnabled: false,
         shadow: true,
+        graduation: {
+          graduated: false,
+          qualifyingStreak: 0,
+          requiredCycles: TUNING_GRADUATION_CYCLES,
+          notifiedAt: null,
+        },
+      });
+    });
+
+    it("carries the graduation read-model (streak + one-time notice stamp)", async () => {
+      const db = makeDb();
+      seedHistory(db, [
+        qualifyingEntry("2026-05-26"),
+        qualifyingEntry("2026-06-02"),
+        qualifyingEntry("2026-06-09"),
+      ]);
+      writeRuntimeState(
+        db,
+        TUNING_GRADUATION_NOTIFIED_STATE_KEY,
+        "2026-06-09T06:00:00.000Z",
+      );
+      const app = makeApp(db);
+      const res = await app.request("/tuning/pending");
+      const json = (await res.json()) as { graduation: unknown };
+      expect(json.graduation).toEqual({
+        graduated: true,
+        qualifyingStreak: 3,
+        requiredCycles: TUNING_GRADUATION_CYCLES,
+        notifiedAt: "2026-06-09T06:00:00.000Z",
       });
     });
 
@@ -661,6 +742,220 @@ describe("tuning routes", () => {
         selfTuningEnabled: true,
         shadow: false,
       });
+    });
+  });
+
+  describe("POST /tuning/verdicts — graduation (WP5 shadow-period exit)", () => {
+    it("tallies newly recorded verdicts onto the cycle's history entry only", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [historyEntry()]);
+      const app = makeApp(db);
+      const body = {
+        cycleId: "2026-06-09",
+        verdicts: [{ id: R1_ID, verdict: "apply", reason: "fine" }],
+      };
+      await postVerdicts(app, body);
+      expect(readHistory(db)).toEqual([
+        historyEntry({ verdicts: { apply: 1, reject: 0, defer: 0 } }),
+      ]);
+      // Retried POST → duplicate status → never re-tallied.
+      await postVerdicts(app, body);
+      expect(readHistory(db)).toEqual([
+        historyEntry({ verdicts: { apply: 1, reject: 0, defer: 0 } }),
+      ]);
+    });
+
+    it("degrades quietly when the pre-step never appended the cycle", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      const app = makeApp(db);
+      const res = await postVerdicts(app, {
+        cycleId: "2026-06-09",
+        verdicts: [{ id: R1_ID, verdict: "apply", reason: "fine" }],
+      });
+      expect(res.status).toBe(200);
+      expect(readHistory(db)).toEqual([]);
+      expect(
+        readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY),
+      ).toBeNull();
+    });
+
+    it("fires the one-time DM + audit + guard exactly at streak completion", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [
+        qualifyingEntry("2026-05-26"),
+        qualifyingEntry("2026-06-02"),
+        historyEntry(), // the pending cycle — 2 recs, unverdicted
+      ]);
+      const sendNotification = vi.fn().mockResolvedValue({
+        dispatchId: "d1",
+        deliveries: [],
+      });
+      const app = makeApp(db, {}, { sendNotification });
+      const body = {
+        cycleId: "2026-06-09",
+        verdicts: [
+          { id: R1_ID, verdict: "apply", reason: "fine" },
+          { id: R2_ID, verdict: "defer", reason: "one more week" },
+        ],
+      };
+      const res = await postVerdicts(app, body);
+      expect(res.status).toBe(200);
+
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+      const dm = sendNotification.mock.calls[0][0] as {
+        message: string;
+        notificationType: string;
+      };
+      expect(dm.notificationType).toBe("self_tuning");
+      expect(dm.message).toContain("selfTuningEnabled");
+      expect(dm.message).toContain("Nothing changes until you do");
+
+      const notifiedAt = readRuntimeState<string>(
+        db,
+        TUNING_GRADUATION_NOTIFIED_STATE_KEY,
+      );
+      expect(typeof notifiedAt).toBe("string");
+
+      const audits = graduatedAudits(db);
+      expect(audits).toHaveLength(1);
+      expect(JSON.parse(audits[0].detail)).toMatchObject({
+        cycleId: "2026-06-09",
+        qualifyingStreak: 3,
+        requiredCycles: TUNING_GRADUATION_CYCLES,
+      });
+
+      // Second call is duplicate-only — no second DM/audit, stable stamp.
+      await postVerdicts(app, body);
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+      expect(graduatedAudits(db)).toHaveLength(1);
+      expect(
+        readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY),
+      ).toBe(notifiedAt);
+    });
+
+    it("does not fire while the streak is below the bar", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [qualifyingEntry("2026-06-02"), historyEntry()]);
+      const sendNotification = vi.fn();
+      const app = makeApp(db, {}, { sendNotification });
+      await postVerdicts(app, {
+        cycleId: "2026-06-09",
+        verdicts: [
+          { id: R1_ID, verdict: "apply", reason: "fine" },
+          { id: R2_ID, verdict: "defer", reason: "wait" },
+        ],
+      });
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(graduatedAudits(db)).toHaveLength(0);
+      expect(
+        readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY),
+      ).toBeNull();
+    });
+
+    it("a reject verdict keeps the cycle non-qualifying (streak reset)", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [
+        qualifyingEntry("2026-05-26"),
+        qualifyingEntry("2026-06-02"),
+        historyEntry(),
+      ]);
+      const sendNotification = vi.fn();
+      const app = makeApp(db, {}, { sendNotification });
+      await postVerdicts(app, {
+        cycleId: "2026-06-09",
+        verdicts: [
+          { id: R1_ID, verdict: "apply", reason: "fine" },
+          { id: R2_ID, verdict: "reject", reason: "noise" },
+        ],
+      });
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(graduatedAudits(db)).toHaveLength(0);
+    });
+
+    it("never re-notifies once the guard stamp exists", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [
+        qualifyingEntry("2026-05-26"),
+        qualifyingEntry("2026-06-02"),
+        historyEntry(),
+      ]);
+      writeRuntimeState(
+        db,
+        TUNING_GRADUATION_NOTIFIED_STATE_KEY,
+        "2026-06-01T00:00:00.000Z",
+      );
+      const sendNotification = vi.fn();
+      const app = makeApp(db, {}, { sendNotification });
+      await postVerdicts(app, {
+        cycleId: "2026-06-09",
+        verdicts: [
+          { id: R1_ID, verdict: "apply", reason: "fine" },
+          { id: R2_ID, verdict: "apply", reason: "fine" },
+        ],
+      });
+      expect(sendNotification).not.toHaveBeenCalled();
+      expect(graduatedAudits(db)).toHaveLength(0);
+      expect(
+        readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY),
+      ).toBe("2026-06-01T00:00:00.000Z");
+    });
+
+    it("graduates with audit + guard even without a DM path", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [
+        qualifyingEntry("2026-05-26"),
+        qualifyingEntry("2026-06-02"),
+        historyEntry(),
+      ]);
+      const app = makeApp(db); // no sendNotification dep
+      const res = await postVerdicts(app, {
+        cycleId: "2026-06-09",
+        verdicts: [
+          { id: R1_ID, verdict: "apply", reason: "fine" },
+          { id: R2_ID, verdict: "defer", reason: "wait" },
+        ],
+      });
+      expect(res.status).toBe(200);
+      expect(graduatedAudits(db)).toHaveLength(1);
+      expect(
+        readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY),
+      ).not.toBeNull();
+    });
+
+    it("degrades to a warn (still 200) when the graduation DM throws — guard stays set", async () => {
+      const db = makeDb();
+      seedCycle(db);
+      seedHistory(db, [
+        qualifyingEntry("2026-05-26"),
+        qualifyingEntry("2026-06-02"),
+        historyEntry(),
+      ]);
+      const sendNotification = vi
+        .fn()
+        .mockRejectedValue(new Error("network down"));
+      const app = makeApp(db, {}, { sendNotification });
+      const res = await postVerdicts(app, {
+        cycleId: "2026-06-09",
+        verdicts: [
+          { id: R1_ID, verdict: "apply", reason: "fine" },
+          { id: R2_ID, verdict: "defer", reason: "wait" },
+        ],
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { recorded: number }).recorded).toBe(2);
+      // Guard written BEFORE the DM attempt — a delivery failure can never
+      // double-notify; GET /tuning/pending still surfaces the state.
+      expect(
+        readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY),
+      ).not.toBeNull();
+      expect(graduatedAudits(db)).toHaveLength(1);
     });
   });
 });

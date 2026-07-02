@@ -183,6 +183,16 @@ export interface BootstrapApiDeps {
   readonly observerManager: ObserverManager;
   readonly contextIndexReconciler: ContextIndexReconcilerObserver;
   readonly primaryVaultWatcher: PrimaryVaultWatcher;
+  /**
+   * SELF_IMPROVEMENT_PHASE2 A2.1 tracking-coverage fix — the `POST
+   * /api/notify` chokepoint below is the delivery path for routine-authored
+   * notifications (morning brief, activity-scan alerts, …), and it used to
+   * bypass `SignalDetector.trackNotification` entirely: replies and
+   * ignore-timeouts on those DMs were never attributed, starving the
+   * feedback loop's richest live signal. Optional so partial test harnesses
+   * can omit it.
+   */
+  readonly signalDetector?: import("../core/signal-detector.js").SignalDetector;
 
   // ── Integration plumbing ─────────────────────────────────────────────
   readonly delegatedBackendInvoker: DelegatedBackendInvoker;
@@ -405,6 +415,7 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
     observerManager,
     contextIndexReconciler,
     primaryVaultWatcher,
+    signalDetector,
     delegatedBackendInvoker,
     gitAccountRegistry,
     writeTracker,
@@ -529,6 +540,20 @@ function composeApiDependencies(deps: BootstrapApiDeps): ApiDependencies {
             originSessionId !== undefined ? [originSessionId] : [],
           notificationType: "proactive_forward",
         });
+        // A2.1 tracking-coverage fix — register each delivery with the
+        // SignalDetector (same `${dispatchId}:${platform}` id shape the
+        // NotificationManager paths use) so replies / corrections /
+        // ignore-timeouts on routine-authored DMs attribute back to
+        // `notification_log` and feed the feedback loop.
+        if (signalDetector) {
+          for (const delivery of deliveries) {
+            signalDetector.trackNotification(
+              `${dispatchId}:${delivery.platform}`,
+              delivery.platform,
+              message,
+            );
+          }
+        }
       }
       return { status: "sent", dispatchId, deliveries };
     };

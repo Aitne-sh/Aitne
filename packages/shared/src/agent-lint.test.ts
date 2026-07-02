@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lintAgentDefinition } from "./agent-lint.js";
+import { isPlaceholderPrompt, lintAgentDefinition } from "./agent-lint.js";
 
 const FRAMED_RESEARCH_PROMPT = `# Role
 You are the AI-news researcher. Every morning you produce a verified digest.
@@ -15,7 +15,10 @@ You are the AI-news researcher. Every morning you produce a verified digest.
 # Output
 - Write a note and DM the "what matters" summary.`;
 
-function codes(prompt: string, extra: { playbooks?: string[]; tags?: string[] } = {}) {
+function codes(
+  prompt: string,
+  extra: { playbooks?: string[]; tags?: string[]; successCriteriaCount?: number } = {},
+) {
   return lintAgentDefinition({ prompt, ...extra }).map((i) => i.code);
 }
 
@@ -32,6 +35,70 @@ describe("lintAgentDefinition", () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const issues = lintAgentDefinition({ prompt: undefined as any });
       expect(issues.map((i) => i.code)).toEqual(["empty_prompt"]);
+    });
+  });
+
+  describe("placeholder_prompt", () => {
+    it.each([
+      "placeholder",
+      "TODO",
+      "tbd",
+      "# TODO",
+      "**placeholder**",
+      "[placeholder]",
+      "Your prompt here",
+      "fill in later",
+      "to be determined",
+      "coming soon",
+      "xxx",
+    ])("flags the whole-body stub %j and returns nothing else", (prompt) => {
+      const issues = lintAgentDefinition({ prompt });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe("placeholder_prompt");
+      expect(issues[0].severity).toBe("warning");
+    });
+
+    it("flags a pure-punctuation body", () => {
+      expect(codes("...")).toEqual(["placeholder_prompt"]);
+      expect(codes("---")).toEqual(["placeholder_prompt"]);
+    });
+
+    it("short-circuits like empty_prompt (no criteria nag on top)", () => {
+      expect(codes("placeholder", { successCriteriaCount: 0 })).toEqual(["placeholder_prompt"]);
+    });
+
+    it("quotes at most 40 characters of a long stub body in the message", () => {
+      const issues = lintAgentDefinition({ prompt: "x".repeat(60) });
+      expect(issues[0].code).toBe("placeholder_prompt");
+      expect(issues[0].message).toContain(`("${"x".repeat(40)}…")`);
+    });
+
+    it("does not flag a terse but real task", () => {
+      expect(codes("Check Hacker News for AI items and DM me the top 3.")).toEqual([]);
+    });
+
+    it("does not flag a real prompt that merely contains a stub word", () => {
+      const prompt = `${FRAMED_RESEARCH_PROMPT}\n- TODO markers in the note are fine; {date} is the only placeholder.`;
+      expect(codes(prompt, { playbooks: ["research"] })).toEqual([]);
+    });
+  });
+
+  describe("isPlaceholderPrompt", () => {
+    it("treats missing and whitespace-only prompts as placeholders", () => {
+      expect(isPlaceholderPrompt(null)).toBe(true);
+      expect(isPlaceholderPrompt(undefined)).toBe(true);
+      expect(isPlaceholderPrompt("   \n ")).toBe(true);
+    });
+
+    it("detects whole-body stub tokens regardless of dressing", () => {
+      expect(isPlaceholderPrompt("placeholder")).toBe(true);
+      expect(isPlaceholderPrompt("`TBD`")).toBe(true);
+      expect(isPlaceholderPrompt("insert prompt here")).toBe(true);
+    });
+
+    it("passes a real prompt", () => {
+      expect(isPlaceholderPrompt("Summarise AI news from HN + arXiv and DM me.")).toBe(false);
+      expect(isPlaceholderPrompt(FRAMED_RESEARCH_PROMPT)).toBe(false);
     });
   });
 
@@ -206,6 +273,54 @@ Note writer.
       const issues = lintAgentDefinition({ prompt, playbooks: ["markdown-note"] });
       // research/monitoring are never mentioned → no spurious warnings.
       expect(issues).toEqual([]);
+    });
+  });
+
+  describe("no_success_criteria", () => {
+    it("fires for an # Output contract with an explicit zero criteria count", () => {
+      const issues = lintAgentDefinition({
+        prompt: FRAMED_RESEARCH_PROMPT,
+        playbooks: ["research"],
+        successCriteriaCount: 0,
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].code).toBe("no_success_criteria");
+      expect(issues[0].severity).toBe("warning");
+    });
+
+    it("is silent when at least one criterion is declared", () => {
+      expect(
+        codes(FRAMED_RESEARCH_PROMPT, { playbooks: ["research"], successCriteriaCount: 1 }),
+      ).not.toContain("no_success_criteria");
+    });
+
+    it("is silent for a free-prose prompt without an # Output contract", () => {
+      // No output contract → nothing deterministic for criteria to verify.
+      expect(
+        codes("Just clean up my bookmarks folder every Sunday.", { successCriteriaCount: 0 }),
+      ).toEqual([]);
+    });
+
+    it("is silent when the caller does not know the criteria count", () => {
+      // successCriteriaCount undefined = prompt-only caller; never flagged.
+      expect(codes(FRAMED_RESEARCH_PROMPT, { playbooks: ["research"] })).toEqual([]);
+    });
+
+    it("accepts the plural # Outputs heading as the output contract", () => {
+      const prompt = `# Role
+Note writer.
+
+# Instruction
+1. Write it.
+
+# Outputs
+- a dated note`;
+      expect(codes(prompt, { successCriteriaCount: 0 })).toContain("no_success_criteria");
+    });
+
+    it("stays out of the empty-prompt early return", () => {
+      // Empty prompt short-circuits after empty_prompt — no criteria nag on top.
+      expect(codes("   ", { successCriteriaCount: 0 })).toEqual(["empty_prompt"]);
     });
   });
 

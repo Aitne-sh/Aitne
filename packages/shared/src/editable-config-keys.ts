@@ -43,6 +43,13 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   "feedbackLessonMaxBytesPerAgent",
   "feedbackLessonStaleDays",
   "feedbackSignalRetentionDays",
+  // SELF_IMPROVEMENT_PHASE2 (QUALITY_LOOP_IMPROVEMENT_PLAN_2026-07.md WP1) —
+  // A3 quality-gate knobs: the effective-cf injection floor (§2.1), the
+  // anti-whiplash contradiction guard (§2.2), and the A2.1 outcome-rollup
+  // toggle for the evening consolidation worksheet.
+  "feedbackLessonConfidenceFloor",
+  "feedbackContradictionGuardCf",
+  "feedbackOutcomeLearningEnabled",
   "timezone", "dayBoundaryHour",
   // Monthly Review kill switch — defaults off pre-release; see
   // packages/daemon/src/settings/runtime-settings.ts for the rationale.
@@ -83,6 +90,10 @@ export const EDITABLE_RUNTIME_KEY_TUPLE = [
   // spawns for the same integration. `harvestForGate` skips pre-pass
   // when `runtime_state.pre_pass_last_run:<key>` is within this window.
   "activityScanPrePassFreshnessMinutes",
+  // WP4 chronic-failure surfacing — consecutive-error streak length at
+  // which an enabled agent counts as chronically failing for the
+  // activity-scan gate's `agent_chronic_failure` escalation.
+  "agentChronicFailureThreshold",
   "authProbeDisabled", "authPreflightFreshnessMs",
   "maxNotificationsPerHour", "maxNotificationsPerDay",
   "quietHoursStart", "quietHoursEnd", "batchIntervalMinutes", "primaryPlatform",

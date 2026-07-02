@@ -497,6 +497,79 @@ export function gatherSelfPerformanceData(
   };
 }
 
+/** A2.1 — default cap on notification types in the evening rollup (C3). */
+export const OUTCOME_ROLLUP_MAX_TYPES = 8;
+
+/**
+ * A2.1 — the evening consolidation's outcome window: per-notification-type
+ * reaction stats over the trailing `windowDays` (default 7). Same
+ * `notification_log` read the weekly measure uses, single window.
+ */
+export function gatherOutcomeRollup(
+  db: Database.Database,
+  opts: { now: Date; windowDays?: number },
+): NotificationTypeStats[] {
+  const windowDays = opts.windowDays ?? SELF_PERFORMANCE_WINDOW_DAYS;
+  const end = formatSqliteDatetime(opts.now);
+  const start = formatSqliteDatetime(
+    new Date(opts.now.getTime() - windowDays * DAY_MS),
+  );
+  return gatherNotifications(db, start, end);
+}
+
+/** `corrected / (replied + corrected)` to 2dp, or null at zero denominator. */
+function correctionRate(stats: NotificationTypeStats): string | null {
+  const denominator = stats.replied + stats.corrected;
+  if (denominator === 0) return null;
+  return (stats.corrected / denominator).toFixed(2);
+}
+
+/**
+ * A2.1 — render the `<outcome_rollup>` block for the evening
+ * `<feedback_worksheet>` (SELF_IMPROVEMENT_PHASE2 §3.1). Pure. Returns null
+ * when nothing was sent in the window (no empty block in the prompt).
+ *
+ * Honest-limits framing baked into the shape: `acted` is omitted (its signal
+ * source is dormant), `ignored` stays its own attribute (engagement
+ * coverage, never rejection), and `correction_rate` only renders when
+ * someone actually responded — silence never produces a rate.
+ */
+export function renderOutcomeRollup(
+  stats: ReadonlyArray<NotificationTypeStats>,
+  opts?: { windowDays?: number; maxTypes?: number },
+): string | null {
+  const windowDays = opts?.windowDays ?? SELF_PERFORMANCE_WINDOW_DAYS;
+  const maxTypes = opts?.maxTypes ?? OUTCOME_ROLLUP_MAX_TYPES;
+  const sent = stats.filter((type) => type.sent > 0);
+  if (sent.length === 0) return null;
+  const shown = [...sent]
+    .sort(
+      (a, b) =>
+        b.sent - a.sent || a.notificationType.localeCompare(b.notificationType),
+    )
+    .slice(0, maxTypes);
+  const omitted = sent.length - shown.length;
+  const out: string[] = [];
+  out.push(
+    `  <outcome_rollup window_days="${windowDays}"` +
+      (omitted > 0 ? ` omitted="${omitted}"` : "") +
+      ` note="correction_rate = corrected/(replied+corrected) over responded ` +
+      `deliveries; ignored is engagement-coverage, not rejection">`,
+  );
+  for (const type of shown) {
+    const rate = correctionRate(type);
+    out.push(
+      `    <type name="${xmlEscape(type.notificationType)}" sent="${type.sent}" ` +
+        `replied="${type.replied}" corrected="${type.corrected}" ` +
+        `ignored="${type.ignored}"` +
+        (rate !== null ? ` correction_rate="${rate}"` : "") +
+        " />",
+    );
+  }
+  out.push("  </outcome_rollup>");
+  return out.join("\n");
+}
+
 /**
  * §3.5 — summarise one lesson store's byte pressure from its raw file
  * contents. Pure (the caller does the FS read); a file with no `## Lessons`
@@ -698,11 +771,14 @@ function renderBlock(
       `  <notifications${omitted > 0 ? ` omitted="${omitted}"` : ""}>`,
     );
     for (const type of shownNotifications) {
+      const rate = correctionRate(type);
       out.push(
         `    <n t="${xmlEscape(type.notificationType)}" sent="${type.sent}" ` +
           `replied="${type.replied}" acted="${type.acted}" ` +
           `corrected="${type.corrected}" ignored="${type.ignored}" ` +
-          `pending="${type.pending}" />`,
+          `pending="${type.pending}"` +
+          (rate !== null ? ` correction_rate="${rate}"` : "") +
+          " />",
       );
     }
     out.push("  </notifications>");

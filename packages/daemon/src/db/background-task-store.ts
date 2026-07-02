@@ -11,7 +11,8 @@
  * The genuinely new shape vs `browser_task` is the ARTIFACT: `report`
  * (verbatim result — the fidelity anchor), `draft` (worker-authored
  * summary), `notify` (the worker's disposition vs the spawn-time policy),
- * `significance`, and `artifact_path`. `markTerminal` writes them in the
+ * `significance`, `verification` (the finish-time self-check checklist,
+ * migration 0023), and `artifact_path`. `markTerminal` writes them in the
  * same transition as the terminal state so a worker's `finish` (or the
  * runner's fail-loud synthesis) is atomic.
  *
@@ -42,6 +43,15 @@ export type BackgroundTaskTier = "lite" | "medium" | "high";
 /** Who set the task in motion — a Task Board provenance hint (migration 0022). */
 export type BackgroundTaskOrigin = "user" | "agent" | "system";
 
+/** One line of the worker's finish-time self-verification checklist
+ *  (migration 0023): a requirement derived from the brief, whether the
+ *  result meets it, and the concrete evidence for that judgement. */
+export interface BackgroundTaskVerificationItem {
+  requirement: string;
+  met: boolean;
+  evidence: string;
+}
+
 export const BACKGROUND_TASK_NON_TERMINAL_STATES: ReadonlySet<BackgroundTaskState> =
   new Set(["pending", "running", "awaiting_user"]);
 
@@ -60,6 +70,10 @@ export interface BackgroundTaskRow {
   /** null until finished; true ⇒ surface, false ⇒ file only. */
   notify: boolean | null;
   significance: string | null;
+  /** Finish-time self-verification checklist (migration 0023) — the
+   *  worker's requirement-by-requirement evaluation of its own result.
+   *  Null until finished (and on the fail-loud synthesis path). */
+  verification: BackgroundTaskVerificationItem[] | null;
   artifactPath: string | null;
   outcomeDetail: string | null;
   originatingChannel: string | null;
@@ -88,6 +102,7 @@ interface BackgroundTaskDbRow {
   draft: string | null;
   notify: number | null;
   significance: string | null;
+  verification: string | null;
   artifact_path: string | null;
   outcome_detail: string | null;
   originating_channel: string | null;
@@ -106,6 +121,7 @@ interface BackgroundTaskDbRow {
 
 const SELECT_COLUMNS = `id, brief, title, state, notification_policy,
         significance_criteria, report, draft, notify, significance,
+        verification,
         artifact_path, outcome_detail, originating_channel, correlation_id,
         schedule_row_id, tier, max_budget_usd, backend_session_id,
         origin, cost_usd,
@@ -126,6 +142,32 @@ function parseSignificanceCriteria(raw: string | null): string[] | null {
   }
 }
 
+/** Parse the persisted `verification` JSON (migration 0023). Same
+ *  tolerance posture as `parseSignificanceCriteria`: a malformed value,
+ *  non-array, or item missing a well-typed field degrades to null (or is
+ *  dropped) rather than throwing, so a hand-written row can never crash a
+ *  read. */
+function parseVerification(
+  raw: string | null,
+): BackgroundTaskVerificationItem[] | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const items = parsed.filter(
+      (x): x is BackgroundTaskVerificationItem =>
+        typeof x === "object"
+        && x !== null
+        && typeof (x as BackgroundTaskVerificationItem).requirement === "string"
+        && typeof (x as BackgroundTaskVerificationItem).met === "boolean"
+        && typeof (x as BackgroundTaskVerificationItem).evidence === "string",
+    );
+    return items.length > 0 ? items : null;
+  } catch {
+    return null;
+  }
+}
+
 function fromDbRow(row: BackgroundTaskDbRow): BackgroundTaskRow {
   return {
     id: row.id,
@@ -138,6 +180,7 @@ function fromDbRow(row: BackgroundTaskDbRow): BackgroundTaskRow {
     draft: row.draft,
     notify: row.notify === null ? null : row.notify === 1,
     significance: row.significance,
+    verification: parseVerification(row.verification),
     artifactPath: row.artifact_path,
     outcomeDetail: row.outcome_detail,
     originatingChannel: row.originating_channel,
@@ -186,12 +229,12 @@ export function createBackgroundTask(
   db.prepare(
     `INSERT INTO background_task
        (id, brief, title, state, notification_policy, significance_criteria,
-        report, draft, notify, significance, artifact_path,
+        report, draft, notify, significance, verification, artifact_path,
         outcome_detail, originating_channel, correlation_id, schedule_row_id,
         tier, max_budget_usd, backend_session_id, origin,
         created_at, started_at, finished_at, delivered_at)
      VALUES (?, ?, ?, 'pending', ?, ?,
-             NULL, NULL, NULL, NULL, NULL,
+             NULL, NULL, NULL, NULL, NULL, NULL,
              NULL, ?, ?, ?,
              ?, ?, NULL, ?,
              ?, NULL, NULL, NULL)`,
@@ -388,6 +431,10 @@ export interface TerminalTransitionInput {
   /** `true`/`false` set explicitly; `undefined` leaves it NULL. */
   notify?: boolean;
   significance?: string | null;
+  /** Finish-time self-verification checklist (migration 0023). Persisted
+   *  as a JSON array; `undefined`/`null`/empty leaves the column
+   *  unchanged (COALESCE), matching the other artifact fields. */
+  verification?: readonly BackgroundTaskVerificationItem[] | null;
   artifactPath?: string | null;
 }
 
@@ -407,6 +454,7 @@ export function markTerminal(
               draft = COALESCE(?, draft),
               notify = COALESCE(?, notify),
               significance = COALESCE(?, significance),
+              verification = COALESCE(?, verification),
               artifact_path = COALESCE(?, artifact_path),
               finished_at = ?
         WHERE id = ?
@@ -419,6 +467,9 @@ export function markTerminal(
       input.draft ?? null,
       input.notify === undefined ? null : input.notify ? 1 : 0,
       input.significance ?? null,
+      input.verification && input.verification.length > 0
+        ? JSON.stringify([...input.verification])
+        : null,
       input.artifactPath ?? null,
       input.finishedAt,
       input.id,

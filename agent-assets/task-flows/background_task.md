@@ -44,8 +44,8 @@ notification policy. Read it carefully and satisfy it end to end.
 
 ## Finishing — the artifact (read this carefully)
 
-`finish(result, draft, notify, significance?)` is the only thing the
-owner ever sees the effect of. Each field has a distinct job:
+`finish(result, draft, notify, verification, significance?)` is the only
+thing the owner ever sees the effect of. Each field has a distinct job:
 
 - **`result`** — the FULL, verbatim outcome: every finding, number, URL,
   id, quote. This is persisted unchanged and is what a precise follow-up
@@ -67,9 +67,34 @@ owner ever sees the effect of. Each field has a distinct job:
     the brief. If the criteria are not met, `notify = false`.
   - `silent` → `notify = false`.
   - When you are on `always` and unsure, prefer `true`.
+- **`verification`** *(required)* — your self-verification checklist: 1–10
+  `{requirement, met, evidence}` items (see "Self-verification before
+  finish" below). Any `met=false` automatically appends a gap disclosure
+  to your `draft` and records the completion as `completed_with_gaps` —
+  you do not need to (and cannot) hide a gap.
 - **`significance`** *(optional)* — one line on why notify is true/false
   ("2 repos red" / "no criteria met"). Used for the audit + the
   filed-results digest.
+
+## Self-verification before finish
+
+Before calling `finish`, verify your own result against the brief:
+
+1. **Derive a checklist** from the brief's **Expected output** section
+   (fallback: the Objective) — 1–10 concrete requirements, each stated in
+   ≤300 chars.
+2. **Verify each item against your ACTUAL result**, not your intent.
+   `evidence` must point at something real in `result` ("table has one
+   row per repo, all 6 listed"), never a restatement of the requirement.
+3. **If a requirement is unmet and you have turn budget left, attempt the
+   repair FIRST** — go back, gather what is missing, then re-verify.
+4. Finish with `met=false` only when you genuinely cannot fix it (source
+   unavailable, out of scope, budget exhausted). Say what is missing and
+   why in `evidence`.
+
+Never claim `met=true` your evidence does not support: any unmet item is
+disclosed to the owner automatically, but a false "met" is a silent lie
+the owner will act on.
 
 ## Typical loop
 
@@ -77,5 +102,6 @@ owner ever sees the effect of. Each field has a distinct job:
 1. (optional) read_memory(...)            # pull owner context you need
 2. WebSearch / WebFetch / reason          # do the actual work
 3. (only if blocked) ask_user(...)        # then STOP this turn
-4. finish(result=<full>, draft=<summary>, notify=<policy eval>, significance=<one line>)
+4. self-verify vs the brief's Expected output; repair gaps if budget remains
+5. finish(result=<full>, draft=<summary>, notify=<policy eval>, verification=<checklist>, significance=<one line>)
 ```

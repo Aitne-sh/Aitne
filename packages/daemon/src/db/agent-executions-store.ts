@@ -415,6 +415,96 @@ export function metricsWindow(
   };
 }
 
+/** One chronically failing enabled agent, as reported by the detector. */
+export interface ChronicallyFailingAgent {
+  slug: string;
+  name: string;
+  /** Consecutive most-recent terminal executions that are all errors. */
+  streak: number;
+  /** `error_kind` of the newest error in the streak (may be NULL). */
+  lastErrorKind: string | null;
+}
+
+export interface ListChronicallyFailingAgentsOptions {
+  /** Minimum consecutive-error streak that qualifies as chronic. */
+  threshold: number;
+  /** The newest error must have ENDED within this many hours of `now`. */
+  lookbackHours: number;
+  /** Wall-clock anchor — injectable for tests. Defaults to `new Date()`. */
+  now?: Date;
+}
+
+/**
+ * Upper bound on the per-agent terminal-row scan when counting the
+ * consecutive-error streak. The chronic verdict only needs `threshold`
+ * rows (≤10); the extra headroom lets the reported `streak` say
+ * "failed its last 25 runs" instead of clamping at the threshold, while
+ * keeping the scan bounded regardless of table size.
+ */
+const CHRONIC_STREAK_SCAN_CAP = 25;
+
+/**
+ * WP4 chronic-failure surfacing — deterministic detector behind the
+ * activity-scan gate's `agent_chronic_failure` escalation. An ENABLED
+ * agent is chronic when its most recent `threshold` TERMINAL executions
+ * (`result IS NOT NULL` — in-flight rows are ignored) are ALL errors AND
+ * the newest of them finished within `lookbackHours`. Agents with fewer
+ * than `threshold` terminal executions never qualify. Same JS-scan style
+ * as `metricsWindow`/`byErrorKind`: thin SQL, reducers unit-testable
+ * without SQL fixtures.
+ */
+export function listChronicallyFailingAgents(
+  db: Database.Database,
+  opts: ListChronicallyFailingAgentsOptions,
+): ChronicallyFailingAgent[] {
+  const now = opts.now ?? new Date();
+  const cutoff = now.getTime() - opts.lookbackHours * 60 * 60 * 1000;
+  const agents = db
+    .prepare<[], { id: string; name: string }>(
+      "SELECT id, name FROM agents WHERE enabled = 1 ORDER BY id",
+    )
+    .all();
+
+  // Newest-first by completion instant (`ended_at` — terminal rows always
+  // carry one; the id tiebreak keeps same-millisecond completions stable).
+  const recentTerminal = db.prepare<
+    [string, number],
+    { result: AgentExecutionResult; error_kind: string | null; ended_at: number | null }
+  >(
+    `SELECT result, error_kind, ended_at
+       FROM agent_executions
+      WHERE agent_id = ? AND result IS NOT NULL
+      ORDER BY ended_at DESC, id DESC
+      LIMIT ?`,
+  );
+
+  const out: ChronicallyFailingAgent[] = [];
+  for (const agent of agents) {
+    const rows = recentTerminal.all(
+      agent.id,
+      Math.max(opts.threshold, CHRONIC_STREAK_SCAN_CAP),
+    );
+    if (rows.length < opts.threshold) continue;
+    let streak = 0;
+    for (const row of rows) {
+      if (row.result !== "error") break;
+      streak += 1;
+    }
+    if (streak < opts.threshold) continue;
+    const newest = rows[0];
+    // Stale streak: the agent stopped firing (or last failed long ago) —
+    // let the signal age out instead of re-escalating forever.
+    if (newest.ended_at === null || newest.ended_at < cutoff) continue;
+    out.push({
+      slug: agent.id,
+      name: agent.name,
+      streak,
+      lastErrorKind: newest.error_kind,
+    });
+  }
+  return out;
+}
+
 /**
  * Count of error executions grouped by `error_kind` over the trailing `days`
  * window (§9.2 `by_error_kind_7d`). A NULL `error_kind` is bucketed as

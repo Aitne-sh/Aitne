@@ -16,6 +16,7 @@ import {
   buildSourcePrefixFilter,
   type ObservationKind,
 } from "@aitne/shared";
+import { listChronicallyFailingAgents } from "./agent-executions-store.js";
 
 /**
  * Build a `(source LIKE 'a:%' OR source LIKE 'b:%' ...)` clause covering
@@ -81,6 +82,24 @@ export interface ActivityScanSignals {
    * all). `Infinity` when no row has been recorded yet.
    */
   hoursSinceLastStage3Run: number;
+  /**
+   * WP4 chronic-failure surfacing — ENABLED agents whose most recent
+   * `chronicFailureThreshold` terminal executions are ALL errors, with
+   * the newest error inside the detector's lookback window (see
+   * `listChronicallyFailingAgents`). Empty when nothing is chronic.
+   */
+  chronicAgentFailures: Array<{
+    slug: string;
+    streak: number;
+    lastErrorKind: string | null;
+  }>;
+  /**
+   * Hours since the last activity_scan gate audit row whose
+   * `gate_reason='agent_chronic_failure'` — the throttle input for the
+   * gate's chronic-failure re-escalation. `Infinity` when the gate has
+   * never escalated for this reason.
+   */
+  hoursSinceLastChronicFailureEscalation: number;
 }
 
 export interface ComputeActivityScanSignalsOptions {
@@ -102,7 +121,22 @@ export interface ComputeActivityScanSignalsOptions {
    * pinned a different `config.timezone`.
    */
   agentTimezone?: string;
+  /**
+   * Consecutive-error streak length at which an enabled agent counts as
+   * chronically failing (`config.agentChronicFailureThreshold`).
+   * Default 3.
+   */
+  chronicFailureThreshold?: number;
 }
+
+/**
+ * Lookback window for the chronic-failure detector: the newest error of
+ * a qualifying streak must have finished within this many hours. Bounds
+ * the WP4 goal — a chronically failing agent surfaces within a day, and
+ * an agent that stopped firing (schedule disabled, cron removed) ages
+ * out of the signal instead of re-escalating forever.
+ */
+const CHRONIC_FAILURE_LOOKBACK_HOURS = 24;
 
 export function computeActivityScanSignals(
   db: Database.Database,
@@ -194,6 +228,21 @@ export function computeActivityScanSignals(
 
   const hoursSinceLastStage3Run = computeHoursSinceLastStage3(db, now);
 
+  // WP4 chronic-failure surfacing — deterministic detector over
+  // `agent_executions` (see `listChronicallyFailingAgents`) plus the
+  // gate-audit throttle input for the `agent_chronic_failure` reason.
+  const chronicAgentFailures = listChronicallyFailingAgents(db, {
+    threshold: options.chronicFailureThreshold ?? 3,
+    lookbackHours: CHRONIC_FAILURE_LOOKBACK_HOURS,
+    now,
+  }).map((agent) => ({
+    slug: agent.slug,
+    streak: agent.streak,
+    lastErrorKind: agent.lastErrorKind,
+  }));
+  const hoursSinceLastChronicFailureEscalation =
+    computeHoursSinceLastChronicFailureEscalation(db, now);
+
   return {
     pendingObsCount: pending.count,
     maxNoveltyScore: noveltyMaxRow.max_score,
@@ -204,6 +253,8 @@ export function computeActivityScanSignals(
     agentPlanOverdueCount,
     scheduleApproachingCount: scheduleRow.count,
     hoursSinceLastStage3Run,
+    chronicAgentFailures,
+    hoursSinceLastChronicFailureEscalation,
   };
 }
 
@@ -495,6 +546,35 @@ function computeHoursSinceLastStage3(
   if (!lastStarted) return Number.POSITIVE_INFINITY;
 
   const lastUtc = parseSqliteUtc(lastStarted);
+  if (lastUtc === null) return Number.POSITIVE_INFINITY;
+  const diffMs = now.getTime() - lastUtc;
+  if (diffMs <= 0) return 0;
+  return diffMs / (60 * 60 * 1000);
+}
+
+/**
+ * WP4 chronic-failure surfacing — mirror of `computeHoursSinceLastStage3`,
+ * keyed on the gate audit rows whose `gate_reason` is the chronic-failure
+ * escalation. No legacy `hourly_check.gate` union here: the reason did not
+ * exist before the v0.1.11 rename, so no legacy row can carry it.
+ */
+function computeHoursSinceLastChronicFailureEscalation(
+  db: Database.Database,
+  now: Date,
+): number {
+  const row = db
+    .prepare(
+      `SELECT started_at
+         FROM agent_actions
+        WHERE action_type = 'activity_scan.gate'
+          AND json_extract(detail, '$.gate_reason') = 'agent_chronic_failure'
+        ORDER BY started_at DESC
+        LIMIT 1`,
+    )
+    .get() as { started_at: string | null } | undefined;
+  if (!row?.started_at) return Number.POSITIVE_INFINITY;
+
+  const lastUtc = parseSqliteUtc(row.started_at);
   if (lastUtc === null) return Number.POSITIVE_INFINITY;
   const diffMs = now.getTime() - lastUtc;
   if (diffMs <= 0) return 0;

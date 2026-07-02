@@ -228,11 +228,21 @@ describe("consolidation-prep", () => {
       expect(block).toContain("<existing_lessons");
       expect(block).toContain('<lesson rank="1"');
       expect(block).toContain('<lesson rank="2"');
-      // Explicit correction promotes; the ignored-only signal holds.
+      // Phase-2 §2.1 — every existing lesson surfaces its canonical cf (the
+      // conf default for legacy trailers) and the note tells the LLM to
+      // carry it verbatim.
+      expect(block).toMatch(/<lesson rank="1"[^>]* cf="\d\.\d\d"/);
+      expect(block).toContain("carry each lesson's cf= into its trailer verbatim");
+      // Explicit correction promotes; the ignored-only signal holds. Both
+      // candidates carry the §2.1 initial-confidence float.
       expect(block).toContain('decision="promote"');
       expect(block).toContain('conf="high"');
       expect(block).toContain('decision="hold-provisional"');
       expect(block).toContain('reason="ignored-non-initiating"');
+      // explicit correction: weighted_ev 1.0 → saturate(1,2)=0.33 · 1.0
+      expect(block).toContain('weighted_ev="1.00" cf0="0.33"');
+      // ignored-only: weighted_ev 0.25 → saturate(0.25,2)≈0.11 · 0.7 ≈ 0.08
+      expect(block).toContain('weighted_ev="0.25" cf0="0.08"');
       expect(block).toContain('<consume ids="11,12" />');
       expect(result!.signalIds).toEqual([11, 12]);
       expect(result!.scopeCount).toBe(1);
@@ -380,6 +390,176 @@ describe("consolidation-prep", () => {
       expect(lesson("Fresh pref")).toContain('stale="false"');
       // Old, but a constraint is durable → never stale-pruned.
       expect(lesson("Hard rule")).toContain('stale="false"');
+    });
+
+    it("emits §2.3 action verdicts (keep / demote) alongside stale", () => {
+      const file = [
+        "# Agent Lessons",
+        "## Lessons",
+        // Stale + conf medium (cf default 0.5) decayed over ~157d ≈ 0.045
+        // < 0.25 floor → demote.
+        "- [2026-01-01] Old do-more. <!-- ev=2 kind=do-more src=behavioral conf=medium last=2026-01-01 -->",
+        "- [2026-06-05] Fresh pref. <!-- ev=2 kind=preference src=behavioral conf=medium last=2026-06-05 -->",
+        "- [2026-01-01] Hard rule. <!-- ev=2 kind=constraint src=explicit conf=high last=2026-01-01 -->",
+      ].join("\n");
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [row({ id: 72, summary: "anything" })],
+            existingFileMd: file,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        {
+          promotionThreshold: 2,
+          nowIso: NOW,
+          staleDays: 60,
+          confidenceFloor: 0.25,
+        },
+      );
+      const lines = result!.block.split("\n");
+      const lesson = (needle: string): string =>
+        lines.find((l) => l.includes("<lesson") && l.includes(needle))!;
+      expect(lesson("Old do-more")).toContain('action="demote"');
+      expect(lesson("Fresh pref")).toContain('action="keep"');
+      expect(lesson("Hard rule")).toContain('action="keep"');
+    });
+
+    it("renders a would-be repromote verdict as advisory keep (prep cannot judge corroboration)", () => {
+      const file = [
+        "# Agent Lessons",
+        "## Lessons",
+        // provisional, corroborated at today (last == NOW date) with ev at
+        // the threshold — the normalizer would repromote; the worksheet
+        // stays advisory and renders keep.
+        "- [2026-06-01] Provisional corroborated today. <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.50 last=2026-06-07 --> <!-- provisional -->",
+      ].join("\n");
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [row({ id: 73, summary: "anything" })],
+            existingFileMd: file,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        {
+          promotionThreshold: 2,
+          nowIso: NOW,
+          staleDays: 60,
+          confidenceFloor: 0.25,
+        },
+      );
+      const line = result!.block
+        .split("\n")
+        .find((l) => l.includes("Provisional corroborated today"))!;
+      expect(line).toContain('action="keep"');
+      expect(line).toContain('provisional="true"');
+    });
+
+    it("holds a contradicting candidate (§2.2) and surfaces contradicts_ranks", () => {
+      const file = [
+        "# Agent Lessons",
+        "## Lessons",
+        "- [2026-06-01] Include the budget section in the weekly report. <!-- ev=4 kind=do-more src=explicit conf=high cf=0.90 last=2026-06-05 -->",
+      ].join("\n");
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [
+              // behavioral+self_critique corroboration reaching the plain
+              // threshold (0.5 + 0.5 + 0.5 + 0.5 = 2.0) but NOT the 1.5×
+              // anti-whiplash bar (1.5 · 2 · 0.9 = 2.7).
+              row({ id: 81, source: "self_critique", valence: "negative", summary: "Stop including the budget section in the weekly report" }),
+              row({ id: 82, source: "self_critique", valence: "negative", summary: "Stop including the budget section in the weekly report" }),
+              row({ id: 83, source: "behavioral", valence: "positive", summary: "Stop including the budget section in the weekly report" }),
+              row({ id: 84, source: "behavioral", valence: "positive", summary: "Stop including the budget section in the weekly report" }),
+            ],
+            existingFileMd: file,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        {
+          promotionThreshold: 2,
+          nowIso: NOW,
+          contradictionGuardCf: 0.6,
+        },
+      );
+      const block = result!.block;
+      expect(block).toContain('decision="hold-contradiction"');
+      expect(block).toContain('contradicts_ranks="1"');
+      expect(block).toContain('reason="contradiction"');
+    });
+
+    it("an explicit correction bypasses the contradiction guard", () => {
+      const file = [
+        "# Agent Lessons",
+        "## Lessons",
+        "- [2026-06-01] Include the budget section in the weekly report. <!-- ev=4 kind=do-more src=explicit conf=high cf=0.90 last=2026-06-05 -->",
+      ].join("\n");
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [
+              row({
+                id: 85,
+                source: "explicit",
+                valence: "correction",
+                summary: "Stop including the budget section in the weekly report",
+              }),
+            ],
+            existingFileMd: file,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        { promotionThreshold: 2, nowIso: NOW, contradictionGuardCf: 0.6 },
+      );
+      const block = result!.block;
+      expect(block).toContain('decision="promote"');
+      // The pairing is still surfaced so the LLM adjudicates supersede/merge.
+      expect(block).toContain('contradicts_ranks="1"');
+    });
+
+    it("rides the outcome rollup between the scopes and the consume set", () => {
+      const rollup =
+        '  <outcome_rollup window_days="7" note="test">\n' +
+        '    <type name="reminder" sent="2" replied="1" corrected="1" ignored="0" correction_rate="0.50" />\n' +
+        "  </outcome_rollup>";
+      const result = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [row({ id: 91, summary: "anything" })],
+            existingFileMd: null,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        { promotionThreshold: 2, nowIso: NOW, outcomeRollupXml: rollup },
+      );
+      const block = result!.block;
+      expect(block).toContain("<outcome_rollup");
+      expect(block.indexOf("<outcome_rollup")).toBeGreaterThan(
+        block.indexOf("</scope>"),
+      );
+      expect(block.indexOf("<outcome_rollup")).toBeLessThan(
+        block.indexOf("<consume"),
+      );
+      // Absent when not supplied.
+      const without = buildFeedbackWorksheet(
+        [
+          {
+            scope: { kind: "agent" },
+            signals: [row({ id: 92, summary: "anything" })],
+            existingFileMd: null,
+            caps: { capBytes: 8192, maxEntries: 40 },
+          },
+        ],
+        { promotionThreshold: 2, nowIso: NOW, outcomeRollupXml: null },
+      );
+      expect(without!.block).not.toContain("<outcome_rollup");
     });
 
     it("renders a raw (user) scope as candidates without a verdict", () => {

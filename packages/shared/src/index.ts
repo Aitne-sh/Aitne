@@ -437,7 +437,9 @@ export type { PlaybookSlug, PlaybookMeta } from "./playbooks.js";
 
 // Deterministic Agent-definition lint (the "verify-agent-definitions" assembler
 // step) — non-blocking authoring warnings surfaced to the DM agent on create.
-export { lintAgentDefinition } from "./agent-lint.js";
+// `isPlaceholderPrompt` backs the daemon's blocking chokepoints: planCreate
+// rejects an empty/stub prompt, planRunNow refuses to enqueue one.
+export { lintAgentDefinition, isPlaceholderPrompt } from "./agent-lint.js";
 export type {
   AgentLintIssue,
   AgentLintCode,

@@ -216,6 +216,12 @@ describe("Context API — optimistic concurrency", () => {
     return {
       dataDir,
       executeTimeoutMinutes: 60,
+      // SELF_IMPROVEMENT_PHASE2 — the lessons-store write normalizer reads
+      // these; realistic values keep the lessons-normalization tests honest.
+      feedbackPromotionThreshold: 2,
+      feedbackLessonStaleDays: 60,
+      feedbackLessonConfidenceFloor: 0.25,
+      feedbackContradictionGuardCf: 0.6,
     } as unknown as AgentConfig;
   }
 
@@ -770,6 +776,104 @@ describe("Context API — optimistic concurrency", () => {
       });
 
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe("PUT/PATCH lessons stores — deterministic cf normalization (SELF_IMPROVEMENT_PHASE2)", () => {
+    const lessonsFile = (bullets: string[]): string =>
+      [
+        "---",
+        "type: rule",
+        "owner: agent",
+        "updated: 2026-07-01",
+        "---",
+        "# Agent Lessons",
+        "",
+        "## Lessons",
+        "<!-- scope: agent · cap: 8192B · 40 entries -->",
+        ...bullets,
+        "",
+      ].join("\n");
+
+    it("PUT of a fresh lessons store comes back normalized on disk (cf stamped)", async () => {
+      const res = await app.request("/api/context/policies/agent-lessons.md", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: lessonsFile([
+            "- [2026-07-01] Keep the budget section.",
+            "  <!-- ev=2 kind=correction src=explicit conf=high last=2026-07-01 -->",
+          ]),
+        }),
+      });
+      expect(res.status).toBe(200);
+      const onDisk = readFileSync(
+        join(contextDir, "policies", "agent-lessons.md"),
+        "utf-8",
+      );
+      // explicit @ weighted_ev 2, K 2 → saturate 0.5 · 1.0 = 0.50
+      expect(onDisk).toContain("cf=0.50");
+    });
+
+    it("PATCH section=lessons mode=replace normalizes against the previous content", async () => {
+      const storePath = join(contextDir, "policies", "agent-lessons.md");
+      writeFileSync(
+        storePath,
+        lessonsFile([
+          "- [2026-06-01] Carried lesson.",
+          "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.61 last=2026-06-20 -->",
+        ]),
+        "utf-8",
+      );
+      const res = await app.request("/api/context/policies/agent-lessons.md", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "replace",
+          section: "lessons",
+          content: [
+            "<!-- scope: agent · cap: 8192B · 40 entries -->",
+            // Same text, corroborated (ev bumped + last advanced) — the LLM
+            // "transcribed" a wrong cf on purpose; the daemon must carry the
+            // previous 0.61 and apply the corroboration bump instead.
+            "- [2026-06-01] Carried lesson.",
+            "  <!-- ev=3 kind=preference src=behavioral conf=medium cf=0.99 last=2026-07-01 -->",
+          ].join("\n"),
+        }),
+      });
+      expect(res.status).toBe(200);
+      const onDisk = readFileSync(storePath, "utf-8");
+      // 0.61 + (1 − 0.61)·0.3 = 0.727 → 0.73 (deterministic carry+bump wins
+      // over the transcribed 0.99).
+      expect(onDisk).toContain("cf=0.73");
+      expect(onDisk).not.toContain("cf=0.99");
+    });
+
+    it("non-lessons writes are untouched by the normalizer", async () => {
+      const res = await app.request("/api/context/identity/profile.md", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: [
+            "---",
+            "type: user",
+            "owner: shared",
+            "updated: 2026-07-01",
+            "---",
+            "# User",
+            "",
+            "## Learned Context",
+            "- [2026-07-01] Not a lessons store — no trailer stamping here.",
+            "",
+          ].join("\n"),
+        }),
+      });
+      expect(res.status).toBe(200);
+      const onDisk = readFileSync(
+        join(contextDir, "identity", "profile.md"),
+        "utf-8",
+      );
+      expect(onDisk).not.toContain("cf=");
     });
   });
 
@@ -2399,6 +2503,12 @@ describe("Context API — additional coverage", () => {
     return {
       dataDir,
       executeTimeoutMinutes: 60,
+      // SELF_IMPROVEMENT_PHASE2 — the lessons-store write normalizer reads
+      // these; realistic values keep the lessons-normalization tests honest.
+      feedbackPromotionThreshold: 2,
+      feedbackLessonStaleDays: 60,
+      feedbackLessonConfidenceFloor: 0.25,
+      feedbackContradictionGuardCf: 0.6,
     } as unknown as AgentConfig;
   }
 

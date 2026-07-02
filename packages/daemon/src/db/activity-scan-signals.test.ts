@@ -3,6 +3,8 @@ import Database from "better-sqlite3";
 import { applySchema } from "./schema.js";
 import { recordObservation, updateObservationSummary } from "./observations.js";
 import { computeActivityScanSignals } from "./activity-scan-signals.js";
+import { upsertAgent, type AgentUpsertInput } from "./agents-store.js";
+import { completeExecution, startExecution } from "./agent-executions-store.js";
 
 describe("computeActivityScanSignals", () => {
   let db: Database.Database;
@@ -30,6 +32,10 @@ describe("computeActivityScanSignals", () => {
     expect(signals.agentPlanOverdueCount).toBe(0);
     expect(signals.scheduleApproachingCount).toBe(0);
     expect(signals.hoursSinceLastStage3Run).toBe(Number.POSITIVE_INFINITY);
+    expect(signals.chronicAgentFailures).toEqual([]);
+    expect(signals.hoursSinceLastChronicFailureEscalation).toBe(
+      Number.POSITIVE_INFINITY,
+    );
   });
 
   it("counts pending observations across actor=user (poller) and actor=agent (pre-pass) rows", () => {
@@ -386,6 +392,78 @@ describe("computeActivityScanSignals", () => {
       vipMailSenders: ["vip@example.com"],
     });
     expect(signals.vipMailUnreadCount).toBe(1);
+  });
+
+  // WP4 chronic-failure surfacing — the signal compute delegates to
+  // `listChronicallyFailingAgents` (unit-tested in agent-executions-store)
+  // and threads `chronicFailureThreshold` through; these tests pin the
+  // wiring, not the detector semantics.
+  function seedFailingAgent(slug: string, errorCount: number): void {
+    upsertAgent(db, {
+      slug,
+      name: slug,
+      source: "user",
+      definitionPath: `/vault/policies/agents/${slug}/agent.md`,
+      definitionHash: "h",
+      enabled: true,
+      processKey: "agent.task",
+      scheduleKind: "cron",
+      scheduleExpression: "0 9 * * *",
+      scheduleTimezone: "UTC",
+    } as AgentUpsertInput);
+    for (let i = errorCount; i >= 1; i--) {
+      const endedAt = now.getTime() - i * 60 * 60 * 1000;
+      const id = startExecution(db, { agentId: slug, trigger: "cron" }, endedAt - 1000);
+      completeExecution(
+        db,
+        { executionId: id, result: "error", errorKind: "tool" },
+        endedAt,
+      );
+    }
+  }
+
+  it("surfaces chronically failing enabled agents at the default threshold", () => {
+    seedFailingAgent("deploy-watch", 3);
+    const signals = computeActivityScanSignals(db, { now });
+    expect(signals.chronicAgentFailures).toEqual([
+      { slug: "deploy-watch", streak: 3, lastErrorKind: "tool" },
+    ]);
+  });
+
+  it("threads chronicFailureThreshold into the detector", () => {
+    seedFailingAgent("deploy-watch", 2);
+    // Default threshold 3 → a 2-streak is not chronic yet.
+    expect(
+      computeActivityScanSignals(db, { now }).chronicAgentFailures,
+    ).toEqual([]);
+    // Lowering the config-driven threshold makes the same streak fire.
+    expect(
+      computeActivityScanSignals(db, { now, chronicFailureThreshold: 2 })
+        .chronicAgentFailures,
+    ).toEqual([{ slug: "deploy-watch", streak: 2, lastErrorKind: "tool" }]);
+  });
+
+  it("computes hoursSinceLastChronicFailureEscalation from the matching gate audit row", () => {
+    const insertGateRow = (hoursAgo: number, gateReason: string): void => {
+      const startedAt = new Date(now.getTime() - hoursAgo * 60 * 60 * 1000)
+        .toISOString()
+        .replace("T", " ")
+        .slice(0, 19);
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, result, detail, started_at, completed_at)
+         VALUES ('activity_scan.gate', 'success', json(?), ?, ?)`,
+      ).run(
+        JSON.stringify({ stage_reached: "stage3", gate_reason: gateReason }),
+        startedAt,
+        startedAt,
+      );
+    };
+    insertGateRow(6, "agent_chronic_failure");
+    // A NEWER stage3 escalation for a different reason must not reset
+    // the chronic-failure throttle clock.
+    insertGateRow(1, "high_novelty");
+    const signals = computeActivityScanSignals(db, { now });
+    expect(signals.hoursSinceLastChronicFailureEscalation).toBeCloseTo(6, 1);
   });
 
   it("counts VIP unread mail from pre-pass gmail observations via normalized payload", () => {

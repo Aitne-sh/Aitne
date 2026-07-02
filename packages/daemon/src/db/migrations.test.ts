@@ -3220,3 +3220,51 @@ describe("0022-task-origin-and-cost", () => {
     expect(result.applied).toEqual(["0022-task-origin-and-cost"]);
   });
 });
+
+describe("0023-background-task-verification", () => {
+  const migration = MIGRATIONS.find(
+    (m) => m.id === "0023-background-task-verification",
+  );
+
+  it("is registered in the production MIGRATIONS list", () => {
+    expect(migration).toBeDefined();
+  });
+
+  it("is a no-op on a fresh DB where applySchema already created the column", () => {
+    const db = openDb();
+    applySchema(db);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0023-background-task-verification"]);
+    expect(columnExists(db, "background_task", "verification")).toBe(true);
+  });
+
+  it("adds verification to a pre-migration table, leaving history NULL", () => {
+    const db = openDb();
+    db.exec(`
+      CREATE TABLE background_task (
+        id TEXT PRIMARY KEY,
+        brief TEXT NOT NULL,
+        state TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO background_task (id, brief, state, created_at) VALUES ('bg-1', 'b', 'completed', 1);
+    `);
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0023-background-task-verification"]);
+    expect(columnExists(db, "background_task", "verification")).toBe(true);
+    // Pre-existing history stays NULL — no worker checklist to backfill.
+    const row = db
+      .prepare("SELECT verification FROM background_task WHERE id = 'bg-1'")
+      .get() as { verification: string | null };
+    expect(row).toEqual({ verification: null });
+    // Direct re-run exercises the columnExists idempotency guard.
+    migration!.up(db);
+    expect(columnExists(db, "background_task", "verification")).toBe(true);
+  });
+
+  it("is a recorded no-op when the table is absent (bare :memory: db)", () => {
+    const db = openDb();
+    const result = runMigrations(db, [migration!]);
+    expect(result.applied).toEqual(["0023-background-task-verification"]);
+  });
+});

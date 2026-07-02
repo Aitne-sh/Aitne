@@ -48,12 +48,32 @@ import {
   actuateApplyVerdicts,
   type ActuationOutcome,
 } from "../../core/feedback/tuning-actuator.js";
+import {
+  TUNING_CYCLE_HISTORY_STATE_KEY,
+  TUNING_GRADUATION_CYCLES,
+  TUNING_GRADUATION_NOTIFIED_STATE_KEY,
+  evaluateGraduation,
+  parseCycleHistory,
+  recordVerdictsInHistory,
+} from "../../core/feedback/tuning-graduation.js";
 import { createLogger } from "../../logging.js";
 
 const logger = createLogger("tuning-api");
 
 const MAX_REASON_CHARS = 280;
 const VERDICTS = new Set<TuningVerdict>(["apply", "reject", "defer"]);
+
+/**
+ * WP5 — the one-time "graduation reached" owner DM (§7 shadow-period exit).
+ * Deliberately informational only: NOTHING auto-enables. The owner flips
+ * `selfTuningEnabled` (the D1 sign-off) or the loop stays in shadow forever.
+ */
+const GRADUATION_DM_MESSAGE =
+  `Self-tuning graduation: ${TUNING_GRADUATION_CYCLES} consecutive weekly ` +
+  "shadow cycles were fully approved (every recommendation verdicted, at " +
+  "least one apply, zero rejects) — self-tuning is ready to actuate. " +
+  "Enable it with `selfTuningEnabled` from the dashboard settings or " +
+  "`PATCH /api/config`. Nothing changes until you do.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -91,10 +111,27 @@ export function createTuningRoutes(deps: ApiDependencies): Hono {
       TUNING_PENDING_CYCLE_STATE_KEY,
     );
     const live = config?.selfTuningEnabled === true;
+    // WP5 (§7 shadow-period exit) — the graduation read-model, so the
+    // owner (and the dashboard) can watch the qualifying streak approach
+    // the bar without waiting for the one-time DM.
+    const { graduated, qualifyingStreak } = evaluateGraduation(
+      parseCycleHistory(
+        readRuntimeState<unknown>(db, TUNING_CYCLE_HISTORY_STATE_KEY),
+      ),
+    );
     return c.json({
       cycle,
       selfTuningEnabled: live,
       shadow: !live,
+      graduation: {
+        graduated,
+        qualifyingStreak,
+        requiredCycles: TUNING_GRADUATION_CYCLES,
+        notifiedAt: readRuntimeState<string>(
+          db,
+          TUNING_GRADUATION_NOTIFIED_STATE_KEY,
+        ),
+      },
     });
   });
 
@@ -310,6 +347,69 @@ export function createTuningRoutes(deps: ApiDependencies): Hono {
       );
     } catch (err) {
       logger.warn({ err }, "Failed to audit self_tuning.verdict");
+    }
+
+    // WP5 (§7 shadow-period exit) — graduation bookkeeping. Tally only the
+    // verdicts *newly recorded by this POST* onto the cycle-history entry
+    // (duplicates/conflicts never re-count), then check whether the
+    // qualifying streak just reached the bar. The "graduation reached" DM
+    // fires exactly once, guarded by TUNING_GRADUATION_NOTIFIED_STATE_KEY;
+    // the guard is written BEFORE the DM attempt so a delivery failure can
+    // never double-notify — GET /tuning/pending still surfaces the state.
+    // Failure-isolated: the verdict write above is already durable.
+    try {
+      const recordedVerdicts = entries
+        .filter((entry) => recordedIds.has(entry.id))
+        .map((entry) => entry.verdict);
+      if (recordedVerdicts.length > 0) {
+        const history = recordVerdictsInHistory(
+          parseCycleHistory(
+            readRuntimeState<unknown>(db, TUNING_CYCLE_HISTORY_STATE_KEY),
+          ),
+          cycle.cycleId,
+          recordedVerdicts,
+        );
+        writeRuntimeState(db, TUNING_CYCLE_HISTORY_STATE_KEY, history);
+        const graduation = evaluateGraduation(history);
+        if (
+          graduation.graduated &&
+          readRuntimeState<string>(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY) ===
+            null
+        ) {
+          const notifiedAt = new Date().toISOString();
+          writeRuntimeState(db, TUNING_GRADUATION_NOTIFIED_STATE_KEY, notifiedAt);
+          db.prepare(
+            `INSERT INTO agent_actions
+               (action_type, trigger, result, detail, started_at, completed_at)
+             VALUES ('self_tuning.graduated', 'autonomous', 'success', json(?), datetime('now'), datetime('now'))`,
+          ).run(
+            JSON.stringify({
+              cycleId: cycle.cycleId,
+              qualifyingStreak: graduation.qualifyingStreak,
+              requiredCycles: TUNING_GRADUATION_CYCLES,
+              notifiedAt,
+            }),
+          );
+          logger.info(
+            { cycleId: cycle.cycleId, streak: graduation.qualifyingStreak },
+            "Self-tuning graduation criteria reached",
+          );
+          if (deps.sendNotification) {
+            await deps.sendNotification({
+              message: GRADUATION_DM_MESSAGE,
+              notificationType: SELF_TUNING_NOTIFICATION_TYPE,
+              priority: "normal",
+            });
+          } else {
+            logger.warn(
+              { cycleId: cycle.cycleId },
+              "Self-tuning graduated without DM path — owner not notified",
+            );
+          }
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, "Failed to update tuning graduation bookkeeping");
     }
 
     // Phase 3 — Actuate (§3.4, D5 namespace semantics). Gated on the D1

@@ -94,6 +94,19 @@ emits it. The block tells you *why* you were spawned — pull the
   `<fetch_report status="failed">` block in your prompt tells you
   which integration is lossy; treat its observations as potentially
   stale and lean on whatever rows the previous tick left.
+- `reason: agent_chronic_failure` → an enabled agent keeps failing
+  its runs; the `<system_health>` block lists which. See "System
+  health" below.
+
+### System health
+A `<system_health>` block (when present) lists enabled agents whose
+recent runs all failed. An entry there qualifies as a positive notify
+trigger under Step 9 rule (c) — a silent, repeated failure the user
+will not discover on their own. The Step 9 dedup pre-check still
+applies: if the same agent's failure was already surfaced today, log
+only. When notifying, name the agent, suggest checking
+`/agents/<slug>` on the dashboard, or offer to have it disabled ("say
+'disable it'").
 
 ### Pre-summarized observations (cost-reduction-structural §A)
 Every observation arrives with `summary_text` (≤120 chars) and

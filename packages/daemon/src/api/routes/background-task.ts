@@ -97,6 +97,10 @@ function toWire(row: BackgroundTaskRow): Record<string, unknown> {
     draft: row.draft,
     notify: row.notify,
     significance: row.significance,
+    // Finish-time self-verification checklist (migration 0023) — lets the
+    // DM agent / Task Board see requirement-level gap state alongside the
+    // `completed_with_gaps` outcomeDetail.
+    verification: row.verification,
     artifactPath: row.artifactPath,
     outcomeDetail: row.outcomeDetail,
     originatingChannel: row.originatingChannel,

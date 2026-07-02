@@ -184,9 +184,10 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "autonomousMonthlyCostCapUsd",
     // advisorEnabled / advisorModel are managed by BackendsAndPlansSection (own save flow, not deferred)
   ],
-  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5) — the
-  // six tuning knobs use the deferred-save EditableField flow, so the sidebar
-  // dirty dot needs them mapped here.
+  // Feedback Learning Loop (FEEDBACK_LEARNING_LOOP_DESIGN.md §9 Phase 5, plus
+  // the SELF_IMPROVEMENT_PHASE2 quality-gate knobs) — the tuning knobs use the
+  // deferred-save EditableField flow, so the sidebar dirty dot needs them
+  // mapped here.
   "/settings/lessons": [
     "feedbackLearningEnabled",
     "feedbackPromotionThreshold",
@@ -194,6 +195,9 @@ const PAGE_KEYS: Record<string, readonly EditableConfigKey[]> = {
     "feedbackLessonMaxBytesPerAgent",
     "feedbackLessonStaleDays",
     "feedbackSignalRetentionDays",
+    "feedbackLessonConfidenceFloor",
+    "feedbackContradictionGuardCf",
+    "feedbackOutcomeLearningEnabled",
   ],
   // DASHBOARD_UI_REFRESH_DESIGN.md follow-up #1 — the former /settings/advanced
   // keys split across the Safety and Infrastructure pages. Danger Zone has no

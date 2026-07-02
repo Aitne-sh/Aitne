@@ -11,19 +11,27 @@
  *
  * Scope discipline: these are **non-blocking warnings** (schema validation still
  * owns hard rejection). Every check keys off a *deterministic* signal — an empty
- * prompt/section, or a playbook the prompt/tags point at but the `playbooks:`
- * field omits — so it never false-positives on a well-formed but unconventional
- * Agent. There is intentionally no archetype heuristic: the product has no
+ * prompt/section, a playbook the prompt/tags point at but the `playbooks:` field
+ * omits, or an `# Output` contract with zero `success_criteria` — so it never
+ * false-positives on a well-formed but unconventional Agent. There is intentionally no archetype heuristic: the product has no
  * archetype field, and guessing "this looks like a research agent" from prose
  * would be exactly the kind of unreliable inference the design rejects.
+ *
+ * One caller-side exception: the two prompt-stub codes (`empty_prompt` /
+ * `placeholder_prompt`) are promoted to a blocking 400 by `planCreate` at the
+ * `POST /api/agents` chokepoint, because such a body is *guaranteed* to be
+ * dropped as ambiguous at run time. The lint itself stays warning-only so the
+ * raw `agent.md` PATCH/PUT editor path never 400s on lint.
  */
 
 import { PLAYBOOK_REGISTRY, PLAYBOOK_SLUGS, type PlaybookSlug } from "./playbooks.js";
 
 export type AgentLintCode =
   | "empty_prompt"
+  | "placeholder_prompt"
   | "empty_instruction"
-  | "playbook_referenced_not_declared";
+  | "playbook_referenced_not_declared"
+  | "no_success_criteria";
 
 export type AgentLintSeverity = "warning" | "info";
 
@@ -60,14 +68,30 @@ const INSTRUCTION_HEADING = /^#{1,6}[ \t]+Instructions?\b/i;
 const ANY_HEADING = /^#{1,6}[ \t]+/;
 
 /**
+ * The frame's `# Output` section — the prompt's checkable output contract
+ * (shared by BOTH the core and the extended frame, unlike `# Instruction`).
+ * Its presence is the deterministic signal that the Agent's run produces
+ * something `success_criteria` could verify; the plural `# Outputs` is accepted
+ * as a natural authoring variation, mirroring `INSTRUCTION_HEADING`.
+ */
+const OUTPUT_HEADING = /^#{1,6}[ \t]+Outputs?\b/im;
+
+/**
  * Lint an authored Agent definition. Pure: takes only the declared `playbooks`,
- * the `tags`, and the prompt body — no DB/fs — so it runs identically in the
- * daemon's create path and (potentially) the dashboard editor.
+ * the `tags`, the prompt body, and the declared `success_criteria` count — no
+ * DB/fs — so it runs identically in the daemon's create path and (potentially)
+ * the dashboard editor.
  */
 export function lintAgentDefinition(input: {
   prompt: string;
   playbooks?: readonly string[];
   tags?: readonly string[];
+  /**
+   * Number of declared `success_criteria`. Optional so callers that do not
+   * know the criteria (e.g. a prompt-only editor) never trip the
+   * `no_success_criteria` check — only an explicit `0` can.
+   */
+  successCriteriaCount?: number;
 }): AgentLintIssue[] {
   const issues: AgentLintIssue[] = [];
   const prompt = input.prompt ?? "";
@@ -84,6 +108,23 @@ export function lintAgentDefinition(input: {
         "The prompt body is empty. It becomes the deployed Agent's task — write a "
         + "# Role / # Important / # Instruction / # Output frame describing exactly "
         + "what it should do each run.",
+    });
+    return issues;
+  }
+
+  // 1b. Whole-body placeholder stub ("placeholder", "TODO", "your prompt
+  //     here", …) left by an author intending to fill the task in later. Same
+  //     terminal outcome as an empty body — every run is dropped as ambiguous —
+  //     so nothing else is worth checking here either.
+  if (isPlaceholderPrompt(trimmed)) {
+    issues.push({
+      code: "placeholder_prompt",
+      severity: "warning",
+      message:
+        `The prompt body is a placeholder stub ("${truncateForMessage(trimmed)}"), not a task. `
+        + "It becomes the deployed Agent's task and every run would be dropped as "
+        + "ambiguous — replace it with a # Role / # Important / # Instruction / "
+        + "# Output frame describing exactly what the Agent should do.",
     });
     return issues;
   }
@@ -128,7 +169,70 @@ export function lintAgentDefinition(input: {
     }
   }
 
+  // 4. An `# Output` contract with zero declared `success_criteria`. The prompt
+  //    promises a checkable output, but with no criteria the post-run evaluator
+  //    never fires and the Agent's `criteriaHitRate` metric stays null — no
+  //    quality signal on /agents. Undefined count = caller doesn't know the
+  //    criteria (never flagged); a prompt without an output contract has
+  //    nothing deterministic to check against (also never flagged).
+  if (input.successCriteriaCount === 0 && OUTPUT_HEADING.test(prompt)) {
+    issues.push({
+      code: "no_success_criteria",
+      severity: "warning",
+      message:
+        "The prompt declares an # Output contract but the Agent has no "
+        + "success_criteria, so its criteria hit-rate metric stays empty. Derive 1-3 "
+        + "criteria from the # Output section (file_exists / file_section_count / "
+        + "notification_log) so every run is verified.",
+    });
+  }
+
   return issues;
+}
+
+/**
+ * Whole-body stub markers an author pastes intending to "fill the prompt in
+ * later" (`placeholder`, `TODO`, `your prompt here`, …). Matched against the
+ * FULL normalized body only — a real prompt that merely *contains* one of
+ * these words never matches, so the check cannot false-positive on a
+ * legitimate (even terse) task definition.
+ */
+const PLACEHOLDER_TOKEN_RE = new RegExp(
+  "^(?:"
+    + "placeholder(?: (?:prompt|text|body|only))?"
+    + "|todo|to do|tbd|tba|wip|n/a|none|pending"
+    + "|fill (?:me |this )?in(?: later)?"
+    + "|to be (?:filled(?: in)?|determined|added|written|done)"
+    + "|coming soon"
+    + "|(?:your |insert |add )?prompt(?: goes)? here"
+    + "|x{3,}"
+    + ")$",
+);
+
+/**
+ * True when a prompt body is effectively a stub: missing, whitespace-only,
+ * pure punctuation, or a whole-body placeholder token. Such a body becomes the
+ * deployed Agent's `task_prompt` verbatim and the runtime's ambiguous-task
+ * rule drops the run without doing any work — so the daemon gates on this at
+ * its API chokepoints (`planCreate` rejects the create, `planRunNow` refuses
+ * the manual run).
+ */
+export function isPlaceholderPrompt(prompt: string | null | undefined): boolean {
+  const trimmed = (prompt ?? "").trim();
+  if (trimmed.length === 0) return true;
+  // Strip markdown/punctuation dressing ("# TODO", "**placeholder**",
+  // "[placeholder]") and collapse whitespace before the whole-body match.
+  const normalized = trimmed
+    .toLowerCase()
+    .replace(/[#>*_`[\](){}<>"'.…!?:;,~|=+-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized.length === 0 || PLACEHOLDER_TOKEN_RE.test(normalized);
+}
+
+/** Quote at most the first 40 characters of the body in a lint message. */
+function truncateForMessage(text: string): string {
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
 }
 
 function hasNonEmptyInstruction(prompt: string): boolean {

@@ -5,6 +5,11 @@ import {
   validateAgentDefinitionMarkdown,
 } from "../agents/validate-agent-md.js";
 import {
+  normalizeLessonsFileContent,
+  type LessonNormalizerOptions,
+} from "../feedback/lesson-normalizer.js";
+import { isSafeAgentSlug } from "../feedback/scope-parser.js";
+import {
   normalizeRoadmapForWrite,
   validateRoadmap,
   validateRoadmapTransition,
@@ -71,6 +76,17 @@ export interface ContentWriteValidationOptions {
    * §morning-routine.
    */
   expectedAgentDay?: string;
+  /**
+   * SELF_IMPROVEMENT_PHASE2 §2.1/§2.3 — when the write targets a lessons
+   * store (`policies/agent-lessons`, `policies/agents/<slug>/lessons`), run
+   * the deterministic normalizer over the outgoing content (stamp/repair
+   * `cf=`, enact expiration verdicts) against `previousContent` so the file
+   * is never persisted un-normalized. Ignored for every other target;
+   * omitted ⇒ no normalization (validation-only callers, snapshot restore).
+   */
+  lessonNormalization?: LessonNormalizerOptions & {
+    previousContent: string | null;
+  };
 }
 
 export interface ContextContentValidationError {
@@ -192,6 +208,20 @@ export function prepareContextContentForWrite(
         path: contentError.path,
       };
     }
+    // Lessons stores get the deterministic Phase-2 normalizer inside the
+    // same pipeline slot the roadmap normalizer occupies — every writer
+    // (evening consolidation, monthly regeneralization, dashboard/manual
+    // API edits) flows through here, so `cf=` and expiration verdicts can
+    // never depend on the LLM honouring them.
+    const lessonNorm = options?.lessonNormalization;
+    if (lessonNorm && isLessonsStoreTarget(target)) {
+      const normalized = normalizeLessonsFileContent(
+        content,
+        lessonNorm.previousContent,
+        lessonNorm,
+      );
+      return { ok: true, content: normalized.content };
+    }
     return { ok: true, content };
   }
 
@@ -233,6 +263,19 @@ export function prepareContextContentForWrite(
   }
 
   return { ok: true, content: normalized.content };
+}
+
+/**
+ * A write target that stores scoped lessons — the global
+ * `policies/agent-lessons.md` or a per-agent
+ * `policies/agents/<slug>/lessons.md` (slug validated with the same guard
+ * the scope parser applies, so an unsafe path never reaches the normalizer).
+ */
+function isLessonsStoreTarget(target: ResolvedContextTarget): boolean {
+  if (target.ext !== ".md") return false;
+  if (target.base === "policies/agent-lessons") return true;
+  const match = /^policies\/agents\/([^/]+)\/lessons$/.exec(target.base);
+  return match !== null && isSafeAgentSlug(match[1]);
 }
 
 function formatRoadmapValidationError(error: RoadmapValidationError): string {

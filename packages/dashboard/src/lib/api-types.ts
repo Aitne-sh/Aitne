@@ -822,6 +822,10 @@ export interface ConfigResponse {
   feedbackLessonMaxBytesPerAgent: number;
   feedbackLessonStaleDays: number;
   feedbackSignalRetentionDays: number;
+  // SELF_IMPROVEMENT_PHASE2 quality-gate knobs + A2.1 outcome rollup toggle.
+  feedbackLessonConfidenceFloor: number;
+  feedbackContradictionGuardCf: number;
+  feedbackOutcomeLearningEnabled: boolean;
   primaryLanguage: string;
   vaultMode: "obsidian" | "plain";
   /**

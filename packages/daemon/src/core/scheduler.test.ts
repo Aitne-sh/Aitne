@@ -1208,12 +1208,13 @@ describe("AgentScheduler", () => {
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       s.start();
       // Internals aren't exposed — reach via cast. Morning routine +
-      // evening review + morning sweep + evening sweep + roadmap
-      // maintenance + weekly review + monthly review + context-index
-      // reconciler + browser-history pre-morning digest
-      // (BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a) + hourly = 10 jobs.
+      // evening review + morning sweep + evening sweep + lesson
+      // maintenance (SELF_IMPROVEMENT_PHASE2) + roadmap maintenance +
+      // weekly review + monthly review + context-index reconciler +
+      // browser-history pre-morning digest
+      // (BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a) + hourly = 11 jobs.
       const jobs = (s as unknown as { cronJobs: unknown[] }).cronJobs;
-      expect(jobs.length).toBe(10);
+      expect(jobs.length).toBe(11);
       s.stop();
     });
 
@@ -1228,7 +1229,7 @@ describe("AgentScheduler", () => {
       const s = new AgentScheduler(setup.eventBus, setup.db, config);
       s.start();
       const jobs = (s as unknown as { cronJobs: unknown[] }).cronJobs;
-      expect(jobs.length).toBe(10);
+      expect(jobs.length).toBe(11);
       s.stop();
     });
 

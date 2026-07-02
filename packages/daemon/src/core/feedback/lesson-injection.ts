@@ -41,7 +41,7 @@ import {
   parseLessonsSection,
   type Lesson,
 } from "./lesson-format.js";
-import { scoreLesson } from "./eviction-scorer.js";
+import { effectiveCf, scoreLesson } from "./eviction-scorer.js";
 
 /**
  * Hard inject-time byte cap for the slim hourly notify-discipline variant (§6
@@ -90,6 +90,13 @@ export interface RenderAgentLessonsOptions {
    * is set (the slim variant is global-only by construction).
    */
   selfScope?: boolean;
+  /**
+   * SELF_IMPROVEMENT_PHASE2 §2.1 injection filter: drop lessons whose
+   * *effective* (time-decayed) `cf` is below this floor before any packing —
+   * low-confidence noise stops consuming the byte budgets. Omitted ⇒ no
+   * filtering (pre-Phase-2 behaviour).
+   */
+  confidenceFloor?: number;
 }
 
 /** Open tag + preamble for a block variant — the only things that differ between
@@ -118,12 +125,21 @@ const SLIM_PREAMBLE =
   "Your highest-signal operating lessons, calibrated from past feedback. Weigh " +
   "these before deciding whether to notify the owner.";
 
-/** Parse the `## Lessons` section and keep only injectable (active) lessons. */
-function activeLessons(fileMd: string): Lesson[] {
+/** Parse the `## Lessons` section and keep only injectable (active) lessons —
+ *  non-provisional, non-empty, and (when a floor is configured) with effective
+ *  time-decayed confidence at or above `confidenceFloor` (§2.1). */
+function activeLessons(
+  fileMd: string,
+  opts: Pick<RenderAgentLessonsOptions, "nowIso" | "confidenceFloor">,
+): Lesson[] {
   const section = extractMarkdownSection(fileMd, "Lessons");
   if (!section) return [];
   return parseLessonsSection(section).filter(
-    (lesson) => !lesson.provisional && lesson.text.length > 0,
+    (lesson) =>
+      !lesson.provisional &&
+      lesson.text.length > 0 &&
+      (opts.confidenceFloor === undefined ||
+        effectiveCf(lesson, opts.nowIso) >= opts.confidenceFloor),
   );
 }
 
@@ -255,7 +271,7 @@ export function renderAgentLessonsBlock(
   opts: RenderAgentLessonsOptions,
 ): AgentLessonsBlockResult {
   if (!fileMd) return { block: null, overflow: null };
-  const lessons = activeLessons(fileMd);
+  const lessons = activeLessons(fileMd, opts);
   if (lessons.length === 0) return { block: null, overflow: null };
   if (opts.slim) return renderSlim(lessons, opts);
   return renderBody(

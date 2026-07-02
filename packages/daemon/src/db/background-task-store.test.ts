@@ -204,6 +204,72 @@ describe("background-task-store", () => {
     expect(clar?.answered_at).toBe(5000);
   });
 
+  describe("verification (finish-time self-check, migration 0023)", () => {
+    it("markTerminal persists + round-trips the checklist", () => {
+      seed(db, "v1");
+      markRunning(db, "v1", 1100);
+      const done = markTerminal(db, {
+        id: "v1",
+        state: "completed",
+        outcomeDetail: null,
+        finishedAt: 2000,
+        report: "r",
+        draft: "d",
+        notify: true,
+        verification: [
+          { requirement: "one line per repo", met: true, evidence: "6 rows" },
+          { requirement: "name the failing job", met: false, evidence: "job log 404ed" },
+        ],
+      });
+      expect(done?.verification).toEqual([
+        { requirement: "one line per repo", met: true, evidence: "6 rows" },
+        { requirement: "name the failing job", met: false, evidence: "job log 404ed" },
+      ]);
+    });
+
+    it("markTerminal without verification leaves the column NULL (fail-loud path)", () => {
+      seed(db, "v2");
+      markRunning(db, "v2", 1100);
+      markTerminal(db, { id: "v2", state: "failed", outcomeDetail: "sdk_error", finishedAt: 2000 });
+      expect(getBackgroundTask(db, "v2")?.verification).toBeNull();
+      // an explicit empty array also stores SQL NULL, not "[]"
+      seed(db, "v3");
+      markRunning(db, "v3", 1100);
+      markTerminal(db, {
+        id: "v3",
+        state: "completed",
+        outcomeDetail: null,
+        finishedAt: 2000,
+        verification: [],
+      });
+      const raw = db
+        .prepare<[], { verification: string | null }>(
+          "SELECT verification FROM background_task WHERE id = 'v3'",
+        )
+        .get();
+      expect(raw?.verification).toBeNull();
+    });
+
+    it("degrades malformed persisted verification to null rather than throwing", () => {
+      seed(db, "bad");
+      for (const value of ["{not json", '{"requirement":"solo object"}', "[]"]) {
+        db.prepare("UPDATE background_task SET verification = ? WHERE id = 'bad'").run(value);
+        expect(getBackgroundTask(db, "bad")?.verification).toBeNull();
+      }
+      // well-typed items survive; malformed siblings are dropped
+      db.prepare("UPDATE background_task SET verification = ? WHERE id = 'bad'").run(
+        JSON.stringify([
+          { requirement: "ok", met: true, evidence: "e" },
+          { requirement: "missing met", evidence: "e" },
+          "not an object",
+        ]),
+      );
+      expect(getBackgroundTask(db, "bad")?.verification).toEqual([
+        { requirement: "ok", met: true, evidence: "e" },
+      ]);
+    });
+  });
+
   describe("significanceCriteria (§4.3 if_significant DSL)", () => {
     it("persists + round-trips a JSON criteria array", () => {
       createBackgroundTask(db, {

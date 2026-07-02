@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
+import { z } from "zod";
 
 import { applySchema } from "../../db/schema.js";
 import {
@@ -64,13 +65,17 @@ describe("background-task worker tools", () => {
     markRunning(db, "t1", 1100);
   });
 
-  it("finish writes the artifact + completes + sets finishFlag", async () => {
+  it("finish with an all-met verification writes a clean artifact + completes + sets finishFlag", async () => {
     const rt = runtime(db, contextDir);
     const r = await handler(rt, "finish")({
       result: "verbatim 42",
       draft: "two repos red",
       notify: true,
       significance: "2 red",
+      verification: [
+        { requirement: "one line per repo", met: true, evidence: "both repos listed" },
+        { requirement: "state the failing job", met: true, evidence: "job names quoted" },
+      ],
     });
     expect(r.isError).toBeFalsy();
     expect(payload(r)).toMatchObject({ completed: true, notify: true });
@@ -78,14 +83,105 @@ describe("background-task worker tools", () => {
     const row = getBackgroundTask(db, "t1");
     expect(row?.state).toBe("completed");
     expect(row?.report).toBe("verbatim 42");
+    // all met ⇒ NO gap disclosure suffix, no outcome downgrade, no
+    // significance prefix — the artifact is exactly what the worker wrote.
     expect(row?.draft).toBe("two repos red");
+    expect(row?.outcomeDetail).toBeNull();
+    expect(row?.significance).toBe("2 red");
     expect(row?.notify).toBe(true);
+    expect(row?.verification).toEqual([
+      { requirement: "one line per repo", met: true, evidence: "both repos listed" },
+      { requirement: "state the failing job", met: true, evidence: "job names quoted" },
+    ]);
+  });
+
+  it("gapped finish appends the disclosure, downgrades to completed_with_gaps, keeps notify", async () => {
+    const rt = runtime(db, contextDir);
+    const r = await handler(rt, "finish")({
+      result: "partial findings",
+      draft: "checked one repo",
+      notify: true,
+      significance: "1 red",
+      verification: [
+        { requirement: "one line per repo", met: false, evidence: "second repo API 404ed" },
+        { requirement: "state the failing job", met: true, evidence: "job named" },
+      ],
+    });
+    expect(r.isError).toBeFalsy();
+    const row = getBackgroundTask(db, "t1");
+    expect(row?.state).toBe("completed");
+    expect(row?.outcomeDetail).toBe("completed_with_gaps");
+    expect(row?.draft).toBe(
+      "checked one repo\n\nNote: 1 of 2 requirements not fully met: one line per repo",
+    );
+    expect(row?.significance).toBe("completed_with_gaps; 1 red");
+    // gaps must NOT override the worker's notify disposition
+    expect(row?.notify).toBe(true);
+    expect(row?.verification).toEqual([
+      { requirement: "one line per repo", met: false, evidence: "second repo API 404ed" },
+      { requirement: "state the failing job", met: true, evidence: "job named" },
+    ]);
+  });
+
+  it("gapped finish without a significance line synthesizes one", async () => {
+    const rt = runtime(db, contextDir);
+    await handler(rt, "finish")({
+      result: "r",
+      draft: "d",
+      notify: false,
+      verification: [{ requirement: "req A", met: false, evidence: "not reachable" }],
+    });
+    const row = getBackgroundTask(db, "t1");
+    expect(row?.significance).toBe(
+      "completed_with_gaps; 1 of 1 requirements not fully met",
+    );
+    expect(row?.notify).toBe(false);
+  });
+
+  it("gap disclosure truncates a huge unmet-requirement list", async () => {
+    const rt = runtime(db, contextDir);
+    const requirement = "x".repeat(300);
+    await handler(rt, "finish")({
+      result: "r",
+      draft: "d",
+      notify: true,
+      verification: Array.from({ length: 3 }, () => ({
+        requirement,
+        met: false,
+        evidence: "missing",
+      })),
+    });
+    const draft = getBackgroundTask(db, "t1")?.draft ?? "";
+    expect(draft).toContain("3 of 3 requirements not fully met");
+    expect(draft.endsWith("…")).toBe(true);
+    // 600-char cap + the ellipsis, not the raw ~900-char join
+    expect(draft.length).toBeLessThan(700);
+  });
+
+  it("finish schema REQUIRES a non-empty verification array", () => {
+    const rt = runtime(db, contextDir);
+    const finishTool = createBackgroundTaskTools(rt).find((t) => t.name === "finish");
+    const schema = z.object(finishTool!.inputSchema as z.ZodRawShape);
+    const base = { result: "r", draft: "d", notify: true };
+    expect(schema.safeParse(base).success).toBe(false);
+    expect(schema.safeParse({ ...base, verification: [] }).success).toBe(false);
+    expect(
+      schema.safeParse({
+        ...base,
+        verification: [{ requirement: "req", met: true, evidence: "seen" }],
+      }).success,
+    ).toBe(true);
   });
 
   it("finish on an already-terminal task is an error, no artifact forced", async () => {
     markTerminal(db, { id: "t1", state: "cancelled", outcomeDetail: "user", finishedAt: 1500 });
     const rt = runtime(db, contextDir);
-    const r = await handler(rt, "finish")({ result: "r", draft: "d", notify: true });
+    const r = await handler(rt, "finish")({
+      result: "r",
+      draft: "d",
+      notify: true,
+      verification: [{ requirement: "req", met: true, evidence: "seen" }],
+    });
     expect(r.isError).toBe(true);
     expect(payload(r).error).toBe("task_not_active");
     expect(getBackgroundTask(db, "t1")?.state).toBe("cancelled");

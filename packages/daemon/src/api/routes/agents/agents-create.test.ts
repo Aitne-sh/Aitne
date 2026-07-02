@@ -119,6 +119,28 @@ describe("POST /api/agents", () => {
     expect(getAgent(h.db, "research-digest")?.invalid).toBe(false);
   });
 
+  it("rejects a placeholder prompt with 400 and writes nothing", async () => {
+    // The stub-prompt failure mode: an Agent deployed with prompt
+    // "placeholder" is dropped as ambiguous on every firing, so the create
+    // chokepoint refuses it outright (unlike the non-blocking authoring lint).
+    const res = await postAgent(h.app, {
+      ...CRON_BODY,
+      slug: "ai-news-daily",
+      prompt: "placeholder",
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as {
+      error: string;
+      issues?: Array<{ field: string; message: string }>;
+    };
+    expect(json.error).toBe("invalid_definition");
+    expect(json.issues?.some((i) => i.field === "prompt")).toBe(true);
+    // Nothing was created: no row, no file, no recurring schedule.
+    expect(getAgent(h.db, "ai-news-daily")).toBeNull();
+    expect(existsSync(join(h.tmp, "context", "policies", "agents", "ai-news-daily"))).toBe(false);
+    expect(listRecurringSchedules(h.db)).toHaveLength(0);
+  });
+
   it("declaring the playbook clears the warning and persists it to the file", async () => {
     const res = await postAgent(h.app, {
       ...CRON_BODY,

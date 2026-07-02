@@ -308,3 +308,98 @@ describe("renderAgentLessonsBlock — self path (Phase 4, agent:<slug>)", () => 
     expect(block).not.toContain('scope="self"');
   });
 });
+
+describe("renderAgentLessonsBlock — confidence floor (Phase-2 §2.1)", () => {
+  const MIXED_CF = file(
+    [
+      "- [2026-06-07] HIGH_CF lesson stays.",
+      "  <!-- ev=2 kind=correction src=explicit conf=high cf=0.90 last=2026-06-07 -->",
+      "- [2026-06-07] LOW_CF lesson is filtered.",
+      "  <!-- ev=1 kind=preference src=behavioral conf=low cf=0.10 last=2026-06-07 -->",
+    ].join("\n"),
+  );
+
+  it("drops lessons whose effective cf is below the floor", () => {
+    const { block } = renderAgentLessonsBlock(MIXED_CF, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0.25,
+    });
+    expect(block).toContain("HIGH_CF");
+    expect(block).not.toContain("LOW_CF");
+  });
+
+  it("filters on the DECAYED cf, not the persisted one", () => {
+    const stale = file(
+      [
+        "- [2026-01-01] DECAYED lesson, high cf long ago.",
+        // ~157 days before NOW → decay ≈ 0.09; 0.9 · 0.09 < 0.25.
+        "  <!-- ev=3 kind=do-more src=explicit conf=high cf=0.90 last=2026-01-01 -->",
+      ].join("\n"),
+    );
+    const { block } = renderAgentLessonsBlock(stale, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0.25,
+    });
+    expect(block).toBeNull();
+  });
+
+  it("does not filter when the floor is omitted (pre-Phase-2 behaviour)", () => {
+    const { block } = renderAgentLessonsBlock(MIXED_CF, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+    });
+    expect(block).toContain("HIGH_CF");
+    expect(block).toContain("LOW_CF");
+  });
+
+  it("a floor of 0 keeps everything (documented disable value)", () => {
+    const { block } = renderAgentLessonsBlock(MIXED_CF, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0,
+    });
+    expect(block).toContain("LOW_CF");
+  });
+
+  it("legacy lessons filter through their conf-default cf", () => {
+    const legacy = file(
+      [
+        "- [2026-06-07] LEGACY_LOW conf lesson.",
+        "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-06-07 -->",
+      ].join("\n"),
+    );
+    // conf low → default 0.3 ≥ 0.25 floor → kept.
+    const kept = renderAgentLessonsBlock(legacy, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0.25,
+    });
+    expect(kept.block).toContain("LEGACY_LOW");
+    // …but a 0.5 floor filters it.
+    const filtered = renderAgentLessonsBlock(legacy, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0.5,
+    });
+    expect(filtered.block).toBeNull();
+  });
+
+  it("applies to the slim path too", () => {
+    const { block } = renderAgentLessonsBlock(MIXED_CF, {
+      capBytes: AGENT_LESSONS_SLIM_CAP_BYTES,
+      slim: true,
+      nowIso: NOW,
+      confidenceFloor: 0.25,
+    });
+    expect(block).toContain("HIGH_CF");
+    expect(block).not.toContain("LOW_CF");
+  });
+});

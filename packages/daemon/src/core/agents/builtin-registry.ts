@@ -394,6 +394,35 @@ export const BUILTIN_AGENT_REGISTRY: readonly BuiltinAgentRegistryEntry[] = [
     policyFiles: [],
   },
   {
+    slug: "lesson-maintenance",
+    name: "Lesson Maintenance",
+    description:
+      "Mechanical (no-LLM) lesson-store upkeep — confidence (cf) re-stamping and the graduated demote/archive/re-promote lifecycle — before the evening review.",
+    cronExpression: () => "40 17 * * *",
+    // No-LLM in-process pass — no backend routing key (§5.5.1).
+    processKey: null,
+    defaultEnabled: true,
+    stopWarning: {
+      level: "normal",
+      services_lost: [
+        "Mechanical lesson-store maintenance (confidence re-stamping, graduated demote/archive/re-promote lifecycle)",
+      ],
+      // Runs at 17:40 so the 18:00 Evening Review consolidation reads
+      // freshly-normalized stores; without it, expiration only fires on
+      // nights a feedback worksheet write happens (SELF_IMPROVEMENT_PHASE2
+      // §2.3 D2 backstop).
+      dependent_agents: ["evening-review"],
+      reactivation_hint:
+        "Re-enable from /agents/lesson-maintenance. Runs daily at 17:40, before Evening Review.",
+    },
+    schedulerFn: {
+      kind: "in_process_callback",
+      callbackName: "onLessonMaintenance",
+    },
+    category: "maintenance",
+    policyFiles: [],
+  },
+  {
     slug: "context-index-reconcile",
     name: "Context Index Reconcile",
     description:

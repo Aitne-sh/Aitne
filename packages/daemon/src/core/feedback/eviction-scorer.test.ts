@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_EVICTION_WEIGHTS,
+  effectiveCf,
   enforceCaps,
   isLessonStale,
   kindImportance,
@@ -21,6 +22,7 @@ function lesson(overrides: Partial<Lesson>): Lesson {
     kind: "preference",
     src: "behavioral",
     conf: "low",
+    cf: null,
     last: "2026-06-01",
     provisional: false,
     ...overrides,
@@ -98,6 +100,32 @@ describe("eviction-scorer", () => {
       const strong = lesson({ ev: 10, kind: "constraint", last: "2026-06-07" });
       const weak = lesson({ ev: 1, kind: "preference", last: "2026-01-01" });
       expect(scoreLesson(strong, NOW)).toBeGreaterThan(scoreLesson(weak, NOW));
+    });
+    it("folds cf into the evidence term (Phase-2 §2.1) — low cf evicts first", () => {
+      const confident = lesson({ ev: 4, cf: 1 });
+      const doubtful = lesson({ ev: 4, cf: 0.1 });
+      expect(scoreLesson(confident, NOW)).toBeGreaterThan(
+        scoreLesson(doubtful, NOW),
+      );
+      // Absent cf reads through the conf default, so legacy scoring shifts
+      // uniformly rather than diverging per lesson.
+      const legacy = lesson({ ev: 4, cf: null, conf: "low" });
+      const stamped = lesson({ ev: 4, cf: 0.3 });
+      expect(scoreLesson(legacy, NOW)).toBeCloseTo(scoreLesson(stamped, NOW), 6);
+    });
+  });
+
+  describe("effectiveCf", () => {
+    it("multiplies the persisted (or conf-default) cf by the recency decay", () => {
+      expect(effectiveCf(lesson({ cf: 0.8, last: "2026-06-07" }), NOW)).toBe(0.8);
+      // one half-life ago → half the cf
+      expect(
+        effectiveCf(lesson({ cf: 0.8, last: "2026-04-23" }), NOW, 45),
+      ).toBeCloseTo(0.4, 6);
+      // legacy lesson: conf low → 0.3 default
+      expect(
+        effectiveCf(lesson({ cf: null, conf: "low", last: "2026-06-07" }), NOW),
+      ).toBeCloseTo(0.3, 6);
     });
   });
 

@@ -238,6 +238,13 @@ worksheet's `decision` and `rank` verbatim. If the block is absent, skip this
 step entirely. Like Steps 1–3 it is internal bookkeeping and emits no
 user-facing output.
 
+When the worksheet carries an `<outcome_rollup>` block (per-notification-type
+reaction counts over the last week), weigh it while judging promotions and
+demotions: a high `correction_rate` on an action type argues for demoting
+lessons that push that behaviour and supports candidates that curb it. Never
+treat `ignored` as rejection — it is engagement-coverage only — and never
+reward sheer notification volume.
+
 4a. **Lesson-store scopes** — process **every** `<scope … mode="lessons">` in the
     worksheet, writing each to the `store=` path it declares: the global `agent`
     scope (`store="policies/agent-lessons.md"`) and any per-agent
@@ -253,24 +260,42 @@ user-facing output.
       intent. If found, bump its `ev=` by `weighted_ev` (rounded to a whole
       number), refresh `last=` to today, raise `conf`, and tighten the wording.
       If not, add a new **active** bullet:
-      `- [<today>] <directive> <!-- ev=<round(weighted_ev), min 1> kind=<kind> src=<src> conf=<conf> last=<today> -->`
-      (`src`/`conf` come from the candidate; use the candidate's `kind=` when
-      present, otherwise infer it from the directive; `kind` ∈
-      preference|correction|do-more|do-less|constraint).
+      `- [<today>] <directive> <!-- ev=<round(weighted_ev), min 1> kind=<kind> src=<src> conf=<conf> cf=<cf0> last=<today> -->`
+      (`src`/`conf` come from the candidate; `cf=` copies the candidate's
+      `cf0=` for a new bullet or the existing lesson's `cf=` verbatim — never
+      invent a value, the daemon re-stamps it deterministically after your
+      write; use the candidate's `kind=` when present, otherwise infer it from
+      the directive; `kind` ∈ preference|correction|do-more|do-less|constraint).
+    - `decision="promote"` with a `contradicts_ranks=` attribute → the candidate
+      cleared the anti-whiplash bar against the lessons at those ranks.
+      Adjudicate: **supersede** (mark each contradicted lesson provisional and
+      promote the candidate), **merge** (rewrite one bullet to cover both,
+      drop the other), or **keep-distinct** (the conflict is context-scoped —
+      keep both, scoping each bullet's wording so they cannot collide).
     - `decision="hold-provisional"` with `reason="below-threshold"` → if it
       matches an existing lesson's intent, bump that lesson's `ev`; otherwise add
       the bullet with a trailing `<!-- provisional -->` marker (stored, not yet
       injected — it promotes once corroboration reaches the threshold).
+    - `decision="hold-contradiction"` → the candidate contradicts an
+      established lesson (see `contradicts_ranks=`) and has NOT yet cleared the
+      higher evidence bar. Store it as a provisional bullet; do **not**
+      supersede, weaken, or reword the lessons it contradicts.
     - `decision="hold-provisional"` with `reason="ignored-non-initiating"` →
       silence never *starts* a lesson. Only use it to bump the `ev` of an
       existing matching lesson; if none matches, write nothing for it.
-    - A newer `correction` that contradicts an active lesson **supersedes** it:
-      drop the stale bullet in the same rebuild so a changed mind leaves no
-      stale guidance.
-    - **Staleness prune** (§4 step 7): drop any existing lesson the worksheet
-      marks `stale="true"` (its `last=` is past the staleness horizon and it is
-      not a `constraint`) unless a fresh candidate re-reinforces it this pass —
-      a `constraint` is durable and is never stale-pruned.
+    - A newer explicit `correction` that contradicts an active lesson
+      **supersedes** it: drop the stale bullet in the same rebuild so a changed
+      mind leaves no stale guidance (a user correction always wins — the
+      contradiction guard applies only to inferred candidates).
+    - **Expiration verdicts** (graduated, reversible): honour each existing
+      lesson's `action=` attribute verbatim — `action="demote"` → append
+      `<!-- provisional -->` to the bullet unless a fresh candidate
+      re-reinforces it this pass; `action="archive"` → drop the bullet (its raw
+      evidence stays in feedback_signals); a re-reinforced provisional lesson
+      whose bumped `ev` now meets the threshold → remove its provisional
+      marker. `action="keep"` (and every `constraint`) stays untouched. The
+      daemon enforces the same verdicts mechanically after your write, so a
+      missed one self-corrects.
     Write the scope's section back with `PATCH <store= path> section=lessons
     mode=replace`, applying the Step-2 section-body-rebuild discipline (GET fresh,
     write the keep-list down first, byte-for-byte for unchanged bullets). Repeat

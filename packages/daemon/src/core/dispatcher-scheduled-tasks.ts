@@ -61,6 +61,7 @@ import {
   isBackendId,
   isKnowledgeImportEvent,
   isRoutineEvent,
+  localDateStr,
   resolveProcessKey,
 } from "@aitne/shared";
 import {
@@ -121,7 +122,9 @@ import {
 } from "./feedback/consolidation-prep.js";
 import {
   buildSelfPerformanceBlock,
+  gatherOutcomeRollup,
   gatherSelfPerformanceData,
+  renderOutcomeRollup,
   summarizeLessonStoreUtilization,
   type LessonStoreUtilization,
 } from "./feedback/self-performance-prep.js";
@@ -133,6 +136,11 @@ import {
   renderTuningRecommendationsBlock,
   type PendingTuningCycle,
 } from "./feedback/tuning-recommender.js";
+import {
+  TUNING_CYCLE_HISTORY_STATE_KEY,
+  appendCycleToHistory,
+  parseCycleHistory,
+} from "./feedback/tuning-graduation.js";
 import { readRuntimeState, writeRuntimeState } from "../db/runtime-state.js";
 import {
   buildRegeneralizationWorksheet,
@@ -1976,10 +1984,28 @@ export class ScheduledTaskRunner {
         });
       }
       if (scopes.length === 0) return null;
+      // A2.1 — the outcome rollup rides the worksheet. Failure-isolated on
+      // its own: a rollup error degrades to "no rollup", never "no
+      // consolidation".
+      let outcomeRollupXml: string | null = null;
+      if (this.config.feedbackOutcomeLearningEnabled !== false) {
+        try {
+          outcomeRollupXml = renderOutcomeRollup(
+            gatherOutcomeRollup(this.db, { now: new Date() }),
+          );
+        } catch (err) {
+          logger.warn({ err }, "Failed to gather feedback outcome rollup");
+        }
+      }
+      const now = new Date();
       const result = buildFeedbackWorksheet(scopes, {
         promotionThreshold: this.config.feedbackPromotionThreshold,
-        nowIso: new Date().toISOString(),
+        nowIso: now.toISOString(),
         staleDays: this.config.feedbackLessonStaleDays,
+        confidenceFloor: this.config.feedbackLessonConfidenceFloor,
+        contradictionGuardCf: this.config.feedbackContradictionGuardCf,
+        today: localDateStr(now, this.config.timezone || undefined),
+        outcomeRollupXml,
       });
       return result?.block ?? null;
     } catch (err) {
@@ -2108,6 +2134,34 @@ export class ScheduledTaskRunner {
         // Always persist — an empty cycle still expires last week's
         // single-use verdict ids (§3.4).
         writeRuntimeState(this.db, TUNING_PENDING_CYCLE_STATE_KEY, cycle);
+        // WP5 (§7 shadow-period exit) — append the fresh cycle to the
+        // bounded graduation history so `evaluateGraduation` can observe
+        // the qualifying streak. Tallies seed from the cycle's own verdicts
+        // (`{}` on a fresh cycle; carried-forward on a same-day re-run, so
+        // the overwrite cannot zero an already-judged cycle). Independently
+        // failure-isolated: a history hiccup must not cost the weekly
+        // session its recommendations block.
+        try {
+          const history = parseCycleHistory(
+            readRuntimeState<unknown>(this.db, TUNING_CYCLE_HISTORY_STATE_KEY),
+          );
+          const tallies = { apply: 0, reject: 0, defer: 0 };
+          for (const record of Object.values(cycle.verdicts)) {
+            tallies[record.verdict] += 1;
+          }
+          writeRuntimeState(
+            this.db,
+            TUNING_CYCLE_HISTORY_STATE_KEY,
+            appendCycleToHistory(history, {
+              cycleId: cycle.cycleId,
+              generatedAt: cycle.generatedAt,
+              recommendationCount: cycle.recommendations.length,
+              verdicts: tallies,
+            }),
+          );
+        } catch (err) {
+          logger.warn({ err }, "Failed to record tuning graduation cycle history");
+        }
         // Phase 3 — the block's `mode` attribute tells the weekly session
         // whether apply verdicts actuate (`live`) or are recorded only
         // (`shadow`), so the task-flow never has to guess the flag state.

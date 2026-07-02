@@ -377,6 +377,23 @@ describe("/api/agents routes", () => {
       expect(((await res.json()) as { error: string }).error).toBe("agent_not_runnable");
     });
 
+    it("409s a user Agent whose recurring prompt is a placeholder stub (no row enqueued)", async () => {
+      // Legacy Agents created before POST /api/agents rejected stub prompts can
+      // still carry one; run-now must refuse instead of burning a worker run
+      // the ambiguous-task rule is guaranteed to drop.
+      h.db
+        .prepare("UPDATE recurring_schedules SET task_prompt = 'placeholder' WHERE id = ?")
+        .run(h.recurringId);
+      const before = h.db.prepare("SELECT COUNT(*) AS n FROM agent_schedule").get() as { n: number };
+      const res = await h.app.request("/agents/my-task/run-now", { method: "POST" });
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string; hint: string };
+      expect(body.error).toBe("agent_prompt_placeholder");
+      expect(body.hint).toContain("policies/agents/my-task/agent.md");
+      const after = h.db.prepare("SELECT COUNT(*) AS n FROM agent_schedule").get() as { n: number };
+      expect(after.n).toBe(before.n);
+    });
+
     it("409s an invalid agent and 404s an unknown slug", async () => {
       const invalid = await h.app.request("/agents/broken-agent/run-now", { method: "POST" });
       expect(invalid.status).toBe(409);

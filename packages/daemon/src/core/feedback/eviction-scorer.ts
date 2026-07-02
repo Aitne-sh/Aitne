@@ -17,6 +17,7 @@
 
 import {
   formatLessonsSection,
+  lessonCf,
   type Lesson,
   type LessonKind,
 } from "./lesson-format.js";
@@ -77,19 +78,38 @@ export function recencyDecay(
   return Math.pow(0.5, ageDays / halfLifeDays);
 }
 
-/** Composite eviction score — higher means keep, lower means evict first. */
+/** Composite eviction score — higher means keep, lower means evict first.
+ *  Phase-2 §2.1 folds `cf` into the evidence term (`w_ev·log(ev+1)·cf`) so a
+ *  low-confidence lesson evicts before an equally-evidenced confident one. */
 export function scoreLesson(
   lesson: Lesson,
   nowIso: string,
   weights: EvictionWeights = DEFAULT_EVICTION_WEIGHTS,
   halfLifeDays: number = DEFAULT_RECENCY_HALFLIFE_DAYS,
 ): number {
-  const evTerm = weights.ev * Math.log(Math.max(lesson.ev, 0) + 1);
+  const evTerm =
+    weights.ev * Math.log(Math.max(lesson.ev, 0) + 1) * lessonCf(lesson);
   const recencyTerm =
     weights.recency * recencyDecay(lesson.last, nowIso, halfLifeDays);
   const kindTerm = weights.kind * kindImportance(lesson.kind);
   const penalty = lesson.provisional ? weights.provisionalPenalty : 0;
   return evTerm + recencyTerm + kindTerm - penalty;
+}
+
+/**
+ * Effective (time-decayed) confidence — Phase-2 §2.1 "cf is multiplied by
+ * recencyDecay(last) at read/rank time rather than rewritten". This is the
+ * value the injection floor filters on and (Gate 3) the demote test compares
+ * against the floor; the *persisted* cf is what {@link scoreLesson} folds in,
+ * because the score already carries its own recency term (double-decay would
+ * over-punish idle lessons).
+ */
+export function effectiveCf(
+  lesson: Lesson,
+  nowIso: string,
+  halfLifeDays: number = DEFAULT_RECENCY_HALFLIFE_DAYS,
+): number {
+  return lessonCf(lesson) * recencyDecay(lesson.last, nowIso, halfLifeDays);
 }
 
 /**

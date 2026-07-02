@@ -35,11 +35,18 @@ import {
 import {
   extractMarkdownSection,
   LESSON_KINDS,
+  lessonCf,
   parseLessonsSection,
   type Lesson,
   type LessonKind,
 } from "./lesson-format.js";
-import { evaluatePromotion } from "./promotion-gate.js";
+import {
+  applyContradictionGuard,
+  computeInitialCf,
+  evaluatePromotion,
+} from "./promotion-gate.js";
+import { findContradictionSuspects } from "./lesson-contradiction.js";
+import { expirationVerdict } from "./lesson-normalizer.js";
 import {
   enforceCaps,
   scoreLesson,
@@ -142,6 +149,32 @@ export interface BuildWorksheetOptions {
    * Omitted ⇒ nothing is flagged stale (no time-based prune this pass).
    */
   staleDays?: number;
+  /**
+   * SELF_IMPROVEMENT_PHASE2 §2.3 — with `staleDays`, drives the advisory
+   * `action="keep|demote|archive"` attribute on existing lessons (the
+   * write-path normalizer enacts the same verdicts mechanically). Omitted ⇒
+   * every lesson renders `action="keep"`-equivalent behaviour (no attribute
+   * change in the demote/archive direction).
+   */
+  confidenceFloor?: number;
+  /**
+   * §2.2 — when set, candidates are paired against the scope's active
+   * lessons; a suspect with `cf ≥ contradictionGuardCf` holds a non-explicit
+   * promotable candidate as `decision="hold-contradiction"` until it clears
+   * the 1.5× evidence bar. Omitted ⇒ no pairing (pre-Phase-2 behaviour).
+   */
+  contradictionGuardCf?: number;
+  /**
+   * Local `YYYY-MM-DD` for the §2.3 verdicts. Defaults to
+   * `nowIso.slice(0, 10)`.
+   */
+  today?: string;
+  /**
+   * A2.1 — pre-rendered `<outcome_rollup>` XML (from
+   * `self-performance-prep.ts`), inserted before `<consume>`. Null/omitted ⇒
+   * no rollup this pass.
+   */
+  outcomeRollupXml?: string | null;
 }
 
 export interface WorksheetResult {
@@ -286,24 +319,37 @@ function renderLessonsScope(
 
   if (ranked.length > 0) {
     out.push(
-      `    <existing_lessons note="ranked by eviction score; drop any lesson marked stale=&quot;true&quot; unless a fresh candidate re-reinforces it; if the section still exceeds the cap after your edits, remove from rank 1 upward then append: ${xmlEscape(
+      `    <existing_lessons note="ranked by eviction score; drop any lesson marked stale=&quot;true&quot; unless a fresh candidate re-reinforces it; carry each lesson's cf= into its trailer verbatim — the daemon re-stamps it deterministically after your write, never invent a value; if the section still exceeds the cap after your edits, remove from rank 1 upward then append: ${xmlEscape(
         "- [...N lower-signal lessons omitted — full history in feedback_signals]",
       )}">`,
     );
     ranked.forEach((lesson, idx) => {
+      // §2.3 advisory verdict — the prep pass cannot judge same-write
+      // corroboration, so a would-be `repromote` renders as `keep` (the
+      // write-path normalizer owns the actual re-promotion).
+      const verdict = expirationVerdict(lesson, {
+        nowIso: opts.nowIso,
+        today: opts.today ?? opts.nowIso.slice(0, 10),
+        promotionThreshold: opts.promotionThreshold,
+        staleDays: opts.staleDays,
+        confidenceFloor: opts.confidenceFloor,
+      });
+      const action = verdict === "repromote" ? "keep" : verdict;
       out.push(
         `      <lesson rank="${idx + 1}" score="${round2(
           scoreLesson(lesson, opts.nowIso, undefined, halfLife),
-        )}" ev="${lesson.ev}" kind="${lesson.kind}" last="${lesson.last}" ` +
+        )}" ev="${lesson.ev}" cf="${round2(lessonCf(lesson))}" ` +
+          `kind="${lesson.kind}" last="${lesson.last}" ` +
           `provisional="${lesson.provisional}" ` +
-          `stale="${isLessonStale(lesson, opts.nowIso, opts.staleDays)}">` +
+          `stale="${isLessonStale(lesson, opts.nowIso, opts.staleDays)}" ` +
+          `action="${action}">` +
           `${inline(lesson.text)}</lesson>`,
       );
     });
     out.push("    </existing_lessons>");
   }
 
-  renderCandidates(input.signals, opts, out, true);
+  renderCandidates(input.signals, opts, out, true, ranked);
   out.push("  </scope>");
 }
 
@@ -328,6 +374,7 @@ function renderCandidates(
   opts: BuildWorksheetOptions,
   out: string[],
   withVerdict: boolean,
+  rankedExisting?: ReadonlyArray<Lesson>,
 ): void {
   const groups = groupSignalsBySummary(
     signals.map((row) => ({ id: row.id, summary: row.summary, row })),
@@ -337,7 +384,7 @@ function renderCandidates(
     const ids = group.members.map((member) => member.id).join(",");
     if (withVerdict) {
       const memberRows = group.members.map((member) => member.row);
-      const verdict = evaluatePromotion(
+      let verdict = evaluatePromotion(
         memberRows.map((row) => ({
           source: row.source,
           valence: row.valence,
@@ -346,10 +393,43 @@ function renderCandidates(
       );
       const src = dominantSource(memberRows);
       const kind = candidateKind(memberRows);
+      // §2.2 — pair against the scope's active lessons; the strongest
+      // suspect's cf feeds the anti-whiplash gate. `contradicts_ranks` maps
+      // suspect indices back to the `<existing_lessons>` rank numbers.
+      let contradictsRanks = "";
+      if (opts.contradictionGuardCf !== undefined && rankedExisting?.length) {
+        const suspects = findContradictionSuspects(
+          { text: group.summary, kind },
+          rankedExisting,
+        );
+        if (suspects.length > 0) {
+          contradictsRanks = suspects
+            .map((suspect) => suspect.index + 1)
+            .sort((a, b) => a - b)
+            .join(",");
+          const maxSuspectCf = Math.max(
+            ...suspects.map((suspect) => lessonCf(rankedExisting[suspect.index])),
+          );
+          verdict = applyContradictionGuard(verdict, maxSuspectCf, {
+            guardCf: opts.contradictionGuardCf,
+            threshold: opts.promotionThreshold,
+          });
+        }
+      }
+      const decision = verdict.promotable
+        ? "promote"
+        : verdict.reason === "contradiction"
+          ? "hold-contradiction"
+          : "hold-provisional";
+      // §2.1 initial confidence — the float the trailer's cf= should carry
+      // for a newly-promoted lesson (the normalizer re-derives/repairs it
+      // post-write, so a mis-transcription can't stick).
+      const cf0 = computeInitialCf(verdict.weightedEv, src, opts.promotionThreshold);
       out.push(
         `      <candidate signals="${group.members.length}" ` +
-          `weighted_ev="${round2(verdict.weightedEv)}" ` +
-          `decision="${verdict.promotable ? "promote" : "hold-provisional"}" ` +
+          `weighted_ev="${round2(verdict.weightedEv)}" cf0="${round2(cf0)}" ` +
+          `decision="${decision}" ` +
+          (contradictsRanks ? `contradicts_ranks="${contradictsRanks}" ` : "") +
           `conf="${verdict.conf}" src="${src}"` +
           (kind ? ` kind="${kind}"` : "") +
           ` reason="${verdict.reason}" ids="${ids}">` +
@@ -389,6 +469,11 @@ export function buildFeedbackWorksheet(
     } else {
       renderRawScope(scope, opts, out);
     }
+  }
+  // A2.1 — the outcome rollup rides the worksheet (never its own surface),
+  // so it exists only on nights the consolidation itself runs.
+  if (opts.outcomeRollupXml) {
+    out.push(opts.outcomeRollupXml);
   }
   out.push(`  <consume ids="${signalIds.join(",")}" />`);
   out.push("</feedback_worksheet>");

@@ -117,6 +117,11 @@ const PUBLIC_CONFIG_RUNTIME_KEYS = [
   "feedbackLessonMaxBytesPerAgent",
   "feedbackLessonStaleDays",
   "feedbackSignalRetentionDays",
+  // SELF_IMPROVEMENT_PHASE2 quality-gate knobs + A2.1 outcome-rollup toggle
+  // (QUALITY_LOOP_IMPROVEMENT_PLAN_2026-07.md WP1) — same Lessons page flow.
+  "feedbackLessonConfidenceFloor",
+  "feedbackContradictionGuardCf",
+  "feedbackOutcomeLearningEnabled",
   // Opt-in toggle: push backend-execution-failure operator diagnostics to
   // the owner DM (default off — failures stay on the dashboard Activity feed).
   "backendFailureDmAlerts",

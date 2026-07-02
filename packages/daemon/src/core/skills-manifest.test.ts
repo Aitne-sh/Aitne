@@ -2253,7 +2253,14 @@ describe("DM manifest body byte budget (P4)", () => {
   // is about the rejected always-on `<task_board>` CONTEXT block — NOT
   // shipped — not the skill body, which is the normal per-DM-skill cost.
   // The 80 KB design target still stands.
-  const REGRESSION_CEILING_BYTES = 160 * 1024;
+  // success_criteria authoring universalization (WP3) — bumped 160 KB →
+  // 162 KB to admit the `agent-create` "Success criteria" guidance (~1.7 KB
+  // after trimming): the mechanical `# Output` → criteria mapping
+  // (file_exists / file_section_count / notification_log) that closes the
+  // "user Agents ship with zero success_criteria → criteriaHitRate is null"
+  // quality-signal gap, paired with the non-blocking `no_success_criteria`
+  // lint. The 80 KB design target still stands.
+  const REGRESSION_CEILING_BYTES = 162 * 1024;
 
   test("message.received.dm total SKILL.md bytes ≤ regression ceiling", () => {
     const slugs = EVENT_SKILL_SETS["message.received.dm"];

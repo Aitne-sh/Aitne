@@ -104,5 +104,6 @@ export function lintAgentDefinitionMarkdown(
     prompt: body,
     playbooks: parsed.data.playbooks,
     tags: parsed.data.tags,
+    successCriteriaCount: parsed.data.success_criteria.length,
   });
 }

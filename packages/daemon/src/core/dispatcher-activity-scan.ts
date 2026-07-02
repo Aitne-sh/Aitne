@@ -79,6 +79,7 @@ import {
   buildGateAuditDetail,
   decideStage,
   renderGateDecisionBlock,
+  renderSystemHealthBlock,
   type ActivityScanGateDecision,
   type ActivityScanGateStage,
 } from "../scheduler/activity-scan-gate.js";
@@ -393,10 +394,18 @@ export class ActivityScanCoordinator {
       // gate's telemetry. The native-integration §6.5.1 bypass is no
       // longer needed — the gate's signal compute now sees pre-pass +
       // delegated-sync rows directly.
+      //
+      // WP4 — the `agent_chronic_failure` escalation is exempt from the
+      // floor: agent failures produce no observations, so on a quiet
+      // vault the chronic tick would ALWAYS land under the floor — and
+      // the skip's audit row (carrying `gate_reason`) would still arm
+      // the 24h re-escalation throttle, silently swallowing the one
+      // surfacing the design promises within a day.
       if (
         !forced
         && !cautiousEscalate
         && decision.stage === "stage3"
+        && decision.reason !== "agent_chronic_failure"
         && pendingCount < minObservations
       ) {
         this.logGateAuditRow(decision, {
@@ -663,6 +672,9 @@ export class ActivityScanCoordinator {
       ...(this.config.timezone
         ? { agentTimezone: this.config.timezone }
         : {}),
+      // WP4 — consecutive-error streak length for the chronic-failure
+      // detector behind `signals.chronicAgentFailures`.
+      chronicFailureThreshold: this.config.agentChronicFailureThreshold ?? 3,
     });
     return decideStage(signals, {
       heartbeatHours: this.config.activityScanHeartbeatHours ?? 4,
@@ -799,6 +811,14 @@ export class ActivityScanCoordinator {
       forced: extra.forced,
       cautiousEscalate: extra.cautiousEscalate,
     });
+    // WP4 chronic-failure surfacing — attach the `<system_health>` block
+    // to EVERY Stage 3 enqueue while failures persist (not only the
+    // forced `agent_chronic_failure` escalation): whichever reason got
+    // us here, the LLM should see the failing agents and decide whether
+    // the owner needs to know under the task-flow's Step 9 notify gate.
+    const systemHealthBlock = renderSystemHealthBlock(
+      decision.signals.chronicAgentFailures,
+    );
     this.logGateAuditRow(decision, {
       appliedDecision: "stage3",
       forced: extra.forced,
@@ -833,6 +853,7 @@ export class ActivityScanCoordinator {
         ...(extra.harvest.fetchReportBlock
           ? { fetchReportBlock: extra.harvest.fetchReportBlock }
           : {}),
+        ...(systemHealthBlock ? { systemHealthBlock } : {}),
       },
       ...(extra.requestedModel ? { requestedModel: extra.requestedModel } : {}),
     } as RoutineEvent;

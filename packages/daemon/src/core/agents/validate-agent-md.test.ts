@@ -130,6 +130,44 @@ describe("lintAgentDefinitionMarkdown (audit B5 — non-blocking edit-path lint)
     ).toContain("empty_prompt");
   });
 
+  it("flags a placeholder-stub body as a warning — the edit path stays non-blocking", () => {
+    // Unlike POST /api/agents (which rejects a stub prompt outright), the raw
+    // agent.md PATCH/PUT editor path must never 400 on lint — the stub only
+    // surfaces as a warning here.
+    const content = validAgentMarkdown().replace(
+      "# Say Hi\n\nSend a friendly greeting.\n",
+      "placeholder\n",
+    );
+    expect(
+      lintAgentDefinitionMarkdown(PATH, content).map((i) => i.code),
+    ).toEqual(["placeholder_prompt"]);
+  });
+
+  it("flags an # Output contract when the frontmatter declares no success_criteria", () => {
+    const content = validAgentMarkdown().replace(
+      "Send a friendly greeting.",
+      "# Output\n- notes/daily-{date}.md",
+    );
+    expect(
+      lintAgentDefinitionMarkdown(PATH, content).map((i) => i.code),
+    ).toContain("no_success_criteria");
+  });
+
+  it("does NOT flag the # Output contract once success_criteria are declared", () => {
+    const content = validAgentMarkdown()
+      .replace("Send a friendly greeting.", "# Output\n- notes/daily-{date}.md")
+      .replace(
+        "  timeout_minutes: 5\n---",
+        "  timeout_minutes: 5\n"
+          + "success_criteria:\n"
+          + "  - id: note-exists\n"
+          + "    kind: file_exists\n"
+          + "    target: notes/daily-{date}.md\n"
+          + "---",
+      );
+    expect(lintAgentDefinitionMarkdown(PATH, content)).toEqual([]);
+  });
+
   it("returns [] for a non-agent path — safe to call on any write success", () => {
     expect(lintAgentDefinitionMarkdown("state/today.md", "anything")).toEqual([]);
   });

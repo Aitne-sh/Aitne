@@ -7,10 +7,16 @@
  *
  *   - [2026-06-07] Keep the weekly report's budget section even when spend is
  *     flat — owner flagged it missing twice.
- *     <!-- ev=2 kind=correction src=explicit conf=high last=2026-06-07 -->
+ *     <!-- ev=2 kind=correction src=explicit conf=high cf=0.74 last=2026-06-07 -->
  *
  * Optional `<!-- provisional -->` marks a lesson stored but excluded from
  * injection until it promotes (§4 step 4).
+ *
+ * `cf` is the SELF_IMPROVEMENT_PHASE2 §2.1 numeric confidence in [0,1] — the
+ * single deterministic key the daemon ranks, filters, and decays on. It is
+ * stamped by the deterministic normalizer (`lesson-normalizer.ts`), never
+ * trusted from LLM transcription; absent on legacy lessons ({@link lessonCf}
+ * supplies the qualitative-`conf` default at read time).
  *
  * This module is pure (no I/O): parse a `## Lessons` section body into typed
  * {@link Lesson}s and serialize them back byte-stably. It is the shared
@@ -40,6 +46,12 @@ export interface Lesson {
   kind: LessonKind;
   src: LessonSource;
   conf: LessonConfidence;
+  /**
+   * Numeric confidence in [0,1] (Phase-2 §2.1), or `null` when the trailer
+   * carries no valid `cf=` (every pre-Phase-2 lesson). Read through
+   * {@link lessonCf} — never directly — so the conf-derived default applies.
+   */
+  cf: number | null;
   /** Last reinforced `YYYY-MM-DD` — staleness pruning keys on this, NOT date. */
   last: string;
   /** Stored but excluded from injection until promoted. */
@@ -65,15 +77,19 @@ export const LESSON_CONFIDENCES: ReadonlySet<string> = new Set<LessonConfidence>
 );
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-/** Bullet entry start: `- [YYYY-MM-DD] …` (rest of the line is prose). */
-const ENTRY_START_RE = /^-\s+\[(\d{4}-\d{2}-\d{2})\]\s?(.*)$/;
+/** Bullet entry start: `- [YYYY-MM-DD] …` (rest of the line is prose).
+ *  Shared with the normalizer's span walker so "what starts an entry" can
+ *  never drift between parse and surgical rewrite. */
+export const LESSON_ENTRY_START_RE = /^-\s+\[(\d{4}-\d{2}-\d{2})\]\s?(.*)$/;
+const ENTRY_START_RE = LESSON_ENTRY_START_RE;
 /**
  * Eviction marker `- [...N … omitted …]` — emitted by the scorer, never a
  * lesson (its bracket holds `...`, not a date). Skipped on parse so re-reading
  * a previously-evicted section does not fold the marker text into the
- * preceding lesson's prose.
+ * preceding lesson's prose. Shared with the normalizer's span walker.
  */
-const OMITTED_MARKER_RE = /^\s*-\s*\[\.\.\./;
+export const LESSON_OMITTED_MARKER_RE = /^\s*-\s*\[\.\.\./;
+const OMITTED_MARKER_RE = LESSON_OMITTED_MARKER_RE;
 /** Any HTML comment — trailer attrs + the `provisional` marker both ride these. */
 const COMMENT_RE = /<!--([\s\S]*?)-->/g;
 const PROVISIONAL_RE = /<!--\s*provisional\s*-->/i;
@@ -96,6 +112,44 @@ function coerceConf(value: string | undefined): LessonConfidence {
   return value && LESSON_CONFIDENCES.has(value)
     ? (value as LessonConfidence)
     : "low";
+}
+
+/**
+ * Tolerant-default map for lessons whose trailer predates `cf` (Phase-2 §2.1:
+ * `cf ??= {high:0.8, medium:0.5, low:0.3}[conf]`). Exported so the normalizer
+ * backfills the same values {@link lessonCf} reads at runtime.
+ */
+export const CONF_CF_DEFAULTS: Record<LessonConfidence, number> = {
+  high: 0.8,
+  medium: 0.5,
+  low: 0.3,
+};
+
+/**
+ * The single canonical read of a lesson's numeric confidence: the persisted
+ * `cf` when present, else the qualitative-`conf` default. Every ranking /
+ * filtering / decay consumer goes through this, so a legacy file behaves
+ * identically before and after the normalizer's lazy backfill.
+ */
+export function lessonCf(lesson: Pick<Lesson, "cf" | "conf">): number {
+  return lesson.cf ?? CONF_CF_DEFAULTS[lesson.conf];
+}
+
+/** Clamp to [0,1] and round to 2 decimals — the persisted `cf` precision. */
+export function roundCf(value: number): number {
+  const clamped = Math.min(1, Math.max(0, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+/**
+ * Parse a trailer `cf=` token: finite numbers clamp into [0,1] (2dp);
+ * anything garbled degrades to `null` (treated as absent — the normalizer
+ * re-derives it) rather than throwing.
+ */
+function coerceCf(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? roundCf(num) : null;
 }
 
 /** Parse `ev=2 kind=correction src=explicit conf=high last=2026-06-07`. */
@@ -172,6 +226,7 @@ export function parseLessonsSection(sectionBody: string): Lesson[] {
       kind: coerceKind(attrs.kind),
       src: coerceSource(attrs.src),
       conf: coerceConf(attrs.conf),
+      cf: coerceCf(attrs.cf),
       last,
       provisional,
     });
@@ -217,11 +272,21 @@ export function parseLessonsSection(sectionBody: string): Lesson[] {
  * it survives `trimBulletEntries` / `clearEntriesBefore` continuation rules.
  */
 export function formatLesson(lesson: Lesson): string {
+  // `cf=` sits between `conf` and `last` (Phase-2 §2.1 example) and is
+  // omitted when null/absent so a legacy file (or a hand-constructed lesson
+  // object without the field) round-trips byte-stably until the normalizer
+  // stamps it. Loose `== null` deliberately covers `undefined`.
+  const cfAttr = lesson.cf == null ? "" : `cf=${formatCfValue(lesson.cf)} `;
   const trailer =
     `<!-- ev=${lesson.ev} kind=${lesson.kind} src=${lesson.src} ` +
-    `conf=${lesson.conf} last=${lesson.last} -->`;
+    `conf=${lesson.conf} ${cfAttr}last=${lesson.last} -->`;
   const provisional = lesson.provisional ? " <!-- provisional -->" : "";
   return `- [${lesson.date}] ${lesson.text}\n  ${trailer}${provisional}`;
+}
+
+/** Serialize a `cf` value for a trailer/worksheet: 2dp, e.g. `0.74`, `1.00`. */
+export function formatCfValue(cf: number): string {
+  return roundCf(cf).toFixed(2);
 }
 
 /**

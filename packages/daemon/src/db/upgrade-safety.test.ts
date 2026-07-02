@@ -45,6 +45,7 @@ const BUILTIN_SLUGS = [
   "user-profile-sweep-morning",
   "user-profile-sweep-evening",
   "roadmap-maintenance",
+  "lesson-maintenance",
   "context-index-reconcile",
   "skill-curation",
 ].sort();

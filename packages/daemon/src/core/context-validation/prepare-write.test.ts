@@ -366,4 +366,118 @@ describe("prepareContextContentForWrite", () => {
     );
     expect(ok.ok).toBe(true);
   });
+
+  describe("lessons-store normalization (SELF_IMPROVEMENT_PHASE2 §2.1/§2.3)", () => {
+    const LESSONS_TARGET: ResolvedContextTarget = {
+      base: "policies/agent-lessons",
+      ext: ".md",
+    };
+    const lessonsFile = (bullets: string[]): string =>
+      [
+        "---",
+        "type: rule",
+        "owner: agent",
+        "updated: 2026-07-01",
+        "---",
+        "# Agent Lessons",
+        "",
+        "## Lessons",
+        ...bullets,
+        "",
+      ].join("\n");
+    const lessonNormalization = {
+      previousContent: null,
+      nowIso: "2026-07-01T18:00:00.000Z",
+      today: "2026-07-01",
+      promotionThreshold: 2,
+      enactExpiration: true,
+      staleDays: 60,
+      confidenceFloor: 0.25,
+    };
+
+    it("stamps cf on a lessons-store write", () => {
+      const content = lessonsFile([
+        "- [2026-07-01] Keep the budget section.",
+        "  <!-- ev=2 kind=correction src=explicit conf=high last=2026-07-01 -->",
+      ]);
+      const result = prepareContextContentForWrite(LESSONS_TARGET, content, {
+        lessonNormalization,
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.content).toContain("cf=0.50");
+    });
+
+    it("normalizes a per-agent lessons store with a safe slug", () => {
+      const target: ResolvedContextTarget = {
+        base: "policies/agents/report-writer/lessons",
+        ext: ".md",
+      };
+      const result = prepareContextContentForWrite(
+        target,
+        lessonsFile([
+          "- [2026-07-01] Per-agent directive.",
+          "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-07-01 -->",
+        ]),
+        { lessonNormalization },
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.content).toContain("cf=");
+    });
+
+    it("skips an unsafe per-agent slug and non-lessons targets", () => {
+      const unsafe: ResolvedContextTarget = {
+        base: "policies/agents/.hidden/lessons",
+        ext: ".md",
+      };
+      const content = lessonsFile([
+        "- [2026-07-01] Would be stamped if the slug were safe.",
+        "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-07-01 -->",
+      ]);
+      const viaUnsafe = prepareContextContentForWrite(unsafe, content, {
+        lessonNormalization,
+      });
+      expect(viaUnsafe.ok).toBe(true);
+      if (viaUnsafe.ok) expect(viaUnsafe.content).toBe(content);
+
+      const profile = prepareContextContentForWrite(
+        USER_PROFILE_TARGET,
+        withUserFrontmatter("# User\n\n## Identity\n"),
+        { lessonNormalization },
+      );
+      expect(profile.ok).toBe(true);
+      if (profile.ok) expect(profile.content).not.toContain("cf=");
+    });
+
+    it("never treats a .base target as a lessons store", () => {
+      const result = prepareContextContentForWrite(
+        PROJECT_BASE_TARGET,
+        "views:\n  - type: table\n",
+        { lessonNormalization },
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.content).toBe("views:\n  - type: table\n");
+    });
+
+    it("leaves a lessons write untouched when no normalization options are passed", () => {
+      const content = lessonsFile([
+        "- [2026-07-01] No options, no stamping.",
+        "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-07-01 -->",
+      ]);
+      const result = prepareContextContentForWrite(LESSONS_TARGET, content);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.content).toBe(content);
+    });
+
+    it("threads previousContent so carries beat re-derivation", () => {
+      const prev = lessonsFile([
+        "- [2026-06-01] Carried lesson.",
+        "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.61 last=2026-06-20 -->",
+      ]);
+      const result = prepareContextContentForWrite(LESSONS_TARGET, prev, {
+        lessonNormalization: { ...lessonNormalization, previousContent: prev },
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.content).toContain("cf=0.61");
+    });
+  });
 });

@@ -25,7 +25,9 @@ import {
   isLegacyTodayContent,
   prepareContextContentForWrite,
   trimBulletEntries,
+  type ContentWriteValidationOptions,
 } from "../../../core/context-validation/index.js";
+import { buildRepromoteGuard } from "../../../core/feedback/lesson-contradiction.js";
 import { createLogger } from "../../../logging.js";
 import {
   composeIssue,
@@ -175,6 +177,37 @@ function agentMdWriteWarnings(
   return warnings.length > 0 ? { warnings } : {};
 }
 
+/**
+ * SELF_IMPROVEMENT_PHASE2 — normalizer options for a potential lessons-store
+ * write. Passed on every PUT/PATCH; `prepareContextContentForWrite` applies
+ * them only when the target actually is a lessons store, so non-lessons
+ * writes are byte-identical to before.
+ */
+function lessonNormalizationFor(
+  config: {
+    timezone: string;
+    feedbackPromotionThreshold: number;
+    feedbackLessonStaleDays: number;
+    feedbackLessonConfidenceFloor: number;
+    feedbackContradictionGuardCf: number;
+  },
+  previousContent: string | null,
+): ContentWriteValidationOptions["lessonNormalization"] {
+  return {
+    previousContent,
+    nowIso: new Date().toISOString(),
+    today: localDateStr(new Date(), config.timezone || undefined),
+    promotionThreshold: config.feedbackPromotionThreshold,
+    enactExpiration: true,
+    staleDays: config.feedbackLessonStaleDays,
+    confidenceFloor: config.feedbackLessonConfidenceFloor,
+    repromoteGuard: buildRepromoteGuard({
+      guardCf: config.feedbackContradictionGuardCf,
+      threshold: config.feedbackPromotionThreshold,
+    }),
+  };
+}
+
 export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
   const {
     deps,
@@ -262,6 +295,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
       disableRoadmapValidation: roadmapValidationOff,
       defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
       expectedAgentDay,
+      lessonNormalization: lessonNormalizationFor(config, null),
     });
     if (!preflight.ok) {
       return respondWithAgentError(c, preflight.status, [
@@ -337,6 +371,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           today: localDateStr(new Date(), config.timezone || undefined),
           defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
           expectedAgentDay,
+          lessonNormalization: lessonNormalizationFor(config, existing),
         });
         if (!prepared.ok) {
           return respondWithAgentError(c, prepared.status, [
@@ -593,6 +628,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
           allowLegacyToday: path === "state/today" && isLegacyTodayContent(fileContent),
           expectedAgentDay,
+          lessonNormalization: lessonNormalizationFor(config, fileContent),
         });
         if (!prepared.ok) {
           return respondWithAgentError(c, prepared.status, [
@@ -691,6 +727,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
           defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
           allowLegacyToday: path === "state/today" && isLegacyTodayContent(fileContent),
           expectedAgentDay,
+          lessonNormalization: lessonNormalizationFor(config, fileContent),
         });
         if (!prepared.ok) {
           return respondWithAgentError(c, prepared.status, [
@@ -831,6 +868,7 @@ export function registerWriteRoutes(app: Hono, ctx: ContextRouteContext): void {
         defaultLongTermPlanSource: roadmapDefaultLongTermPlanSource(c),
         allowLegacyToday: path === "state/today" && isLegacyTodayContent(fileContent),
         expectedAgentDay,
+        lessonNormalization: lessonNormalizationFor(config, fileContent),
       });
       if (!prepared.ok) {
         return respondWithAgentError(c, prepared.status, [

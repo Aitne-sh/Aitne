@@ -323,6 +323,24 @@ export const runtimeSettingsSchema = z.object({
   feedbackLessonMaxBytesPerAgent: z.number().int().min(512).max(16384).default(4096),
   feedbackLessonStaleDays: z.number().int().min(7).max(365).default(60),
   feedbackSignalRetentionDays: z.number().int().min(30).max(365).default(180),
+  /**
+   * SELF_IMPROVEMENT_PHASE2 §2.1 — lessons whose *effective* (time-decayed)
+   * cf falls below this floor are dropped from injection before packing;
+   * Gate 3 (§2.3) also demotes a stale active lesson below it. 0 disables.
+   */
+  feedbackLessonConfidenceFloor: z.number().min(0).max(1).default(0.25),
+  /**
+   * §2.2 anti-whiplash guard — a candidate contradicting an existing lesson
+   * with cf at or above this value is held provisional until its weighted
+   * evidence clears the higher `1.5 · threshold · cf` bar. Explicit owner
+   * directives bypass the guard (a user correction always wins).
+   */
+  feedbackContradictionGuardCf: z.number().min(0).max(1).default(0.6),
+  /**
+   * A2.1 — include the `<outcome_rollup>` per-action-type notification
+   * reaction block (correction_rate) in the evening consolidation worksheet.
+   */
+  feedbackOutcomeLearningEnabled: z.boolean().default(true),
   agentDisplayName: z.string().default(DEFAULT_AGENT_DISPLAY_NAME).refine(
     (value) => validateAgentDisplayName(value) === null,
     { message: "PA_AGENT_DISPLAY_NAME must be a single line, 40 characters or fewer" },
@@ -618,6 +636,20 @@ export const runtimeSettingsSchema = z.object({
     .min(0)
     .max(480)
     .default(30),
+  /**
+   * WP4 chronic-failure surfacing — number of most-recent TERMINAL
+   * executions that must ALL be errors before an enabled agent counts
+   * as chronically failing (`listChronicallyFailingAgents` in
+   * db/agent-executions-store.ts). The activity-scan gate then force-
+   * runs Stage 3 with reason `agent_chronic_failure` (at most once per
+   * CHRONIC_FAILURE_REESCALATE_HOURS) and every Stage 3 prompt carries
+   * a `<system_health>` block so the LLM can surface the failures to
+   * the owner under the existing notify gates. Min 2 — a single failure
+   * is routine noise; max 10 keeps the streak requirement meaningful
+   * within the detector's one-day lookback. Twin bound:
+   * `env-writer.ts:NUMERIC_RANGE`.
+   */
+  agentChronicFailureThreshold: z.number().int().min(2).max(10).default(3),
   /**
    * Phase 4 auth health probe kill switch — corresponds to
    * `PA_AUTH_PROBE_DISABLED` per `docs/design/09-safety-cost.md` §9.5.11
@@ -1135,6 +1167,9 @@ export const RUNTIME_SETTING_KEYS = [
   "feedbackLessonMaxBytesPerAgent",
   "feedbackLessonStaleDays",
   "feedbackSignalRetentionDays",
+  "feedbackLessonConfidenceFloor",
+  "feedbackContradictionGuardCf",
+  "feedbackOutcomeLearningEnabled",
   "agentDisplayName",
   "character",
   "timezone",
@@ -1161,6 +1196,7 @@ export const RUNTIME_SETTING_KEYS = [
   "activityScanHeartbeatHours",
   "activityScanLowSignalPendingCeiling",
   "activityScanPrePassFreshnessMinutes",
+  "agentChronicFailureThreshold",
   "authProbeDisabled",
   "authPreflightFreshnessMs",
   "schedulePollIntervalSeconds",

@@ -99,6 +99,11 @@ export function dedupeLessons(lessons: ReadonlyArray<Lesson>): Lesson[] {
     if (CONF_RANK[lesson.conf] > CONF_RANK[existing.conf]) {
       existing.conf = lesson.conf;
     }
+    // Max of the persisted confidences (null = absent, never wins over a
+    // stamped value) — a merged lesson is harder to evict, never easier.
+    if (lesson.cf !== null && (existing.cf === null || lesson.cf > existing.cf)) {
+      existing.cf = lesson.cf;
+    }
     if (lesson.kind === "constraint") existing.kind = "constraint";
     existing.provisional = existing.provisional && lesson.provisional;
   }

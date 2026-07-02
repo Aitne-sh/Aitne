@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CONF_CF_DEFAULTS,
   extractMarkdownSection,
+  formatCfValue,
   formatLesson,
   formatLessonsSection,
+  lessonCf,
   lessonsSectionByteLength,
   parseLessonsSection,
+  roundCf,
   type Lesson,
 } from "./lesson-format.js";
 
@@ -16,6 +20,7 @@ const baseLesson: Lesson = {
   kind: "do-more",
   src: "behavioral",
   conf: "high",
+  cf: null,
   last: "2026-06-05",
   provisional: false,
 };
@@ -70,6 +75,7 @@ describe("lesson-format", () => {
         kind: "correction",
         src: "explicit",
         conf: "high",
+        cf: null,
         last: "2026-06-07",
         provisional: false,
       });
@@ -237,5 +243,55 @@ describe("lesson-format", () => {
         "utf-8",
       ),
     );
+  });
+
+  describe("cf (SELF_IMPROVEMENT_PHASE2 §2.1)", () => {
+    it("parses a valid cf and clamps out-of-range numerics into [0,1]", () => {
+      const body = [
+        "- [2026-06-07] a <!-- ev=2 kind=correction src=explicit conf=high cf=0.74 last=2026-06-07 -->",
+        "- [2026-06-07] b <!-- ev=2 kind=correction src=explicit conf=high cf=1.7 last=2026-06-07 -->",
+        "- [2026-06-07] c <!-- ev=2 kind=correction src=explicit conf=high cf=-0.2 last=2026-06-07 -->",
+        "- [2026-06-07] d <!-- ev=2 kind=correction src=explicit conf=high cf=0.333 last=2026-06-07 -->",
+      ].join("\n");
+      const [a, b, c, d] = parseLessonsSection(body);
+      expect(a.cf).toBe(0.74);
+      expect(b.cf).toBe(1);
+      expect(c.cf).toBe(0);
+      expect(d.cf).toBe(0.33);
+    });
+
+    it("degrades a garbled cf to null instead of throwing", () => {
+      const [lesson] = parseLessonsSection(
+        "- [2026-06-07] x <!-- ev=2 kind=correction src=explicit conf=high cf=banana last=2026-06-07 -->",
+      );
+      expect(lesson.cf).toBeNull();
+    });
+
+    it("formats cf between conf and last, 2dp, and round-trips", () => {
+      const withCf: Lesson = { ...baseLesson, cf: 0.7 };
+      const md = formatLesson(withCf);
+      expect(md).toContain("conf=high cf=0.70 last=2026-06-05");
+      const [parsed] = parseLessonsSection(md);
+      expect(parsed).toEqual(withCf);
+    });
+
+    it("omits cf when null so legacy files round-trip byte-stably", () => {
+      expect(formatLesson(baseLesson)).not.toContain("cf=");
+    });
+
+    it("lessonCf reads the persisted cf or the conf default", () => {
+      expect(lessonCf({ cf: 0.42, conf: "high" })).toBe(0.42);
+      expect(lessonCf({ cf: null, conf: "high" })).toBe(CONF_CF_DEFAULTS.high);
+      expect(lessonCf({ cf: null, conf: "medium" })).toBe(0.5);
+      expect(lessonCf({ cf: null, conf: "low" })).toBe(0.3);
+    });
+
+    it("roundCf clamps and rounds to 2dp; formatCfValue pads", () => {
+      expect(roundCf(1.2)).toBe(1);
+      expect(roundCf(-3)).toBe(0);
+      expect(roundCf(0.256)).toBe(0.26);
+      expect(formatCfValue(1)).toBe("1.00");
+      expect(formatCfValue(0.5)).toBe("0.50");
+    });
   });
 });

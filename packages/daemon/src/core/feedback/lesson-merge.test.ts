@@ -11,6 +11,7 @@ function lesson(overrides: Partial<Lesson>): Lesson {
     kind: "preference",
     src: "behavioral",
     conf: "low",
+    cf: null,
     last: "2026-06-01",
     provisional: false,
     ...overrides,
@@ -129,6 +130,33 @@ describe("lesson-merge", () => {
         lesson({ text: "maybe", provisional: true }),
       ]);
       expect(merged[0].provisional).toBe(true);
+    });
+
+    it("merges cf as the max of persisted values; null never wins", () => {
+      expect(
+        dedupeLessons([
+          lesson({ text: "Same", cf: 0.4 }),
+          lesson({ text: "same", cf: 0.7 }),
+        ])[0].cf,
+      ).toBe(0.7);
+      expect(
+        dedupeLessons([
+          lesson({ text: "Same", cf: 0.7 }),
+          lesson({ text: "same", cf: 0.4 }),
+        ])[0].cf,
+      ).toBe(0.7);
+      expect(
+        dedupeLessons([
+          lesson({ text: "Same", cf: null }),
+          lesson({ text: "same", cf: 0.4 }),
+        ])[0].cf,
+      ).toBe(0.4);
+      expect(
+        dedupeLessons([
+          lesson({ text: "Same", cf: 0.4 }),
+          lesson({ text: "same", cf: null }),
+        ])[0].cf,
+      ).toBe(0.4);
     });
   });
 });

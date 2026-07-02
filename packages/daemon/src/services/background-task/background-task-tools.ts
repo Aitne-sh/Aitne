@@ -12,11 +12,14 @@
  *   - `ask_user(question, contextSummary)` — write a clarification
  *     artifact, park the task (`awaiting_user`), and end the turn. The
  *     runner surfaces it through the gated delivery boundary.
- *   - `finish(result, draft, notify, significance?)` — WRITE THE ARTIFACT
- *     (verbatim `result` + plain `draft` summary + the `notify`
- *     disposition the worker evaluated against the spawn-time policy) and
- *     complete the task. The runner's reconcile hook reads the artifact
- *     and decides delivery.
+ *   - `finish(result, draft, notify, verification, significance?)` —
+ *     WRITE THE ARTIFACT (verbatim `result` + plain `draft` summary + the
+ *     `notify` disposition the worker evaluated against the spawn-time
+ *     policy + a REQUIRED requirement-by-requirement `verification`
+ *     checklist) and complete the task. Any unmet requirement marks the
+ *     completion `completed_with_gaps` and appends a deterministic gap
+ *     disclosure to the draft — structural honesty, no extra LLM call.
+ *     The runner's reconcile hook reads the artifact and decides delivery.
  *
  * The tools do NOT send DMs or enqueue delivery — they only write to the
  * task store + transition state. Delivery is the runner's job (it owns
@@ -62,6 +65,11 @@ export const BACKGROUND_TASK_TOOL_FQNS = [
 /** Per-read output cap so a large memory file can't blow the worker's
  *  context window or budget in one tool call. */
 const MEMORY_READ_CHAR_CAP = 8_000;
+
+/** Cap on the comma-joined unmet-requirement list inside the automatic
+ *  gap disclosure, so ten near-max (300-char) requirements can't balloon
+ *  the persisted draft. */
+const GAP_DISCLOSURE_LIST_CHAR_CAP = 600;
 
 /**
  * Allowlist of READ-ONLY memory keys → vault-relative paths. A fixed
@@ -131,6 +139,19 @@ const finishArgsSchema = {
     .boolean()
     .describe(
       "Your disposition vs the spawn-time notification policy. always ⇒ true (even for a '0 issues' result — the owner asked). if_significant ⇒ true ONLY if the brief's concrete criteria are met. silent ⇒ false. When unsure on always, prefer true.",
+    ),
+  verification: z
+    .array(
+      z.object({
+        requirement: z.string().min(1).max(300),
+        met: z.boolean(),
+        evidence: z.string().min(1).max(500),
+      }),
+    )
+    .min(1)
+    .max(10)
+    .describe(
+      "REQUIRED self-verification checklist. Derive the requirements from the brief's Expected output section (fallback: the Objective), then judge each against your ACTUAL result with concrete evidence. Any met=false completes the task with an automatic gap disclosure appended to the draft — never claim met=true without evidence.",
     ),
   significance: z
     .string()
@@ -283,19 +304,40 @@ function makeAskUserTool(runtime: BackgroundTaskRuntime) {
 function makeFinishTool(runtime: BackgroundTaskRuntime) {
   return tool(
     "finish",
-    "Done. Writes your artifact (verbatim result + plain draft summary + the notify disposition) and completes the task. Do not call any tool after finish — your session ends here.",
+    "Done. Writes your artifact (verbatim result + plain draft summary + the notify disposition + your self-verification checklist) and completes the task. Any unmet requirement is disclosed to the owner automatically. Do not call any tool after finish — your session ends here.",
     finishArgsSchema,
     async (args): Promise<ToolResult> => {
       const now = (runtime.nowFn ?? (() => Date.now()))();
+      // Structural self-verification: any unmet requirement downgrades the
+      // completion to `completed_with_gaps` and appends a deterministic
+      // disclosure so the DM agent cannot present a gapped result as a
+      // clean one. Notify is deliberately NOT overridden — the policy
+      // evaluation stands; the gap only changes how the result is framed.
+      const unmet = args.verification.filter((v) => !v.met);
+      const passed = unmet.length === 0;
+      let draft = args.draft;
+      let significance = args.significance ?? null;
+      if (!passed) {
+        const gapSummary = `${unmet.length} of ${args.verification.length} requirements not fully met`;
+        let unmetList = unmet.map((v) => v.requirement).join(", ");
+        if (unmetList.length > GAP_DISCLOSURE_LIST_CHAR_CAP) {
+          unmetList = `${unmetList.slice(0, GAP_DISCLOSURE_LIST_CHAR_CAP)}…`;
+        }
+        draft = `${draft}\n\nNote: ${gapSummary}: ${unmetList}`;
+        significance = significance
+          ? `completed_with_gaps; ${significance}`
+          : `completed_with_gaps; ${gapSummary}`;
+      }
       const terminal = markTerminal(runtime.db, {
         id: runtime.taskId,
         state: "completed",
-        outcomeDetail: null,
+        outcomeDetail: passed ? null : "completed_with_gaps",
         finishedAt: now,
         report: args.result,
-        draft: args.draft,
+        draft,
         notify: args.notify,
-        significance: args.significance ?? null,
+        significance,
+        verification: args.verification,
       });
       if (!terminal) {
         // CAS miss — the task was already cancelled / timed out. Surface

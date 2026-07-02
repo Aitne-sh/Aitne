@@ -52,6 +52,9 @@ curl -s -X POST http://localhost:8321/api/agents \
       "timezone": "Asia/Tokyo"
     },
     "backend": { "tier": "medium" },
+    "success_criteria": [
+      { "id": "triage-note", "kind": "file_exists", "target": "notes/inbox-triage-{date}.md" }
+    ],
     "prompt": "<the detailed agent definition — see below>"
   }'
 ```
@@ -107,8 +110,15 @@ Fields:
   separate skill copy). **Declare every playbook you name in the prompt's
   `# Important`** — a bare mention is not injected on its own. An unknown slug is
   rejected as `invalid_definition` on field `playbooks`.
+- **`success_criteria`** — optional array of deterministic post-run checks; their
+  hit rate is the Agent's dashboard quality metric. **Derive 1–3 from the prompt's
+  `# Output` contract** (see "Success criteria" below); omitting them when the
+  prompt has an `# Output` section returns a `no_success_criteria` warning.
 - **`prompt`** — the Agent's instructions (the Markdown body). **This is the most
-  important field. Write it in detail.**
+  important field. Write it in detail.** An empty or stub body (`"placeholder"`,
+  `"TODO"`, …) is rejected as `invalid_definition` on field `prompt` — the Agent
+  would skip every run as ambiguous. Never create now to fill the prompt in
+  later; clarify the task with the user first.
 
 ## Writing the `prompt` — the Agent has NO memory of why it exists
 
@@ -150,13 +160,36 @@ includes DMing the user, also set `schedule.defer_in_quiet_hours: true` so a
 firing inside quiet hours waits for the window's end instead of producing a
 message that would be held anyway.
 
+## Success criteria — derive them from `# Output`
+
+`success_criteria` are deterministic checks the daemon evaluates after every
+firing; their hit rate is the Agent's dashboard quality metric — without them
+the Agent has **no quality signal**. Derive 1–3 mechanically from the `# Output`
+contract at creation time:
+
+- Writes a dated note → `{ "id": "note-exists", "kind": "file_exists",
+  "target": "notes/<name>-{date}.md" }`. Targets are vault-relative; `{date}`
+  (the agent-day, resolved at eval time) is the only placeholder.
+- Populates a note with N sections → `{ "id": "sections-filled",
+  "kind": "file_section_count", "target": "…", "heading_level": 2, "min": N }` —
+  counts headings of exactly `heading_level`.
+- DMs the user → `{ "id": "dm-delivered", "kind": "notification_log",
+  "notification_type": "agent", "delivered_within_minutes": M }` — size `M` to
+  the run (30–60 typical). Caveat: matching is install-wide within the window
+  (ANY delivered `"agent"` notification counts, not just this Agent's), so
+  prefer the file-based kinds whenever the output also lands in a file.
+
+`id` values must be unique within the Agent (duplicates are rejected as
+`invalid_definition` on `success_criteria[i].id`).
+
 ## Responses & errors
 
 - `201 { "status": "created", "slug": "…" }` — the Agent is live; its recurring
   schedule is paired and it will fire on the next matching tick. The response may
-  also carry `warnings[]` (non-blocking authoring lint — e.g. an empty prompt, a
-  missing `# Instruction` section, or a playbook you named but didn't declare);
-  the Agent is still created, but fix the flagged issues and re-save its `agent.md`.
+  also carry `warnings[]` (non-blocking authoring lint — e.g. a missing
+  `# Instruction` section, a playbook you named but didn't declare, or an
+  `# Output` contract with no `success_criteria`); the Agent is still created,
+  but fix the flagged issues and re-save its `agent.md`.
 - `400 one_shot_not_supported` — the schedule was not `cron`/`recurring`. Use the
   `schedule` skill for one-time tasks.
 - `400 invalid_recurrence` — a `kind:"recurring"` schedule carried a malformed
@@ -168,7 +201,8 @@ message that would be held anyway.
   `issues[]` (each `{ field, message }`); the post-write cross-check (loader
   rejects the freshly written file) returns `slug` + a single `detail` string
   (or `null`). Read `issues[]` if present, else fall back to `detail`, fix the
-  reported field(s), and resubmit.
+  reported field(s), and resubmit. An empty/placeholder `prompt` also lands
+  here — get the real task from the user, never retry with another stub.
 
 Read `Read`-only files you reference in the prompt to confirm they exist before
 creating the Agent.

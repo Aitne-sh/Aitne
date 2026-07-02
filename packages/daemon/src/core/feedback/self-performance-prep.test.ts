@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 import { applySchema } from "../../db/schema.js";
 import {
   buildSelfPerformanceBlock,
+  gatherOutcomeRollup,
   gatherSelfPerformanceData,
+  renderOutcomeRollup,
   summarizeLessonStoreUtilization,
   FETCH_WINDOW_ACTION_TYPE,
   ACTIVITY_SCAN_GATE_ACTION_TYPE,
@@ -749,8 +751,14 @@ describe("self-performance-prep", () => {
         },
       });
       const block = build(data)!;
+      // A2.1 — correction_rate = corrected/(replied+corrected) rides the
+      // weekly row when someone actually responded; the untouched types
+      // below carry no rate (zero denominator).
       expect(block).toContain(
-        '<n t="reminder" sent="9" replied="2" acted="1" corrected="1" ignored="4" pending="1" />',
+        '<n t="reminder" sent="9" replied="2" acted="1" corrected="1" ignored="4" pending="1" correction_rate="0.33" />',
+      );
+      expect(block).toContain(
+        '<n t="a" sent="2" replied="0" acted="0" corrected="0" ignored="0" pending="2" />',
       );
       expect(block.indexOf('t="reminder"')).toBeLessThan(block.indexOf('t="a"'));
       expect(block.indexOf('t="a"')).toBeLessThan(block.indexOf('t="b"'));
@@ -910,6 +918,87 @@ describe("self-performance-prep", () => {
       expect(block).toBe(
         `<self_performance generated_at="${GENERATED_AT}" window_days="7" overflow="true" />`,
       );
+    });
+  });
+
+  describe("outcome rollup (A2.1)", () => {
+    it("gatherOutcomeRollup reads only the trailing window", () => {
+      const db = makeDb();
+      insertNotification(db, { type: "reminder", reaction: "replied" });
+      insertNotification(db, { type: "reminder", reaction: "corrected" });
+      insertNotification(db, {
+        type: "reminder",
+        reaction: "corrected",
+        createdAt: BEFORE_BASELINE, // outside the 7d window
+      });
+      const stats = gatherOutcomeRollup(db, { now: NOW });
+      expect(stats).toHaveLength(1);
+      expect(stats[0]).toMatchObject({
+        notificationType: "reminder",
+        sent: 2,
+        replied: 1,
+        corrected: 1,
+      });
+    });
+
+    it("renders correction_rate, keeps ignored separate, omits acted", () => {
+      const xml = renderOutcomeRollup(
+        [
+          notification({
+            notificationType: "deadline_nudge",
+            sent: 6,
+            replied: 2,
+            corrected: 1,
+            ignored: 3,
+            acted: 4, // deliberately non-zero: must NOT appear
+          }),
+        ],
+        { windowDays: 7 },
+      )!;
+      expect(xml).toContain('<outcome_rollup window_days="7"');
+      expect(xml).toContain(
+        '<type name="deadline_nudge" sent="6" replied="2" corrected="1" ' +
+          'ignored="3" correction_rate="0.33" />',
+      );
+      expect(xml).not.toContain("acted");
+      expect(xml).toContain("ignored is engagement-coverage, not rejection");
+    });
+
+    it("omits correction_rate at a zero denominator", () => {
+      const xml = renderOutcomeRollup([
+        notification({ notificationType: "fyi", sent: 4, ignored: 4 }),
+      ])!;
+      expect(xml).toContain('<type name="fyi" sent="4" replied="0" corrected="0" ignored="4" />');
+      expect(xml).not.toContain('correction_rate="');
+    });
+
+    it("returns null when nothing was sent", () => {
+      expect(renderOutcomeRollup([])).toBeNull();
+      expect(
+        renderOutcomeRollup([notification({ notificationType: "x", sent: 0 })]),
+      ).toBeNull();
+    });
+
+    it("caps types (sent desc, name tie-break) and marks the omission", () => {
+      const xml = renderOutcomeRollup(
+        [
+          notification({ notificationType: "b", sent: 2 }),
+          notification({ notificationType: "a", sent: 2 }),
+          notification({ notificationType: "big", sent: 9 }),
+        ],
+        { maxTypes: 2 },
+      )!;
+      expect(xml).toContain('omitted="1"');
+      expect(xml).toContain('name="big"');
+      expect(xml).toContain('name="a"');
+      expect(xml).not.toContain('name="b"');
+    });
+
+    it("escapes XML metacharacters in the type name", () => {
+      const xml = renderOutcomeRollup([
+        notification({ notificationType: 'x"<&>', sent: 1 }),
+      ])!;
+      expect(xml).toContain("x&quot;&lt;&amp;&gt;");
     });
   });
 });

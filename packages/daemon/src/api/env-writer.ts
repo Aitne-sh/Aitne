@@ -119,6 +119,8 @@ const NUMERIC_RANGE: Record<string, { min: number; max: number; label: string }>
   // Twin of the runtimeSettingsSchema bound; cap 480 = the self-tuning R1
   // freshness ladder's top notch (SELF_TUNING_REVIEW_CYCLE_DESIGN.md D2).
   activityScanPrePassFreshnessMinutes: { min: 0, max: 480, label: "0–480 minutes" },
+  // Twin of the runtimeSettingsSchema bound (WP4 chronic-failure surfacing).
+  agentChronicFailureThreshold: { min: 2, max: 10, label: "2–10" },
   gitPollIntervalSeconds: { min: 60, max: 86400, label: "60–86400 seconds" },
   githubPollIntervalSeconds: { min: 60, max: 86400, label: "60–86400 seconds" },
   // 0 disables the observer; 20160 min = 14 days which is already well past

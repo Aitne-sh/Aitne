@@ -225,6 +225,13 @@ export const USER_PROFILE_SWEEP_EVENING_CRON_EXPR = "50 17 * * *";
 export const ROADMAP_MAINTENANCE_CRON_EXPR = "45 17 * * *";
 
 /**
+ * SELF_IMPROVEMENT_PHASE2 §2.1/§2.3 — daily mechanical lessons sweep, 5 min
+ * before the roadmap pass so both finish before evening_review at 18:00.
+ * Must match the `lesson-maintenance` builtin-registry cronExpression.
+ */
+export const LESSON_MAINTENANCE_CRON_EXPR = "40 17 * * *";
+
+/**
  * Cron expression for the BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a
  * pre-morning digest: 60 min before the day boundary, wrapping
  * backward across midnight (so `dayBoundaryHour = 4` → "0 3 * * *",
@@ -343,6 +350,16 @@ export class AgentScheduler {
    * agent/journal.md append.
    */
   private onRoadmapMaintenance: (() => void) | null = null;
+  /**
+   * SELF_IMPROVEMENT_PHASE2 §2.1/§2.3 — daily mechanical lessons sweep at
+   * 17:40 local, 5 min before the roadmap pass and 20 min before
+   * evening_review. Wraps `runLessonMechanicalMaintenance` so the graduated
+   * expiration (demote → archive → re-promote) and cf re-stamping run even
+   * on nights with zero feedback signals (no worksheet → no write-path
+   * normalization) and over hand-edited files. Fire-and-forget like the
+   * roadmap callback; the implementation owns audit emission.
+   */
+  private onLessonMaintenance: (() => void) | null = null;
   /**
    * BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
    * builder. Fires at `dayBoundaryHour − 1` local each night so the
@@ -489,6 +506,17 @@ export class AgentScheduler {
    */
   setRoadmapMaintenanceCallback(fn: () => void): void {
     this.onRoadmapMaintenance = fn;
+  }
+
+  /**
+   * Register the daily lessons mechanical maintenance callback
+   * (SELF_IMPROVEMENT_PHASE2 §2.1/§2.3). Called at 17:40 local, before
+   * the 17:45 roadmap pass and the 18:00 evening_review so the evening
+   * worksheet reads freshly-normalized stores. Fire-and-forget; failures
+   * are logged but never cascade into the evening review.
+   */
+  setLessonMaintenanceCallback(fn: () => void): void {
+    this.onLessonMaintenance = fn;
   }
 
   /**
@@ -1169,6 +1197,31 @@ export class AgentScheduler {
       { timezone: tz },
     );
     this.cronJobs.push(sweepEveningJob);
+
+    // Lesson mechanical maintenance (SELF_IMPROVEMENT_PHASE2 §2.1/§2.3):
+    // 17:40 local — 5 min before the roadmap pass and 20 min before
+    // evening_review — so the evening consolidation reads
+    // freshly-normalized lesson stores. Same gating posture as the
+    // roadmap pass below: autonomousGate applies, the morning-routine
+    // pending skip deliberately does not.
+    const lessonMaintenanceJob = cron.schedule(
+      LESSON_MAINTENANCE_CRON_EXPR,
+      () => {
+        if (!this.isAgentEnabledForFiring("lesson-maintenance", "lesson_maintenance")) return;
+        const gateReason = this.autonomousGate();
+        if (gateReason !== null) {
+          this.logGateBlock(gateReason, { cron: "lesson_maintenance" });
+          return;
+        }
+        try {
+          this.onLessonMaintenance?.();
+        } catch (err) {
+          logger.warn({ err }, "Lesson maintenance callback threw");
+        }
+      },
+      { timezone: tz },
+    );
+    this.cronJobs.push(lessonMaintenanceJob);
 
     // Roadmap mechanical maintenance (evening-review slimdown §2.2):
     // 17:45 local, 15 min before evening_review's 18:00 fire. Runs the

@@ -42,6 +42,7 @@
 
 import {
   extractMarkdownSection,
+  lessonCf,
   parseLessonsSection,
   type Lesson,
 } from "./lesson-format.js";
@@ -166,7 +167,8 @@ function renderScope(
     out.push(
       `      <lesson rank="${idx + 1}" score="${round2(
         scoreLesson(lesson, opts.nowIso, undefined, halfLife),
-      )}" ev="${lesson.ev}" kind="${lesson.kind}" last="${lesson.last}" ` +
+      )}" ev="${lesson.ev}" cf="${round2(lessonCf(lesson))}" ` +
+        `kind="${lesson.kind}" last="${lesson.last}" ` +
         `provisional="${lesson.provisional}" ` +
         `stale="${isLessonStale(lesson, opts.nowIso, opts.staleDays)}">` +
         `${inline(lesson.text)}</lesson>`,

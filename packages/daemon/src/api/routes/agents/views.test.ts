@@ -350,14 +350,31 @@ describe("planRunNow", () => {
       makeDto({ slug: "my-task", source: "user", processKey: "agent.task", recurringScheduleId: 9 }),
       { taskPrompt: "Do the thing" },
     );
-    const withoutPrompt = planRunNow(
-      makeDto({ slug: "my-task", source: "user", processKey: "agent.task" }),
-    );
-    if (!withPrompt.ok || !withoutPrompt.ok) throw new Error("unreachable");
+    if (!withPrompt.ok) throw new Error("unreachable");
     expect(withPrompt.taskPrompt).toBe("Do the thing");
     expect(withPrompt.emitDm).toBe(false);
     expect(withPrompt.taskContext.routine).toBeUndefined();
-    expect(withoutPrompt.taskPrompt).toBeNull();
+  });
+
+  it("refuses a user Agent whose recurring prompt is missing or a placeholder stub", () => {
+    // Missing prompt (no recurring row / unpaired) — the insert would coalesce
+    // to the Agent's *name* as the task, guaranteed ambiguous-drop.
+    const missing = planRunNow(
+      makeDto({ slug: "my-task", source: "user", processKey: "agent.task" }),
+    );
+    expect(missing).toMatchObject({ ok: false, status: 409, error: "agent_prompt_placeholder" });
+
+    // Whole-body stub left by a pre-reject-era create.
+    const stub = planRunNow(
+      makeDto({ slug: "my-task", source: "user", processKey: "agent.task", recurringScheduleId: 9 }),
+      { taskPrompt: "placeholder" },
+    );
+    expect(stub).toMatchObject({ ok: false, status: 409, error: "agent_prompt_placeholder" });
+    if (!stub.ok) expect(stub.hint).toContain("policies/agents/my-task/agent.md");
+
+    // Built-ins drive their prompt from the process key — never gated on this.
+    const builtin = planRunNow(makeDto());
+    expect(builtin.ok).toBe(true);
   });
 
   it("surfaces a user Agent's backend/model/tier pin so run-now matches a cron fire", () => {
@@ -366,7 +383,7 @@ describe("planRunNow", () => {
     // Agent's backend — manual runs must route like cron fires).
     const plan = planRunNow(
       makeDto({ slug: "my-task", source: "user", processKey: "agent.task", recurringScheduleId: 9 }),
-      { backendId: "codex", model: null, tier: "lite" },
+      { taskPrompt: "Do the thing", backendId: "codex", model: null, tier: "lite" },
     );
     if (!plan.ok) throw new Error("unreachable");
     expect(plan.backendId).toBe("codex");
@@ -996,12 +1013,11 @@ describe("planCreate (POST /api/agents)", () => {
     expect(plan.issues!.length).toBeGreaterThan(0);
   });
 
-  it("renders an empty body when no prompt is supplied", () => {
+  it("rejects a missing prompt as invalid_definition on field prompt", () => {
     const plan = planCreate(cronBody({ prompt: undefined }), NONE);
-    expect(plan.ok).toBe(true);
-    if (!plan.ok) return;
-    // The frontmatter still renders; body is just blank.
-    expect(plan.markdown).toContain("slug: daily-triage");
+    if (plan.ok || plan.status !== 400) throw new Error("expected invalid_definition");
+    expect(plan.error).toBe("invalid_definition");
+    expect(plan.issues?.some((i) => i.field === "prompt")).toBe(true);
   });
 
   // ── playbooks[] + lint warnings (AGENT_PROMPT_QUALITY_DESIGN.md Phase 2) ──
@@ -1057,10 +1073,50 @@ describe("planCreate (POST /api/agents)", () => {
     expect(plan.warnings).toEqual([]);
   });
 
-  it("warns on an empty prompt body", () => {
+  it("rejects an empty prompt body as invalid_definition on field prompt", () => {
     const plan = planCreate(cronBody({ prompt: "" }), NONE);
+    if (plan.ok || plan.status !== 400) throw new Error("expected invalid_definition");
+    expect(plan.error).toBe("invalid_definition");
+    expect(plan.issues?.some((i) => i.field === "prompt")).toBe(true);
+  });
+
+  it("rejects a whole-body placeholder prompt as invalid_definition on field prompt", () => {
+    // The exact failure this guards against: an Agent deployed with
+    // prompt "placeholder" is dropped as ambiguous on every firing.
+    const plan = planCreate(cronBody({ prompt: "placeholder" }), NONE);
+    if (plan.ok || plan.status !== 400) throw new Error("expected invalid_definition");
+    expect(plan.error).toBe("invalid_definition");
+    const issue = plan.issues?.find((i) => i.field === "prompt");
+    expect(issue?.message).toContain("placeholder");
+    expect(plan.hint).toContain("resubmit");
+  });
+
+  it("warns when the prompt has an # Output contract but no success_criteria", () => {
+    const plan = planCreate(
+      cronBody({
+        prompt:
+          "# Role\nNote writer.\n\n# Instruction\n1. Write the note.\n\n# Output\n- notes/daily-{date}.md",
+      }),
+      NONE,
+    );
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    expect(plan.warnings.map((w) => w.code)).toContain("empty_prompt");
+    expect(plan.warnings.map((w) => w.code)).toContain("no_success_criteria");
+  });
+
+  it("does not warn when success_criteria back the # Output contract", () => {
+    const plan = planCreate(
+      cronBody({
+        success_criteria: [
+          { id: "note-exists", kind: "file_exists", target: "notes/daily-{date}.md" },
+        ],
+        prompt:
+          "# Role\nNote writer.\n\n# Instruction\n1. Write the note.\n\n# Output\n- notes/daily-{date}.md",
+      }),
+      NONE,
+    );
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.warnings).toEqual([]);
   });
 });

@@ -291,7 +291,9 @@ declares (`policies/agent-lessons.md` for the global `agent` scope;
     - Replace its members with **one** higher-level bullet that captures the
       shared principle:
       `- [<today>] <generalized directive> <!-- ev=<sum of the cluster's ev, min 1> kind=<the cluster's strongest kind> src=<strongest src> conf=<high if any member was high, else medium> last=<today> -->`
-      (summing `ev` keeps the merged lesson harder to evict — never re-derive it lower).
+      (summing `ev` keeps the merged lesson harder to evict — never re-derive it
+      lower; omit `cf=` on a merged bullet — the daemon stamps it
+      deterministically after your write).
     - Leave a lesson that belongs to no cluster untouched, byte-for-byte.
     - **Never collapse, merge, or promote a `<!-- provisional -->` lesson.** The
       worksheet block lists only active (promoted) lessons; the file also holds

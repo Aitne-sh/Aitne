@@ -54,8 +54,9 @@ Resolve ambiguity with the user now, then encode all of:
   reads right if it's sent directly.
 - **Notification policy + criteria** — see below; for `if_significant` the
   criteria MUST be written into the brief in concrete terms.
-- **Expected output** — what a good `result` contains (a per-repo table, a
-  ranked list, a one-paragraph verdict).
+- **Expected output** — 1–5 concretely verifiable requirements (a per-repo
+  table, a ranked list, a one-paragraph verdict). The worker verifies its
+  result against these line-by-line before finishing.
 
 The worker can read owner memory itself to fill in preferences, so you need
 only supply the *task-specific* inputs above. **Promoting an inline task?**
@@ -83,7 +84,7 @@ in the daily digest and the user can pull it (see "Filed results" below).
 |---|---|---|
 | POST | `/api/background-task` | Create + dispatch, or schedule (`scheduleAt`). |
 | GET | `/api/background-task?state=...` | List (also `notify`, `sinceHours` for the filed pull). |
-| GET | `/api/background-task/:id` | The artifact — verbatim `report`, `draft`, `notify`, clarifications. |
+| GET | `/api/background-task/:id` | The artifact — verbatim `report`, `draft`, `notify`, `verification`, clarifications. |
 | POST | `/api/background-task/:id/cancel` | Force-stop. |
 
 Clarifications are answered with the **`background-task-reply`** skill.
@@ -156,7 +157,9 @@ curl --silent --fail http://localhost:8321/api/background-task/<taskId>
 
 `report` is the full, unparaphrased result. Quote from it; don't invent
 detail. If you lack the `taskId`, list `state=completed` and match by
-`title`.
+`title`. The worker's `verification` checklist rides along — on
+`outcomeDetail` `completed_with_gaps` it shows which requirements fell
+short.
 
 ## Filed results — the "did that monitor ever run?" pull
 

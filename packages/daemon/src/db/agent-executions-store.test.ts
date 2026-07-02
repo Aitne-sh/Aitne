@@ -6,6 +6,7 @@ import {
   byErrorKind,
   completeExecution,
   getExecution,
+  listChronicallyFailingAgents,
   listExecutions,
   listInFlightAgentIds,
   listLastExecutionsByAgent,
@@ -14,14 +15,14 @@ import {
   sweepAbandoned,
 } from "./agent-executions-store.js";
 
-function seedAgent(db: Database.Database, slug: string): void {
+function seedAgent(db: Database.Database, slug: string, enabled = true): void {
   const input: AgentUpsertInput = {
     slug,
     name: slug,
     source: "user",
     definitionPath: `/vault/policies/agents/${slug}/agent.md`,
     definitionHash: "h",
-    enabled: true,
+    enabled,
     processKey: "agent.task",
     scheduleKind: "cron",
     scheduleExpression: "0 9 * * *",
@@ -391,6 +392,124 @@ describe("agent-executions-store", () => {
       expect(first.count).toBe(1);
       const second = sweepAbandoned(db, 150, 300);
       expect(second).toEqual({ count: 0, ids: [] });
+    });
+  });
+
+  describe("listChronicallyFailingAgents", () => {
+    const HOUR = 3_600_000;
+    // Wall-clock anchor comfortably above every relative offset used below.
+    const now = new Date(1_000 * HOUR);
+
+    /** Insert one TERMINAL execution ending at `endedAt` (epoch ms). */
+    function run(
+      slug: string,
+      result: "success" | "error",
+      endedAt: number,
+      errorKind: string | null = null,
+    ): void {
+      const id = startExecution(
+        db,
+        { agentId: slug, trigger: "cron" },
+        endedAt - 1000,
+      );
+      completeExecution(
+        db,
+        { executionId: id, result, errorKind },
+        endedAt,
+      );
+    }
+
+    it("fires on an exactly-threshold error streak with a fresh last error", () => {
+      // A success further back does not matter — only the newest
+      // `threshold` terminal rows are inspected for the streak.
+      run("deploy-watch", "success", now.getTime() - 10 * HOUR);
+      run("deploy-watch", "error", now.getTime() - 3 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 2 * HOUR, "quota");
+      run("deploy-watch", "error", now.getTime() - 1 * HOUR, "timeout");
+      const got = listChronicallyFailingAgents(db, {
+        threshold: 3,
+        lookbackHours: 24,
+        now,
+      });
+      expect(got).toEqual([
+        {
+          slug: "deploy-watch",
+          name: "deploy-watch",
+          streak: 3,
+          lastErrorKind: "timeout",
+        },
+      ]);
+    });
+
+    it("defaults `now` to the wall clock when omitted", () => {
+      // Errors anchored in 1970 are far outside any real-clock lookback, so
+      // the wall-clock default (`opts.now ?? new Date()`) yields no chronic
+      // agents — exercising the default without freezing time.
+      run("deploy-watch", "error", now.getTime() - 3 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 2 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 1 * HOUR, "tool");
+      expect(
+        listChronicallyFailingAgents(db, { threshold: 3, lookbackHours: 24 }),
+      ).toEqual([]);
+    });
+
+    it("does not fire when an intervening success breaks the streak", () => {
+      run("deploy-watch", "error", now.getTime() - 4 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 3 * HOUR, "tool");
+      run("deploy-watch", "success", now.getTime() - 2 * HOUR);
+      run("deploy-watch", "error", now.getTime() - 1 * HOUR, "tool");
+      expect(
+        listChronicallyFailingAgents(db, { threshold: 3, lookbackHours: 24, now }),
+      ).toEqual([]);
+    });
+
+    it("does not fire when the newest error is outside the lookback window", () => {
+      run("deploy-watch", "error", now.getTime() - 30 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 28 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 26 * HOUR, "tool");
+      expect(
+        listChronicallyFailingAgents(db, { threshold: 3, lookbackHours: 24, now }),
+      ).toEqual([]);
+    });
+
+    it("ignores in-flight rows entirely", () => {
+      run("deploy-watch", "error", now.getTime() - 3 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 2 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 1 * HOUR, null);
+      // A newer in-flight row must neither extend nor break the streak.
+      startExecution(db, { agentId: "deploy-watch", trigger: "cron" }, now.getTime());
+      const got = listChronicallyFailingAgents(db, {
+        threshold: 3,
+        lookbackHours: 24,
+        now,
+      });
+      // NULL error_kind on the newest error surfaces as-is.
+      expect(got).toEqual([
+        {
+          slug: "deploy-watch",
+          name: "deploy-watch",
+          streak: 3,
+          lastErrorKind: null,
+        },
+      ]);
+    });
+
+    it("excludes disabled agents even with a qualifying streak", () => {
+      seedAgent(db, "broken-but-off", false);
+      run("broken-but-off", "error", now.getTime() - 3 * HOUR, "tool");
+      run("broken-but-off", "error", now.getTime() - 2 * HOUR, "tool");
+      run("broken-but-off", "error", now.getTime() - 1 * HOUR, "tool");
+      expect(
+        listChronicallyFailingAgents(db, { threshold: 3, lookbackHours: 24, now }),
+      ).toEqual([]);
+    });
+
+    it("does not fire with fewer than threshold terminal executions", () => {
+      run("deploy-watch", "error", now.getTime() - 2 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 1 * HOUR, "tool");
+      expect(
+        listChronicallyFailingAgents(db, { threshold: 3, lookbackHours: 24, now }),
+      ).toEqual([]);
     });
   });
 

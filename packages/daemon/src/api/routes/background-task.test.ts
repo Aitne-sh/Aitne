@@ -6,6 +6,7 @@ import {
   getBackgroundTask,
   markRunning,
   markAwaitingUser,
+  markTerminal,
 } from "../../db/background-task-store.js";
 import { createClarification } from "../../db/background-task-clarifications-store.js";
 import { createBackgroundTaskRoutes } from "./background-task.js";
@@ -133,6 +134,45 @@ describe("/api/background-task routes", () => {
     const json = (await res.json()) as { id: string; clarifications: unknown[] };
     expect(json.id).toBe(taskId);
     expect(Array.isArray(json.clarifications)).toBe(true);
+  });
+
+  it("GET :id exposes the verification checklist + the gap outcome detail", async () => {
+    db.prepare(
+      `INSERT INTO background_task (id, brief, state, notification_policy, created_at)
+       VALUES ('v1', 'b', 'pending', 'always', 1000)`,
+    ).run();
+    markRunning(db, "v1", 1100);
+    markTerminal(db, {
+      id: "v1",
+      state: "completed",
+      outcomeDetail: "completed_with_gaps",
+      finishedAt: 2000,
+      report: "r",
+      draft: "d\n\nNote: 1 of 2 requirements not fully met: name the job",
+      notify: true,
+      verification: [
+        { requirement: "one line per repo", met: true, evidence: "2 rows" },
+        { requirement: "name the job", met: false, evidence: "log unavailable" },
+      ],
+    });
+    const res = await makeApp(db, null).request("/background-task/v1");
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      verification: unknown;
+      outcomeDetail: string | null;
+    };
+    expect(json.outcomeDetail).toBe("completed_with_gaps");
+    expect(json.verification).toEqual([
+      { requirement: "one line per repo", met: true, evidence: "2 rows" },
+      { requirement: "name the job", met: false, evidence: "log unavailable" },
+    ]);
+    // the list serializer shares toWire — verification rides along there too
+    const list = await makeApp(db, null).request("/background-task?state=completed");
+    const listJson = (await list.json()) as { tasks: { id: string; verification: unknown }[] };
+    expect(listJson.tasks.find((t) => t.id === "v1")?.verification).toEqual([
+      { requirement: "one line per repo", met: true, evidence: "2 rows" },
+      { requirement: "name the job", met: false, evidence: "log unavailable" },
+    ]);
   });
 
   it("clarify resolves the open clarification and resumes the runner", async () => {

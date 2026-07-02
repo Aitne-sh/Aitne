@@ -2863,6 +2863,35 @@ describe("ContextBuilder", () => {
     });
   });
 
+  // WP4 chronic-failure surfacing — the dispatcher attaches a
+  // `<system_health>` block (rendered by `renderSystemHealthBlock`) to
+  // every Stage 3 activity_scan event while at least one enabled agent is
+  // chronically failing; ContextBuilder injects it verbatim like the other
+  // dispatcher-owned blocks.
+  describe("WP4 — system_health injection", () => {
+    it("injects <system_health> when event.data.systemHealthBlock is a string", async () => {
+      const block = `<system_health>\n  - agent "deploy-watch" failed its last 3 run(s) (last error kind: tool); dashboard: /agents/deploy-watch\n</system_health>`;
+      const event = createEvent({
+        type: "routine.activity_scan",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+        data: { systemHealthBlock: block },
+      }) as unknown as RoutineEvent;
+      const context = await builder.build(event);
+      expect(context).toContain(block);
+    });
+
+    it("omits the block when event.data.systemHealthBlock is absent", async () => {
+      const event = createEvent({
+        type: "routine.activity_scan",
+        source: "cron",
+        priority: EventPriority.NORMAL,
+      });
+      const context = await builder.build(event);
+      expect(context).not.toContain("<system_health");
+    });
+  });
+
   // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 / Phase 5 — the monthly re-generalization
   // worksheet is assembled by the dispatcher pre-step and injected verbatim,
   // exactly like the evening-review `<feedback_worksheet>`.

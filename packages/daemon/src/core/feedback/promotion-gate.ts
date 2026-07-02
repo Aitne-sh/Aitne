@@ -19,6 +19,7 @@ import type {
   FeedbackSignalSource,
   FeedbackSignalValence,
 } from "../../db/feedback-signals-store.js";
+import { roundCf } from "./lesson-format.js";
 
 /** Minimal signal shape the gate scores — a projection of `feedback_signals`. */
 export interface GateSignal {
@@ -72,11 +73,90 @@ export function computeWeightedEvidence(
   return signals.reduce((sum, signal) => sum + signalWeight(signal), 0);
 }
 
+/**
+ * Phase-2 §2.1 source factor for a candidate's initial confidence: an owner
+ * directive is fully trusted, the agent's own critique slightly less, and a
+ * behavioral inference least — mirroring the {@link signalWeight} authority
+ * ordering without re-deriving it per signal (cf0 keys on the candidate's
+ * *dominant* source, which the worksheet already computes).
+ */
+export const SOURCE_CF_FACTOR: Record<FeedbackSignalSource, number> = {
+  explicit: 1.0,
+  self_critique: 0.85,
+  behavioral: 0.7,
+};
+
+/**
+ * `saturate(w) = w / (w + K)` — maps unbounded weighted evidence into [0,1),
+ * with `K = feedbackPromotionThreshold` as the half-saturation point (at the
+ * promotion bar, cf0 sits at 0.5·sourceFactor). Guards `k <= 0` to the
+ * documented default so a misconfigured threshold can't divide by zero.
+ */
+export function saturate(weightedEv: number, k: number): number {
+  const safeK = k > 0 ? k : 2;
+  const w = Math.max(weightedEv, 0);
+  return w / (w + safeK);
+}
+
+/**
+ * Initial numeric confidence for a newly-promoted lesson (Phase-2 §2.1):
+ * `cf0 = saturate(weighted_ev) · sourceFactor`, rounded to the persisted 2dp.
+ * Surfaced on worksheet candidates as `cf0=` and re-derived by the normalizer
+ * for a written bullet that carries no trustworthy `cf`.
+ */
+export function computeInitialCf(
+  weightedEv: number,
+  src: FeedbackSignalSource,
+  threshold: number,
+): number {
+  return roundCf(saturate(weightedEv, threshold) * SOURCE_CF_FACTOR[src]);
+}
+
+/**
+ * §2.2 anti-whiplash gate. A promotable NON-explicit candidate that
+ * contradicts an established lesson (`maxSuspectCf ≥ guardCf`) is downgraded
+ * to provisional with reason `contradiction` unless its weighted evidence
+ * clears the HIGHER bar `1.5 · threshold · maxSuspectCf` — established
+ * beliefs take more evidence to overturn than to confirm. An explicit owner
+ * directive bypasses the guard entirely (a user correction always wins), as
+ * does a verdict that is already non-promotable.
+ */
+export function applyContradictionGuard(
+  verdict: PromotionVerdict,
+  maxSuspectCf: number,
+  opts: { guardCf: number; threshold: number },
+): PromotionVerdict {
+  if (!verdict.promotable || verdict.reason === "explicit-directive") {
+    return verdict;
+  }
+  if (
+    maxSuspectCf >= opts.guardCf &&
+    verdict.weightedEv < contradictionOverrideBar(opts.threshold, maxSuspectCf)
+  ) {
+    return {
+      ...verdict,
+      promotable: false,
+      provisional: true,
+      reason: "contradiction",
+    };
+  }
+  return verdict;
+}
+
+/** The §2.2 higher evidence bar for overturning an established lesson. */
+export function contradictionOverrideBar(
+  threshold: number,
+  suspectCf: number,
+): number {
+  return 1.5 * threshold * suspectCf;
+}
+
 export type PromotionReason =
   | "explicit-directive"
   | "evidence-threshold"
   | "below-threshold"
   | "ignored-non-initiating"
+  | "contradiction"
   | "no-signals";
 
 export interface PromotionVerdict {

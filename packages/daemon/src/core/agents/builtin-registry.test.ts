@@ -10,9 +10,10 @@ import {
   resolveRuntimeWindowCadence,
 } from "./builtin-registry.js";
 
-// The 10 frozen built-in slugs (design §5.5.1). The registry MUST contain
-// exactly these; the per-slug expectations below mirror the frozen
-// firing-path table verified against scheduler.ts during Phase 0.
+// The 11 frozen built-in slugs (design §5.5.1; `lesson-maintenance` added by
+// SELF_IMPROVEMENT_PHASE2 / QUALITY_LOOP_IMPROVEMENT_PLAN_2026-07 WP1). The
+// registry MUST contain exactly these; the per-slug expectations below mirror
+// the frozen firing-path table verified against scheduler.ts.
 const EXPECTED_SLUGS = [
   "morning-routine",
   "evening-review",
@@ -22,13 +23,14 @@ const EXPECTED_SLUGS = [
   "user-profile-sweep-morning",
   "user-profile-sweep-evening",
   "roadmap-maintenance",
+  "lesson-maintenance",
   "context-index-reconcile",
   "skill-curation",
 ] as const;
 
 describe("BUILTIN_AGENT_REGISTRY — structure", () => {
-  it("contains exactly the 10 frozen built-in slugs", () => {
-    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(10);
+  it("contains exactly the 11 frozen built-in slugs", () => {
+    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(11);
     expect(BUILTIN_AGENT_REGISTRY.map((e) => e.slug).sort()).toEqual(
       [...EXPECTED_SLUGS].sort(),
     );
@@ -164,6 +166,14 @@ describe("BUILTIN_AGENT_REGISTRY — frozen firing paths (§5.5.1)", () => {
         callbackName: "onRoadmapMaintenance",
       },
     },
+    "lesson-maintenance": {
+      processKey: null,
+      cron: "40 17 * * *",
+      scheduler: {
+        kind: "in_process_callback",
+        callbackName: "onLessonMaintenance",
+      },
+    },
     "context-index-reconcile": {
       processKey: null,
       cron: "45 3 * * *",
@@ -215,6 +225,7 @@ describe("BUILTIN_AGENT_REGISTRY — frozen firing paths (§5.5.1)", () => {
       "monthly-review",
       "user-profile-sweep-evening",
       "roadmap-maintenance",
+      "lesson-maintenance",
       "skill-curation",
     ]) {
       const entry = getBuiltinRegistryEntry(slug)!;
@@ -301,6 +312,7 @@ describe("hub metadata — category + policyFiles (AGENTS_HUB_REDESIGN_PLAN §1)
       "user-profile-sweep-morning": "maintenance",
       "user-profile-sweep-evening": "maintenance",
       "roadmap-maintenance": "maintenance",
+      "lesson-maintenance": "maintenance",
       "context-index-reconcile": "maintenance",
       "skill-curation": "maintenance",
     });
@@ -329,6 +341,7 @@ describe("hub metadata — category + policyFiles (AGENTS_HUB_REDESIGN_PLAN §1)
     expect(paths("monthly-review")).toEqual(["policies/routines/monthly.md"]);
     expect(paths("activity-scan")).toEqual(["policies/routines/activity-scan.md"]);
     expect(paths("roadmap-maintenance")).toEqual([]);
+    expect(paths("lesson-maintenance")).toEqual([]);
     expect(paths("context-index-reconcile")).toEqual([]);
     expect(paths("user-profile-sweep-morning")).toEqual([]);
     expect(paths("user-profile-sweep-evening")).toEqual([]);

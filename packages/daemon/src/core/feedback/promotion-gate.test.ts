@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyContradictionGuard,
+  computeInitialCf,
   computeWeightedEvidence,
+  contradictionOverrideBar,
   evaluatePromotion,
   isExplicitDirective,
   isIgnoredSignal,
+  saturate,
   signalWeight,
+  SOURCE_CF_FACTOR,
   type GateSignal,
 } from "./promotion-gate.js";
 
@@ -156,6 +161,89 @@ describe("promotion-gate", () => {
         reason: "below-threshold",
         weightedEv: 0.75,
       });
+    });
+  });
+
+  describe("cf0 (SELF_IMPROVEMENT_PHASE2 §2.1)", () => {
+    it("saturate maps weighted evidence into [0,1) with K as half-point", () => {
+      expect(saturate(2, 2)).toBe(0.5);
+      expect(saturate(0, 2)).toBe(0);
+      expect(saturate(6, 2)).toBeCloseTo(0.75, 6);
+    });
+
+    it("saturate guards non-positive K to the documented default", () => {
+      expect(saturate(2, 0)).toBe(0.5);
+      expect(saturate(2, -1)).toBe(0.5);
+    });
+
+    it("saturate clamps negative evidence to zero", () => {
+      expect(saturate(-3, 2)).toBe(0);
+    });
+
+    it("computeInitialCf = round2(saturate · sourceFactor)", () => {
+      expect(computeInitialCf(2, "explicit", 2)).toBe(0.5);
+      expect(computeInitialCf(2, "self_critique", 2)).toBe(
+        Math.round(0.5 * SOURCE_CF_FACTOR.self_critique * 100) / 100,
+      );
+      expect(computeInitialCf(2, "behavioral", 2)).toBe(0.35);
+      // single explicit correction: 1/(1+2) · 1.0 ≈ 0.33 (the documented
+      // D7 asymmetry — below the contradiction guard, which explicit
+      // directives bypass anyway)
+      expect(computeInitialCf(1, "explicit", 2)).toBe(0.33);
+    });
+  });
+
+  describe("applyContradictionGuard (§2.2 anti-whiplash)", () => {
+    const promotable = evaluatePromotion(
+      [sig("behavioral", "positive"), sig("behavioral", "positive"), sig("behavioral", "positive"), sig("behavioral", "positive")],
+      2,
+    ); // weightedEv 2.0, evidence-threshold
+
+    it("holds a promotable non-explicit candidate below the 1.5x bar", () => {
+      // bar = 1.5 · 2 · 0.8 = 2.4 > 2.0
+      const held = applyContradictionGuard(promotable, 0.8, {
+        guardCf: 0.6,
+        threshold: 2,
+      });
+      expect(held).toMatchObject({
+        promotable: false,
+        provisional: true,
+        reason: "contradiction",
+      });
+    });
+
+    it("promotes once evidence clears the bar", () => {
+      const strong = evaluatePromotion(
+        Array.from({ length: 6 }, () => sig("behavioral", "positive")),
+        2,
+      ); // weightedEv 3.0 ≥ 2.4
+      expect(
+        applyContradictionGuard(strong, 0.8, { guardCf: 0.6, threshold: 2 }),
+      ).toBe(strong);
+    });
+
+    it("ignores suspects below the guard cf", () => {
+      expect(
+        applyContradictionGuard(promotable, 0.5, { guardCf: 0.6, threshold: 2 }),
+      ).toBe(promotable);
+    });
+
+    it("explicit directives bypass the guard (a user correction always wins)", () => {
+      const explicit = evaluatePromotion([sig("explicit", "correction")], 2);
+      expect(
+        applyContradictionGuard(explicit, 1, { guardCf: 0.6, threshold: 2 }),
+      ).toBe(explicit);
+    });
+
+    it("passes a non-promotable verdict through untouched", () => {
+      const held = evaluatePromotion([sig("behavioral", "positive")], 2);
+      expect(
+        applyContradictionGuard(held, 1, { guardCf: 0.6, threshold: 2 }),
+      ).toBe(held);
+    });
+
+    it("contradictionOverrideBar is the documented 1.5·K·cf", () => {
+      expect(contradictionOverrideBar(2, 0.8)).toBeCloseTo(2.4, 6);
     });
   });
 });

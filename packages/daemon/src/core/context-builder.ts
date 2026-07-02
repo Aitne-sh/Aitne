@@ -325,6 +325,7 @@ export class ContextBuilder implements IContextBuilder {
         capBytes,
         slim: lessonsInjection.slim,
         nowIso: new Date().toISOString(),
+        confidenceFloor: this.config.feedbackLessonConfidenceFloor,
       });
       if (lessonsResult.block) {
         sections.push(lessonsResult.block);
@@ -360,6 +361,7 @@ export class ContextBuilder implements IContextBuilder {
         slim: false,
         selfScope: true,
         nowIso: new Date().toISOString(),
+        confidenceFloor: this.config.feedbackLessonConfidenceFloor,
       });
       if (selfResult.block) {
         sections.push(selfResult.block);
@@ -499,6 +501,15 @@ export class ContextBuilder implements IContextBuilder {
     // block's wire format.
     if (typeof event.data?.fetchReportBlock === "string") {
       sections.push(event.data.fetchReportBlock);
+    }
+    // WP4 chronic-failure surfacing — Stage 3 activity_scan events arrive
+    // with a `<system_health>` block (rendered by
+    // `renderSystemHealthBlock` in scheduler/activity-scan-gate.ts)
+    // whenever at least one enabled agent is chronically failing. Injected
+    // verbatim; the task-flow's Step 9 notify rules decide whether the
+    // owner hears about it. Absent on healthy ticks — no string is pushed.
+    if (typeof event.data?.systemHealthBlock === "string") {
+      sections.push(event.data.systemHealthBlock);
     }
     // FEEDBACK_LEARNING_LOOP_DESIGN.md §4 — the evening-review session
     // receives a `<feedback_worksheet>` block assembled by the dispatcher's

@@ -19,6 +19,10 @@ import { writeIntegrations } from "../db/integrations-store.js";
 import { upsertAgent } from "../db/agents-store.js";
 import { readRuntimeState, writeRuntimeState } from "../db/runtime-state.js";
 import { TUNING_PENDING_CYCLE_STATE_KEY } from "./feedback/tuning-recommender.js";
+import {
+  TUNING_CYCLE_HISTORY_STATE_KEY,
+  type TuningCycleHistory,
+} from "./feedback/tuning-graduation.js";
 import { PromptAssembler } from "./dispatcher-prompt.js";
 import { ResultProcessor } from "./dispatcher-result-processor.js";
 import { DispatcherErrorRouter } from "./dispatcher-error-handling.js";
@@ -2027,6 +2031,80 @@ describe("ScheduledTaskRunner.executeDefault — self-performance Measure pre-st
       }>(db, TUNING_PENDING_CYCLE_STATE_KEY);
       expect(cycle?.cycleId).toBe(todayUtc);
       expect(cycle?.verdicts).toEqual({ [r1Id]: verdict });
+    });
+
+    // WP5 (§7 shadow-period exit) — the graduation-history write chokepoint
+    // rides the same pending-cycle persist.
+    it("appends the fresh cycle to the graduation history (WP5)", async () => {
+      insertEmptyFetchRuns(12); // R1 fires → recommendationCount 1
+      const { runner, router } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      const history = readRuntimeState<TuningCycleHistory>(
+        db,
+        TUNING_CYCLE_HISTORY_STATE_KEY,
+      );
+      expect(history).toHaveLength(1);
+      expect(history?.[0]).toMatchObject({
+        cycleId: new Date().toISOString().slice(0, 10),
+        recommendationCount: 1,
+        verdicts: { apply: 0, reject: 0, defer: 0 },
+      });
+    });
+
+    it("records a neutral history entry when no rule fires (zero-rec cycle)", async () => {
+      db.prepare(
+        `INSERT INTO agent_actions (action_type, result, started_at)
+         VALUES ('message.dm', 'success', datetime('now', '-1 hour'))`,
+      ).run();
+      const { runner, router } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      const history = readRuntimeState<TuningCycleHistory>(
+        db,
+        TUNING_CYCLE_HISTORY_STATE_KEY,
+      );
+      expect(history?.[0]).toMatchObject({
+        recommendationCount: 0,
+        verdicts: { apply: 0, reject: 0, defer: 0 },
+      });
+    });
+
+    it("seeds history tallies from carried-forward same-day verdicts (WP5)", async () => {
+      insertEmptyFetchRuns(12); // R1 fires with a same-day-stable id
+      const todayUtc = new Date().toISOString().slice(0, 10);
+      const r1Id = `${todayUtc}:R1:activityScanPrePassFreshnessMinutes`;
+      writeRuntimeState(db, TUNING_PENDING_CYCLE_STATE_KEY, {
+        cycleId: todayUtc,
+        generatedAt: `${todayUtc}T05:00:00.000Z`,
+        recommendations: [{ id: r1Id, key: "activityScanPrePassFreshnessMinutes" }],
+        verdicts: {
+          [r1Id]: {
+            verdict: "apply",
+            reason: "fine",
+            recordedAt: `${todayUtc}T10:00:00.000Z`,
+          },
+        },
+      });
+      const { runner, router } = makeRunner({ db, dataDir });
+      stubExecute(router);
+
+      await runner.executeDefault(makeRoutineEvent("weekly_review"));
+
+      // The re-run overwrite must not zero an already-judged cycle.
+      const history = readRuntimeState<TuningCycleHistory>(
+        db,
+        TUNING_CYCLE_HISTORY_STATE_KEY,
+      );
+      expect(history?.[0]).toMatchObject({
+        cycleId: todayUtc,
+        recommendationCount: 1,
+        verdicts: { apply: 1, reject: 0, defer: 0 },
+      });
     });
 
     it("advertises mode='live' when selfTuningEnabled is on (Phase 3)", async () => {

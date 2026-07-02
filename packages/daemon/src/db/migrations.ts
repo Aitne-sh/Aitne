@@ -1255,6 +1255,26 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0023-background-task-verification",
+    description:
+      "(background-task worker self-verification) — add `verification` to "
+      + "background_task: a JSON array of {requirement, met, evidence} the "
+      + "worker's finish() tool now REQUIRES, so a tier-2 worker checks its "
+      + "result against the brief's requirements before completing instead "
+      + "of claiming unverified success. Any unmet item marks the row "
+      + "outcome_detail='completed_with_gaps' and appends a deterministic "
+      + "gap disclosure to the draft — enforcement is structural (tool "
+      + "schema), no new LLM call. NULL = finished before this shipped, or "
+      + "a runner-synthesized fail-loud artifact (no worker checklist to "
+      + "record). Idempotent via the columnExists guard.",
+    up(db) {
+      if (!tableExists(db, "background_task")) return;
+      if (!columnExists(db, "background_task", "verification")) {
+        db.exec(`ALTER TABLE background_task ADD COLUMN verification TEXT`);
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

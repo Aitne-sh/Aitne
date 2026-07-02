@@ -90,9 +90,9 @@ describe("built-in agent.md files — bijection with the registry", () => {
     expect(dirs).toEqual(registrySlugs);
   });
 
-  it("ships exactly 10 built-in definitions", () => {
-    expect(listAgentDirs()).toHaveLength(10);
-    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(10);
+  it("ships exactly 11 built-in definitions", () => {
+    expect(listAgentDirs()).toHaveLength(11);
+    expect(BUILTIN_AGENT_REGISTRY).toHaveLength(11);
   });
 });
 

@@ -185,6 +185,10 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
     feedbackLessonMaxBytesPerAgent: parseNumberOrDefault(env("FEEDBACK_LESSON_MAX_BYTES_PER_AGENT"), 4096),
     feedbackLessonStaleDays: parseNumberOrDefault(env("FEEDBACK_LESSON_STALE_DAYS"), 60),
     feedbackSignalRetentionDays: parseNumberOrDefault(env("FEEDBACK_SIGNAL_RETENTION_DAYS"), 180),
+    // SELF_IMPROVEMENT_PHASE2 §2.1/§2.2 quality gates + A2.1 outcome rollup.
+    feedbackLessonConfidenceFloor: parseNumberOrDefault(env("FEEDBACK_LESSON_CONFIDENCE_FLOOR"), 0.25),
+    feedbackContradictionGuardCf: parseNumberOrDefault(env("FEEDBACK_CONTRADICTION_GUARD_CF"), 0.6),
+    feedbackOutcomeLearningEnabled: parseBooleanOrDefault(env("FEEDBACK_OUTCOME_LEARNING_ENABLED"), true),
     agentDisplayName: envOrDefault("AGENT_DISPLAY_NAME", DEFAULT_AGENT_DISPLAY_NAME),
     character: envOrDefault("PA_CHARACTER", ""),
     timezone: envOrDefault("TIMEZONE", ""),
@@ -236,6 +240,12 @@ export function loadDefaultRuntimeSettings(): RuntimeSettings {
       env("ACTIVITY_SCAN_PRE_PASS_FRESHNESS_MINUTES")
         ?? env("HOURLY_CHECK_PRE_PASS_FRESHNESS_MINUTES"),
       30,
+    ),
+    // WP4 chronic-failure surfacing — see runtime-settings.ts for the
+    // full rationale and the [2, 10] bound.
+    agentChronicFailureThreshold: parseNumberOrDefault(
+      env("AGENT_CHRONIC_FAILURE_THRESHOLD"),
+      3,
     ),
     authProbeDisabled: parseBooleanOrDefault(env("AUTH_PROBE_DISABLED"), false),
     authPreflightFreshnessMs: parseNumberOrDefault(env("AUTH_PREFLIGHT_FRESHNESS_MS"), 600000),

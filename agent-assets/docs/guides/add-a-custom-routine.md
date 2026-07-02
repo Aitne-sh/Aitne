@@ -112,7 +112,10 @@ curl -X POST http://localhost:8321/api/agents \
 ```
 
 - **`prompt` becomes the Agent's task prompt** — it is stored as the
-  Markdown body of `agent.md` and sent to the agent on every run.
+  Markdown body of `agent.md` and sent to the agent on every run. It
+  must be a real task definition: an empty body or a stand-in like
+  `"placeholder"`/`"TODO"` is rejected as `400 invalid_definition`
+  (the agent would skip every run as too ambiguous to act on).
 - **`schedule`** takes one of two forms: a raw 5-field cron
   (`{ "kind": "cron", "expression": "0 11 * * 2" }`, interpreted in
   the daemon's timezone unless `schedule.timezone` is set) or a
@@ -150,6 +153,10 @@ curl -X POST http://localhost:8321/api/agents \
 - `400 invalid_definition` — fix the fields listed in `issues`.
 - `400 one_shot_not_supported` — `/agents` is recurring-only; use
   `POST /api/schedule` for one-time work.
+- **Run now** returns `409 agent_prompt_placeholder` — the Agent's
+  stored prompt is empty or still a placeholder stub (possible for
+  Agents created before this was validated); write the real task into
+  its `agent.md` and try again.
 - A prompt that trips the absolute-block guardrails — the run still
   executes, but the offending tool call is logged as `blocked_absolute`
   in the action log.

@@ -141,9 +141,42 @@ function FeedbackTuningCard() {
         suffix="days"
         min={7}
         max={365}
-        description="A lesson not reinforced within this window is pruned at the next consolidation — unless it is a durable constraint, which never expires."
+        description="A stale lesson demotes to provisional (reversible) at the next consolidation; a provisional lesson uncorroborated for twice this window is archived. Durable constraints never expire."
         modified={dirtyFields.has("feedbackLessonStaleDays")}
         defaultValue={df("feedbackLessonStaleDays")}
+        onSave={deferSave}
+      />
+      <EditableField
+        label="Confidence floor"
+        value={dv("feedbackLessonConfidenceFloor", config.feedbackLessonConfidenceFloor)}
+        configKey="feedbackLessonConfidenceFloor"
+        type="number"
+        min={0}
+        max={1}
+        description="Lessons whose time-decayed confidence (cf) falls below this floor stop being injected and, once stale, demote to provisional. 0 disables the filter."
+        modified={dirtyFields.has("feedbackLessonConfidenceFloor")}
+        defaultValue={df("feedbackLessonConfidenceFloor")}
+        onSave={deferSave}
+      />
+      <EditableField
+        label="Contradiction guard"
+        value={dv("feedbackContradictionGuardCf", config.feedbackContradictionGuardCf)}
+        configKey="feedbackContradictionGuardCf"
+        type="number"
+        min={0}
+        max={1}
+        description="A new candidate that contradicts an established lesson with confidence at or above this value is held provisional until it accumulates 1.5x the usual evidence. Explicit owner corrections always win immediately."
+        modified={dirtyFields.has("feedbackContradictionGuardCf")}
+        defaultValue={df("feedbackContradictionGuardCf")}
+        onSave={deferSave}
+      />
+      <EditableBooleanField
+        label="Outcome-aware consolidation"
+        value={dv("feedbackOutcomeLearningEnabled", config.feedbackOutcomeLearningEnabled)}
+        configKey="feedbackOutcomeLearningEnabled"
+        description="Include the per-notification-type outcome rollup (replied / corrected / ignored, correction rate) in the nightly consolidation so lesson promotions can weigh real reactions."
+        modified={dirtyFields.has("feedbackOutcomeLearningEnabled")}
+        defaultValue={df("feedbackOutcomeLearningEnabled")}
         onSave={deferSave}
       />
       <EditableField

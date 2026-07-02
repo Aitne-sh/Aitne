@@ -1,5 +1,5 @@
 import type { AgentDefinition, AgentLintIssue, AgentTier, StopWarning, OverrideEditPath } from "@aitne/shared";
-import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS, agentDefinitionSchema, lintAgentDefinition, recurrenceRuleSchema } from "@aitne/shared";
+import { AGENT_TIERS, BACKEND_IDS, OVERRIDE_EDIT_PATHS, agentDefinitionSchema, isPlaceholderPrompt, lintAgentDefinition, recurrenceRuleSchema } from "@aitne/shared";
 
 import type {
   AgentPolicyFile,
@@ -298,8 +298,9 @@ export type RunNowPlan =
  * flow where it supports them.
  *
  * Rejects (409) the no-LLM in-process passes (`process_key: null`) — they fire
- * via the scheduler's in-process callback, not the `agent_schedule` queue — and
- * any row currently flagged invalid.
+ * via the scheduler's in-process callback, not the `agent_schedule` queue —
+ * any row currently flagged invalid, and a user Agent whose recurring prompt
+ * is empty/placeholder (the run would be dropped as ambiguous by the worker).
  */
 export function planRunNow(
   dto: AgentDTO,
@@ -325,6 +326,24 @@ export function planRunNow(
       status: 409,
       error: "agent_not_runnable",
       hint: "This built-in is a no-LLM in-process pass with no routing key; it is fired by the scheduler, not run-now.",
+    };
+  }
+
+  // A user Agent whose recurring row carries no real prompt — empty, missing
+  // (unpaired row), or a whole-body placeholder stub like "placeholder"/"TODO",
+  // still possible for Agents created before planCreate started rejecting
+  // those — would enqueue a run the worker is guaranteed to drop as ambiguous.
+  // Refuse up front with the fix instead of burning the run.
+  if (dto.source === "user" && isPlaceholderPrompt(opts.taskPrompt)) {
+    return {
+      ok: false,
+      status: 409,
+      error: "agent_prompt_placeholder",
+      hint:
+        "This Agent's prompt is empty or a placeholder stub, so the run would be "
+        + "dropped as ambiguous without doing any work. Write the real task into its "
+        + `agent.md (PATCH /api/context/policies/agents/${dto.slug}/agent.md or the `
+        + "dashboard editor), then run it again.",
     };
   }
 
@@ -533,14 +552,39 @@ export function planCreate(
 
   const prompt = asString(body.prompt) ?? "";
   // AGENT_PROMPT_QUALITY_DESIGN.md §3.5 — the deterministic "verify-agent-
-  // definitions" step. Non-blocking authoring warnings (empty prompt / missing
-  // # Instruction / a playbook the prompt names but doesn't declare) returned to
-  // the DM agent so it can fix them or ask the user. Never blocks a create.
+  // definitions" step. Authoring lint (missing # Instruction / a playbook the
+  // prompt names but doesn't declare / an # Output contract with no
+  // success_criteria) is returned as non-blocking warnings the DM agent fixes
+  // or asks the user about.
   const warnings = lintAgentDefinition({
     prompt,
     playbooks: parsed.data.playbooks,
     tags: parsed.data.tags,
+    successCriteriaCount: parsed.data.success_criteria.length,
   });
+  // The two prompt-stub codes are promoted to a blocking reject at this
+  // chokepoint: the body becomes the deployed Agent's task_prompt verbatim,
+  // and an empty or whole-body-placeholder task ("placeholder", "TODO") is
+  // guaranteed to be dropped as ambiguous by the worker on every firing —
+  // creating such an Agent is never right. The caller must resolve the task
+  // with the user (clarify-back) and resubmit. The raw agent.md PATCH/PUT
+  // editor path intentionally keeps these as warnings (see
+  // lintAgentDefinitionMarkdown) — that human path never 400s on lint.
+  const blockingPrompt = warnings.filter(
+    (w) => w.code === "empty_prompt" || w.code === "placeholder_prompt",
+  );
+  if (blockingPrompt.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "invalid_definition",
+      hint:
+        "prompt must be the Agent's real task definition — an empty or placeholder "
+        + "body is rejected because every run would be dropped as ambiguous. Resolve "
+        + "the task's sources/scope/format with the user, then resubmit.",
+      issues: blockingPrompt.map((w) => ({ field: "prompt", message: w.message })),
+    };
+  }
   return {
     ok: true,
     slug,

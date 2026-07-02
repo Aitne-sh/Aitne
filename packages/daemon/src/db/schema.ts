@@ -1902,6 +1902,13 @@ CREATE TABLE IF NOT EXISTS background_task (
     notify              INTEGER,
     -- Worker note: why notify is true/false (digest + audit). Free-form.
     significance        TEXT,
+    -- Finish-time self-verification checklist: a JSON array of
+    -- {requirement, met, evidence} objects the worker's finish tool
+    -- REQUIRES — its result judged requirement-by-requirement against the
+    -- brief. Any unmet item marks outcome_detail completed_with_gaps and
+    -- appends a gap disclosure to the draft. NULL until finished (and on
+    -- the fail-loud synthesis path). Mirrors migration 0023.
+    verification        TEXT,
     -- Optional vault MD path for research-type output (reuses the
     -- obsidian 30_outputs/ pattern). Null for quick tasks whose row
     -- fields suffice.

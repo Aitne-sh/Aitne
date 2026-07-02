@@ -53,6 +53,15 @@ export interface ActivityScanGateDecision {
 const HIGH_NOVELTY_FLOOR = 3;
 const ESCALATE_NOVELTY_FLOOR = 2;
 
+/**
+ * WP4 chronic-failure surfacing — minimum hours between two
+ * `agent_chronic_failure` Stage-3 escalations. The throttle input is
+ * `signals.hoursSinceLastChronicFailureEscalation` (derived from the
+ * last gate audit row carrying this reason), so a still-broken agent
+ * re-surfaces at most once a day instead of on every tick.
+ */
+export const CHRONIC_FAILURE_REESCALATE_HOURS = 24;
+
 export function decideStage(
   signals: ActivityScanSignals,
   config: ActivityScanGateConfig,
@@ -89,6 +98,21 @@ export function decideStage(
   }
   if (signals.scheduleApproachingCount > 0) {
     return decision("stage3", "schedule_approaching", signals);
+  }
+
+  // WP4 chronic-failure surfacing: a chronically failing enabled agent
+  // (deterministic detector over `agent_executions`) forces Stage 3 so
+  // the LLM can decide whether the owner needs to know — throttled to
+  // once per CHRONIC_FAILURE_REESCALATE_HOURS via the last gate audit
+  // row carrying this reason. Sits BELOW the other hard-escalates: any
+  // of those reaches Stage 3 anyway, and the dispatcher attaches the
+  // `<system_health>` block to EVERY Stage 3 while failures persist.
+  if (
+    signals.chronicAgentFailures.length > 0
+    && signals.hoursSinceLastChronicFailureEscalation
+      >= CHRONIC_FAILURE_REESCALATE_HOURS
+  ) {
+    return decision("stage3", "agent_chronic_failure", signals);
   }
 
   // No signals at all → Stage 0 silent.
@@ -153,6 +177,9 @@ export function buildGateAuditDetail(
     gate_stage: decision.stage,
     gate_reason: decision.reason,
     forced: extra.forced ?? false,
+    // WP4 — count of chronically failing agents at decision time; the
+    // per-agent detail rides on the signal snapshot below.
+    chronic_agent_failures: decision.signals.chronicAgentFailures.length,
     ...(extra.stage2Verdict ? { stage2_verdict: extra.stage2Verdict } : {}),
     ...(extra.cautiousEscalate ? { cautious_escalate: true } : {}),
     ...(extra.preEscalateGateStage
@@ -172,6 +199,10 @@ export function buildGateAuditDetail(
       scheduleApproachingCount: decision.signals.scheduleApproachingCount,
       hoursSinceLastStage3Run: serializeHours(
         decision.signals.hoursSinceLastStage3Run,
+      ),
+      chronicAgentFailures: decision.signals.chronicAgentFailures,
+      hoursSinceLastChronicFailureEscalation: serializeHours(
+        decision.signals.hoursSinceLastChronicFailureEscalation,
       ),
     },
   };
@@ -198,9 +229,47 @@ export function renderGateDecisionBlock(
       calConflict: decision.signals.calendarHasConflict,
       agentPlanOverdue: decision.signals.agentPlanOverdueCount,
       scheduleApproaching: decision.signals.scheduleApproachingCount,
+      chronicAgentFailures: decision.signals.chronicAgentFailures.length,
     })}`,
     "</gate_decision>",
   ].join("\n");
+}
+
+/**
+ * WP4 chronic-failure surfacing — render the `<system_health>` block the
+ * dispatcher attaches to EVERY Stage 3 event while at least one enabled
+ * agent is chronically failing (not only the forced
+ * `agent_chronic_failure` escalation). One line per failing agent with
+ * slug, streak, last error kind, and the `/agents/<slug>` dashboard
+ * page; the task-flow's Step 9 notify rules own whether the owner hears
+ * about it. Pure string builder; returns null for empty input so the
+ * caller can omit the event.data key entirely.
+ */
+export function renderSystemHealthBlock(
+  failures: ActivityScanSignals["chronicAgentFailures"],
+): string | null {
+  if (failures.length === 0) return null;
+  return [
+    "<system_health>",
+    "  These enabled agents have failed repeatedly on their most recent",
+    "  runs. Their failures are otherwise silent — the owner may want to",
+    "  know so they can fix or disable the agent.",
+    ...failures.map(
+      (f) =>
+        `  - agent "${escapeXml(f.slug)}" failed its last ${f.streak} run(s)`
+        + ` (last error kind: ${escapeXml(f.lastErrorKind ?? "unknown")});`
+        + ` dashboard: /agents/${escapeXml(f.slug)}`,
+    ),
+    "</system_health>",
+  ].join("\n");
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function numericNovelty(score: number | null): number {

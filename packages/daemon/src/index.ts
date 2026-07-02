@@ -76,6 +76,7 @@ import {
   getRoadmapWriteLockTimeoutMs,
 } from "./core/roadmap-write-lock.js";
 import { runRoadmapMechanicalMaintenance } from "./core/roadmap-maintenance.js";
+import { runLessonMechanicalMaintenance } from "./core/lesson-maintenance.js";
 import { fanoutResearchClusterUpdates } from "./core/browser-history/research-cluster-fanout.js";
 import { runDayBoundaryTasks } from "./core/day-boundary.js";
 import { SleepInhibitor } from "./core/sleep-inhibitor.js";
@@ -1271,6 +1272,7 @@ async function startup(): Promise<void> {
     observerManager,
     contextIndexReconciler,
     primaryVaultWatcher,
+    signalDetector,
     delegatedBackendInvoker,
     gitAccountRegistry,
     // BROWSER_TASK_REDESIGN_PLAN.md §5 / §5.1 — runner + shared slot
@@ -1435,6 +1437,29 @@ async function startup(): Promise<void> {
   scheduler.setRoadmapMaintenanceCallback(() => {
     fireRoadmapMaintenance().catch((err: unknown) => {
       logger.error({ err }, "runRoadmapMechanicalMaintenance threw");
+    });
+  });
+  // SELF_IMPROVEMENT_PHASE2 §2.1/§2.3 — daily mechanical lessons sweep at
+  // 17:40 local. Re-stamps cf and enacts the graduated expiration lifecycle
+  // over every lesson store with prev == current, so expiration fires even
+  // on nights with zero feedback signals and hand-edited files re-normalize.
+  scheduler.setLessonMaintenanceCallback(() => {
+    runLessonMechanicalMaintenance({
+      db,
+      contextDir: getContextDir(config, db),
+      config: {
+        feedbackLearningEnabled: config.feedbackLearningEnabled,
+        feedbackPromotionThreshold: config.feedbackPromotionThreshold,
+        feedbackLessonStaleDays: config.feedbackLessonStaleDays,
+        feedbackLessonConfidenceFloor: config.feedbackLessonConfidenceFloor,
+        feedbackContradictionGuardCf: config.feedbackContradictionGuardCf,
+        timezone: config.timezone || undefined,
+      },
+      writeTracker,
+      onIndexableContextChange: () =>
+        contextIndexReconciler.requestReconcile("manual"),
+    }).catch((err: unknown) => {
+      logger.error({ err }, "runLessonMechanicalMaintenance threw");
     });
   });
   // BROWSER_HISTORY_INTEGRATION_PLAN §5.F2 P4a — pre-morning digest
