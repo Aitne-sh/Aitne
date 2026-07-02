@@ -1,6 +1,6 @@
 {
   "name": "@aitne-sh/aitne",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Aitne — a local-first, proactive personal AI agent. A long-running TypeScript daemon is the nervous system; Claude Code (or Codex / Gemini CLI) is the brain. All persistent memory lives in local Markdown files.",
   "keywords": [
     "ai",

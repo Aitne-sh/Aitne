@@ -1,6 +1,6 @@
 {
   "name": "@aitne/daemon",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Aitne daemon — long-running TypeScript service that hosts the event bus, scheduler, observers, safety layer, and HTTP API. Consumed by the `aitne` CLI; not intended for standalone use.",
   "homepage": "https://github.com/Aitne-sh/Aitne#readme",
   "bugs": {
