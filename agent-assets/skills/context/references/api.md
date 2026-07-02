@@ -38,8 +38,11 @@ curl -s http://localhost:8321/api/context/list/plans/projects
 
 Response: `{ "files": [{ "name", "lastModified" }, …] }`. Use this to
 enumerate `plans/projects/`, `journal/weekly/`, `journal/monthly/`,
-`identity/`, `policies/`, `policies/routines/`, `state/inbox/` before
-deciding a write target.
+`identity/`, `policies/`, `policies/routines/`, `state/inbox/`,
+`knowledge/sources/` before deciding a write target.
+For `plans/projects` each project entry additionally carries
+`meta: { "title", "state" }` (frontmatter/H1 summary; `_`-prefixed
+files omit it).
 
 ### GET /api/context/today/reconciliation
 

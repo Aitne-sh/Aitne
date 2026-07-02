@@ -3,6 +3,7 @@
 import {
   Calendar,
   CheckSquare,
+  ExternalLink,
   Hash,
   List,
   Tag,
@@ -17,6 +18,11 @@ import {
   type FrontmatterValue,
   type ParsedFrontmatter,
 } from "@/lib/frontmatter";
+import {
+  mimeShortLabel,
+  sourceBinding,
+  sourceFileHref,
+} from "./source-binding.logic";
 
 export interface FrontmatterPropertiesProps {
   fields: ParsedFrontmatter["fields"];
@@ -26,6 +32,10 @@ export interface FrontmatterPropertiesProps {
 const TAG_FIELDS = new Set(["tags", "labels", "categories"]);
 
 export function FrontmatterProperties({ fields, className }: FrontmatterPropertiesProps) {
+  // Source cards carry a ledger binding — surface the original binary
+  // (served by GET /api/sources/:id/file) right where source_id shows.
+  const binding = sourceBinding(fields);
+  const bindingLabel = binding ? mimeShortLabel(binding.mime) : null;
   return (
     <div
       className={cn(
@@ -33,8 +43,21 @@ export function FrontmatterProperties({ fields, className }: FrontmatterProperti
         className,
       )}
     >
-      <div className="mb-1.5 text-xs font-medium text-muted-foreground">
-        Properties
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-muted-foreground">
+          Properties
+        </span>
+        {binding && (
+          <a
+            href={sourceFileHref(binding.sourceId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+          >
+            <ExternalLink className="h-3 w-3" />
+            Open original{bindingLabel ? ` (${bindingLabel})` : ""}
+          </a>
+        )}
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
         {fields.map((field) => (

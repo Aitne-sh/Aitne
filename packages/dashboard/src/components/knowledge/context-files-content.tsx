@@ -22,6 +22,11 @@ import {
   selectionPathFor,
   type ContextTreeNode,
 } from "./context-files-tree.logic";
+import {
+  groupProjects,
+  type ProjectGroup,
+  type ProjectItem,
+} from "./projects-tree.logic";
 import { useSnapshots, useSnapshotContent } from "@/lib/hooks/use-snapshots";
 import { useRegenerate } from "@/lib/hooks/use-regenerate";
 import { RegenerateButton } from "@/components/regenerate-button";
@@ -110,6 +115,7 @@ const DIRS = [
   "journal/monthly",
   "knowledge/repos",
   "knowledge/dossiers",
+  "knowledge/sources",
   "policies",
   "policies/routines",
   "policies/management-captures",
@@ -262,6 +268,171 @@ function FileTreeDir({
   );
 }
 
+function ProjectTreeItem({
+  item,
+  showStateBadge,
+  active,
+  onClick,
+}: {
+  item: ProjectItem;
+  showStateBadge: boolean;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+        active
+          ? "bg-primary/10 text-primary font-medium"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground",
+      )}
+    >
+      <File className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 text-left">
+        <span className="block truncate">{item.title}</span>
+        {item.title !== item.slug && (
+          <span className="block truncate font-mono text-[10px] text-muted-foreground/70">
+            {item.slug}
+          </span>
+        )}
+      </span>
+      {showStateBadge && (
+        <Badge variant="gray" className="shrink-0 px-1.5 text-[10px] font-normal">
+          {item.state}
+        </Badge>
+      )}
+    </button>
+  );
+}
+
+function ProjectGroupSection({
+  group,
+  showHeader,
+  collapsedByDefault,
+  selectedPath,
+  onSelect,
+}: {
+  group: ProjectGroup;
+  showHeader: boolean;
+  collapsedByDefault: boolean;
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const containsSelected = group.items.some(
+    (i) => i.selectionPath === selectedPath,
+  );
+  const [open, setOpen] = useState(!collapsedByDefault || containsSelected);
+  const [prevSelectedPath, setPrevSelectedPath] = useState(selectedPath);
+  if (selectedPath !== prevSelectedPath) {
+    setPrevSelectedPath(selectedPath);
+    if (containsSelected) setOpen(true);
+  }
+
+  const items = group.items.map((item) => (
+    <ProjectTreeItem
+      key={item.slug}
+      item={item}
+      // Inside a state-labeled group the header already says it; only the
+      // mixed "Active" bucket needs per-item badges (incubating, etc.).
+      showStateBadge={group.key === "active" && item.state !== "active"}
+      active={selectedPath === item.selectionPath}
+      onClick={() => onSelect(item.selectionPath)}
+    />
+  ));
+
+  if (!collapsedByDefault) {
+    return (
+      <div>
+        {showHeader && (
+          <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+            {group.label}
+          </div>
+        )}
+        {items}
+      </div>
+    );
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex w-full items-center gap-1 rounded-md px-2 pt-1.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70 hover:text-foreground">
+        <ChevronRight
+          className={cn("h-3 w-3 transition-transform", open && "rotate-90")}
+        />
+        {group.label} ({group.items.length})
+      </CollapsibleTrigger>
+      <CollapsibleContent>{items}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// plans/projects gets a grouped rendering (Active / On hold / Archived,
+// titles from frontmatter meta) instead of the generic slug-file tree —
+// projects stay flat on disk; readability is purely presentational here.
+function ProjectsTreeDir({
+  dir,
+  selectedPath,
+  onSelect,
+}: {
+  dir: string;
+  selectedPath: string | null;
+  onSelect: (path: string) => void;
+}) {
+  const { data } = useContextList(dir);
+  const containsSelected = selectedPath?.startsWith(`${dir}/`) ?? false;
+  const [open, setOpen] = useState(containsSelected);
+  const [prevSelectedPath, setPrevSelectedPath] = useState(selectedPath);
+  if (selectedPath !== prevSelectedPath) {
+    setPrevSelectedPath(selectedPath);
+    if (containsSelected) setOpen(true);
+  }
+
+  const grouped = useMemo(
+    () => groupProjects(data?.files ?? [], dir),
+    [data?.files, dir],
+  );
+  // A lone all-active group needs no header noise.
+  const showHeaders =
+    grouped.groups.length > 1 ||
+    grouped.groups.some((g) => g.key !== "active");
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+        <ChevronRight
+          className={cn("h-3 w-3 transition-transform", open && "rotate-90")}
+        />
+        <FolderOpen className="h-3.5 w-3.5" />
+        {dir}/
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="ml-5 space-y-0.5">
+          {grouped.groups.map((group) => (
+            <ProjectGroupSection
+              key={group.key}
+              group={group}
+              showHeader={showHeaders}
+              collapsedByDefault={group.key === "archived"}
+              selectedPath={selectedPath}
+              onSelect={onSelect}
+            />
+          ))}
+          {grouped.other.map((f) => (
+            <FileTreeItem
+              key={f.name}
+              name={f.name}
+              active={selectedPath === f.selectionPath}
+              onClick={() => onSelect(f.selectionPath)}
+            />
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function FileTreeItem({ name, active, onClick }: {
   name: string;
   active?: boolean;
@@ -301,18 +472,26 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
   const [selectedPath, setSelectedPath] = useState<string | null>(
     urlPath ?? "identity/profile",
   );
-  // Re-sync when the URL path changes after mount (Next.js keeps the page
-  // mounted across client-side navigations). Using the "set state during
-  // render" pattern avoids the `react-hooks/set-state-in-effect` lint
-  // and is the React-recommended way to reset derived state.
-  const [prevUrlPath, setPrevUrlPath] = useState<string | null>(urlPath);
-  if (urlPath !== prevUrlPath) {
-    setPrevUrlPath(urlPath);
-    if (urlPath) setSelectedPath(urlPath);
-  }
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [snapshotId, setSnapshotId] = useState<number | null>(null);
+  // Re-sync when the URL path changes after mount (Next.js keeps the page
+  // mounted across client-side navigations). Using the "set state during
+  // render" pattern avoids the `react-hooks/set-state-in-effect` lint
+  // and is the React-recommended way to reset derived state. Placed after
+  // the state it resets — the block runs during render, so every setter it
+  // calls must already be initialized (TDZ).
+  const [prevUrlPath, setPrevUrlPath] = useState<string | null>(urlPath);
+  if (urlPath !== prevUrlPath) {
+    setPrevUrlPath(urlPath);
+    if (urlPath) {
+      setSelectedPath(urlPath);
+      // A snapshot view is per-file; carrying it across an in-page
+      // navigation (wikilink click while viewing a snapshot) would show
+      // the previous file's snapshot body under the new file's path.
+      setSnapshotId(null);
+    }
+  }
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [baselineContent, setBaselineContent] = useState("");
@@ -593,14 +772,23 @@ export const ContextFilesContent = forwardRef<ContextFilesHandle>(
               />
             ))}
             <div className="my-2 h-px bg-border" />
-            {DIRS.map((d) => (
-              <FileTreeDir
-                key={d}
-                dir={d}
-                selectedPath={selectedPath}
-                onSelect={selectPath}
-              />
-            ))}
+            {DIRS.map((d) =>
+              d === "plans/projects" ? (
+                <ProjectsTreeDir
+                  key={d}
+                  dir={d}
+                  selectedPath={selectedPath}
+                  onSelect={selectPath}
+                />
+              ) : (
+                <FileTreeDir
+                  key={d}
+                  dir={d}
+                  selectedPath={selectedPath}
+                  onSelect={selectPath}
+                />
+              ),
+            )}
           </div>
         </ScrollArea>
       </div>

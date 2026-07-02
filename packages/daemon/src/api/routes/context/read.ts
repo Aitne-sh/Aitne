@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { localDateStr } from "@aitne/shared";
 import { CONTEXT_FILE_EXTENSIONS } from "../../../core/context-paths.js";
+import { summarizeProjectFile } from "../../../core/context-builder-projects.js";
 import { buildContextHealthReport } from "../../../core/context-health.js";
 import {
   type AgentPlanScheduleCandidate,
@@ -73,6 +74,7 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
       "knowledge/dossiers",
       "knowledge/repos",
       "knowledge/repos/legacy-registry",
+      "knowledge/sources",
       "state/inbox",
     ];
     if (!allowedDirs.includes(dir)) {
@@ -90,7 +92,11 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
       return c.json({ files: [] });
     }
 
-    const files = readdirSync(dirPath)
+    const files: {
+      name: string;
+      lastModified: string;
+      meta?: { title: string; state: string };
+    }[] = readdirSync(dirPath)
       .filter((f) =>
         CONTEXT_FILE_EXTENSIONS.some((ext) => f.endsWith(ext)),
       )
@@ -98,6 +104,25 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
         const stat = statSync(join(dirPath, f));
         return { name: f, lastModified: stat.mtime.toISOString() };
       });
+
+    // Projects tree readability — attach the frontmatter/H1 summary the
+    // dashboard sidebar groups by (title + state). Additive: every other
+    // dir keeps the bare {name, lastModified} shape, and `_`-prefixed
+    // files (`_index.md`, `_active.base`) stay meta-less on purpose.
+    if (dir === "plans/projects") {
+      for (const file of files) {
+        if (file.name.startsWith("_") || !file.name.endsWith(".md")) continue;
+        try {
+          const content = readFileSync(join(dirPath, file.name), "utf-8");
+          const summary = summarizeProjectFile(file.name, content);
+          if (summary) {
+            file.meta = { title: summary.title, state: summary.state };
+          }
+        } catch {
+          // Unreadable file — leave the bare entry rather than failing the listing.
+        }
+      }
+    }
 
     // Surface custom routines so the dashboard routines editor sees
     // them alongside the built-ins. After the restructure the parent
@@ -131,6 +156,27 @@ export function registerReadRoutes(app: Hono, ctx: ContextRouteContext): void {
           const stat = statSync(join(slugDir, f));
           files.push({
             name: `${slug}/${f}`,
+            lastModified: stat.mtime.toISOString(),
+          });
+        }
+      }
+    }
+    // Source-document cards live at `knowledge/sources/<collection>/<slug>.md`
+    // (SOURCE_LIBRARY_DESIGN.md); the root `_index.md` is picked up by the
+    // flat readdir above. Mirrors the knowledge/repos one-level flattening.
+    // Cards nested deeper than one level (permitted by the write whitelist
+    // but against the sources-skill convention) stay invisible here — same
+    // accepted limitation as the repos block.
+    if (dir === "knowledge/sources") {
+      for (const entry of readdirSync(dirPath, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const collection = entry.name;
+        const collectionDir = join(dirPath, collection);
+        for (const f of readdirSync(collectionDir)) {
+          if (!CONTEXT_FILE_EXTENSIONS.some((ext) => f.endsWith(ext))) continue;
+          const stat = statSync(join(collectionDir, f));
+          files.push({
+            name: `${collection}/${f}`,
             lastModified: stat.mtime.toISOString(),
           });
         }

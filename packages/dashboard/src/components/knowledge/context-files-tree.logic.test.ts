@@ -110,6 +110,17 @@ describe("buildContextTree", () => {
     expect(file.relPath).toBe("aitne/data.base");
   });
 
+  it("keeps a root-level _index.md below collection dirs (knowledge/sources shape)", () => {
+    const tree = buildContextTree([
+      { name: "_index.md" },
+      { name: "acme-launch/pitch-deck.md" },
+    ]);
+    expect(tree.map((n) => `${n.kind}:${n.name}`)).toEqual([
+      "dir:acme-launch",
+      "file:_index.md",
+    ]);
+  });
+
   it("does not treat the input as ordered — equivalent inputs in any order produce equal trees", () => {
     const a = buildContextTree([
       { name: "aitne/journal/2026-05-07.md" },

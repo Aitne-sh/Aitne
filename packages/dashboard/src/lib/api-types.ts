@@ -1016,7 +1016,12 @@ export interface ContextFileResponse {
 }
 
 export interface ContextListResponse {
-  files: { name: string; lastModified: string }[];
+  files: {
+    name: string;
+    lastModified: string;
+    /** plans/projects only — frontmatter/H1 summary for sidebar grouping. */
+    meta?: { title: string; state: string };
+  }[];
 }
 
 export type ContextHealthStatus = "ok" | "warning" | "error";

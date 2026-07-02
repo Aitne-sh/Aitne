@@ -2722,6 +2722,91 @@ describe("Context API — additional coverage", () => {
       const names = body.files.map((f) => f.name);
       expect(names).toContain("management-captures/no-delete.md");
     });
+
+    it("flattens knowledge/sources collection subdirs and lists the root _index.md", async () => {
+      const sourcesDir = join(contextDir, "knowledge", "sources");
+      const collectionDir = join(sourcesDir, "acme-launch");
+      mkdirSync(collectionDir, { recursive: true });
+      writeFileSync(join(sourcesDir, "_index.md"), "# Sources\n", "utf-8");
+      writeFileSync(join(collectionDir, "pitch-deck.md"), "# Pitch deck\n", "utf-8");
+
+      const res = await app.request("/api/context/list/knowledge/sources");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { files: { name: string }[] };
+      const names = body.files.map((f) => f.name);
+      expect(names).toContain("_index.md");
+      expect(names).toContain("acme-launch/pitch-deck.md");
+    });
+
+    it("ignores non-context files inside source collections", async () => {
+      const collectionDir = join(contextDir, "knowledge", "sources", "acme-launch");
+      mkdirSync(collectionDir, { recursive: true });
+      writeFileSync(join(collectionDir, "deck.pdf"), "%PDF-1.4", "utf-8");
+
+      const res = await app.request("/api/context/list/knowledge/sources");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { files: { name: string }[] };
+      expect(body.files.map((f) => f.name)).not.toContain("acme-launch/deck.pdf");
+    });
+
+    it("returns empty files when knowledge/sources does not exist", async () => {
+      rmSync(join(contextDir, "knowledge", "sources"), {
+        recursive: true,
+        force: true,
+      });
+      const res = await app.request("/api/context/list/knowledge/sources");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { files: unknown[] };
+      expect(body.files).toEqual([]);
+    });
+
+    it("attaches title/state meta to plans/projects entries", async () => {
+      const projectsDir = join(contextDir, "plans", "projects");
+      mkdirSync(projectsDir, { recursive: true });
+      writeFileSync(
+        join(projectsDir, "acme-launch.md"),
+        "---\ntype: project\nowner: shared\nstate: on-hold\nupdated: 2026-07-01\n---\n# Acme launch\n\nBody.\n",
+        "utf-8",
+      );
+
+      const res = await app.request("/api/context/list/plans/projects");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        files: { name: string; meta?: { title: string; state: string } }[];
+      };
+      const entry = body.files.find((f) => f.name === "acme-launch.md");
+      expect(entry?.meta).toEqual({ title: "Acme launch", state: "on-hold" });
+    });
+
+    it("falls back to slug title and active state when frontmatter is missing", async () => {
+      const projectsDir = join(contextDir, "plans", "projects");
+      mkdirSync(projectsDir, { recursive: true });
+      writeFileSync(join(projectsDir, "bare.md"), "just prose\n", "utf-8");
+
+      const res = await app.request("/api/context/list/plans/projects");
+      const body = (await res.json()) as {
+        files: { name: string; meta?: { title: string; state: string } }[];
+      };
+      const entry = body.files.find((f) => f.name === "bare.md");
+      expect(entry?.meta).toEqual({ title: "bare", state: "active" });
+    });
+
+    it("leaves underscore-prefixed project files meta-less", async () => {
+      const projectsDir = join(contextDir, "plans", "projects");
+      mkdirSync(projectsDir, { recursive: true });
+      writeFileSync(join(projectsDir, "_index.md"), "# Projects\n", "utf-8");
+      writeFileSync(join(projectsDir, "_active.base"), "views: []\n", "utf-8");
+
+      const res = await app.request("/api/context/list/plans/projects");
+      const body = (await res.json()) as {
+        files: { name: string; meta?: unknown }[];
+      };
+      for (const name of ["_index.md", "_active.base"]) {
+        const entry = body.files.find((f) => f.name === name);
+        expect(entry).toBeDefined();
+        expect(entry?.meta).toBeUndefined();
+      }
+    });
   });
 
   // ── GET wildcard — empty path / "list" path ──

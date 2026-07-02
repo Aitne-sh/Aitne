@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
 
-interface ProjectSummary {
+export interface ProjectSummary {
   slug: string;
   title: string;
   state: string;
@@ -85,7 +85,13 @@ async function readProjectFile(
   }
 }
 
-function summarizeProjectFile(
+/**
+ * Frontmatter/H1 summary of a single `plans/projects/<slug>.md` file.
+ * Shared with the context API's directory listing, which attaches
+ * `{title, state}` metadata so the dashboard sidebar can group projects
+ * without re-parsing files client-side.
+ */
+export function summarizeProjectFile(
   filename: string,
   content: string,
 ): ProjectSummary | null {
