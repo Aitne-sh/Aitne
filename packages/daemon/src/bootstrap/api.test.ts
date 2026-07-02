@@ -210,6 +210,7 @@ function makeBootstrapApiDeps(
     writeTracker: {} as BootstrapApiDeps["writeTracker"],
     auditLogger: {} as BootstrapApiDeps["auditLogger"],
     attachmentStore: {} as BootstrapApiDeps["attachmentStore"],
+    sourceLibrary: {} as BootstrapApiDeps["sourceLibrary"],
     dashboardAdapter: {} as BootstrapApiDeps["dashboardAdapter"],
     docsQAAdapter: {} as BootstrapApiDeps["docsQAAdapter"],
     docsIndexer: null,

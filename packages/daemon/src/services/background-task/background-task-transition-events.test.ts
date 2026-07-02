@@ -19,6 +19,7 @@ function row(overrides: Partial<BackgroundTaskRow> = {}): BackgroundTaskRow {
     draft: "2 repos red",
     notify: true,
     significance: "2 red",
+    verification: null,
     artifactPath: null,
     outcomeDetail: null,
     originatingChannel: "slack:C1",

@@ -216,6 +216,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 1024,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-04-22T00:00:00.000Z",
     };
 
@@ -245,6 +246,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 4096,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const transcripts = new Map([
@@ -292,6 +294,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 2048,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const transcripts = new Map([
@@ -343,6 +346,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 99999,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const block = (
@@ -376,6 +380,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 1024,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const block = (
@@ -407,6 +412,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 1024,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const block = (
@@ -432,6 +438,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 1024,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const result = await (
@@ -471,6 +478,7 @@ describe("dispatcher attachment prompt block", () => {
       sizeBytes: 1024,
       turnToken: null,
       caption: null,
+      sourceId: null,
       createdAt: "2026-05-04T00:00:00.000Z",
     };
     const photoRow: StoreAttachmentRow = {
@@ -523,6 +531,7 @@ describe("dispatcher attachment prompt block", () => {
         sizeBytes: 1024,
         turnToken: null,
         caption: null,
+        sourceId: null,
         createdAt: "2026-05-04T00:00:00.000Z",
       },
       {
@@ -538,6 +547,7 @@ describe("dispatcher attachment prompt block", () => {
         sizeBytes: 1024,
         turnToken: null,
         caption: null,
+        sourceId: null,
         createdAt: "2026-05-04T00:00:00.000Z",
       },
     ];

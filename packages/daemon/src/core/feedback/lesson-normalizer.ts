@@ -36,7 +36,6 @@
  */
 
 import {
-  CONF_CF_DEFAULTS,
   extractMarkdownSection,
   formatCfValue,
   lessonCf,
