@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CLAUDE_HIGH_MODEL,
+  DEFAULT_CLAUDE_LITE_MODEL,
+  DEFAULT_CLAUDE_MEDIUM_MODEL,
+  DEFAULT_CODEX_LITE_MODEL,
+  DEFAULT_CODEX_MEDIUM_MODEL,
+  DEFAULT_GEMINI_LITE_MODEL,
+  DEFAULT_GEMINI_MEDIUM_MODEL,
+  DEFAULT_OPENCODE_HIGH_MODEL,
+  DEFAULT_OPENCODE_LITE_MODEL,
+  DEFAULT_OPENCODE_MEDIUM_MODEL,
   defaultModelForTier,
   estimateCostForUsage,
   estimateTextInputTokens,
@@ -10,6 +20,34 @@ import {
   latestLiteFor,
   latestMediumFor,
 } from "./model-registry.js";
+
+describe("DEFAULT_*_MODEL constants stay in sync with the registry", () => {
+  // These constants are the canonical per-(backend,tier) default IDs imported
+  // across the daemon. They are hand-written literals (deriving them from
+  // `latest*For` would add never-taken `?? literal` branches that break the
+  // 100% branch-coverage gate), so this guard fails loudly if a model bump
+  // edits the registry array but forgets to move the matching constant —
+  // keeping the two co-located sources in the one shared module honest.
+  const cases: Array<[string, string, string | null]> = [
+    ["claude lite", DEFAULT_CLAUDE_LITE_MODEL, latestLiteFor("claude")],
+    ["claude medium", DEFAULT_CLAUDE_MEDIUM_MODEL, latestMediumFor("claude")],
+    ["claude high", DEFAULT_CLAUDE_HIGH_MODEL, latestHighFor("claude")],
+    ["codex lite", DEFAULT_CODEX_LITE_MODEL, latestLiteFor("codex")],
+    ["codex medium", DEFAULT_CODEX_MEDIUM_MODEL, latestMediumFor("codex")],
+    ["gemini lite", DEFAULT_GEMINI_LITE_MODEL, latestLiteFor("gemini")],
+    ["gemini medium", DEFAULT_GEMINI_MEDIUM_MODEL, latestMediumFor("gemini")],
+    ["opencode lite", DEFAULT_OPENCODE_LITE_MODEL, latestLiteFor("opencode")],
+    ["opencode medium", DEFAULT_OPENCODE_MEDIUM_MODEL, latestMediumFor("opencode")],
+    ["opencode high", DEFAULT_OPENCODE_HIGH_MODEL, latestHighFor("opencode")],
+  ];
+
+  it.each(cases)(
+    "%s default equals the registry's latest non-deprecated pick",
+    (_label, constant, latest) => {
+      expect(constant).toBe(latest);
+    },
+  );
+});
 
 describe("model-registry", () => {
   it("returns backend-specific models", () => {

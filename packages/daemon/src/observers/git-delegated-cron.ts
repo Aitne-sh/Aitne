@@ -1,7 +1,9 @@
 import type Database from "better-sqlite3";
 import {
   createEvent,
+  DEFAULT_CLAUDE_LITE_MODEL,
   EventPriority,
+  latestLiteFor,
   type AgentTaskEvent,
   type BackendId,
   type IntegrationKey,
@@ -164,15 +166,13 @@ export class GitDelegatedCronObserver implements Observer {
       return pinned;
     }
     const canonical = resolveCanonicalDelegatedModel(backend, this.options.db);
-    /* c8 ignore start — unreachable while the model registry carries lite models for all backends */
-    if (!canonical)
-      return backend === "claude"
-        ? "claude-haiku-4-5-20251001"
-        : backend === "codex"
-          ? "gpt-5.4-mini"
-          : "gemini-3.1-flash-lite-preview";
-    /* c8 ignore stop */
-    return canonical;
+    // `resolveCanonicalDelegatedModel` already returns the registry lite pick
+    // (`latestLiteFor`) when nothing is pinned, so `canonical` is null only in
+    // the impossible case where the registry carries no lite model for the
+    // backend. Fall back to a registry-sourced constant rather than a
+    // hardcoded per-backend literal (which also mis-mapped `opencode`).
+    /* c8 ignore next — unreachable while the model registry carries lite models for all backends */
+    return canonical ?? latestLiteFor(backend) ?? DEFAULT_CLAUDE_LITE_MODEL;
   }
 
   private buildEvent(scope: DelegatedScope): AgentTaskEvent {

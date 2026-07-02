@@ -72,6 +72,7 @@ export default defineConfig({
         "**/*.d.ts",
         "**/index.ts",                                    // barrel re-exports
         "**/types.ts",                                    // pure type definitions
+        "packages/daemon/src/core/backends/model-registry.ts", // compat barrel — re-exports @aitne/shared model-registry (the real impl lives in shared/src/model-registry.ts and IS covered)
 
         // ── Pure type / interface declaration files (no runtime code) ──
         // Each file below is a Zod-free `export interface` / `export type`
@@ -335,6 +336,7 @@ export default defineConfig({
         // exclusion rationale.
         "packages/daemon/src/core/integration-lifecycle.ts",
         "packages/daemon/src/core/repository-management-docs.ts",
+        "packages/daemon/src/core/lesson-maintenance.ts",
         "packages/daemon/src/core/roadmap-maintenance.ts",
         "packages/daemon/src/core/routine-acquisition-plan.ts",
         "packages/daemon/src/db/activity-scan-signals.ts",

@@ -76,6 +76,33 @@ export type {
   ExecutionPermissionMode,
 } from "./backend.js";
 
+// Canonical model registry — per-backend model IDs, pricing, tiers, cost
+// estimation, and tier-default resolution. Single source of truth shared by
+// the daemon (routing / cost) and dashboard-adjacent code. See
+// `model-registry.ts`. (The daemon keeps a compatibility barrel at
+// `core/backends/model-registry.ts` re-exporting these.)
+export {
+  DEFAULT_CLAUDE_LITE_MODEL,
+  DEFAULT_CLAUDE_MEDIUM_MODEL,
+  DEFAULT_CLAUDE_HIGH_MODEL,
+  DEFAULT_CODEX_LITE_MODEL,
+  DEFAULT_CODEX_MEDIUM_MODEL,
+  DEFAULT_GEMINI_LITE_MODEL,
+  DEFAULT_GEMINI_MEDIUM_MODEL,
+  DEFAULT_OPENCODE_LITE_MODEL,
+  DEFAULT_OPENCODE_MEDIUM_MODEL,
+  DEFAULT_OPENCODE_HIGH_MODEL,
+  getModelsForBackend,
+  findRegisteredModel,
+  latestHighFor,
+  latestMediumFor,
+  latestLiteFor,
+  defaultModelForTier,
+  estimateCostForUsage,
+  estimateTextInputTokens,
+  getModelLabel,
+} from "./model-registry.js";
+
 // Per-backend provider auth config (direct API key / Bedrock / Vertex /
 // Foundry / Codex Azure / Gemini Vertex). See `backend-api-key-config.ts`.
 export {
