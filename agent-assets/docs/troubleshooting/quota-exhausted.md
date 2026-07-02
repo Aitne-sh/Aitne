@@ -14,7 +14,6 @@ summary: |
   spending limit, or pin a different model.
 section: quota-exhausted
 tags:
-  - troubleshooting
   - cost
   - backends
   - quotas
@@ -26,7 +25,7 @@ ask_examples:
   - Why did an autonomous run get skipped for the cost cap?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - quota
   - BackendQuotaError
@@ -51,37 +50,40 @@ related:
 ## What You See
 
 - A `BackendQuotaError` row in Activity.
-- Fallback ran the next routine instead of main.
-- Or: an autonomous run was skipped with reason
-  `autonomous_cost_cap_exceeded` — this is a *separate* safety net
-  (`autonomousDailyCostCapUsd`, default off) that skips only autonomous
-  work, never reactive DMs. (`autonomousMonthlyCostCapUsd`, also default
-  off, is notifications-only — it never skips a run, just alerts.)
-  It is not a provider quota error; raise the cap on `/settings/models`
-  or wait for the next agent day.
+- The fallback backend ran the next routine instead of the main one.
+- Or: an autonomous run was skipped with the reason
+  `autonomous_cost_cap_exceeded`. This is a *separate* safety net, not a
+  provider quota error. It comes from `autonomousDailyCostCapUsd` (default
+  off), which skips only autonomous work and never touches reactive DMs.
+  Its sibling `autonomousMonthlyCostCapUsd` (also default off) only sends
+  a notification — it alerts you but never skips a run. To clear the skip,
+  raise the cap on `/settings/models` or wait for the next agent day (the
+  moment "today" rolls over, 04:00 local by default).
 
 ## Most Likely Causes
 
 1. **Provider rate limit** on your API key (Anthropic / OpenAI /
-   Google) — the supported path. Check the provider console for the
-   per-minute / per-day caps tied to your billing.
+   Google). Running on an API key is the supported path. Check the
+   provider console for the per-minute / per-day caps tied to your
+   billing.
 2. **Gemini per-agent-day request ceiling** reached. Aitne caps
-   Gemini at 450 model requests per agent day (a conservative fraction
-   of Google's free-tier daily limit on `GEMINI_API_KEY` /
-   `GOOGLE_API_KEY` without billing). This ceiling is Gemini-only and
-   model-agnostic — it is not tied to any one model id. The error reads
-   "Gemini daily-request ceiling reached" and resets at the next
-   agent-day boundary (04:00 local).
+   Gemini at 450 model requests per agent day — a deliberately low
+   fraction of Google's free-tier daily limit for `GEMINI_API_KEY` /
+   `GOOGLE_API_KEY` keys without billing. This ceiling applies to Gemini
+   only and covers every Gemini model together, so it is not tied to any
+   one model id. The error reads "Gemini daily-request ceiling reached"
+   and resets at the next agent-day boundary (04:00 local).
 3. **Cloud-provider quota** — Bedrock / Vertex / Foundry / Azure
    OpenAI / Gemini-Vertex enforce their own per-region / per-model
-   quotas. The error surfaces the same way as a direct-API quota.
-4. **Subscription fallback exhausted** — no API key registered, so
-   the backend is running on the CLI's local subscription login.
-   The underlying provider's subscription limits then apply (e.g.
-   Claude's rolling 5-hour Opus window on a Max plan login). The
-   recommended fix is to register an API key on `/settings/models`;
-   the fallback is not provider-supported for automated agent use.
-   See [Costs and Quotas](../concepts/costs-and-quotas.md).
+   quotas. The error shows up the same way as a direct-API quota.
+4. **Subscription fallback exhausted** — you have no API key
+   registered, so the backend is running on the CLI's local
+   subscription login. The provider's subscription limits then apply
+   (for example, Claude's rolling 5-hour Opus window on a Max plan
+   login). The recommended fix is to register an API key on
+   `/settings/models`; the fallback is not provider-supported for
+   automated agent use. See
+   [Costs and Quotas](../concepts/costs-and-quotas.md).
 
 ## Diagnostic Steps
 

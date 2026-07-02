@@ -15,9 +15,7 @@ summary: |
   recipes for exporting your existing profile out of ChatGPT and Gemini.
 section: import-knowledge-file
 tags:
-  - guides
   - knowledge
-  - import
   - memory
 status: stable
 ask_examples:
@@ -27,7 +25,7 @@ ask_examples:
   - What format does the Knowledge upload accept?
 locale: en-US
 created: 2026-04-28
-updated: 2026-05-28
+updated: 2026-07-01
 ui_anchors:
   - /knowledge
 keywords:
@@ -58,9 +56,10 @@ Bring a single Markdown (`.md`, `.markdown`) or plain-text (`.txt`)
 file you wrote elsewhere — a hand-written profile, an Obsidian or
 Notion export, or a summary you produced in ChatGPT / Gemini — into
 Aitne's `identity/*.md` Context Files. The agent reads the file once
-and appends each fact verbatim into the right topic file. Existing
-bullets are never overwritten; identity-class facts are deferred for
-your explicit confirmation.
+and appends each fact, word for word, into the right topic file. It
+never overwrites bullets you already have, and it holds back
+identity-class facts — things like your legal name or timezone — until
+you confirm them yourself.
 
 ## Prerequisites
 
@@ -130,8 +129,8 @@ date inline, so you can resolve them later without losing data.
 - **`415 unsupported_extension`** — the file is not `.md`,
   `.markdown`, or `.txt`. Convert PDFs / DOCX / HTML to plain
   Markdown first.
-- **`413 file_too_large`** — exceed 64 KB. Split the file into
-  smaller chunks and upload each separately.
+- **`413 file_too_large`** — the file is over 64 KB. Split it into
+  smaller chunks and upload each one separately.
 - **`400 secret_shape_detected`** — the route found content shaped
   like a private key or token. Remove the offending lines and re-
   upload.
@@ -152,8 +151,8 @@ following two paths produce a file that uploads cleanly.
 ### Recommended: ask ChatGPT to write it for you (≈ 2 min)
 
 Works against ChatGPT's *Memory* feature — the model already holds a
-list of personal facts about you. This procedure asks it to dump them
-in the exact format the upload expects.
+list of personal facts about you. This recipe asks it to write those
+out in the exact format the upload expects.
 
 1. Open <https://chatgpt.com> and start a **new conversation**. (Use
    a model with Memory enabled — GPT-4o, GPT-5, etc.)

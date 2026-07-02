@@ -17,8 +17,6 @@ section: routines
 tags:
   - routines
   - autonomous
-  - daily
-  - core
 status: stable
 ask_examples:
   - When does the evening review run?
@@ -27,7 +25,7 @@ ask_examples:
   - How do I disable the evening review?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - evening review
   - retro
@@ -89,10 +87,11 @@ rather than producing a chatty end-of-day report.
 
 ## When It Runs / How It Is Triggered
 
-Every day at **18:00 local time**, exactly once. The cron expression
-(`0 18 * * *`) is fixed in `packages/daemon/src/core/scheduler.ts`; the
-fire time is not operator-configurable. Like every autonomous cron, the
-run is skipped while the agent is paused (`!stop`) or setup is incomplete.
+Every day at **18:00 local time**, exactly once. The schedule — a cron
+expression (`0 18 * * *`, the standard five-field way to write "18:00 every
+day") — is fixed in `packages/daemon/src/core/scheduler.ts`, so you can't
+change the fire time. Like every autonomous routine, the run is skipped
+while the agent is paused (`!stop`) or setup is not finished.
 
 ## What It Outputs
 

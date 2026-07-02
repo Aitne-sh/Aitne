@@ -317,6 +317,7 @@ function DocsLanding() {
 
 const LANDING_CATEGORIES: Array<{ key: string; label: string; blurb: string }> = [
   { key: "getting-started", label: "Get Started",     blurb: "Install, set up, first day." },
+  { key: "pages",           label: "Pages",           blurb: "What each dashboard screen does." },
   { key: "concepts",        label: "Concepts",        blurb: "Vocabulary of the system." },
   { key: "features",        label: "Features",        blurb: "Per-feature operator docs." },
   { key: "guides",          label: "Guides",          blurb: "Task-oriented playbooks." },

@@ -12,7 +12,6 @@ summary: |
   via the backend's CLI or paste a fresh API key.
 section: troubleshooting
 tags:
-  - troubleshooting
   - safety
   - backends
   - health
@@ -23,7 +22,7 @@ ask_examples:
   - The auth-health pill went red, what now?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - auth failed
   - auth error
@@ -56,16 +55,18 @@ api_endpoints:
 
 ## Most Likely Causes
 
-1. **Provider API key revoked or rotated** — the most common cause
-   on a healthy install. Re-paste the key on `/settings/models`.
+1. **Provider API key revoked or rotated** (replaced with a new one) —
+   the most common cause on a healthy install. Re-paste the key on
+   `/settings/models`.
 2. **Subscription-fallback login expired** when no API key was
-   registered (the daemon was running on the CLI's local login —
-   `claude auth login`, `codex login`, `gemini` — and that session
-   timed out). The recommended fix is to register an API key.
-3. **Account-level scope change** at the provider (key disabled,
-   project deleted, billing suspended). For cloud-provider auth
-   (Bedrock / Vertex / Foundry for Claude, Vertex AI for Gemini),
-   IAM-role / service-account changes show up the same way.
+   registered. This means the daemon was signed in through the CLI's
+   local login — `claude auth login`, `codex login`, `gemini` — and
+   that session timed out. The recommended fix is to register an API key.
+3. **Account-level change** at the provider (key disabled, project
+   deleted, billing suspended). If you use cloud-provider auth
+   (Bedrock / Vertex / Foundry for Claude, Vertex AI for Gemini), a
+   change to the underlying IAM role or service account shows up the
+   same way.
 
 ## Diagnostic Steps
 
@@ -109,3 +110,4 @@ probe (default 10 minutes).
 ## Related
 
 - [Auth Health](../concepts/auth-health.md)
+- [Dashboard Shows Degraded](./dashboard-shows-degraded.md)

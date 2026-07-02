@@ -20,7 +20,6 @@ tags:
   - autonomous
   - observations
   - polling
-  - activity-scan
 status: stable
 ui_anchors:
   - /agents/activity-scan
@@ -34,7 +33,7 @@ ask_examples:
   - How do I tune the gate's freshness window?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - hourly
   - observations
@@ -70,11 +69,13 @@ config_keys:
 
 # Activity Scan
 
-A medium-tier routine that drains the observations queue every interval
-during active hours and decides whether the accumulated change
-pattern warrants notifying you or appending to `state/today.md`. The
-"decide" step is a four-layer gate designed to keep quiet days quiet
-without missing the moment when something piles up.
+A medium-tier routine that runs every interval during your active
+hours (the daily window when the agent is allowed to work). Each run
+empties the pending observations queue and decides whether the changes
+that piled up are worth notifying you about or just worth logging to
+`state/today.md`. That "decide" step is a four-layer gate, built to
+keep quiet days quiet without missing the moment something actually
+matters.
 
 ## When It Runs
 
@@ -89,7 +90,8 @@ The legacy `activityScan*` config keys are deprecated fallbacks (see
   (recoverable — the dispatcher enqueues a `queueMorningRoutineWake`
   self-recovery and the activity scan resumes after the morning
   routine succeeds).
-- **Skips** when another activity scan is in flight (atomic flag).
+- **Skips** when another activity scan is already running (an atomic
+  in-flight flag stops two runs from overlapping).
 - **Skips** when accumulated signal is below the agent's **min
   observations** threshold and the heartbeat window
   (`activityScanHeartbeatHours`) hasn't elapsed.
@@ -119,9 +121,10 @@ Telemetry: `agent_actions.detail.harvest_ran` /
 
 ### Layer 2 — Signal compute
 
-`computeActivityScanSignals` reads the observation table mode-blind —
-it filters by source-prefix sets derived from
-`INTEGRATION_DESCRIPTORS`, never by `actor`. Signal categories
+`computeActivityScanSignals` reads the observation table mode-blind
+(it does not care which integration mode wrote a row) — it filters by
+source-prefix sets derived from `INTEGRATION_DESCRIPTORS`, never by
+`actor`. Signal categories
 include unread-mail / event-change / repo-change / browser-history
 clusters; each category produces a (count, last-seen, summary)
 tuple. The pre-pass freshness gate from Layer 1 is what guarantees

@@ -28,7 +28,6 @@ tags:
   - github
   - autonomous
   - observations
-  - core
 status: stable
 ask_examples:
   - What is the My Life › Git page for?
@@ -46,7 +45,7 @@ ask_examples:
   - How much does one Architecture refresh cost?
 locale: en-US
 created: 2026-05-05
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - my life
   - git
@@ -102,18 +101,18 @@ The page lists every repository registered on
 **Connections → Repositories** and exposes three collapsible sections
 per repo (all open by default so the controls are visible at a glance):
 
-1. **Polling** — overrides the global `gitPollIntervalSeconds` for
-   this repository alone. Useful when one repo is high-traffic and
-   you want it scanned more aggressively (or vice-versa). Also shows
-   the most recent observations gathered from that repo's polling
-   sources.
+1. **Polling** — how often the agent checks this repo for new
+   activity. It overrides the global `gitPollIntervalSeconds` for
+   this repository alone, which is handy when one repo is busy and you
+   want it scanned more often (or the reverse). It also shows the most
+   recent observations gathered from that repo's polling sources.
 2. **Triggers** — fire when matching Git or GitHub events arrive on
    this repository. Triggers run **alongside** the project-wide
    task-flow defaults, not in place of them. Each trigger has a
    workdir mode (`local-clone` or `temp`); local-clone triggers
    require the repository to have a `localPath`.
 3. **Daily git management** — opt-in per repo. Enabling it does three
-   distinct kinds of work, on different cadences:
+   distinct kinds of work, each on its own schedule:
    - On the first **Generate overview** click, writes the curated
      `knowledge/repos/<slug>/overview.md` skeleton, mirrors the source
      `README.*` to `knowledge/repos/<slug>/README.md`, and

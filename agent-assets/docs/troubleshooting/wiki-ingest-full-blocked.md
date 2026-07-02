@@ -16,7 +16,6 @@ summary: |
   This entry tells you how to clear each branch.
 section: troubleshooting
 tags:
-  - troubleshooting
   - wiki
   - cost
   - git
@@ -29,7 +28,7 @@ ask_examples:
   - What does "Sent for approval" mean after !compile full?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - wiki compile blocked
   - compile cost gate
@@ -57,8 +56,8 @@ ui_anchors:
 
 ## What You See
 
-You ran `!compile full` and the bang reply was one of these. Jump to the
-matching section:
+You ran `!compile full` and it stopped before doing anything, with one of
+these replies. Jump to the section that matches what you saw:
 
 - **"the external vault has uncommitted changes"** — the git pre-compile
   gate. See [Uncommitted Changes](#uncommitted-changes).
@@ -74,20 +73,20 @@ The full reply is:
 > Cannot run `!compile full` — the external vault has uncommitted
 > changes. Please commit or stash first. Dirty paths: …
 
-This is the **git pre-compile gate** firing. Before a full rebuild,
-Aitne wants to take a clean pre-compile snapshot commit so you can revert
-the whole compile in one step. It refuses to start on an external
-git-tracked vault whose working tree is dirty, because that snapshot
-would no longer be a clean baseline.
+This is the **git pre-compile gate**. Before a full rebuild, Aitne makes a
+clean snapshot commit of your vault, so you can undo the whole compile in
+one step later. It will not start when a git-tracked external vault still
+has uncommitted changes (a "dirty" working tree), because that snapshot
+would no longer be a clean baseline to revert to.
 
 To proceed:
 
 1. `git -C <vault> status` — review the dirty paths Aitne listed.
 2. Commit or stash them: `git add -A && git commit -m "wip"` or
    `git stash -u`.
-3. Re-run `!compile full`. On a clean tree Aitne commits the snapshot
-   itself (`aitne wiki: pre-compile snapshot <ts>`) before the compile
-   starts, and the reply echoes the short SHA.
+3. Re-run `!compile full`. On a clean tree Aitne makes the snapshot commit
+   for you (`aitne wiki: pre-compile snapshot <ts>`) before the compile
+   starts, and the reply shows its short SHA.
 
 If you don't want the auto-commit, turn off **Auto-commit before
 `!compile full`** on `/settings/wiki` (the toggle only appears for
@@ -105,9 +104,10 @@ The full reply ends with:
 > Sent for approval. Open `/settings/wiki` → Approvals to confirm and the
 > compile will start.
 
-This is the **cost gate**. Before running, Aitne estimates the compile
-cost (pure on-disk arithmetic — no agent session is spent). The estimate
-DM looks like this:
+This is the **cost gate**. Before running, Aitne estimates what the compile
+will cost. This estimate is just arithmetic over the files on disk — it
+does not spend an agent session to work it out. The estimate DM looks like
+this:
 
 ```
 Full compile estimate for `my-wiki`:
@@ -117,13 +117,13 @@ Full compile estimate for `my-wiki`:
 - approval threshold: $2.00
 ```
 
-If the **pessimistic** bound (`2× expected`) exceeds the per-workspace
-approval threshold (default **$2.00**), the compile is queued for
-approval instead of running.
+If the **pessimistic** figure (`2× expected`) is above the per-workspace
+approval threshold (default **$2.00**), the compile waits for your approval
+instead of running right away.
 
 ### Approve or Deny
 
-The queued request shows up as a **pending approval** on the dashboard.
+The waiting request shows up as a **pending approval** on the dashboard.
 Open the dashboard overview (the home page `/`, also reached via the
 `/approvals` shortcut) and use the **pending approvals** card:
 
@@ -140,21 +140,22 @@ request.
 You have three levers, all on `/settings/wiki`:
 
 - **Raise the threshold.** The **Approval threshold for `!compile full`**
-  field controls when a compile queues for approval. Bump it if routine
-  recompiles keep stalling on a confirmation you'd always grant.
+  field decides when a compile has to wait for approval. Raise it if
+  routine recompiles keep stalling on a confirmation you would always say
+  yes to.
 - **Use a cheaper model.** In the **Commands & models** section, point
   `wiki.compile` at a lite-tier model. It defaults to the medium tier
-  (Claude Sonnet 5), whose per-token cost is the dominant variable in
-  the estimate.
+  (Claude Sonnet 5), and the model's per-token price is the biggest factor
+  in the estimate.
 - **Trim the raw layer.** The estimate scans `10_raw/` and approximates
-  tokens per file from on-disk content, so the cost tracks the actual
-  size of what you're compiling. Compiling fewer or shorter raw notes
-  lowers the bound directly.
+  the tokens in each file from its on-disk content, so the cost tracks the
+  actual size of what you are compiling. Fewer or shorter raw notes lower
+  the estimate directly.
 
-> The estimate is a heuristic (≈4 chars per token for prose, denser for
-> CJK), bracketed `0.5×`–`2×`. It is intentionally cheap rather than
-> exact — close enough to gate spend without burning a session to
-> measure it.
+> The estimate is a rough rule of thumb (≈4 characters per token for
+> prose, denser for CJK), bracketed `0.5×`–`2×`. It is deliberately cheap
+> rather than exact — close enough to gate spending without burning a
+> session just to measure it.
 
 ## Not Enabled
 
@@ -163,11 +164,11 @@ If the reply is:
 > Wiki is not enabled. Open `/settings/wiki` and enable the internal
 > wiki workspace first.
 
-you have no active workspace row. On `/settings/wiki`, either click
+you have no active workspace yet. On `/settings/wiki`, either click
 **Enable internal wiki** to create the built-in workspace, or point Aitne
-at an existing folder with **Use this folder** (after the path probe
+at an existing folder with **Use this folder** (once the path check
 passes). Then re-run `!compile full`.
 
 If the workspace exists but is archived, the page shows a **This wiki is
-archived** card — click **Re-activate wiki** there before any `!compile`
-command will run.
+archived** card — click **Re-activate wiki** there first. No `!compile`
+command will run until you do.

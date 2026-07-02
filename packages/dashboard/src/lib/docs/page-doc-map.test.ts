@@ -15,29 +15,19 @@ function search(params: Record<string, string> = {}): URLSearchParams {
 
 describe("docIdForPath", () => {
   it("returns the docId for a literal pathname match", () => {
-    expect(docIdForPath("/chat", search())).toBe(
-      "features/messaging/dashboard-chat",
-    );
-    expect(docIdForPath("/reading", search())).toBe(
-      "features/lifestyle/reading",
-    );
+    expect(docIdForPath("/chat", search())).toBe("pages/chat");
+    expect(docIdForPath("/reading", search())).toBe("pages/reading");
   });
 
   it("matches regex pathnames", () => {
-    expect(docIdForPath("/activity", search())).toBe(
-      "features/operations/activity-and-conversations",
-    );
-    expect(docIdForPath("/activity/2026-04-25", search())).toBe(
-      "features/operations/activity-and-conversations",
-    );
-    expect(docIdForPath("/conversations/123", search())).toBe(
-      "features/operations/activity-and-conversations",
-    );
+    expect(docIdForPath("/activity", search())).toBe("pages/activity");
+    expect(docIdForPath("/activity/2026-04-25", search())).toBe("pages/activity");
+    expect(docIdForPath("/conversations/123", search())).toBe("pages/activity");
   });
 
-  it("agents hub: documented built-ins get their routine doc, everything else the hub doc", () => {
+  it("agents hub: documented built-ins get their routine doc, everything else the hub page doc", () => {
     // AGENTS_HUB_REDESIGN_PLAN §4 — the `?` button on /agents pages.
-    expect(docIdForPath("/agents", search())).toBe("concepts/routines");
+    expect(docIdForPath("/agents", search())).toBe("pages/agents");
     expect(docIdForPath("/agents/morning-routine", search())).toBe(
       "features/routines/morning-routine",
     );
@@ -55,11 +45,11 @@ describe("docIdForPath", () => {
     expect(docIdForPath("/agents/activity-scan", search())).toBe(
       "features/routines/activity-scan",
     );
-    // Undocumented built-ins, user Agents, and sub-pages fall to the hub doc.
-    expect(docIdForPath("/agents/monthly-review", search())).toBe("concepts/routines");
-    expect(docIdForPath("/agents/my-custom-agent", search())).toBe("concepts/routines");
+    // Undocumented built-ins, user Agents, and sub-pages fall to the hub page doc.
+    expect(docIdForPath("/agents/monthly-review", search())).toBe("pages/agents");
+    expect(docIdForPath("/agents/my-custom-agent", search())).toBe("pages/agents");
     expect(docIdForPath("/agents/my-custom-agent/executions", search())).toBe(
-      "concepts/routines",
+      "pages/agents",
     );
   });
 
@@ -70,8 +60,8 @@ describe("docIdForPath", () => {
     expect(docIdForPath("/knowledge", search({ tab: "context-files" }))).toBe(
       "concepts/memory-model",
     );
-    // Bare /knowledge falls through to the unqualified entry
-    expect(docIdForPath("/knowledge", search())).toBe("concepts/memory-model");
+    // Bare /knowledge falls through to the unqualified entry (hub page doc)
+    expect(docIdForPath("/knowledge", search())).toBe("pages/knowledge");
   });
 
   it("specific sub-pages win over their parent catch-all", () => {
@@ -81,16 +71,14 @@ describe("docIdForPath", () => {
     expect(docIdForPath("/connections/notes", search())).toBe(
       "features/integrations/obsidian",
     );
-    expect(docIdForPath("/connections", search())).toBe(
-      "features/messaging/overview",
-    );
+    expect(docIdForPath("/connections", search())).toBe("pages/connections");
     expect(docIdForPath("/settings/models", search())).toBe(
       "concepts/backends-and-tiers",
     );
     expect(docIdForPath("/settings/commands", search())).toBe(
       "features/messaging/overview",
     );
-    expect(docIdForPath("/settings", search())).toBe("concepts/agent-day");
+    expect(docIdForPath("/settings", search())).toBe("pages/settings");
   });
 
   it("returns null for /docs (suppression entry)", () => {
@@ -104,9 +92,9 @@ describe("docIdForPath", () => {
 
   it("query mismatch falls through to next entry", () => {
     // /knowledge?tab=other doesn't match the qualified entries; the bare
-    // /knowledge entry catches it.
+    // /knowledge entry catches it (hub page doc).
     expect(docIdForPath("/knowledge", search({ tab: "other" }))).toBe(
-      "concepts/memory-model",
+      "pages/knowledge",
     );
   });
 

@@ -17,7 +17,6 @@ summary: |
   this directory, so re-register them after a restore.
 section: backup-and-restore
 tags:
-  - guides
   - operations
   - backup
 status: stable
@@ -27,7 +26,7 @@ ask_examples:
   - Why are my API keys gone after restoring a backup?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - backup
   - restore
@@ -46,12 +45,12 @@ related:
 
 ## Goal
 
-Capture all of Aitne's durable state in a single tar archive you can
-restore later — on this machine or a fresh one.
+Save everything Aitne keeps on disk into a single tar archive (a `.tgz`
+file) that you can restore later — on this machine or a new one.
 
 ## What's in the backup (and what isn't)
 
-Everything Aitne persists lives under `PA_DATA_DIR` (default
+Everything Aitne saves lives under `PA_DATA_DIR` (default
 `~/.personal-agent`), so backing up that one directory captures it all:
 
 - `data/personal_agent.db` — sessions, actions, observations, FTS index
@@ -72,8 +71,9 @@ Both are re-added through the dashboard after restore.
 
 ## Steps
 
-1. **Stop the daemon** so the SQLite write-ahead log is checkpointed and
-   the snapshot is consistent:
+1. **Stop the daemon** (Aitne's background service). This flushes any
+   pending database writes to disk — the SQLite write-ahead log is
+   checkpointed — so your snapshot is a clean, consistent copy:
 
    ```bash
    aitne stop
@@ -95,7 +95,8 @@ Both are re-added through the dashboard after restore.
    ```
 
    Schema migrations run automatically on the first boot (see below), so
-   an older DB is brought up to the current shape without extra steps.
+   Aitne upgrades an older database to the current shape without extra
+   steps.
 
 4. **Re-register secrets and re-pair messaging** through the dashboard —
    they were never in the tar.
@@ -109,16 +110,18 @@ Both are re-added through the dashboard after restore.
 ## If It Fails
 
 - **Schema mismatch on restore.** Aitne ships forward-only schema
-  migrations applied automatically at boot (see
-  [Schema Migration](../glossary.md#schema-migration)), so a restored DB
-  from an older daemon version usually just works — the migration runner
-  brings it up to the current shape on the next start. Only fall back to
-  dropping the DB (see [Reinstall Cleanly](reinstall-cleanly.md)) if the
-  daemon refuses to start *after* you've checked the log
-  (`aitne logs`) for a real migration error.
+  migrations — they only ever upgrade a database, never downgrade it —
+  and applies them automatically at boot (see
+  [Schema Migration](../glossary.md#schema-migration)), so a restored
+  database from an older daemon version usually just works: the migration
+  runner brings it up to the current shape on the next start. Only fall
+  back to dropping the database (see
+  [Reinstall Cleanly](reinstall-cleanly.md)) if the daemon refuses to
+  start *after* you've checked the log (`aitne logs`) for a real
+  migration error.
 - **The agent can't reach its backends after restore.** That's the
   missing keychain secrets — re-add your API keys in the dashboard
-  (Step 4). The DB and context restore fine without them.
+  (Step 4). The database and context restore fine without them.
 
 ## Moving to a different machine?
 

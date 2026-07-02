@@ -14,7 +14,6 @@ summary: |
   drives every routine schedule and date-stamped memory file.
 section: agent-day
 tags:
-  - core
   - memory
   - routines
   - scheduler
@@ -26,7 +25,7 @@ ask_examples:
   - What is dayBoundaryHour?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - day boundary
   - 04:00
@@ -49,23 +48,24 @@ config_keys:
 
 ## TL;DR
 
-Aitne treats the "day" as starting at **04:00 local time**, not
-00:00. Anything you log between midnight and 4am is filed under the day
-that just ended, so a late commit at 02:30 lands in the same `state/today.md`
-that opened the previous morning.
+Aitne starts each "day" at **04:00 local time**, not at 00:00. In other
+words, the agent-day boundary (the moment "today" rolls over) sits at 4am
+by default. Anything you do between midnight and 4am counts toward the day
+that is just ending, so a late commit at 02:30 lands in the same
+`state/today.md` that opened the previous morning.
 
 ## Why This Concept Exists
 
-Owner-as-user installations almost always have late-night work sessions
-that, mentally, belong to "today" even though the wall-clock has already
-ticked over. A day boundary at midnight would split a single coherent
-working session across two `state/today.md` files, and the morning routine
-would open against an empty schedule because no agent activity had been
-logged for the new calendar day yet.
+Most people who run Aitne for themselves work late into the night. Those
+sessions still feel like "today" to you, even after the clock has ticked
+past midnight. A boundary at midnight would cut one continuous work session
+in half, spreading it across two `state/today.md` files. It would also leave
+the morning routine with nothing to open against: no agent activity has been
+logged yet for the fresh calendar day.
 
-Picking 04:00 is a defensive default: late enough to capture even very
-late nights, early enough that an early-rising operator (5–6am) sees a
-clean boundary before they start.
+04:00 is a safe default. It is late enough to capture even very late nights,
+yet early enough that an early riser (someone up at 5–6am) still starts the
+day on the far side of a clean boundary.
 
 ## Definitions
 

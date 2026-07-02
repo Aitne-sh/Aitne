@@ -26,7 +26,7 @@ ui_anchors:
   - /connections/messaging
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - discord
   - bot token
@@ -44,8 +44,9 @@ related:
 
 ## In One Sentence
 
-A Discord bot becomes the agent's surface; pair via DM after
-installing the bot in the developer portal.
+Aitne talks to you through a Discord bot you create. Set the bot up in
+Discord's developer portal, then link it to yourself by sending it a
+direct message.
 
 ## How to Set Up
 
@@ -57,8 +58,9 @@ installing the bot in the developer portal.
    DM or mention text without it.
 4. Invite the bot to any servers where you want mentions to work.
 5. Paste the token under **Connections → Messaging → Discord**.
-6. DM the magic phrase from your own Discord account to complete
-   pairing.
+6. From your own Discord account, DM the bot the magic phrase (the
+   short one-time pairing code Aitne shows you) to finish pairing. See
+   [Pairing & Magic Phrase](pairing-and-magic-phrase.md).
 
 ## What It Does
 

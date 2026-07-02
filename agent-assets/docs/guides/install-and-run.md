@@ -15,12 +15,10 @@ summary: |
   start the daemon and dashboard, and open the dashboard at :8322.
 section: install-and-run
 tags:
-  - core
-  - guides
   - getting-started
-  - install
   - setup
   - operations
+  - migration
 status: stable
 ask_examples:
   - How do I install Aitne?
@@ -29,7 +27,7 @@ ask_examples:
   - How do I install the aitne npm package?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - install
   - first run
@@ -90,10 +88,10 @@ pnpm install
 pnpm start
 ```
 
-`pnpm start` builds first when the source is stale (mtime check against
-`.buildstamp`), then launches the daemon + dashboard detached. The
-`pnpm <cmd>` scripts are thin aliases that forward to
-`node bin/aitne.mjs <cmd>`.
+`pnpm start` builds first if the source has changed since the last build
+(a modified-time check against `.buildstamp`), then launches the daemon
+and dashboard in the background. The `pnpm <cmd>` scripts are thin aliases
+that forward to `node bin/aitne.mjs <cmd>`.
 
 ### Then, for both paths
 
@@ -101,8 +99,9 @@ Open `http://localhost:8322` and follow the setup wizard.
 
 ## Verification
 
-- `aitne status` (or `pnpm status` from a clone) shows two PIDs (daemon
-  + dashboard), uptime, connected backends, and a green health pill.
+- `aitne status` (or `pnpm status` from a clone) shows two process IDs
+  (one for the daemon, one for the dashboard), uptime, connected backends,
+  and a green health pill.
 - `~/.personal-agent/` has been created, containing
   `data/personal_agent.db`, `context/`, and `logs/`.
 

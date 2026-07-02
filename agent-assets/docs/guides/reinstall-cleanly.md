@@ -17,9 +17,7 @@ summary: |
   DB is genuinely corrupt.
 section: reinstall-cleanly
 tags:
-  - guide
   - operations
-  - reinstall
   - migration
   - backup
 status: stable
@@ -30,7 +28,7 @@ ask_examples:
   - Do I need to wipe the DB to upgrade Aitne?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - reinstall
   - factory reset
@@ -54,10 +52,12 @@ ui_anchors:
 
 ## You Almost Never Need This
 
-Aitne upgrades through **forward-only schema migrations** applied at
-daemon boot — your DB and context files survive every
+Aitne upgrades itself safely. Each time the background service (the
+**daemon**) starts, it runs **forward-only schema migrations** — small
+scripts that update the database structure without erasing anything. So
+your database and context files survive every
 `npm install -g @aitne-sh/aitne@latest` upgrade. If you're reading this
-because you just upgraded, **don't run the steps below**; restart the
+right after upgrading, **don't run the steps below.** Just restart the
 daemon and let the migration runner do its job.
 
 This guide is the last-resort escape hatch for:
@@ -97,8 +97,8 @@ with different scopes — make sure you're running the one you mean:
    ```bash
    cp -R ~/.personal-agent/context backup/
    ```
-   Context Markdown is what makes the agent know who you are; the DB is
-   recoverable, context is not.
+   Context Markdown is how the agent knows who you are; the DB can be
+   rebuilt, but context cannot.
 3. **Back up the DB** if there's any chance you'll want to recover it
    later:
    ```bash
@@ -115,8 +115,9 @@ with different scopes — make sure you're running the one you mean:
    ```bash
    rm ~/.personal-agent/data/personal_agent.db*
    ```
-   (The `*` glob clears `-shm` / `-wal` left behind by WAL mode. The DB
-   lives inside `data/`, not at the top of the data dir.)
+   (The `*` at the end also clears the `-shm` and `-wal` helper files
+   that SQLite's write-ahead log leaves behind. The DB lives inside
+   `data/`, not at the top of the data dir.)
 3. Start the daemon.
    ```bash
    aitne start
@@ -135,5 +136,5 @@ with different scopes — make sure you're running the one you mean:
 
 - [Backup and Restore](backup-and-restore.md)
 - [Migrate Machines](migrate-machines.md)
-- [Schema Migration](../glossary.md#schema-migration) — the boring
-  alternative to this guide that runs automatically on every boot.
+- [Glossary: Schema Migration](../glossary.md) — the boring alternative
+  to this guide that runs automatically on every boot.

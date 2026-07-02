@@ -15,8 +15,6 @@ summary: |
   and pointers to the canonical key tuples in shared/.
 section: config
 tags:
-  - core
-  - reference
   - config
   - operations
   - backends
@@ -78,7 +76,7 @@ ui_anchors:
   - /settings/infrastructure
   - /settings/models
 created: 2026-04-25
-updated: 2026-06-08
+updated: 2026-07-01
 related:
   - reference/api
   - reference/cli-commands
@@ -89,21 +87,24 @@ related:
 # Config Reference
 
 The full `AgentConfig` schema lives in
-`packages/daemon/src/config.ts`. Three canonical tuples in
-`packages/shared/src/editable-config-keys.ts` govern what is editable
-and when:
+`packages/daemon/src/config.ts`. Three fixed lists of key names
+(TypeScript tuples) in `packages/shared/src/editable-config-keys.ts`
+decide which keys you can change, and when:
 
-- **`EDITABLE_RUNTIME_KEY_TUPLE`** — the ~130 keys mutable at runtime
-  via `PATCH /api/config`. Both the daemon and the dashboard import
-  from this tuple so the accepted-key set is enforced at compile time
-  in both packages.
-- **`RESTART_REQUIRED_KEY_TUPLE`** — runtime-editable keys whose
-  change does not apply to a running worker (the dashboard renders a
-  restart-required badge for these).
-- **`EDITABLE_BOOTSTRAP_KEY_TUPLE`** — `apiPort` only, written to
-  `.env` because it's read before the daemon binds.
+- **`EDITABLE_RUNTIME_KEY_TUPLE`** — the ~130 keys you can change while
+  the daemon is running, via `PATCH /api/config`. Both the daemon and
+  the dashboard import this list, so the set of accepted keys is checked
+  at compile time in both packages.
+- **`RESTART_REQUIRED_KEY_TUPLE`** — keys you can edit at runtime, but
+  the new value only reaches a worker after a restart; it does not apply
+  to a worker that is already running. The dashboard shows a
+  restart-required badge for these.
+- **`EDITABLE_BOOTSTRAP_KEY_TUPLE`** — only `apiPort`. It is written to
+  `.env` because the daemon reads it before it starts listening on the
+  network (binds to a port).
 
-Anything not in those tuples must be set via env or restart.
+Any key that is not in one of these three lists can only be set through
+an environment variable or by restarting.
 
 ## Where Each Field Comes From
 
@@ -116,9 +117,9 @@ Anything not in those tuples must be set via env or restart.
 
 ## Selected Keys
 
-A representative slice of `EDITABLE_RUNTIME_KEY_TUPLE` — the full list
-of ~130 keys is in `editable-config-keys.ts`. Names below are exact and
-case-sensitive.
+A representative sample of `EDITABLE_RUNTIME_KEY_TUPLE`; the full list
+of ~130 keys is in `editable-config-keys.ts`. The names below are exact
+and case-sensitive.
 
 ### Identity and timezone
 
@@ -127,18 +128,19 @@ case-sensitive.
 | `agentDisplayName` | string | What the agent calls itself in DMs. |
 | `character` | string | Free-text user-defined communication style / persona (max 1000 chars). When non-empty, rendered as a `## Character (user-defined)` block into each backend's instruction file. The agent profile itself is selected by ProcessKey, not by this key. |
 | `timezone` | IANA tz | Empty falls back to the system tz. |
-| `dayBoundaryHour` | 0–9 | Default `4`. Controls the agent-day rollover (must be an early-morning hour). |
+| `dayBoundaryHour` | 0–9 | Default `4`. Sets the agent-day boundary — the moment "today" rolls over for the agent (must be an early-morning hour). |
 | `primaryLanguage` | BCP-47 | Output language for DMs, journal, and Obsidian writes. Templates stay English-headered. |
 | `vaultMode` | enum | Where context lives — `plain` (default; `<dataDir>/context`) or `obsidian` (an external Obsidian vault). |
 
 ### Activity scan and gate
 
-The first five keys are **deprecated fallbacks**: the activity-scan
-cadence, active window, min-observations threshold, and enable switch
-moved onto the activity-scan agent (`/agents/activity-scan`, Definition
-tab → Cadence card; Enable/Disable). The keys are still accepted by
-`PATCH /api/config` but no longer surfaced in the dashboard; values
-resolve agent override → legacy config key → built-in default.
+The first five keys are **deprecated fallbacks**. The activity-scan
+cadence (how often it runs), active window, minimum-observations
+threshold, and enable switch now live on the activity-scan agent
+(`/agents/activity-scan`, Definition tab → Cadence card; Enable/Disable).
+`PATCH /api/config` still accepts these keys, but the dashboard no longer
+shows them. A value resolves in this order: agent override → legacy
+config key → built-in default.
 
 | Key | Type | Notes |
 |---|---|---|
@@ -247,7 +249,7 @@ resolve agent override → legacy config key → built-in default.
 ### Feedback learning
 
 The feedback learning loop (capture → nightly consolidation → injection of
-durable lessons). All six knobs are runtime-editable via `PATCH /api/config`,
+durable lessons). All knobs are runtime-editable via `PATCH /api/config`,
 surfaced by `GET /config`, and tunable from the dashboard `/settings/lessons`
 page. Defaults and ranges below are enforced in
 `packages/daemon/src/settings/runtime-settings.ts`.
@@ -255,12 +257,15 @@ page. Defaults and ranges below are enforced in
 | Key | Type | Notes |
 |---|---|---|
 | `feedbackLearningEnabled` | boolean | Default `true` (env `FEEDBACK_LEARNING_ENABLED`). Master kill-switch for the whole loop — capture, consolidation, and injection. |
-| `selfTuningEnabled` | boolean | Default `false` (env `SELF_TUNING_ENABLED`). Actuation gate for the self-tuning review cycle. While `false`, the loop runs in shadow mode: the weekly review still receives `<tuning_recommendations>` and records verdicts via `POST /api/tuning/verdicts`, but no config change is ever applied. With the flag on, apply verdicts for config knobs actuate through the bounded config chokepoint — one owner DM per applied change, `!revert tuning` undoes the latest, and a daily monitor auto-reverts any change whose 7-day verify metrics regressed. Flip only after ≥2 clean shadow cycles (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §7 shadow→live gate). |
+| `selfTuningEnabled` | boolean | Default `false` (env `SELF_TUNING_ENABLED`). Actuation gate for the self-tuning review cycle. While `false`, the loop runs in shadow mode: the weekly review still receives `<tuning_recommendations>` and records verdicts via `POST /api/tuning/verdicts`, but no config change is ever applied. With the flag on, apply verdicts for config knobs actuate through the bounded config chokepoint — one owner DM per applied change, `!revert tuning` undoes the latest, and a daily monitor auto-reverts any change whose 7-day verify metrics regressed. Flip only after ≥2 clean shadow cycles (SELF_TUNING_REVIEW_CYCLE_DESIGN.md §7 shadow→live gate); the daemon DMs you once when 3 consecutive shadow cycles were fully approved (graduation). |
 | `feedbackPromotionThreshold` | 1–10 | Default `2` (env `FEEDBACK_PROMOTION_THRESHOLD`). Weighted-evidence threshold a behavioral / self-critique lesson must clear before it becomes injectable. |
 | `feedbackLessonMaxBytesGlobal` | 1024–32768 | Default `8192` (env `FEEDBACK_LESSON_MAX_BYTES_GLOBAL`). Byte cap for `policies/agent-lessons.md`. |
 | `feedbackLessonMaxBytesPerAgent` | 512–16384 | Default `4096` (env `FEEDBACK_LESSON_MAX_BYTES_PER_AGENT`). Byte cap for each `policies/agents/<slug>/lessons.md`. |
-| `feedbackLessonStaleDays` | 7–365 | Default `60` (env `FEEDBACK_LESSON_STALE_DAYS`). Lessons whose `last=` date is older are pruned, except `kind=constraint` (durable). |
+| `feedbackLessonStaleDays` | 7–365 | Default `60` (env `FEEDBACK_LESSON_STALE_DAYS`). Staleness horizon for the graduated expiration lifecycle: an active lesson past the horizon whose time-decayed confidence is below the floor demotes to provisional (reversible); a provisional lesson uncorroborated for twice the horizon is archived. `kind=constraint` lessons are durable and never expire. |
 | `feedbackSignalRetentionDays` | 30–365 | Default `180` (env `FEEDBACK_SIGNAL_RETENTION_DAYS`). Consumed `feedback_signals` rows older than this are swept. |
+| `feedbackLessonConfidenceFloor` | 0–1 | Default `0.25` (env `FEEDBACK_LESSON_CONFIDENCE_FLOOR`). Lessons whose effective (time-decayed) confidence `cf` falls below this floor are dropped from injection; also the demote test in the expiration lifecycle. `0` disables the filter. |
+| `feedbackContradictionGuardCf` | 0–1 | Default `0.6` (env `FEEDBACK_CONTRADICTION_GUARD_CF`). Anti-whiplash guard: a new candidate contradicting an established lesson with `cf` at or above this value is held provisional until it accumulates 1.5x the usual evidence. Explicit owner corrections always win immediately. |
+| `feedbackOutcomeLearningEnabled` | boolean | Default `true` (env `FEEDBACK_OUTCOME_LEARNING_ENABLED`). Includes the per-notification-type outcome rollup (replied / corrected / ignored, correction rate) in the nightly consolidation worksheet so lesson promotions weigh real reactions. |
 
 ## Routine Schedule Times Are Not Configurable
 
@@ -284,10 +289,10 @@ cadence and active window — edited on the activity-scan agent's page
 
 ## Restart-Required Keys
 
-The `RESTART_REQUIRED_KEY_TUPLE` covers fields whose new value is
-written through `applyConfigUpdates` but does not apply to a running
-worker — the dashboard renders a badge prompting an `aitne restart`.
-The current list:
+The `RESTART_REQUIRED_KEY_TUPLE` covers fields whose new value is saved
+through `applyConfigUpdates` but does not reach a worker that is already
+running — the dashboard shows a badge prompting an `aitne restart`. The
+current list:
 
 - `apiPort` (env-only)
 - `externalObsidianVaultName` / `externalObsidianVaultPath` / `externalObsidianWatch`

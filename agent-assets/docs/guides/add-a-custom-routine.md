@@ -18,12 +18,10 @@ summary: |
   prompt for every run; runs appear on the Agent's detail page.
 section: add-a-custom-routine
 tags:
-  - guides
   - agents
   - routines
   - scheduler
   - autonomous
-  - core
 status: stable
 ask_examples:
   - How do I create a recurring agent?
@@ -32,7 +30,7 @@ ask_examples:
   - Where do I see my agent's runs?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - recurring agent
   - new agent
@@ -60,8 +58,8 @@ related:
 
 ## Goal
 
-Make the agent fire a particular kind of work on a schedule you pick —
-as a user **Agent** you can watch, tune, and toggle from `/agents`.
+Run a task you write on a schedule you pick, packaged as a user
+**Agent** you can watch, tune, and toggle from `/agents`.
 
 ## Prerequisites
 
@@ -89,7 +87,7 @@ as a user **Agent** you can watch, tune, and toggle from `/agents`.
      becomes the Markdown body of `agent.md` and is the prompt the
      agent receives every time it fires.
    - An **Advanced (YAML)** toggle reveals the raw `agent.md` editor
-     for long-tail fields the form doesn't expose (tags, tools,
+     for the extra fields the form doesn't expose (tags, tools,
      success criteria, error handling).
 3. Save. The dashboard writes `policies/agents/<slug>/agent.md`
    through the context vault and opens the new Agent's detail page;
@@ -122,8 +120,8 @@ curl -X POST http://localhost:8321/api/agents \
   "weekly", "daysOfWeek": ["tuesday"], "time": "11:00" } }`).
   `/agents` is recurring-only — a one-time task belongs on
   `POST /api/schedule` instead.
-- **`backend.tier`** is optional; omitted, the Agent inherits the
-  `agent.task` process default (medium). `backend.process_key`
+- **`backend.tier`** is optional; if you omit it, the Agent inherits
+  the `agent.task` process default (medium). `backend.process_key`
   defaults to `agent.task` — you don't need to set it.
 - **`limits`** defaults: 20 turns, $0.25 per run, 10-minute timeout.
 - Success returns `201 { "status": "created", "slug": ... }`. A taken
@@ -152,9 +150,9 @@ curl -X POST http://localhost:8321/api/agents \
 - `400 invalid_definition` — fix the fields listed in `issues`.
 - `400 one_shot_not_supported` — `/agents` is recurring-only; use
   `POST /api/schedule` for one-time work.
-- A prompt that hits the absolute-block guardrails: the run fires but
-  the offending tool call is logged as `blocked_absolute` in the
-  action log.
+- A prompt that trips the absolute-block guardrails — the run still
+  executes, but the offending tool call is logged as `blocked_absolute`
+  in the action log.
 
 ## Migrating From Custom Routines
 

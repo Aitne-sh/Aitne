@@ -14,7 +14,6 @@ summary: |
   rate limits gate the flow.
 section: operations
 tags:
-  - core
   - notifications
   - operations
 status: stable
@@ -23,7 +22,7 @@ ask_examples:
   - How do I limit how often it notifies me?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - notification
   - notify
@@ -54,15 +53,16 @@ api_endpoints:
 
 ## In One Sentence
 
-Outbound DMs the agent sends through the paired messaging app, gated
-by quiet hours and rate limits.
+Outbound DMs the agent sends you through your paired messaging app,
+held back by quiet hours and capped by rate limits.
 
 ## What It Does
 
-- Routines, observations, and approvals enqueue notifications.
-- Quiet hours hold notifications until the window ends.
-- Per-hour and per-day rate limits cap the volume.
-- Batching folds multiple small alerts of the same event type into a
+- Routines, observations, and approvals line up notifications to send.
+- Quiet hours (your do-not-disturb window) hold notifications until the
+  window ends.
+- Per-hour and per-day rate limits cap how many you get.
+- Batching folds several small alerts of the same event type into a
   single message.
 
 ## How a Notification Flows
@@ -74,13 +74,13 @@ by quiet hours and rate limits.
 4. It is sent to the operator over `primaryPlatform` (or, when set, the
    exact channels in `defaultNotificationPlatforms`).
 
-Explicit agent notifications (`POST /api/notify`) ride the same gates
-with one difference: inside quiet hours they are **deferred, not
-dropped** — the full message is queued as a scheduled DM that fires
-when the window ends (visible under Schedule), and repeat sends from
-the same agent overnight coalesce into one combined DM. Outside quiet
-hours the per-hour / per-day caps apply; a capped call is rejected
-(`rate_limited`) rather than silently queued, so the agent can adapt.
+Explicit agent notifications (`POST /api/notify`) go through the same
+checks, with one difference: inside quiet hours they are **deferred,
+not dropped** — the full message is queued as a scheduled DM that fires
+when the window ends (visible under Schedule), and repeat sends from the
+same agent overnight merge into one combined DM. Outside quiet hours the
+per-hour / per-day caps apply; a capped call is rejected (`rate_limited`)
+rather than silently queued, so the agent can adapt.
 
 ### Safety categories always get through
 

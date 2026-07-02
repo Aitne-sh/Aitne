@@ -15,7 +15,6 @@ aliases:
   - day zero
 section: getting-started
 tags:
-  - core
   - getting-started
   - setup
   - integrations
@@ -52,7 +51,7 @@ context_files:
 api_endpoints:
   - POST /api/knowledge/import
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 related:
   - getting-started/02-first-steps
   - getting-started/03-what-can-this-do
@@ -119,9 +118,9 @@ Send 3–5 DMs that read like introductions to a new assistant:
 
 The agent appends each fact to the right `identity/*.md` file (work
 facts → `identity/work.md`, people → `identity/people.md`, preferences →
-`identity/personal.md`, and so on). Identity-class facts (legal name,
-primary timezone) are deferred for your explicit confirmation
-rather than auto-written.
+`identity/personal.md`, and so on). Identity-class facts (your legal
+name, your primary timezone) wait for you to confirm them instead of
+being written automatically.
 
 ### Bootstrap from ChatGPT, Gemini, or anywhere else
 

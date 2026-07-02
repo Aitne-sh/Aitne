@@ -16,7 +16,6 @@ summary: |
   agent uses the same channel to send notifications back.
 section: messaging
 tags:
-  - core
   - messaging
   - integrations
   - pairing
@@ -29,7 +28,7 @@ ask_examples:
   - Can I send the agent a voice note?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - messaging
   - dm
@@ -66,17 +65,17 @@ config_keys:
 
 # Messaging Overview
 
-Aitne treats DMs from a paired messaging app as its primary reactive
-surface — you message it, it answers; it messages you when a
-notification fires. Voice notes are transcribed locally with Whisper
+Direct messages (DMs) from a paired messaging app are Aitne's main way
+to talk with you: you message it, it answers; it messages you back when
+a notification fires. Voice notes are transcribed locally with Whisper,
 so you can talk to the agent the same way you'd type.
 
 ## What It Does
 
 - **Reactive DMs**: the agent answers every direct message you send.
 - **@-mentions (Slack and Discord)**: @-mentioning the agent inside a
-  shared channel routes to the `message.mention` ProcessKey and is
-  answered the same way as a DM. Telegram and WhatsApp drop all non-DM
+  shared channel routes to the `message.mention` process key and is
+  answered the same way as a DM. Telegram and WhatsApp ignore all non-DM
   traffic (no group support).
 - **Outbound notifications**: routines and observations fire alerts
   back through the same channel.
@@ -94,16 +93,17 @@ so you can talk to the agent the same way you'd type.
 
 Aitne serves exactly one owner. Any message that does not come from a
 paired owner channel is dropped — group chats, multi-user Slack DMs
-(`mpim`), and unrecognized senders never reach the agent. This is
-defense in depth: both the messaging adapter and the dispatcher check
-the owner channel independently.
+(`mpim`), and unrecognized senders never reach the agent. Two layers
+enforce this independently (defense in depth): the messaging adapter
+and the dispatcher each check the owner channel on their own.
 
 ## When It Runs / How It Is Triggered
 
-- The messaging adapter for each connected platform long-polls
-  (Telegram) or holds a persistent WebSocket connection (Slack,
-  Discord, WhatsApp) for incoming messages.
-- An incoming DM dispatches to the `message.dm` ProcessKey.
+- The messaging adapter for each connected platform watches for
+  incoming messages — Telegram by long-polling (repeatedly asking the
+  server for updates), Slack, Discord, and WhatsApp by holding an
+  always-open WebSocket connection.
+- An incoming DM dispatches to the `message.dm` process key.
 - An incoming mention dispatches to `message.mention`.
 - Notifications fire as a side-effect of routines and observations
   reaching the notifier (subject to quiet hours and rate limits).

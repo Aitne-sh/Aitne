@@ -15,8 +15,6 @@ summary: |
   Rules step.
 section: guides
 tags:
-  - core
-  - guides
   - getting-started
   - setup
   - backends
@@ -29,7 +27,7 @@ ask_examples:
   - Where do I paste my API key?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - setup
   - wizard
@@ -65,10 +63,10 @@ ui_anchors:
 
 ## Goal
 
-Take a fresh install through the wizard with informed answers at each
-step. The wizard is rerunnable any time at `/setup?mode=update`, which
-jumps straight to the Customize Rules step so you can refine the agent
-without redoing the whole flow.
+Walk a fresh install through the wizard, making an informed choice at
+each step. You can rerun the wizard any time at `/setup?mode=update`,
+which jumps straight to the Customize Rules step so you can refine the
+agent without redoing the whole flow.
 
 ## Prerequisites
 
@@ -77,10 +75,10 @@ without redoing the whole flow.
 
 ## The steps at a glance
 
-The wizard has eight collection steps plus a terminal "Done" screen.
-Three are required (**Basics**, **Vault**, **AI Backend**, plus
-**Customize Rules**); the four integration/messaging steps are
-skippable and re-runnable later.
+The wizard has eight collection steps plus a final "Done" screen. Four
+of them are required — **Basics**, **Vault**, **AI Backend**, and
+**Customize Rules**; the other four (the integration and messaging
+steps) are skippable, and you can run them later.
 
 | # | Step | Required? | What it sets |
 |---|------|-----------|--------------|

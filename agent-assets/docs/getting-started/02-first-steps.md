@@ -14,7 +14,6 @@ summary: |
   pair a messaging app, and arrive at a green health pill.
 section: getting-started
 tags:
-  - core
   - getting-started
   - setup
 status: stable
@@ -31,7 +30,7 @@ keywords:
   - dashboard onboarding
   - health pill
 created: 2026-04-27
-updated: 2026-06-07
+updated: 2026-07-01
 related:
   - getting-started/01-what-is-this
   - getting-started/03-what-can-this-do
@@ -70,19 +69,19 @@ skippable in the wizard. Run through it once, top to bottom.
    the daemon claims you as the owner. See
    [Messaging Overview](../features/messaging/overview.md) for the
    list of supported apps and what each one does well.
-3. **Pick a main backend and register an API key.** Pick the LLM
+3. **Pick a main backend and register an API key.** This is the LLM
    the agent uses for "think hard" turns (Claude / Codex / Gemini /
-   OpenCode) and paste a provider API key — the supported way to run
-   a headless agent. If you skip the key, the daemon falls back to
-   whatever subscription login the matching CLI already has on your
-   machine; the dashboard surfaces a warning when this happens
-   because most providers do not support running agents on a
-   personal subscription. The same picker also lets you point the
+   OpenCode). Paste a provider API key — that is the supported way
+   to run the agent unattended (with no human signed in). If you skip
+   the key, the daemon falls back to whatever subscription login the
+   matching CLI already has on your machine, and the dashboard shows
+   a warning, because most providers do not support running agents on
+   a personal subscription. The same picker can instead point the
    backend at a cloud provider (Bedrock / Vertex / Foundry / Azure
-   OpenAI / Gemini-Vertex) instead of the direct API key — the
-   provider dropdown on `/settings/models` is the single surface for
-   both direct keys and cloud-provider credentials. Defaults are
-   sensible and can be changed later from `/settings/models`.
+   OpenAI / Gemini-Vertex) rather than a direct API key — the provider
+   dropdown on `/settings/models` is the single place for both direct
+   keys and cloud-provider credentials. The defaults are sensible, and
+   you can change them later from `/settings/models`.
    Background: [Backends and Tiers](../concepts/backends-and-tiers.md).
 4. **Skip integrations you do not need yet.** Mail, calendar, git,
    Notion, Obsidian are all optional and re-runnable any time from

@@ -17,7 +17,6 @@ summary: |
   use an app password.
 section: connect-a-new-mail-account
 tags:
-  - guide
   - mail
   - integrations
 status: stable
@@ -27,7 +26,7 @@ ask_examples:
   - How do I connect an Outlook mailbox?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - mail
   - imap
@@ -62,17 +61,17 @@ and search it.
 
 ## Supported providers
 
-The mail registry recognizes exactly four provider kinds — `gmail`,
-`outlook`, `yahoo`, `icloud`. It deliberately stops at hosted
-providers, so there is no separate "generic IMAP server" kind. Each
-kind authenticates differently:
+The mail registry supports exactly four provider kinds — `gmail`,
+`outlook`, `yahoo`, `icloud`. It sticks to these hosted providers on
+purpose, so there is no separate "generic IMAP server" kind. Each kind
+signs in differently:
 
 | Provider | How it connects |
 |---|---|
-| **Gmail** | Rides the primary Google sign-in (`/config/google-auth`). Extra Gmail accounts beyond the primary identity are not implemented yet. |
-| **Outlook** | OAuth — a browser loopback flow, with a device-code fallback for headless machines. |
-| **Yahoo** | App password (IMAP). |
-| **iCloud** | App password (IMAP). |
+| **Gmail** | Uses the same primary Google sign-in you set up for the app (`/config/google-auth`). Adding extra Gmail accounts beyond that main Google identity isn't supported yet. |
+| **Outlook** | OAuth (a browser sign-in flow). A headless machine — one with no browser, such as a server you reach over SSH — falls back to a device code you type in instead. |
+| **Yahoo** | App password (connects over IMAP). |
+| **iCloud** | App password (connects over IMAP). |
 
 ## Prerequisites
 
@@ -87,39 +86,41 @@ kind authenticates differently:
 2. Click "Add account" and pick the provider kind.
 3. Authenticate for that kind:
    - **Gmail** — connect the primary Google account from the setup or
-     connections flow (`/config/google-auth`). It then appears on the
-     unified mail surface automatically; you do not add it as a
-     separate mail account.
+     connections flow (`/config/google-auth`). It then shows up in your
+     mail view automatically; you do not add it as a separate mail
+     account.
    - **Outlook** — step through the OAuth browser flow. On a headless
-     machine (SSH / WSL), use the device-code fallback, which prints a
-     code to enter at a verification URL.
+     machine (one you reach over SSH or WSL, with no browser of its
+     own), use the device-code fallback, which shows a code to type in
+     at a verification URL.
    - **Yahoo / iCloud** — paste the email address and the app password.
-4. Save. Registration succeeds regardless of the enabled-providers
-   setting (`enabledMailProviders`); the account goes live only when
-   you flip its **Enable** toggle on the mail card.
-5. The account is picked up on the next mail poll tick (default every
-   180 seconds, configurable via `mailPollIntervalSeconds`).
+4. Save. The account saves whether or not its provider is turned on in
+   the enabled-providers setting (`enabledMailProviders`); it goes live
+   only when you flip its **Enable** toggle on the mail card.
+5. The agent picks up the account on the next mail poll (by default
+   every 180 seconds, which you can change with
+   `mailPollIntervalSeconds`).
 
 ## Verification
 
-- The account row turns healthy on the auth-health card.
+- The account row turns healthy (green) on the auth-health card.
 - The mail count updates on `/connections/mail`.
 
 ## If It Fails
 
-- **Outlook OAuth never returns** — the loopback flow binds an
-  ephemeral port on `127.0.0.1`, so a fixed-port redirect mismatch is
-  not the cause. Confirm the browser actually opened and completed the
-  redirect; on a headless host switch to the device-code flow instead.
+- **Outlook OAuth never returns** — the sign-in flow opens a temporary
+  local port on `127.0.0.1`, so a fixed-port redirect mismatch isn't
+  the cause. Check that the browser actually opened and finished the
+  redirect; on a headless host, switch to the device-code flow instead.
 - **Outlook add returns "client config missing"** — set the Outlook
   client config (`PUT /api/config/mail/outlook/client-config`) before
-  adding the account.
+  you add the account.
 - **Yahoo / iCloud login rejected** — re-check the address and the app
-  password (not your normal account password); regenerate the app
+  password (not your normal account password); generate a fresh app
   password if it still fails.
 - **Adding a second Gmail account fails** — only the primary Google
-  identity is supported today; additional Gmail accounts are not yet
-  implemented.
+  identity is supported today; extra Gmail accounts aren't available
+  yet.
 
 ## Related
 

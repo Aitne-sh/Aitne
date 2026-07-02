@@ -16,8 +16,6 @@ summary: |
 section: memory-files
 tags:
   - memory
-  - projects
-  - core
 status: stable
 ask_examples:
   - Where do I find the per-project files?
@@ -25,7 +23,7 @@ ask_examples:
   - How does the agent write to a project file?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - projects
   - project file
@@ -67,11 +65,11 @@ only the minimum — `type: project`, `owner: shared`, an `updated`
 date, and an H1 title. By convention the agent also writes `slug`,
 `state`, `start`, `due`, `stakeholders`, `next_milestone`, and `tags`.
 
-`state` is what marks a project **active**: the Obsidian `_active.base`
-Bases view filters on it (`state != "archived"`), and the morning
-routine surfaces every project whose `state` is not `archived` — a
-file with no `state` (or any state other than `archived`) is treated
-as active and surfaced.
+The `state` field is what marks a project **active**. The Obsidian
+`_active.base` view filters on it (keeping rows where
+`state != "archived"`), and the morning routine surfaces every project
+whose `state` is not `archived`. A file with no `state` at all — or any
+state other than `archived` — counts as active and shows up.
 
 ```markdown
 ---
@@ -95,13 +93,14 @@ Ship the public beta before the conference.
 
 ## When It Runs / How It Is Triggered
 
-Read on demand. Written when the operator asks the agent to remember
-something project-specific, or when a DM expresses project intent
-(create, update status, mark done).
+Read on demand. Written when you ask the agent to remember something
+project-specific, or when a direct message (DM) signals project intent
+— create, update status, or mark done.
 
-The agent cannot edit context files on disk — a pre-write hook blocks
-`Edit`/`Write` anywhere inside the context vault. All project writes go
-through the context API:
+The agent cannot edit context files directly on disk: a pre-write hook
+blocks the `Edit` and `Write` tools anywhere inside the context vault
+(the folder that holds these Markdown memory files). Instead, every
+project write goes through the context API:
 
 - `GET /api/context/list/projects` — discover existing project files.
 - `PUT /api/context/plans/projects/<slug>` — create or fully replace.

@@ -18,7 +18,6 @@ summary: |
   Markdown files.
 section: getting-started
 tags:
-  - core
   - getting-started
   - backends
 status: stable
@@ -42,7 +41,7 @@ keywords:
   - markdown memory
   - backends
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 context_files:
   - state/today.md
   - plans/roadmap.md
@@ -59,7 +58,7 @@ related:
 # What is Aitne?
 
 Aitne is a local-first personal AI agent. It runs as a long-running
-daemon on your own machine, drives Claude Code, Codex CLI, Gemini
+background program (a daemon) on your own machine, drives Claude Code, Codex CLI, Gemini
 CLI, or OpenCode (`@opencode-ai/sdk` server) via provider API keys
 you register (with the CLI's local subscription login as a
 fallback), and keeps all of its memory as plain Markdown files under
@@ -122,7 +121,7 @@ decides what (if anything) is worth telling you about.
 
 - [Mail](../features/integrations/mail.md) — Gmail, Outlook, Yahoo,
   iCloud, or any IMAP server. Searches your messages locally via
-  FTS5. Auto-classifies into
+  FTS5 (SQLite's built-in full-text search). Auto-classifies into
   [reading list](../features/lifestyle/reading.md),
   [receipts](../features/lifestyle/receipts.md), and
   [travel bookings](../features/lifestyle/travel-bookings.md).

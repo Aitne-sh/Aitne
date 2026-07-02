@@ -17,7 +17,6 @@ summary: |
   retro, plus any recurring user Agents you define.
 section: routines
 tags:
-  - core
   - routines
   - autonomous
   - scheduler
@@ -30,7 +29,7 @@ ask_examples:
   - Which routine uses the high tier by default?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - routine
   - routines
@@ -78,24 +77,26 @@ config_keys:
 
 ## TL;DR
 
-A routine is a unit of agent work that runs on a schedule, not in
-response to a message. The morning routine fires once per agent day at
-`dayBoundaryHour`; the evening review (18:00 daily), weekly review
-(Friday 19:00), and optional monthly review fire on fixed schedules in
-code; the activity scan coalesces accumulated observations on a
-configurable cadence.
+A routine is a piece of agent work that runs on a schedule instead of
+in reply to a message. The morning routine fires once per agent day —
+the 24-hour window that starts at `dayBoundaryHour` (04:00 by default).
+The evening review (18:00 daily), weekly review (Friday 19:00), and
+optional monthly review run on fixed schedules set in code. The
+activity scan gathers up the observations that have piled up, on a
+cadence you can configure.
 
 ## Why This Concept Exists
 
-The premise of Aitne is that the operator does not want to
-"prompt" their assistant every time. Routines are how the agent shows
-up without being asked: it builds today, it logs to the journal, it
-files a retro for the week. They are the proactive surface.
+The whole idea of Aitne is that you should not have to "prompt" your
+assistant every time. Routines are how the agent shows up without being
+asked: it builds the day's plan, it writes to the journal, and it files
+a weekly retrospective. This is the proactive side of the agent.
 
 Each routine is a single ProcessKey — `routine.morning_routine`,
-`routine.activity_scan`, `routine.weekly_review`, etc. The dispatcher
-treats them as just another event class; the only difference from a
-DM is who fired the event.
+`routine.activity_scan`, `routine.weekly_review`, and so on. The
+dispatcher treats a routine as just another kind of event; the only
+thing that sets it apart from a direct message (DM) is what triggered
+it — a schedule rather than you.
 
 ## Definitions
 
@@ -128,8 +129,8 @@ DM is who fired the event.
 - **Pre-pass fetcher**: each main routine that needs fresh mail /
   calendar / Notion data is preceded by a lite-tier
   `routine.fetch_window` session that fetches the relevant window and
-  POSTs observations. The main routine then consumes the resulting
-  `<fetch_report>` block plus pending observations instead of hitting
+  POSTs observations. The main routine then reads the resulting
+  `<fetch_report>` block plus pending observations instead of calling
   upstream APIs itself — a cost-savings split introduced in 2026-05.
 
 ## Concrete Examples

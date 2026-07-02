@@ -22,7 +22,6 @@ tags:
   - agents
   - autonomous
   - scheduler
-  - advanced
 status: deprecated
 ask_examples:
   - What happened to my custom routines?
@@ -31,7 +30,7 @@ ask_examples:
   - How do I create a recurring task now?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - custom routine
   - routine.custom.<slug>
@@ -73,19 +72,21 @@ once, at the first daemon start after the upgrade.
 - Recurring work you define is now an **Agent**: a
   `policies/agents/<slug>/agent.md` file that appears on the
   **Agents** page (`/agents`) with its schedule, an enable toggle, run
-  metrics, execution history, and a **Run now** button — surfaces
+  metrics, execution history, and a **Run now** button — features
   custom routines never had. See
   [Create a Recurring Agent](../../guides/add-a-custom-routine.md).
 
 ## The One-Time Migration
 
-At the first daemon start after the upgrade — and only once, guarded
-by a persisted flag — every file under `policies/routines/custom/` is
+The first time the daemon (Aitne's background service) starts after
+the upgrade — and only that once, guarded by a saved flag so it can
+never run twice — every file under `policies/routines/custom/` is
 examined:
 
 - A **valid routine becomes a user Agent** at
   `policies/agents/<slug>/agent.md` carrying over:
-  - the same **cron expression** (pinned to your configured timezone),
+  - the same **cron expression** (the schedule rule, pinned to your
+    configured timezone),
   - the same **model tier** (`backend_tier` → the Agent's tier),
   - the same **per-run budget** (`max_budget_usd`),
   - the same **enabled state** — a disabled routine migrates disabled.
@@ -95,7 +96,8 @@ examined:
   it came from (`Migrated from custom routine "<slug>".`).
 - The **source file is never deleted.** It is rewritten in place with
   `enabled: false` and a `migrated_to_agent: <slug>` marker in its
-  frontmatter, so it is visibly inert while your content is preserved.
+  frontmatter, so you can plainly see it no longer runs while your
+  original content is preserved.
 
 ### Collisions and invalid files
 

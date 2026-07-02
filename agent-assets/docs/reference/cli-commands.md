@@ -14,8 +14,6 @@ summary: |
   dashboard, plus the environment variables that override defaults.
 section: cli
 tags:
-  - core
-  - reference
   - cli
   - operations
 status: stable
@@ -28,7 +26,7 @@ ask_examples:
   - How do I check my install with aitne doctor?
 locale: en-US
 created: 2026-04-27
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - aitne start
   - aitne stop
@@ -54,6 +52,7 @@ related:
   - features/messaging/bang-commands
   - reference/knowledge-layout
   - reference/config
+  - reference/keyboard-shortcuts
 ui_anchors:
   - /setup
   - /activity
@@ -66,10 +65,11 @@ ui_anchors:
 
 `aitne` is the project's CLI (`bin/aitne.mjs`). The `pnpm <cmd>` forms are
 workspace scripts that delegate to the same entry point. Use whichever you
-prefer — `aitne start` and `pnpm start` do the same thing. After installing
-the npm package globally (`npm install -g @aitne-sh/aitne`) the `aitne`
-binary is on your `$PATH` and you no longer need to be inside the repo to
-use it. The tables below show both forms.
+prefer — `aitne start` and `pnpm start` do the same thing. After you install
+the npm package globally (`npm install -g @aitne-sh/aitne`), the `aitne`
+binary lands on your `$PATH` (the list of folders your shell searches for
+commands), so you can run it from anywhere — you no longer need to be inside
+the repo. The tables below show both forms.
 
 Note: `pnpm build` is *not* the same as `aitne build`. `pnpm build` runs
 `turbo run build` directly; `aitne build` runs the same build **and** writes
@@ -157,9 +157,10 @@ lives under `PA_DATA_DIR`, **not** inside the repo.
 
 ## Where data lives
 
-The context vault is partitioned into six authority classes (context-vault
-v2). The agent never writes these files directly — it goes through the
-daemon at `http://localhost:8321/api/context/<class>/<path>`.
+The context vault is split into six top-level folders (context-vault v2),
+each one an "authority class" — a separate group of memory files. The agent
+never writes these files directly; every write goes through the daemon at
+`http://localhost:8321/api/context/<class>/<path>`.
 
 ```
 ~/.personal-agent/
@@ -182,3 +183,5 @@ daemon at `http://localhost:8321/api/context/<class>/<path>`.
   guide that uses these commands end-to-end.
 - [Reinstall Cleanly](../guides/reinstall-cleanly.md) — when you need
   to wipe state and start over.
+- [Keyboard Shortcuts](./keyboard-shortcuts.md) — the dashboard hotkeys
+  that pair with these terminal commands.

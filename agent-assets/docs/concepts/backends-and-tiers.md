@@ -13,13 +13,11 @@ aliases:
 category: concepts
 summary: |
   Aitne runs on four backends — Claude Code, Codex, Gemini CLI, OpenCode.
-  Each backend exposes light, medium, and high model tiers; the dispatcher
+  Each backend exposes lite, medium, and high model tiers; the dispatcher
   picks the binding for every ProcessKey based on operator configuration.
 section: backends
 tags:
-  - core
   - backends
-  - models
   - cost
   - routing
 status: stable
@@ -31,7 +29,7 @@ ask_examples:
   - How does Aitne fail over when a backend hits its quota?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - claude
   - codex
@@ -53,6 +51,9 @@ related:
   - concepts/process-keys
   - concepts/costs-and-quotas
   - features/operations/backend-routing
+  - concepts/auth-health
+  - troubleshooting/fallback-keeps-firing
+  - troubleshooting/quota-exhausted
 ui_anchors:
   - /settings/models
   - /analytics
@@ -114,9 +115,10 @@ What each tier is for:
   daemon-prepared `<roadmap_skeleton>` block instead of the retired
   heavy `routine.morning_routine_initial`.
 
-Every ProcessKey resolves to a backend + model binding via
-`BackendRouter`. Aitne **does not store or read subscription-plan
-state** — there is no "Claude Pro / Max / Team" or "ChatGPT Plus /
+Every [ProcessKey](process-keys.md) — Aitne's internal name for one
+kind of work, such as a morning routine or a Gmail classification —
+resolves to a backend + model binding via `BackendRouter`. Aitne
+**does not store or read subscription-plan state** — there is no "Claude Pro / Max / Team" or "ChatGPT Plus /
 Pro" picker in the wizard or settings, and the DB has no plan
 column. Bindings come from `process_backend_config` rows seeded at
 install time and edited from `/settings/models`.
@@ -132,11 +134,11 @@ Each backend authenticates via a provider API key registered on
 | `opencode` | `opencode-server` (server URL + HTTP Basic-Auth username / optional password). Model-provider keys (Anthropic / OpenAI / OpenRouter / …) live on the OpenCode server itself — configure them there with `opencode auth login`; Aitne does not store or forward them | "Managed" mode runs a local `opencode` HTTP server on loopback; a "Remote" mode pointing at a baseUrl you operate is designed but not wired up yet |
 
 API keys are the recommended and provider-supported auth method for
-headless agent use; if you skip the key the daemon falls back to the
+headless agent use. If you skip the key, the daemon falls back to the
 CLI's local subscription login, which most providers do not
 officially support — Anthropic in particular currently prohibits the
 Claude Agent SDK on a Claude Pro / Max subscription. The dashboard
-surfaces a warning whenever a backend is on subscription auth.
+shows a warning whenever a backend is on subscription auth.
 
 Cloud / aggregator providers (Bedrock / Vertex / Foundry / Azure
 OpenAI / Gemini-Vertex / OpenRouter via OpenCode) let teams reuse
@@ -179,9 +181,9 @@ through the daemon's polling path or another backend's MCP). See
 Different work has different cost / quality tradeoffs. Owner-facing
 surfaces (DMs, daily review) need real instruction-following.
 Background polling (mail / calendar / git events) just needs a
-classifier-shaped output. Splitting Sonnet vs Haiku at the seed layer
-keeps the cost of an autonomous loop bounded without compromising the
-quality of work the operator actually reads.
+classifier-shaped output. Splitting Sonnet vs Haiku in the
+install-time defaults keeps the cost of an autonomous loop bounded
+without hurting the quality of the work the operator actually reads.
 
 Multiple backends exist so Aitne isn't single-vendor. The same
 operator can keep Claude as the primary brain, fall back to Codex when
@@ -235,4 +237,10 @@ Claude's quota is exhausted, or use Gemini for cheap polling tasks.
 
 - [Costs and Quotas](costs-and-quotas.md) — how to read the rollup.
 - [Backend Routing](../features/operations/backend-routing.md) — the
-  fallover machinery.
+  failover machinery.
+- [Auth Health](auth-health.md) — check whether each backend's
+  credentials are still valid.
+- [Fallback Keeps Firing](../troubleshooting/fallback-keeps-firing.md) —
+  when the router keeps switching to the fallback backend.
+- [Quota Exhausted](../troubleshooting/quota-exhausted.md) — what to do
+  when a backend runs out of quota.

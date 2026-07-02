@@ -29,7 +29,7 @@ ask_examples:
   - Where do I add a GitHub repo to watch?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - github
   - issue
@@ -61,14 +61,16 @@ context_files:
 
 # GitHub
 
-The daemon polls GitHub via the local `gh` CLI: review requests, CI
-failures on the default branch, security alerts, and assignments
-become DMs; everything else is recorded for the activity scan.
+The daemon polls GitHub through the local `gh` CLI. Four kinds of
+signal turn into a direct message (DM): review requests, CI failures
+on the default branch, security alerts, and assignments. Everything
+else is recorded for the activity scan instead of pinging you.
 
 ## What It Does
 
 - **Polls Notifications** every `githubPollIntervalSeconds` (default
-  1800s / 30 min) using ETag caching — 304 responses cost no
+  1800s / 30 min) using ETag caching, so when nothing has changed
+  GitHub returns a 304 ("not modified") and that poll costs no
   rate-limit quota.
 - **Polls workflow_runs** per watched GitHub repository, filtered by
   `status=failure`. Each repo's GitHub side comes from a unified
@@ -84,8 +86,8 @@ The agent never auto-comments, auto-merges, or pushes.
 ## High-priority events
 
 The agent will DM the user (priority `high`; during quiet hours the DM
-is deferred until they end rather than dropped — only `critical`
-safety messages break through) on:
+waits until quiet hours end rather than being dropped — only
+`critical` safety messages break through) on:
 
 - A teammate or bot **requested your review** on a PR — only when it
   looks time-sensitive (release-blocker keywords in the title, or the
@@ -149,9 +151,9 @@ Watched repos are no longer config keys. The old `gitRepos` /
 cutover — repos now live in the `repositories` table and are managed on
 **Connections → Repositories**. Per-repo polling cadence is set on
 **My Life → Git** and overrides the global interval for that repo's
-workflow-runs poll. The global interval is the floor — a per-repo
-cadence longer than it slows that repo down, while a shorter one
-still polls at the global tick.
+workflow-runs poll. The global interval is the floor: a per-repo
+cadence longer than the global one slows that repo down, but a shorter
+one still only polls at the global tick.
 
 ## When Something Goes Wrong
 

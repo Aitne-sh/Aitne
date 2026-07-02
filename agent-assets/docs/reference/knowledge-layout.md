@@ -19,8 +19,6 @@ summary: |
   api/routes/context/permissions.ts.
 section: knowledge-layout
 tags:
-  - reference
-  - core
   - memory
   - knowledge
   - operations
@@ -34,7 +32,7 @@ ask_examples:
   - Which files can the agent write to?
 locale: en-US
 created: 2026-05-18
-updated: 2026-06-08
+updated: 2026-07-01
 keywords:
   - context
   - knowledge
@@ -87,15 +85,17 @@ knowledge of you. Every file lives under `PA_DATA_DIR/context/`
 (default `~/.personal-agent/context/`) as plain Markdown that you can read,
 edit, version, and back up with ordinary tools.
 
-The vault is partitioned into **six authority classes** — `identity/`, `state/`,
-`plans/`, `journal/`, `knowledge/`, and `policies/`. Each top-level directory
-carries a distinct authority + lifecycle contract; the daemon enforces those
-contracts via the file's YAML frontmatter (advisory in this release; strict in
-the next phase). This shape landed in the context-vault v2 restructure
+The vault is split into **six authority classes** — `identity/`, `state/`,
+`plans/`, `journal/`, `knowledge/`, and `policies/`. An authority class is
+simply a top-level directory with its own rules for who may write to it and
+how long its files are kept. The daemon enforces those rules through each
+file's YAML frontmatter (advisory in this release; strict in the next
+phase). This shape landed in the context-vault v2 restructure
 (migration `0004-context-vault-restructure`); legacy pre-v2 paths such as <!-- drift-allow -->
 `today.md`, `user/profile`, `rules/management`, `agent/journal`, etc. continue to work <!-- drift-allow -->
-because the daemon normalizes them in-process — never via HTTP 3xx — for one
-minor release while shipped skills and task-flows are updated.
+because the daemon rewrites them to the new paths in-process — never via an
+HTTP 3xx redirect — for one minor release while the shipped skills and
+task-flows are updated.
 
 The layout below is the canonical source-of-truth. It mirrors
 `packages/daemon/src/core/context-paths.ts` (`CONTEXT_RELATIVE_PATHS`) and

@@ -16,7 +16,6 @@ summary: |
   recovery flows when the right signal is available.
 section: auth-health
 tags:
-  - core
   - safety
   - backends
   - operations
@@ -29,7 +28,7 @@ ask_examples:
   - What is the SubscriptionAuthWarning banner?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - auth
   - authentication
@@ -44,6 +43,7 @@ related:
   - concepts/backends-and-tiers
   - concepts/costs-and-quotas
   - troubleshooting/auth-failed
+  - troubleshooting/dashboard-shows-degraded
 ui_anchors:
   - /settings/models
   - /
@@ -68,14 +68,15 @@ red and surfaces a recovery hint.
 
 ## Why This Concept Exists
 
-Routines silently failing because of an expired token is the most
-common operator pain. The auth-health monitor is the proactive surface
-that surfaces "your credentials expired" before the next morning
-routine fails.
+A routine that quietly fails because a token expired is the most
+common operator headache. The auth-health monitor catches that early:
+it tells you "your credentials expired" before the next morning
+routine trips over the same problem.
 
 ## Definitions
 
-- **Probe**: a no-op call against each backend's auth surface. With
+- **Probe**: a lightweight test call that checks each backend's login
+  without doing any real work. With
   a registered API key the probe hits the provider's lightweight
   `models` endpoint (Anthropic, OpenAI, Google) and verifies the key
   is live. Without an API key, the probe checks whatever local CLI
@@ -138,3 +139,5 @@ register a paid key and leave the gray area.
   quota signals interact.
 - [Troubleshooting: Auth Failed](../troubleshooting/auth-failed.md) —
   step-by-step recovery when a card goes red.
+- [Dashboard Shows Degraded](../troubleshooting/dashboard-shows-degraded.md) —
+  what to do when the dashboard flags a backend as degraded.

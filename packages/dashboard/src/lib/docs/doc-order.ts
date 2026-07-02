@@ -17,6 +17,9 @@ import type { DocsTreeItem } from "@/lib/api-types";
  */
 export const CATEGORY_ORDER: ReadonlyArray<string> = [
   "getting-started",
+  // Per-page hub docs sit right after onboarding — they are the
+  // "what does this screen do?" entry point the `?` button opens.
+  "pages",
   "concepts",
   "features",
   "guides",

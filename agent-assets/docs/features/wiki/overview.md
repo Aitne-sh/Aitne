@@ -17,7 +17,6 @@ section: wiki
 tags:
   - wiki
   - knowledge
-  - core
 status: stable
 ask_examples:
   - What is the wiki?
@@ -26,7 +25,7 @@ ask_examples:
   - Can I point the wiki at my Obsidian vault?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - wiki
   - wiki workspace
@@ -88,10 +87,10 @@ and questions you ask it.
 The three commands you reach for daily:
 
 - **URL ingest**: send `!ingest <url>` from a paired DM channel; the wiki
-  agent fetches the source, summarises it, and stores a raw note.
+  agent fetches the source, summarizes it, and stores a raw note.
 - **Compile**: `!compile` (incremental) and `!compile full` (full
-  rebuild) turn raw notes into synthesised wiki articles with
-  cross-links and an `_index.md` catalogue.
+  rebuild) turn raw notes into synthesized wiki articles with
+  cross-links and an `_index.md` catalog.
 - **Ask**: `!ask <question>` searches the wiki and writes a cited
   answer under `30_outputs/`.
 
@@ -110,8 +109,9 @@ competes for budget with daily reactive memory.
 Aitne offers two modes:
 
 - **Internal** (recommended starting point) — the daemon owns the
-  vault at `$PA_DATA_DIR/context/knowledge/wiki`. No sandbox issues,
-  daemon-managed snapshots, isolated from iCloud sync conflicts.
+  vault at `$PA_DATA_DIR/context/knowledge/wiki`. No sandbox
+  permission issues, snapshots are managed for you, and it stays clear
+  of iCloud sync conflicts.
 - **External** — you point the wiki at an existing Obsidian vault on
   disk. The daemon writes directly when the filesystem allows, and
   falls back to the official Obsidian CLI when the vault sits in a
@@ -126,7 +126,7 @@ workspaces may not nest.
 - `00_inbox/` — human-only capture (the agent has read access but
   cannot write here).
 - `10_raw/` — source-faithful raw notes (append-only).
-- `20_wiki/` — synthesised wiki articles + `_index.md` catalogue.
+- `20_wiki/` — synthesized wiki articles + `_index.md` catalog.
 - `30_outputs/` — answer / report artifacts written by `!ask`.
 - `90_meta/` — taxonomy, schemas, lint reports, and the
   `import-<date>.md` migration record.
@@ -138,31 +138,23 @@ process keys can write wiki layers.
 ## Cost Safety
 
 `!compile full` rebuilds the entire wiki from raw notes and is the
-most expensive command. Before you run it, the dashboard shows a
-bracketed estimate — the optimistic (0.5×) and pessimistic (2×)
-multiples of the assumed input-token spend. If the pessimistic
-estimate exceeds the per-workspace threshold (default $2.00), the
-command escalates to the approval queue and requires your explicit
-confirmation before the compile starts. The pending-approval card
-surfaces on the dashboard home page (`/`), where you Approve or Deny
-it.
-
-On a git-tracked external vault, Aitne also runs
-`git add -A && git commit -m "aitne wiki: pre-compile snapshot <ts>"`
-on a clean working tree before the compile so you can roll back if
-the run produces a surprise. A dirty tree refuses the operation —
-commit or stash first.
+most expensive command, so Aitne guards it: the dashboard shows a cost
+estimate before you run it, a large run needs your approval (the
+per-workspace threshold defaults to $2.00), and a git-tracked external
+vault gets a snapshot commit first so you can roll back a surprising
+run. See [Cost estimation and approval](cost-and-approval.md) for the
+exact estimate math, the approval flow, and the pre-compile snapshot.
 
 ## Where it lives in the dashboard
 
 The wiki has two distinct surfaces in the dashboard. The split mirrors
-how Aitne organises the rest of the app — configuration lives under
+how Aitne organizes the rest of the app — configuration lives under
 **Setup → Settings**, day-to-day content browsing lives under **My
 Life** next to Knowledge / Reading / Git.
 
 | Page | Section | Use it for |
 |---|---|---|
-| `/wiki` | My Life | Workspace summary, the compiled `_index.md` catalogue, and the latest activity log. The page you open most often. |
+| `/wiki` | My Life | Workspace summary, the compiled `_index.md` catalog, and the latest activity log. The page you open most often. |
 | `/wiki/timeline` | My Life | Full chronological activity log plus the latest `!lint` health report. Linked from `/wiki` and from settings. |
 | `/settings/wiki` | Setup → Settings | Enable / archive a workspace, switch between internal and external mode, pick an external vault path, language, dispatch mode, write strategy, git auto-commit, approval threshold, per-command model selectors. |
 
@@ -196,7 +188,7 @@ This page is a high-level tour. For depth on a specific surface:
 - **[Commands reference](commands.md)** — every wiki bang command
   (`!ingest`, `!compile`, `!ask`, `!lint`, `!trace`, `!connect`,
   `!wiki`), the `@<workspace>` addressing token, dispatch modes, and
-  the disabled-state behaviour.
+  the disabled-state behavior.
 - **[Dashboard surfaces](dashboard.md)** — what `/wiki`,
   `/wiki/timeline`, and `/settings/wiki` actually render, where each
   card reads from on disk, and how the contextual help button maps

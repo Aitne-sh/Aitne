@@ -14,10 +14,8 @@ summary: |
   to a backend + tier binding; the manifest map resolves it to skills.
 section: process-keys
 tags:
-  - core
-  - dispatch
-  - backends
   - routing
+  - backends
 status: stable
 ask_examples:
   - What is a ProcessKey?
@@ -26,7 +24,7 @@ ask_examples:
   - What is the difference between configurable and fixed ProcessKeys?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - process key
   - ProcessKey
@@ -70,36 +68,37 @@ ui_anchors:
 
 ## TL;DR
 
-A ProcessKey is a string like `routine.morning_routine` or `message.dm`
-that identifies one class of agent work. Every routine, every reactive
-event, every dashboard action is tagged with one. The router uses it
-to pick the backend; the skills compiler uses it to pick the tools.
+A ProcessKey is a short string like `routine.morning_routine` or
+`message.dm` that names one class of agent work. Every routine, every
+event the agent reacts to, and every dashboard action carries one. The
+router uses it to pick the backend; the skills compiler uses it to pick
+the tools.
 
 ## Why This Concept Exists
 
-Without a stable identifier per task class, "the morning routine" and
-"a DM" would have to be hand-distinguished everywhere they were
-treated differently — pricing, retention, tool scope, auditability.
-The ProcessKey is the single coupling that ties dispatch to all of
-those subsystems.
+Without a stable name for each class of task, "the morning routine" and
+"a DM" would have to be told apart by hand everywhere they behave
+differently — pricing, retention, tool scope, and auditing. The
+ProcessKey is the one label that connects dispatch to all of those
+subsystems.
 
 ## Definitions
 
-- **CONFIGURABLE_PROCESS_KEYS**: the set the operator can override per
+- **CONFIGURABLE_PROCESS_KEYS**: the keys an operator can override per
   backend on `/settings/models`. The rest (`delegated_task`, `setup`,
-  `schedule.approaching`, …) use fixed defaults and are not surfaced
+  `schedule.approaching`, …) use fixed defaults and do not appear
   there.
-- **REACTIVE_PROCESS_KEYS**: those tied to in-the-loop events
-  (`message.dm`, `message.mention`, `dashboard.chat`,
-  `dashboard.docs_qa`, `setup`, `knowledge.import`). Everything else is
-  autonomous.
-- **DEFAULT_PROCESS_TIERS**: the per-key default model size — `lite`
-  (Haiku-class), `medium` (Sonnet-class), or `high` (Opus-class).
-  Unknown keys default to `medium`.
-- **TIER_LOCKED_PROCESS_KEYS**: keys whose tier is hard-locked and
-  cannot be overridden by an operator pin. Today this is just
-  `dashboard.docs_qa`, locked to `medium`.
-- **PROCESS_TO_EVENT_TYPE**: maps a ProcessKey to the skill manifest
+- **REACTIVE_PROCESS_KEYS**: keys tied to events that happen while you
+  interact with the agent (`message.dm`, `message.mention`,
+  `dashboard.chat`, `dashboard.docs_qa`, `setup`, `knowledge.import`).
+  Everything else runs on its own (autonomous).
+- **DEFAULT_PROCESS_TIERS**: the default model size for each key —
+  `lite` (Haiku-class), `medium` (Sonnet-class), or `high`
+  (Opus-class). Unknown keys default to `medium`.
+- **TIER_LOCKED_PROCESS_KEYS**: keys whose tier is hard-locked, so an
+  operator pin cannot change it. Today this is just `dashboard.docs_qa`,
+  locked to `medium`.
+- **PROCESS_TO_EVENT_TYPE**: maps a ProcessKey to its skill manifest
   key, so the skills compiler can pick the right tool set.
 
 ## Concrete Examples

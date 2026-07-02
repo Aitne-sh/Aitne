@@ -26,7 +26,7 @@ ask_examples:
   - Why didn't I get a reminder before my meeting?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - schedule approaching
   - pre-event reminder
@@ -49,16 +49,17 @@ Pre-event reminders fire 15 minutes before each calendar event.
 
 ## What It Does
 
-- Watches upcoming calendar events and fires a notification ~15
+- Watches upcoming calendar events and sends a notification ~15
   minutes before each one. The lead time is fixed in
-  `imminent-event-scheduler.ts` (not a config key today).
-- Emits one `schedule.approaching` event per item via the EventBus
-  when the event is `≤ 15 minutes` away. The event is handled at the
-  `medium` tier.
-- Deduplicates via the `imminent_event_notifications` table, keyed on
-  the provider's stable event id, so the same event never fires twice
-  across reschedules, restarts, or repeated poll cycles. Rows are
-  pruned after 24 hours.
+  `imminent-event-scheduler.ts` (there is no config key for it today).
+- When an event is `≤ 15 minutes` away, it emits one
+  `schedule.approaching` event per item on the EventBus (the daemon's
+  internal message bus). That event is handled at the `medium` tier.
+- To avoid duplicate reminders, it records each fired event in the
+  `imminent_event_notifications` table, keyed on the provider's stable
+  event id. The same event never fires twice across reschedules,
+  restarts, or repeated poll cycles, and rows are pruned after 24
+  hours.
 
 ## How It Is Triggered
 
@@ -71,10 +72,11 @@ integration mode:
   direct mode and the delegated-sync worker in delegated mode).
 - **`native` mode** — the daemon does not poll, so it reads
   `observations` rows instead. These are posted by the agent's
-  native-mode `routine.fetch_window` pre-pass. Because that pre-pass
-  refreshes on the activity-scan tick (~60-minute cadence), events
-  scheduled with less than ~60 minutes of lead time may miss their
-  reminder. Direct mode (5-minute poll) does not have this limit.
+  native-mode `routine.fetch_window` pre-pass (the pre-run scan that
+  gathers fresh context). Because that pre-pass only refreshes on the
+  activity-scan tick (~60-minute cadence), an event scheduled with
+  less than ~60 minutes of lead time can miss its reminder. Direct
+  mode, which polls every 5 minutes, does not have this limit.
 
 Cross-source dedup is automatic: snapshot and observation rows for the
 same event share the provider's event id, so they collapse into one

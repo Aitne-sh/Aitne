@@ -26,7 +26,7 @@ ask_examples:
   - Where do reading-list items get stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - reading
   - books
@@ -37,6 +37,7 @@ related:
   - features/memory-files/user-profile
   - features/lifestyle/receipts
   - features/lifestyle/travel-bookings
+  - pages/reading
 api_endpoints:
   - GET /api/books
   - PATCH /api/books/:id
@@ -52,7 +53,7 @@ ui_anchors:
 
 A reading list backed by the `books` and `reading_highlights` SQLite
 tables: imports your Kindle highlights, tracks each book's status
-(`reading`, `completed`, or `abandoned`), and surfaces the working set
+(`reading`, `completed`, or `abandoned`), and shows your current list
 at `/reading`.
 
 ## What It Does
@@ -65,14 +66,15 @@ at `/reading`.
     "Export Notebook" email.
 - **List** the library on `/reading` or via `GET /api/books`
   (filterable by `status` and `source`, paginated to 200 rows per call).
-- **Mark complete or abandoned** — an existing row is updated via
-  `PATCH /api/books/:id`. This is an **Approve-tier** write that requires
-  an operator `Authorization: Bearer` token, so it is driven from the
-  dashboard, not autonomously by the agent (an unauthenticated agent curl
-  is rejected with **401** before the handler runs). Setting `status` to
+- **Mark complete or abandoned** — `PATCH /api/books/:id` updates a book
+  that already exists. This is an **Approve-tier** write (a change that
+  needs your explicit sign-off), so it requires an operator
+  `Authorization: Bearer` token and runs from the dashboard rather than
+  on the agent's own initiative (an unauthenticated agent curl is
+  rejected with **401** before the handler runs). Setting `status` to
   `completed` stamps `completed_at` automatically; you can also set a 1–5
   `rating` or `notes`.
-- **Recommend** from the list during reactive turns, and refresh the
+- **Recommend** from the list when you ask in a chat, and refresh the
   reading-taste profile during the weekly review.
 
 There is **no bare "add a book" endpoint** — new books arrive through the
@@ -126,5 +128,6 @@ drives the list shape. The reading skill loads in two situations:
 
 ## Related
 
+- [Reading Page](../../pages/reading.md)
 - [Receipts](receipts.md)
 - [Travel Bookings](travel-bookings.md)

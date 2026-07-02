@@ -17,7 +17,6 @@ summary: |
   which actions are categorically refused.
 section: safety
 tags:
-  - core
   - safety
   - operations
   - backends
@@ -28,7 +27,7 @@ ask_examples:
   - How do I see what tools the agent is allowed to use?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - safety
   - safe mode
@@ -63,7 +62,9 @@ Three layers gate what the agent can do:
 
 1. **Skill `allowed-tools`** — the visible toolset for that session.
 2. **Execution mode** — Safe (strict permission checks, sandboxes)
-   or Allow (SDK bypass, sandbox off). Set per-backend.
+   or Allow (the SDK's permission prompts are bypassed, sandbox off).
+   Set per backend (the underlying agent engine — Claude, Codex,
+   Gemini, or OpenCode).
 3. **Always-disallowed** — a hard floor. Recursive deletes, `sudo`,
    secret-file reads / writes are denied unconditionally regardless
    of mode, and neither a skill nor Allow mode can widen past it.
@@ -87,29 +88,31 @@ disallowed-tools floor.
   permission block.
 - **Allow mode**: the looser posture. SDK bypass, sandbox off, minimal
   TOML. The absolute-block layer still holds in Allow mode on Claude,
-  Gemini, and OpenCode — Codex is the documented exception: its Allow
-  mode is a binary sandbox-off switch with no hook layer the daemon can
+  Gemini, and OpenCode. Codex is the documented exception. Its Allow
+  mode is a binary sandbox-off switch, with no hook layer the daemon can
   attach the block list to, so the dashboard warns you before you flip
-  it. Set independently per backend, so one backend can run Allow while
-  the others stay Safe.
+  it. You set the mode separately for each backend, so one backend can
+  run Allow while the others stay Safe.
 - **Absolute block**: the unconditional layer. `ALWAYS_DISALLOWED_TOOLS`
   in `src/safety/always-disallowed.ts`. Cannot be widened by skills,
   by config, or by allow-mode.
 - **Risk tier**: every daemon-API operation carries one of three tiers —
   `autonomous`, `read_sensitive`, or `approve`. *Autonomous* runs without a
-  prompt. *Read-sensitive* reads (email, calendar, notes, context files) are
-  the same blast radius as autonomous but are gated by a read token when
-  `enforceReadToken` is on. *Approve* is blocked until you confirm with a
-  bearer token (the dashboard does this when you click Approve). There is no
-  separate "notify" tier — that behaviour now lives in the skill prompts: for
-  potentially destructive actions the agent DMs you first, then proceeds. See
-  [Safety model](safety-model.md) for the full taxonomy.
+  prompt. *Read-sensitive* reads (email, calendar, notes, context files) can
+  do no more harm than autonomous ones, but they are gated by a read token
+  when `enforceReadToken` is on. *Approve* actions are blocked until you
+  confirm with a bearer token (the dashboard does this when you click
+  Approve). There is no separate "notify" tier — that behaviour now lives in
+  the skill prompts: before a potentially destructive action the agent DMs
+  you first, then proceeds. See [Safety model](safety-model.md) for the full
+  taxonomy.
 
 ## Concrete Examples
 
-The daemon API is the agent's only write path, so most of its own writes are
-`autonomous` (the memory chokepoint validates and snapshots them). The
-absolute-block layer and Approve tier are where the agent is actually stopped.
+The daemon API is the agent's only write path, so most of the writes it makes
+are `autonomous` — a single choke point validates and snapshots each one. The
+places the agent is actually stopped are the absolute-block layer and the
+Approve tier.
 
 | Action | What gates it |
 |---|---|

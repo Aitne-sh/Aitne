@@ -37,9 +37,10 @@ describe("orderIndex", () => {
 });
 
 describe("CATEGORY_ORDER / SECTION_ORDER (sanity)", () => {
-  it("includes all 7 top-level categories", () => {
+  it("includes all 8 top-level categories", () => {
     expect(CATEGORY_ORDER).toEqual([
       "getting-started",
+      "pages",
       "concepts",
       "features",
       "guides",

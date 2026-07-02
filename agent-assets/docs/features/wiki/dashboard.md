@@ -23,8 +23,6 @@ section: wiki
 tags:
   - wiki
   - dashboard
-  - reference
-  - core
 status: stable
 ask_examples:
   - What does the /wiki page show?
@@ -37,7 +35,7 @@ ask_examples:
   - What does the Enable Wiki button do?
 locale: en-US
 created: 2026-05-21
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - /wiki
   - /wiki/timeline
@@ -82,12 +80,12 @@ process_keys:
 
 # Wiki Dashboard Surfaces
 
-The wiki has three distinct pages in the dashboard. The split mirrors
-Aitne's broader IA: content browsing lives under **My Life**,
-configuration lives under **Setup → Settings**. The pages share a
-single read path through the daemon's `/api/wiki/*` routes — every
+The wiki has three separate pages in the dashboard. The split mirrors
+how the rest of Aitne is organized: content you browse lives under
+**My Life**, and configuration lives under **Setup → Settings**. All
+three pages read through the same daemon routes (`/api/wiki/*`). Every
 request carries an `x-process-key: wiki.ask` header so the safety
-layer can attribute reads correctly.
+layer can record who is reading what.
 
 ## `/wiki` — workspace home
 
@@ -112,13 +110,13 @@ Two action buttons at the bottom of the card: **Timeline & health**
 
 ### 2. Index
 
-Renders the latest `20_wiki/_index.md`, the LLM-maintained catalogue
-of wiki pages. The agent rewrites this file at the end of every
-`!compile` run.
+Renders the latest `20_wiki/_index.md`, the running catalogue of wiki
+pages that the agent keeps up to date. The agent rewrites this file at
+the end of every `!compile` run.
 
 States:
-- **Empty** — no `_index.md` yet; the CTA tells you to run `!compile`
-  from a DM.
+- **Empty** — no `_index.md` yet; the card's call-to-action button
+  tells you to run `!compile` from a DM.
 - **Loaded** — the file is rendered verbatim as a monospaced code
   block (the index uses wikilink syntax, so rendering as markdown
   would lose information).
@@ -139,10 +137,10 @@ error toast.
 ### Disabled state
 
 When no `active=1` workspace exists in `wiki_workspaces`, the page
-shows an **Enable Wiki** CTA that jumps to `/settings/wiki`. The
-sidebar entry is always visible (gated only on the workspace
-catalogue being reachable), so this disabled state is reachable via
-the sidebar, a deep link, or browser history.
+shows an **Enable Wiki** button that jumps to `/settings/wiki`. The
+sidebar entry is always visible (it shows as long as the workspace
+list can be loaded), so you can still land on this disabled page from
+the sidebar, a shared link, or browser history.
 
 ## `/wiki/timeline` — full chronological history + health
 
@@ -172,9 +170,9 @@ log plus an **All commands** default. Entries render the same way
 they do in the `/wiki` recent-activity card — process-key badge,
 operation, path, timestamp.
 
-Both surfaces read live from the wiki API; the timeline page is a
-pure rendering pass over files the wiki skills already produce — no
-extra daemon-side schema backs them.
+Both surfaces read live from the wiki API. The timeline page simply
+displays files the wiki skills already write to disk — there is no
+separate database table behind it.
 
 ## `/settings/wiki` — configuration
 
@@ -186,9 +184,9 @@ A two-card chooser:
 
 - **Internal** (recommended) — managed by Aitne inside the context
   vault (default `<contextDir>/knowledge/wiki`, i.e.
-  `~/.personal-agent/context/knowledge/wiki`), schema seeded
-  automatically. The **Enable internal wiki** button turns it on with
-  nothing else to configure.
+  `~/.personal-agent/context/knowledge/wiki`), with the folder
+  structure set up for you. The **Enable internal wiki** button turns
+  it on with nothing else to configure.
 - **Existing Obsidian vault** (external) — point Aitne at a folder you
   already own via the path picker, then confirm with **Use this
   folder**.

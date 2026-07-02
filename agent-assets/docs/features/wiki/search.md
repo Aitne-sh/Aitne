@@ -21,9 +21,7 @@ summary: |
 section: wiki
 tags:
   - wiki
-  - search
-  - fts
-  - reference
+  - knowledge
 status: stable
 ask_examples:
   - How does !ask find the right wiki pages?
@@ -36,7 +34,7 @@ ask_examples:
   - What is fts_wiki?
 locale: en-US
 created: 2026-05-21
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - wiki search
   - fts_wiki
@@ -83,9 +81,9 @@ The wiki exposes two read paths the skills use to find content:
    A short, human-readable list with one bullet per wiki page, kept
    current by every `!compile` run. Good for "give me the lay of the
    land" queries.
-2. **`fts_wiki`** — a content-less SQLite FTS5 virtual table the
-   daemon syncs on every successful disk write. Good for "find any
-   page that mentions X" queries.
+2. **`fts_wiki`** — a full-text search index (a content-less SQLite
+   FTS5 virtual table) the daemon syncs on every successful disk
+   write. Good for "find any page that mentions X" queries.
 
 Both surfaces are read-only consumers; only `!compile` writes the
 catalogue, and only the wiki API write endpoints update `fts_wiki`.
@@ -139,9 +137,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_wiki USING fts5(
 ```
 
 The `unicode61` tokenizer with `remove_diacritics 2` matches the
-mail FTS table for consistency. CJK content is handled by code-point
-breaking — searches work for Japanese, Chinese, Korean, and
-mixed-script wikis.
+mail FTS table for consistency. CJK (Chinese, Japanese, Korean)
+content is handled by code-point breaking, so searches work across
+those scripts and mixed-script wikis.
 
 ### Layer prefixes
 
@@ -157,9 +155,9 @@ The path classifier maps each on-disk file to one of six layers:
 Only four of these are actually indexed. `upsertWikiFulltextRow`
 **drops `log` and `inbox` rows** before insert: `log.md` is an
 append-only audit trail and `00_inbox/` is human-only, so indexing
-them would bury wiki and raw matches under log noise. So the values
-you ever see in `fts_wiki.layer` are `raw`, `wiki`, `output`, and
-`meta`.
+them would bury wiki and raw matches under log noise. So the only
+values you ever see in `fts_wiki.layer` are `raw`, `wiki`, `output`,
+and `meta`.
 
 Searches can filter by layer to restrict the result set — e.g.
 `layer=wiki` for only canonical pages, not raw notes.
@@ -173,7 +171,7 @@ evidence. The query supports:
 
 - `q` — the search query. Each whitespace-separated token is quoted
   and joined by implicit AND, so a multi-word query narrows the
-  result set. (Tokens are quoted to neutralise FTS5's `AND`/`OR`/
+  result set. (Tokens are quoted to neutralize FTS5's `AND`/`OR`/
   `NOT`/`NEAR` operator vocabulary — typing literally `rust AND go`
   matches those words, it does not parse as a boolean.)
 - `layer` — restrict to a single indexed layer (`raw` / `wiki` /
@@ -187,8 +185,8 @@ evidence. The query supports:
 
 Each result row carries `path`, `layer`, `title`, a body `snippet`
 (FTS5 `snippet()` output, `<mark>`-wrapped), `mtime` so the caller
-can rank by recency, and a BM25 `rank` (lower is better, `title`
-weighted above `body`).
+can rank by recency, and a BM25 relevance `rank` (lower is better,
+`title` weighted above `body`).
 
 There is no dashboard content-search bar today — the FTS surface is
 used by the agent, not the user UI. The dashboard timeline
@@ -222,7 +220,7 @@ A simplified flow for `!ask <question>`:
    question's key terms.
 2. It reads `10_raw/` notes only when the wiki pages need source
    verification.
-3. The LLM synthesises an answer from the pages it pulled.
+3. The LLM synthesizes an answer from the pages it pulled.
 4. The answer is written to
    `30_outputs/<YYYY-MM-DD>-<slug>.md` (the date-prefixed output
    shape the `OUTPUT_RE` path check enforces). The file records the

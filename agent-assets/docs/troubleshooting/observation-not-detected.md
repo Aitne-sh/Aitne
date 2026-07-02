@@ -15,10 +15,8 @@ summary: |
   watched, or a change the agent authored itself (filtered out).
 section: troubleshooting
 tags:
-  - troubleshooting
   - observations
   - polling
-  - activity-scan
 status: stable
 ask_examples:
   - Why didn't the agent notice my new commit?
@@ -26,7 +24,7 @@ ask_examples:
   - Why is the activity scan empty?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - observation
   - polling
@@ -64,16 +62,17 @@ gate. Work through them in that order.
 
 ## How detection actually works
 
-Observers (Obsidian, Git, Notion, Calendar) do **not** fire an event per
-change. They poll on a cadence and call `recordObservation(...)`, which
-appends a row to the `observations` table. The activity scan later reads those
-rows in a single batch. So a "missing" observation is usually a row that was
-never written, or one that was written but filtered.
+Observers (Obsidian, Git, Notion, Calendar) do **not** fire an event the
+instant something changes. Instead they poll — check the source on a fixed
+schedule — and each time they call `recordObservation(...)`, which appends a
+row to the `observations` table. The activity scan later reads those rows in
+one batch. So a "missing" observation is usually a row that was never written,
+or one that was written but then filtered out.
 
-`AgentWriteTracker` tags every change as `actor='agent'` or `actor='user'`.
-Changes the agent itself wrote are tagged `actor='agent'` and skipped by the
-activity scan — this is the deliberate anti-loop filter that stops the agent
-from observing its own output.
+`AgentWriteTracker` tags every change as either `actor='agent'` or
+`actor='user'`. Changes the agent wrote itself are tagged `actor='agent'` and
+skipped by the activity scan. This is a deliberate anti-loop filter: it keeps
+the agent from reacting to its own output.
 
 ## Most likely causes
 
@@ -85,9 +84,9 @@ from observing its own output.
 3. **The change was tagged `actor='agent'`.** If the agent (not you) authored
    the commit or note, the anti-loop filter drops it.
 4. **It was below the gate threshold.** The activity scan only runs its full
-   pass when at least the activity-scan agent's **min observations**
-   threshold (default `1`; legacy key `activityScanMinObservations`) of
-   pending observations exists. A single low-signal change can be held back.
+   pass once the number of pending observations reaches the activity-scan
+   agent's **min observations** threshold (default `1`; legacy key
+   `activityScanMinObservations`). A single low-signal change can be held back.
 
 ## Diagnostic steps
 

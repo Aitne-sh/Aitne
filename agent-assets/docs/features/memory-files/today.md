@@ -13,9 +13,7 @@ summary: |
   and the operator all read and append to it during the day.
 section: memory-files
 tags:
-  - core
   - memory
-  - today
 status: stable
 ask_examples:
   - What is in today.md?
@@ -23,7 +21,7 @@ ask_examples:
   - Why does today.md keep getting rewritten?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - today
   - day plan
@@ -48,9 +46,10 @@ context_files:
 
 ## In One Sentence
 
-The single live file for the current agent day — plan, log, tasks, and
-hand-off. The morning routine rebuilds it; everything else during the
-day appends to it.
+The single live file for the current agent day (the window the agent
+treats as "today") — its plan, log, tasks, and hand-off. The morning
+routine rebuilds it fresh each day; everything else during the day only
+appends to it.
 
 ## What It Does
 
@@ -58,12 +57,12 @@ today.md holds six sections, written in this order:
 
 - **User Schedule** — the day's calendar events.
 - **User Tasks** — today's external tasks plus agent-tracked to-dos.
-- **Agent Plan** — what the agent intends to work on today (each row is
-  registered as a schedule entry by the morning routine; mid-day
-  sessions may add rows for new signals or cancel ones whose premise
-  changed).
-- **Agent Notes** — look-ahead items and date-bound memos folded in from
-  inbox triage.
+- **Agent Plan** — what the agent means to work on today. The morning
+  routine turns each row into a schedule entry; a later session that day
+  can add rows for new signals or drop a row whose reason no longer
+  holds.
+- **Agent Notes** — upcoming items and date-specific memos pulled in from
+  inbox triage (the sorting of new incoming items).
 - **Agent Log** — what actually happened, appended throughout the day.
 - **Handoff** — what carries over to tomorrow.
 
@@ -73,17 +72,18 @@ today.md holds six sections, written in this order:
   rotates the previous day's file to `state/yesterday.md`).
 - The **activity scan** routes new observations into the right section
   and appends short status lines under Agent Log.
-- The **evening review** finalizes the file — it updates Agent Log and
+- The **evening review** closes out the file — it updates Agent Log and
   the Handoff section. (The daily journal itself is written the next
   morning, from the rotated file.)
 
 ## How It Is Written
 
-The agent never edits today.md with a file tool. All writes go through
-the daemon's context API — `PUT`/`PATCH /api/context/state/today` (the
-canonical, class-prefixed path). A `today-write-lock` serializes writes
-during the morning routine: while the lock is held, a write to
-`state/today` must carry the `X-Lock-Id` header or it is rejected.
+The agent never edits today.md with a file tool. Every write goes
+through the daemon's context API — `PUT`/`PATCH /api/context/state/today`
+(the canonical, class-prefixed path). A `today-write-lock` forces writes
+to happen one at a time during the morning routine: while the lock is
+held, any write to `state/today` must carry the `X-Lock-Id` header, or
+it is rejected.
 
 ## Where in the Dashboard
 

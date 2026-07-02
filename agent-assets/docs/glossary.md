@@ -13,9 +13,7 @@ summary: |
   Single flat term list for Aitne vocabulary. Cross-references
   link to a single canonical anchor here so concept docs do not drift.
 tags:
-  - core
-  - reference
-  - glossary
+  - knowledge
 status: stable
 ask_examples:
   - What is a ProcessKey?
@@ -35,7 +33,7 @@ ask_examples:
   - What is an observation?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - terminology
   - vocabulary
@@ -102,7 +100,7 @@ and rationale.
 
 ## Backend
 
-One of the model providers Aitne can dispatch to: `claude`
+One of the AI model providers Aitne can send work to: `claude`
 (Claude Code SDK), `codex` (Codex CLI), `gemini` (Gemini CLI), or
 `opencode` (`@opencode-ai/sdk` HTTP server). Each backend is configured
 per-installation; one is the **main backend**, and the others can be
@@ -110,12 +108,13 @@ enabled as fallbacks.
 
 ## Browser History (B-3)
 
-Local-only history poller that reads the browser's own SQLite database
+A local-only poller that reads the browser's own SQLite history database
 (Chromium-based browsers — Chrome, Chromium, Edge, Brave, Comet, Atlas)
-and records page visits as observations. Drives the **research cluster** derivation, the weekly
-reload-memory block, and the [`!checks`](features/messaging/bang-commands.md)
-on-demand reload tally. No content is uploaded; only URLs, titles, and
-visit timings the browser itself recorded. See
+and records page visits as observations. It feeds the **research cluster**
+derivation, the weekly reload-memory block, and the
+[`!checks`](features/messaging/bang-commands.md) on-demand reload tally.
+Nothing is uploaded — only the URLs, titles, and visit timings the browser
+itself already recorded. See
 [Browser History](features/integrations/browser-history.md).
 
 ## Managed Chromium (B-4)
@@ -146,8 +145,9 @@ enabled custom commands appear in `!help`. See
 
 ## Backend Router
 
-The component that resolves a `ProcessKey` to a concrete `(backend,
-model, maxTurns, maxBudgetUsd)` binding at dispatch time. Lives in
+The component that turns a `ProcessKey` into a concrete `(backend,
+model, maxTurns, maxBudgetUsd)` binding at dispatch time (the moment an
+invocation is handed to a backend). Lives in
 `packages/daemon/src/core/backends/backend-router.ts`. Routing reads
 `process_backend_config` (per-process pins) layered over
 `backend_global_defaults` (installation-wide defaults).
@@ -160,8 +160,8 @@ matching anchor.
 
 ## Day Boundary
 
-The hour-of-day at which the agent day rolls over. Configured via
-`dayBoundaryHour` (default `4`).
+The hour of the day when the agent day rolls over (when "today" starts
+fresh). Configured via `dayBoundaryHour` (default `4`).
 
 ## deniedTools
 
@@ -262,7 +262,7 @@ in 2026-05 to trim morning-routine input tokens by ~24%.
 
 ## Observation
 
-One row in the `observations` table. A change record a polling
+One row in the `observations` table. A change record that a polling
 integration (Obsidian, Git, Notion, calendar, mail, browser history)
 or a `routine.fetch_window` pre-pass wrote into SQLite. The
 `routine.activity_scan` is the consumer — there is no per-change
@@ -272,7 +272,8 @@ to break the agent-observing-its-own-writes loop. See
 
 ## ProcessKey
 
-The branded string identifier for a class of agent invocation, e.g.
+The typed string identifier (a "branded" string in the TypeScript code)
+for a class of agent invocation, e.g.
 `routine.morning_routine`, `message.dm`, `dashboard.docs_qa`. Drives
 backend selection, skill manifest, agent profile, and task-flow
 template lookup. Defined in `packages/shared/src/process-key.ts`.

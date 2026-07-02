@@ -17,7 +17,6 @@ summary: |
 section: lifestyle
 tags:
   - lifestyle
-  - travel
   - mail
   - integrations
 status: stable
@@ -27,7 +26,7 @@ ask_examples:
   - Where are my travel bookings stored?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - flight
   - hotel
@@ -76,10 +75,10 @@ confirmation email never creates a duplicate row.
 
 ## How Bookings Get Created
 
-Bookings are extracted from email only — there is no manual "log a
-flight" command or DM shortcut. To start capturing travel, connect a
-mail account (see [Mail](features/integrations/mail)) and let the
-classifier do the rest. The flow is:
+Bookings come from email only — there is no manual "log a flight"
+command or DM shortcut. To start capturing travel, connect a mail
+account (see [Mail](../integrations/mail.md)) and let the classifier
+do the rest. The flow is:
 
 1. The mail poller fetches new messages.
 2. The classifier (`gmail_classify`, lite tier) tags travel
@@ -99,9 +98,10 @@ classifier do the rest. The flow is:
 
 ## API
 
-Read-only and status-update access (read endpoints are read-sensitive —
-they expose personal travel data; the PATCH endpoint follows the standard
-write-safety tier and requires approval):
+These endpoints give read and status-update access. The two read
+endpoints are read-sensitive, because they expose personal travel data.
+The `PATCH` endpoint follows the standard write-safety tier, so it
+requires approval before it runs.
 
 ```bash
 # All bookings (optionally filter by type/status/date range)

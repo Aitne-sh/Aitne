@@ -16,13 +16,12 @@ summary: |
   DM, or the message landed in a group instead of a direct channel.
 section: messaging
 tags:
-  - troubleshooting
   - messaging
   - pairing
 status: stable
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - magic phrase
   - owner channel
@@ -53,8 +52,8 @@ deep link (Telegram / WhatsApp), the pairing card on
 
 ## Know which secret your platform uses
 
-Not every platform uses the typed phrase, so the fix depends on the
-platform:
+Not every platform uses a typed phrase, so the right fix depends on which
+one you are pairing:
 
 | Platform | Secret | How you send it |
 |---|---|---|
@@ -69,11 +68,11 @@ All secrets are single-use and expire after **5 minutes**.
 
 1. **The secret expired.** The phrase or token is only valid for 5
    minutes. If you took longer, it has lapsed — regenerate a fresh one.
-2. **You wrapped the phrase in a sentence (Slack / Discord).** The
-   matcher requires the four words to be the **only** content of the
-   message. Sending "my phrase is apple-banana-cherry-date" is rejected
-   by design, and the agent replies asking you to send the phrase on its
-   own. Matching otherwise ignores case, punctuation, and emoji.
+2. **You wrapped the phrase in a sentence (Slack / Discord).** The four
+   words have to be the **only** thing in the message. Sending "my phrase
+   is apple-banana-cherry-date" is turned down on purpose, and the agent
+   replies asking you to send the phrase on its own. Aside from that, the
+   check ignores capitalization, punctuation, and emoji.
 3. **You sent it in a group or channel.** Pairing — and all agent
    messaging — works only in a one-to-one DM. Group chats are out of
    scope.

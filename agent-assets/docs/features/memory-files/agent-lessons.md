@@ -18,8 +18,6 @@ summary: |
 section: memory-files
 tags:
   - memory
-  - feedback
-  - learning
   - routines
 status: beta
 ask_examples:
@@ -30,7 +28,7 @@ ask_examples:
   - How do I tune the lesson caps?
 locale: en-US
 created: 2026-06-08
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - lessons
   - feedback
@@ -61,20 +59,21 @@ ui_anchors:
 
 The lesson stores are where the agent remembers how you want it to
 behave: a short, dated list of learned directives that grows from your
-corrections and the agent's own retros, and is fed back into the agent's
-work so it stops repeating the same mistakes.
+corrections and from the agent's own reviews of its work, and is fed back
+into the agent's work so it stops repeating the same mistakes.
 
 ## What they are
 
 There are two kinds of store:
 
 - **Global agent behavior** — `policies/agent-lessons.md`. Lessons that
-  apply to the agent as a whole. These are injected into your DM
-  conversations and into the routines that decide whether to notify you.
+  apply to the agent as a whole. They are fed into your DM (direct
+  message) chats with the agent and into the routines that decide whether
+  to notify you.
 - **Per-agent** — `policies/agents/<slug>/lessons.md`, one per Agent
-  Definition. These are injected **only** into that agent's own
-  executions, so a lesson learned for your "weekly-report" agent never
-  leaks into an unrelated one.
+  Definition. These are fed in **only** when that agent itself runs, so a
+  lesson learned for your "weekly-report" agent never leaks into an
+  unrelated one.
 
 Both live under `~/.personal-agent/context/policies/`, alongside your
 other rule files, and are plain Markdown you can read or hand-edit.
@@ -111,7 +110,7 @@ it for you. There are three ways signals enter:
 Those raw signals don't become lessons immediately. Each night the
 [evening review](../routines/evening-review.md) folds the day's
 unconsumed signals into the right store as dated lessons, then marks them
-consumed (it skips the step entirely when nothing pends). Once a month
+consumed (it skips the step entirely when nothing is waiting). Once a month
 the monthly review — off by default; opt in by enabling the
 monthly-review agent at `/agents/monthly-review` — runs a re-generalize
 pass that collapses several same-theme lessons into one higher-level
@@ -122,8 +121,8 @@ principle, keeping each store small.
 A new lesson is stored but is not necessarily *injected* right away. A
 lesson carries a `<!-- provisional -->` marker until it has enough
 corroborating evidence; provisional lessons sit in the file but are not
-fed into the agent's prompts. This avoids over-fitting to a single
-offhand comment.
+fed into the agent's prompts. This keeps the agent from over-reacting to a
+single offhand comment.
 
 How a lesson crosses from provisional to active:
 
@@ -135,6 +134,22 @@ How a lesson crosses from provisional to active:
   promotes on the first occurrence — it is taken at your word.
 - An **ignore on its own never promotes** a lesson, and is never read as
   disapproval.
+- A candidate that **contradicts an established lesson** (one whose
+  confidence is at or above `feedbackContradictionGuardCf`, default 0.6)
+  is held provisional until it accumulates 1.5x the usual evidence — a
+  single stray signal can't flip a well-supported lesson. Your explicit
+  corrections bypass this guard entirely.
+
+## Confidence (`cf`)
+
+Every lesson carries a numeric confidence `cf` between 0 and 1, stamped
+deterministically by the daemon (never trusted from the model's rewrite).
+It rises with corroboration and decays with time since the lesson was
+last reinforced. Lessons whose decayed confidence falls below
+`feedbackLessonConfidenceFloor` (default 0.25) quietly stop being
+injected. A daily mechanical pass (the **Lesson Maintenance** agent at
+`/agents/lesson-maintenance`, 17:40) keeps the stamps fresh even on days
+with no new feedback.
 
 ## Bounded by design
 
@@ -142,19 +157,25 @@ The stores can't grow without limit. Each is capped in bytes and entry
 count — the global store at `feedbackLessonMaxBytesGlobal` bytes
 (default 8192) / 40 entries, the per-agent stores at
 `feedbackLessonMaxBytesPerAgent` (default 4096) / 20 entries. When a
-store is full, the lowest-signal lessons are dropped first. Lessons that
-go untouched for `feedbackLessonStaleDays` (default 60) are pruned — with
-one exception: a `kind=constraint` lesson is durable and is never
-stale-pruned or collapsed away. The underlying feedback signals
-themselves are retained for `feedbackSignalRetentionDays` (default 180).
+store is full, the lowest-signal lessons are dropped first. Expiration is
+graduated and reversible: a lesson untouched past
+`feedbackLessonStaleDays` (default 60) whose decayed confidence is below
+the floor **demotes** back to provisional; a provisional lesson that goes
+uncorroborated for twice that horizon is **archived** (removed from the
+file — its raw signals remain in the database); fresh corroboration
+**re-promotes** a demoted lesson. One exception: a `kind=constraint`
+lesson is durable and never expires or collapses away. The underlying
+feedback signals themselves are retained for
+`feedbackSignalRetentionDays` (default 180).
 
 ## Where in the dashboard
 
 **Settings → Lessons** (`/settings/lessons`, labelled "Lessons" with a
-**Preview** badge) is the read/tune surface. From there you can view and
-edit the lessons themselves and adjust every knob above:
+**Preview** badge) is where you read and tune all of this. From there you
+can view and edit the lessons themselves and adjust every knob above:
 `feedbackLearningEnabled` (the master kill-switch, on by default),
-`feedbackPromotionThreshold`, the byte caps, the stale-days horizon, and
+`feedbackPromotionThreshold`, the byte caps, the stale-days horizon, the
+confidence floor, the contradiction guard, the outcome-rollup toggle, and
 the signal retention window. Turning `feedbackLearningEnabled` off stops
 both capture and consolidation.
 

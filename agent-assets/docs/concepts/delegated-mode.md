@@ -24,7 +24,6 @@ summary: |
   (`/api/integrations/:key/exec` task-mode proxy).
 section: integrations
 tags:
-  - core
   - integrations
   - safety
   - skills
@@ -36,7 +35,7 @@ ask_examples:
   - Why don't I see a SKILL.md for Gmail in my Codex session?
 locale: en-US
 created: 2026-04-26
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - delegated mode
   - direct mode
@@ -101,9 +100,10 @@ backend is the same as the integration's `delegatedBackend`:
 
 `native` has no sub-cases. The integration's `nativeBackend` must equal
 the main DM backend — `cascadeNativeBindingsOnMainSwitch` cascades
-unmatched `native` rows to `disabled`. From the agent's call-site view, `native`
-is indistinguishable from `delegated` same-backend (both are in-session
-MCP); the difference is who polls (no one, for `native`).
+unmatched `native` rows to `disabled`. From where the agent actually makes
+the call, `native` looks identical to `delegated` same-backend (both use
+in-session MCP tools); the only difference is who polls in the background —
+for `native`, no one does.
 
 > The four modes are `direct | delegated | native | disabled`
 > (`INTEGRATION_MODES` in `packages/shared/src/integrations.ts`).
@@ -113,19 +113,19 @@ MCP); the difference is who polls (no one, for `native`).
 
 ## Why This Concept Exists
 
-The setup tax for direct mode (OAuth client setup in a vendor console, then
-JSON download, then keychain seeding) is the single biggest blocker for
-non-technical operators. Claude Code, Codex, and Gemini CLI all ship
-first-party connectors to Gmail, Calendar, Drive, and more (OpenCode
-ships none). When the operator is signed into claude.ai or ChatGPT,
-the agent can reach those services through the backend's own MCP tools,
-zero daemon credentials required.
+Direct mode has a real setup cost: you create an OAuth client in a vendor
+console, download a JSON key, then load it into the macOS Keychain. For
+non-technical operators, that is the single biggest blocker. Claude Code,
+Codex, and Gemini CLI all ship first-party connectors to Gmail, Calendar,
+Drive, and more (OpenCode ships none). When you're signed into claude.ai
+or ChatGPT, the agent can reach those services through the backend's own
+MCP tools, with no daemon credentials at all.
 
-Delegated mode lets the operator skip the vendor console entirely. The
-two sub-cases (same- vs cross-backend) exist because the agent's DM
-session may run on a different backend than the one whose connector is
-signed in — e.g. a Claude DM session whose Gmail comes from Codex. In
-that case the daemon spawns the other backend per call.
+Delegated mode lets you skip the vendor console entirely. The two
+sub-cases (same- vs cross-backend) exist because your DM session may run
+on a different backend than the one whose connector is signed in — for
+example, a Claude DM session whose Gmail comes from Codex. In that case
+the daemon spawns the other backend once per call.
 
 ## Definitions
 

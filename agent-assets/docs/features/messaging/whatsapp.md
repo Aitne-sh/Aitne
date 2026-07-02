@@ -17,7 +17,6 @@ summary: |
 section: messaging
 tags:
   - messaging
-  - whatsapp
   - integrations
   - pairing
 status: stable
@@ -27,7 +26,7 @@ ask_examples:
   - Why does WhatsApp say the device is unlinked?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - whatsapp
   - qr code
@@ -57,10 +56,11 @@ messages that flow exactly like Telegram.
 
 ## How It Works
 
-Aitne connects to WhatsApp as a **linked device** (the multi-device feature
-in the WhatsApp mobile app), not through the WhatsApp Cloud API or a paid
-bridge such as Twilio. There is no business account, no bot token, and no
-inbound webhook to expose:
+Aitne connects to WhatsApp as a **linked device** — the same "linked
+devices" feature in the WhatsApp mobile app that powers WhatsApp Web. It does
+not use the WhatsApp Cloud API or a paid bridge such as Twilio. There is no
+business account, no bot token, and no inbound webhook (a public URL that
+WhatsApp would call) to expose:
 
 - You scan a QR code once to link the daemon as a device on your account.
 - Incoming WhatsApp messages arrive over the linked-device connection.

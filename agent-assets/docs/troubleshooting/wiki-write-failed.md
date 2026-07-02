@@ -14,9 +14,7 @@ summary: |
   filesystem permission vs. the Obsidian CLI fallback path.
 section: wiki-write-failed
 tags:
-  - troubleshooting
   - wiki
-  - obsidian
   - integrations
 status: stable
 ask_examples:
@@ -25,7 +23,7 @@ ask_examples:
   - How do I retry the write-strategy probe?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-11
+updated: 2026-07-01
 keywords:
   - wiki write failed
   - wiki API failure
@@ -46,31 +44,30 @@ related:
 
 ## What You See
 
-A wiki bang command (`!ingest`, `!compile`) reports a write failure in
-the daemon log, or the `GET /api/wiki/:workspace/health` endpoint
-(surfaced behind the dashboard's write-strategy badge) reports a
-non-`fs` strategy with `cliAvailable: false`.
+A wiki bang command (`!ingest` or `!compile`) reports a write failure in
+the daemon log. Or the wiki health check — `GET /api/wiki/:workspace/health`,
+shown behind the dashboard's write-strategy badge — reports a strategy other
+than `fs`, with `cliAvailable: false`.
 
 ## Quick Checklist
 
-1. **Internal mode?** Internal workspaces always write via the local
-   filesystem. If you see EPERM there, the underlying issue is
-   `dataDir` permissions — fix those rather than thinking the wiki
-   is the problem.
+1. **Internal mode?** Internal workspaces always write to the local
+   filesystem. If you see EPERM there, the real problem is `dataDir`
+   permissions — fix those, not the wiki.
 2. **External mode + `write_strategy=fs`?** The filesystem rejected
    the write. Common causes:
-   - iCloud sandbox (most frequent on macOS).
-   - Read-only volume / snapshot mount.
-   - Filesystem ACL on the parent directory.
-3. **External mode + `write_strategy=cli`?** The probe already fell
-   back to the Obsidian CLI but the CLI is unavailable. See the CLI
-   checklist below.
+   - iCloud sandbox (the most frequent one on macOS).
+   - A read-only volume or snapshot mount.
+   - A filesystem ACL (access-control list) on the parent directory.
+3. **External mode + `write_strategy=cli`?** The write probe already
+   fell back to the Obsidian CLI, but the CLI is unavailable. See the
+   CLI checklist below.
 
 ## The CLI Fallback Path
 
-When direct fs writes fail with `EPERM` / `EACCES` / `EROFS` /
-`EBUSY`, Aitne falls back to the official Obsidian CLI (1.12+).
-Requirements:
+When a direct filesystem write fails with `EPERM` / `EACCES` / `EROFS` /
+`EBUSY`, Aitne falls back to the official Obsidian CLI (1.12 or later).
+For that fallback to work, you need:
 
 - Obsidian installed (1.12 or later).
 - **Settings → General → Command line interface** enabled inside
@@ -89,10 +86,10 @@ If any of these is missing, the daemon surfaces a structured error:
 
 ## Force a Re-Probe
 
-The resolved strategy (`fs` or `cli`) is cached on the workspace row so
-later writes skip the probe. If you've fixed the underlying issue
-(granted iCloud permission, mounted the disk read-write) but the cached
-strategy is still `cli`, force a fresh probe:
+Once a strategy (`fs` or `cli`) is resolved, Aitne caches it on the
+workspace row so later writes can skip the probe. If you've fixed the
+underlying problem (granted iCloud permission, remounted the disk
+read-write) but the cached strategy is still `cli`, force a fresh probe:
 
 1. Open **Settings → Wiki** (`/settings/wiki`) and edit the external
    workspace.

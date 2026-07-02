@@ -53,6 +53,7 @@ function groupTree(docs: DocsTreeItem[]): CategoryGroup[] {
 
 const CATEGORY_LABEL: Record<string, string> = {
   "getting-started": "Get Started",
+  pages: "Pages",
   concepts: "Concepts",
   features: "Features",
   guides: "Guides",

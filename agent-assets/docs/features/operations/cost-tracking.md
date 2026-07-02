@@ -16,7 +16,6 @@ summary: |
   autonomous spend.
 section: operations
 tags:
-  - core
   - cost
   - operations
 status: stable
@@ -27,7 +26,7 @@ ask_examples:
   - What is the difference between the daily and monthly cost cap?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - cost tracking
   - analytics
@@ -97,9 +96,10 @@ Open **Analytics**. It has two tabs:
 - **Metrics** (`/analytics?tab=metrics`) — operational health: activity
   volume, execution breakdown, error rates, notification throughput.
 
-Note on delegated work: only **cross-backend** delegated calls show up as
-separate runs. Same-backend delegated/native calls roll up under the
-parent session's totals.
+Note on delegated work (when a run hands part of its job to a helper
+model): only **cross-backend** delegated calls show up as separate runs.
+Same-backend delegated/native calls roll up under the parent session's
+totals.
 
 ### Sidebar footer (running daily total)
 

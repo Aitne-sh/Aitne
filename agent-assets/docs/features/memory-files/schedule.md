@@ -21,7 +21,6 @@ tags:
   - memory
   - journal
   - routines
-  - core
 status: stable
 ask_examples:
   - Where does the agent store the day's diary?
@@ -29,7 +28,7 @@ ask_examples:
   - How do I change which sections the daily journal includes?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - daily journal
   - diary
@@ -55,8 +54,9 @@ context_files:
 ## In One Sentence
 
 `journal/daily/YYYY-MM-DD.md` is the morning routine's first-person
-diary of the **previous** agent-day — what the user did, who they met,
-what they talked about — composed by the daemon and kept as a
+diary of the **previous** agent-day (the agent's version of a day,
+which rolls over at 04:00 by default) — what the user did, who they
+met, what they talked about — composed by the daemon and kept as a
 read-only archive that the weekly and monthly reviews read back.
 
 > **Renamed from `schedule/`.** The old mechanical `schedule/YYYY-MM-DD.md`
@@ -93,11 +93,11 @@ typically includes:
 - `## Tasks` — what the user worked on.
 - `## Conversations` — who they talked to and about what.
 
-When the `browser_history` integration is active, a reading/research
-surface is woven in from the day's browser digest. Daemon-owned
-frontmatter (`date`, `weekday`, `calendar_events`, `messages_handled`,
-`projects`, `people`, `tags`, `content_hash`, `updated`) is filled in
-automatically. The exact sections and tone are governed by the
+When the `browser_history` integration is turned on, a reading and
+research section is added from the day's browser digest. The daemon
+fills in the frontmatter fields automatically (`date`, `weekday`,
+`calendar_events`, `messages_handled`, `projects`, `people`, `tags`,
+`content_hash`, `updated`). The exact sections and tone are set by the
 journal-format and journal-export policy files (see
 [Configuration](#configuration)).
 

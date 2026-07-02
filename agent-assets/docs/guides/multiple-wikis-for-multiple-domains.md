@@ -15,7 +15,6 @@ summary: |
   on disk.
 section: guides
 tags:
-  - guides
   - wiki
   - workspaces
   - knowledge
@@ -26,7 +25,7 @@ ask_examples:
   - What does `@research` do before a wiki command?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - multi-workspace
   - wiki workspace
@@ -76,10 +75,10 @@ DM agent routes commands per workspace; the file trees never overlap.
   pull from your parenting journal. Separate workspaces give you
   separate `_index.md` and `20_wiki/` trees so the agent never has to
   filter across domains.
-- **Different audiences.** A workspace synced via Obsidian to a shared
-  iCloud folder for a team is governed differently from the daemon's
-  internal workspace under its data directory. Per-workspace settings
-  handle the asymmetry.
+- **Different audiences.** A workspace that Obsidian syncs to a shared
+  iCloud folder for a team needs different handling from the daemon's
+  own internal workspace under its data directory. Per-workspace
+  settings let you treat each one on its own terms.
 - **Different cadences.** A "current project" wiki gets multiple
   ingests per day; a long-term commonplace book may compile weekly.
   Per-workspace dispatch / cost / approval thresholds let you tune
@@ -138,12 +137,12 @@ comma-separated arguments verbatim.
 
 ## What the agent sees per workspace
 
-Each session is materialised against a single workspace's tree. The
-`wiki-vault-rules` skill loaded for the session names that workspace's
-language, dispatch mode, layer invariants, and frontmatter
-conventions. Layer authorisation in the daemon API is workspace-scoped
-— a `wiki.ask` session against `@research` cannot reach into
-`@parenting`'s `10_raw/` even if the agent attempts it.
+Each session works against a single workspace's file tree. The
+`wiki-vault-rules` skill loaded for the session spells out that
+workspace's language, dispatch mode, layer rules, and frontmatter
+conventions. Access to vault layers is workspace-scoped in the daemon
+API: a `wiki.ask` session against `@research` cannot reach into
+`@parenting`'s `10_raw/`, even if the agent tries.
 
 ## `!wiki` status with multiple workspaces
 

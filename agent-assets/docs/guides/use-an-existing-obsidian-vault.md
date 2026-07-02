@@ -14,9 +14,7 @@ summary: |
   through Adopt vs Migrate vs Split.
 section: use-an-existing-obsidian-vault
 tags:
-  - guides
   - wiki
-  - obsidian
   - knowledge
 status: stable
 ask_examples:
@@ -26,7 +24,7 @@ ask_examples:
   - Why is Split greyed out?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - external vault
   - existing obsidian vault
@@ -58,11 +56,11 @@ process_keys:
 
 ## Goal
 
-Aitne can point the wiki subsystem at a vault you already maintain
-in Obsidian, instead of creating its own at `$PA_DATA_DIR/wiki`.
-This is "external mode", and the setup wizard walks you through
-three decisions: **probe**, **classify**, then **Adopt vs Migrate
-vs Split**.
+Aitne can point the wiki at a vault you already keep in Obsidian,
+instead of creating its own at `$PA_DATA_DIR/wiki`. This is called
+"external mode". The setup wizard walks you through three steps:
+it **probes** the folder you pick, **classifies** what it finds,
+then asks you to choose **Adopt vs Migrate vs Split**.
 
 ## Step 1 — Open Settings → Wiki
 
@@ -110,9 +108,9 @@ levels:
   an existing wiki layout is detected, the wizard will surface the
   Adopt / Migrate decision in Step 3.
 
-The **Use this folder** button is greyed out while the banner
-is an error so you cannot fire a workspace-create that the daemon
-already knows will fail.
+The **Use this folder** button stays greyed out while the banner
+shows an error, so you cannot start a workspace-create that the
+daemon already knows will fail.
 
 ## Step 2 — Probe Classifies the Vault
 

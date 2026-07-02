@@ -14,7 +14,6 @@ summary: |
   granularity, with a link to the detailed feature doc for each.
 section: getting-started
 tags:
-  - core
   - getting-started
   - routines
   - messaging
@@ -35,7 +34,7 @@ keywords:
   - wiki
   - lifestyle
 created: 2026-04-27
-updated: 2026-05-28
+updated: 2026-07-01
 related:
   - getting-started/01-what-is-this
   - getting-started/02-first-steps
@@ -110,16 +109,17 @@ them — the agent reads what's there next time it runs.
 
 ## Build a personal wiki from what you DM
 
-A workspace-scoped builder turns URLs, pastes, and notes you send into a
-linked Markdown wiki. The raw capture, the synthesised article, and the
-cited answer all stay on disk and the agent only writes via the daemon
-API so the layout invariants hold.
+Send the agent URLs, pastes, or notes and it builds them into a linked
+Markdown wiki inside a dedicated workspace. The raw capture, the
+synthesized article, and any cited answer all stay as files on disk. The
+agent writes only through the daemon API, which keeps the folder layout
+consistent.
 
 - [Wiki Overview](../features/wiki/overview.md) — the workspace concept,
   the `00_inbox` / `10_raw` / `20_wiki` / `30_outputs` layers, and the
   approval gate on full rebuilds.
 - [Wiki Commands](../features/wiki/commands.md) — `!ingest` (capture
-  URLs), `!compile` (synthesise), `!ask` (cited Q&A), `!lint` /
+  URLs), `!compile` (synthesize), `!ask` (cited Q&A), `!lint` /
   `!trace` / `!connect` (audit, history, bridges), `!wiki` (status).
 - [Build Your Wiki](../guides/build-your-wiki.md) — the first-day
   walkthrough from empty workspace to first answered question.

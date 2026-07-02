@@ -15,6 +15,11 @@ export const DOCS_SCHEMA_VERSION = 1 as const;
 
 const DOC_CATEGORIES = [
   "getting-started",
+  // Per-dashboard-page "hub" docs (slug `pages/<screen>`). Each answers
+  // "what can I do on this screen?" and links down to the feature/concept
+  // docs that go deep. Drives the `?` button via PAGE_DOC_MAP and gives
+  // the docs-QA bot a screen-scoped entry point.
+  "pages",
   "concepts",
   "features",
   "guides",

@@ -20,8 +20,6 @@ section: operations
 tags:
   - operations
   - safety
-  - browser-automation
-  - experimental
 status: experimental
 ask_examples:
   - What is B-4?
@@ -31,7 +29,7 @@ ask_examples:
   - How do I block a site from managed Chromium?
 locale: en-US
 created: 2026-05-22
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - managed chromium
   - browser automation
@@ -66,16 +64,18 @@ api_endpoints:
 
 # Managed Chromium (B-4)
 
-B-4 is the experimental purchase-confirmation flow. When you've asked
-the agent to "buy X" or "complete the checkout", and the vendor is on
-your B-4 allowlist, the daemon spawns a managed Chromium profile,
-fills the cart, and pauses for an explicit one-time token from your
-DM before clicking the final confirm. **It is default-off**, gated
-behind every safety check the project ships, and not surfaced in the
-public dashboard until the upstream B-3 surface (browser-history
-research) has been stable for six weeks.
+B-4 is the experimental purchase-confirmation flow. When you ask the
+agent to "buy X" or "complete the checkout", and the vendor is on your
+B-4 allowlist (the short list of sites you have explicitly approved),
+the daemon (Aitne's always-on background service) opens a managed
+Chromium profile, fills the cart, and then stops. It waits for a
+one-time token that you send back in a DM (direct message) before it
+clicks the final confirm button. **It is default-off**, sits behind
+every safety check the project ships, and stays hidden in the public
+dashboard until the upstream B-3 surface (browser-history research)
+has run smoothly for six weeks.
 
-This page is written so it's safe to read whether you've enabled it
+This page is written so it's safe to read whether you've turned it on
 or not.
 
 ## What's Actually Gated
@@ -93,16 +93,15 @@ Before B-4 can run, every one of these must be true:
 3. At least one **primary DM channel** is set (Slack / Telegram /
    Discord / WhatsApp). The single-use token is delivered there; the
    dashboard never shows the raw token.
-4. The **site is on your B-4 allowlist**. Per-site enablement happens
-   via `PATCH /api/browser-automation/sites/:siteKey/b4-config`
-   (Approve). Sites not in the allowlist cannot run a B-4 flow even
-   if the master toggle is on.
+4. The **site is on your B-4 allowlist**. You enable each site one at
+   a time via `PATCH /api/browser-automation/sites/:siteKey/b4-config`
+   (Approve). A site that isn't on the allowlist can't run a B-4 flow,
+   even when the master toggle is on.
 5. The **site is signed in** through the B-2.5 per-site sign-in
    flow (`POST /api/browser-automation/sites/:siteKey/connect` →
    sign in by hand in the spawned UI Chromium →
-   `POST .../finalize`). The daemon stores the profile in a
-   restricted directory the absolute-block layer protects from any
-   skill.
+   `POST .../finalize`). The daemon keeps the profile in a locked-down
+   directory that no skill can reach (the absolute-block layer).
 
 ## Structural Defences (no hardcoded category denylist)
 
@@ -117,8 +116,10 @@ category list:
    navigation that resolves to a private (RFC1918), loopback,
    link-local, multicast, cloud-metadata (`169.254.169.254`), or the
    IPv6 equivalents is denied at the egress chokepoint
-   (`shouldDenyEgress` in `egress-denylist.ts`). This is the
-   defence-in-depth against SSRF — it cannot be turned off.
+   (`shouldDenyEgress` in `egress-denylist.ts`). This is the extra
+   layer of defence against SSRF (server-side request forgery, where a
+   request is tricked into reaching an internal address) — it cannot be
+   turned off.
 2. **Payment-path blocker.** A URL-pattern matcher
    (`payment-path-blocker.ts`) trips at form-submit time on
    payment-handoff paths so the agent can't silently push a

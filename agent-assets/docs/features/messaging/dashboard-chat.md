@@ -16,7 +16,6 @@ summary: |
   messaging app.
 section: messaging
 tags:
-  - core
   - messaging
   - dashboard
 status: stable
@@ -26,7 +25,7 @@ ask_examples:
   - Why are my dashboard chat replies different from my Telegram replies?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - chat
   - dashboard
@@ -55,13 +54,14 @@ ui_anchors:
 
 ## In One Sentence
 
-`/chat` is a browser-mounted DM with the agent — a fully featured
-conversational surface separate from any paired messaging app.
+`/chat` is a DM with the agent that lives in your browser — a fully
+featured chat, separate from any paired messaging app.
 
 ## What It Does
 
-- **Real-time** message stream over SSE — the same conversational
-  experience as a paired DM, but in the browser.
+- **Real-time** message stream over SSE (Server-Sent Events, a live
+  one-way feed from the daemon to your browser) — the same
+  conversational experience as a paired DM, but in the browser.
 - **Tool progress** rendered inline (which tool, which file, which
   endpoint) so you can watch the agent work.
 - **Session history** persisted to SQLite (`scope='dashboard_chat'`)
@@ -113,3 +113,4 @@ demand when you send, never on a schedule. Its default tier is
 - [Messaging Overview](overview.md)
 - [Backends and Tiers](../../concepts/backends-and-tiers.md)
 - [Process Keys](../../concepts/process-keys.md)
+- [Keyboard Shortcuts](../../reference/keyboard-shortcuts.md)

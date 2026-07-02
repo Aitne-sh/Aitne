@@ -17,7 +17,6 @@ section: messaging
 tags:
   - messaging
   - integrations
-  - slack
   - pairing
 status: stable
 ask_examples:
@@ -26,7 +25,7 @@ ask_examples:
   - Can the agent listen in shared channels?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - slack
   - socket mode
@@ -49,18 +48,20 @@ config_keys:
 
 ## In One Sentence
 
-A Slack bot user becomes the agent's surface in your workspace: DMs to
-the bot are owner messages, and `@`-mentions of the bot in channels are
-mention events — but only from the one paired owner.
+You add a Slack bot user to your workspace, and that bot is how you talk
+to the agent: DMs you send the bot are treated as owner messages, and
+`@`-mentions of the bot in channels are treated as mentions — but only
+when they come from the one paired owner.
 
 ## What It Does
 
-- Listens for **DMs** to the bot (owner reactive path).
+- Listens for **DMs** to the bot — your direct messages to the agent.
 - Listens for **`@`-mentions of the bot** in channels you've added it to.
 - Sends notifications back to your owner DM.
 
-The adapter runs over Slack **Socket Mode** (a WebSocket), so Aitne does
-not need a public inbound URL or webhook endpoint.
+The adapter connects to Slack over **Socket Mode**, a WebSocket (a
+persistent two-way link Slack opens to Aitne). Because Slack does the
+reaching-out, Aitne needs no public inbound URL or webhook endpoint.
 
 ## Single-Owner Scope
 

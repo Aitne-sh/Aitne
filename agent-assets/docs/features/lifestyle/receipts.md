@@ -16,7 +16,6 @@ summary: |
 section: lifestyle
 tags:
   - lifestyle
-  - receipts
   - mail
   - integrations
 status: stable
@@ -27,7 +26,7 @@ ask_examples:
   - What receipts haven't I saved yet?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - receipt
   - invoice
@@ -58,10 +57,10 @@ your external Obsidian vault on request.
 ## How Detection Works
 
 The mail observer scans travel-booking emails across every connected
-mail account and records each attachment it finds. Each detected
-attachment inserts a row into the `receipts` table, keyed uniquely on
-`(account_id, provider_msg_id, attachment_id)` so re-scans are
-idempotent. Columns:
+mail account and records each attachment it finds. Every detected
+attachment becomes one row in the `receipts` table. Each row is keyed
+uniquely on `(account_id, provider_msg_id, attachment_id)`, so
+re-scanning the same mail never creates a duplicate. Columns:
 
 - `category` — `travel` at detection time; reclassify to `document`
   via PATCH (nullable on legacy rows)
@@ -72,22 +71,22 @@ idempotent. Columns:
   vault (see below)
 - `id`, `created_at` — row identity and detection time
 
-There is no Markdown context file for receipts; the durable record is
-the SQLite row plus the optional Obsidian copy.
+There is no Markdown context file for receipts. The lasting record is
+the SQLite row, plus the optional Obsidian copy you save yourself.
 
 ## Saving a Receipt to Your Vault
 
-Saving is a two-step flow — the download endpoint never writes to the
-vault by itself:
+Saving takes two steps. The download endpoint never writes to the vault
+on its own:
 
-1. The agent downloads the original bytes via
+1. The agent downloads the original bytes with
    `POST /api/receipts/:id/download`, which streams the raw attachment
-   (resolved through the mail registry by `account_id`; oversized files
-   over 100 MB and orphaned rows with a null `account_id` are rejected).
-2. The agent writes the file into your **external** Obsidian vault — not
-   the primary management vault — under the convention
-   `receipts/YYYY/MM/<merchant>-<date>.<ext>` (e.g.
-   `receipts/2026/04/amazon-2026-04-12.pdf`), then records that path
+   (found in the mail registry by `account_id`). Files larger than
+   100 MB, and orphaned rows with a null `account_id`, are rejected.
+2. The agent writes the file into your **external** Obsidian vault —
+   not the primary management vault — using the naming convention
+   `receipts/YYYY/MM/<merchant>-<date>.<ext>` (for example,
+   `receipts/2026/04/amazon-2026-04-12.pdf`). It then records that path
    with `PATCH /api/receipts/:id` (body `{"obsidianPath": "..."}`),
    which also stamps `saved_at`.
 
@@ -96,11 +95,11 @@ To reclassify a receipt, the agent PATCHes `{"category": "travel"}`
 
 ## Where in the Dashboard
 
-There is no dedicated tab today. Receipts surface inline when you ask
-for them in chat (e.g. "what receipts haven't I saved yet?"). List and
-filter them with `GET /api/receipts` (`category`, `saved`, `limit`
-params) and pull totals from `GET /api/receipts/summary`. The full API
-is documented in
+There is no dedicated tab yet. Receipts show up inline when you ask for
+them in chat (for example, "what receipts haven't I saved yet?"). List
+and filter them with `GET /api/receipts` (the `category`, `saved`, and
+`limit` params) and pull totals from `GET /api/receipts/summary`. The
+full API is documented in
 `agent-assets/skills/gmail-lifestyle/references/receipts-api.md`
 (loaded by the `gmail-lifestyle` skill).
 

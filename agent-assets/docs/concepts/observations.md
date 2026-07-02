@@ -16,7 +16,6 @@ summary: |
   notification. This pivot was the Phase 9 polling change.
 section: observations
 tags:
-  - core
   - observations
   - polling
   - integrations
@@ -29,7 +28,7 @@ ask_examples:
   - Where does the routine pre-pass write observations?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - observation
   - observations
@@ -50,6 +49,10 @@ related:
   - concepts/routines
   - features/integrations/git
   - features/integrations/obsidian
+  - features/integrations/calendar
+  - features/integrations/github
+  - features/integrations/notion
+  - features/integrations/browser-history
 ui_anchors:
   - /activity
 process_keys:
@@ -72,29 +75,30 @@ context_files:
 
 ## TL;DR
 
-Polling integrations (Obsidian, Git, Notion, Calendar) **do not emit
-events** when they detect changes. They write observation rows to
-SQLite. A single `routine.activity_scan` consumes the queue and decides
-what is worth surfacing.
+Polling integrations (Obsidian, Git, Notion, Calendar) watch for
+changes on a schedule. When they find one, they **do not emit an
+event** or message you — they write an *observation* row into SQLite.
+A single `routine.activity_scan` reads that queue and decides what is
+worth surfacing.
 
-Since 2026-05, observations have a **second writer**: every main
-routine (`routine.morning_routine`, `routine.today_refresh`,
+Since 2026-05, observations have a **second writer**. Before each main
+routine runs (`routine.morning_routine`, `routine.today_refresh`,
 `routine.activity_scan`, `routine.evening_review`,
-`routine.weekly_review`) is preceded by a lite-tier
-`routine.fetch_window` pre-pass that fetches mail / calendar / Notion
-windows and POSTs them to `/api/observations/batch`.
-(`routine.monthly_review` has no pre-pass window.) The main routine
-then reads them via the same `pending=true` queue that the polling
-path feeds. Observation rows look identical regardless of which writer
-produced them — the distinction is invisible to downstream consumers.
+`routine.weekly_review`), a lite-tier `routine.fetch_window` pre-pass
+fetches mail / calendar / Notion windows and POSTs them to
+`/api/observations/batch`. (`routine.monthly_review` has no pre-pass
+window.) The main routine then reads them through the same
+`pending=true` queue that the polling path feeds. The rows look
+identical no matter which writer produced them, so downstream consumers
+cannot tell them apart.
 
 ## Why This Concept Exists
 
 Per-change notifications turned every routine commit, every saved
-note, every tiny calendar tweak into a paging event. The Phase 9
-pivot moved the agent away from that: changes accumulate, and once an
-hour the agent looks at the bag and decides whether the pattern adds
-up to something the operator should hear about.
+note, every tiny calendar tweak into an interruption. The Phase 9
+pivot moved the agent away from that: changes pile up quietly, and
+once an hour the agent reviews the whole batch and decides whether the
+pattern adds up to something you should hear about.
 
 ## Definitions
 
@@ -149,4 +153,8 @@ Both write rows of the same shape; the consumer reads the merged queue.
 - [Process Keys](./process-keys.md)
 - [Routines](./routines.md)
 - [Git](../features/integrations/git.md)
+- [GitHub](../features/integrations/github.md)
 - [Obsidian](../features/integrations/obsidian.md)
+- [Notion](../features/integrations/notion.md)
+- [Calendar](../features/integrations/calendar.md)
+- [Browser History](../features/integrations/browser-history.md)

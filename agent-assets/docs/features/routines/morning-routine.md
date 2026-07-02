@@ -16,8 +16,7 @@ section: routines
 tags:
   - routines
   - autonomous
-  - daily
-  - core
+  - scheduler
 status: stable
 ask_examples:
   - When does morning routine run?
@@ -26,7 +25,7 @@ ask_examples:
   - What model does morning routine use?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - morning
   - day plan
@@ -63,9 +62,10 @@ context_files:
 
 ## In One Sentence
 
-Once per agent day, at `dayBoundaryHour` local time, Aitne
-rebuilds `state/today.md` and the day's schedule from your calendar, mail,
-roadmap, and recent observations.
+Once per agent day (the daily window that starts when "today" rolls
+over), at `dayBoundaryHour` local time, Aitne rebuilds `state/today.md`
+and the day's schedule from your calendar, mail, roadmap, and recent
+observations.
 
 ## What It Does
 
@@ -74,16 +74,17 @@ It runs as a **two-stage pipeline**, with both stages dispatched in
 parallel:
 
 - **Stage A** (`routine.morning_routine_today`, medium tier) rebuilds
-  `state/today.md`, walks the roadmap, fans out the day's schedule, and
-  self-reports structured metadata.
-- **Stage B** (`routine.morning_routine_journal`, lite tier) authors
+  `state/today.md`, walks the roadmap, fans out the day's schedule (queues
+  each of today's scheduled tasks), and reports structured metadata about
+  the run.
+- **Stage B** (`routine.morning_routine_journal`, lite tier) writes
   yesterday's daily journal at `journal/daily/<yesterday>.md` from a
-  daemon-prepared skeleton, then drops the run's audit-trail paragraph
-  into `journal/agent.md`.
+  daemon-prepared skeleton, then appends the run's audit-trail paragraph
+  to `journal/agent.md`.
 
-Every downstream routine for the next 24 hours reads Stage A's output,
-so a bad morning briefing degrades the entire day — hence the
-medium-tier ceiling on Stage A even after the split.
+Every routine that runs over the next 24 hours reads Stage A's output, so
+a bad morning briefing drags down the whole day. That is why Stage A stays
+capped at the medium tier even after the split.
 
 Within Stage A, the work proceeds in this order:
 
@@ -103,12 +104,12 @@ so a post-midnight install does not run two morning routines back-to-back.
 There is no separate `morningRoutineHour` — the morning routine and the
 agent-day rollover are the same instant.
 
-There is no separate "initial" process key. The first morning after
-setup is detected inline by Stage A from the absence of `state/yesterday.md`;
-the daemon injects a `<roadmap_skeleton>` block carrying the pre-aggregated
-Annual Goals / Quarterly Focus / Preparation Timeline facts so Stage A
-can populate the wizard's placeholder roadmap on medium tier instead of
-paying for a one-shot high-tier session. (The dedicated
+There is no separate "initial" process key. Stage A detects the first
+morning after setup on its own, from the missing `state/yesterday.md` file.
+The daemon then injects a `<roadmap_skeleton>` block carrying the
+pre-aggregated Annual Goals / Quarterly Focus / Preparation Timeline facts,
+so Stage A can fill in the wizard's placeholder roadmap on the medium tier
+instead of paying for a one-shot high-tier session. (The dedicated
 `routine.morning_routine_initial` process key — along with its high-tier
 seed — was retired in Phase 7, 2026-05-16; the first-run branch now flows
 through the parent `routine.morning_routine` envelope.)

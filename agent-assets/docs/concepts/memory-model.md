@@ -15,10 +15,8 @@ summary: |
   the agent reads and rewrites about you.
 section: memory
 tags:
-  - core
   - memory
   - knowledge
-  - context
   - safety
 status: stable
 ask_examples:
@@ -29,7 +27,7 @@ ask_examples:
   - How does the daemon prevent the agent from writing to disk directly?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-11
+updated: 2026-07-01
 keywords:
   - context
   - markdown
@@ -78,36 +76,39 @@ api_endpoints:
 
 ## TL;DR
 
-Aitne treats Markdown files in `~/.personal-agent/context/`
+Aitne uses Markdown files in `~/.personal-agent/context/`
 as its long-term memory and SQLite
-(`~/.personal-agent/data/personal_agent.db`) as session-scoped state.
-Anything you want the agent to remember between runs lives in an MD
-file you can read, diff, and edit by hand. The vault is partitioned
-into six authority classes — `identity/`, `state/`, `plans/`, `journal/`,
-`knowledge/`, and `policies/` — each carrying its own authority and
-lifecycle contract. See [Knowledge Layout](../reference/knowledge-layout.md)
-for the canonical map.
+(`~/.personal-agent/data/personal_agent.db`) for short-lived state that
+only matters within a single run. Anything you want the agent to
+remember between runs lives in an MD file you can open, diff, and edit
+by hand. The vault (the folder that holds these files) is split into six
+top-level folders — `identity/`, `state/`, `plans/`, `journal/`,
+`knowledge/`, and `policies/` — and each one has its own rules about who
+may change it and how long its contents last. See
+[Knowledge Layout](../reference/knowledge-layout.md) for the full map.
 
 ## Why This Concept Exists
 
-A long-running agent that stores meaning inside an opaque database
-gives you no recourse when something goes wrong. Aitne's design
-is the opposite: every fact the agent recalls about you, your projects,
-your day, or its own past behavior sits in a `.md` file you can open in
-any editor. Auditing, backups, and recovery are all "use git or rsync".
+If a long-running agent hides everything it knows inside an opaque
+database, you have no way to check or fix it when something goes wrong.
+Aitne does the opposite: every fact the agent recalls about you, your
+projects, your day, or its own past behavior sits in a `.md` file you
+can open in any editor. Auditing, backing up, and restoring all come
+down to ordinary tools — git or rsync.
 
 SQLite is reserved for the things you do not want the agent rewriting
-on every turn — session logs, action audit trails, observations, FTS
-indexes, and configuration.
+on every turn — session logs, action audit trails, observations,
+full-text search (FTS) indexes, and configuration.
 
 ## Definitions
 
 - **Context file**: any `.md` file under `~/.personal-agent/context/`.
 - **Authoritative memory**: the union of context files; SQLite never
   stores facts the agent treats as canonical truth about the operator.
-- **`AgentWriteTracker`**: the daemon component that distinguishes an
-  agent-originated context-file write from a human edit so the
-  Obsidian/Git observers do not loop on the agent's own output.
+- **`AgentWriteTracker`**: the daemon component that tells an
+  agent-made context-file write apart from a human edit, so the
+  Obsidian/Git observers (the watchers that notice file changes) do not
+  loop on the agent's own output.
 - **Context API**: the daemon's `/api/context/*` endpoint, the **only**
   legal write path. The agent does not have direct `Edit` / `Write`
   permissions on the filesystem; it must go through the daemon.
@@ -115,9 +116,9 @@ indexes, and configuration.
 ## How the Agent Writes
 
 The agent has no `Edit` or `Write` tool. To change a context file it
-calls the daemon over HTTP, and every write funnels through one
-endpoint family so the daemon can validate, hold locks, and snapshot a
-backup before touching disk. Paths are class-prefixed
+calls the daemon over HTTP, and every write goes through one small set
+of endpoints so the daemon can validate the request, hold locks, and
+save a backup snapshot before it touches disk. Paths are class-prefixed
 (`/api/context/<class>/<path>`):
 
 ```bash

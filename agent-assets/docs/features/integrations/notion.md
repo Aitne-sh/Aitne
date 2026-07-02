@@ -13,7 +13,6 @@ summary: |
 section: integrations
 tags:
   - integrations
-  - notion
   - knowledge
   - observations
 status: stable
@@ -24,7 +23,7 @@ ask_examples:
   - Why are my Notion routine fetches skipped?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-11
+updated: 2026-07-01
 keywords:
   - notion
   - page
@@ -48,21 +47,25 @@ api_endpoints:
 
 # Notion
 
-Aitne polls the configured Notion databases, records an
-observation on change, and the activity scan decides whether anything
-warrants surfacing. The agent can also read pages on demand through
+Aitne watches the Notion databases you configure. When a page changes,
+it records an *observation* (a short note that something happened), and
+the [activity scan](../routines/activity-scan.md) — the routine that
+periodically reviews recent activity — decides whether anything is worth
+surfacing to you. The agent can also read Notion pages on demand through
 the `notion` skill.
 
 ## What It Does
 
-- Polls Notion via the official API at `notionPollIntervalSeconds`.
-- Records an observation per detected change.
+- Checks Notion through the official API on the interval set by
+  `notionPollIntervalSeconds`.
+- Records one observation for each change it detects.
 - Lets the agent read pages on demand.
 
 ## When It Runs / How It Is Triggered
 
-Continuous polling in `direct` mode. In `delegated` / `native` / `disabled`
-modes the poller does not run — see Integration Modes below.
+The poller runs continuously, but only in `direct` mode. In the
+`delegated`, `native`, and `disabled` modes it does not run — see
+[Integration Modes](#integration-modes) below.
 
 ## Integration Modes
 
@@ -84,8 +87,9 @@ Notion supports all four integration modes (`direct` / `delegated` /
   `disabled`.
 - **`disabled`** — silence; no observations, no daemon access.
 
-Switching modes requires the integration flip-lock probe to pass
-(connector reachable, capabilities reported). See `POST /api/integrations/notion/probe`.
+Switching modes requires the integration flip-lock probe to pass — a
+quick check that the connector is reachable and reports its
+capabilities. See `POST /api/integrations/notion/probe`.
 
 ## Routine Fetch Targets
 

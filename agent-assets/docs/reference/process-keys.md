@@ -14,11 +14,8 @@ summary: |
   tier. Mirrors packages/shared/src/process-key.ts.
 section: process-keys
 tags:
-  - core
-  - reference
-  - dispatch
-  - backends
   - routing
+  - backends
 status: stable
 ask_examples:
   - List all the ProcessKeys
@@ -41,7 +38,7 @@ keywords:
   - delegated_task
   - gmail_classify
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 config_keys:
   - monthlyReviewEnabled
   - delegatedTaskHeavyEnabled
@@ -61,12 +58,13 @@ related:
 
 # ProcessKeys
 
-A **ProcessKey** identifies the kind of work being dispatched (an owner DM,
-the morning routine, an activity scan, …). The dispatcher passes a ProcessKey
-to the `BackendRouter`, which resolves it to a `{ main, fallback }` backend
-plus an execution tier — the dispatcher never picks a model directly.
+A **ProcessKey** is a label for one kind of work the agent runs — an owner
+DM, the morning routine, an activity scan, and so on. When a piece of work
+starts, the dispatcher hands its ProcessKey to the `BackendRouter`, which
+turns the key into a `{ main, fallback }` backend pair plus an execution
+tier. The dispatcher itself never picks a model; the router does that.
 
-The **default tier** column maps to a model size, not a specific id:
+The **default tier** column maps to a model size, not to a specific id:
 
 - `lite` → Haiku-class (cheap, fast, narrow)
 - `medium` → Sonnet-class (the default for most owner-facing and routine work)
@@ -128,21 +126,21 @@ The **default tier** column maps to a model size, not a specific id:
 | `routine.research_wiki_summary` | Accept path for the "wiki summary" option — writes a wiki note into Obsidian inbox / Notion / local context per integration availability | medium | yes |
 | `browser_task` | Open-ended browser sub-agent (BROWSER_TASK_REDESIGN_PLAN.md §6.1). Claude-only backend floor; dispatched from `POST /api/browser-task` (DM, dashboard, or scheduler). | medium | yes |
 
-"Configurable" = the operator can override the backend / tier on
-`/settings/models` (i.e. the key appears in `CONFIGURABLE_PROCESS_KEYS`).
-"no" means the binding is fixed and uses the corresponding tier's
-global default.
+**Configurable** means the operator can override the backend or tier for
+that key on `/settings/models` — these are the keys listed in
+`CONFIGURABLE_PROCESS_KEYS`. **no** means the binding is fixed and always
+uses the global default for its tier.
 
 This list mirrors `packages/shared/src/process-key.ts`. The codebase
 is the source of truth.
 
 ## Reactive vs Autonomous
 
-The set `REACTIVE_PROCESS_KEYS` (owner currently in the loop) is:
-`message.dm`, `message.mention`, `dashboard.chat`, `dashboard.docs_qa`,
-`setup`, `knowledge.import`. Every other key is autonomous and runs
-under the tighter Approve-tier MCP tool-stripping that B-003 Phase 3
-established.
+Reactive keys run while the owner is in the loop, waiting on a reply.
+`REACTIVE_PROCESS_KEYS` holds them: `message.dm`, `message.mention`,
+`dashboard.chat`, `dashboard.docs_qa`, `setup`, `knowledge.import`. Every
+other key is autonomous — it runs on its own, under the tighter Approve-tier
+MCP tool-stripping that B-003 Phase 3 established.
 
 ## Tier Locks
 
@@ -160,6 +158,6 @@ by `DELEGATED_TASK_HARD_CAPS` (server-enforced, not user-tunable):
 - `maxTimeoutMs` ≤ 300 000
 - `maxSchemaBytes` ≤ 4096
 
-`config.ts` holds the *defaults* (`delegatedTaskDefaultMaxToolCalls`,
-…); the caps above bound a prompt-injected caller regardless of the
-per-request fields.
+`config.ts` holds the *defaults* (`delegatedTaskDefaultMaxToolCalls`, …),
+but the caps above bound the request even when a prompt-injected caller
+tries to raise the per-request fields.

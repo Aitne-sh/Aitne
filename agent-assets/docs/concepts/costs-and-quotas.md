@@ -17,7 +17,6 @@ summary: |
   dashboard reports, it does not bill.
 section: cost
 tags:
-  - core
   - cost
   - quotas
   - backends
@@ -31,7 +30,7 @@ ask_examples:
   - How does Gemini's per-day quota work?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - cost
   - budget
@@ -88,7 +87,10 @@ is not provider-supported for automated agent use — see
 shape becomes whatever the underlying subscription enforces (e.g.
 Claude's rolling 5-hour Opus window when running on a Max plan login).
 
-The dashboard rolls cost up by ProcessKey, by backend, and by agent day.
+The dashboard rolls cost up three ways: by ProcessKey (the routine or
+event type that triggered the run), by backend, and by agent day (the
+window Aitne treats as "today", which rolls over at 04:00 local by
+default).
 
 ## Why This Concept Exists
 
@@ -194,14 +196,12 @@ register an API key on `/settings/models`.
 
 ## Where You See It
 
-In the dashboard:
+In the dashboard, the **Analytics** page (`/analytics`) is the full
+cost rollup — by backend, by ProcessKey, by model, over daily / weekly
+/ monthly windows, with the day's running total in the sidebar. See
+[Cost Tracking](../features/operations/cost-tracking.md) for the guided
+tour. One surface is specific to this page's topic:
 
-- **Analytics** (`/analytics`) rolls cost by backend, by ProcessKey
-  (event type), by model, and over daily / weekly / monthly periods,
-  plus a today total.
-- **Sidebar** shows the day's running total next to the Analytics
-  entry.
-- **Activity** event details include the per-execute cost.
 - **Settings → Models** (`/settings/models`) exposes the per-backend
   API-key panel and a warning banner whenever a backend is running on
   subscription auth.

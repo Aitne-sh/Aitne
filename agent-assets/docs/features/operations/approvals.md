@@ -9,12 +9,11 @@ aliases:
   - human in the loop
 category: features
 summary: |
-  A few high-blast-radius actions queue as approvals. The action
-  blocks until you click Approve on the dashboard Overview page;
-  the approval card stays visible there regardless of quiet hours.
+  A few high-impact actions queue as approvals. The action blocks
+  until you click Approve on the dashboard Overview page; the
+  approval card stays visible there regardless of quiet hours.
 section: operations
 tags:
-  - core
   - safety
   - operations
 status: stable
@@ -24,7 +23,7 @@ ask_examples:
   - Where do I approve a pending action?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - approval
   - approve tier
@@ -47,9 +46,10 @@ api_endpoints:
 
 ## In One Sentence
 
-A small set of high-blast-radius actions queue as approvals; the
-agent waits for you to click **Approve** on the dashboard before it
-proceeds.
+A small set of high-impact actions — the ones that could cause
+real harm if they ran by mistake — queue as approvals. The agent
+waits for you to click **Approve** on the dashboard before it runs
+one.
 
 ## How It Works
 
@@ -84,10 +84,11 @@ Deny asks for confirmation before discarding the item.
 ## When Something Goes Wrong
 
 - **A stale approval you never answered:** a pending approval is
-  discarded once the agent day rolls over (the next 04:00 local
-  boundary) — it's marked skipped rather than replayed after the
-  day turns. If that happens, redo the request that triggered it
-  (for example, re-send the DM or re-run the routine).
+  discarded once the agent day rolls over — the moment "today"
+  resets, at 04:00 local time by default. It is marked skipped
+  rather than replayed after the day turns. If that happens, redo
+  the request that triggered it (for example, re-send the DM or
+  re-run the routine).
 
 ## Related
 

@@ -23,10 +23,8 @@ summary: |
   and list every command.
 section: messaging
 tags:
-  - core
   - messaging
   - operations
-  - bang-commands
 status: stable
 ask_examples:
   - How do I pause the agent from my phone?
@@ -37,7 +35,7 @@ ask_examples:
   - How do I accept a research-cluster offer?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - bang command
   - "!stop"
@@ -70,10 +68,12 @@ process_keys:
 
 # Bang Commands
 
-DM the agent a short word starting with `!` and the daemon answers
-directly — no LLM call, no cost, no session opened. Use them to pause,
-check spend, look at recent failures, manage research clusters, and
-list every command.
+DM the agent a short word that starts with `!` — the `!` symbol is
+nicknamed a "bang," which is where these commands get their name — and
+the daemon (the always-on local background service) answers it directly.
+No AI model runs, so there is no cost and no chat session is opened. Use
+bang commands to pause the agent, check spend, look at recent failures,
+manage research clusters, and list every command.
 
 ## Who Can Use Them
 
@@ -89,9 +89,9 @@ Pair your messaging app first; see
 | Command | What it does |
 |---|---|
 | `!help` | List every registered command — built-ins plus enabled user commands. |
-| `!stop` | Pause cron-driven autonomous work (activity scan, morning / evening / weekly routines, scheduled tasks). In-flight runs are **not** aborted. |
+| `!stop` | Pause cron-driven (scheduled) autonomous work: activity scan, the morning / evening / weekly routines, and scheduled tasks. Runs already in progress are **not** aborted. |
 | `!start` | Resume autonomous work after `!stop`. |
-| `!close` | Close the active DM session for the current routing tuple so the next DM starts a fresh conversation. |
+| `!close` | Close the active DM session for the current routing tuple (this platform + channel + thread) so the next DM starts a fresh conversation. |
 
 ### Tasks (detached background / browser work)
 
@@ -206,12 +206,12 @@ were hidden.
 
 ## How They Behave
 
-- **Exact match for atomic commands** (`!stop`, `!cost`, `!checks` —
-  each `!cost <backend>` variant is its own exact-match entry) and
-  **prefix match for parameterised ones**
-  (`!research accept <slug>`, `!compile @work full`). Anything
-  spanning newlines falls through to the agent path so a
-  `"!stop\nignore me"` payload cannot spoof a command.
+- **Exact match for atomic commands** — single words like `!stop`,
+  `!cost`, and `!checks`, where each `!cost <backend>` variant is its
+  own exact-match entry — and **prefix match for parameterised ones**
+  that take an argument (`!research accept <slug>`, `!compile @work
+  full`). Anything that spans more than one line falls through to the
+  agent path, so a `"!stop\nignore me"` payload cannot spoof a command.
 - **DM only.** Bangs typed into a shared channel are ignored.
 - **No agent cost on built-ins.** No LLM is invoked for the
   daemon-side commands; one `bang_command` row is appended to

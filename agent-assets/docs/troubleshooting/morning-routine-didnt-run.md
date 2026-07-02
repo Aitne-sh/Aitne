@@ -16,11 +16,10 @@ summary: |
   boot/wake catch-up, the missed-fire self-heal, or the retry chain.
 section: morning-routine-didnt-run
 tags:
-  - troubleshooting
   - routines
   - autonomous
   - scheduler
-  - dispatch
+  - routing
 status: stable
 ask_examples:
   - Why didn't my morning routine fire?
@@ -28,7 +27,7 @@ ask_examples:
   - How do I regenerate today.md by hand?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - morning routine didn't run
   - morning routine skipped
@@ -74,24 +73,25 @@ without any action from you:
   So a missed routine often resolves itself on the next `aitne start`
   or `aitne restart`.
 - **Sleep wake catch-up.** If the machine was asleep at the trigger
-  minute (laptop lid closed at 04:00), the cron fire is silently lost —
-  cron never replays missed ticks. The daemon detects the wall-clock
-  gap when the machine wakes and queues the morning routine itself,
-  along with any missed evening/weekly reviews.
+  minute (laptop lid closed at 04:00), the scheduled trigger is
+  silently lost — the scheduler (cron) never replays a tick it missed.
+  When the machine wakes, the daemon spots the gap in wall-clock time
+  and queues the morning routine itself, along with any missed evening
+  or weekly reviews.
 - **Missed-fire self-heal.** A periodic check (every 10 minutes)
   notices when the day is more than ~15 minutes old with no morning
   attempt and nothing queued, and queues the routine. This covers
   sleeps too short for the wake detector and any other lost trigger.
 - **Retry on failure.** If the routine runs but fails to produce a
-  fresh `state/today.md`, the daemon retries up to 3 times with an
-  exponential back-off (5, then 10, then 15 minutes). After 3 failed
-  attempts it sends you a DM asking you to regenerate manually.
-- **Hung-run recovery.** If a run starts and then wedges (typically a
-  sleep mid-run that kills the backend connection), the self-heal
-  check re-queues it once the run has been silent past the stall
-  threshold (~2 hours by default) — at most twice per day, after which
-  it alerts instead of re-running. Either way you get an owner DM so
-  the silence never goes unnoticed.
+  fresh `state/today.md`, the daemon retries up to 3 times, waiting a
+  little longer between each try (5, then 10, then 15 minutes). After 3
+  failed attempts it sends you a DM asking you to regenerate manually.
+- **Hung-run recovery.** If a run starts and then gets stuck (usually
+  the machine sleeps mid-run and drops the backend connection), the
+  self-heal check re-queues it once the run has stayed silent past the
+  stall threshold (~2 hours by default) — at most twice per day, after
+  which it alerts you instead of re-running. Either way you get an owner
+  DM, so the silence never goes unnoticed.
 
 Give it a few minutes, or restart the daemon, before digging deeper.
 
@@ -111,8 +111,9 @@ Give it a few minutes, or restart the daemon, before digging deeper.
    run. See [Quota Exhausted](quota-exhausted.md).
 4. **Mid-retry.** The routine threw and is in the 5/10/15-minute
    retry window — the row may simply not have landed yet.
-5. **Day-boundary subtlety.** Before `dayBoundaryHour` (default 04:00),
-   the routine still "belongs to" yesterday — see
+5. **Day-boundary subtlety.** Before the agent-day boundary (the moment
+   "today" rolls over, set by `dayBoundaryHour`, default 04:00), the
+   routine still "belongs to" yesterday — see
    [Agent Day](../concepts/agent-day.md).
 
 Note: the morning routine takes priority over the activity scan, not the

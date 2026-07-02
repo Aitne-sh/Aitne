@@ -22,7 +22,6 @@ summary: |
   unchanged.)
 section: safety
 tags:
-  - core
   - safety
   - integrations
   - audit
@@ -34,7 +33,7 @@ ask_examples:
   - Where do I see what the agent has been doing?
 locale: en-US
 created: 2026-04-26
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - deniedTools
   - safety floor
@@ -73,9 +72,10 @@ The risk classifier has two write tiers, not three:
   every connector tool call (send mail, archive, label, create event,
   delete event, …) and for normal context writes.
 - **Approve** — agent must present a Bearer token issued through the
-  dashboard. Reserved for posture-changing daemon configuration:
-  flipping integration modes, swapping the main backend, enabling/
-  disabling backends, wiping config.
+  dashboard. Reserved for posture-changing daemon configuration
+  (settings that change the safety setup itself): flipping integration
+  modes, swapping the main backend, enabling/disabling backends,
+  wiping config.
 - (`ReadSensitive` is the third tier, but it gates *reads* of personal
   data — orthogonal to write notifications. It is unchanged.)
 
@@ -95,22 +95,23 @@ actions are:
 ## Why This Concept Exists
 
 The previous Notify tier (3-tier model: Autonomous / Notify / Approve)
-gave a *false sense* of safety: the action completed regardless, the
-operator could miss the DM, and the middleware was structurally unable
-to intercept native MCP calls (the agent could reach Gmail through the
-backend's connector without ever touching the daemon). Curating a
-per-tool Notify policy across direct + cross-backend + same-backend +
-operator-installed MCPs was an ever-growing maintenance trap.
+gave a *false sense* of safety. The action completed either way, the
+operator could easily miss the DM, and the middleware simply could not
+intercept native MCP calls — the agent could reach Gmail through the
+backend's own connector without ever passing through the daemon. On top
+of that, hand-curating a per-tool Notify policy across every path
+(direct, cross-backend, same-backend, and operator-installed MCPs) was
+an ever-growing maintenance trap.
 
 The new model is honest: dangerous actions either (a) are denied at the
 chokepoint by the operator's `deniedTools`, (b) require explicit
 Approve (sparse, intentional, daemon-config only), or (c) happen
 autonomously and are auditable on demand.
 
-The *value proposition* — the agent manages the operator's life — is
-preserved. The operator should not have to manage the agent's calendar
-of "report to me" events. Information about what the agent did is
-**available on demand**, not pushed.
+The core promise — the agent manages the operator's life — stays
+intact. The operator should not have to manage the agent's own calendar
+of "report back to me" events. Details of what the agent did are
+**available on demand**, not pushed at you.
 
 ## Definitions
 

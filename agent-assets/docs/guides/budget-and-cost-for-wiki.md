@@ -15,7 +15,6 @@ summary: |
   to tune the threshold.
 section: budget-and-cost-for-wiki
 tags:
-  - guides
   - wiki
   - cost
   - approval
@@ -27,7 +26,7 @@ ask_examples:
   - What does the pre-compile snapshot do?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - wiki budget
   - wiki cost
@@ -56,92 +55,86 @@ ui_anchors:
 
 # Wiki Budgets and Cost
 
-The wiki ships with three cost knobs you can tune in
-**Settings → Wiki** (`/settings/wiki`):
+This is the operator's walkthrough for keeping wiki spending under
+control. For the deep mechanics — exactly how the estimate is
+computed and how the approval gate decides — see
+[features/wiki/cost-and-approval](../features/wiki/cost-and-approval.md).
 
-1. **Per-command model selector** for each wiki process. The model
-   picker covers the full set: `wiki.ingest_url`, `wiki.compile`,
-   `wiki.ask`, plus the operational triad `wiki.lint`, `wiki.trace`,
-   `wiki.connect`. Each defaults to your main backend at the medium
-   tier; downgrade `wiki.ingest_url` to a lite tier if you ingest a
-   lot of URLs.
+The wiki gives you three cost knobs, all in **Settings → Wiki**
+(`/settings/wiki`):
+
+1. **Per-command model picker** — one model per wiki process. The
+   picker covers `wiki.ingest_url`, `wiki.compile`, and `wiki.ask`,
+   plus the operational trio `wiki.lint`, `wiki.trace`, and
+   `wiki.connect`. Each starts on your main backend at the medium
+   tier. If you ingest a lot of URLs, drop `wiki.ingest_url` to a lite
+   tier to save money.
 2. **Per-process budget cap** (`max_budget_usd` on each row). The
-   dispatcher's per-session budget envelope is the enforcer.
+   dispatcher's per-session budget envelope enforces it.
 3. **Per-workspace `!compile full` approval threshold** (default
-   $2.00, range $0–$100). The cost estimator brackets the expected
-   spend at 0.5× / 1× / 2× the estimated input-token count; if the
-   pessimistic (2×) estimate breaches the threshold, the bang handler
-   escalates to the approval queue instead of running autonomously.
+   $2.00, range $0–$100). The estimator brackets the likely spend at
+   0.5× / 1× / 2× the estimated input-token count; if the worst-case
+   (2×) number crosses the threshold, `!compile full` asks for
+   approval instead of running on its own.
 
 ## What the Estimator Does
 
 `!compile full` is the most expensive wiki command because a full
-rebuild touches every raw note. The estimator is **pure JS** — it
-does not spawn an agent (spawning one to estimate would itself burn
-budget). It walks the `10_raw/` layer, approximates each file's token
-count from its on-disk character count, sums the total, and brackets:
+rebuild touches every raw note. Before it runs, a small piece of
+plain JavaScript estimates the cost — it never spawns an agent, since
+spawning one just to estimate would itself burn budget. It walks the
+`10_raw/` layer, approximates each file's token count from its size on
+disk, and reports a low/high bracket so you can weigh a worst case
+before you approve. For the exact character-to-token ratios and the
+0.5× / 2× bracket math, see
+[features/wiki/cost-and-approval](../features/wiki/cost-and-approval.md).
 
-```
-expected_usd = total_estimated_input_tokens / 1000 × $0.003
-optimistic   = 0.5 × expected
-pessimistic  = 2.0 × expected
-```
-
-Per-file token approximation is script-aware: ~4 characters per token
-for Latin/prose, ~1.5 for majority-CJK files, with a 200-token floor
-per file so empty or one-line stubs still account for the fixed
-per-call overhead (system prompt, skills bundle, tool docs). The unit
-cost (`$0.003` per 1k tokens) matches Claude Sonnet 5's ~$3 /
-Mtoken standard input price. (An introductory $2 / Mtoken rate runs
+The unit cost (`$0.003` per 1k tokens) matches Claude Sonnet 5's ~$3
+/ Mtoken standard input price. (An introductory $2 / Mtoken rate runs
 through 2026-08-31; the estimate lists the standard rate, while the
 SDK's billed `total_cost_usd` reflects the intro price during the
-window.) The bracket lets you see a worst case before approving.
+window.)
 
 > The dashboard surfaces the top raw files by estimated token count,
 > so you can see which sources dominate the bill before approving.
-> An older flat heuristic (`raw_count × 1500 tokens`) survives as an
-> opt-in fallback for deterministic banner copy, but the default is
-> the per-file character scan described above.
 
 ## Where the Gate Fires
 
-- **Below threshold**: the compile runs autonomously and you get a
-  completion DM with actual spend.
-- **Above threshold**: the bang handler inserts an `agent_schedule`
-  row with `task_type='approval'`, DMs you the estimate, and pauses.
-  The request shows up as an **Approvals** card on the dashboard home
-  page (`/`); the `/settings/wiki` page also points you there.
-  Clicking **Approve** flips the row to `task_type='approved_task'`
-  and the scheduler picks it up — only then is the pre-compile git
-  snapshot taken (see below) and the compile session spawned.
+- **Below threshold**: the compile runs on its own, and you get a
+  completion DM with the actual spend.
+- **Above threshold**: the compile pauses. It inserts an
+  `agent_schedule` row with `task_type='approval'`, DMs you the
+  estimate, and waits. The request shows up as an **Approvals** card
+  on the dashboard home page (`/`); the `/settings/wiki` page also
+  points you there. When you click **Approve**, the row flips to
+  `task_type='approved_task'` and the scheduler picks it up — only
+  then does Aitne take the pre-compile git snapshot (see below) and
+  start the compile session.
 
-If you change your mind, hit **Deny** on the approval card — the row
-flips to `skipped`, no git commit is made, and no agent session is
-spawned.
+Changed your mind? Click **Deny** on the approval card. The row flips
+to `skipped`, no git commit is made, and no agent session runs.
 
 ## Git Pre-Compile Snapshot
 
 On an external workspace that is a git repo and has **Auto-commit
-before `!compile full`** enabled, Aitne runs:
-
-```
-git -C <vault> status --porcelain
-# must be empty — dirty trees refuse the operation entirely
-git -C <vault> add -A
-git -C <vault> commit --allow-empty -m "aitne wiki: pre-compile snapshot <ISO-8601-ts>"
-```
-
-before the compile session starts. The commit message is
-deterministic so you can roll back with `git reset --hard HEAD~1` if
-the compile produces a surprise. The `--no-verify` flag is not used —
-your pre-commit hooks run as normal.
+before `!compile full`** enabled, Aitne commits the vault
+(`git add -A && git commit`) just before the compile session starts,
+giving you a rollback point. If the compile produces a surprise,
+`git reset --hard HEAD~1` puts the vault back. A dirty working tree
+refuses the operation entirely — commit or stash first, then re-run.
+The commit runs your normal pre-commit hooks (the `--no-verify` flag
+is not used).
 
 The estimate DM tells you which snapshot path applies:
 **"will commit before compile starts"** (clean repo), **"not taken
 (no git repo)"**, **"disabled by setting"** (auto-commit off), or
 **"not applicable"** for internal-mode workspaces — those recover via
 `md_file_snapshots` instead of git. When no git backup will be taken,
-you can decide whether to add one before approving.
+you can add one yourself before approving.
+
+For the full state-by-state table of what the snapshot gate does in
+each workspace configuration, see
+[features/wiki/cost-and-approval](../features/wiki/cost-and-approval.md).
 
 ## Tuning the Threshold
 

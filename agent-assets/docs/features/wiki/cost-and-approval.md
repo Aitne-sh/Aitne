@@ -25,7 +25,6 @@ tags:
   - cost
   - approval
   - safety
-  - core
 status: stable
 ask_examples:
   - How does !compile full estimate cost?
@@ -39,7 +38,7 @@ ask_examples:
   - Can I see the cost before running !compile full?
 locale: en-US
 created: 2026-05-21
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - cost estimate
   - cost bracket
@@ -106,26 +105,30 @@ The same estimator backs four surfaces so the numbers cannot drift:
 
 ## How the estimator works
 
-Pure JS, no agent session, no SDK call. The estimator
-(`packages/daemon/src/core/wiki/cost-estimate.ts`) opens each raw
-note under `10_raw/`, approximates its token count from on-disk
-content, then multiplies the total by the tier unit cost and
-brackets with 0.5×/2× multipliers.
+The estimate is plain JavaScript math — it never starts an agent or
+calls the model, so it costs nothing and returns instantly. The
+estimator (`packages/daemon/src/core/wiki/cost-estimate.ts`) opens
+each raw note under `10_raw/`, approximates its token count from the
+text on disk, then multiplies the total by the tier unit cost and
+wraps it in a 0.5×/2× bracket (a low/high range).
 
 ### Character → token approximation
 
-- **Latin / English content** — ~4 chars per token. The well-known
-  OpenAI rule-of-thumb; matches Anthropic's tokenizer within ±15%
-  for prose; confirmed against the gpt-tokenizer dist.
-- **CJK content** — ~1.5 chars per token. BPE merges short CJK runs
-  but not as aggressively as Latin word fragments.
+- **Latin / English content** — about 4 characters per token. This
+  is the well-known OpenAI rule-of-thumb; it matches Anthropic's
+  tokenizer within ±15% for prose, confirmed against the
+  gpt-tokenizer package.
+- **CJK content** (Chinese, Japanese, Korean) — about 1.5 characters
+  per token. The tokenizer merges short CJK runs, but not as
+  aggressively as it merges Latin word fragments, so each character
+  carries more weight.
 
-The classifier counts Unicode code points whose script is one of
-Han, Hiragana, Katakana, Hangul, Bopomofo. If the document is
-majority-CJK we apply the CJK divisor to the entire file; otherwise
-Latin. A per-script split per file would be marginally more accurate
-but adds 30% code for a sub-percent gain on typical mixed-script
-files.
+To pick a ratio, the classifier counts the Unicode code points whose
+script is one of Han, Hiragana, Katakana, Hangul, or Bopomofo. If a
+file is majority-CJK, the CJK ratio applies to the whole file;
+otherwise the Latin ratio does. Splitting each file script-by-script
+would be slightly more accurate, but it adds 30% more code for a
+sub-percent gain on typical mixed-script files, so we don't.
 
 ### The 0.5×/2× bracket
 
@@ -188,7 +191,8 @@ estimate landed to the actual cost.
 
 ## The pre-compile git snapshot
 
-Only meaningful on an **external + git-tracked** vault. The gate
+This only matters for an **external + git-tracked** vault — a vault
+stored outside Aitne whose folder is a git repository. The gate
 decides:
 
 | Workspace state | Outcome |
@@ -202,9 +206,10 @@ decides:
 The snapshot is your rollback target if `!compile full` produces a
 surprise — `git reset --hard <snapshot-commit>` puts the vault back.
 
-The pre-compile commit uses no special author identity; it lands
-under whatever git is configured to use. If you co-author with
-Aitne, you'll want to set that up at the git config level.
+The pre-compile commit uses no special author identity — it lands
+under whatever name and email your git is already configured to use.
+If you want to credit Aitne as a co-author, set that up in your git
+config.
 
 ## The `--preview` dry-run
 

@@ -14,7 +14,6 @@ summary: |
   different backend.
 section: switch-default-backend
 tags:
-  - guides
   - backends
   - operations
   - routing
@@ -25,7 +24,7 @@ ask_examples:
   - How do I change the main backend the agent uses?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - main backend
   - switch backend
@@ -52,9 +51,10 @@ api_endpoints:
 ## Goal
 
 Change which backend the agent uses by default for most work —
-`claude`, `codex`, `gemini`, or `opencode`. This is the broad switch
-that re-seeds every ProcessKey to the new backend's per-tier default
-models. To change just one ProcessKey instead, see
+`claude`, `codex`, `gemini`, or `opencode`. This is the broad switch:
+it re-seeds every ProcessKey (each named job the agent runs, like a DM
+reply or a morning routine) to the new backend's default model for
+that job's tier. To change just one ProcessKey instead, see
 [Change which model handles X](change-which-model-handles-x.md).
 
 ## Prerequisites
@@ -65,10 +65,10 @@ will start failing the moment it routes work there.
 - Register an API key for the backend on `/settings/models`
   (`anthropic` / `openai` / `google`, or one of the cloud-provider
   options for that backend).
-- API keys are the supported path. If no key is set, the daemon falls
-  back to whatever subscription login the backend's CLI already has —
-  the auth-health card on `/settings/models` flags this so you can
-  tell which credential is actually in use.
+- An API key is the supported way in. If no key is set, the daemon
+  falls back to whatever subscription login the backend's CLI already
+  has — the auth-health card on `/settings/models` flags this so you
+  can tell which credential is actually in use.
 
 ## Steps
 

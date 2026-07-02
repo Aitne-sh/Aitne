@@ -26,7 +26,7 @@ ask_examples:
   - How often does the daemon poll my repos?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - git
   - commit
@@ -53,31 +53,33 @@ api_endpoints:
 
 # Git
 
-Add local git repositories to a watched set; the daemon polls them
-and the activity scan decides whether the recent activity is worth
-flagging.
+Add local git repositories to a watched set. The daemon checks them
+on a schedule (it polls them), and the activity scan decides whether
+the recent activity is worth flagging.
 
 ## What It Does
 
-- **Polls** each watched repo every `gitPollIntervalSeconds`.
-- **Records observations** when new commits land between polls. The
-  commit author is included so agent-originated commits do not
-  re-surface to the agent (defended via `AgentWriteTracker`).
+- **Checks (polls)** each watched repo every `gitPollIntervalSeconds`
+  seconds.
+- **Records an observation** when new commits land between two checks.
+  It notes who authored each commit, so commits the agent made itself
+  are not shown back to it (enforced by `AgentWriteTracker`).
 - **Surfaces patterns**, not individual commits — three small commits
-  in an hour will not page you.
+  in an hour will not each trigger a notification.
 
 The agent never pushes, never amends, never force-resets. Read-only
 by design.
 
 ## When It Runs / How It Is Triggered
 
-- The poller is continuous.
-- The activity scan consumes the accumulated observations.
+- The poller runs continuously in the background.
+- The activity scan reads the observations it has collected.
 
 ## What It Outputs
 
-- An `observation` row per detected change set.
-- A summary in the activity scan's output when observations qualified.
+- One `observation` row for each detected set of changes.
+- A summary in the activity scan's output when those observations are
+  worth reporting.
 
 ## Where in the Dashboard
 

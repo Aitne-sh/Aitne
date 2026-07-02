@@ -9,13 +9,11 @@ aliases:
   - key bindings
 category: reference
 summary: |
-  Keyboard shortcuts available in the dashboard. The set is small by
-  design — the dashboard is a low-cognition surface.
+  Keyboard shortcuts available in the dashboard. The set is small on
+  purpose — the dashboard is meant to stay calm and easy to scan.
 section: reference
 tags:
-  - reference
   - dashboard
-  - core
 status: stable
 ask_examples:
   - What keyboard shortcuts work in the dashboard?
@@ -23,7 +21,7 @@ ask_examples:
   - What does pressing "?" do in the dashboard?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - shortcut
   - hotkey
@@ -42,9 +40,9 @@ related:
 
 # Keyboard Shortcuts
 
-The dashboard ships a deliberately small set of shortcuts — it is a
-low-cognition surface, not a power-user IDE. These work from any
-dashboard screen.
+The dashboard ships a deliberately small set of shortcuts — it is built
+to stay calm and easy to scan, not to be a power-user IDE. These work
+from any dashboard screen.
 
 | Keys | Action |
 |---|---|

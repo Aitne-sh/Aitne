@@ -17,7 +17,6 @@ section: memory-files
 tags:
   - memory
   - journal
-  - reflection
   - routines
 status: stable
 ask_examples:
@@ -27,7 +26,7 @@ ask_examples:
   - Why did journal/agent.md stop growing?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - journal
   - retros
@@ -77,20 +76,22 @@ Each entry carries:
 - The reflection itself.
 
 The file lives at `~/.personal-agent/context/journal/agent.md`. The
-day-to-day morning and ad-hoc entries accumulate indefinitely; the
-daily retention rollup keeps only a rolling window of the structured
-retros (the most recent 12 `## Weekly` and 24 `## Monthly` sections),
-pruning older ones. Later routines read it back to look for patterns.
+day-to-day morning and ad-hoc entries accumulate indefinitely. A daily
+retention rollup then keeps only a rolling window of the structured
+retros — the most recent 12 `## Weekly` and 24 `## Monthly` sections —
+and prunes older ones. Later routines read the file back to look for
+patterns.
 
 ## Who writes it, and when
 
 Three routines append to the journal — none ever rewrites it:
 
 - **Morning routine** is the recurring daily writer — and here the
-  daemon itself does the writing, not an LLM stage. After the day's
+  daemon (the always-on local background service) does the writing
+  itself, rather than an AI-model (LLM) stage. Once the day's
   stages (Stage A `routine.morning_routine_today`, Stage B
-  `routine.morning_routine_journal`) settle, the daemon appends a
-  one-paragraph audit-trail entry assembled from the run's
+  `routine.morning_routine_journal`) finish, the daemon appends a
+  one-paragraph audit-trail entry built from the run's
   `agent_actions` rows — stage results, inbox stats, anomalies — plus
   a one-line footprint of the prior day's actions. This is the entry
   you'll see most often.
@@ -104,7 +105,8 @@ Three routines append to the journal — none ever rewrites it:
   rejected. It does not write the bulk of the diary.
 
 In-the-moment notes can also land here when the agent flags something
-worth recording during reactive work.
+worth recording during reactive work — its live back-and-forth with
+you, outside the scheduled routines.
 
 ### Example entry
 

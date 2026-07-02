@@ -13,8 +13,6 @@ summary: |
   a SKILL.md under agent-assets/skills/<slug>/.
 section: skills
 tags:
-  - core
-  - reference
   - skills
 status: stable
 ask_examples:
@@ -34,7 +32,7 @@ keywords:
   - wiki skill
   - notify skill
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 ui_anchors:
   - /knowledge?tab=skills
 process_keys:
@@ -56,11 +54,13 @@ related:
 
 # Built-in Skills
 
-Aitne ships a fixed set of built-in skills the agent loads per session. Most
-are always available; a few are **conditional** — loaded only when a gating
-flag is set (`gmail-lifestyle`, `managed-tasks`) or only for a specific event
-type (`browser-task` / `background-task` / `background-task-reply`, on owner
-DMs). The table below is the canonical roster.
+A skill is a small instruction file that teaches the agent how to do one job.
+Aitne ships a fixed set of built-in skills, and the agent loads the ones it
+needs at the start of each session. Most are always available. A few are
+**conditional** — the agent loads them only when a gating flag turns them on
+(`gmail-lifestyle`, `managed-tasks`), or only for a specific event such as an
+owner DM (`browser-task` / `background-task` / `background-task-reply`). The
+table below is the full, authoritative roster.
 
 | Slug | Purpose |
 |---|---|
@@ -94,14 +94,16 @@ DMs). The table below is the canonical roster.
 
 ## How skills are sourced
 
-The source of truth is each skill's `SKILL.md` under
-`agent-assets/skills/<slug>/`. The `description` field in that file's
-frontmatter is what the dispatcher uses for runtime skill selection.
+Each skill is defined by its own `SKILL.md` file under
+`agent-assets/skills/<slug>/` — that file is the single source of truth. The
+`description` field at the top of that file (its frontmatter) is the text the
+dispatcher reads when it decides which skills to load for a session.
 
 ## Runtime overlays
 
-A subset of these skills' sections (knowledge layout, routing tables, search
-recipes, etc.) is refined at runtime through JSON **overlays** maintained by
-the skill-curation loop. The seed files in `agent-assets/skills/` are never
-rewritten — overlays are applied at session-init by the `SkillsCompiler` and
-live under `<dataDir>/skill-curation-overlays/<slug>/<section-id>.json`.
+Some sections of these skills (knowledge layout, routing tables, search
+recipes, and the like) can be refined at runtime through JSON **overlays** — small
+patches maintained by the skill-curation loop. The shipped seed files in
+`agent-assets/skills/` are never rewritten. Instead, the `SkillsCompiler`
+applies the overlays when a session starts, reading them from
+`<dataDir>/skill-curation-overlays/<slug>/<section-id>.json`.

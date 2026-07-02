@@ -16,9 +16,6 @@ summary: |
   per-route files under packages/daemon/src/api/routes/.
 section: api
 tags:
-  - reference
-  - api
-  - core
   - operations
 status: stable
 ask_examples:
@@ -28,7 +25,7 @@ ask_examples:
   - How do I list registered backends?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-08
+updated: 2026-07-01
 keywords:
   - API
   - REST
@@ -50,20 +47,23 @@ related:
 
 # API Reference
 
-The daemon serves a single Hono app on `127.0.0.1:PA_API_PORT` (default
-`8321`). Almost all endpoints are mounted under `/api/*`; the lone
-exception is the GitHub webhook receiver, mounted at root `/webhook/github`.
+The daemon serves one Hono web app on `127.0.0.1:PA_API_PORT` (default
+`8321`). Hono is a small, fast HTTP framework. Almost every endpoint sits
+under `/api/*`; the one exception is the GitHub webhook receiver, at the
+root path `/webhook/github`.
+
 **Source of truth:** `packages/daemon/src/api/server.ts` (`createApp`)
-registers most route groups, with one post-compose mount in
-`packages/daemon/src/bootstrap/api.ts` (the docs corpus + docs-QA, wired
-only after the indexer handle exists). Each group lives in its own file
-or directory under `packages/daemon/src/api/routes/`.
+registers most route groups. One more group is mounted later, in
+`packages/daemon/src/bootstrap/api.ts` — the docs corpus plus docs-QA,
+which can only be wired up once the search indexer is ready. Each group
+lives in its own file or directory under `packages/daemon/src/api/routes/`.
 
 ## Auth
 
-A bearer token is generated at first launch and stored in the OS
-keychain. The dashboard reads it via the daemon proxy; external
-callers pass it as `Authorization: Bearer <token>`.
+A bearer token — a secret string that proves a caller is allowed to use
+the API — is generated at first launch and stored in the OS keychain. The
+dashboard reads it through the daemon proxy; external callers pass it in
+the `Authorization: Bearer <token>` header.
 
 ## Route Groups
 
@@ -187,9 +187,10 @@ keys.
 ## Risk classification
 
 Every endpoint carries a `RiskTier` from
-`packages/daemon/src/safety/risk-classifier.ts`. The enum has three
-values (the former **notify** tier was abolished daemon-wide — Approve
-now covers everything that used to be Notify):
+`packages/daemon/src/safety/risk-classifier.ts` that says how much
+protection it needs. There are three values (the former **notify** tier
+was removed daemon-wide — Approve now covers everything that used to be
+Notify):
 
 - **autonomous** — safe to execute without any auth or notification.
 - **read_sensitive** — touches personal data (email, calendar, notes,

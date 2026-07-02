@@ -20,7 +20,6 @@ section: integrations
 tags:
   - integrations
   - observations
-  - browser-history
   - polling
   - autonomous
 status: stable
@@ -32,7 +31,7 @@ ask_examples:
   - How do I opt out of browser history?
 locale: en-US
 created: 2026-05-22
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - browser history
   - browser history poller
@@ -75,38 +74,41 @@ api_endpoints:
 
 # Browser History
 
-Aitne can read the SQLite history databases that Chrome, Chromium,
-Edge, Brave, Comet, and Atlas already maintain on disk, classify visits
-into categories, and use the result to notice what you've been
-researching, what you've been refreshing, and what comparison-shopping
-windows you're in. Everything stays local — no URLs, titles, or
-clicks leave the daemon.
+Every browser keeps a local history file (a small SQLite database) of
+the pages you visit. Aitne can read that file for Chrome, Chromium,
+Edge, Brave, Comet, and Atlas, sort each visit into a category, and use
+the result to notice what you've been researching, what pages you keep
+refreshing, and when you're comparison-shopping. Everything stays on
+your machine — no URLs, titles, or clicks leave the daemon.
 
 ## What It Does
 
-- **Reads visits** from the browser's own history DB on a 30-min
-  cadence (per browser, per profile) and inserts them into the
+- **Reads visits** from the browser's own history file every 30
+  minutes (per browser, per profile) and inserts them into the
   daemon's `browser_visits` table.
 - **Counts reloads** per `<domain>/<first-path>` into
-  `browser_reload_signals`. Surfaced via [`!checks`](../messaging/bang-commands.md)
-  for the agent-day and via the weekly review's "this week you
-  checked" block.
-- **Derives research clusters** when a topic crosses meaningful-visits
-  / foreground-time / distinct-domain thresholds. Clusters live in
-  `browser_research_clusters` with a slug, display name, journal at
-  `context/research/<slug>.md`, and a status (`active | dormant |
-  muted | concluded`).
-- **Offers engagement DMs** via the Two-Option Offer pattern when a
-  cluster qualifies: pick "research dive" (parallel web research +
-  summary) or "wiki summary" (Obsidian / Notion / local context).
-  Accept paths run through `routine.research_dispatch` /
-  `routine.research_wiki_summary`; decline silences offers for 14
+  `browser_reload_signals` — that is, how often you reopen the same
+  page. These show up via [`!checks`](../messaging/bang-commands.md)
+  for the current agent-day (Aitne's version of "today", which rolls
+  over in the early morning rather than at midnight) and in the weekly
+  review's "this week you checked" block.
+- **Derives research clusters** when a topic passes the thresholds for
+  meaningful visits, foreground reading time, and distinct domains. A
+  cluster is a group of related pages Aitne thinks you're actively
+  researching. Clusters live in `browser_research_clusters` with a
+  slug, display name, journal at `context/research/<slug>.md`, and a
+  status (`active | dormant | muted | concluded`).
+- **Offers a direct message** when a cluster qualifies, using the
+  Two-Option Offer pattern: pick "research dive" (parallel web research
+  plus a summary) or "wiki summary" (into Obsidian / Notion / local
+  context). Accepting runs `routine.research_dispatch` or
+  `routine.research_wiki_summary`; declining silences offers for 14
   days; mute / unmute / rename / conclude via [`!research`](../messaging/bang-commands.md).
-- **Detects shopping comparison windows** — 90-min sliding windows
-  containing ≥3 distinct ASINs surface as comparison sessions the
-  agent can summarise.
+- **Detects comparison-shopping sessions** — a 90-min sliding window
+  holding ≥3 distinct ASINs (Amazon product IDs) surfaces as a session
+  the agent can summarize for you.
 - **Powers the pre-morning digest** — yesterday's reading and reload
-  patterns feed the digest the morning routine reads.
+  patterns feed the digest that the morning routine reads.
 
 ## Privacy and Consent
 
@@ -116,9 +118,9 @@ clicks leave the daemon.
   (`/settings/integrations/browser-history`) page. The integration only
   supports `direct` (the daemon poller) or `disabled` — there is no
   delegated or native mode.
-- **Local-only.** No request leaves the daemon. The browser's
-  history file is opened read-only; the daemon never reaches into
-  cookies, login sessions, or profile dirs other than the history DB.
+- **Local-only.** No request leaves the daemon. The history file is
+  opened read-only, and the daemon never touches cookies, login
+  sessions, or any profile file other than that history database.
 - **Per-browser opt-in.** `browserHistoryBrowserOverrides` lets you
   force each detected browser on or off independently
   (`auto` / `forced-on` / `forced-off`).
@@ -134,17 +136,20 @@ clicks leave the daemon.
 
 ## How Clusters Qualify
 
-A research cluster qualifies when the combination of meaningful visits,
-foreground time, and distinct domains crosses the thresholds in
-`DEFAULT_OFFER_THRESHOLDS` (fixed defaults — `browserHistoryLifecycle`
-tunes the poller's check cadence, not these thresholds).
-On each tick the poller evaluates the offer triggers per active cluster
-(`evaluateOfferTriggers`) — this is where the 14-day, per-slug offer
-re-fire window lives — and the **offer rate-limit gate**
-(`gateOfferRateLimit`: daily offer cap, minimum gap between offers,
-quiet hours, and a 30-day decline backoff) must also approve before a
-Two-Option Offer DM is composed by the `routine.research_offer_dm`
-process key.
+A cluster qualifies once its meaningful visits, foreground time, and
+distinct-domain counts all cross the thresholds in
+`DEFAULT_OFFER_THRESHOLDS`. Those thresholds are fixed defaults;
+`browserHistoryLifecycle` tunes how often the poller checks, not the
+thresholds themselves.
+
+Qualifying does not guarantee a message. On each tick the poller runs
+the offer triggers for every active cluster (`evaluateOfferTriggers`),
+which hold the 14-day, per-slug window before the same cluster can be
+offered again. The **offer rate-limit gate** (`gateOfferRateLimit`) must
+then approve too — it enforces a daily offer cap, a minimum gap between
+offers, quiet hours, and a 30-day backoff after a decline. Only then
+does the `routine.research_offer_dm` process key compose the Two-Option
+Offer DM.
 
 Accepting either path clears every pending-offer row for that slug, so a
 later tick cannot re-offer the same cluster.
@@ -179,15 +184,15 @@ later tick cannot re-offer the same cluster.
 
 - **The settings page shows no browsers.** Open
   `/settings/integrations/browser-history` and run `aitne doctor` — the
-  platform detector might be failing to resolve the user's profile dir.
-  The daemon log line will name the candidate paths it tried.
+  detector may be unable to locate your browser's profile folder. The
+  daemon log line lists the candidate paths it tried.
 - **A cluster keeps re-offering.** Check the `lastResearchOfferAt` /
-  `lastWikiOfferAt` columns; the trigger evaluator uses those for the
-  14-day re-fire window (the rate-limit gate also reads them for its
+  `lastWikiOfferAt` columns; the trigger evaluator uses them for the
+  14-day re-fire window (and the rate-limit gate reads them for its
   30-day decline backoff). `!research decline <slug>` stamps both
   fields.
-- **`!checks` is empty.** That's the common case for a quiet day —
-  the reload signals are gated to the agent-day, not UTC.
+- **`!checks` is empty.** That's normal for a quiet day — the reload
+  signals are counted per agent-day, not per UTC day.
 
 ## Related
 

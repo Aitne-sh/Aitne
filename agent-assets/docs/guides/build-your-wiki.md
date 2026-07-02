@@ -14,7 +14,6 @@ summary: |
   notes, and ask a question against the vault.
 section: build-your-wiki
 tags:
-  - guide
   - wiki
   - knowledge
 status: stable
@@ -24,7 +23,7 @@ ask_examples:
   - How do I compile my ingested notes into wiki articles?
 locale: en-US
 created: 2026-05-12
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - wiki
   - build wiki
@@ -53,14 +52,14 @@ prerequisites:
 
 ## Goal
 
-Stand up the internal wiki, capture a URL, compile it into a wiki
-article, and run a question against the result.
+Turn on the internal wiki, capture a URL, compile it into a wiki
+article, and ask a question about the result.
 
 ## Prerequisites
 
 - A paired messaging channel (Telegram, Slack, Discord, WhatsApp, or
   dashboard chat) — see
-  [Pairing and the Magic Phrase](../messaging/pairing-and-magic-phrase.md).
+  [Pairing and the Magic Phrase](../features/messaging/pairing-and-magic-phrase.md).
 - The daemon is running and the dashboard is reachable.
 
 ## Where you'll work in the dashboard
@@ -71,8 +70,8 @@ browsing lives under **My Life**.
 
 - **My Life → Wiki** (`/wiki`) — your main entry point. Shows
   workspace stats, the compiled `_index.md`, and recent activity. When
-  the wiki is not enabled yet, this page renders an **Enable Wiki**
-  call-to-action.
+  the wiki is not enabled yet, this page shows an **Enable Wiki**
+  button instead.
 - **Setup → Settings → Wiki** (`/settings/wiki`) — workspace creation,
   internal/external mode, per-command model selectors, budgets,
   archive / delete.
@@ -101,8 +100,8 @@ you enable a workspace, so you do not need to remember the URL.
    number of URLs queued.
 5. Wait for the per-URL completion DMs (parallel mode) or the single
    summary reply (serial mode).
-6. Run `!compile` to compile raw captures into wiki articles. The
-   compile session synthesises `20_wiki/<slug>.md` files and updates
+6. Run `!compile` to turn your raw captures into wiki articles. The
+   compile session writes `20_wiki/<slug>.md` files and updates
    `20_wiki/_index.md`.
 7. Ask a question: `!ask What did this source say about X?`. The
    answer is written to `30_outputs/<YYYY-MM-DD>-<slug>.md` with
@@ -115,9 +114,9 @@ returns the command list.
 ## What to Try Next
 
 - **Send multiple URLs at once**: `!ingest https://a.com, https://b.com`
-  fans out in parallel by default. Switch to serial mode on
-  `/settings/wiki` when you care about ordering and rate
-  predictability.
+  processes them in parallel (all at once) by default. Switch to serial
+  mode on `/settings/wiki` when you want them handled one at a time, for
+  predictable ordering and request pacing.
 - **Point at an existing Obsidian vault** instead of the daemon-owned
   root — see [Use An Existing Obsidian Vault](use-an-existing-obsidian-vault.md).
 - **Tune the budget** for `wiki.compile` and `wiki.ingest_url` from

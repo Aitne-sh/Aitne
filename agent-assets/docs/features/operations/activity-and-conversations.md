@@ -15,7 +15,6 @@ summary: |
   answer "what happened" and "what was said".
 section: operations
 tags:
-  - core
   - operations
   - audit
   - dashboard
@@ -26,7 +25,7 @@ ask_examples:
   - How do I find why a routine failed?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - activity
   - conversations
@@ -53,9 +52,9 @@ ui_anchors:
 
 ## In One Sentence
 
-Every agent session, action, and outcome is logged to SQLite and
-surfaced as the Activity timeline; the matching message-by-message
-detail lives one click deeper under Conversations.
+The agent logs every session, action, and outcome to a local SQLite
+database and shows them as the Activity timeline; the matching
+message-by-message detail lives one click deeper under Conversations.
 
 ## What It Does
 
@@ -71,10 +70,11 @@ Each row links to the underlying conversation when one exists.
 
 ## How It Works
 
-Activity has no trigger of its own — it is a read-only projection.
-Every other event in the system writes to it as a side effect, landing
-in three SQLite tables: `agent_actions` (what happened), and
-`conversation_sessions` + `messages` (what was said).
+Activity never runs anything on its own — it only mirrors what already
+happened (a read-only view). Every other event in the system writes to
+it as a side effect, landing in three SQLite tables: `agent_actions`
+(what happened), plus `conversation_sessions` and `messages` (what was
+said).
 
 ## What You See
 

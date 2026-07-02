@@ -17,7 +17,6 @@ section: operations
 tags:
   - operations
   - notifications
-  - core
 status: stable
 ask_examples:
   - How do I stop notifications at night?
@@ -25,7 +24,7 @@ ask_examples:
   - Will routines still run during quiet hours?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - quiet hours
   - dnd
@@ -57,14 +56,14 @@ alerts still get through.
 
 ## What It Does
 
-Quiet hours only gate *agent-initiated* proactive notifications. During
+Quiet hours only affect *proactive* notifications — the messages the
+agent starts on its own. They do not touch replies you asked for. During
 the window:
 
 - **A normal proactive notification is suppressed.** If nothing of the
-  same event type was sent recently, the message goes straight to the
-  notification path, sees that it is quiet hours, and is logged as
-  `suppressed` — it is **dropped, not held**. You will not receive it
-  later.
+  same event type was sent recently, the message reaches the send step,
+  finds that quiet hours are active, and is logged as `suppressed` — it
+  is **dropped, not held**. You will not receive it later.
 - **An explicit agent notification (`POST /api/notify`) is deferred,
   not dropped.** When an agent session calls the notify endpoint inside
   the window, the full message is queued as a scheduled DM that fires
@@ -76,11 +75,11 @@ the window:
   end (or released immediately when the new window no longer covers
   the current time).
 - **A notification already in a batch queue is deferred, not dropped.**
-  Aitne batches repeat notifications of the same event type within
-  `batchIntervalMinutes`. When a batch is pending and quiet hours are
-  active, the flush is pushed to the wall-clock moment the window ends,
-  so that combined message arrives when you wake instead of being
-  suppressed.
+  Aitne groups repeat notifications into batches (see
+  [Notifications](notifications.md) for how batching works). When a batch
+  is pending and quiet hours are active, its flush is pushed to the
+  wall-clock moment the window ends, so the combined message arrives when
+  you wake instead of being suppressed.
 - **Reactive DMs still respond.** A direct reply to your message
   bypasses quiet hours, rate limits, and batching entirely.
 - **Safety-category alerts still wake you.** Notifications tagged
@@ -111,9 +110,9 @@ the window:
 
 Continuously. Every proactive notification checks `quietHoursStart` and
 `quietHoursEnd` against the current local time (in the configured
-timezone) before sending. The window may wrap midnight — the default
-`22:00` → `08:00` is an overnight shape. Setting start equal to end
-(e.g. `00:00` / `00:00`) disables quiet hours.
+timezone) before sending. The window may cross midnight — the default
+`22:00` → `08:00` is an overnight window. Setting start equal to end
+(e.g. `00:00` / `00:00`) turns quiet hours off.
 
 ## Where in the Dashboard
 

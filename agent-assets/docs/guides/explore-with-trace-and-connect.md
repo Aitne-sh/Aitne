@@ -16,10 +16,7 @@ summary: |
   <b>` to find bridges between two domains.
 section: guides
 tags:
-  - guides
   - wiki
-  - exploration
-  - bang-commands
 status: stable
 ask_examples:
   - How do I trace an idea across the wiki?
@@ -30,7 +27,7 @@ ask_examples:
   - How do I run !trace against a non-default wiki workspace?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - "!trace"
   - "!connect"
@@ -55,35 +52,36 @@ ui_anchors:
 
 # Explore Your Wiki with `!trace` and `!connect`
 
-`!trace` and `!connect` are the two wiki exploration commands. Both
-produce a one-off output document in `30_outputs/` and never touch
-your raw or wiki notes. Think of them as cited essays written from
-what your wiki actually contains.
+`!trace` and `!connect` are the two wiki exploration commands. Each
+one writes a single new document to `30_outputs/` and never changes
+your raw or wiki notes. Think of them as short, cited essays built
+only from what your wiki already contains.
 
-Both run as owner-DM bang commands. Both also accept an optional
-leading `@<workspace>` token to target a non-default wiki workspace
-— for example `!trace @research formal methods` or
-`!connect @research category theory, distributed systems`. Omit the
-token and the command runs against your default workspace.
+You send both as bang commands (a message that starts with `!`) in a
+direct message to the agent. Both also accept an optional leading
+`@<workspace>` token to point at a wiki workspace other than your
+default — for example `!trace @research formal methods` or
+`!connect @research category theory, distributed systems`. Leave the
+token off and the command runs against your default workspace.
 
 ## `!trace <topic>` — Time-Based Exploration
 
 Use `!trace` when you want to see **how thinking about a topic has
-evolved**. The wiki agent searches every layer, orders the matches
-chronologically (preferring dates asserted in the content over
-file mtimes), and groups them into two-to-five phases of stable
-framing.
+evolved**. The wiki agent searches every layer, puts the matches in
+time order (preferring dates written inside a note over the file's
+last-modified time), and groups them into two-to-five phases, each
+holding a stretch where the framing stayed roughly the same.
 
 ```
 !trace quantum computing
 !trace formal methods in distributed systems
 ```
 
-The topic is free-form prose. The skill canonicalises against
-`90_meta/taxonomy.md` before deriving the output slug, so
-`!trace quantum computing` and `!trace quantum-computing` produce
-the same output filename if `quantum-computing` is your canonical
-topic.
+The topic is free-form prose. Before it builds the output filename,
+the skill maps your wording to its standard form using
+`90_meta/taxonomy.md`, so `!trace quantum computing` and
+`!trace quantum-computing` produce the same filename when
+`quantum-computing` is your canonical topic.
 
 ### Output
 
@@ -117,9 +115,9 @@ says so directly. No padding, no speculation.
 Use `!connect` to find honest overlaps between two domains in
 your wiki. The agent surfaces four kinds of bridges:
 
-1. **Shared terminology** — terms that mean the same (or
-   recognisably different) things in each domain, disambiguated
-   against `90_meta/taxonomy.md`.
+1. **Shared terminology** — terms that mean the same (or clearly
+   different) things in each domain, sorted out against
+   `90_meta/taxonomy.md`.
 2. **Common references** — the same URL, author, or wiki note
    linked from both sides.
 3. **Structural analogies** — recurring patterns of reasoning or
@@ -153,16 +151,16 @@ The output lands at:
 ```
 
 The double-hyphen (`--`) separates the two canonical slugs in the
-filename. Each report cites bridges with at least one path from
-each side — a one-sided match becomes a bridging candidate, not a
-bridge.
+filename. Each report only counts a bridge when it has at least one
+supporting note from each side — a match found on just one side
+becomes a bridging candidate, not a bridge.
 
 ### Honest "No Connection" Reports
 
-If your wiki contains nothing in common between the two domains,
-the report still writes — with `_(none)_` filling the empty
-sections and a `## Summary` that says so plainly. A negative
-finding is itself useful: it tells you where the wiki has gaps.
+If your wiki holds nothing in common between the two domains, the
+report is still written — with `_(none)_` filling the empty
+sections and a `## Summary` that says so plainly. An empty result
+is useful in itself: it tells you where the wiki has gaps.
 
 ### `!connect` Does Not Create Wiki Notes
 

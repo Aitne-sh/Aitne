@@ -15,7 +15,6 @@ summary: |
   because schema migrations auto-forward at boot.
 section: migrate-machines
 tags:
-  - guides
   - operations
   - migration
   - backup
@@ -25,7 +24,7 @@ ask_examples:
   - Will my DB still work after upgrading on the new machine?
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - migrate
   - move install
@@ -50,22 +49,25 @@ context-file history or activity logs.
 | `~/.personal-agent/data/personal_agent.db` (sessions, actions, observations, FTS) | Messaging pairing tokens (Slack / Telegram / Discord / WhatsApp) |
 | `~/.personal-agent/logs/` (optional — for reference) | Integration OAuth grants (Gmail / Google Calendar / Notion) |
 
-The DB carries cleanly even across daemon versions: at boot, Aitne
-runs forward-only migrations from `packages/daemon/src/db/migrations.ts`
-that bring older schemas up to the current shape. As long as you're
-upgrading (not downgrading), the same DB works.
+The database carries cleanly even across daemon versions. Each time it
+starts, Aitne runs forward-only migrations from
+`packages/daemon/src/db/migrations.ts` — one-way updates that bring an
+older database up to the current shape. As long as you're upgrading
+(not downgrading), the same database works.
 
 ## Steps
 
-1. **On the old machine:** stop the daemon.
+1. **On the old machine:** stop the daemon (the background Aitne process).
    ```bash
    aitne stop
    ```
-2. **Copy the data directory** to the new machine — context plus DB.
+2. **Copy the data directory** to the new machine — the context files
+   plus the database. The command below uses `rsync`, a standard
+   file-copy tool.
    ```bash
    rsync -av ~/.personal-agent/ user@new-host:~/.personal-agent/
    ```
-   (Or rsync just `context/` and `data/` if you want to skip logs.)
+   (Or copy just `context/` and `data/` if you want to skip the logs.)
 3. **On the new machine:** install per [Install and Run](install-and-run.md).
 4. **Re-register secrets and re-pair messaging** through the dashboard:
    - Re-register each backend's API key, or re-run its CLI auth flow for
@@ -73,16 +75,16 @@ upgrading (not downgrading), the same DB works.
      Gemini run `gemini` and choose **Sign in with Google**.
    - Walk the setup wizard's messaging pairing steps for each app you
      had paired.
-   - Re-authorize each integration's OAuth grant (Gmail / Calendar /
-     Notion are the common ones).
+   - Re-authorize each integration's OAuth grant — the access you
+     approved for Gmail, Calendar, and Notion (the common ones).
 5. Start the daemon.
    ```bash
    aitne start
    ```
 
-On first boot the migration runner brings the carried DB up to the
-new daemon's schema. Check the daemon log if you want to see exactly
-which migrations applied:
+On first boot the migration runner brings the carried database up to
+the new daemon's schema. Check the daemon log if you want to see
+exactly which migrations applied:
 
 ```bash
 aitne logs -n 200 | grep -i migration

@@ -18,7 +18,6 @@ summary: |
 section: troubleshooting
 status: stable
 tags:
-  - troubleshooting
   - operations
   - health
   - memory
@@ -28,7 +27,7 @@ ask_examples:
   - Why are context writes being refused with 503?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - degraded
   - degraded banner
@@ -61,17 +60,18 @@ related:
   followed by the offending path.
 - An **Open Management Mode** button on the right of the banner (links to
   Settings → Management Mode).
-- Any routine or skill that touches a context file fails: while degraded the
+- Any routine or skill that touches a memory file fails. While degraded, the
   context API returns **HTTP 503** for every request — reads (`GET`) as well as
-  writes (`POST`/`PUT`/`PATCH`/`DELETE`) — so the agent never reads or writes a
-  stale fallback location.
+  writes (`POST`/`PUT`/`PATCH`/`DELETE`). This is on purpose: it stops the agent
+  from quietly falling back to the wrong, out-of-date location.
 
 ## What "Degraded" Actually Means
 
-Degraded mode is set by the daemon's vault-health probe, which re-runs every
-30 seconds. It is **not** about backend auth, message delivery, or a stuck
-write lock — it is specifically about the daemon being unable to safely write
-your memory files.
+Every 30 seconds the daemon runs a vault-health probe — a quick background
+check on the folder that holds your memory files. If that check fails, the
+daemon switches to degraded mode. It is **not** about backend auth, message
+delivery, or a stuck write lock — it means only one thing: the daemon can't
+safely write your memory files right now.
 
 You only see this banner if you switched memory to an **Obsidian-style vault**
 (`vaultMode: "obsidian"`). The default `vaultMode: "plain"` stores memory under
@@ -83,7 +83,7 @@ The `reason` in the banner is one of:
 |--------------------------------|---------|
 | `primary_vault_unreachable`    | The configured vault path doesn't exist, isn't a directory, or isn't writable (e.g. an external drive was unplugged). |
 | `primary_vault_not_configured` | Vault mode is Obsidian but no `primaryVaultPath` is set. |
-| `primary_vault_missing_content`| The path is reachable but doesn't carry the expected vault markers (it was never seeded / restructured). |
+| `primary_vault_missing_content`| The path is reachable but is missing the marker files that identify a set-up vault (it was never seeded, or was moved/restructured). |
 
 A context-vault migration (`POST /api/setup/migrate-context`) is a **separate**
 state, not a degraded reason — it does **not** raise this banner. During a

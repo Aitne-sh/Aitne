@@ -9,13 +9,13 @@ aliases:
   - preparation timeline
 category: features
 summary: |
-  roadmap.md captures long-running goals plus Preparation Timeline
-  rows that fire on specific days. The morning routine walks the
-  roadmap each day to surface items whose offsets fire.
+  roadmap.md holds long-running goals plus Preparation Timeline
+  rows dated for specific days. Each day the morning routine reads the
+  roadmap and surfaces any row whose date has arrived.
 section: memory-files
 tags:
   - memory
-  - core
+  - scheduler
 status: stable
 ask_examples:
   - What is the roadmap file?
@@ -24,7 +24,7 @@ ask_examples:
   - How do I add a roadmap entry?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - roadmap.md
   - roadmap
@@ -49,7 +49,7 @@ context_files:
 ## In One Sentence
 
 A multi-week plan: each goal carries dates and Preparation Timeline
-rows that the morning routine fires on the day they come due.
+rows, and the morning routine surfaces each row on the day it comes due.
 
 ## What It Does
 
@@ -87,16 +87,17 @@ hotel", and so on.
 
 ## When It Runs / How It Is Triggered
 
-Read by the morning routine each day, which walks the roadmap and
-surfaces any Preparation Timeline rows dated for that day (or overdue).
-The file is updated by the operator, or by the agent on request (for
-example via the roadmap skill or `aitne run-now roadmap_maintenance`).
+The morning routine reads the roadmap each day and surfaces any
+Preparation Timeline rows dated for that day — plus any earlier row it
+has not handled yet (overdue). You can update the file yourself, or ask
+the agent to (for example via the roadmap skill or
+`aitne run-now roadmap_maintenance`).
 
-The agent never edits the file directly. All writes go through the
+The agent never edits the file directly. Every write goes through the
 daemon's context endpoint — `PUT /api/context/plans/roadmap` (full
-replace) or `PATCH /api/context/plans/roadmap` (section op) — which is
-guarded by an exclusive roadmap write lock so two flows can't clobber
-each other.
+replace) or `PATCH /api/context/plans/roadmap` (section op). A write
+lock holds the roadmap exclusively during each write, so two flows can
+never overwrite each other.
 
 ## Where in the Dashboard
 
@@ -104,6 +105,6 @@ each other.
 
 ## Related
 
-- [Morning Routine](../../routines/morning-routine.md) — reads the roadmap each day.
+- [Morning Routine](../routines/morning-routine.md) — reads the roadmap each day.
 - [Projects](projects.md) — deeper, per-project context the roadmap links to.
 - [today.md](today.md) — the single-day plan the roadmap feeds into.

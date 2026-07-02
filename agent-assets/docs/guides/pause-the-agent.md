@@ -12,7 +12,6 @@ summary: |
   every routine, or use dashboard toggles and quiet hours for finer control.
 section: pause-the-agent
 tags:
-  - guides
   - operations
   - messaging
   - autonomous
@@ -23,7 +22,7 @@ ask_examples:
   - Can I disable everything for a week?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-10
+updated: 2026-07-01
 keywords:
   - pause agent
   - stop agent
@@ -58,24 +57,25 @@ losing your install.
 
 ## The fastest pause: `!stop`
 
-DM `!stop` to the agent on any paired messaging app. This is the
-recommended way to go silent and the only one you need for most cases:
+DM `!stop` to the agent on any paired messaging app (any chat app you
+have connected). This is the recommended way to go silent, and the only
+step you need for most cases:
 
-- It pauses **every** cron-driven routine — morning, evening, weekly,
+- It pauses **every** scheduled routine — morning, evening, weekly,
   monthly, and the activity scan — not just one of them.
-- Non-command DMs are declined with a paused notice (no LLM cost)
-  until you resume.
-- The paused state is persisted, so a daemon restart does **not**
-  silently resume autonomous work.
-- In-flight runs are not aborted; the pause takes effect from the next
-  scheduled tick.
+- While paused, a plain (non-command) DM gets a short "paused" reply
+  instead of an answer, so it costs nothing to run.
+- The pause is saved to disk, so restarting the daemon does **not**
+  quietly start the agent working again.
+- A run that is already in progress keeps going; the pause applies from
+  the next scheduled run onward.
 
 Resume with `!start` whenever you want the agent active again. See
 [Bang Commands](../features/messaging/bang-commands.md).
 
 ## Finer-grained control from the dashboard
 
-If you want to mute specific behaviour rather than pause everything:
+If you want to quiet one specific behavior rather than pause everything:
 
 1. **Disable the activity scan** — open `/agents/activity-scan` and click
    **Disable**. This leaves the morning, evening, weekly, and monthly
@@ -90,22 +90,22 @@ If you want to mute specific behaviour rather than pause everything:
    take an `HH:MM` string. Routines still run; they just don't notify
    you.
 
-Morning (fires at the day boundary, default 04:00), evening (18:00),
-and weekly (Fri 19:00) reviews each have a per-routine Enable/Disable
-toggle on the `/agents` page — open `/agents/<slug>` (e.g.
-`/agents/weekly-review`) and click Disable (a stop-warning confirmation
-appears for these system agents). To halt all of them at once, use
-`!stop` above instead. Each routine's instructions (its rulebook) are
-edited on the same page's **Rulebook** tab
-(`/agents/<slug>?tab=rulebook`).
+The morning review (fires at the day boundary — the moment "today"
+rolls over, 04:00 by default), evening (18:00), and weekly (Fri 19:00)
+reviews each have their own Enable/Disable toggle on the `/agents`
+page. Open `/agents/<slug>` (e.g. `/agents/weekly-review`) and click
+Disable; a stop-warning confirmation appears for these system agents.
+To halt all of them at once, use `!stop` above instead. To edit a
+routine's instructions (its rulebook), use the same page's **Rulebook**
+tab (`/agents/<slug>?tab=rulebook`).
 
 ## Last resort: stop the daemon
 
-`aitne stop` shuts the daemon down entirely (graceful SIGTERM, then
-SIGKILL after 10 seconds). Nothing runs — no routines, no messaging, no
-dashboard. Use this only when you want the agent fully offline; for a
-temporary pause that survives across days, prefer `!stop`. Restart with
-`aitne start`.
+`aitne stop` shuts the daemon down entirely: it asks the process to
+quit (SIGTERM), then forces it (SIGKILL) after 10 seconds. Nothing
+runs — no routines, no messaging, no dashboard. Use this only when you
+want the agent fully offline. For a temporary pause that survives across
+days, prefer `!stop`. Restart with `aitne start`.
 
 ## Verification
 

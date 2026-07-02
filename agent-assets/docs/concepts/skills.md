@@ -14,7 +14,6 @@ summary: |
   to load it, and pins the exact tools the session may use.
 section: skills
 tags:
-  - core
   - skills
   - safety
   - knowledge
@@ -28,7 +27,7 @@ ask_examples:
   - Where do skill overlays live?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - SKILL.md
   - allowed-tools
@@ -42,6 +41,7 @@ keywords:
 related:
   - concepts/safety-and-execution
   - concepts/process-keys
+  - concepts/delegated-mode
   - reference/skills
 ui_anchors:
   - /knowledge
@@ -66,14 +66,15 @@ A skill is a Markdown file the daemon copies into the agent's working
 directory before each session. Its frontmatter declares the skill's
 `name`, `description`, and the `allowed-tools` the session may use.
 The agent reads `SKILL.md` at the start of every session that loads
-that skill and follows it as a contract.
+that skill and treats it as a contract — the rules it must follow
+for that task.
 
 ## Why This Concept Exists
 
 The agent runs against a real machine. Without scoped permissions, a
 "please summarize my mail" turn could in principle invoke `Bash(rm)`,
 post to your social accounts, or rewrite arbitrary files. Skills fix
-that by making the available toolset task-shaped: the morning routine
+that by fitting the available tools to the task: the morning routine
 loads the context/today/observations/schedule skills; a docs question
 loads only `docs-search`. Tools outside the allow-list aren't even
 visible to the model.
@@ -154,5 +155,7 @@ surfaced at **Settings → Self-learning** (`/settings/self-learning`).
   `allowed-tools` is too permissive.
 - [Process Keys](process-keys.md) — the dispatch identity that picks
   which skill manifest to load.
+- [Delegated Mode](delegated-mode.md) — the run mode whose sessions
+  load these skills.
 - [Skills (Reference)](../reference/skills.md) — index of every
   built-in skill.

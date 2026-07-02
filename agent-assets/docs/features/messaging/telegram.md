@@ -13,7 +13,6 @@ section: messaging
 tags:
   - messaging
   - integrations
-  - telegram
 status: stable
 config_keys:
   - telegramOwnerChatId
@@ -24,7 +23,7 @@ ask_examples:
   - Where do I get a Telegram bot token?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - telegram
   - telegram bot
@@ -45,14 +44,15 @@ token, scan the pairing QR code.
 
 ## What It Does
 
-- Acts as the agent's reactive surface for your incoming direct messages (owner DMs only — group chats are ignored).
-- Delivers the agent's outbound notifications and replies back to the same Telegram chat.
+- Receives your incoming direct messages so the agent can react to them (owner DMs only — group chats are ignored).
+- Sends the agent's notifications and replies back to the same Telegram chat.
 
 ## When It Runs / How It Is Triggered
 
-Before pairing, nothing listens. Once you paste the bot token and complete
-QR / deep-link pairing, Aitne long-polls Telegram's Bot API continuously for new
-direct messages.
+Before pairing, nothing listens. Once you paste the bot token and finish pairing
+(scan the QR code or tap the deep link), Aitne continuously long-polls Telegram's
+Bot API — it keeps an open request that returns the moment a new direct message
+arrives.
 
 ## Where in the Dashboard
 

@@ -17,7 +17,6 @@ summary: |
   to your owner identity so nobody else can impersonate you.
 section: messaging
 tags:
-  - core
   - messaging
   - pairing
   - safety
@@ -25,7 +24,7 @@ tags:
 status: stable
 locale: en-US
 created: 2026-04-25
-updated: 2026-05-28
+updated: 2026-07-01
 keywords:
   - pairing
   - magic phrase
@@ -86,23 +85,24 @@ on the platform.
 
 ### The magic phrase (Slack, Discord)
 
-The dashboard generates a short, memorable phrase of four lowercase words
-joined by hyphens, drawn from a 64-word list (24 bits of entropy). You DM
-that exact phrase to the bot. Matching is tolerant — it ignores case,
-punctuation, and emoji — but the phrase must be **sent by itself**. If you
-wrap it in a sentence ("my phrase is apple-banana-cherry-date"), the agent
-will reply asking you to send the phrase on its own.
+The dashboard generates a short, memorable phrase: four lowercase words
+joined by hyphens, drawn from a 64-word list. That makes it easy to type
+but hard to guess (24 bits of entropy). You DM that exact phrase to the
+bot. Matching is forgiving — it ignores case, punctuation, and emoji — but
+you have to send the phrase **by itself**. If you wrap it in a sentence
+("my phrase is apple-banana-cherry-date"), the agent replies asking you to
+send just the phrase on its own.
 
-The phrase is single-use and expires after **5 minutes**. If it lapses,
-regenerate a fresh one from the dashboard.
+The phrase works once and expires after **5 minutes**. If it runs out,
+generate a fresh one from the dashboard.
 
 ### Token pairing (Telegram, WhatsApp)
 
 Telegram and WhatsApp don't use a typed phrase:
 
-- **Telegram** encodes a high-entropy, single-use token in a QR / deep
+- **Telegram** hides a hard-to-guess, one-time token inside the QR / deep
   link. Tapping **START** sends `/start <token>` to the bot, which
-  promotes you to owner. The token is matched exactly and also expires
+  promotes you to owner. The token has to match exactly and also expires
   after 5 minutes.
 - **WhatsApp** uses WhatsApp's own linked-device flow — you scan a QR from
   your phone to attach the daemon as a device. Set the owner phone number

@@ -14,9 +14,7 @@ summary: |
   by skill-level allow-lists. Mirrors src/safety/always-disallowed.ts.
 section: reference
 tags:
-  - reference
   - safety
-  - core
   - audit
 status: stable
 ask_examples:
@@ -25,7 +23,7 @@ ask_examples:
   - Why can't the agent read my .env or SSH keys?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - disallowedTools
   - deniedTools
@@ -41,16 +39,18 @@ related:
 
 # Disallowed Tools
 
-There are two distinct deny layers — the **absolute-block layer**
-(non-overridable) and the **default strict-mode list** (`DEFAULT_DISALLOWED_TOOLS`
-in `src/settings/runtime-settings.ts`, relaxable in Allow mode or via
-`allowedToolsOverride`).
+The agent keeps two separate lists of tools it refuses to run. The
+first is the **absolute-block layer**, which nothing can turn off —
+not your config, not a skill's allow-list. The second is the
+**default strict-mode list** (`DEFAULT_DISALLOWED_TOOLS` in
+`src/settings/runtime-settings.ts`), which you *can* relax by
+switching to Allow mode or by setting `allowedToolsOverride`.
 
 ## Absolute-block layer (cannot be widened past)
 
-These patterns are denied unconditionally regardless of execution mode
-or `allowedToolsOverride`. Source of truth:
-`packages/daemon/src/safety/always-disallowed.ts`.
+The agent always refuses these patterns — no matter which execution
+mode it is in, and no matter what you put in `allowedToolsOverride`.
+Source of truth: `packages/daemon/src/safety/always-disallowed.ts`.
 
 | Category | Examples |
 |---|---|
@@ -79,13 +79,14 @@ managed-Chromium chokepoints above).
 
 ## Default strict-mode list (relaxable)
 
-`DEFAULT_DISALLOWED_TOOLS` (in `src/settings/runtime-settings.ts`, the
-seed for `config.disallowedTools`) ships with additional defaults that the
-operator can widen out of via `allowedToolsOverride` or by switching
-to Allow mode. These include `Bash(chmod *)`, `Bash(chown *)`,
-`Bash(git push --force *)`, `Bash(git reset --hard *)` and a handful
-of other footgun patterns. They are **not** in the absolute-block
-layer — Allow mode permits them.
+`DEFAULT_DISALLOWED_TOOLS` (in `src/settings/runtime-settings.ts`)
+seeds `config.disallowedTools` with a few extra blocks you can lift —
+either by setting `allowedToolsOverride` or by switching to Allow
+mode. These include `Bash(chmod *)`, `Bash(chown *)`,
+`Bash(git push --force *)`, `Bash(git reset --hard *)`, and a handful
+of other patterns that are easy to run by accident and hard to undo.
+Because they are **not** part of the absolute-block layer, Allow mode
+permits them.
 
 ## Audit log
 

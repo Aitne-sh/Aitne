@@ -24,7 +24,6 @@ tags:
   - wiki
   - workspaces
   - config
-  - core
 status: stable
 ask_examples:
   - What is a wiki workspace?
@@ -37,7 +36,7 @@ ask_examples:
   - Can two wikis live in nested folders?
 locale: en-US
 created: 2026-05-21
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - wiki workspace
   - workspace
@@ -87,10 +86,10 @@ config_keys:
 # Wiki Workspaces, Vaults, and Write Strategy
 
 A **wiki workspace** is one row in the `wiki_workspaces` table plus
-the directory tree it points at. Aitne ships with no active
-workspace; the first run of the Enable flow creates one named
-`default`. Phase 5 unlocked multi-workspace — you can run as many
-side-by-side wikis as you have distinct knowledge domains.
+the directory tree it points at. Aitne starts with no active
+workspace. The first run of the Enable flow creates one named
+`default`. You can run as many side-by-side wikis as you have
+distinct knowledge domains — one per subject is a common setup.
 
 ## Internal vs external mode
 
@@ -109,8 +108,8 @@ Path-collision rules apply to both modes:
 - Two wiki workspaces may not nest — neither root can be inside the other.
 
 The dashboard probe (`POST /api/wiki/workspaces/probe`) runs these
-checks live before the workspace row is written and surfaces a
-human-readable error if any rule trips.
+checks live before the workspace row is written, and shows a
+plain-language error if any rule is broken.
 
 ## The layered layout
 
@@ -126,19 +125,19 @@ top-level subdirectories plus a workspace-root `log.md`:
 | `90_meta/` | Wiki agent | Taxonomy (`taxonomy.md`), schemas, health reports (`90_meta/health/<date>.md`), migration records (`90_meta/health/pre-migrate-<date>/`). |
 | `log.md` | Wiki agent (append-only) | One line per write. Drives the dashboard timeline. |
 
-The DM agent can read wiki search and index routes, but only the
+The DM agent can read the wiki search and index routes, but only the
 wiki process keys (`wiki.ingest_url`, `wiki.compile`, `wiki.ask`,
-`wiki.lint`, `wiki.trace`, `wiki.connect`) can write into these
-layers. The chokepoint is `POST /api/wiki/:workspace/files/:path` —
-the route validates the layer the path resolves into and rejects
-writes to `00_inbox/` unconditionally.
+`wiki.lint`, `wiki.trace`, `wiki.connect`) may write into these
+layers. Every write funnels through one route,
+`POST /api/wiki/:workspace/files/:path`, which checks which layer the
+path lands in and always rejects writes to `00_inbox/`.
 
 ## Multi-workspace addressing
 
-Every wiki bang command accepts an optional `@<name>` token
-immediately after the bang to target a specific workspace. The token
-is parsed before the command's own argument parser sees the rest, so
-multi-word topics and comma-separated arguments work as normal:
+Every wiki bang command takes an optional `@<name>` token right
+after the bang to aim at a specific workspace. Aitne reads this token
+before the command parses the rest of the line, so multi-word topics
+and comma-separated arguments still work as usual:
 
 ```
 !compile @research full
@@ -146,15 +145,15 @@ multi-word topics and comma-separated arguments work as normal:
 !connect @research diffusion models, score matching
 ```
 
-Omit the token and the command targets the **default** workspace —
-in practice the oldest active workspace (lowest id), which is the one
-named `default` on a fresh install, or the next-oldest active
-workspace if `default` has been archived.
+Leave the token off and the command targets the **default**
+workspace — in practice the oldest active workspace (lowest id). That
+is the one named `default` on a fresh install, or the next-oldest
+active workspace if `default` has been archived.
 
-A workspace name after `@` must start with a letter or digit and then
-contain only letters, digits, `.`, `_`, or `-` (max 64 chars). An
-invalid token is rejected with a usage error rather than silently
-falling back to the default.
+A workspace name after `@` must start with a letter or digit, and the
+rest may contain only letters, digits, `.`, `_`, or `-` (max 64
+chars). An invalid token gets a usage error rather than a silent
+fall-back to the default.
 
 See [guides/multiple-wikis-for-multiple-domains](../../guides/multiple-wikis-for-multiple-domains.md)
 for a walkthrough.
@@ -172,18 +171,18 @@ write. Three values:
   running). Used for external vaults that live in sandboxed
   locations (typically iCloud-synced vaults) where direct fs writes
   fail with `EPERM` / `EACCES` / `EROFS` / `EBUSY`.
-- **`auto`** — the resolver tries `fs` first, falls back to `cli`
-  on those sandbox error codes, and persists the resolved value back
-  to the row so subsequent writes skip the probe.
+- **`auto`** — tries `fs` first, falls back to `cli` on those
+  sandbox error codes, and saves the value it settled on back to the
+  row so later writes skip the check.
 
 Internal workspaces are pinned to `fs`. External workspaces start in
-`auto` and self-tune. You can override the resolved value from
-`/settings/wiki` if you need to force one path or the other (e.g. to
-test the CLI path on a non-sandboxed vault).
+`auto` and tune themselves. You can override the resolved value from
+`/settings/wiki` if you need to force one path or the other (for
+example, to test the CLI path on a non-sandboxed vault).
 
-The resolved strategy is surfaced in the workspace API response and
-on the `/settings/wiki` row, so you can always see which path
-(`fs` or `cli`) `auto` settled on. The full design is in
+The resolved strategy shows up in the workspace API response and on
+the `/settings/wiki` row, so you can always see which path (`fs` or
+`cli`) `auto` settled on. The full design is in
 WIKI_BUILDER_DESIGN.md §P2.B / §8.
 
 ## Dispatch mode (`parallel` / `serial`)
@@ -191,13 +190,13 @@ WIKI_BUILDER_DESIGN.md §P2.B / §8.
 `!ingest` honours the per-workspace **dispatch mode** in
 `/settings/wiki`:
 
-- **Parallel** (default): all URLs fan out simultaneously up to the
-  per-URL concurrency cap (`wiki_workspaces.concurrency_cap`, default
-  `3`, valid range 1–10). Fastest; small risk of bursting rate
-  limits at the URL host.
-- **Serial**: URLs are enqueued in submitted order; each agent
-  session starts only after the previous one completes. Slower but
-  predictable budget and rate.
+- **Parallel** (default): all URLs run at once, up to the per-URL
+  concurrency cap (`wiki_workspaces.concurrency_cap`, default `3`,
+  valid range 1–10). Fastest, with a small risk of tripping rate
+  limits at the URL's host.
+- **Serial**: URLs run in the order you submitted them; each agent
+  session starts only after the previous one finishes. Slower, but
+  the budget and request rate stay predictable.
 
 The acknowledgement DM tells you which mode ran
 (`in parallel` / `serially`).
@@ -205,10 +204,10 @@ The acknowledgement DM tells you which mode ran
 ## Language
 
 `wiki_workspaces.language` is the workspace's content language. It
-defaults to `en` and is independent of `runtimeSettings.primaryLanguage`
-— see WIKI_BUILDER_DESIGN.md §14 Q2 for the reasoning. You can pick
-any language tag from the picker in `/settings/wiki`; the value is
-passed to the wiki skills as the target language for compiled
+defaults to `en` and is separate from `runtimeSettings.primaryLanguage`
+— see WIKI_BUILDER_DESIGN.md §14 Q2 for the reasoning. Pick any
+language tag from the picker in `/settings/wiki`; Aitne passes that
+value to the wiki skills as the target language for compiled
 articles, ask answers, and trace / connect outputs.
 
 The wiki language does **not** cascade from your primary language at
@@ -217,16 +216,16 @@ wiki in English, and vice versa.
 
 ## Archive vs delete
 
-- **Archive** — flips `active=0` on the row but keeps the on-disk
+- **Archive** — sets `active=0` on the row but keeps the on-disk
   data and the row's metadata. Bang commands cannot target an
-  archived workspace; the dashboard hides it from the active list
-  but surfaces it in an "Archived" collapsible. You can unarchive by
-  re-enabling the workspace.
-- **Delete** — drops the row. On-disk data is **not** removed for
-  external workspaces (the daemon never deletes the user's vault).
-  For internal workspaces, the disk tree is also left in place under
-  `$PA_DATA_DIR/context/knowledge/wiki/<name>` — recover by re-creating
-  a workspace at the same name.
+  archived workspace; the dashboard hides it from the active list and
+  tucks it into an "Archived" collapsible. Re-enable the workspace to
+  unarchive it.
+- **Delete** — drops the row. The on-disk data is **not** removed for
+  external workspaces (the daemon never deletes your vault). For
+  internal workspaces, the disk tree is also left in place under
+  `$PA_DATA_DIR/context/knowledge/wiki/<name>` — to recover, create a
+  workspace again with the same name.
 
 ## Fields and defaults reference
 
@@ -250,5 +249,5 @@ Quick map between the dashboard knobs and the `wiki_workspaces` row:
 | Active | `active` | `1` |
 
 `dm_agent_write_enabled=0` is the safe default — the DM agent can
-only call the read-side wiki routes; writes happen inside dedicated
-`wiki.*` sessions spawned by bang commands.
+only call the read-side wiki routes. Writes happen inside dedicated
+`wiki.*` sessions that bang commands spawn.

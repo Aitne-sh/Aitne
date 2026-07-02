@@ -18,8 +18,6 @@ summary: |
 section: memory-files
 tags:
   - memory
-  - profile
-  - core
 status: stable
 ask_examples:
   - What is identity/profile.md?
@@ -27,7 +25,7 @@ ask_examples:
   - Will the agent change my profile without asking?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - user profile
   - identity/profile.md
@@ -55,19 +53,21 @@ context_files:
 
 ## In One Sentence
 
-A stable profile of you — the agent reads it every session and
-silently appends durable facts you state in DMs.
+A steady profile of you. The agent reads it at the start of every
+session and quietly adds durable facts — things that stay true, like
+your role or your manager's name — that you mention in DMs.
 
 ## What It Does
 
 - Captures who you are, what you do, and who matters in your life.
-- Is pinned at the top of every session prompt, so the agent keeps
-  the same baseline understanding of you turn-to-turn.
-- Anchors a set of companion slices in the `identity/` directory that
-  split the dossier into topic-shaped files:
+- Sits at the top of every session prompt, so the agent keeps the same
+  baseline understanding of you from one message to the next.
+- Anchors a set of companion files — called slices — in the `identity/`
+  directory, one per topic:
   `identity/people.md`, `identity/work.md`, `identity/expertise.md`,
-  `identity/personal.md`, `identity/goals.md`. The agent loads these on
-  demand instead of inlining everything into every prompt.
+  `identity/personal.md`, `identity/goals.md`. The agent loads these
+  only when it needs them, instead of packing everything into every
+  prompt.
 
 > Older docs and exports may call these files `user/profile.md`,
 > `user/people.md`, and so on. `user/` is a legacy alias for
@@ -77,11 +77,11 @@ silently appends durable facts you state in DMs.
 ## When It Runs / How It Is Triggered
 
 - **Read continuously** — loaded at the start of every session.
-- **Written** silently, in the same turn, when you state a durable
-  fact about yourself in a DM ("remember that…", "I'm a…", "my
-  manager is…"), and during the profile sweep routine
-  (`routine.user_profile_sweep`), which catches facts the DM-time
-  capture missed and routes them into the appropriate
+- **Written** silently, within the same reply, when you state a
+  durable fact about yourself in a DM ("remember that…", "I'm a…",
+  "my manager is…"), and during the profile sweep routine
+  (`routine.user_profile_sweep`), which catches facts that the
+  in-chat capture missed and files them into the right
   `identity/*.md` slice.
 
 The agent never edits these files directly. It writes through the
@@ -106,7 +106,7 @@ To tell the agent a durable fact about yourself, just say it in a DM:
 > remember that my manager is Priya and we sync every Monday at 10am
 
 The agent silently appends a line to the relevant slice (here
-`identity/people.md`) in the same turn, and recalls it in future
+`identity/people.md`) right away, and recalls it in future
 sessions.
 
 ## When Something Goes Wrong

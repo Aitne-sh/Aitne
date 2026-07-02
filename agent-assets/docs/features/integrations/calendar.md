@@ -19,7 +19,6 @@ section: integrations
 tags:
   - integrations
   - calendar
-  - core
   - observations
   - polling
 status: stable
@@ -33,7 +32,7 @@ ask_examples:
   - Which model handles detected calendar changes?
 locale: en-US
 created: 2026-04-25
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - calendar
   - google calendar
@@ -77,10 +76,11 @@ around them and DM you ahead of meetings that matter.
 - **Polls** Google Calendar on `calendarPollIntervalSeconds`; Outlook
   and Apple calendars are read on demand rather than polled.
 - **Records observations** when events change (add / move / remove),
-  consumed by the activity scan.
+  which the activity scan then reads.
 - **Surfaces today's events** to the morning routine so they land in
   `state/today.md` and the day's schedule file.
-- **Reads** events on demand for reactive turns ("am I free at 3?").
+- **Reads** events on demand when you ask a live question, such as
+  "am I free at 3?".
 
 The agent can create, move, or delete events when the operator asks
 (`POST`/`PATCH`/`DELETE /api/calendar/events`, all Autonomous-tier — no
@@ -108,9 +108,9 @@ an explicit request.
 ## Calendar Event Model
 
 The Calendar Event Model picker chooses the backend and model that
-runs when the **daemon-side poller detects a calendar change**. It binds
-the `calendar.change` ProcessKey. The poller's change detection reacts
-in two situations:
+runs when the **daemon-side poller detects a calendar change**. It is
+bound to the `calendar.change` ProcessKey (the internal name for this
+change-handling job). The poller reacts to a change in two situations:
 
 - An event was added, moved, or deleted between polls (recorded as a
   change observation; the activity scan picks it up).

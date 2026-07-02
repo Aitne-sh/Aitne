@@ -21,8 +21,6 @@ summary: |
 section: wiki
 tags:
   - wiki
-  - bang-commands
-  - core
 status: stable
 ask_examples:
   - How do I send a URL to the wiki?
@@ -34,7 +32,7 @@ ask_examples:
   - How do I bridge two domains with `!connect`?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - !ingest
   - !compile
@@ -48,6 +46,7 @@ keywords:
 related:
   - features/wiki/overview
   - features/messaging/bang-commands
+  - features/wiki/cost-and-approval
   - guides/budget-and-cost-for-wiki
   - guides/maintain-wiki-health
   - guides/explore-with-trace-and-connect
@@ -67,9 +66,10 @@ ui_anchors:
 
 # Wiki Commands
 
-Use these from a paired DM channel after enabling the wiki. Open
+These are bang commands — chat messages that start with `!`. Send
+them from a paired DM channel once the wiki is turned on. Open
 **Settings → Wiki** (`/settings/wiki`) to enable a workspace, then
-browse the result from **My Life → Wiki** (`/wiki`).
+read the results under **My Life → Wiki** (`/wiki`).
 
 | Command | Effect |
 |---|---|
@@ -91,17 +91,17 @@ batch at 10 URLs.
 ## `@<workspace>` — addressing a non-default workspace
 
 If you run more than one wiki workspace (Phase 5), every bang command
-accepts an optional `@<name>` token immediately after the bang. The
-token is parsed before the command's own argument parser sees the
-rest, so multi-word topics and comma-separated arguments work as
-normal:
+accepts an optional `@<name>` token right after the bang. Aitne reads
+this token first and removes it before the command parses the rest of
+your message, so multi-word topics and comma-separated arguments still
+work as usual:
 
     !compile @research full
     !ask @parenting what did the pediatrician recommend?
     !connect @research diffusion models, score matching
 
 Omit the token and the command targets the **default** workspace.
-See `agent-assets/docs/guides/multiple-wikis-for-multiple-domains.md`
+See [guides/multiple-wikis-for-multiple-domains](../../guides/multiple-wikis-for-multiple-domains.md)
 for a walkthrough.
 
 ## `!compile --preview` — the dry run
@@ -119,14 +119,15 @@ Use `!compile --preview` (or `--dry-run`) when you want to see what
 - **est. duration** — Rough wall-clock estimate (intentionally
   pessimistic).
 
-The preview is an upper bound. The compile is an LLM and may
-merge or skip pages inside the agent loop; the preview cannot
-predict that exactly, but it will not undercount the touch set.
-Reply `!compile` (or `!compile full`) to actually run the compile.
+Treat the preview as an upper bound. The real compile runs an LLM,
+which may merge or skip pages as it works, so the preview cannot
+predict the outcome exactly — but it will never undercount the pages
+it touches. Reply `!compile` (or `!compile full`) to run the compile
+for real.
 
 ## Dispatch Mode for `!ingest`
 
-`!ingest` honours the per-workspace **dispatch mode** in
+`!ingest` follows the per-workspace **dispatch mode** set in
 Settings → Wiki:
 
 - **Parallel** (default): all URLs fan out simultaneously up to the
@@ -142,8 +143,8 @@ The acknowledgement DM names the mode that ran (`in parallel` /
 
 ## `!compile full` — the Cost Gate
 
-Full rebuilds touch every wiki note and are the most expensive
-command in the wiki surface. The flow:
+Full rebuilds touch every wiki note, so they are the most expensive
+command in the wiki surface. Here is what happens when you run one:
 
 1. The bang handler estimates the cost (per raw note, an on-disk
    char→token approximation × Sonnet 5 input price, bracketed
@@ -160,15 +161,20 @@ command in the wiki surface. The flow:
 4. Otherwise, the run starts autonomously and you receive a
    completion DM with actual spend.
 
-The same estimate is shown live in **Settings → Wiki** so you can
-see what the next `!compile full` will cost before you run it.
+The same estimate is shown live in **Settings → Wiki**, so you can
+see what the next `!compile full` will cost before you run it. See
+[features/wiki/cost-and-approval](cost-and-approval.md) for the full
+cost-estimation and approval reference.
 
 ## Operational Triad — `!lint`, `!trace`, `!connect`
 
 These three commands round out the wiki surface for ongoing
 maintenance and exploration. None of them write to the content
 layers (`10_raw/`, `20_wiki/`); they only produce health reports
-(`90_meta/health/`) or output documents (`30_outputs/`).
+(`90_meta/health/`) or output documents (`30_outputs/`). This
+section is the command reference; for the step-by-step workflows,
+see [guides/maintain-wiki-health](../../guides/maintain-wiki-health.md)
+and [guides/explore-with-trace-and-connect](../../guides/explore-with-trace-and-connect.md).
 
 ### `!lint`
 
@@ -197,7 +203,7 @@ Timeline & health** (`/wiki/timeline`).
 ### `!trace <topic>`
 
 Reconstructs the chronological evolution of an idea across every
-wiki layer. Use a free-form topic — the skill canonicalises against
+wiki layer. Use a free-form topic — the skill matches it against
 `90_meta/taxonomy.md` before deriving the output slug:
 
 ```

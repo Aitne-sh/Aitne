@@ -16,7 +16,6 @@ summary: |
   approval before promoting them.
 section: maintain-wiki-health
 tags:
-  - guides
   - wiki
   - health
 status: stable
@@ -28,7 +27,7 @@ ask_examples:
   - What is a taxonomy candidate?
 locale: en-US
 created: 2026-05-12
-updated: 2026-06-07
+updated: 2026-07-01
 keywords:
   - wiki health
   - wiki lint
@@ -59,11 +58,12 @@ ui_anchors:
 
 # Maintain Wiki Health
 
-The wiki is a living artifact. Notes accumulate, sources drift,
-slugs collide, and the taxonomy slowly diverges from the vocabulary
-your raw notes actually use. `!lint` is the periodic audit pass
-that surfaces all of this in one report — without changing your
-notes itself.
+The wiki is a living thing. Notes pile up, sources go stale,
+slugs (the short id each note is filed under) collide, and the
+taxonomy — the list of canonical topic names your notes are filed
+under — slowly drifts away from the words your raw notes actually
+use. `!lint` is the periodic audit that surfaces all of this in one
+report, without changing any of your notes.
 
 ## When to Run
 
@@ -120,7 +120,7 @@ page is also reachable from a button at the top of `/settings/wiki`,
 and the same view is mirrored under `/settings/wiki/timeline`. The
 most-recent report is parsed and rendered with:
 
-- A coloured date badge.
+- A colored date badge.
 - The `## Summary` bullets.
 - The `## Action items` list (this is the part you actually act on).
 - A "View full report" expander showing the raw Markdown for
@@ -132,8 +132,8 @@ that produced the state.
 
 ## Acting on Action Items
 
-The audit never modifies content layers itself. For each action
-item:
+The audit never edits your notes itself — it only reports. For each
+action item:
 
 - **Orphan** → either link the note from `20_wiki/_index.md` and
   related notes, or archive it. From a DM you can run `!ask` to
