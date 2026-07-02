@@ -317,6 +317,34 @@ export function updateRecurringSchedule(
     `UPDATE recurring_schedules SET ${updates.join(", ")} WHERE id = ?`,
   ).run(...values);
 
+  // A prompt/description edit must also reach any already-materialised
+  // pending agent_schedule row — the dispatcher reads the row's task_prompt
+  // directly, so without this the next fire runs the OLD text even though the
+  // recurring rule was updated. Unlike recurrence/enabled (below) the edit
+  // does NOT cancel + re-materialise (that recomputes next_run_at
+  // strictly-after-now and can drop an imminent fire); the text is patched in
+  // place instead: same scheduled_for, same claim window, fresh task text.
+  // Mirrors the generateNextScheduleRow contract (task_prompt falls back to
+  // the description). `running` rows keep the text they launched with.
+  if (
+    (params.prompt !== undefined || params.description !== undefined)
+    && params.recurrenceRule === undefined
+    && params.enabled === undefined
+  ) {
+    const row = db.prepare(
+      "SELECT task_description, task_prompt FROM recurring_schedules WHERE id = ?",
+    ).get(id) as { task_description: string | null; task_prompt: string | null };
+    db.prepare(
+      `UPDATE agent_schedule
+          SET task_description = ?, task_prompt = ?
+        WHERE recurring_schedule_id = ? AND status = 'pending'`,
+    ).run(
+      row.task_description ?? "",
+      row.task_prompt ?? row.task_description ?? "",
+      id,
+    );
+  }
+
   // If recurrence rule changed or re-enabled, recompute next_run_at
   // and cancel the old pending agent_schedule row. AGENT_DEFINITIONS_DESIGN.md
   // §11.3.2: a pending materialisation derived from the *old* rule is

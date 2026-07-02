@@ -259,7 +259,6 @@ describe("normalizeLessonsFileContent — Gate 3 expiration", () => {
     enactExpiration: true,
     staleDays: 60,
     confidenceFloor: 0.25,
-    today: "2026-07-01",
   };
 
   it("demotes a stale active lesson whose effective cf is below the floor", () => {
@@ -325,51 +324,125 @@ describe("normalizeLessonsFileContent — Gate 3 expiration", () => {
     expect(result.stats.archived).toBe(0);
   });
 
-  it("re-promotes a provisional lesson corroborated today at the threshold", () => {
-    const md = fileWith([
+  it("re-promotes a provisional lesson genuinely corroborated by this write", () => {
+    const prev = fileWith([
+      "- [2026-06-01] Now corroborated.",
+      "  <!-- ev=1 kind=preference src=behavioral conf=medium cf=0.50 last=2026-06-01 --> <!-- provisional -->",
+    ]);
+    const next = fileWith([
       "- [2026-06-01] Now corroborated.",
       "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.50 last=2026-07-01 --> <!-- provisional -->",
     ]);
-    const result = normalizeLessonsFileContent(md, md, gateOpts);
+    const result = normalizeLessonsFileContent(next, prev, gateOpts);
     const [lesson] = lessonsOf(result.content);
     expect(lesson.provisional).toBe(false);
     expect(result.stats.repromoted).toBe(1);
     expect(result.content).not.toContain("provisional");
   });
 
-  it("honours a repromote guard veto", () => {
+  it("a freshly-written provisional bullet is NOT re-promoted in the same write", () => {
+    // The evening LLM stores a hold-provisional candidate with a rounded
+    // ev=round(weighted_ev) that can meet the threshold — without genuine
+    // corroboration (a carry-bump vs the previous file) the marker must
+    // survive, or the promotion gate is bypassed in the very PATCH that
+    // stored the hold.
     const md = fileWith([
-      "- [2026-06-01] Vetoed re-promotion.",
-      "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.50 last=2026-07-01 --> <!-- provisional -->",
+      "- [2026-07-01] Fresh hold-provisional candidate.",
+      "  <!-- ev=2 kind=preference src=behavioral conf=low cf=0.35 last=2026-07-01 --> <!-- provisional -->",
     ]);
-    const result = normalizeLessonsFileContent(md, md, {
-      ...gateOpts,
-      repromoteGuard: () => false,
-    });
+    const result = normalizeLessonsFileContent(md, null, gateOpts);
     const [lesson] = lessonsOf(result.content);
     expect(lesson.provisional).toBe(true);
     expect(result.stats.repromoted).toBe(0);
   });
 
-  it("passes stamped active peers to the repromote guard", () => {
+  it("the sweep (prev == current) never re-promotes — corroboration required", () => {
     const md = fileWith([
-      "- [2026-06-01] Candidate for re-promotion.",
+      "- [2026-06-01] Provisional at threshold but uncorroborated.",
       "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.50 last=2026-07-01 --> <!-- provisional -->",
-      "- [2026-05-01] Active peer.",
-      "  <!-- ev=3 kind=do-less src=explicit conf=high cf=0.80 last=2026-06-30 -->",
     ]);
-    const seen: Lesson[][] = [];
-    normalizeLessonsFileContent(md, md, {
+    const result = normalizeLessonsFileContent(md, md, gateOpts);
+    const [lesson] = lessonsOf(result.content);
+    expect(lesson.provisional).toBe(true);
+    expect(result.stats.repromoted).toBe(0);
+  });
+
+  it("vetoes a re-promotion that contradicts an established active peer", () => {
+    const prev = fileWith([
+      "- [2026-06-01] Stop including the budget section in reports.",
+      "  <!-- ev=1 kind=do-less src=behavioral conf=medium cf=0.40 last=2026-06-01 --> <!-- provisional -->",
+      "- [2026-05-01] Include the budget section in every report.",
+      "  <!-- ev=4 kind=do-more src=explicit conf=high cf=0.90 last=2026-06-30 -->",
+    ]);
+    const next = fileWith([
+      "- [2026-06-01] Stop including the budget section in reports.",
+      // corroborated (ev 1→2, last advanced) but bar = 1.5·2·0.9 = 2.7 > 2
+      "  <!-- ev=2 kind=do-less src=behavioral conf=medium cf=0.40 last=2026-07-01 --> <!-- provisional -->",
+      "- [2026-05-01] Include the budget section in every report.",
+      "  <!-- ev=4 kind=do-more src=explicit conf=high cf=0.90 last=2026-06-30 -->",
+    ]);
+    const result = normalizeLessonsFileContent(next, prev, {
       ...gateOpts,
-      repromoteGuard: (_lesson, peers) => {
-        seen.push([...peers]);
-        return true;
-      },
+      contradictionGuardCf: 0.6,
     });
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toHaveLength(1);
-    expect(seen[0][0].text).toContain("Active peer");
-    expect(seen[0][0].cf).toBe(0.8);
+    const vetoed = lessonsOf(result.content).find((l) =>
+      l.text.includes("Stop including"),
+    )!;
+    expect(vetoed.provisional).toBe(true);
+    expect(result.stats.repromoted).toBe(0);
+  });
+
+  it("re-promotes through the guard once evidence clears the 1.5x bar", () => {
+    const prev = fileWith([
+      "- [2026-06-01] Stop including the budget section in reports.",
+      "  <!-- ev=2 kind=do-less src=behavioral conf=medium cf=0.40 last=2026-06-01 --> <!-- provisional -->",
+      "- [2026-05-01] Include the budget section in every report.",
+      "  <!-- ev=4 kind=do-more src=explicit conf=high cf=0.90 last=2026-06-30 -->",
+    ]);
+    const next = fileWith([
+      "- [2026-06-01] Stop including the budget section in reports.",
+      // corroborated to ev=3 ≥ 2.7 bar
+      "  <!-- ev=3 kind=do-less src=behavioral conf=medium cf=0.40 last=2026-07-01 --> <!-- provisional -->",
+      "- [2026-05-01] Include the budget section in every report.",
+      "  <!-- ev=4 kind=do-more src=explicit conf=high cf=0.90 last=2026-06-30 -->",
+    ]);
+    const result = normalizeLessonsFileContent(next, prev, {
+      ...gateOpts,
+      contradictionGuardCf: 0.6,
+    });
+    const cleared = lessonsOf(result.content).find((l) =>
+      l.text.includes("Stop including"),
+    )!;
+    expect(cleared.provisional).toBe(false);
+    expect(result.stats.repromoted).toBe(1);
+  });
+
+  it("removes an own-line provisional marker instead of leaving a blank line", () => {
+    // A blank line terminates the entry — leaving one would orphan the
+    // trailer below it and silently reset the lesson's attrs on the next
+    // pass (idempotency violation for hand-edited layouts).
+    const prev = fileWith([
+      "- [2026-06-01] Marker on its own line.",
+      "  <!-- provisional -->",
+      "  <!-- ev=1 kind=preference src=behavioral conf=medium cf=0.50 last=2026-06-01 -->",
+    ]);
+    const next = fileWith([
+      "- [2026-06-01] Marker on its own line.",
+      "  <!-- provisional -->",
+      "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.50 last=2026-07-01 -->",
+    ]);
+    const result = normalizeLessonsFileContent(next, prev, gateOpts);
+    const [lesson] = lessonsOf(result.content);
+    expect(lesson.provisional).toBe(false);
+    expect(lesson.ev).toBe(2);
+    expect(result.content).not.toMatch(/\n\s*\n\s*<!-- ev=/);
+    // Idempotent from here: a second pass changes nothing and the attrs
+    // survive re-parsing.
+    const again = normalizeLessonsFileContent(result.content, result.content, gateOpts);
+    expect(again.changed).toBe(false);
+    const [reparsed] = lessonsOf(again.content);
+    expect(reparsed.ev).toBe(2);
+    expect(reparsed.kind).toBe("preference");
   });
 
   it("does not enact expiration when the horizon inputs are absent", () => {
@@ -380,7 +453,6 @@ describe("normalizeLessonsFileContent — Gate 3 expiration", () => {
     const result = normalizeLessonsFileContent(md, md, {
       ...baseOpts,
       enactExpiration: true,
-      today: "2026-07-01",
     });
     const [lesson] = lessonsOf(result.content);
     expect(lesson.provisional).toBe(false);
@@ -397,23 +469,41 @@ describe("normalizeLessonsFileContent — Gate 3 expiration", () => {
     expect(lesson.provisional).toBe(false);
   });
 
-  it("defaults today from nowIso when not supplied", () => {
-    const md = fileWith([
-      "- [2026-06-01] Corroborated at now-date.",
-      "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.50 last=2026-07-01 --> <!-- provisional -->",
+  it("only the Lessons section of the previous file is a carry source", () => {
+    // A dated bullet in some OTHER section must not masquerade as a prior
+    // lesson — a re-added lesson matching it would "carry" stale attrs
+    // instead of deriving fresh ones.
+    const prev = [
+      "---",
+      "type: rule",
+      "owner: agent",
+      "updated: 2026-07-01",
+      "---",
+      "# Agent Lessons",
+      "",
+      "## Lessons",
+      "<!-- scope: agent · cap: 8192B · 40 entries -->",
+      "",
+      "## Archive",
+      "- [2026-01-01] Shadow directive lives here.",
+      "  <!-- ev=9 kind=constraint src=explicit conf=high cf=0.05 last=2026-01-01 -->",
+    ].join("\n");
+    const next = fileWith([
+      "- [2026-07-01] Shadow directive lives here.",
+      "  <!-- ev=1 kind=preference src=behavioral conf=low last=2026-07-01 -->",
     ]);
-    const result = normalizeLessonsFileContent(md, md, {
-      ...gateOpts,
-      today: undefined,
-    });
-    expect(result.stats.repromoted).toBe(1);
+    const result = normalizeLessonsFileContent(next, prev, baseOpts);
+    const [lesson] = lessonsOf(result.content);
+    // Derived fresh (behavioral cf0), NOT carried from the archive bullet.
+    expect(result.stats.derived).toBe(1);
+    expect(result.stats.carried).toBe(0);
+    expect(lesson.cf).toBe(computeInitialCf(1, "behavioral", 2));
   });
 });
 
 describe("expirationVerdict", () => {
   const opts = {
     nowIso: NOW,
-    today: "2026-07-01",
     promotionThreshold: 2,
     staleDays: 60,
     confidenceFloor: 0.25,
@@ -451,13 +541,27 @@ describe("expirationVerdict", () => {
     ).toBe("keep");
   });
 
-  it("re-promotes a provisional corroborated today at threshold", () => {
+  it("re-promotes a provisional only when corroborated AND at threshold", () => {
+    expect(
+      expirationVerdict(lesson({ provisional: true, last: "2026-07-01", ev: 2 }), {
+        ...opts,
+        corroborated: true,
+      }),
+    ).toBe("repromote");
+    // Uncorroborated (fresh bullet / sweep) never re-promotes…
     expect(
       expirationVerdict(
         lesson({ provisional: true, last: "2026-07-01", ev: 2 }),
         opts,
       ),
-    ).toBe("repromote");
+    ).toBe("keep");
+    // …and corroboration below the threshold holds too.
+    expect(
+      expirationVerdict(lesson({ provisional: true, last: "2026-07-01", ev: 1 }), {
+        ...opts,
+        corroborated: true,
+      }),
+    ).toBe("keep");
   });
 
   it("archives a provisional past 2× staleDays", () => {

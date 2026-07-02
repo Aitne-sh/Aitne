@@ -153,7 +153,7 @@ function FeedbackTuningCard() {
         type="number"
         min={0}
         max={1}
-        description="Lessons whose time-decayed confidence (cf) falls below this floor stop being injected and, once stale, demote to provisional. 0 disables the filter."
+        description="Inferred lessons whose time-decayed confidence (cf) falls below this floor stop being injected and, once stale, demote to provisional. Durable constraints are exempt, and explicit owner corrections are tested on their undecayed cf. 0 disables the filter."
         modified={dirtyFields.has("feedbackLessonConfidenceFloor")}
         defaultValue={df("feedbackLessonConfidenceFloor")}
         onSave={deferSave}

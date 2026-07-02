@@ -61,7 +61,6 @@ import {
   isBackendId,
   isKnowledgeImportEvent,
   isRoutineEvent,
-  localDateStr,
   resolveProcessKey,
 } from "@aitne/shared";
 import {
@@ -1997,14 +1996,12 @@ export class ScheduledTaskRunner {
           logger.warn({ err }, "Failed to gather feedback outcome rollup");
         }
       }
-      const now = new Date();
       const result = buildFeedbackWorksheet(scopes, {
         promotionThreshold: this.config.feedbackPromotionThreshold,
-        nowIso: now.toISOString(),
+        nowIso: new Date().toISOString(),
         staleDays: this.config.feedbackLessonStaleDays,
         confidenceFloor: this.config.feedbackLessonConfidenceFloor,
         contradictionGuardCf: this.config.feedbackContradictionGuardCf,
-        today: localDateStr(now, this.config.timezone || undefined),
         outcomeRollupXml,
       });
       return result?.block ?? null;

@@ -403,7 +403,7 @@ describe("agent-executions-store", () => {
     /** Insert one TERMINAL execution ending at `endedAt` (epoch ms). */
     function run(
       slug: string,
-      result: "success" | "error",
+      result: "success" | "error" | "skipped",
       endedAt: number,
       errorKind: string | null = null,
     ): void {
@@ -439,6 +439,44 @@ describe("agent-executions-store", () => {
           lastErrorKind: "timeout",
         },
       ]);
+    });
+
+    it("treats skipped rows as neutral — never a recovery signal", () => {
+      // error, error, SKIP (gated-out dispatch), error — the skip must not
+      // reset the streak, or a sleep/wake skip hides a broken agent forever.
+      run("deploy-watch", "error", now.getTime() - 4 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 3 * HOUR, "tool");
+      run("deploy-watch", "skipped", now.getTime() - 2 * HOUR);
+      run("deploy-watch", "error", now.getTime() - 1 * HOUR, "timeout");
+      const got = listChronicallyFailingAgents(db, {
+        threshold: 3,
+        lookbackHours: 24,
+        now,
+      });
+      expect(got).toEqual([
+        {
+          slug: "deploy-watch",
+          name: "deploy-watch",
+          streak: 3,
+          lastErrorKind: "timeout",
+        },
+      ]);
+    });
+
+    it("a leading skip does not mask the lookback anchor (newest ERROR counts)", () => {
+      // Newest terminal row is a skip; the newest ERROR is what must sit
+      // inside the lookback window.
+      run("deploy-watch", "error", now.getTime() - 30 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 28 * HOUR, "tool");
+      run("deploy-watch", "error", now.getTime() - 26 * HOUR, "tool");
+      run("deploy-watch", "skipped", now.getTime() - 1 * HOUR);
+      expect(
+        listChronicallyFailingAgents(db, {
+          threshold: 3,
+          lookbackHours: 24,
+          now,
+        }),
+      ).toEqual([]);
     });
 
     it("defaults `now` to the wall clock when omitted", () => {

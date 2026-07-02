@@ -66,6 +66,25 @@ export function decideStage(
   signals: ActivityScanSignals,
   config: ActivityScanGateConfig,
 ): ActivityScanGateDecision {
+  // WP4 chronic-failure surfacing: a chronically failing enabled agent
+  // (deterministic detector over `agent_executions`) forces Stage 3 so
+  // the LLM can decide whether the owner needs to know — throttled to
+  // once per CHRONIC_FAILURE_REESCALATE_HOURS via the last gate audit
+  // row carrying this reason. Sits ABOVE the heartbeat branch on purpose:
+  // with Stage 2 enabled, a quiet vault takes `heartbeat_due → stage2` on
+  // every tick and a lower-placed chronic clause would be starved
+  // indefinitely (stage2 ticks never reset `hoursSinceLastStage3Run`).
+  // Fires at most once per 24h, so claiming the reason ahead of the other
+  // escalates costs nothing — every Stage 3 carries the `<system_health>`
+  // block while failures persist regardless of the reason.
+  if (
+    signals.chronicAgentFailures.length > 0
+    && signals.hoursSinceLastChronicFailureEscalation
+      >= CHRONIC_FAILURE_REESCALATE_HOURS
+  ) {
+    return decision("stage3", "agent_chronic_failure", signals);
+  }
+
   // Heartbeat: even on quiet days, exercise Stage 2/3 every N hours so
   // the gate's signal compute is exercised end-to-end. We pick Stage 3
   // when there is *some* novelty pending, Stage 2 otherwise — Stage 2
@@ -98,21 +117,6 @@ export function decideStage(
   }
   if (signals.scheduleApproachingCount > 0) {
     return decision("stage3", "schedule_approaching", signals);
-  }
-
-  // WP4 chronic-failure surfacing: a chronically failing enabled agent
-  // (deterministic detector over `agent_executions`) forces Stage 3 so
-  // the LLM can decide whether the owner needs to know — throttled to
-  // once per CHRONIC_FAILURE_REESCALATE_HOURS via the last gate audit
-  // row carrying this reason. Sits BELOW the other hard-escalates: any
-  // of those reaches Stage 3 anyway, and the dispatcher attaches the
-  // `<system_health>` block to EVERY Stage 3 while failures persist.
-  if (
-    signals.chronicAgentFailures.length > 0
-    && signals.hoursSinceLastChronicFailureEscalation
-      >= CHRONIC_FAILURE_REESCALATE_HOURS
-  ) {
-    return decision("stage3", "agent_chronic_failure", signals);
   }
 
   // No signals at all → Stage 0 silent.

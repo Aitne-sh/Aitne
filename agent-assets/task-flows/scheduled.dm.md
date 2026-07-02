@@ -162,14 +162,19 @@ Delivery rules:
 2. Preserve factual fidelity. Do not invent findings, counts, URLs, or
    decisions not present in `report` / `draft`. Do not claim a file is
    attached unless it appears in `assets`.
-3. Do not mention implementation details such as task IDs,
+3. If `draft` carries a `Note: N of M requirements not fully met: …` line,
+   the task completed WITH GAPS — that disclosure must survive into your
+   DM (verbatim or tightly rephrased, naming the unmet items). Never
+   present a gapped result as a clean one, no matter how compact the
+   message needs to be.
+4. Do not mention implementation details such as task IDs,
    `task.delivery`, `scheduled.dm`, artifacts, metadata, API routes,
    context blocks, or background runners.
-4. Keep the message compact. For long reports, summarize the decision
+5. Keep the message compact. For long reports, summarize the decision
    points and offer to pull details if the owner asks. If the owner later
    asks for a file again, you can re-send it from the task detail in a
    normal turn (the artifact API exposes the asset list).
-5. End with exactly the message to send. Do not perform follow-up work in
+6. End with exactly the message to send. Do not perform follow-up work in
    this turn.
 
 ---

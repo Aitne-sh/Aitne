@@ -38,6 +38,7 @@
 
 import {
   extractMarkdownSection,
+  lessonCf,
   parseLessonsSection,
   type Lesson,
 } from "./lesson-format.js";
@@ -126,21 +127,41 @@ const SLIM_PREAMBLE =
   "these before deciding whether to notify the owner.";
 
 /** Parse the `## Lessons` section and keep only injectable (active) lessons —
- *  non-provisional, non-empty, and (when a floor is configured) with effective
- *  time-decayed confidence at or above `confidenceFloor` (§2.1). */
+ *  non-provisional, non-empty, and (when a floor is configured) above the
+ *  `confidenceFloor` (§2.1). The floor targets low-confidence *inferred*
+ *  noise, so the two highest-authority classes are treated specially:
+ *
+ *   - `kind=constraint` is exempt outright — durable everywhere else in the
+ *     lifecycle (`isLessonStale`, `expirationVerdict`), so the one filter
+ *     that runs on every prompt must not be the place a constraint silently
+ *     stops binding behaviour.
+ *   - `src=explicit` (a direct owner directive) is floor-tested on its
+ *     PERSISTED cf, not the time-decayed one. An *obeyed* directive
+ *     generates no corroborating signals, so decay is monotonic for exactly
+ *     the lessons that are working; decayed-cf filtering would silently
+ *     drop a fresh explicit correction (cf0 ≈ 0.33) after ~18 idle days and
+ *     invite the re-correct/whiplash loop. Longevity for explicit lessons
+ *     stays governed by the staleness lifecycle (demote at `staleDays`),
+ *     which is visible and reversible — unlike this filter.
+ *
+ *  Inferred lessons (behavioral / self_critique) keep the decayed-cf test:
+ *  idle inferences quietly sinking is the §2.1 design intent. */
 function activeLessons(
   fileMd: string,
   opts: Pick<RenderAgentLessonsOptions, "nowIso" | "confidenceFloor">,
 ): Lesson[] {
   const section = extractMarkdownSection(fileMd, "Lessons");
   if (!section) return [];
-  return parseLessonsSection(section).filter(
-    (lesson) =>
-      !lesson.provisional &&
-      lesson.text.length > 0 &&
-      (opts.confidenceFloor === undefined ||
-        effectiveCf(lesson, opts.nowIso) >= opts.confidenceFloor),
-  );
+  return parseLessonsSection(section).filter((lesson) => {
+    if (lesson.provisional || lesson.text.length === 0) return false;
+    if (opts.confidenceFloor === undefined) return true;
+    if (lesson.kind === "constraint") return true;
+    const floorCf =
+      lesson.src === "explicit"
+        ? lessonCf(lesson)
+        : effectiveCf(lesson, opts.nowIso);
+    return floorCf >= opts.confidenceFloor;
+  });
 }
 
 /**

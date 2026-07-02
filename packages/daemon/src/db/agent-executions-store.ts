@@ -446,12 +446,16 @@ const CHRONIC_STREAK_SCAN_CAP = 25;
 /**
  * WP4 chronic-failure surfacing — deterministic detector behind the
  * activity-scan gate's `agent_chronic_failure` escalation. An ENABLED
- * agent is chronic when its most recent `threshold` TERMINAL executions
- * (`result IS NOT NULL` — in-flight rows are ignored) are ALL errors AND
- * the newest of them finished within `lookbackHours`. Agents with fewer
- * than `threshold` terminal executions never qualify. Same JS-scan style
- * as `metricsWindow`/`byErrorKind`: thin SQL, reducers unit-testable
- * without SQL fixtures.
+ * agent is chronic when its most recent `threshold` RUN outcomes are ALL
+ * errors AND the newest error finished within `lookbackHours`. In-flight
+ * rows are ignored (`result IS NOT NULL`), and `skipped` rows are NEUTRAL:
+ * a skip is a gated-out dispatch (morning-routine-pending, autonomous
+ * pause), not evidence the agent works — without that, a single sleep/wake
+ * skip interleaved into an error run would reset the streak and hide a
+ * chronically-broken agent forever. Agents with fewer than `threshold`
+ * run outcomes never qualify. Same JS-scan style as
+ * `metricsWindow`/`byErrorKind`: thin SQL, reducers unit-testable without
+ * SQL fixtures.
  */
 export function listChronicallyFailingAgents(
   db: Database.Database,
@@ -486,20 +490,27 @@ export function listChronicallyFailingAgents(
     );
     if (rows.length < opts.threshold) continue;
     let streak = 0;
+    let newestErrorEndedAt: number | null = null;
+    let newestErrorKind: string | null = null;
     for (const row of rows) {
+      // Neutral: a skip is a non-run, never a recovery signal.
+      if (row.result === "skipped") continue;
       if (row.result !== "error") break;
+      if (streak === 0) {
+        newestErrorEndedAt = row.ended_at;
+        newestErrorKind = row.error_kind;
+      }
       streak += 1;
     }
     if (streak < opts.threshold) continue;
-    const newest = rows[0];
     // Stale streak: the agent stopped firing (or last failed long ago) —
     // let the signal age out instead of re-escalating forever.
-    if (newest.ended_at === null || newest.ended_at < cutoff) continue;
+    if (newestErrorEndedAt === null || newestErrorEndedAt < cutoff) continue;
     out.push({
       slug: agent.id,
       name: agent.name,
       streak,
-      lastErrorKind: newest.error_kind,
+      lastErrorKind: newestErrorKind,
     });
   }
   return out;

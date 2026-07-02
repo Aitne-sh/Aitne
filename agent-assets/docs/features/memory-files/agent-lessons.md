@@ -145,9 +145,13 @@ How a lesson crosses from provisional to active:
 Every lesson carries a numeric confidence `cf` between 0 and 1, stamped
 deterministically by the daemon (never trusted from the model's rewrite).
 It rises with corroboration and decays with time since the lesson was
-last reinforced. Lessons whose decayed confidence falls below
+last reinforced. Inferred lessons whose decayed confidence falls below
 `feedbackLessonConfidenceFloor` (default 0.25) quietly stop being
-injected. A daily mechanical pass (the **Lesson Maintenance** agent at
+injected — but the two highest-authority classes are protected: a
+durable `constraint` is never filtered, and an explicit owner correction
+is tested on its undecayed confidence (obeying a directive produces no
+new signals, so decay alone can't silently un-bind it). A daily
+mechanical pass (the **Lesson Maintenance** agent at
 `/agents/lesson-maintenance`, 17:40) keeps the stamps fresh even on days
 with no new feedback.
 

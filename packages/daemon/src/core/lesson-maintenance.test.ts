@@ -65,7 +65,7 @@ describe("lesson-maintenance", () => {
     }>;
   }
 
-  it("skips (with an audit row) when feedback learning is disabled", async () => {
+  it("skips silently (no daily audit row) when feedback learning is disabled", async () => {
     const result = await runLessonMechanicalMaintenance({
       db,
       contextDir: dir,
@@ -74,9 +74,9 @@ describe("lesson-maintenance", () => {
     });
     expect(result.status).toBe("skipped");
     expect(result.skipReason).toBe("feedback_learning_disabled");
-    const rows = auditRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].result).toBe("skipped");
+    // A permanently-off feature must not accrete one skipped row per cron
+    // fire — the dashboard toggle is the visibility surface.
+    expect(auditRows()).toHaveLength(0);
   });
 
   it("succeeds as a no-op when no store files exist", async () => {

@@ -330,12 +330,12 @@ describe("renderAgentLessonsBlock — confidence floor (Phase-2 §2.1)", () => {
     expect(block).not.toContain("LOW_CF");
   });
 
-  it("filters on the DECAYED cf, not the persisted one", () => {
+  it("filters an inferred lesson on the DECAYED cf, not the persisted one", () => {
     const stale = file(
       [
         "- [2026-01-01] DECAYED lesson, high cf long ago.",
         // ~157 days before NOW → decay ≈ 0.09; 0.9 · 0.09 < 0.25.
-        "  <!-- ev=3 kind=do-more src=explicit conf=high cf=0.90 last=2026-01-01 -->",
+        "  <!-- ev=3 kind=do-more src=behavioral conf=high cf=0.90 last=2026-01-01 -->",
       ].join("\n"),
     );
     const { block } = renderAgentLessonsBlock(stale, {
@@ -365,6 +365,60 @@ describe("renderAgentLessonsBlock — confidence floor (Phase-2 §2.1)", () => {
       confidenceFloor: 0,
     });
     expect(block).toContain("LOW_CF");
+  });
+
+  it("never filters a constraint, no matter how decayed", () => {
+    const md = file(
+      [
+        "- [2025-01-01] CONSTRAINT_KEEPS binding forever.",
+        "  <!-- ev=1 kind=constraint src=explicit conf=high cf=0.10 last=2025-01-01 -->",
+      ].join("\n"),
+    );
+    const { block } = renderAgentLessonsBlock(md, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0.25,
+    });
+    expect(block).toContain("CONSTRAINT_KEEPS");
+  });
+
+  it("floor-tests an explicit directive on persisted cf, not decayed cf", () => {
+    // An obeyed explicit correction gets no corroborating signals — the
+    // decayed cf would drop below the floor in ~18 idle days, silently
+    // un-binding exactly the highest-authority lessons.
+    const md = file(
+      [
+        "- [2026-04-01] EXPLICIT_SURVIVES idle decay.",
+        "  <!-- ev=1 kind=correction src=explicit conf=high cf=0.33 last=2026-04-01 -->",
+        "- [2026-04-01] BEHAVIORAL_FADES on the same timeline.",
+        "  <!-- ev=2 kind=preference src=behavioral conf=medium cf=0.33 last=2026-04-01 -->",
+      ].join("\n"),
+    );
+    const { block } = renderAgentLessonsBlock(md, {
+      capBytes: 8192,
+      slim: false,
+      nowIso: NOW,
+      confidenceFloor: 0.25,
+    });
+    expect(block).toContain("EXPLICIT_SURVIVES");
+    expect(block).not.toContain("BEHAVIORAL_FADES");
+    // …but an explicit lesson whose PERSISTED cf is below the floor still
+    // filters (the exemption is from decay, not from the floor itself).
+    const weak = file(
+      [
+        "- [2026-06-07] EXPLICIT_WEAK below the floor outright.",
+        "  <!-- ev=1 kind=correction src=explicit conf=low cf=0.10 last=2026-06-07 -->",
+      ].join("\n"),
+    );
+    expect(
+      renderAgentLessonsBlock(weak, {
+        capBytes: 8192,
+        slim: false,
+        nowIso: NOW,
+        confidenceFloor: 0.25,
+      }).block,
+    ).toBeNull();
   });
 
   it("legacy lessons filter through their conf-default cf", () => {

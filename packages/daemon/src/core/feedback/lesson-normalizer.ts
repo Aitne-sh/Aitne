@@ -37,6 +37,7 @@
 
 import {
   CONF_CF_DEFAULTS,
+  extractMarkdownSection,
   formatCfValue,
   lessonCf,
   LESSON_ENTRY_START_RE,
@@ -47,6 +48,7 @@ import {
 } from "./lesson-format.js";
 import { computeInitialCf, SOURCE_CF_FACTOR } from "./promotion-gate.js";
 import { effectiveCf, isLessonStale } from "./eviction-scorer.js";
+import { buildRepromoteGuard } from "./lesson-contradiction.js";
 import { dedupeLessons, normalizeSummary } from "./lesson-merge.js";
 
 /** §2.1 corroboration bump rate: `cf ← cf + (1−cf)·γ`. */
@@ -61,7 +63,7 @@ export interface LessonNormalizerOptions {
    * Gate 3 (§2.3): when true, enact the computed expiration lifecycle —
    * demote (active ∧ stale ∧ effective cf < floor → `<!-- provisional -->`),
    * archive (provisional ∧ no corroboration in 2× staleDays → remove), and
-   * re-promote (provisional ∧ corroborated at `today` ∧ ev ≥ threshold →
+   * re-promote (provisional ∧ corroborated BY THIS WRITE ∧ ev ≥ threshold →
    * marker cleared). Requires `staleDays` + `confidenceFloor`; conditions
    * whose inputs are absent simply never fire (never destructive by default).
    */
@@ -71,17 +73,12 @@ export interface LessonNormalizerOptions {
   /** `feedbackLessonConfidenceFloor` (Gate 3 demote test). */
   confidenceFloor?: number;
   /**
-   * Local `YYYY-MM-DD` for the re-promote "corroborated this write" test.
-   * Defaults to `nowIso.slice(0, 10)` — callers with a configured timezone
-   * should pass their local agent-day instead.
+   * §2.2 anti-whiplash guard for re-promotion (`feedbackContradictionGuardCf`).
+   * When set, a provisional lesson that contradicts an established active
+   * peer (`cf ≥ guard`) only re-promotes once its evidence clears the higher
+   * `1.5 · threshold · cf` bar. Omitted ⇒ no contradiction veto.
    */
-  today?: string;
-  /**
-   * Gate 3 re-promote guard (§2.2, Phase 3): before clearing a provisional
-   * marker, the caller-supplied hook may veto (e.g. contradiction-held
-   * candidates must clear the higher anti-whiplash bar). Absent ⇒ no veto.
-   */
-  repromoteGuard?: (lesson: Lesson, activePeers: ReadonlyArray<Lesson>) => boolean;
+  contradictionGuardCf?: number;
 }
 
 export interface LessonNormalizerStats {
@@ -245,12 +242,16 @@ function decideCf(
     return { cf: roundCf(base), kind: prev.cf === null ? "backfilled" : "carried" };
   }
   if (lesson.cf !== null) {
-    // A fresh bullet's cf can only come from the worksheet's cf0, and the
+    // A fresh bullet's cf should come from the worksheet's cf0, and the
     // §2.1 model can never produce more than `sourceFactor` (saturate < 1).
     // Cap the transcription there so a hallucinated float can't mint an
     // instantly-established lesson the anti-whiplash guard then protects.
-    // (Legitimate cf above the factor only arises via corroboration bumps,
-    // which flow through the carry branch above, never this one.)
+    // Known bounded losses: a REWORDED lesson (text no longer matches prev)
+    // lands here too, so a legitimately-bumped cf above the factor clamps
+    // back to it; and a mis-transcribed `src=` widens the cap to that
+    // source's factor. Both are one-write distortions the next carry pass
+    // stabilises, and an explicit owner correction bypasses the guard the
+    // cap protects regardless.
     return {
       cf: Math.min(lesson.cf, SOURCE_CF_FACTOR[lesson.src]),
       kind: "transcribed",
@@ -268,21 +269,29 @@ type ExpirationVerdict = "keep" | "demote" | "archive" | "repromote";
  * Gate 3 (§2.3) verdict table over the *stamped* lesson. `constraint` is
  * durable; demote needs stale + effective (decayed) cf below the floor;
  * archive needs a provisional lesson uncorroborated for 2× the horizon;
- * re-promote needs corroboration at `today` clearing the promotion bar.
+ * re-promote needs GENUINE corroboration by the current write
+ * (`opts.corroborated` — the normalizer's carry pass observed `ev` grow or
+ * `last` advance vs the previous file) clearing the promotion bar. A
+ * freshly-written provisional bullet is NOT corroborated — without that
+ * distinction, the evening LLM's `ev=round(weighted_ev)` transcription
+ * would strip the `<!-- provisional -->` marker in the very PATCH that
+ * stored a hold-provisional / hold-contradiction candidate, silently
+ * bypassing the promotion gate.
  */
 export function expirationVerdict(
   lesson: Lesson,
   opts: {
     nowIso: string;
-    today: string;
     promotionThreshold: number;
     staleDays?: number;
     confidenceFloor?: number;
+    /** True when the current write corroborated this lesson (carry-bump). */
+    corroborated?: boolean;
   },
 ): ExpirationVerdict {
   if (lesson.kind === "constraint") return "keep";
   if (lesson.provisional) {
-    if (lesson.last === opts.today && lesson.ev >= opts.promotionThreshold) {
+    if (opts.corroborated === true && lesson.ev >= opts.promotionThreshold) {
       return "repromote";
     }
     if (
@@ -324,23 +333,33 @@ export function normalizeLessonsFileContent(
   const spans = collectEntrySpans(lines, bounds.start, bounds.end);
   if (spans.length === 0) return { content: newFileMd, changed: false, stats };
 
-  // Previous lessons, deduped (summed ev / max cf) so a duplicated bullet
-  // can't make its own rewrite look like fresh corroboration.
-  const prevLessons = prevFileMd
-    ? dedupeLessons(parseLessonsSection(prevFileMd))
+  // Previous lessons, section-scoped (a dated bullet in some other section
+  // of the file must not masquerade as a carry source) and deduped (summed
+  // ev / max cf) so a duplicated bullet can't make its own rewrite look
+  // like fresh corroboration.
+  const prevSection = prevFileMd
+    ? extractMarkdownSection(prevFileMd, "Lessons")
+    : null;
+  const prevLessons = prevSection
+    ? dedupeLessons(parseLessonsSection(prevSection))
     : [];
   const prevBySummary = new Map<string, Lesson>(
     prevLessons.map((lesson) => [normalizeSummary(lesson.text), lesson]),
   );
 
-  const today = opts.today ?? opts.nowIso.slice(0, 10);
   const replacements = new Map<number, string>();
   const insertAfter = new Map<number, string>();
   const removedSpans: EntrySpan[] = [];
+  const removedLines = new Set<number>();
 
   // First pass: parse + stamp every entry so re-promote guards can see the
   // final active set (peers use their stamped cf, not the written one).
-  const entries: Array<{ span: EntrySpan; lesson: Lesson; cf: number }> = [];
+  const entries: Array<{
+    span: EntrySpan;
+    lesson: Lesson;
+    cf: number;
+    corroborated: boolean;
+  }> = [];
   for (const span of spans) {
     const parsed = parseLessonsSection(
       lines.slice(span.start, span.end + 1).join("\n"),
@@ -355,6 +374,9 @@ export function normalizeLessonsFileContent(
       span,
       lesson: { ...lesson, cf: decision.cf },
       cf: decision.cf,
+      // Only a carry-bump proves this WRITE brought fresh evidence — a new
+      // or reworded bullet is never "corroborated" for re-promotion.
+      corroborated: decision.kind === "bumped",
     });
   }
 
@@ -363,14 +385,22 @@ export function normalizeLessonsFileContent(
       .filter((entry) => entry.span !== self && !entry.lesson.provisional)
       .map((entry) => entry.lesson);
 
-  for (const { span, lesson, cf } of entries) {
+  const repromoteGuard =
+    opts.contradictionGuardCf === undefined
+      ? null
+      : buildRepromoteGuard({
+          guardCf: opts.contradictionGuardCf,
+          threshold: opts.promotionThreshold,
+        });
+
+  for (const { span, lesson, cf, corroborated } of entries) {
     const verdict = opts.enactExpiration
       ? expirationVerdict(lesson, {
           nowIso: opts.nowIso,
-          today,
           promotionThreshold: opts.promotionThreshold,
           staleDays: opts.staleDays,
           confidenceFloor: opts.confidenceFloor,
+          corroborated,
         })
       : "keep";
 
@@ -382,7 +412,7 @@ export function normalizeLessonsFileContent(
 
     const repromote =
       verdict === "repromote" &&
-      (opts.repromoteGuard?.(lesson, activePeersOf(span)) ?? true);
+      (repromoteGuard?.(lesson, activePeersOf(span)) ?? true);
 
     // Demotion rides the same trailer write (marker appended to it) so a
     // freshly-inserted trailer and a replaced one behave identically.
@@ -410,13 +440,22 @@ export function normalizeLessonsFileContent(
       for (let i = span.start; i <= span.end; i++) {
         const base = replacements.get(i) ?? lines[i];
         const cleared = base.replace(PROVISIONAL_MARKER_RE, "");
-        if (cleared !== base) replacements.set(i, cleared);
+        if (cleared === base) continue;
+        if (cleared.trim() === "") {
+          // A marker that lived on its own line must be REMOVED, not left
+          // as a blank line — a blank line terminates the entry, so on the
+          // next pass the trailer below it would be orphaned and the
+          // lesson's attrs silently reset to defaults.
+          removedLines.add(i);
+        } else {
+          replacements.set(i, cleared);
+        }
       }
       stats.repromoted += 1;
     }
   }
 
-  const removed = new Set<number>();
+  const removed = removedLines;
   for (const span of removedSpans) {
     for (let i = span.start; i <= span.end; i++) removed.add(i);
   }

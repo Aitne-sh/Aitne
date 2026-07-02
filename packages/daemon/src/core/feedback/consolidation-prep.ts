@@ -165,11 +165,6 @@ export interface BuildWorksheetOptions {
    */
   contradictionGuardCf?: number;
   /**
-   * Local `YYYY-MM-DD` for the §2.3 verdicts. Defaults to
-   * `nowIso.slice(0, 10)`.
-   */
-  today?: string;
-  /**
    * A2.1 — pre-rendered `<outcome_rollup>` XML (from
    * `self-performance-prep.ts`), inserted before `<consume>`. Null/omitted ⇒
    * no rollup this pass.
@@ -319,21 +314,22 @@ function renderLessonsScope(
 
   if (ranked.length > 0) {
     out.push(
-      `    <existing_lessons note="ranked by eviction score; drop any lesson marked stale=&quot;true&quot; unless a fresh candidate re-reinforces it; carry each lesson's cf= into its trailer verbatim — the daemon re-stamps it deterministically after your write, never invent a value; if the section still exceeds the cap after your edits, remove from rank 1 upward then append: ${xmlEscape(
+      `    <existing_lessons note="ranked by eviction score; honour each lesson's action= attribute verbatim (demote → add the provisional marker unless a fresh candidate re-reinforces it, archive → drop the bullet, keep → untouched); carry each lesson's cf= into its trailer verbatim — the daemon re-stamps it deterministically after your write, never invent a value; if the section still exceeds the cap after your edits, remove from rank 1 upward then append: ${xmlEscape(
         "- [...N lower-signal lessons omitted — full history in feedback_signals]",
       )}">`,
     );
     ranked.forEach((lesson, idx) => {
       // §2.3 advisory verdict — the prep pass cannot judge same-write
-      // corroboration, so a would-be `repromote` renders as `keep` (the
-      // write-path normalizer owns the actual re-promotion).
+      // corroboration (it never passes `corroborated`), so the verdict here
+      // is always keep | demote | archive; the write-path normalizer owns
+      // the actual re-promotion.
       const verdict = expirationVerdict(lesson, {
         nowIso: opts.nowIso,
-        today: opts.today ?? opts.nowIso.slice(0, 10),
         promotionThreshold: opts.promotionThreshold,
         staleDays: opts.staleDays,
         confidenceFloor: opts.confidenceFloor,
       });
+      /* c8 ignore next — repromote is unreachable without `corroborated` */
       const action = verdict === "repromote" ? "keep" : verdict;
       out.push(
         `      <lesson rank="${idx + 1}" score="${round2(

@@ -88,6 +88,23 @@ describe("decideStage", () => {
     expect(d.reason).toBe("agent_chronic_failure");
   });
 
+  it("chronic escalation beats the heartbeat branch (no stage2 starvation)", () => {
+    // With stage2 enabled on a quiet vault, heartbeat_due → stage2 fires on
+    // every tick and never resets hoursSinceLastStage3Run — the chronic
+    // clause must sit ABOVE the heartbeat or surfacing is starved forever.
+    const d = decideStage(
+      withSignals({
+        chronicAgentFailures: [
+          { slug: "deploy-watch", streak: 3, lastErrorKind: "tool" },
+        ],
+        hoursSinceLastStage3Run: 999,
+      }),
+      { ...baseConfig, stage2Enabled: true },
+    );
+    expect(d.stage).toBe("stage3");
+    expect(d.reason).toBe("agent_chronic_failure");
+  });
+
   it("does not force stage3 when the last chronic-failure escalation is under 24h old", () => {
     const d = decideStage(
       withSignals({

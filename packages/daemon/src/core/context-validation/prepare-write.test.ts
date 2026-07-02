@@ -388,11 +388,11 @@ describe("prepareContextContentForWrite", () => {
     const lessonNormalization = {
       previousContent: null,
       nowIso: "2026-07-01T18:00:00.000Z",
-      today: "2026-07-01",
       promotionThreshold: 2,
       enactExpiration: true,
       staleDays: 60,
       confidenceFloor: 0.25,
+      contradictionGuardCf: 0.6,
     };
 
     it("stamps cf on a lessons-store write", () => {

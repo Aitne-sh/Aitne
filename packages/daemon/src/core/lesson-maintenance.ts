@@ -1,11 +1,9 @@
 import type Database from "better-sqlite3";
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
 import { join } from "node:path";
-import { localDateStr } from "@aitne/shared";
 import { writeFileAtomically } from "./atomic-write.js";
 import { serializeContextFileWrite } from "./context-file-serializer.js";
 import { agentLessonsPath, CONTEXT_RELATIVE_PATHS } from "./context-paths.js";
-import { buildRepromoteGuard } from "./feedback/lesson-contradiction.js";
 import {
   normalizeLessonsFileContent,
   type LessonNormalizerStats,
@@ -31,7 +29,6 @@ export interface LessonMaintenanceDeps {
     feedbackLessonStaleDays: number;
     feedbackLessonConfidenceFloor: number;
     feedbackContradictionGuardCf: number;
-    timezone?: string;
   };
   writeTracker?: AgentWriteTracker;
   /** Test seam — frozen-clock fixtures pass a fixed Date. */
@@ -92,25 +89,24 @@ export async function runLessonMechanicalMaintenance(
     errors: [],
   };
 
-  try {
-    if (deps.config.feedbackLearningEnabled === false) {
-      result.status = "skipped";
-      result.skipReason = "feedback_learning_disabled";
-      return result;
-    }
+  // Disabled feature = fully silent no-op (no daily `skipped` audit row —
+  // a permanently-off feature must not accrete a row per cron fire; the
+  // dashboard toggle is the visibility surface for the disabled state).
+  if (deps.config.feedbackLearningEnabled === false) {
+    result.status = "skipped";
+    result.skipReason = "feedback_learning_disabled";
+    return result;
+  }
 
+  try {
     const now = deps.now ?? new Date();
     const normalizerOpts = {
       nowIso: now.toISOString(),
-      today: localDateStr(now, deps.config.timezone || undefined),
       promotionThreshold: deps.config.feedbackPromotionThreshold,
       enactExpiration: true,
       staleDays: deps.config.feedbackLessonStaleDays,
       confidenceFloor: deps.config.feedbackLessonConfidenceFloor,
-      repromoteGuard: buildRepromoteGuard({
-        guardCf: deps.config.feedbackContradictionGuardCf,
-        threshold: deps.config.feedbackPromotionThreshold,
-      }),
+      contradictionGuardCf: deps.config.feedbackContradictionGuardCf,
     };
 
     for (const rel of enumerateLessonStores(deps.contextDir)) {

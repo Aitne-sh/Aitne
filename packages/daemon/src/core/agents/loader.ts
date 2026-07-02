@@ -617,7 +617,9 @@ function persistInvalid(
  * schedule is always cron (`validateDefinition` rejects one_shot/event before
  * pairing). `body` is the Agent's Markdown body — the operator's prompt
  * (§6.1 step 5: a recurring row is built from "schedule + backend + body"),
- * captured into the recurring row's `task_prompt` at **first pairing only**.
+ * captured into the recurring row's `task_prompt` at first pairing and
+ * re-synced on reconcile whenever the body diverges (an agent.md edit must
+ * reach the row both firing paths actually run — see the reconcile below).
  */
 function pairRecurring(
   def: AgentDefinition,
@@ -678,13 +680,20 @@ function pairRecurring(
       // an imminent fire across a restart. Build a minimal patch instead and
       // skip the write entirely when nothing diverged.
       //
-      // task_prompt is deliberately NOT reconciled — it is owned at creation
-      // (re-writing it every boot would clobber an auto-imported row's legacy
-      // prompt with the generated placeholder body, §6.5). Body→prompt re-sync
-      // after an edit is a documented v1 limitation (§6.1 step 5).
       const patch: RecurringUpdateInput = {};
       if (row.enabled !== desired.enabled) patch.enabled = desired.enabled;
       if (row.description !== desired.description) patch.description = desired.description;
+      // Body→prompt re-sync (divergence-gated). The row's task_prompt is what
+      // BOTH firing paths actually run (cron materialisation copies it via
+      // generateNextScheduleRow; run-now reads it directly), and claimed rows
+      // reject direct PATCH — so after an agent.md edit this reconcile is the
+      // ONLY writer that can keep the row truthful; without it the row stays
+      // frozen at first pairing and every fire runs the stale text. The old
+      // "would clobber an auto-imported row's legacy prompt" concern cannot
+      // trigger under the divergence gate: an imported file's body was
+      // generated FROM row.prompt (§6.5), so a legacy prompt compares equal
+      // and a patch only fires once a human actually edits the body.
+      if (row.prompt !== desired.prompt) patch.prompt = desired.prompt;
       if (row.model !== desired.model) patch.model = desired.model;
       if (row.tier !== desired.tier) patch.tier = desired.tier;
       if (row.backendId !== desired.backendId) patch.backendId = desired.backendId;

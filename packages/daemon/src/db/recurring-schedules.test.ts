@@ -425,6 +425,71 @@ describe("recurring-schedules DB", () => {
       expect(updated!.model).toBe("opus");
     });
 
+    it("a prompt edit patches the pending materialised row's text IN PLACE (no cancel)", () => {
+      // The dispatcher reads agent_schedule.task_prompt directly, so a prompt
+      // edit that only touched the parent rule would leave the next fire
+      // running the OLD text (the stale-"placeholder" incident). The patch
+      // must not cancel + re-materialise either — that recomputes next_run_at
+      // and can drop an imminent fire.
+      const created = createRecurringSchedule(db, {
+        taskType: "agent.task",
+        description: "AI News Daily",
+        prompt: "placeholder",
+        recurrenceRule: makeRule(),
+      });
+      const before = db.prepare(
+        "SELECT id, scheduled_for, task_prompt FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+      ).get(created.id) as { id: number; scheduled_for: string; task_prompt: string };
+      expect(before.task_prompt).toBe("placeholder");
+
+      updateRecurringSchedule(db, created.id, { prompt: "Fetch today's AI news and DM a digest." });
+
+      const after = db.prepare(
+        "SELECT id, status, scheduled_for, task_prompt, task_description FROM agent_schedule WHERE recurring_schedule_id = ?",
+      ).all(created.id) as Array<{ id: number; status: string; scheduled_for: string; task_prompt: string; task_description: string }>;
+      // Same single row: still pending, same fire time, fresh text.
+      expect(after).toHaveLength(1);
+      expect(after[0].id).toBe(before.id);
+      expect(after[0].status).toBe("pending");
+      expect(after[0].scheduled_for).toBe(before.scheduled_for);
+      expect(after[0].task_prompt).toBe("Fetch today's AI news and DM a digest.");
+      expect(after[0].task_description).toBe("AI News Daily");
+    });
+
+    it("clearing the prompt (null) falls the pending row's task_prompt back to the description", () => {
+      const created = createRecurringSchedule(db, {
+        taskType: "agent.task",
+        description: "AI News Daily",
+        prompt: "Old task text.",
+        recurrenceRule: makeRule(),
+      });
+      updateRecurringSchedule(db, created.id, { prompt: null });
+      const row = db.prepare(
+        "SELECT task_prompt FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+      ).get(created.id) as { task_prompt: string };
+      // Mirrors generateNextScheduleRow's `prompt ?? description` contract.
+      expect(row.task_prompt).toBe("AI News Daily");
+    });
+
+    it("a model-only update does NOT rewrite the pending row's text", () => {
+      const created = createRecurringSchedule(db, {
+        taskType: "agent.task",
+        description: "AI News Daily",
+        prompt: "Fetch today's AI news.",
+        recurrenceRule: makeRule(),
+      });
+      // Hand-drift the pending row's text to prove a pin update leaves it alone
+      // (pins accept one-cycle staleness; only text edits patch in place).
+      db.prepare(
+        "UPDATE agent_schedule SET task_prompt = 'drifted' WHERE recurring_schedule_id = ?",
+      ).run(created.id);
+      updateRecurringSchedule(db, created.id, { model: "opus" });
+      const row = db.prepare(
+        "SELECT task_prompt FROM agent_schedule WHERE recurring_schedule_id = ? AND status = 'pending'",
+      ).get(created.id) as { task_prompt: string };
+      expect(row.task_prompt).toBe("drifted");
+    });
+
     // SCHEDULE_API_REDESIGN_PLAN §4.3a — PATCH updates that flip an
     // alias-pinned row to a registered-id pin (or vice versa) must
     // move BOTH `model` and `backend_id` in lockstep. Clearing one

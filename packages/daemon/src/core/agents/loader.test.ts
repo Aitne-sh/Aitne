@@ -549,10 +549,12 @@ describe("loadAgents: user agents", () => {
     expect((created[0].input as { prompt: string | null }).prompt).toBeNull();
   });
 
-  it("does not re-sync task_prompt onto an already-paired row on reconcile", () => {
-    // First boot pairs + captures the body as task_prompt; a later boot whose
-    // body changed must NOT push the new body onto the recurring row (§6.1 step
-    // 5 — task_prompt is owned at creation, re-sync is a v1 limitation).
+  it("re-syncs an edited Markdown body onto the paired row's task_prompt on reconcile", () => {
+    // The recurring row's task_prompt is what BOTH firing paths run (cron
+    // materialisation copies it; run-now reads it), and claimed rows reject a
+    // direct PATCH — so an agent.md body edit MUST flow through this
+    // reconcile or the row stays frozen at first pairing and every fire runs
+    // the stale text (the "placeholder" incident).
     writeAgentFile(userDir, "edited", userFrontmatter("edited"), "Original prompt.");
     const { port, created, updated } = fakePort();
     loadAgents(db, baseOptions({ recurring: port }));
@@ -560,8 +562,23 @@ describe("loadAgents: user agents", () => {
 
     writeAgentFile(userDir, "edited", userFrontmatter("edited"), "Rewritten prompt.");
     loadAgents(db, baseOptions({ recurring: port }));
-    // The reconcile patch carries no `prompt` key at all.
-    expect(updated.every((u) => !("prompt" in (u.patch as Record<string, unknown>)))).toBe(true);
+    const lastPatch = updated.at(-1)!.patch as { prompt?: string | null };
+    expect(lastPatch.prompt).toBe("Rewritten prompt.");
+
+    // Unchanged reload afterwards → no further patch (divergence-gated).
+    loadAgents(db, baseOptions({ recurring: port }));
+    expect(updated).toHaveLength(1);
+  });
+
+  it("re-syncs a blanked body as a null prompt (dispatcher falls back to description)", () => {
+    writeAgentFile(userDir, "blanked", userFrontmatter("blanked"), "Original prompt.");
+    const { port, updated } = fakePort();
+    loadAgents(db, baseOptions({ recurring: port }));
+    writeAgentFile(userDir, "blanked", userFrontmatter("blanked"), "");
+    loadAgents(db, baseOptions({ recurring: port }));
+    const lastPatch = updated.at(-1)!.patch as { prompt?: string | null };
+    expect("prompt" in lastPatch).toBe(true);
+    expect(lastPatch.prompt).toBeNull();
   });
 
   it("reconciles an already-paired recurring row (YAML wins)", () => {
@@ -645,7 +662,7 @@ describe("loadAgents: user agents", () => {
     expect(updated).toHaveLength(0);
   });
 
-  it("reconcile patches ONLY the diverged fields (description/model/tier/backend/recurrence)", () => {
+  it("reconcile patches ONLY the diverged fields (description/prompt/model/tier/backend/recurrence)", () => {
     writeAgentFile(
       userDir,
       "weekly-bookmarks",
@@ -672,6 +689,7 @@ describe("loadAgents: user agents", () => {
     expect(patch.backendId).toBe("claude");
     expect(patch.recurrence).toBeDefined(); // daily → weekly diverged
     expect(patch.description).toBe("User Agent"); // "Imported task" → "User Agent"
+    expect(patch.prompt).toBe("Built-in routine pointer."); // null → body diverged
     // enabled matched (both true) → not patched.
     expect("enabled" in patch).toBe(false);
   });
