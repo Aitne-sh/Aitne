@@ -1,6 +1,6 @@
 {
   "name": "@aitne/dashboard",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Aitne dashboard — Next.js web UI for the Aitne personal agent. Consumed by the `aitne` CLI; not intended for standalone use.",
   "homepage": "https://github.com/Aitne-sh/Aitne#readme",
   "bugs": {
@@ -31,7 +31,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node ../../scripts/strip-maps.mjs .next/server .next/build",
+    "build": "next build && node ../../scripts/strip-maps.mjs .next/server .next/build && node ../../scripts/sanitize-build-paths.mjs .next",
     "start": "next start",
     "lint": "eslint .",
     "clean": "node ../../scripts/rm-paths.mjs .next out tsconfig.tsbuildinfo"
