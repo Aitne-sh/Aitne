@@ -578,6 +578,17 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       expect(failureCtx.backendId).toBe("claude");
       expect(failureCtx.modelId).toBe("claude-sonnet-test");
       expect(failureCtx.durationMs).toBeGreaterThanOrEqual(0);
+      // A plain Error carries no billed spend — the failed row must NOT
+      // fabricate cost/turns (audit contract: only real recovered
+      // figures land on failure rows).
+      const spendlessCtx = failureCtx as {
+        costUsd?: number;
+        costSource?: string;
+        numTurns?: number;
+      };
+      expect(spendlessCtx.costUsd).toBeUndefined();
+      expect(spendlessCtx.costSource).toBeUndefined();
+      expect(spendlessCtx.numTurns).toBeUndefined();
     });
 
     it("folds Stage B throws into stageBResult=null and writes a result='failed' audit row for Stage B without aborting Stage A", async () => {
@@ -640,6 +651,69 @@ describe("MorningRoutinePipelineOrchestrator", () => {
       expect(ctx.failureKind).toBe("quota");
       expect(ctx.failureCode).toBe("max_budget_usd");
       expect(ctx.backendId).toBe("claude");
+    });
+
+    it("lands the recovered sdk_partial spend on a budget-capped Stage A failure row", async () => {
+      // ROUTINE_COST_REDUCTION_PLAN_2026-07 WP3 — the production shape:
+      // Stage A hits maxBudgetUsd, the SDK aborts mid-stream, and
+      // stampPartialSpend attaches a BackendQuotaSpend (costSource
+      // "sdk_partial", costUsd floored at the cap) to the
+      // BackendQuotaError. recordStageFailure must thread that spend
+      // onto the failed agent_actions row — before this fix the row
+      // landed with NULL cost/turns while the daemon log showed ~$1.5
+      // and 29 turns burned, so the cost dials under-reported every
+      // capped morning by ~the cap.
+      const { BackendQuotaError } = await import("../agent-core.js");
+      const quotaErr = new BackendQuotaError(
+        "claude" as BackendId,
+        "max_budget_usd",
+        null,
+        "Reached maximum budget ($1.5)",
+        {
+          usage: {
+            inputTokens: 1000,
+            outputTokens: 500,
+            cacheCreationInputTokens: 200,
+            cacheReadInputTokens: 30000,
+          },
+          costUsd: 1.5,
+          modelId: "claude-sonnet-test",
+          numTurns: 29,
+          durationMs: 60000,
+          costSource: "sdk_partial",
+        },
+      );
+      const quotaMocks = buildMocks({ stageAThrows: quotaErr });
+      mocks = quotaMocks;
+      const orch = makeOrchestrator();
+      await expect(
+        orch.run({ parentEvent: makeParentEvent(), isRetry: false }),
+      ).rejects.toThrow("Reached maximum budget ($1.5)");
+      expect(quotaMocks.audit.logError).toHaveBeenCalledTimes(1);
+      const ctx = quotaMocks.audit.logError.mock.calls[0]![3] as {
+        backendId?: string;
+        modelId?: string;
+        failureKind?: string;
+        failureCode?: string;
+        costUsd?: number;
+        costSource?: string;
+        tokensInput?: number;
+        tokensOutput?: number;
+        tokensCacheCreation?: number;
+        tokensCacheRead?: number;
+        numTurns?: number;
+      };
+      // The quota tagging stays intact next to the spend fields.
+      expect(ctx.failureKind).toBe("quota");
+      expect(ctx.failureCode).toBe("max_budget_usd");
+      expect(ctx.backendId).toBe("claude");
+      expect(ctx.costUsd).toBe(1.5);
+      expect(ctx.costSource).toBe("sdk_partial");
+      expect(ctx.numTurns).toBe(29);
+      expect(ctx.tokensInput).toBe(1000);
+      expect(ctx.tokensOutput).toBe(500);
+      expect(ctx.tokensCacheCreation).toBe(200);
+      expect(ctx.tokensCacheRead).toBe(30000);
     });
 
     it("captures per-stage `durationMs` independently so an early Stage B failure is not inflated by a still-running Stage A", async () => {

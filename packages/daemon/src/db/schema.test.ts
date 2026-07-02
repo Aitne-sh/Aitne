@@ -349,7 +349,10 @@ describe("applySchema", () => {
     expect(eveningReview.max_budget_usd).toBe(2.0);
 
     // morning-routine-optimization.md Phase 5 — Stage A / Stage B seed
-    // rows. Stage B's $0.30 cap is the realigned value after production
+    // rows. Stage A's $2.00 cap is the realigned value after Sonnet 5
+    // pushed real runs past the prior $1.50 cap into a daily fail +
+    // today.md-health re-run (migration 0025 bumps upgrading installs).
+    // Stage B's $0.30 cap is the realigned value after production
     // observed Stage B's ~21 KB prompt + Haiku cache_creation tripping
     // the previous $0.10 cap mid-turn (BackendQuotaError(max_budget_usd))
     // before the daily/<yesterday>.md PUT could fire. Pinned here in
@@ -361,7 +364,7 @@ describe("applySchema", () => {
       .get() as { main_model: string; max_turns: number; max_budget_usd: number };
     expect(morningStageA.main_model).toBe("claude-sonnet-5");
     expect(morningStageA.max_turns).toBe(50);
-    expect(morningStageA.max_budget_usd).toBe(1.5);
+    expect(morningStageA.max_budget_usd).toBe(2.0);
 
     const morningStageB = db
       .prepare(

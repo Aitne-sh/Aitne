@@ -1178,6 +1178,7 @@ describe("CodexCore", () => {
         maxTurns: 10,
         maxBudgetUsd: 1.0,
         persistSession: false,
+        processKey: "routine.activity_scan",
       });
 
       expect(mockCreateSessionWorkdir).toHaveBeenCalledWith(
@@ -1195,6 +1196,11 @@ describe("CodexCore", () => {
       expect(env.PA_DAEMON_API_BASE_URL).toBe("http://127.0.0.1:8321");
       expect(env.PA_DAEMON_READ_TOKEN).toBeUndefined();
       expect(env.PATH).toContain("/tmp/test-workdir/.pa/bin");
+      // params.processKey must reach the session env as PA_PROCESS_KEY —
+      // the CLI shim turns it into the x-process-key header on
+      // PATCH /api/agent-actions/self (session_identity_missing 400
+      // without it).
+      expect(env.PA_PROCESS_KEY).toBe("routine.activity_scan");
     });
 
     it("opts the workspace-write sandbox into localhost network access on resume", async () => {

@@ -23,6 +23,32 @@ user's explicit rulebook intent. For ad-hoc deadline or surprise nudges,
 the surfacing event handler that discovered the item — not this routine —
 is the right vehicle.
 
+**Session constraints & turn economy** (apply at every step):
+- This session has **no calendar or external-connector access**.
+  "Prepare tomorrow" means updating the `state/today.md` ## Handoff
+  `### Tomorrow` section in Step 1 — that is the entire contract. Do
+  NOT attempt a calendar or observations "tomorrow preview"; no tool
+  in this session can serve it, and probing for one wastes a turn.
+  If Handoff needs upcoming-event context, the injected
+  `<calendar_events_3d>` block already carries the coming days'
+  events — read it directly.
+- Operate in as few turns as possible: consolidate tool calls, do not
+  narrate routine actions, and never re-derive facts already in your
+  context. Issue independent read-only GETs (e.g. the Step 0
+  observations drain) together in a single turn as parallel tool
+  calls. The one exception is rebuild discipline: a GET that feeds a
+  `mode=replace` PATCH (e.g. the Step 4 lesson-store reads) must be
+  fresh — keep it adjacent to its write, never batched up front.
+- Injected context blocks (`<roadmap>`, `<today>`, `<user>`,
+  `<feedback_worksheet>`, …) are already in your prompt — never GET a
+  file merely to read what is injected. GET fresh only immediately
+  before a rebuild-and-replace write.
+- Prose writes to `journal/agent.md` use
+  `PATCH /api/context/journal/agent` with the body
+  `{"mode":"append_to_file","content":"..."}` — `append_to_file`
+  appends at end-of-file and takes **no** `section` field
+  (`mode:"append"` without a `section` is rejected with 400).
+
 ### Step 0 — Read today's mail outcomes
 
 The pre-pass fetcher session (`routine.fetch_window`) ran ahead of you
@@ -73,6 +99,16 @@ ago as the daemon-driven `roadmap_mechanical_maintenance` job — they
 are NOT this routine's job anymore. This step only carries the two
 substeps that genuinely need an LLM in the loop: promote-on-resolution
 and Review-date fire.
+
+**Skip-gate (check the injected roadmap before locking).** Read
+`## Long-term Plans` from the `<roadmap>` block already in your
+prompt (it is injected verbatim). If it is empty, or it has no entry
+that resolved to a concrete date today (2a) and no entry whose
+`Review:` date is on or before today (2b, ignoring
+`Review: [noreview]`), skip Step 2 entirely — do NOT acquire the
+lock and do NOT GET the roadmap. An entry added mid-evening simply
+waits for tomorrow's review — the same 24-hour tolerance the
+409-conflict path below already accepts.
 
 **Write-lock handling.** `<roadmap_write_lock_id>` is NOT injected for
 evening_review, so acquire the lock explicitly before the first PATCH:

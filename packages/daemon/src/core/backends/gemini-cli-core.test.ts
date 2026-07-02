@@ -749,6 +749,7 @@ describe("GeminiCliCore", () => {
         modelId: "gemini-2.5-pro",
         maxTurns: 10,
         maxBudgetUsd: 1.0,
+        processKey: "routine.activity_scan",
       });
 
       expect(mockCreateSessionWorkdir).toHaveBeenCalledWith(
@@ -766,6 +767,11 @@ describe("GeminiCliCore", () => {
       expect(env.PA_DAEMON_API_BASE_URL).toBe("http://127.0.0.1:8321");
       expect(env.PA_DAEMON_READ_TOKEN).toBe("gemini-read-token");
       expect(env.PATH).toContain(`${TEST_WORKDIR}/.pa/bin`);
+      // params.processKey must reach the session env as PA_PROCESS_KEY —
+      // the CLI shim turns it into the x-process-key header on
+      // PATCH /api/agent-actions/self (session_identity_missing 400
+      // without it).
+      expect(env.PA_PROCESS_KEY).toBe("routine.activity_scan");
     });
 
     it("throws BackendDecisiveFailure when resume fails", async () => {

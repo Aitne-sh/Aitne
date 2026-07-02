@@ -166,7 +166,7 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // loop tripped the prior $0.30 cap and surfaced
   // BackendQuotaError(max_budget_usd) with no fallback. Realigned to
   // $0.50 — the medium-tier 20-turn peer dashboard.docs_qa value, well
-  // under the superset morning_routine_today ($1.50). Bumped for upgrading
+  // under the superset morning_routine_today ($2.00). Bumped for upgrading
   // installs by migration 0009; keep in lock-step with the schema-seed row.
   "routine.today_refresh": { maxTurns: 20, maxBudgetUsd: 0.5 },
   // Above medium nominal: V2-disabled monolithic path absorbs fetch +
@@ -185,21 +185,24 @@ const ENVELOPE_OVERRIDES_BY_PROCESS_KEY: Partial<
   // the schema-seed row.
   "routine.evening_review": { maxTurns: 50, maxBudgetUsd: 2.0 },
   // morning-routine-optimization.md Phase 5 — Stage A of the split
-  // pipeline. Originally seeded at $0.50 on the projection that the
-  // Stage A task-flow would shrink to 6-8 KB (~40-50% off the
-  // monolithic session) once Step 5 daily-journal prose and Step 1
-  // handoff parsing moved off the agent. The handoff/journal moves
-  // shipped but the task-flow body did not shrink: the file is still
-  // ~34 KB and Stage A loads 9 skills, so even the design's own
-  // typical-day p95 ($0.52) and initial-day worst case ($0.70) sit
-  // at/above the $0.50 cap. Anthropic SDK enforces max_budget_usd by
-  // aborting mid-turn — production runs hit BackendQuotaError(max_budget_usd)
-  // mid-session. Realigned to $1.50: 3x the typical p95 (matching the
-  // headroom convention used by routine.today_refresh), above the
-  // initial-day worst case, and below the parent envelope ($2.00)
-  // so Stage A still can't silently consume the parent's headroom.
-  // Keep in lock-step with the corresponding schema-seed row.
-  "routine.morning_routine_today": { maxTurns: 50, maxBudgetUsd: 1.5 },
+  // pipeline. Originally seeded at $0.50, realigned to $1.50 when the
+  // task-flow body stayed at ~34 KB instead of shrinking. The
+  // sonnet-4-6 → sonnet-5 default bump (more tokens per text + more
+  // agentic = more prefix re-reads per run) pushed real runs to
+  // ~$1.50-1.69 in 29 turns, so the SDK's mid-turn abort produced a
+  // daily BackendQuotaError(max_budget_usd) fail followed by the
+  // today.md-health retry chain re-running the whole session — a
+  // fail+retry day costs MORE (~$2.0-2.2 across both runs) than one
+  // completed run under a wider cap, and risks a half-written
+  // today.md. Realigned to $2.00, matching the parent
+  // routine.morning_routine and its structural twin
+  // routine.evening_review (both medium-tier, connector-capable,
+  // many-turn). Stage A sharing the parent's ceiling is accepted: the
+  // parent envelope only bounds the V2-disabled monolithic path, not
+  // a Stage A + parent sum. Bumped for upgrading installs by
+  // migration 0025; keep in lock-step with the corresponding
+  // schema-seed row.
+  "routine.morning_routine_today": { maxTurns: 50, maxBudgetUsd: 2.0 },
   // morning-routine-optimization.md Phase 5 — Stage B is template-
   // driven daily-journal authoring on lite tier. The original $0.10 cap
   // was sized to a 15 KB prompt projection; production showed Stage B's

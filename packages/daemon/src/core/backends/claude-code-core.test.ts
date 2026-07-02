@@ -2484,7 +2484,12 @@ describe("ClaudeCodeCore", () => {
           });
 
           const call = vi.mocked(query).mock.calls[0]?.[0] as
-            | { options?: { systemPrompt?: unknown } }
+            | {
+                options?: {
+                  systemPrompt?: unknown;
+                  env?: Record<string, string | undefined>;
+                };
+              }
             | undefined;
           expect(call?.options?.systemPrompt).toBeDefined();
           // The Phase 1 contract: fetch_window receives a string, not the
@@ -2494,6 +2499,13 @@ describe("ClaudeCodeCore", () => {
           expect(typeof call?.options?.systemPrompt).toBe("string");
           expect(call?.options?.systemPrompt).toMatch(
             /routine\.fetch_window pre-pass/,
+          );
+          // params.processKey must reach the session env as PA_PROCESS_KEY —
+          // the CLI shim turns it into the x-process-key header on
+          // PATCH /api/agent-actions/self; without it the self-report 400s
+          // with session_identity_missing.
+          expect(call?.options?.env?.PA_PROCESS_KEY).toBe(
+            "routine.fetch_window",
           );
         } finally {
           try {
@@ -2567,6 +2579,69 @@ describe("ClaudeCodeCore", () => {
           expect(typeof sp).toBe("object");
           expect(sp?.type).toBe("preset");
           expect(sp?.preset).toBe("claude_code");
+        } finally {
+          try {
+            rmSync(tempSessionDir, { recursive: true, force: true });
+          } catch {
+            /* best-effort */
+          }
+        }
+      });
+
+      it("execute() without processKey leaves PA_PROCESS_KEY unset", async () => {
+        const tempSessionDir = mkdtempSync(join(tmpdir(), "pa-fw-wire-nokey-"));
+        try {
+          vi.mocked(query).mockReset();
+          vi.mocked(query).mockImplementation(
+            () =>
+              (async function* () {
+                yield {
+                  type: "system",
+                  subtype: "init",
+                  session_id: "nokey-sess",
+                  model: "claude-sonnet-4-6",
+                };
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  result: "ok",
+                  session_id: "nokey-sess",
+                  total_cost_usd: 0,
+                  usage: {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                  },
+                  modelUsage: {},
+                  num_turns: 1,
+                  duration_api_ms: 1,
+                  is_error: false,
+                  stop_reason: "end_turn",
+                };
+              })() as unknown as ReturnType<typeof query>,
+          );
+          const wireCore = new ClaudeCodeCore(makeConfig());
+          await wireCore.execute({
+            prompt: "test",
+            context: "ctx",
+            event: createEvent({
+              type: "test.event",
+              source: "test",
+              priority: EventPriority.NORMAL,
+            }),
+            modelId: "claude-sonnet-4-6",
+            maxTurns: 1,
+            maxBudgetUsd: 0.1,
+            sessionDir: tempSessionDir,
+          });
+
+          const call = vi.mocked(query).mock.calls[0]?.[0] as
+            | { options?: { env?: Record<string, string | undefined> } }
+            | undefined;
+          // buildDaemonApiCliEnv deletes PA_PROCESS_KEY when no processKey
+          // is passed — a keyless session must not inherit a stale value.
+          expect(call?.options?.env?.PA_PROCESS_KEY).toBeUndefined();
         } finally {
           try {
             rmSync(tempSessionDir, { recursive: true, force: true });

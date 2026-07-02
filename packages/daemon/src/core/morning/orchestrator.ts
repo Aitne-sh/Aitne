@@ -89,6 +89,10 @@ import {
   type ResolvedBackendRoute,
 } from "../backends/backend-router.js";
 import { BackendQuotaError } from "../agent-core.js";
+import {
+  extractFailureSpendInfo,
+  type FailureSpendInfo,
+} from "../backends/failure-spend.js";
 import type { DispatcherErrorRouter } from "../dispatcher-error-handling.js";
 import type { ResultProcessor } from "../dispatcher-result-processor.js";
 import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
@@ -642,22 +646,52 @@ export class MorningRoutinePipelineOrchestrator {
       : new Error(String(outcome.error ?? "stage rejection with no message"));
     const durationMs = Math.max(0, outcome.completedAtMs - outcome.startedAtMs);
     const quotaError = extractQuotaError(outcome.error);
+    const spendInfo = extractStageSpend(outcome.error);
     const context: {
       durationMs: number;
       backendId?: BackendId;
       modelId?: string;
       failureKind?: string;
       failureCode?: string;
+      costUsd?: number;
+      costSource?: string;
+      tokensInput?: number;
+      tokensOutput?: number;
+      tokensCacheCreation?: number;
+      tokensCacheRead?: number;
+      numTurns?: number;
       dailyWrite?: DailyWriteAuditDetail;
     } = { durationMs };
     const backendId =
       outcome.binding?.main.backendId ?? quotaError?.backendId ?? undefined;
-    const modelId = outcome.binding?.main.modelId ?? undefined;
+    // The spend payload's model is the actually-billed one — prefer the
+    // binding when resolved, fall back to the spend's modelId otherwise.
+    const modelId =
+      outcome.binding?.main.modelId ?? spendInfo?.spend.modelId ?? undefined;
     if (backendId !== undefined) context.backendId = backendId;
     if (modelId !== undefined) context.modelId = modelId;
     if (quotaError !== null) {
       context.failureKind = "quota";
       context.failureCode = quotaError.originalCode;
+    }
+    // Recovered spend for a failed stage the provider already billed
+    // (PREPASS_COST_REDUCTION_PLAN.md N1 tagging convention). Without
+    // this the budget-capped Stage A row lands with NULL cost/turns
+    // while the log shows ~the full cap burned (costSource
+    // "sdk_partial") — the cost dials then under-report every capped
+    // morning by ~the cap. Only ever a real recovered figure; absent
+    // spend leaves the fields unset per the audit contract.
+    if (spendInfo !== null) {
+      context.costUsd = spendInfo.spend.costUsd;
+      if (spendInfo.costSource !== null) {
+        context.costSource = spendInfo.costSource;
+      }
+      context.numTurns = spendInfo.spend.numTurns;
+      context.tokensInput = spendInfo.spend.usage.inputTokens;
+      context.tokensOutput = spendInfo.spend.usage.outputTokens;
+      context.tokensCacheCreation =
+        spendInfo.spend.usage.cacheCreationInputTokens;
+      context.tokensCacheRead = spendInfo.spend.usage.cacheReadInputTokens;
     }
     // §4.11 — Stage B's failure-path row also carries the dailyWrite
     // outcome when one was computed. Useful for the streak detector
@@ -1462,6 +1496,33 @@ function extractQuotaError(error: unknown): BackendQuotaError | null {
   if (error instanceof BackendQuotaError) return error;
   if (error instanceof BackendRouterHandledError) {
     if (error.cause instanceof BackendQuotaError) return error.cause;
+  }
+  return null;
+}
+
+/**
+ * Recover the billed spend from a stage rejection so
+ * `recordStageFailure` can land it on the failed agent_actions row.
+ * Delegates the per-failure extraction to the shared
+ * `extractFailureSpendInfo` (failure-spend.ts) and only adds the
+ * `BackendRouterHandledError` unwrap the orchestrator sees on the
+ * router throw path (cause first — the terminating failure — then the
+ * per-backend attempts). Kept module-local like `extractQuotaError`:
+ * when main AND fallback both billed, the single stage row carries the
+ * first spend found; a fallback-SUCCESS main-attempt spend is already
+ * recorded router-side and never reaches this path.
+ */
+function extractStageSpend(error: unknown): FailureSpendInfo | null {
+  const direct = extractFailureSpendInfo(error);
+  if (direct !== null) return direct;
+  if (error instanceof BackendRouterHandledError) {
+    return (
+      extractFailureSpendInfo(error.cause)
+      ?? extractFailureSpendInfo(error.mainFailure)
+      ?? (error.fallbackFailure !== null
+        ? extractFailureSpendInfo(error.fallbackFailure)
+        : null)
+    );
   }
   return null;
 }

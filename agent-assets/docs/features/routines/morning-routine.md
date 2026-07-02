@@ -136,7 +136,7 @@ through the parent `routine.morning_routine` envelope.)
 | `dayBoundaryHour` | `4` | Both the agent-day boundary and the morning-routine fire time. See [Agent Day](../../concepts/agent-day.md). |
 | Stage A tier (`routine.morning_routine_today`) | medium (Sonnet 5) | Synthesises `state/today.md` + the day's roadmap fan-out. Adjustable per-row in Settings → Models. |
 | Stage B tier (`routine.morning_routine_journal`) | lite (Haiku 4.5) | Authors `journal/daily/<date>.md` and the `journal/agent.md` audit paragraph. |
-| Stage A max turns / budget | 50 turns / $1.50 | Per-execute envelope for `routine.morning_routine_today`. Adjustable in Settings → Models. |
+| Stage A max turns / budget | 50 turns / $2.00 | Per-execute envelope for `routine.morning_routine_today`. Adjustable in Settings → Models. |
 | Stage B max turns / budget | 20 turns / $0.30 | Per-execute envelope for `routine.morning_routine_journal`. |
 
 The parent `routine.morning_routine` key keeps its own envelope (50 turns / $2.00) for the pipeline entry point. Codex and Gemini backends scale the dollar caps by a per-tier factor (lite ×2.5, medium ×1.5); the router enforces the cap before token costs accumulate.

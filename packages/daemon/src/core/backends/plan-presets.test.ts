@@ -96,12 +96,15 @@ describe("resolveDefaultBindingFor", () => {
   });
 
   // morning-routine-optimization.md Phase 5 — Stage A / Stage B envelope
-  // overrides. Stage B's $0.30 cap is the realigned value after production
-  // observed Stage B's ~21 KB prompt + Haiku cache_creation tripping the
-  // previous $0.10 cap mid-turn (BackendQuotaError(max_budget_usd))
-  // before the daily/<yesterday>.md PUT could fire. Pinned here so a
-  // future `force: true` reset cannot silently regress it to the
-  // lite-tier nominal $0.20, and so the lock-step invariant with the
+  // overrides. Stage A's $2.00 cap is the realigned value after Sonnet 5
+  // pushed real runs to ~$1.50-1.69/29 turns and the prior $1.50 cap
+  // produced a daily BackendQuotaError(max_budget_usd) fail + full
+  // today.md-health re-run (migration 0025). Stage B's $0.30 cap is the
+  // realigned value after production observed Stage B's ~21 KB prompt +
+  // Haiku cache_creation tripping the previous $0.10 cap mid-turn
+  // (BackendQuotaError(max_budget_usd)) before the daily/<yesterday>.md
+  // PUT could fire. Pinned here so a future `force: true` reset cannot
+  // silently regress them, and so the lock-step invariant with the
   // schema seed is enforced at test time.
   it("preserves the morning-routine Stage A envelope override", () => {
     const binding = resolveDefaultBindingFor(
@@ -110,7 +113,7 @@ describe("resolveDefaultBindingFor", () => {
     );
     expect(binding.model).toBe(DEFAULT_CLAUDE_MEDIUM_MODEL);
     expect(binding.maxTurns).toBe(50);
-    expect(binding.maxBudgetUsd).toBe(1.5);
+    expect(binding.maxBudgetUsd).toBe(2.0);
   });
 
   it("preserves the morning-routine Stage B envelope override", () => {

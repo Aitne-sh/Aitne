@@ -877,6 +877,10 @@ export class GeminiCliCore implements IAgentCore {
             sessionBackend: "gemini",
             sessionId: params.sessionDbId,
             eventCorrelationId: params.eventCorrelationId,
+            // PA_PROCESS_KEY → the CLI shim's x-process-key header on
+            // PATCH /api/agent-actions/self (session_identity_missing
+            // 400 without it).
+            ...(params.processKey ? { processKey: params.processKey } : {}),
           }),
           ...mcp.env,
           ...(params.turnToken ? { PA_TURN_TOKEN: params.turnToken } : {}),

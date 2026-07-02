@@ -856,6 +856,10 @@ export class ClaudeCodeCore implements IAgentCore {
               sessionBackend: "claude",
               sessionId: params.sessionDbId,
               eventCorrelationId: event.correlationId,
+              // PA_PROCESS_KEY → the CLI shim's x-process-key header on
+              // PATCH /api/agent-actions/self; without it the self-report
+              // 400s with session_identity_missing every run.
+              ...(params.processKey ? { processKey: params.processKey } : {}),
             }),
             ...mcp.env,
             ...(params.turnToken ? { PA_TURN_TOKEN: params.turnToken } : {}),

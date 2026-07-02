@@ -2399,15 +2399,17 @@ VALUES
     -- (which selects on action_type='routine.morning_routine') and any
     -- legacy tooling that resolves the parent key keep working; the
     -- two stage keys below carry the actual LLM dispatch budgets.
-    -- Stage A originally seeded $0.50 on the projection that the
-    -- task-flow would shrink to 6-8 KB (design §"Cost projection",
-    -- ~55-65%). That shrink never landed — the Stage A task-flow is
-    -- still ~34 KB and loads 9 skills, so even the design's own
-    -- typical-day p95 ($0.52) and initial-day worst case ($0.70) sit
-    -- at/above $0.50. The cap is realigned to $1.50 — 3x the design's
-    -- typical p95 (matching the headroom convention used by
-    -- routine.today_refresh) and below the parent envelope so Stage A
-    -- still can't silently consume the parent's headroom.
+    -- Stage A originally seeded $0.50 (on a task-flow-shrink projection
+    -- that never landed), realigned to $1.50, then to $2.00: the
+    -- sonnet-4-6 → sonnet-5 default bump pushed real runs to
+    -- ~$1.50-1.69 in 29 turns, so the $1.50 cap produced a daily
+    -- BackendQuotaError(max_budget_usd) fail followed by the
+    -- today.md-health retry chain re-running the whole session —
+    -- fail+retry costs MORE (~$2.0-2.2/day) than one completed run and
+    -- risks a half-written today.md. $2.00 matches the parent
+    -- routine.morning_routine and the structural twin
+    -- routine.evening_review (both medium-tier, connector-capable,
+    -- many-turn). Bumped for upgrading installs by migration 0025.
     --
     -- Stage B was originally seeded at $0.10 on the same 15 KB prompt
     -- projection that Stage A overshot. Production showed Stage B's
@@ -2423,7 +2425,7 @@ VALUES
     -- ENVELOPE_OVERRIDES_BY_PROCESS_KEY in plan-presets.ts (the same
     -- lock-step invariant the routine.roadmap_refresh row documents
     -- above).
-    ('routine.morning_routine_today',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50, 1.50, 'preset'),
+    ('routine.morning_routine_today',   'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}', 50, 2.00, 'preset'),
     ('routine.morning_routine_journal', 'claude', '${DEFAULT_CLAUDE_LITE_MODEL}',   20, 0.30, 'preset'),
     ('routine.activity_scan',    'claude', '${DEFAULT_CLAUDE_MEDIUM_MODEL}',  50,  1.00, 'preset'),
     -- $0.50 budget: a typical drift-triggered refresh on Sonnet runs ~$0.10
@@ -2434,7 +2436,7 @@ VALUES
     -- with no fallback (claude is the only binding). The previous $0.10→$0.30
     -- bump did not hold. Realigned to $0.50 — the medium-tier 20-turn peer
     -- dashboard.docs_qa value, and well under the superset
-    -- routine.morning_routine_today ($1.50), which writes the full today.md
+    -- routine.morning_routine_today ($2.00), which writes the full today.md
     -- from the same calendar data. A third trip should drive a
     -- work-reduction fix (tighter GET limit / cheaper 409 backoff), not
     -- another blind bump. Bumped for upgrading installs by migration 0009.

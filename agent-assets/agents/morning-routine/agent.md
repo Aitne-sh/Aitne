@@ -28,9 +28,14 @@ backend:
   model: null
 
 # ── Limits (per execution) ───────────────────────────────────────────────────
+# Mirrors the runtime envelope (plan-presets / process_backend_config seed:
+# parent routine.morning_routine and Stage A routine.morning_routine_today are
+# both 50 / $2.00). These values prefill the dashboard Definition form; a
+# stale lower number saved there would clamp the real runs via
+# override_snapshot, so keep them in step with the seed authority.
 limits:
-  max_turns: 30
-  max_budget_usd: 0.50
+  max_turns: 50
+  max_budget_usd: 2.00
   timeout_minutes: 15
 
 # ── Expected outputs (informational; drive the dashboard + criteria intent) ──

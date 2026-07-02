@@ -41,6 +41,22 @@ Global rules (apply at every step):
   `daily/*.md` file from this session — Step 5 is delegated. The
   daemon's parent audit row gates on YOUR success + today.md health,
   so a Stage B failure does not stop the day from "opening".
+- Turn economy: operate in as few turns as possible. Consolidate tool
+  calls, do not narrate routine actions, and never re-derive facts
+  already in context. The independent read-only GETs — Step 2a mail,
+  Step 2b notion, the Step 2c non-direct calendar observations read,
+  Step 3 `actor=user`, Step 4 inbox list — MUST be issued together in
+  **one turn** as parallel tool calls; only a GET that immediately
+  precedes a `mode=replace` PATCH (rebuild discipline) needs to stay
+  adjacent to its write.
+- Injected blocks (`<yesterday>`, `<calendar_events_7d>`,
+  `<fetch_report>`, `<handoff_parsed>`, `<user>`, …) are already in
+  your prompt — never GET a file merely to read what is injected; GET
+  fresh only immediately before a rebuild-and-replace write.
+- curl rules: always double-quote URLs containing `&` (an unquoted
+  `&` backgrounds the command mid-URL), and never pass
+  `-w`/`--write-out` (the shell hook rejects it) — plain `curl -s`
+  output is sufficient.
 
 ### Step 1 — Read handoff and derive day-type
 
@@ -662,12 +678,14 @@ the morning routine.
     need a flag in metadata.
 
     If the PATCH returns `agent_actions.session_row_not_found`
-    (404), the dispatcher has not pre-inserted your in-flight row —
-    surface a one-line warning to `## Agent Log`
-    (`- HH:MM [morning_routine] agent-self self-report 404 — no in-flight row`)
-    and continue. Do NOT block the turn on telemetry, and do NOT
-    fall back to writing `journal/agent.md` directly (the daemon
-    owns that file in V2; a direct write would race).
+    (404) — the dispatcher has not pre-inserted your in-flight row —
+    or any other 4xx, surface a one-line warning to `## Agent Log`
+    (`- HH:MM [morning_routine] agent-self self-report <status> — <code>`)
+    and continue. Telemetry is best-effort: do NOT block the turn on
+    it, do NOT spend turns debugging headers or environment
+    variables, and do NOT fall back to writing `journal/agent.md`
+    directly (the daemon owns that file in V2; a direct write would
+    race).
 
     <output_language>english_only — Policy A surface (agent journal,
     parsed log); `<output_language_policy>` carves this out
