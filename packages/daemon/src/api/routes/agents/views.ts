@@ -404,7 +404,7 @@ export interface CreateIssue {
 
 export type CreatePlan =
   | { ok: false; status: 400; error: string; hint?: string; field?: string; issues?: CreateIssue[] }
-  | { ok: false; status: 409; error: "slug_collision"; slug: string }
+  | { ok: false; status: 409; error: "slug_collision"; slug: string; hint?: string }
   | { ok: true; slug: string; markdown: string; warnings: AgentLintIssue[] };
 
 function asString(v: unknown): string | undefined {
@@ -443,16 +443,34 @@ export function planCreate(
 ): CreatePlan {
   const slug = asString(body.slug);
   if (slug === undefined || slug.length === 0) {
-    return { ok: false, status: 400, error: "slug_required", field: "slug" };
+    return {
+      ok: false,
+      status: 400,
+      error: "slug_required",
+      field: "slug",
+      hint: "Add a non-empty `slug`: kebab-case matching ^[a-z][a-z0-9-]*$, unique across Agents. It becomes the immutable /agents/<slug> URL.",
+    };
   }
   const name = asString(body.name);
   if (name === undefined || name.length === 0) {
-    return { ok: false, status: 400, error: "name_required", field: "name" };
+    return {
+      ok: false,
+      status: 400,
+      error: "name_required",
+      field: "name",
+      hint: "Add a non-empty `name` — the human-readable label shown in the dashboard.",
+    };
   }
 
   const schedule = asRecord(body.schedule);
   if (schedule === undefined) {
-    return { ok: false, status: 400, error: "schedule_required", field: "schedule" };
+    return {
+      ok: false,
+      status: 400,
+      error: "schedule_required",
+      field: "schedule",
+      hint: "Add a `schedule` object. Preferred: { \"kind\": \"recurring\", \"recurrence\": { \"frequency\": \"daily\", \"time\": \"09:00\" } }. Raw cron: { \"kind\": \"cron\", \"expression\": \"0 9 * * *\" }.",
+    };
   }
   // Resolve either input form into the canonical cron schedule the frontmatter
   // stores. A structured `recurrence` is validated + rendered to cron; a raw
@@ -502,7 +520,13 @@ export function planCreate(
 
   // Slug uniqueness (covers built-in slugs too — they're rows in `agents`).
   if (existingSlugs.has(slug)) {
-    return { ok: false, status: 409, error: "slug_collision", slug };
+    return {
+      ok: false,
+      status: 409,
+      error: "slug_collision",
+      slug,
+      hint: `An Agent with slug "${slug}" already exists. GET /api/agents to inspect it — then either choose a different slug, or edit the existing Agent (do NOT recreate it) via its agent.md.`,
+    };
   }
 
   // Assemble the agent.md frontmatter from the input. `kind` is forced to
@@ -619,7 +643,7 @@ export const EDITABLE_NESTED: Record<string, ReadonlySet<string>> = (() => {
 const CONTROL_KEYS = new Set(["enabled", "ack_warning", "reset", "schedule_window"]);
 
 export type PatchPlan =
-  | { ok: false; status: 409; error: "stop_warning_required"; warning: StopWarning | null }
+  | { ok: false; status: 409; error: "stop_warning_required"; warning: StopWarning | null; hint?: string }
   | { ok: false; status: 400; error: string; hint?: string; field?: string }
   | {
       ok: true;
@@ -671,6 +695,26 @@ function isValidOverrideValue(path: OverrideEditPath, value: unknown): boolean {
   }
 }
 
+/** Human description of the value each override path accepts — powers the
+ *  `invalid_field_value` retry hint so the caller knows exactly what to resend. */
+function describeOverridePath(path: OverrideEditPath): string {
+  switch (path) {
+    case "backend.tier":
+      return `one of ${AGENT_TIERS.join("/")}, or null to clear`;
+    case "backend.model":
+      return "a non-empty model-id string, or null to defer to the process default";
+    case "backend.backend_id":
+      return `one of ${BACKEND_IDS.join("/")}, or null to clear`;
+    case "limits.max_turns":
+    case "limits.timeout_minutes":
+      return "a positive integer";
+    case "limits.max_budget_usd":
+      return "a non-negative number (USD)";
+    case "on_error.notify_owner":
+      return "a boolean";
+  }
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -691,7 +735,13 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
   let setEnabled: boolean | undefined;
   if ("enabled" in body) {
     if (typeof body.enabled !== "boolean") {
-      return { ok: false, status: 400, error: "invalid_enabled", field: "enabled" };
+      return {
+        ok: false,
+        status: 400,
+        error: "invalid_enabled",
+        field: "enabled",
+        hint: "`enabled` must be a JSON boolean (true to enable, false to stop). Resubmit with the boolean value.",
+      };
     }
     // Only a real ON↔OFF transition is a change (design §12.2 gates on
     // `body.enabled !== agent.enabled`). Re-disabling an already-stopped
@@ -705,7 +755,13 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
   }
   const ackWarning = body.ack_warning === true;
   if (setEnabled === false && dto.source === "builtin" && !ackWarning) {
-    return { ok: false, status: 409, error: "stop_warning_required", warning: dto.stopWarning };
+    return {
+      ok: false,
+      status: 409,
+      error: "stop_warning_required",
+      warning: dto.stopWarning,
+      hint: "Stopping this system Agent needs explicit consent. Review the `warning` (what stops working), then resend the same PATCH with `\"ack_warning\": true` to confirm.",
+    };
   }
 
   // ── collect override edits + stripped read-only keys ──
@@ -737,12 +793,24 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
   let reset: string[] = [];
   if ("reset" in body) {
     if (!Array.isArray(body.reset) || body.reset.some((p) => typeof p !== "string")) {
-      return { ok: false, status: 400, error: "invalid_reset", field: "reset" };
+      return {
+        ok: false,
+        status: 400,
+        error: "invalid_reset",
+        field: "reset",
+        hint: `\`reset\` must be an array of override-path strings to clear back to the definition default. Valid paths: ${OVERRIDE_EDIT_PATHS.join(", ")}.`,
+      };
     }
     reset = body.reset as string[];
     for (const path of reset) {
       if (!(OVERRIDE_EDIT_PATHS as readonly string[]).includes(path)) {
-        return { ok: false, status: 400, error: "invalid_reset_path", field: path };
+        return {
+          ok: false,
+          status: 400,
+          error: "invalid_reset_path",
+          field: path,
+          hint: `"${path}" is not a resettable override path. Valid paths: ${OVERRIDE_EDIT_PATHS.join(", ")}.`,
+        };
       }
     }
   }
@@ -751,7 +819,13 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
   let scheduleWindow: Record<string, unknown> | undefined;
   if ("schedule_window" in body) {
     if (!isPlainObject(body.schedule_window)) {
-      return { ok: false, status: 400, error: "invalid_schedule_window", field: "schedule_window" };
+      return {
+        ok: false,
+        status: 400,
+        error: "invalid_schedule_window",
+        field: "schedule_window",
+        hint: "`schedule_window` must be a JSON object of interval/active-hours fields (e.g. { \"interval_minutes\": 120, \"active_start_hour\": 8, \"active_end_hour\": 22 }).",
+      };
     }
     const entry = dto.source === "builtin" ? getBuiltinRegistryEntry(dto.slug) : undefined;
     // Runtime-window marker: a builtin whose registry cron resolver is null
@@ -782,7 +856,13 @@ export function planPatch(dto: AgentDTO, body: Record<string, unknown>): PatchPl
   const overrideSet: Record<string, unknown> = {};
   for (const { path, value } of edits) {
     if (!isValidOverrideValue(path, value)) {
-      return { ok: false, status: 400, error: "invalid_field_value", field: path };
+      return {
+        ok: false,
+        status: 400,
+        error: "invalid_field_value",
+        field: path,
+        hint: `\`${path}\` must be ${describeOverridePath(path)}. Fix the value and resubmit.`,
+      };
     }
     overrideSet[path] = value;
   }

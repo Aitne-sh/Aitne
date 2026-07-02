@@ -210,7 +210,10 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
     const plan = planCreate(body, existingSlugs);
     if (!plan.ok) {
       if (plan.status === 409) {
-        return c.json({ error: plan.error, slug: plan.slug }, 409);
+        return c.json(
+          { error: plan.error, slug: plan.slug, ...(plan.hint ? { hint: plan.hint } : {}) },
+          409,
+        );
       }
       return c.json(
         {
@@ -234,7 +237,14 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
       writeFileSync(join(dir, "agent.md"), plan.markdown, "utf-8");
     } catch (err) {
       logger.error({ err, slug: plan.slug, dir }, "Failed to write agent.md");
-      return c.json({ error: "agent_write_failed", slug: plan.slug }, 500);
+      return c.json(
+        {
+          error: "agent_write_failed",
+          slug: plan.slug,
+          hint: "The daemon could not write the agent.md file (filesystem/permissions). This is usually transient — retry the same request; if it persists, check the daemon logs.",
+        },
+        500,
+      );
     }
 
     // Synchronous load pairs the recurring row + upserts the agents row. The
@@ -252,7 +262,20 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
       }
       if (dto) deleteAgent(db, plan.slug);
       deps.agentEnabledCache?.invalidate();
-      return c.json({ error: "invalid_definition", slug: plan.slug, detail }, 400);
+      // The loader's cross-check (tools.allowed vs the absolute-block layer,
+      // process_key vs live PROCESS_KEYS, …) rejected the assembled file — a
+      // layer the schema can't express, so `detail` is the only specific signal.
+      return c.json(
+        {
+          error: "invalid_definition",
+          slug: plan.slug,
+          detail,
+          hint: detail
+            ? `The written agent.md failed the loader cross-check: ${detail}. Fix that and resubmit.`
+            : "The written agent.md failed the loader cross-check (e.g. a tools.allowed entry hitting the absolute-block layer, or an unknown backend.process_key). Review tools/process_key and resubmit.",
+        },
+        400,
+      );
     }
 
     deps.agentEnabledCache?.invalidate();
@@ -429,7 +452,10 @@ export function createAgentDefinitionRoutes(deps: ApiDependencies): Hono {
     const plan = planPatch(dto, body);
     if (!plan.ok) {
       if (plan.status === 409) {
-        return c.json({ error: plan.error, warning: plan.warning }, 409);
+        return c.json(
+          { error: plan.error, warning: plan.warning, ...(plan.hint ? { hint: plan.hint } : {}) },
+          409,
+        );
       }
       return c.json(
         { error: plan.error, ...(plan.hint ? { hint: plan.hint } : {}), ...(plan.field ? { field: plan.field } : {}) },

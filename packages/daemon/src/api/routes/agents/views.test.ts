@@ -573,6 +573,35 @@ describe("planPatch — reset", () => {
   });
 });
 
+describe("planPatch — retry hints", () => {
+  // Every rejection must carry a non-empty `hint` so the caller can self-correct.
+  it.each([
+    ["invalid_enabled", { enabled: "yes" }],
+    ["invalid_reset", { reset: "not-an-array" }],
+    ["invalid_reset_path", { reset: ["enabled"] }],
+    ["invalid_field_value", { limits: { max_turns: -3 } }],
+    ["stop_warning_required", { enabled: false }],
+  ])("returns an actionable hint for %s", (_label, body) => {
+    const plan = planPatch(makeDto(), body as Record<string, unknown>);
+    if (plan.ok) throw new Error("expected a rejection");
+    expect(typeof plan.hint).toBe("string");
+    expect((plan.hint ?? "").length).toBeGreaterThan(0);
+  });
+
+  it("invalid_field_value hint names the expected value for the failing path", () => {
+    const plan = planPatch(makeDto(), { limits: { max_turns: -3 } });
+    if (plan.ok) throw new Error("expected invalid_field_value");
+    expect(plan.hint).toContain("limits.max_turns");
+    expect(plan.hint).toContain("positive integer");
+  });
+
+  it("stop_warning_required hint tells the caller to resend with ack_warning", () => {
+    const plan = planPatch(makeDto(), { enabled: false });
+    if (plan.ok || plan.status !== 409) throw new Error("expected stop_warning_required");
+    expect(plan.hint).toContain("ack_warning");
+  });
+});
+
 describe("planPatch — user Agent field edits routed to the file", () => {
   it("rejects field edits on a user Agent", () => {
     expect(
@@ -817,6 +846,27 @@ describe("planCreate (POST /api/agents)", () => {
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
     expect(plan.markdown).toContain("process_key: agent.task");
+  });
+
+  // Retry contract: every create-path rejection must carry a non-empty `hint`
+  // so the caller can self-correct and resubmit (skill "Responses & errors").
+  it.each([
+    ["slug_required", { name: "X", schedule: { kind: "cron", expression: "0 9 * * *" } }],
+    ["name_required", { slug: "x", schedule: { kind: "cron", expression: "0 9 * * *" } }],
+    ["schedule_required", { slug: "x", name: "X" }],
+    ["one_shot_not_supported", { slug: "x", name: "X", schedule: { kind: "one_shot" } }],
+    ["invalid_recurrence", { slug: "x", name: "X", schedule: { kind: "recurring", recurrence: {} } }],
+  ])("returns an actionable hint for %s", (_label, body) => {
+    const plan = planCreate(body as Record<string, unknown>, NONE);
+    if (plan.ok) throw new Error("expected a rejection");
+    expect(typeof plan.hint).toBe("string");
+    expect((plan.hint ?? "").length).toBeGreaterThan(0);
+  });
+
+  it("slug_collision carries a hint pointing at GET /api/agents", () => {
+    const plan = planCreate(cronBody(), new Set(["daily-triage"]));
+    if (plan.ok || plan.status !== 409) throw new Error("expected slug_collision");
+    expect(plan.hint).toContain("GET /api/agents");
   });
 
   it("reaches the assembly with description omitted, then the schema rejects it", () => {

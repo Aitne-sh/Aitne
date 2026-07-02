@@ -22,8 +22,8 @@ is the way to register repeating autonomous **work** — creating a recurring
 | A recurring scheduled **DM / briefing** ("DM me a summary every morning") | `schedule` skill → `POST /api/recurring-schedules` `taskType:dm_session` |
 | A background fetch of app data on a cadence (managed-task fetch windows) | `managed-tasks` skill |
 
-If the request is one-time, STOP and use the `schedule` skill. If it just sends a
-recurring DM with no autonomous work, use `dm_session` (above), not an Agent.
+One-time? STOP → `schedule` skill. Just a recurring DM with no autonomous work?
+Use `dm_session` (above), not an Agent.
 
 ## Before creating — dedup (mandatory)
 
@@ -52,6 +52,7 @@ curl -s -X POST http://localhost:8321/api/agents \
       "timezone": "Asia/Tokyo"
     },
     "backend": { "tier": "medium" },
+    "limits": { "max_turns": 30, "max_budget_usd": 1.0, "timeout_minutes": 15 },
     "success_criteria": [
       { "id": "triage-note", "kind": "file_exists", "target": "notes/inbox-triage-{date}.md" }
     ],
@@ -69,15 +70,13 @@ Fields:
 - **`schedule.kind`** — `"recurring"` (structured, preferred) or `"cron"` (raw
   expression). A `one_shot`/`event` schedule is rejected with
   `one_shot_not_supported` (use `/schedule` for one-time work). Note:
-  `"recurring"` is an **API-input convenience only** — the daemon converts the
-  `recurrence` object to a cron expression and persists it as `kind: "cron"`.
-  The Agent's on-disk `agent.md` frontmatter (and the dashboard editor) therefore
-  only ever show `schedule.kind ∈ { cron, one_shot, event }`; there is no stored
-  `"recurring"` kind to read back or PATCH.
+  `"recurring"` is an **API-input convenience only** — the daemon converts it to a
+  cron expression and persists `kind: "cron"`, so the stored `agent.md` (and the
+  dashboard editor) only ever show `cron`; there is no `"recurring"` to read back.
 - **`schedule.recurrence`** (when `kind:"recurring"`) — a structured recurrence:
   - `{ "frequency": "hourly", "intervalHours": 1, "minuteOfHour": 0 }` — every hour
-    at :00 (`intervalHours` 1–23 for every-N-hours). **Sub-hourly (e.g. every
-    30 min) is not supported** for user Agents.
+    at :00 (`intervalHours` 1–23 for every-N-hours). **Sub-hourly is not
+    supported** for user Agents.
   - `{ "frequency": "daily",  "time": "09:00" }`
   - `{ "frequency": "weekly", "time": "08:00", "daysOfWeek": [1] }` — 0=Sun…6=Sat.
   - `{ "frequency": "monthly", "time": "18:00", "daysOfMonth": [1] }`
@@ -85,24 +84,27 @@ Fields:
   them and fix the named field.
 - **`schedule.expression`** (when `kind:"cron"`) — a standard 5-field cron string
   in the resolved timezone (`min hour day-of-month month day-of-week`). Examples:
-  `0 9 * * *` (daily 09:00), `0 8 * * 1` (Mondays 08:00), `0 * * * *` (hourly at
-  :00), `0 */2 * * *` (every 2 hours), `0 18 1 * *` (1st of each month 18:00).
-  A syntactically-valid cron is accepted at create (`201`, valid row) even if it
-  cannot be mapped to a recurrence — but a non-mappable shape (sub-hourly steps
-  like `*/30`, hour ranges/lists like `9-17`) is never paired and silently never
-  fires. Only shapes that map are actually run: minute a single value; hour a
-  single value or `*` / `*/N`. Pick one explicit, mappable cadence.
+  `0 9 * * *` (daily 09:00), `0 8 * * 1` (Mondays 08:00), `0 */2 * * *` (every 2h),
+  `0 18 1 * *` (1st of month 18:00). Only mappable shapes actually fire: minute a
+  single value; hour a single value or `*` / `*/N`. A non-mappable shape (`*/30`,
+  ranges like `9-17`) is accepted at create but silently never fires — pick one
+  explicit, mappable cadence.
 - **`schedule.timezone`** — IANA zone; omit to inherit the daemon default.
 - **`schedule.defer_in_quiet_hours`** — boolean, default `false`. When `true`, a
-  firing that lands inside the user's quiet hours is pushed to the window's end
-  instead of running — the whole run moves, so the data is fresh at delivery
-  time. Mechanical rule: **set `true` whenever the Expected output includes
-  DMing the user**; leave it `false` for silent file-writing work deliberately
-  scheduled overnight.
+  firing inside the user's quiet hours is pushed to the window's end (the whole run
+  moves, so data is fresh at delivery). Mechanical rule: **set `true` whenever the
+  Expected output includes DMing the user**; `false` for silent overnight file work.
 - **`backend`** — optional. `tier` is `lite`/`medium`/`high` (cost/capability knob;
-  the standalone control that works). `process_key` defaults to `agent.task`;
-  omit unless you know you need another. (Pinning a backend *engine* without a
-  `model` is a known no-op — prefer `tier`.)
+  the standalone control that works). `process_key` defaults to `agent.task`; omit
+  unless you know you need another. (Pinning an *engine* without a `model` is a
+  known no-op — prefer `tier`.)
+- **`limits`** — optional per-firing caps: `max_turns` (default `20`),
+  `max_budget_usd` (soft cost cap, default `0.25`), `timeout_minutes` (default
+  `10`). Defaults are tight; a research/briefing Agent that runs several searches
+  and writes a note wants more, e.g. `{ "max_turns": 40, "max_budget_usd": 1.5,
+  "timeout_minutes": 20 }`. **Set them here at create time** — omitting the block
+  silently applies the defaults, and (like other user-Agent fields) limits are
+  changed afterward only by editing the `agent.md`, not via `PATCH /api/agents`.
 - **`playbooks`** — optional array of operating-playbook slugs to inject into the
   Agent's prompt at fire time: `research`, `markdown-note`, `monitoring`. Declaring
   one makes the daemon inject that playbook's full methodology into every run — a
@@ -155,17 +157,14 @@ a run-time autonomy boundary, and a verification receipt:
 
 {{> ref:prompt-frame-extended }}
 
-The `# Output` decision feeds one schedule field: if the output contract
-includes DMing the user, also set `schedule.defer_in_quiet_hours: true` so a
-firing inside quiet hours waits for the window's end instead of producing a
-message that would be held anyway.
+Reminder: if the `# Output` includes DMing the user, set
+`schedule.defer_in_quiet_hours: true` (see the schedule field above).
 
 ## Success criteria — derive them from `# Output`
 
-`success_criteria` are deterministic checks the daemon evaluates after every
-firing; their hit rate is the Agent's dashboard quality metric — without them
-the Agent has **no quality signal**. Derive 1–3 mechanically from the `# Output`
-contract at creation time:
+`success_criteria` are deterministic checks the daemon runs after every firing;
+their hit rate is the Agent's dashboard quality metric (without them it has **no
+quality signal**). Derive 1–3 mechanically from the `# Output` contract:
 
 - Writes a dated note → `{ "id": "note-exists", "kind": "file_exists",
   "target": "notes/<name>-{date}.md" }`. Targets are vault-relative; `{date}`
@@ -175,34 +174,38 @@ contract at creation time:
   counts headings of exactly `heading_level`.
 - DMs the user → `{ "id": "dm-delivered", "kind": "notification_log",
   "notification_type": "agent", "delivered_within_minutes": M }` — size `M` to
-  the run (30–60 typical). Caveat: matching is install-wide within the window
-  (ANY delivered `"agent"` notification counts, not just this Agent's), so
-  prefer the file-based kinds whenever the output also lands in a file.
+  the run (30–60 typical). Caveat: matching is install-wide (ANY delivered
+  `"agent"` notification in the window counts) — prefer file-based kinds when the
+  output also lands in a file.
+- Mutates state (no file) → `{ "id": "acted", "kind": "agent_action_count",
+  "action_type": "…", "min": N }` — ≥ N logged actions of `action_type`; the
+  signal for **operational Agents**.
 
 `id` values must be unique within the Agent (duplicates are rejected as
 `invalid_definition` on `success_criteria[i].id`).
 
 ## Responses & errors
 
-- `201 { "status": "created", "slug": "…" }` — the Agent is live; its recurring
-  schedule is paired and it will fire on the next matching tick. The response may
-  also carry `warnings[]` (non-blocking authoring lint — e.g. a missing
-  `# Instruction` section, a playbook you named but didn't declare, or an
-  `# Output` contract with no `success_criteria`); the Agent is still created,
-  but fix the flagged issues and re-save its `agent.md`.
-- `400 one_shot_not_supported` — the schedule was not `cron`/`recurring`. Use the
-  `schedule` skill for one-time tasks.
-- `400 invalid_recurrence` — a `kind:"recurring"` schedule carried a malformed
-  `recurrence`. Read `issues[]` (each `{ field, message }`), fix the named field,
-  and resubmit.
-- `409 slug_collision` — pick a different slug.
-- `400 invalid_definition` — the assembled definition failed validation. Two
-  shapes share this error: pre-write schema validation returns `hint` +
-  `issues[]` (each `{ field, message }`); the post-write cross-check (loader
-  rejects the freshly written file) returns `slug` + a single `detail` string
-  (or `null`). Read `issues[]` if present, else fall back to `detail`, fix the
-  reported field(s), and resubmit. An empty/placeholder `prompt` also lands
-  here — get the real task from the user, never retry with another stub.
+Every error is `{ "error": "<code>", "hint"?: "…", "field"?: "…", "issues"?:
+[{ field, message }] }`. **Read `hint` (what to do), `field` / `issues` (what to
+fix), then resubmit** — almost every failure is a one-field fix the response
+spells out, so retry after correcting rather than giving up.
+
+- `201 { "status": "created", "slug": "…" }` — live; the recurring schedule is
+  paired and fires on the next tick. May carry `warnings[]` (non-blocking lint:
+  missing `# Instruction`, an undeclared playbook, or `# Output` with no
+  `success_criteria`) — created anyway, but fix + re-save the `agent.md`.
+- `400 slug_required` / `name_required` / `schedule_required` — a required field
+  was missing/empty; `field` + `hint` name the one to add.
+- `400 one_shot_not_supported` — schedule wasn't `cron`/`recurring`; one-time work
+  goes to the `schedule` skill.
+- `400 invalid_recurrence` — malformed `recurrence`; fix each `issues[]` field.
+- `409 slug_collision` — that slug exists (`GET /api/agents` to inspect); pick
+  another, or edit the existing Agent rather than recreating it.
+- `400 invalid_definition` — schema or loader cross-check failure. Read `issues[]`
+  if present, else the single `detail` string (also mirrored into `hint`). An
+  empty/placeholder `prompt` lands here too — get the real task from the user,
+  never retry with a stub.
 
 Read `Read`-only files you reference in the prompt to confirm they exist before
 creating the Agent.
