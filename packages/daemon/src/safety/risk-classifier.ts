@@ -129,6 +129,10 @@ const API_RISK: Record<string, RiskTier> = {
   // visibility — the route handlers are the chokepoint, not the
   // classifier.
   "/api/repositories": RiskTier.Approve,
+  // Development-mode read projection for the dashboard "Dev Sessions" page.
+  // Read-only (GET list + GET detail); the contract is authored in-process by
+  // the interview runner, so there is no agent-callable write chokepoint here.
+  "/api/dev-sessions": RiskTier.Approve,
   // Agent-callable chokepoint for the architecture refresh flow. The
   // outer `/api/repositories` Approve umbrella protects browser-facing
   // CRUD; this endpoint is invoked by the agent session spawned for

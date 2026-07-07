@@ -32,6 +32,7 @@ import { createObsidianRoutes } from "./routes/obsidian.js";
 import { createGitRoutes } from "./routes/git.js";
 import { createGitTemplatesRoutes } from "./routes/git-templates.js";
 import { createRepositoriesRoutes } from "./routes/repositories.js";
+import { createDevSessionsRoutes } from "./routes/dev-sessions.js";
 import { createMailRoutes } from "./routes/mail/index.js";
 import { createSSERoutes, EventBroadcaster } from "./routes/sse.js";
 import { createSetupRoutes } from "./routes/setup.js";
@@ -1228,6 +1229,9 @@ export function createApp(deps: ApiDependencies): Hono {
     onIndexableContextChange: deps.onIndexableContextChange,
   });
   app.route("/api", repositoriesRoutes);
+  // Dev-mode session read projection (dashboard "Dev Sessions" page).
+  const devSessionsRoutes = createDevSessionsRoutes({ db: deps.db });
+  app.route("/api", devSessionsRoutes);
   // Git template editor + retemplate. Registered unconditionally — the
   // dashboard's Templates editor is reachable even when no repos are
   // currently watched (the user may be staging a template change before

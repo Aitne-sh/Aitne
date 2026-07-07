@@ -304,6 +304,10 @@ export class AgentScheduler {
   private onDayBoundary: (() => Promise<void>) | null = null;
   private sendDm: ((message: string, platforms?: string[]) => Promise<MessageDelivery[]>) | null = null;
   private onActivityScan: ((source: string) => Promise<unknown>) | null = null;
+  /** Dev-mode inactivity-timeout hook — a `dev_session_timeout` row fires this
+   *  with the parked session id so the runner exits an idle session. Direct
+   *  daemon work (no backend dispatch), like `handleDirectDm`. */
+  private onDevSessionTimeout: ((sessionId: string) => Promise<void>) | null = null;
   /**
    * Phase 4 auth probe hook — fired on every hourly cron tick BEFORE
    * `onActivityScan` so the probe gets a chance to refresh DB cache +
@@ -464,6 +468,11 @@ export class AgentScheduler {
    */
   setSendDmCallback(fn: (message: string, platforms?: string[]) => Promise<MessageDelivery[]>): void {
     this.sendDm = fn;
+  }
+
+  /** Wire the dev-mode inactivity-timeout handler (index.ts → runner). */
+  setDevSessionTimeoutCallback(fn: (sessionId: string) => Promise<void>): void {
+    this.onDevSessionTimeout = fn;
   }
 
   setActivityScanCallback(fn: (source: string) => Promise<unknown>): void {
@@ -1804,6 +1813,12 @@ export class AgentScheduler {
             // task_context JSON), flip the claim to 'failed' so the row
             // doesn't stay 'running' forever and the watcher can move on.
             try {
+              // Dev-mode inactivity timeout: exit an idle dev session directly
+              // (no backend), like the `dm` branch.
+              if (row.task_type === "dev_session_timeout") {
+                await this.handleDevSessionTimeout(row);
+                continue;
+              }
               // Direct DM: send message without running an agent
               if (row.task_type === "dm") {
                 await this.handleDirectDm(row);
@@ -2345,6 +2360,34 @@ export class AgentScheduler {
         { err, taskId: row.id },
         "Failed to send direct DM",
       );
+    }
+  }
+
+  /**
+   * Handle a `dev_session_timeout` row: a dev session sat idle in interview /
+   * awaiting_approval past the inactivity window. Fire the registered callback
+   * (→ runner.expireForTimeout, which exits the session iff still idle) and
+   * mark the row completed. Pure daemon work, no backend dispatch.
+   */
+  private async handleDevSessionTimeout(row: ScheduleRow): Promise<void> {
+    try {
+      const ctx = JSON.parse(row.task_context ?? "{}") as { sessionId?: unknown };
+      const sessionId = typeof ctx.sessionId === "string" ? ctx.sessionId : null;
+      if (!sessionId) {
+        logger.warn({ taskId: row.id }, "dev_session_timeout row missing sessionId");
+      } else if (!this.onDevSessionTimeout) {
+        logger.warn({ taskId: row.id, sessionId }, "onDevSessionTimeout callback not registered");
+      } else {
+        await this.onDevSessionTimeout(sessionId);
+      }
+      this.db
+        .prepare("UPDATE agent_schedule SET status = 'completed' WHERE id = ?")
+        .run(row.id);
+    } catch (err) {
+      this.db
+        .prepare("UPDATE agent_schedule SET status = 'failed' WHERE id = ?")
+        .run(row.id);
+      logger.error({ err, taskId: row.id }, "Failed to handle dev_session_timeout");
     }
   }
 

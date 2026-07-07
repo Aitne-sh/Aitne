@@ -26,6 +26,9 @@ export const DEV_DIR_NAME = ".aitne-dev";
 /** Relative doc paths inside .aitne-dev/. */
 export const DEV_DOCS = {
   contract: "docs/product-contract.md",
+  /** Machine loop config the interview agent proposes (verifyCommands etc.);
+   *  the runner reads + validates it at CONTRACT_READY. JSON. */
+  loopConfig: "docs/loop-config.json",
   ledger: "docs/requirements-ledger.md",
   plan: "docs/implementation-plan.md",
   progress: "docs/progress.md",

@@ -1391,6 +1391,14 @@ async function startup(): Promise<void> {
     return messageHub.sendToUser(message);
   });
   scheduler.setActivityScanCallback((source) => dispatcher.triggerActivityScan(source));
+  // Dev-mode inactivity timeout: a `dev_session_timeout` row fires this with
+  // the parked session id → the runner exits an idle interview/approval
+  // session. A direct scheduler-owned callback (no backend dispatch), like the
+  // context-index reconciler below.
+  scheduler.setDevSessionTimeoutCallback(
+    (sessionId) =>
+      dispatcher.getDevModeRunner()?.expireForTimeout(sessionId) ?? Promise.resolve(),
+  );
   // B-004 Phase 2a — nightly context-index reconciler. The design doc
   // (§4.1, §5.3) originally proposed an `agent_schedule` row with
   // `task_type: "internal.reconcile_context_index"`, but the dispatcher's

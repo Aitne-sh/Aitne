@@ -801,6 +801,8 @@ export default defineConfig({
         "packages/daemon/src/services/dev-mode/dev-loop-legs.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-engine.ts",
         "packages/daemon/src/services/dev-mode/dev-mode-runner.ts",
+        "packages/daemon/src/services/dev-mode/dev-mode-backend.ts",
+        "packages/daemon/src/services/dev-mode/dev-mode-publisher.ts",
         "packages/daemon/src/api/routes/dev-sessions.ts",
 
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──

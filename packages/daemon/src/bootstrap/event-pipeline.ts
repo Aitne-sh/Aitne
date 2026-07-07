@@ -85,6 +85,7 @@ import type Database from "better-sqlite3";
 
 import type { AgentConfig } from "../config.js";
 import { getContextDir, isRoadmapStale } from "../config.js";
+import { isInQuietHoursAt } from "../core/quiet-hours.js";
 import { resolveUserSkillsRoot } from "../core/user-skills-root.js";
 import { isUserPaused } from "../db/runtime-state.js";
 import { readIntegrations } from "../db/integrations-store.js";
@@ -1359,6 +1360,158 @@ export async function createEventPipeline(
   });
   dispatcher.setBackgroundTaskRunner(backgroundTaskRunner);
 
+  // ── Development-mode runner (dev-mode plan §2) ────────────────────────
+  // Drives a `!repo` → interview → `!approve` → autonomous-loop session in a
+  // registered repo. The model-calling backend resolves per-leg models via the
+  // router's binding table but runs `query()` directly (repo isolation, D6
+  // tool clamp). `onSessionEnded` drops the dispatcher's singleton latch on a
+  // terminal session in one place.
+  const { createDevModeRunner } = await import(
+    "../services/dev-mode/dev-mode-runner.js"
+  );
+  const { createDevModeBackend } = await import(
+    "../services/dev-mode/dev-mode-backend.js"
+  );
+  const { getRepository: getRepositoryForDev } = await import(
+    "../db/repositories-store.js"
+  );
+  const { createAutonomousForwardDeliveryEvent: createDevForwardEvent } =
+    await import("../core/dispatcher-task-delivery.js");
+  const { markDevEscalationDelivered } = await import(
+    "../db/dev-session-escalations-store.js"
+  );
+  const { createDevModePublisher } = await import(
+    "../services/dev-mode/dev-mode-publisher.js"
+  );
+  // The context-index reconcile hook isn't reachable from this bootstrap layer
+  // (it lives in bootstrap/api.ts); the periodic reconciler re-indexes the
+  // published files on its next cycle, so omit the immediate-notify hook.
+  const devModePublisher = createDevModePublisher({
+    db,
+    contextDir: getContextDir(config, db),
+    writeTracker,
+  });
+  // Owner reachable now = NOT in the quiet-hours window (the task-delivery
+  // handler drops an `autonomous_forward` idle-send during quiet hours with no
+  // recovery, so we must not mark such a send as delivered).
+  const devOwnerReachable = (nowMs: number): boolean =>
+    !isInQuietHoursAt(new Date(nowMs), {
+      start: config.quietHoursStart,
+      end: config.quietHoursEnd,
+      timezone: config.timezone || undefined,
+    });
+  // Dev-mode delivery — plain-text digest + escalation questions routed through
+  // the `autonomous_forward` task-delivery kind (fire-and-forget: it carries no
+  // background-task row, so no store-coupled idempotency, and still weaves into
+  // an active DM turn or lands verbatim when idle). An escalation marks its own
+  // `delivered_at` ONLY when the owner is reachable; a quiet-hours enqueue is
+  // left undelivered so the periodic housekeeping tick re-delivers it after the
+  // window (a parked session must never lose its question).
+  const devModeDeliveryEnqueuer = {
+    async enqueueDigest(input: {
+      sessionId: string;
+      originatingChannel: string | null;
+      title: string;
+      draft: string;
+      report: string;
+      evidencePath?: string | null;
+    }): Promise<void> {
+      const content =
+        input.report && input.report !== input.draft
+          ? `${input.draft}\n\n${input.report}`
+          : input.draft;
+      await eventBus.put(
+        createDevForwardEvent({
+          content,
+          originatingChannel: input.originatingChannel,
+          title: `dev: ${input.title}`,
+          correlationId: `dev.session:${input.sessionId}`,
+        }),
+      );
+    },
+    async enqueueEscalation(input: {
+      sessionId: string;
+      escalationId: string;
+      originatingChannel: string | null;
+      title: string;
+      question: string;
+      contextSummary: string | null;
+    }): Promise<void> {
+      const content = [
+        `The dev loop for ${input.title} needs a decision:`,
+        "",
+        input.question,
+        input.contextSummary ? `\n${input.contextSummary}` : "",
+        "\nReply here to continue, or !exit to stop.",
+      ]
+        .filter((l) => l.length > 0)
+        .join("\n");
+      await eventBus.put(
+        createDevForwardEvent({
+          content,
+          originatingChannel: input.originatingChannel,
+          title: `dev decision needed: ${input.title}`,
+          correlationId: `dev.session:${input.sessionId}`,
+        }),
+      );
+      // Only mark delivered when the send will actually land now; otherwise
+      // leave it for the housekeeping-tick retry after quiet hours.
+      if (devOwnerReachable(Date.now())) {
+        markDevEscalationDelivered(db, input.escalationId, Date.now());
+      }
+    },
+  };
+  const devModeRunner = createDevModeRunner({
+    db,
+    deliveryEnqueuer: devModeDeliveryEnqueuer,
+    publisher: devModePublisher,
+    makeBackend: (abortController) =>
+      createDevModeBackend({
+        abortController,
+        resolveModelId: (tier) => {
+          try {
+            const route = agentRouter.resolveBinding(
+              {
+                type: "dev.session",
+                source: "dev-mode",
+                priority: EventPriority.NORMAL,
+                timestamp: new Date(),
+                data: {},
+                correlationId: "dev.session",
+              },
+              { processKey: "dev.session", requestedTier: tier },
+            );
+            return route.main.modelId;
+          } catch (err) {
+            logger.warn({ err, tier }, "dev-mode: resolveBinding failed");
+            return null;
+          }
+        },
+      }),
+    loadTaskFlow: (key) => getTaskFlow(key),
+    resolveRepoPath: (repoId) => getRepositoryForDev(db, repoId)?.localPath ?? null,
+    onSessionEnded: () => dispatcher.clearDevMode(),
+    tier: "high",
+  });
+  dispatcher.setDevModeRunner(devModeRunner);
+  // Boot recovery: restart a `running` loop from its checkpoint; re-arm the
+  // inactivity timer for a session still waiting on the human. At most one is
+  // non-terminal (D5), but the sweep is defensive.
+  try {
+    const { listNonTerminalDevSessions } = await import(
+      "../db/dev-sessions-store.js"
+    );
+    for (const devSession of listNonTerminalDevSessions(db)) {
+      void devModeRunner.resumeFromBoot(devSession.id).catch((err) => {
+        logger.error({ err, sessionId: devSession.id }, "dev-mode boot resume failed");
+      });
+    }
+    // Undelivered-escalation recovery is handled by the periodic housekeeping
+    // tick (which also runs immediately at boot), so no separate boot sweep.
+  } catch (err) {
+    logger.warn({ err }, "dev-mode boot recovery sweep failed");
+  }
+
   // ── Browser-task deadline scanner tick ────────────────────────────────
   // BROWSER_TASK_REDESIGN_PLAN.md §5 ask_user "Deadline enforcement" +
   // §5.1 pending-queue timeout safety valve. Single 30 s tick handles
@@ -1641,6 +1794,30 @@ export async function createEventPipeline(
             { count },
             "background-task delivery recovery enqueued task.delivery events",
           );
+        }
+        // (4) dev-mode escalation delivery recovery — re-deliver any parked
+        // session's question that was never sent (crash between park and
+        // enqueue, or a quiet-hours drop). Skip while the owner is unreachable
+        // so we don't churn undeliverable events; the enqueuer marks
+        // delivered_at once it lands.
+        if (devOwnerReachable(nowMs)) {
+          const { listUndeliveredDevEscalations } = await import(
+            "../db/dev-session-escalations-store.js"
+          );
+          for (const esc of listUndeliveredDevEscalations(db)) {
+            try {
+              await devModeDeliveryEnqueuer.enqueueEscalation({
+                sessionId: esc.sessionId,
+                escalationId: esc.id,
+                originatingChannel: esc.sessionOriginatingChannel,
+                title: esc.sessionSlug ?? esc.sessionId,
+                question: esc.question,
+                contextSummary: esc.contextSummary,
+              });
+            } catch (err) {
+              logger.warn({ err, escalationId: esc.id }, "dev escalation delivery recovery failed (continuing)");
+            }
+          }
         }
       } catch (err) {
         logger.warn({ err }, "background-task housekeeping tick failed (continuing)");

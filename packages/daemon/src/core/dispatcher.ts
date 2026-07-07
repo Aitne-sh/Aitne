@@ -52,6 +52,12 @@ import {
   readRuntimeState,
   writeRuntimeState,
 } from "../db/runtime-state.js";
+import {
+  clearDevModeState,
+  readDevModeState,
+  writeDevModeState,
+  type DevModeState,
+} from "./dev-mode/dev-mode-state.js";
 import type { IAgentRouter } from "./backends/backend-router.js";
 import type { TodayWriteLockManager } from "./today-write-lock.js";
 import type { RoadmapWriteLockManager } from "./roadmap-write-lock.js";
@@ -233,6 +239,25 @@ export class EventDispatcher {
   private backgroundTaskRunner:
     | import("../services/background-task/background-task-runner.js").BackgroundTaskRunner
     | null = null;
+  /**
+   * Development mode — drives a `!repo` → interview → `!approve` → autonomous
+   * loop session inside a registered repo. Wired at startup from
+   * `bootstrap/event-pipeline.ts` via `setDevModeRunner`. Null when the factory
+   * has not landed; the `!approve`/`!exit` bang commands then reply that dev
+   * mode is unavailable rather than silently no-op.
+   */
+  private devModeRunner:
+    | import("../services/dev-mode/dev-mode-runner.js").DevModeRunner
+    | null = null;
+  /**
+   * The live dev-mode latch — the SetupMode analog (`current_dev_mode` in
+   * runtime_state). The FAST intercept signal the message handler checks on
+   * every DM to route into an interview turn / escalation answer. The
+   * authoritative session state lives in `dev_sessions`; this pointer only
+   * says "a dev session is live, here is its id". At most one is set (D5).
+   * Persisted so a daemon restart restores the routing.
+   */
+  private currentDevMode: DevModeState | null = null;
   /**
    * Current setup mode — scope-agnostic flag that survives internal
    * direct-message session refresh (day boundary, stale flag, etc). Previously this
@@ -795,6 +820,10 @@ export class EventDispatcher {
       getFinalConfirmHandler: () => this.finalConfirmHandler,
       getBackgroundTaskRunner: () => this.backgroundTaskRunner,
       getBrowserTaskRunner: () => this.browserTaskRunner,
+      getDevModeRunner: () => this.devModeRunner,
+      getCurrentDevMode: () => this.currentDevMode,
+      beginDevMode: (state) => this.beginDevMode(state),
+      clearDevMode: () => this.clearDevMode(),
       getCurrentSetupMode: () => this.currentSetupMode,
       beginSetupMode: (mode) => this.beginSetupMode(mode),
       lookupCustomBangCommandForEvent: (event) =>
@@ -813,6 +842,16 @@ export class EventDispatcher {
       logger.info(
         { mode: this.currentSetupMode },
         "Restored setup mode from runtime_state — autonomous work remains paused",
+      );
+    }
+    // Restore the dev-mode latch so a DM to a live dev session still routes
+    // into its interview / escalation after a restart. The runner's
+    // resumeFromBoot (wired in bootstrap) restarts any running loop.
+    this.currentDevMode = readDevModeState(this.db);
+    if (this.currentDevMode !== null) {
+      logger.info(
+        { sessionId: this.currentDevMode.sessionId, slug: this.currentDevMode.slug },
+        "Restored dev mode from runtime_state",
       );
     }
   }
@@ -905,6 +944,22 @@ export class EventDispatcher {
       | null,
   ): void {
     this.backgroundTaskRunner = runner;
+  }
+
+  /** Wire the dev-mode runner (from `event-pipeline.ts`) so the bang commands
+   *  + the message-handler dev-mode branch can reach it. */
+  setDevModeRunner(
+    runner:
+      | import("../services/dev-mode/dev-mode-runner.js").DevModeRunner
+      | null,
+  ): void {
+    this.devModeRunner = runner;
+  }
+
+  getDevModeRunner():
+    | import("../services/dev-mode/dev-mode-runner.js").DevModeRunner
+    | null {
+    return this.devModeRunner;
   }
 
   /**
@@ -1309,6 +1364,52 @@ export class EventDispatcher {
   /** Observable getter, primarily for tests and the onPromptContextChanged gate. */
   getCurrentSetupMode(): SetupMode | null {
     return this.currentSetupMode;
+  }
+
+  /**
+   * Latch dev mode onto a session (from the `!repo` bang command). Persists to
+   * runtime_state so the routing survives a restart. Mirrors `beginSetupMode`.
+   */
+  beginDevMode(state: DevModeState): void {
+    if (this.currentDevMode !== null && this.currentDevMode.sessionId !== state.sessionId) {
+      logger.warn(
+        { previous: this.currentDevMode.sessionId, next: state.sessionId },
+        "Dev mode replaced while another session was active",
+      );
+    }
+    this.currentDevMode = state;
+    try {
+      writeDevModeState(this.db, state);
+    } catch (err) {
+      logger.warn({ err, sessionId: state.sessionId }, "Failed to persist dev mode to runtime_state");
+    }
+    logger.info({ sessionId: state.sessionId, slug: state.slug }, "Dev mode engaged");
+  }
+
+  /** Drop the dev-mode latch (session reached terminal / `!exit`). Idempotent —
+   *  wired into the runner's `onSessionEnded`. */
+  clearDevMode(): void {
+    if (this.currentDevMode === null) {
+      try {
+        clearDevModeState(this.db);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    const sessionId = this.currentDevMode.sessionId;
+    this.currentDevMode = null;
+    try {
+      clearDevModeState(this.db);
+    } catch (err) {
+      logger.warn({ err }, "Failed to clear dev mode from runtime_state (in-memory cleared)");
+    }
+    logger.info({ sessionId }, "Dev mode cleared");
+  }
+
+  /** The live dev-mode latch, or null. Read by the message-handler on each DM. */
+  getCurrentDevMode(): DevModeState | null {
+    return this.currentDevMode;
   }
 
   /**

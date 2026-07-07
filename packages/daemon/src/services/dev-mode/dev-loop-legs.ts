@@ -50,6 +50,9 @@ export interface DevBackendRequest {
   tier: BackendModelTier;
   maxTurns: number;
   maxBudgetUsd: number;
+  /** Per-leg wall-clock watchdog (seconds) — loop-kit maxIterSeconds. The
+   *  backend aborts a hung leg after this. */
+  maxSeconds: number;
 }
 
 export interface DevBackend {
@@ -76,20 +79,29 @@ const LEG_ENVELOPE = {
 } as const;
 
 /**
- * Derive a Bash allowlist from the verify commands (first token each) plus
- * read-only git. This lets the implement leg run its own checks WITHOUT an
- * unscoped Bash that could `git push` (D6 — never push) or run destructive
- * commands; the deterministic path policy is the harder guard on top.
+ * Derive a Bash allowlist from the verify commands plus read-only git. Each
+ * verify command is granted as its FULL prefix (`Bash(<command>:*)`), never as
+ * a bare root (`Bash(<root>:*)`): a bare root would let the leg run ANY
+ * subcommand of that tool — e.g. `Bash(git:*)` permits `git push`, `Bash(npm:*)`
+ * permits `npm run <push-script>`, `Bash(bash:*)` permits `bash -c 'git push'`
+ * — all D6 escapes (never push). Full-prefix grants let the leg re-run exactly
+ * the approved checks (with args) and nothing else. The deterministic path
+ * policy is the harder guard on top.
  */
 export function deriveBashAllowlist(verifyCommands: readonly string[]): string[] {
-  const roots = new Set<string>();
+  const tools = new Set<string>();
   for (const cmd of verifyCommands) {
-    const first = cmd.trim().split(/\s+/)[0];
-    if (first) roots.add(first);
+    const trimmed = cmd.trim();
+    if (trimmed.length > 0) tools.add(`Bash(${trimmed}:*)`);
   }
-  const tools = [...roots].map((r) => `Bash(${r}:*)`);
-  tools.push("Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(ls:*)", "Bash(cat:*)");
-  return tools;
+  return [
+    ...tools,
+    "Bash(git status:*)",
+    "Bash(git diff:*)",
+    "Bash(git log:*)",
+    "Bash(ls:*)",
+    "Bash(cat:*)",
+  ];
 }
 
 function section(title: string, body: string | null): string {
@@ -119,6 +131,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         prompt: loadTaskFlow("dev.plan"),
         context,
         sessionDir: ctx.repoPath,
+        maxSeconds: ctx.config.maxIterSeconds,
         allowedTools: WRITE_TOOLS,
         readOnly: false,
         ...LEG_ENVELOPE.plan,
@@ -138,6 +151,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         prompt: loadTaskFlow("dev.implement"),
         context,
         sessionDir: ctx.repoPath,
+        maxSeconds: ctx.config.maxIterSeconds,
         allowedTools: [...WRITE_TOOLS, ...deriveBashAllowlist(ctx.config.verifyCommands)],
         readOnly: false,
         maxTurns: LEG_ENVELOPE.implement.maxTurns,
@@ -158,6 +172,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         prompt: loadTaskFlow("dev.review"),
         context,
         sessionDir: ctx.repoPath,
+        maxSeconds: ctx.config.maxIterSeconds,
         allowedTools: READONLY_TOOLS,
         readOnly: true,
         maxTurns: LEG_ENVELOPE.review.maxTurns,
@@ -182,6 +197,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         prompt: loadTaskFlow("dev.stop_eval"),
         context,
         sessionDir: ctx.repoPath,
+        maxSeconds: ctx.config.maxIterSeconds,
         allowedTools: READONLY_TOOLS,
         readOnly: true,
         ...LEG_ENVELOPE.stop_eval,
@@ -207,6 +223,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         prompt: loadTaskFlow("dev.evidence"),
         context,
         sessionDir: ctx.repoPath,
+        maxSeconds: ctx.config.maxIterSeconds,
         allowedTools: WRITE_TOOLS,
         readOnly: false,
         ...LEG_ENVELOPE.evidence,

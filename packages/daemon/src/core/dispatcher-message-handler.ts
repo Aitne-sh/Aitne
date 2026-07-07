@@ -91,6 +91,12 @@ import {
 } from "./workdir.js";
 import { upsertOwnerChannel } from "../messaging/owner-channels.js";
 import { readIntegrations } from "../db/integrations-store.js";
+import {
+  getDevSession,
+  DEV_SESSION_NON_TERMINAL_STATES,
+} from "../db/dev-sessions-store.js";
+import { getOpenDevEscalationForSession } from "../db/dev-session-escalations-store.js";
+import type { DevModeState } from "./dev-mode/dev-mode-state.js";
 import { EventBus } from "./event-bus.js";
 import type {
   IAuditLogger,
@@ -188,6 +194,23 @@ export interface MessageHandlerDeps {
   getBrowserTaskRunner?: () =>
     | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
     | null;
+  /** Lazily-injected dev-mode runner (interview/escalation resume + timeout
+   *  re-arm). Null before startup / in tests; the dev-mode branch degrades
+   *  gracefully when absent. */
+  getDevModeRunner?: () =>
+    | import("../services/dev-mode/dev-mode-runner.js").DevModeRunner
+    | null;
+  /** Live getter for the dispatcher's `currentDevMode` latch. */
+  getCurrentDevMode?: () =>
+    | import("./dev-mode/dev-mode-state.js").DevModeState
+    | null;
+  /** Forward into the dispatcher's `beginDevMode` (latch a session on `!repo`)
+   *  and `clearDevMode` (drop the latch on a terminal session observed from
+   *  the message path). */
+  beginDevMode?: (
+    state: import("./dev-mode/dev-mode-state.js").DevModeState,
+  ) => void;
+  clearDevMode?: () => void;
 
   /** Live getter for the dispatcher's `currentSetupMode` flag. */
   getCurrentSetupMode: () => SetupMode | null;
@@ -246,6 +269,16 @@ export class MessageHandler {
   private readonly getBrowserTaskRunner: () =>
     | import("../services/browser-task/browser-task-runner.js").BrowserTaskRunner
     | null;
+  private readonly getDevModeRunner: () =>
+    | import("../services/dev-mode/dev-mode-runner.js").DevModeRunner
+    | null;
+  private readonly getCurrentDevMode: () =>
+    | import("./dev-mode/dev-mode-state.js").DevModeState
+    | null;
+  private readonly beginDevMode: (
+    state: import("./dev-mode/dev-mode-state.js").DevModeState,
+  ) => void;
+  private readonly clearDevMode: () => void;
   private readonly getCurrentSetupMode: () => SetupMode | null;
   private readonly beginSetupMode: (mode: SetupMode) => void;
   private readonly lookupCustomBangCommandForEvent: (
@@ -290,6 +323,10 @@ export class MessageHandler {
       deps.getBackgroundTaskRunner ?? ((): null => null);
     this.getBrowserTaskRunner =
       deps.getBrowserTaskRunner ?? ((): null => null);
+    this.getDevModeRunner = deps.getDevModeRunner ?? ((): null => null);
+    this.getCurrentDevMode = deps.getCurrentDevMode ?? ((): null => null);
+    this.beginDevMode = deps.beginDevMode ?? ((): void => undefined);
+    this.clearDevMode = deps.clearDevMode ?? ((): void => undefined);
     this.getCurrentSetupMode = deps.getCurrentSetupMode;
     this.beginSetupMode = deps.beginSetupMode;
     this.lookupCustomBangCommandForEvent = deps.lookupCustomBangCommandForEvent;
@@ -515,6 +552,109 @@ export class MessageHandler {
   }
 
   /**
+   * Development-mode DM routing. Returns `true` when the DM was consumed by the
+   * dev session (caller short-circuits), `false` to fall through to normal
+   * processing (only when the latch is stale). Branches on the live session
+   * state:
+   *   - awaiting_user  → the loop parked on a critical question; the DM is the
+   *     owner's answer → resolve the open escalation + resume the loop.
+   *   - interview / awaiting_approval → the DM is an interview turn → draft the
+   *     contract (the inactivity timer slides forward on the activity).
+   *   - running → the loop is busy; acknowledge (owner should `!exit` to stop).
+   */
+  private async handleDevModeMessage(
+    event: MessageEvent,
+    devMode: DevModeState,
+  ): Promise<boolean> {
+    const session = getDevSession(this.db, devMode.sessionId);
+    // Stale latch — the session vanished or already reached a terminal state.
+    // Drop the latch and let the DM flow through normal handling.
+    if (!session || !DEV_SESSION_NON_TERMINAL_STATES.has(session.state)) {
+      logger.info(
+        { sessionId: devMode.sessionId, state: session?.state },
+        "Dev-mode latch is stale — clearing and falling through",
+      );
+      this.clearDevMode();
+      return false;
+    }
+    const runner = this.getDevModeRunner();
+
+    if (session.state === "awaiting_user") {
+      const open = getOpenDevEscalationForSession(this.db, session.id);
+      if (!open) {
+        // Parked but no open question — defensive. Nudge the owner.
+        await this.notificationMgr.send(
+          "The dev session is paused but I have no open question on file. Reply `!exit` to end it.",
+          event,
+        );
+        return true;
+      }
+      if (!runner) {
+        await this.notificationMgr.send(
+          "Dev mode is unavailable right now (the loop runner isn't wired). Try again shortly.",
+          event,
+        );
+        return true;
+      }
+      const outcome = await runner.resumeAfterEscalation({
+        sessionId: session.id,
+        escalationId: open.id,
+        answer: event.content,
+      });
+      if (outcome === "resumed") {
+        await this.notificationMgr.send(
+          "Got it — resuming the dev loop with your answer.",
+          event,
+        );
+      } else if (outcome === "failed") {
+        await this.notificationMgr.send(
+          "Couldn't resume the dev loop from that answer. Reply `!exit` to end the session.",
+          event,
+        );
+      }
+      // outcome === "blocked": the loop hit its resume budget and terminated;
+      // the runner already enqueued a "blocked" digest, so don't double-message.
+      return true;
+    }
+
+    if (session.state === "interview" || session.state === "awaiting_approval") {
+      // Sliding inactivity window — activity re-arms the timer.
+      runner?.retimeTimeout(session.id);
+      if (!runner) {
+        await this.notificationMgr.send(
+          "Dev mode is warming up — try again in a moment.",
+          event,
+        );
+        return true;
+      }
+      const activity = await this.notificationMgr.beginReplyActivity(event);
+      try {
+        const reply = await runner.runInterviewTurn({
+          sessionId: session.id,
+          userMessage: event.content,
+        });
+        await this.notificationMgr.send(reply, event);
+      } catch (err) {
+        logger.error({ err, sessionId: session.id }, "dev interview turn threw");
+        await this.notificationMgr.send(
+          "That interview turn failed. Try again, or reply !exit to stop.",
+          event,
+        );
+      } finally {
+        await activity.stop();
+      }
+      return true;
+    }
+
+    // running — the autonomous loop owns the repo; a DM here is out-of-band.
+    await this.notificationMgr.send(
+      "The dev loop is running. Reply `!exit` to stop it, or wait for the next update.",
+      event,
+    );
+    return true;
+  }
+
+  /**
    * Process a reactive message event end-to-end: bang commands, setup
    * lockout, `/auth` interception, session resume/fresh-execute, message
    * persistence, attachment plumbing, dashboard streaming, and the §4.5
@@ -667,6 +807,27 @@ export class MessageHandler {
       }
     }
 
+    // ── Development mode intercept (NON-bang DMs) ──
+    // While a dev session is latched (a singleton, like setup mode), a plain DM
+    // from the owner routes into the loop rather than the generic DM agent: an
+    // escalation answer resumes the parked loop; an interview turn drafts the
+    // contract. This MUST run BEFORE the bang interceptor's pause-decline —
+    // otherwise a paused dev session (started with the `runsWhilePaused` `!repo`)
+    // would have its interview / escalation DMs swallowed by the "agent is
+    // paused" notice, stranding the session. Bang DMs (`!repo`/`!approve`/
+    // `!exit`) are left to the bang interceptor below (they are runsWhilePaused).
+    // Dashboard messages / non-DM mentions keep their own scope and are exempt.
+    const currentDevMode = this.getCurrentDevMode();
+    if (
+      event.isDm
+      && event.platform !== "dashboard"
+      && currentDevMode !== null
+      && !event.content.trim().startsWith("!")
+    ) {
+      const handledDev = await this.handleDevModeMessage(event, currentDevMode);
+      if (handledDev) return;
+    }
+
     // Bang-command interceptor — runs first so `!stop` / `!cost` / `!report`
     // succeed even mid-setup, mid-auth-recovery, etc., and so non-bang DMs
     // received while the agent is paused short-circuit before reaching the
@@ -731,6 +892,8 @@ export class MessageHandler {
           const runner = this.getBrowserTaskRunner();
           return runner ? runner.cancel(taskId, reason) : false;
         },
+        getDevModeRunner: () => this.getDevModeRunner(),
+        beginDevMode: (state) => this.beginDevMode(state),
         enqueueWikiApproval: async (approvalInput) => {
           // WIKI_BUILDER_DESIGN.md §5.5 / §P2.E — escalate to Approve tier
           // via the existing agent_schedule approval queue. The dashboard

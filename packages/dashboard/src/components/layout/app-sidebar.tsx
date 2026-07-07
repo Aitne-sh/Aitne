@@ -24,6 +24,7 @@ import {
   Plug,
   GitBranch,
   Globe2,
+  Terminal,
   Plane,
   Wallet,
   Heart,
@@ -225,6 +226,9 @@ export function AppSidebar() {
         // the run queue and scheduled-DM rules that used to live on the
         // retired /schedule page (DASHBOARD_AUTOMATION_IA_REDESIGN.md).
         { label: "Tasks", href: "/tasks", icon: ListChecks },
+        // Dev Sessions — the development-mode build loop (!repo → !approve),
+        // read-only visibility into the running loop + evidence.
+        { label: "Dev Sessions", href: "/dev-sessions", icon: Terminal },
         {
           // /browser hub fronts every browser surface (history integration,
           // managed Chromium, B-4, task list) — BROWSER_HUB_CONSOLIDATION_DESIGN.md.

@@ -80,6 +80,22 @@ export interface BangCommandContext {
   cancelBackgroundTask?: (taskId: string, reason: string) => Promise<boolean>;
   cancelBrowserTask?: (taskId: string, reason: string) => Promise<boolean>;
   /**
+   * Development-mode wiring for the `!repo` / `!approve` / `!exit` commands.
+   * `getDevModeRunner` reaches the in-memory loop runner (approve / cancel /
+   * arm-timeout); `beginDevMode` latches the dispatcher's singleton pointer so
+   * subsequent DMs route into the interview. Optional so unit fixtures without
+   * a dispatcher can omit them — the commands reply "dev mode unavailable"
+   * rather than dropping the request. Must be forwarded in BOTH commandCtx
+   * construction branches below (paused + not-paused) since all three commands
+   * are `runsWhilePaused`.
+   */
+  getDevModeRunner?: () =>
+    | import("../../services/dev-mode/dev-mode-runner.js").DevModeRunner
+    | null;
+  beginDevMode?: (
+    state: import("../dev-mode/dev-mode-state.js").DevModeState,
+  ) => void;
+  /**
    * BROWSER_HISTORY_INTEGRATION_PLAN P3 — wire-through for the
    * `!research accept` / `!research wiki` paths. The bang handler
    * constructs an Event via `createResearchCommandEvent` and the
@@ -397,6 +413,8 @@ export async function tryHandle(
             enqueueWikiEvent: ctx.enqueueWikiEvent,
             enqueueBrowserResearchEvent: ctx.enqueueBrowserResearchEvent,
             enqueueWikiApproval: ctx.enqueueWikiApproval,
+            getDevModeRunner: ctx.getDevModeRunner,
+            beginDevMode: ctx.beginDevMode,
           };
           // Stamp the wall-clock the handler started so we can back-fill
           // runMs into the audit row on success/failure.
@@ -525,6 +543,8 @@ export async function tryHandle(
       // even when the dispatcher-message-handler caller had supplied it.
       enqueueBrowserResearchEvent: ctx.enqueueBrowserResearchEvent,
       enqueueWikiApproval: ctx.enqueueWikiApproval,
+      getDevModeRunner: ctx.getDevModeRunner,
+      beginDevMode: ctx.beginDevMode,
     };
     // Stamp wall-clock start so audit rows carry runMs.
     const startedAtMs = Date.now();
