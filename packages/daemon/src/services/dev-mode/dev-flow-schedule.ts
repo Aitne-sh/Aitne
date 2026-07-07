@@ -205,11 +205,12 @@ export function computeSplitNudge(input: DevSplitNudgeInput): string | null {
     "",
     `Still not met: ${input.unmetReqIds.join(", ")}. If the remaining work does`,
     "not clearly fit in the iterations left, do NOT push on: bring the tree to",
-    "a clean, committed boundary, write a decision request stating exactly what",
-    "is DONE (with evidence) and what REMAINS (as a proposed sequence of",
-    "phases), and declare NEEDS_DECOMPOSITION in .aitne-dev/agent-state — the",
-    "supervisor can split the remainder into phased tasks. If the remaining",
-    "work clearly fits, justify continuing in progress.md and ignore this note.",
+    "a clean, coherent boundary (the daemon commits it after evaluation), write",
+    "a decision request stating exactly what is DONE (with evidence) and what",
+    "REMAINS (as a proposed sequence of phases), and declare",
+    "NEEDS_DECOMPOSITION in .aitne-dev/agent-state — the supervisor can split",
+    "the remainder into phased tasks. If the remaining work clearly fits,",
+    "justify continuing in progress.md and ignore this note.",
     "",
   ].join("\n");
 }

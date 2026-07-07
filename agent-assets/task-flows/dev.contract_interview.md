@@ -56,7 +56,11 @@ either ask ONE more sharp question or finalize.
      "verifyCommands": ["<shell command that exits 0 on success>"],
      "deniedPaths": [".env*", "secrets/**"],
      "escalatePaths": [],
-     "maxIterations": 10
+     "maxIterations": 10,
+     "flow": {
+       "worktreeSetupCommand": "<install command, or omit>",
+       "maxParallel": 3
+     }
    }
    ```
 
@@ -70,6 +74,15 @@ either ask ONE more sharp question or finalize.
    - `escalatePaths` — globs (dependency manifests, schema/migration dirs, infra)
      that should pause for the owner if the loop needs to change them.
    - `maxIterations` — a sane cap for the size of the work (small feature ≈ 5–10).
+   - `flow` — optional fleet settings. Large contracts may be decomposed into
+     parallel loops running in **fresh git worktrees**; a fresh worktree does
+     not contain gitignored artifacts (node_modules, venvs, build caches), so
+     when the repo has a lockfile/manifest whose install step the
+     verifyCommands depend on, set `flow.worktreeSetupCommand` to the exact
+     install command (e.g. `pnpm install --frozen-lockfile`, `npm ci`,
+     `pip install -e .`) — otherwise omit the key. `flow.maxParallel`
+     (default 3) caps concurrent loops; only surface it to the owner when
+     they ask about speed or cost.
 
 ## Steps
 

@@ -15,6 +15,7 @@ import {
   DEV_DOCS,
   gitDiffText,
   readDevDoc,
+  readPhaseContext,
 } from "./dev-loop-docs.js";
 import {
   parseReviewResult,
@@ -117,12 +118,37 @@ function baseContext(ctx: DevLegContext): string {
   ].join("");
 }
 
+/** Fleet-worker sections — empty strings in a single (non-fleet) run where
+ *  none of these files exist. Order mirrors the load order dev.implement.md
+ *  prescribes. */
+function fleetContext(ctx: DevLegContext): string {
+  return (
+    section(
+      "Task instruction (this worktree's job — implement ONLY this)",
+      readDevDoc(ctx.repoPath, DEV_DOCS.taskInstruction),
+    )
+    + section(
+      "Supervisor guidance (treat as the owner's decision)",
+      readDevDoc(ctx.repoPath, DEV_DOCS.supervisorGuidance),
+    )
+    + section(
+      "Parallel loops in this project (never touch a sibling's scope)",
+      readDevDoc(ctx.repoPath, DEV_DOCS.parallelContext),
+    )
+    + section("Budget signal", readDevDoc(ctx.repoPath, DEV_DOCS.splitNudge))
+    + section(
+      "Phase context from merged dependencies (advisory — the WHY behind code already in your tree)",
+      readPhaseContext(ctx.repoPath),
+    )
+  );
+}
+
 export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
   const { backend, loadTaskFlow } = deps;
 
   return {
     async plan(ctx: DevLegContext): Promise<DevLegResponse> {
-      const context = `<dev_loop_context>${baseContext(ctx)}${section(
+      const context = `<dev_loop_context>${baseContext(ctx)}${fleetContext(ctx)}${section(
         "Existing plan (if any)",
         readDevDoc(ctx.repoPath, DEV_DOCS.plan),
       )}</dev_loop_context>`;
@@ -140,7 +166,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
 
     async implement(ctx: DevLegContext): Promise<DevLegResponse> {
       const context =
-        `<dev_loop_context>${baseContext(ctx)}`
+        `<dev_loop_context>${baseContext(ctx)}${fleetContext(ctx)}`
         + section("Implementation plan", readDevDoc(ctx.repoPath, DEV_DOCS.plan))
         + section("Recent progress", readDevDoc(ctx.repoPath, DEV_DOCS.progress))
         + section("Reviewer must-fix (address FIRST if present)", readDevDoc(ctx.repoPath, DEV_DOCS.reviewFeedback))

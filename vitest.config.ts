@@ -804,6 +804,10 @@ export default defineConfig({
         "packages/daemon/src/services/dev-mode/dev-mode-runner.ts",
         "packages/daemon/src/services/dev-mode/dev-mode-backend.ts",
         "packages/daemon/src/services/dev-mode/dev-mode-publisher.ts",
+        // Flow port (fleet) I/O peers — the pure core (task-plan.ts,
+        // dev-flow-schedule.ts) stays IN the gate at 100%.
+        "packages/daemon/src/services/dev-mode/dev-flow-git.ts",
+        "packages/daemon/src/services/dev-mode/dev-flow-legs.ts",
         "packages/daemon/src/api/routes/dev-sessions.ts",
 
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──

@@ -42,6 +42,24 @@ of truth if the injected copy looks stale.
 - `.aitne-dev/agent-state` — you overwrite this with exactly ONE line at the
   very end.
 
+When this loop is one **fleet task** (a decomposed slice of a larger run in
+its own worktree), these additional files may exist — read the ones present:
+
+- `.aitne-dev/docs/task-instruction.md` — **this worktree's job.** Implement
+  ONLY this task's scope; the master contract stays the outer boundary, but
+  another worker owns everything outside this instruction.
+- `.aitne-dev/supervisor-guidance.md` — a supervisor's answer to your earlier
+  decision request. **Treat it as the owner's decision**: follow it, do not
+  re-ask the same question.
+- `.aitne-dev/parallel-context.md` — what the sibling loops are doing. NEVER
+  implement, "fix", or revert anything in a sibling's scope — if a sibling's
+  work looks wrong, note it in `progress.md` and stay in your lane.
+- `.aitne-dev/phase-context/<dep>/` — the archived instruction + evidence of
+  merged dependency phases (advisory — the WHY behind code already in your
+  tree; their "met" claims are phase-scoped, not gospel).
+- `.aitne-dev/split-nudge.md` — a deterministic budget signal (see
+  NEEDS_DECOMPOSITION below).
+
 ## Tools available to you
 
 This leg is **full write-capable** — unlike the read-only analysis flows, you
@@ -144,6 +162,17 @@ Chokepoints and denied surfaces (the runtime enforces these — do not fight the
      API-surface decision is needed (also wrote a `DR-N` block).
    - `BLOCKED <reason>` — cannot proceed (missing info or permission, or the
      same failure resisted 3 fixes; also wrote a `DR-N` block).
+   - `NEEDS_DECOMPOSITION <reason>` — **fleet tasks only** (ignored in a
+     single-loop run): the REMAINING work clearly exceeds the iterations left
+     (`.aitne-dev/split-nudge.md` is the deterministic signal, but you may
+     also conclude it yourself). Protocol: finish the current milestone to a
+     coherent, verifiable state first (the daemon commits your tree after
+     evaluation — never leave it half-edited), then write a `DR-N` block
+     stating exactly what is DONE (with evidence) and what REMAINS as a
+     proposed sequence of phases. The supervisor splits the remainder into
+     phased tasks and carries your committed work forward. If the remaining
+     work clearly fits the budget, justify continuing in `progress.md` and
+     ignore the nudge instead.
 
 ## Stopping conditions
 

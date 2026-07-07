@@ -14,6 +14,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -38,7 +39,31 @@ export const DEV_DOCS = {
   agentState: "agent-state",
   reviewFeedback: "review-feedback.md",
   lastVerify: "last-verify.log",
+  // ── fleet/flow docs (loop-kit task-plan / supervisor / worktree files) ──
+  /** The decomposed task DAG (grammar in task-plan.ts). */
+  taskPlan: "docs/task-plan.md",
+  /** A worker worktree's job — the decomposed TASK body. */
+  taskInstruction: "docs/task-instruction.md",
+  /** Reuse marker: sha256(contract + task-plan) of the APPROVED plan. */
+  decomposeApproved: "decompose-approved",
+  /** Deterministic-validator feedback for the decompose retry. */
+  decomposeFeedback: "decompose-feedback.md",
+  /** Decompose-reviewer feedback for the regenerate round. */
+  decomposeReviewFeedback: "decompose-review-feedback.md",
+  /** Supervisor ANSWER payload — the worker treats it as the owner decision. */
+  supervisorGuidance: "supervisor-guidance.md",
+  /** Fleet budget signal (computeSplitNudge output). */
+  splitNudge: "split-nudge.md",
+  /** What the sibling loops are doing (refreshed on launch/merge/supersede). */
+  parallelContext: "parallel-context.md",
 } as const;
+
+/** Directory (inside .aitne-dev/) holding merged dependencies' archived
+ *  task-instruction + evidence, copied into a dependent's worktree. */
+export const DEV_PHASE_CONTEXT_DIR = "phase-context";
+/** Directory (inside the PARENT repo's .aitne-dev/) archiving each merged
+ *  task's instruction/evidence/ledger — the phase-context + publisher source. */
+export const DEV_TASK_ARCHIVE_DIR = "task-archive";
 
 function devDir(repoPath: string): string {
   return join(repoPath, DEV_DIR_NAME);
@@ -89,6 +114,52 @@ export function appendDevDoc(repoPath: string, rel: string, content: string): vo
 export function removeDevDoc(repoPath: string, rel: string): void {
   const p = devPath(repoPath, rel);
   if (existsSync(p)) rmSync(p);
+}
+
+/** Copy one .aitne-dev doc between repos/worktrees (phase-context / archive
+ *  plumbing). Missing sources are a silent no-op — the archives are advisory. */
+export function copyDevDoc(
+  fromRepo: string,
+  fromRel: string,
+  toRepo: string,
+  toRel: string,
+): void {
+  const body = readDevDoc(fromRepo, fromRel);
+  if (body === null) return;
+  writeDevDoc(toRepo, toRel, body);
+}
+
+/**
+ * Concatenate a worktree's phase-context/<dep>/ files (merged dependencies'
+ * archived task instruction + evidence) into one advisory block for the
+ * plan/implement context, capped. Null when the dir is absent/empty.
+ */
+export function readPhaseContext(repoPath: string, capBytes = 24_000): string | null {
+  const dir = devPath(repoPath, DEV_PHASE_CONTEXT_DIR);
+  if (!existsSync(dir)) return null;
+  const parts: string[] = [];
+  for (const dep of readdirSync(dir).sort()) {
+    const depDir = join(dir, dep);
+    let files: string[];
+    try {
+      files = readdirSync(depDir).sort();
+    } catch {
+      continue; // a stray file at the top level — phase-context is dirs only
+    }
+    for (const f of files) {
+      try {
+        const body = readFileSync(join(depDir, f), "utf8").trim();
+        if (body.length > 0) parts.push(`### ${dep}/${f}\n${body}`);
+      } catch {
+        // advisory — skip unreadable entries
+      }
+    }
+  }
+  if (parts.length === 0) return null;
+  const joined = parts.join("\n\n");
+  return joined.length > capBytes
+    ? `${joined.slice(0, capBytes)}\n… (phase context truncated)`
+    : joined;
 }
 
 /** The first token of agent-state (implement leg's declared state), or null. */

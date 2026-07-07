@@ -29,6 +29,19 @@ inside the repo:
   present for prior-iteration context; do not append here.
 - `.aitne-dev/agent-state` — a single line you write last (see Final output).
 
+When this loop is one **fleet task** (a decomposed slice of a larger run in
+its own worktree), also read, BEFORE planning:
+
+- `.aitne-dev/docs/task-instruction.md` — **this worktree's job. Plan against
+  IT** (the master contract stays the outer boundary, but only this task's
+  scope belongs in your milestones — another worker owns everything else, and
+  your ledger lists only the REQs this task owns).
+- `.aitne-dev/phase-context/<dep>/` — merged dependency phases' archived
+  instruction + evidence: the WHY behind code already in your tree. Plan only
+  THIS phase's increment; never re-plan what a merged phase already landed.
+- `.aitne-dev/parallel-context.md` — the sibling loops' scopes; keep every
+  milestone out of them.
+
 ## Tools available to you
 
 This session runs under a **plan clamp**: read-only over the product code, and
