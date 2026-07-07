@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  DEV_FLOW_CONFIG_DEFAULTS,
   DEV_LOOP_CONFIG_DEFAULTS,
   canonicalize,
   computeApprovalHash,
   computeConfigHashSansBudget,
+  normalizeDevFlowConfig,
   normalizeDevLoopConfig,
   validateDevLoopConfig,
 } from "./dev-loop-config.js";
@@ -181,5 +183,58 @@ describe("approval-hash serialization", () => {
     const nonBudget = computeConfigHashSansBudget(cfg({ stagnationN: 9 }));
     expect(budgetOnly).toBe(base);
     expect(nonBudget).not.toBe(base);
+  });
+});
+
+describe("normalizeDevFlowConfig", () => {
+  it("returns the fleet defaults for empty/absent partials", () => {
+    expect(normalizeDevFlowConfig(undefined)).toEqual(DEV_FLOW_CONFIG_DEFAULTS);
+    expect(normalizeDevFlowConfig(null)).toEqual(DEV_FLOW_CONFIG_DEFAULTS);
+    expect(normalizeDevFlowConfig({})).toEqual(DEV_FLOW_CONFIG_DEFAULTS);
+    expect(DEV_FLOW_CONFIG_DEFAULTS.maxParallel).toBe(3);
+    expect(DEV_FLOW_CONFIG_DEFAULTS.decompose).toBe(true);
+  });
+  it("coerces every field defensively", () => {
+    const c = normalizeDevFlowConfig({
+      decompose: false,
+      maxParallel: 0,
+      maxTasks: -5,
+      superviseCap: 4.9,
+      replanCap: Number.NaN,
+      planReview: false,
+      planReviewCap: 2,
+      integrationFixupCap: 3,
+      splitNudgeAt: 250,
+      splitCarryover: false,
+      worktreeSetupCommand: "  pnpm install  ",
+    });
+    expect(c.decompose).toBe(false);
+    expect(c.maxParallel).toBe(1); // floor of 1
+    expect(c.maxTasks).toBe(1); // floor of 1 after non-neg clamp
+    expect(c.superviseCap).toBe(4);
+    expect(c.replanCap).toBe(DEV_FLOW_CONFIG_DEFAULTS.replanCap);
+    expect(c.planReview).toBe(false);
+    expect(c.splitNudgeAt).toBe(100); // percentage clamp
+    expect(c.splitCarryover).toBe(false);
+    expect(c.worktreeSetupCommand).toBe("pnpm install");
+  });
+  it("normalizes a blank setup command to null", () => {
+    expect(normalizeDevFlowConfig({ worktreeSetupCommand: "   " }).worktreeSetupCommand).toBeNull();
+    expect(
+      normalizeDevFlowConfig({ worktreeSetupCommand: 42 as unknown as string }).worktreeSetupCommand,
+    ).toBeNull();
+  });
+  it("lands in the loop config and the approval hash", () => {
+    const base = computeApprovalHash(CONTRACT_MD, cfg());
+    const flowChanged = computeApprovalHash(
+      CONTRACT_MD,
+      cfg({ flow: { ...DEV_FLOW_CONFIG_DEFAULTS, maxParallel: 1 } }),
+    );
+    expect(cfg().flow).toEqual(DEV_FLOW_CONFIG_DEFAULTS);
+    expect(flowChanged).not.toBe(base);
+    // flow is NOT a budget key — sans-budget hash still changes.
+    expect(
+      computeConfigHashSansBudget(cfg({ flow: { ...DEV_FLOW_CONFIG_DEFAULTS, maxParallel: 1 } })),
+    ).not.toBe(computeConfigHashSansBudget(cfg()));
   });
 });

@@ -70,6 +70,10 @@ export interface DevEvaluateInput {
   assumeReady: boolean;
   /** For NO_OP under --final: is the whole-run non-.aitne-dev diff empty? */
   wholeRunDiffEmpty: boolean;
+  /** Fleet workers may declare NEEDS_DECOMPOSITION (loop-kit honors it only
+   *  behind the .loop/fleet-worker marker); in the single loop the token is
+   *  ignored here and the engine journals it as a CONTINUE. */
+  fleetWorker: boolean;
   bookkeeping: DevEvaluateBookkeeping;
 }
 
@@ -91,6 +95,10 @@ const AGENT_ESCALATION_TOKENS = new Set([
   "NEEDS_SPEC_DECISION",
   "NEEDS_ARCHITECTURE_DECISION",
   "BLOCKED",
+]);
+const AGENT_ESCALATION_TOKENS_FLEET = new Set([
+  ...AGENT_ESCALATION_TOKENS,
+  "NEEDS_DECOMPOSITION",
 ]);
 /** Keep the last N fingerprints (>= any sane repeatFailN). */
 const FINGERPRINT_WINDOW = 8;
@@ -195,8 +203,12 @@ export function evaluateIteration(
   const verify = runAllVerify(config.verifyCommands, deps);
   const verifyGreen = verify.every((v) => v.passed);
 
-  // 5. Agent-declared escalation/block.
-  if (input.agentStateToken && AGENT_ESCALATION_TOKENS.has(input.agentStateToken)) {
+  // 5. Agent-declared escalation/block. NEEDS_DECOMPOSITION is a fleet-only
+  //    token: a single loop has no supervisor to split the task.
+  const escalationTokens = input.fleetWorker
+    ? AGENT_ESCALATION_TOKENS_FLEET
+    : AGENT_ESCALATION_TOKENS;
+  if (input.agentStateToken && escalationTokens.has(input.agentStateToken)) {
     return {
       result: result(
         input.agentStateToken as DevEvaluateState,

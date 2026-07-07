@@ -56,7 +56,8 @@ export type DevRequirementStatus =
   | "at_risk"
   | "regressed";
 
-/** One loop leg (native journal.jsonl). */
+/** One loop leg (native journal.jsonl). The last five are dev-flow fleet
+ *  phases (task-DAG decompose/supervise/merge + plan review). */
 export type DevIterationPhase =
   | "plan"
   | "implement"
@@ -64,7 +65,12 @@ export type DevIterationPhase =
   | "review"
   | "stop_eval"
   | "gate"
-  | "evidence";
+  | "evidence"
+  | "decompose"
+  | "decompose_review"
+  | "supervise"
+  | "plan_review"
+  | "merge";
 
 export interface DevSessionRow {
   id: string;
@@ -81,6 +87,11 @@ export interface DevSessionRow {
   gateReviseCount: number;
   iterReviseCount: number;
   resumes: number;
+  /** Cumulative fleet-mutation counters — replan / plan-review /
+   *  integration-fixup budgets are enforced against these. */
+  replanCount: number;
+  planReviewCount: number;
+  fixupCount: number;
   maxIterations: number | null;
   /** Approved stop conditions (verifyCommands, deniedPaths, …). */
   config: Record<string, unknown> | null;
@@ -112,6 +123,9 @@ interface DevSessionDbRow {
   gate_revise_count: number;
   iter_revise_count: number;
   resumes: number;
+  replan_count: number;
+  plan_review_count: number;
+  fixup_count: number;
   max_iterations: number | null;
   config_json: string | null;
   models_json: string | null;
@@ -129,7 +143,8 @@ interface DevSessionDbRow {
 const SELECT_COLUMNS = `
   id, repository_id, slug, branch, base_ref, state, loop_state,
   approved_hash, approved_at, iteration, agent_failures, gate_revise_count,
-  iter_revise_count, resumes, max_iterations, config_json, models_json,
+  iter_revise_count, resumes, replan_count, plan_review_count, fixup_count,
+  max_iterations, config_json, models_json,
   cost_usd, max_budget_usd, timeout_schedule_id, originating_platform,
   originating_channel, created_at, entered_at, updated_at, exited_at
 `;
@@ -162,6 +177,9 @@ function fromDbRow(row: DevSessionDbRow): DevSessionRow {
     gateReviseCount: row.gate_revise_count,
     iterReviseCount: row.iter_revise_count,
     resumes: row.resumes,
+    replanCount: row.replan_count,
+    planReviewCount: row.plan_review_count,
+    fixupCount: row.fixup_count,
     maxIterations: row.max_iterations,
     config: parseJsonObject(row.config_json),
     models: parseJsonObject(row.models_json),
@@ -525,6 +543,45 @@ export function addDevSessionCost(
   ).run(deltaUsd, id);
 }
 
+/** Column allowlist for bumpDevSessionFleetCounter — the counter name is
+ *  interpolated into SQL, so it MUST be validated against this literal set
+ *  first (never trust the compile-time type alone across a JS boundary). */
+const DEV_FLEET_COUNTERS: ReadonlySet<string> = new Set([
+  "replan_count",
+  "plan_review_count",
+  "fixup_count",
+]);
+
+/**
+ * Bump one cumulative fleet-mutation counter (replan / plan-review /
+ * integration-fixup) by `delta` and return the new value. The counters
+ * only ever go up — budget checks compare them against the contract caps.
+ */
+export function bumpDevSessionFleetCounter(
+  db: Database.Database,
+  id: string,
+  counter: "replan_count" | "plan_review_count" | "fixup_count",
+  delta: number,
+  now: number,
+): number {
+  if (!DEV_FLEET_COUNTERS.has(counter)) {
+    throw new Error(
+      `bumpDevSessionFleetCounter: unknown counter ${JSON.stringify(counter)}`,
+    );
+  }
+  db.prepare(
+    `UPDATE dev_sessions
+        SET ${counter} = ${counter} + ?, updated_at = ?
+      WHERE id = ?`,
+  ).run(delta, now, id);
+  const row = db
+    .prepare<[string], { n: number }>(
+      `SELECT ${counter} AS n FROM dev_sessions WHERE id = ?`,
+    )
+    .get(id);
+  return row?.n ?? 0;
+}
+
 /** Arm/clear the FK to the 30-min inactivity-timeout schedule row. */
 export function setDevTimeoutScheduleId(
   db: Database.Database,
@@ -541,6 +598,8 @@ export function setDevTimeoutScheduleId(
 export interface DevIterationRow {
   id: string;
   sessionId: string;
+  /** The task-DAG node this leg ran under; null = session-level leg. */
+  taskId: string | null;
   iteration: number;
   phase: DevIterationPhase;
   verdict: string | null;
@@ -553,6 +612,7 @@ export interface DevIterationRow {
 interface DevIterationDbRow {
   id: string;
   session_id: string;
+  task_id: string | null;
   iteration: number;
   phase: DevIterationPhase;
   verdict: string | null;
@@ -565,6 +625,8 @@ interface DevIterationDbRow {
 export interface RecordDevIterationInput {
   id: string;
   sessionId: string;
+  /** Omitted/null = session-level leg (plan / plan_review / evidence …). */
+  taskId?: string | null;
   iteration: number;
   phase: DevIterationPhase;
   verdict?: string | null;
@@ -580,12 +642,13 @@ export function recordDevIteration(
 ): void {
   db.prepare(
     `INSERT INTO dev_session_iterations
-       (id, session_id, iteration, phase, verdict, reason, cost_usd,
+       (id, session_id, task_id, iteration, phase, verdict, reason, cost_usd,
         commit_sha, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     input.id,
     input.sessionId,
+    input.taskId ?? null,
     input.iteration,
     input.phase,
     input.verdict ?? null,
@@ -602,8 +665,8 @@ export function listDevIterations(
 ): readonly DevIterationRow[] {
   const rows = db
     .prepare<[string], DevIterationDbRow>(
-      `SELECT id, session_id, iteration, phase, verdict, reason, cost_usd,
-              commit_sha, created_at
+      `SELECT id, session_id, task_id, iteration, phase, verdict, reason,
+              cost_usd, commit_sha, created_at
          FROM dev_session_iterations
         WHERE session_id = ?
         ORDER BY created_at ASC`,
@@ -612,6 +675,7 @@ export function listDevIterations(
   return rows.map((row) => ({
     id: row.id,
     sessionId: row.session_id,
+    taskId: row.task_id,
     iteration: row.iteration,
     phase: row.phase,
     verdict: row.verdict,
@@ -753,5 +817,26 @@ export function countDevRequirements(
         WHERE session_id = ?`,
     )
     .get(sessionId);
+  return { total: row?.total ?? 0, met: row?.met ?? 0 };
+}
+
+/** countDevRequirements scoped to a task's claimed REQ ids (dev-flow: the
+ *  per-task gate only reasons over the reqs the task owns). Unseeded ids
+ *  simply don't count toward total. Empty list → {0, 0}. */
+export function countDevRequirementsIn(
+  db: Database.Database,
+  sessionId: string,
+  reqIds: readonly string[],
+): DevRequirementCounts {
+  if (reqIds.length === 0) return { total: 0, met: 0 };
+  const placeholders = reqIds.map(() => "?").join(", ");
+  const row = db
+    .prepare<(string | number)[], { total: number; met: number }>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(CASE WHEN status = 'met' THEN 1 ELSE 0 END), 0) AS met
+         FROM dev_session_requirements
+        WHERE session_id = ? AND req_id IN (${placeholders})`,
+    )
+    .get(sessionId, ...reqIds);
   return { total: row?.total ?? 0, met: row?.met ?? 0 };
 }

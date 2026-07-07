@@ -1,13 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
   applyGateReqDowngrade,
+  extractBetween,
   extractContractReqIds,
   extractContractRequirements,
   extractLastMatching,
   parseAgentStateToken,
+  parseDecomposeReviewVerdict,
+  parseDecomposeVerdict,
+  parsePlanReviewVerdict,
   parseReqVerdicts,
   parseReviewResult,
   parseStopEval,
+  parseSuperviseVerdict,
   stripDecorations,
 } from "./verdict-parse.js";
 import type { DevReviewResult } from "./types.js";
@@ -158,5 +163,72 @@ describe("extractContractRequirements / extractContractReqIds", () => {
 
   it("returns empty for a contract with no REQ headings", () => {
     expect(extractContractReqIds("# Goal\nno reqs")).toEqual([]);
+  });
+});
+
+describe("flow verdicts", () => {
+  it("parseDecomposeVerdict takes the LAST n, strips decorations, rejects junk", () => {
+    expect(parseDecomposeVerdict("analysis\nDECOMPOSE: TASKS n=3")).toBe(3);
+    expect(parseDecomposeVerdict("DECOMPOSE: TASKS n=1\n> **DECOMPOSE: TASKS n=4**")).toBe(4);
+    expect(parseDecomposeVerdict("decompose: tasks n=2")).toBe(2);
+    expect(parseDecomposeVerdict("no verdict here")).toBeNull();
+    expect(parseDecomposeVerdict("DECOMPOSE: TASKS n=0")).toBeNull();
+  });
+
+  it("parseDecomposeReviewVerdict returns verdict + detail or null", () => {
+    expect(parseDecomposeReviewVerdict("DECOMPOSE-REVIEW: APPROVE clean split")).toEqual({
+      verdict: "APPROVE",
+      detail: "clean split",
+    });
+    expect(parseDecomposeReviewVerdict("- decompose-review: revise 1. fix scopes")).toEqual({
+      verdict: "REVISE",
+      detail: "1. fix scopes",
+    });
+    expect(parseDecomposeReviewVerdict("nothing")).toBeNull();
+  });
+
+  it("parseSuperviseVerdict parses the three decisions or null", () => {
+    expect(parseSuperviseVerdict("…\nSUPERVISE: ANSWER use the existing helper")).toEqual({
+      verdict: "ANSWER",
+      detail: "use the existing helper",
+    });
+    expect(parseSuperviseVerdict("SUPERVISE: REPLAN split into phases")?.verdict).toBe("REPLAN");
+    expect(parseSuperviseVerdict("supervise: escalate the contract is wrong")?.verdict).toBe(
+      "ESCALATE",
+    );
+    expect(parseSuperviseVerdict("SUPERVISED: nothing")).toBeNull();
+  });
+
+  it("parsePlanReviewVerdict parses KEEP/REVISE/ESCALATE or null", () => {
+    expect(parsePlanReviewVerdict("PLAN-REVIEW: KEEP still right")).toEqual({
+      verdict: "KEEP",
+      detail: "still right",
+    });
+    expect(parsePlanReviewVerdict("plan-review: revise swap phase 2")?.verdict).toBe("REVISE");
+    expect(parsePlanReviewVerdict("PLAN-REVIEW: ESCALATE req unreachable")?.verdict).toBe(
+      "ESCALATE",
+    );
+    expect(parsePlanReviewVerdict("KEEP")).toBeNull();
+  });
+
+  it("extractBetween captures exact-line-marker payloads, fail-closed", () => {
+    const reply = [
+      "analysis",
+      "GUIDANCE-BEGIN",
+      "do the thing",
+      "on two lines",
+      "GUIDANCE-END",
+      "SUPERVISE: ANSWER done",
+    ].join("\n");
+    expect(extractBetween(reply, "GUIDANCE-BEGIN", "GUIDANCE-END")).toBe(
+      "do the thing\non two lines",
+    );
+    // Multiple blocks concatenate (awk-toggle parity).
+    const two = "A-BEGIN\none\nA-END\nmid\nA-BEGIN\ntwo\nA-END";
+    expect(extractBetween(two, "A-BEGIN", "A-END")).toBe("one\ntwo");
+    // Inline mentions are NOT markers; missing/empty payloads return null.
+    expect(extractBetween("see GUIDANCE-BEGIN inline", "GUIDANCE-BEGIN", "GUIDANCE-END")).toBeNull();
+    expect(extractBetween("A-BEGIN\nA-END", "A-BEGIN", "A-END")).toBeNull();
+    expect(extractBetween("A-BEGIN\n   \nA-END", "A-BEGIN", "A-END")).toBeNull();
   });
 });

@@ -1505,6 +1505,165 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    id: "0027-dev-flow",
+    description:
+      "(dev-flow) — task-DAG data layer for the dev-mode fleet engine. "
+      + "(a) create dev_session_tasks: one row per task-DAG node — JSON "
+      + "depends_on/reqs edges, per-task loop-checkpoint counters, "
+      + "branch/worktree/seed-branch anchors, and a CAS state machine "
+      + "(queued->running->supervise_pending->merge_pending->merged plus "
+      + "awaiting_user/failed/superseded/dep_failed) — with the "
+      + "(session_id, task_key) unique index. (b) ALTER dev_sessions ADD the "
+      + "three cumulative fleet-mutation counters (replan_count / "
+      + "plan_review_count / fixup_count) that the replan / plan-review / "
+      + "integration-fixup budgets are enforced against. (c) ALTER "
+      + "dev_session_escalations ADD task_id (task-scoped escalation "
+      + "pointer; NULL = session-scoped; ON DELETE SET NULL keeps the Q&A "
+      + "history when a task row goes away). (d) rebuild "
+      + "dev_session_iterations to add task_id and widen the phase CHECK "
+      + "with the five fleet phases (decompose / decompose_review / "
+      + "supervise / plan_review / merge) — SQLite cannot ALTER a CHECK in "
+      + "place, so: create *_new, copy rows with task_id = NULL (every "
+      + "pre-flow leg was session-level), drop, rename, recreate indexes. "
+      + "Idempotent: fresh DBs get the final shape from applySchema "
+      + "(schema.ts) BEFORE this runs, so (a) is CREATE IF NOT EXISTS, "
+      + "(b)/(c) are gated on columnExists, and (d) short-circuits when "
+      + "dev_session_iterations.task_id already exists — the runner then "
+      + "just records the id. The rebuild needs NO PRAGMA foreign_keys "
+      + "toggling (which would be a silent no-op inside the runner's "
+      + "transaction anyway): no table references dev_session_iterations, "
+      + "so the DROP + RENAME cannot orphan or rewrite any inbound FK.",
+    up(db) {
+      // (a) New table — pure CREATE IF NOT EXISTS mirror of schema.ts.
+      // task_key is the human DAG id ([a-z0-9][a-z0-9-]{0,23}); id is a
+      // uuid. depends_on / reqs are JSON string arrays.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dev_session_tasks (
+            id                 TEXT PRIMARY KEY,
+            session_id         TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+            task_key           TEXT NOT NULL,
+            summary            TEXT NOT NULL,
+            depends_on         TEXT NOT NULL DEFAULT '[]',
+            scope              TEXT NOT NULL DEFAULT '',
+            reqs               TEXT NOT NULL DEFAULT '[]',
+            body               TEXT NOT NULL,
+            origin             TEXT NOT NULL DEFAULT 'plan'
+                CHECK (origin IN ('plan','replan','plan_review','fixup')),
+            state              TEXT NOT NULL DEFAULT 'queued'
+                CHECK (state IN ('queued','running','supervise_pending','merge_pending',
+                                 'awaiting_user','merged','failed','superseded','dep_failed')),
+            loop_state         TEXT
+                CHECK (loop_state IS NULL OR loop_state IN (
+                    'SUCCESS','NO_OP','NEEDS_SPEC_DECISION','NEEDS_ARCHITECTURE_DECISION',
+                    'NEEDS_DECOMPOSITION','RISK_REQUIRES_APPROVAL','BLOCKED','STALLED',
+                    'BUDGET_EXCEEDED')),
+            branch             TEXT,
+            worktree_path      TEXT,
+            base_ref           TEXT,
+            seed_branch        TEXT,
+            iteration          INTEGER NOT NULL DEFAULT 0,
+            agent_failures     INTEGER NOT NULL DEFAULT 0,
+            gate_revise_count  INTEGER NOT NULL DEFAULT 0,
+            iter_revise_count  INTEGER NOT NULL DEFAULT 0,
+            resumes            INTEGER NOT NULL DEFAULT 0,
+            merge_retries      INTEGER NOT NULL DEFAULT 0,
+            supervise_count    INTEGER NOT NULL DEFAULT 0,
+            plan_review        TEXT
+                CHECK (plan_review IS NULL OR plan_review IN ('pending','done','escalated')),
+            cost_usd           REAL,
+            fail_reason        TEXT,
+            created_at         INTEGER NOT NULL,
+            started_at         INTEGER,
+            ended_at           INTEGER,
+            merged_at          INTEGER,
+            updated_at         INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_tasks_session_key
+            ON dev_session_tasks(session_id, task_key);
+        CREATE INDEX IF NOT EXISTS idx_dev_tasks_session_state
+            ON dev_session_tasks(session_id, state);
+      `);
+
+      // (b) Cumulative fleet-mutation counters on dev_sessions. Fresh DBs
+      // already carry these from schema.ts — the columnExists guards make
+      // each ALTER a no-op there. tableExists first: columnExists returns
+      // false for a missing table, and the ALTER would then throw on a
+      // bare unit-test db that never saw applySchema/0026.
+      if (tableExists(db, "dev_sessions")) {
+        for (const column of [
+          "replan_count",
+          "plan_review_count",
+          "fixup_count",
+        ]) {
+          if (!columnExists(db, "dev_sessions", column)) {
+            db.exec(
+              `ALTER TABLE dev_sessions ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`,
+            );
+          }
+        }
+      }
+
+      // (c) Task-scoped escalation pointer. NULL = session-scoped
+      // escalation (plan-phase / fleet-level questions).
+      if (
+        tableExists(db, "dev_session_escalations")
+        && !columnExists(db, "dev_session_escalations", "task_id")
+      ) {
+        db.exec(
+          `ALTER TABLE dev_session_escalations ADD COLUMN task_id TEXT
+             REFERENCES dev_session_tasks(id) ON DELETE SET NULL`,
+        );
+      }
+
+      // (d) dev_session_iterations rebuild — add task_id + widen the phase
+      // CHECK (SQLite cannot ALTER a CHECK in place). Guard: a fresh DB's
+      // applySchema shape already has task_id, so skip. No PRAGMA
+      // foreign_keys toggling: nothing references dev_session_iterations
+      // (it is a leaf child of dev_sessions / dev_session_tasks), so the
+      // DROP + RENAME is FK-safe inside the runner's transaction.
+      if (
+        tableExists(db, "dev_session_iterations")
+        && !columnExists(db, "dev_session_iterations", "task_id")
+      ) {
+        db.exec(`
+          CREATE TABLE dev_session_iterations_new (
+              id          TEXT PRIMARY KEY,
+              session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+              task_id     TEXT REFERENCES dev_session_tasks(id) ON DELETE CASCADE,
+              iteration   INTEGER NOT NULL,
+              phase       TEXT NOT NULL
+                  CHECK (phase IN ('plan','implement','evaluate','review','stop_eval','gate','evidence',
+                                   'decompose','decompose_review','supervise','plan_review','merge')),
+              verdict     TEXT,
+              reason      TEXT,
+              cost_usd    REAL,
+              commit_sha  TEXT,
+              created_at  INTEGER NOT NULL
+          );
+          INSERT INTO dev_session_iterations_new
+            (id, session_id, task_id, iteration, phase, verdict, reason,
+             cost_usd, commit_sha, created_at)
+            SELECT id, session_id, NULL, iteration, phase, verdict, reason,
+                   cost_usd, commit_sha, created_at
+              FROM dev_session_iterations;
+          DROP TABLE dev_session_iterations;
+          ALTER TABLE dev_session_iterations_new RENAME TO dev_session_iterations;
+        `);
+      }
+      // Recreate the indexes dropped with the old table (both IF NOT
+      // EXISTS so the fresh-DB path — where applySchema already made
+      // them — is a no-op). Guarded on the table for bare unit-test dbs.
+      if (tableExists(db, "dev_session_iterations")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_dev_iterations_session
+              ON dev_session_iterations(session_id, iteration);
+          CREATE INDEX IF NOT EXISTS idx_dev_iterations_task
+              ON dev_session_iterations(task_id);
+        `);
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

@@ -146,6 +146,108 @@ export function parseAgentStateToken(firstLine: string | null | undefined): stri
   return token && token.length > 0 ? token.toUpperCase() : null;
 }
 
+// ── Flow verdicts (decompose / decompose-review / supervise / plan-review) ──
+
+const DECOMPOSE_RE = /^DECOMPOSE:\s*TASKS\s+n=(\d+)\b/i;
+
+/** Parse the decomposer's final `DECOMPOSE: TASKS n=<N>` line; null when
+ *  absent (the caller retries once with a format reminder, then fails
+ *  closed to the user). */
+export function parseDecomposeVerdict(reply: string): number | null {
+  const m = extractLastMatching(reply, DECOMPOSE_RE);
+  if (!m) return null;
+  const n = Number.parseInt(m[1]!, 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+const DECOMPOSE_REVIEW_RE = /^DECOMPOSE-REVIEW:\s*(APPROVE|REVISE)\b\s*(.*)$/i;
+
+export interface DevDecomposeReview {
+  verdict: "APPROVE" | "REVISE";
+  detail: string;
+}
+
+/** Parse the decompose reviewer's `DECOMPOSE-REVIEW: APPROVE|REVISE …` line. */
+export function parseDecomposeReviewVerdict(reply: string): DevDecomposeReview | null {
+  const m = extractLastMatching(reply, DECOMPOSE_REVIEW_RE);
+  if (!m) return null;
+  return {
+    verdict: m[1]!.toUpperCase() as DevDecomposeReview["verdict"],
+    detail: m[2]!.trim(),
+  };
+}
+
+const SUPERVISE_RE = /^SUPERVISE:\s*(ANSWER|REPLAN|ESCALATE)\b\s*(.*)$/i;
+
+export interface DevSuperviseVerdict {
+  verdict: "ANSWER" | "REPLAN" | "ESCALATE";
+  detail: string;
+}
+
+/** Parse the supervisor's `SUPERVISE: ANSWER|REPLAN|ESCALATE …` line. A
+ *  missing/malformed verdict fails toward the human (caller maps null to
+ *  ESCALATE after a format-reminder retry). */
+export function parseSuperviseVerdict(reply: string): DevSuperviseVerdict | null {
+  const m = extractLastMatching(reply, SUPERVISE_RE);
+  if (!m) return null;
+  return {
+    verdict: m[1]!.toUpperCase() as DevSuperviseVerdict["verdict"],
+    detail: m[2]!.trim(),
+  };
+}
+
+const PLAN_REVIEW_RE = /^PLAN-REVIEW:\s*(KEEP|REVISE|ESCALATE)\b\s*(.*)$/i;
+
+export interface DevPlanReviewVerdict {
+  verdict: "KEEP" | "REVISE" | "ESCALATE";
+  detail: string;
+}
+
+/** Parse the phase-boundary plan-review verdict. A missing/malformed verdict
+ *  degrades to KEEP in the caller (a refused mutation must not stop the
+ *  fleet). */
+export function parsePlanReviewVerdict(reply: string): DevPlanReviewVerdict | null {
+  const m = extractLastMatching(reply, PLAN_REVIEW_RE);
+  if (!m) return null;
+  return {
+    verdict: m[1]!.toUpperCase() as DevPlanReviewVerdict["verdict"],
+    detail: m[2]!.trim(),
+  };
+}
+
+/**
+ * Extract a payload block between exact marker LINES (loop-kit
+ * extract_between: markers must be whole lines, ASCII machine tokens).
+ * Multiple begin/end pairs concatenate, matching the awk toggle. Returns
+ * null when no content was captured — fail-closed callers treat that as a
+ * malformed payload.
+ */
+export function extractBetween(
+  reply: string,
+  beginMarker: string,
+  endMarker: string,
+): string | null {
+  const out: string[] = [];
+  let on = false;
+  let sawAny = false;
+  for (const raw of reply.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (line === endMarker) {
+      on = false;
+      continue;
+    }
+    if (on) {
+      out.push(raw);
+      sawAny = true;
+      continue;
+    }
+    if (line === beginMarker) on = true;
+  }
+  if (!sawAny) return null;
+  const body = out.join("\n");
+  return body.trim().length > 0 ? body : null;
+}
+
 const REQ_HEADING_RE = /^#{1,6}\s+REQ-(\d+)\b\s*:?\s*(.*)$/;
 
 /**

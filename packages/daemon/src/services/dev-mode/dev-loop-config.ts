@@ -11,8 +11,24 @@
  */
 
 import { createHash } from "node:crypto";
-import type { DevLoopConfig } from "./types.js";
+import type { DevFlowConfig, DevLoopConfig } from "./types.js";
 import { DEV_BUDGET_CONFIG_KEYS } from "./types.js";
+
+/** loop-kit fleet.config.sh defaults. maxParallel=3 was a product decision
+ *  (2026-07-07): parallel throughput over cost, interview-overridable. */
+export const DEV_FLOW_CONFIG_DEFAULTS: DevFlowConfig = {
+  decompose: true,
+  maxParallel: 3,
+  maxTasks: 8,
+  superviseCap: 2,
+  replanCap: 6,
+  planReview: true,
+  planReviewCap: 4,
+  integrationFixupCap: 1,
+  splitNudgeAt: 50,
+  splitCarryover: true,
+  worktreeSetupCommand: null,
+};
 
 /** loop-kit load_config defaults. verifyCommands has NO default — an empty
  *  list is rejected at approval (fail-closed, never a vacuous pass). */
@@ -35,6 +51,7 @@ export const DEV_LOOP_CONFIG_DEFAULTS: DevLoopConfig = {
   stopEval: true,
   permissionMode: "acceptEdits",
   maxResumes: 10,
+  flow: DEV_FLOW_CONFIG_DEFAULTS,
 };
 
 function cleanStringList(value: unknown, fallback: string[]): string[] {
@@ -60,6 +77,37 @@ function positiveOrNull(value: unknown): number | null {
     return null;
   }
   return value;
+}
+
+/**
+ * Merge a partial flow section over the fleet defaults — same coercion
+ * posture as the loop config (unknown shapes fall back, never throw).
+ */
+export function normalizeDevFlowConfig(
+  partial: Partial<DevFlowConfig> | null | undefined,
+): DevFlowConfig {
+  const p = partial ?? {};
+  const d = DEV_FLOW_CONFIG_DEFAULTS;
+  const setupRaw = p.worktreeSetupCommand;
+  const worktreeSetupCommand =
+    typeof setupRaw === "string" && setupRaw.trim().length > 0
+      ? setupRaw.trim()
+      : null;
+  return {
+    decompose: typeof p.decompose === "boolean" ? p.decompose : d.decompose,
+    maxParallel: Math.max(1, nonNegInt(p.maxParallel, d.maxParallel)),
+    maxTasks: Math.max(1, nonNegInt(p.maxTasks, d.maxTasks)),
+    superviseCap: nonNegInt(p.superviseCap, d.superviseCap),
+    replanCap: nonNegInt(p.replanCap, d.replanCap),
+    planReview: typeof p.planReview === "boolean" ? p.planReview : d.planReview,
+    planReviewCap: nonNegInt(p.planReviewCap, d.planReviewCap),
+    integrationFixupCap: nonNegInt(p.integrationFixupCap, d.integrationFixupCap),
+    // A percentage — clamp into [0, 100] (0 = off).
+    splitNudgeAt: Math.min(100, nonNegInt(p.splitNudgeAt, d.splitNudgeAt)),
+    splitCarryover:
+      typeof p.splitCarryover === "boolean" ? p.splitCarryover : d.splitCarryover,
+    worktreeSetupCommand,
+  };
 }
 
 /**
@@ -105,6 +153,7 @@ export function normalizeDevLoopConfig(
     stopEval: typeof p.stopEval === "boolean" ? p.stopEval : d.stopEval,
     permissionMode,
     maxResumes: Math.max(1, nonNegInt(p.maxResumes, d.maxResumes)),
+    flow: normalizeDevFlowConfig(p.flow),
   };
 }
 

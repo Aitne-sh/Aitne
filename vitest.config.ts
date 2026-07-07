@@ -797,6 +797,7 @@ export default defineConfig({
         // Mirrors the background-task exclusion rationale above.
         "packages/daemon/src/db/dev-sessions-store.ts",
         "packages/daemon/src/db/dev-session-escalations-store.ts",
+        "packages/daemon/src/db/dev-session-tasks-store.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-docs.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-legs.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-engine.ts",

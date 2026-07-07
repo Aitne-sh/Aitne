@@ -5,7 +5,9 @@ import { MIGRATIONS, runMigrations } from "./migrations.js";
 import {
   addDevSessionCost,
   approveDevSession,
+  bumpDevSessionFleetCounter,
   countDevRequirements,
+  countDevRequirementsIn,
   createDevSession,
   getActiveDevSession,
   getDevSession,
@@ -32,6 +34,7 @@ import {
   markDevEscalationDelivered,
   resolveDevEscalation,
 } from "./dev-session-escalations-store.js";
+import { insertDevTasks } from "./dev-session-tasks-store.js";
 
 const T0 = 1_700_000_000_000;
 
@@ -81,6 +84,10 @@ describe("dev-sessions-store", () => {
     expect(row.state).toBe("interview");
     expect(row.iteration).toBe(0);
     expect(row.costUsd).toBeNull();
+    // dev-flow fleet-mutation counters start at 0.
+    expect(row.replanCount).toBe(0);
+    expect(row.planReviewCount).toBe(0);
+    expect(row.fixupCount).toBe(0);
     expect(getDevSession(db, "s1")?.slug).toBe("test");
     expect(getActiveDevSession(db)?.id).toBe("s1");
     expect(listNonTerminalDevSessions(db)).toHaveLength(1);
@@ -183,6 +190,32 @@ describe("dev-sessions-store", () => {
     expect(getDevSession(db, "s1")?.costUsd).toBeCloseTo(0.75, 6);
   });
 
+  it("bumps the fleet-mutation counters and returns the new value", () => {
+    seedSession(db);
+    expect(bumpDevSessionFleetCounter(db, "s1", "replan_count", 1, T0 + 1)).toBe(1);
+    expect(bumpDevSessionFleetCounter(db, "s1", "replan_count", 2, T0 + 2)).toBe(3);
+    expect(
+      bumpDevSessionFleetCounter(db, "s1", "plan_review_count", 1, T0 + 3),
+    ).toBe(1);
+    expect(bumpDevSessionFleetCounter(db, "s1", "fixup_count", 1, T0 + 4)).toBe(1);
+    const row = getDevSession(db, "s1");
+    expect(row?.replanCount).toBe(3);
+    expect(row?.planReviewCount).toBe(1);
+    expect(row?.fixupCount).toBe(1);
+    // Missing session: nothing to bump, returns 0.
+    expect(bumpDevSessionFleetCounter(db, "nope", "fixup_count", 1, T0 + 5)).toBe(0);
+    // The literal allowlist guards the interpolated column name.
+    expect(() =>
+      bumpDevSessionFleetCounter(
+        db,
+        "s1",
+        "resumes; DROP TABLE dev_sessions" as never,
+        1,
+        T0 + 6,
+      ),
+    ).toThrow(/unknown counter/);
+  });
+
   it("arms and clears the timeout schedule fk", () => {
     seedSession(db);
     const scheduleId = Number(
@@ -229,6 +262,15 @@ describe("dev-sessions-store", () => {
     expect(reqs.find((r) => r.reqId === "REQ-001")?.status).toBe("met");
     expect(reqs.find((r) => r.reqId === "REQ-001")?.title).toBe("auth");
     expect(countDevRequirements(db, "s1")).toEqual({ total: 2, met: 1 });
+    // Scoped counting (dev-flow per-task gate): only the given req_ids.
+    expect(countDevRequirementsIn(db, "s1", ["REQ-001"])).toEqual({
+      total: 1,
+      met: 1,
+    });
+    expect(
+      countDevRequirementsIn(db, "s1", ["REQ-001", "REQ-002", "REQ-999"]),
+    ).toEqual({ total: 2, met: 1 });
+    expect(countDevRequirementsIn(db, "s1", [])).toEqual({ total: 0, met: 0 });
     // Unknown REQ update is a no-op.
     expect(
       updateDevRequirement(db, {
@@ -262,6 +304,62 @@ describe("dev-sessions-store", () => {
     const legs = listDevIterations(db, "s1");
     expect(legs.map((l) => l.phase)).toEqual(["implement", "evaluate"]);
     expect(legs[1]?.commitSha).toBe("abc123");
+    // taskId omitted = session-level leg.
+    expect(legs.every((l) => l.taskId === null)).toBe(true);
+  });
+
+  it("records task-scoped legs with the dev-flow fleet phases", () => {
+    seedSession(db);
+    insertDevTasks(
+      db,
+      "s1",
+      [
+        {
+          id: "t1",
+          taskKey: "auth",
+          summary: "auth",
+          dependsOn: [],
+          scope: "",
+          reqs: ["REQ-001"],
+          body: "do auth",
+          origin: "plan",
+        },
+      ],
+      T0,
+    );
+    // Every widened phase passes the CHECK; task-scoped ones carry taskId.
+    const phases = [
+      "decompose",
+      "decompose_review",
+      "supervise",
+      "plan_review",
+      "merge",
+    ] as const;
+    phases.forEach((phase, i) => {
+      recordDevIteration(db, {
+        id: `i-${phase}`,
+        sessionId: "s1",
+        taskId: phase === "plan_review" ? null : "t1",
+        iteration: 1,
+        phase,
+        createdAt: T0 + 1 + i,
+      });
+    });
+    const legs = listDevIterations(db, "s1");
+    expect(legs.map((l) => l.phase)).toEqual([...phases]);
+    expect(legs.find((l) => l.phase === "plan_review")?.taskId).toBeNull();
+    expect(legs.find((l) => l.phase === "merge")?.taskId).toBe("t1");
+    // The FK refuses a leg pointing at a missing task.
+    expect(() =>
+      recordDevIteration(db, {
+        id: "i-bad",
+        sessionId: "s1",
+        taskId: "no-such-task",
+        iteration: 1,
+        phase: "supervise",
+        createdAt: T0 + 99,
+      }),
+    ).toThrow(/FOREIGN KEY constraint failed/);
   });
 
   it("filters listDevSessions by repository and state", () => {
@@ -402,6 +500,58 @@ describe("dev-session-escalations-store", () => {
     expect(
       resolveDevEscalation(db, { id: "nope", answer: "x", answeredAt: T0 }).reason,
     ).toBe("not_found");
+  });
+
+  it("round-trips the dev-flow task scope (taskId) and defaults to session-scoped", () => {
+    insertDevTasks(
+      db,
+      "s1",
+      [
+        {
+          id: "t1",
+          taskKey: "auth",
+          summary: "auth",
+          dependsOn: [],
+          scope: "",
+          reqs: [],
+          body: "do auth",
+          origin: "plan",
+        },
+      ],
+      T0,
+    );
+    const scoped = createDevEscalation(db, {
+      id: "e-task",
+      sessionId: "s1",
+      taskId: "t1",
+      kind: "risk_approval",
+      question: "task wants to touch .env",
+      contextSummary: null,
+      askedAt: T0 + 1,
+    });
+    expect(scoped.taskId).toBe("t1");
+    const sessionScoped = createDevEscalation(db, {
+      id: "e-session",
+      sessionId: "s1",
+      kind: "spec_decision",
+      question: "session-level?",
+      contextSummary: null,
+      askedAt: T0 + 2,
+    });
+    expect(sessionScoped.taskId).toBeNull();
+    // Every read surface carries it — list, open-pointer, recovery join.
+    expect(
+      listDevEscalationsForSession(db, "s1").map((e) => e.taskId),
+    ).toEqual(["t1", null]);
+    expect(getOpenDevEscalationForSession(db, "s1")?.taskId).toBeNull();
+    const undelivered = listUndeliveredDevEscalations(db);
+    expect(undelivered.find((e) => e.id === "e-task")?.taskId).toBe("t1");
+    // ON DELETE SET NULL: dropping the task keeps the Q&A history.
+    db.prepare("DELETE FROM dev_session_tasks WHERE id = 't1'").run();
+    expect(listDevEscalationsForSession(db, "s1").map((e) => e.taskId)).toEqual([
+      null,
+      null,
+    ]);
   });
 });
 

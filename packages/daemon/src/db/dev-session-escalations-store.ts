@@ -33,6 +33,8 @@ export type DevEscalationKind =
 export interface DevEscalationRow {
   id: string;
   sessionId: string;
+  /** Task-scoped escalation pointer; null = session-scoped. */
+  taskId: string | null;
   kind: DevEscalationKind;
   question: string;
   contextSummary: string | null;
@@ -47,6 +49,7 @@ export interface DevEscalationRow {
 interface DevEscalationDbRow {
   id: string;
   session_id: string;
+  task_id: string | null;
   kind: DevEscalationKind;
   question: string;
   context_summary: string | null;
@@ -58,13 +61,14 @@ interface DevEscalationDbRow {
   resolved: number;
 }
 
-const SELECT_COLUMNS = `id, session_id, kind, question, context_summary,
+const SELECT_COLUMNS = `id, session_id, task_id, kind, question, context_summary,
         asked_at, deadline_at, delivered_at, answer, answered_at, resolved`;
 
 function fromDbRow(row: DevEscalationDbRow): DevEscalationRow {
   return {
     id: row.id,
     sessionId: row.session_id,
+    taskId: row.task_id,
     kind: row.kind,
     question: row.question,
     contextSummary: row.context_summary,
@@ -80,6 +84,9 @@ function fromDbRow(row: DevEscalationDbRow): DevEscalationRow {
 export interface CreateDevEscalationInput {
   id: string;
   sessionId: string;
+  /** Omitted/null = session-scoped escalation (dev-flow: a task-scoped
+   *  question carries its dev_session_tasks id). */
+  taskId?: string | null;
   kind: DevEscalationKind;
   question: string;
   contextSummary: string | null;
@@ -94,12 +101,13 @@ export function createDevEscalation(
 ): DevEscalationRow {
   db.prepare(
     `INSERT INTO dev_session_escalations
-       (id, session_id, kind, question, context_summary,
+       (id, session_id, task_id, kind, question, context_summary,
         asked_at, deadline_at, delivered_at, answer, answered_at, resolved)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0)`,
   ).run(
     input.id,
     input.sessionId,
+    input.taskId ?? null,
     input.kind,
     input.question,
     input.contextSummary,
@@ -232,8 +240,8 @@ export function listUndeliveredDevEscalations(
         slug: string | null;
       }
     >(
-      `SELECT e.id, e.session_id, e.kind, e.question, e.context_summary,
-              e.asked_at, e.deadline_at, e.delivered_at,
+      `SELECT e.id, e.session_id, e.task_id, e.kind, e.question,
+              e.context_summary, e.asked_at, e.deadline_at, e.delivered_at,
               e.answer, e.answered_at, e.resolved,
               s.originating_channel, s.originating_platform, s.slug
          FROM dev_session_escalations e

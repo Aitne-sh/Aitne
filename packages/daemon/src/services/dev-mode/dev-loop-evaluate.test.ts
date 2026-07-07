@@ -42,6 +42,7 @@ function input(overrides: Partial<DevEvaluateInput> = {}): DevEvaluateInput {
     final: false,
     assumeReady: false,
     wholeRunDiffEmpty: false,
+    fleetWorker: false,
     bookkeeping: EMPTY_BOOKKEEPING,
     ...overrides,
   };
@@ -271,5 +272,32 @@ describe("evaluateIteration — decision order", () => {
       deps({ verifyOutput: "x".repeat(5000) }),
     );
     expect(out.result.verify?.[0]?.output.length).toBe(4000);
+  });
+});
+
+describe("NEEDS_DECOMPOSITION (fleet-only token)", () => {
+  it("is honored for fleet workers", () => {
+    const out = evaluateIteration(
+      input({ agentStateToken: "NEEDS_DECOMPOSITION", fleetWorker: true }),
+      deps(),
+    );
+    expect(out.result.state).toBe("NEEDS_DECOMPOSITION");
+    expect(out.result.reason).toMatch(/declared NEEDS_DECOMPOSITION/);
+  });
+
+  it("is ignored in the single loop (falls through to bookkeeping)", () => {
+    const out = evaluateIteration(
+      input({ agentStateToken: "NEEDS_DECOMPOSITION", fleetWorker: false }),
+      deps(),
+    );
+    expect(out.result.state).toBe("CONTINUE");
+  });
+
+  it("does not weaken the other fleet-worker escalation tokens", () => {
+    const out = evaluateIteration(
+      input({ agentStateToken: "BLOCKED", fleetWorker: true }),
+      deps(),
+    );
+    expect(out.result.state).toBe("BLOCKED");
   });
 });

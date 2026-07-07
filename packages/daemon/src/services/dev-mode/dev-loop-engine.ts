@@ -293,6 +293,7 @@ export class DevLoopEngine {
         final: false,
         assumeReady: false,
         wholeRunDiffEmpty: false,
+        fleetWorker: false,
         bookkeeping: this.bookkeeping,
       },
       {
@@ -443,6 +444,7 @@ export class DevLoopEngine {
         final: true,
         assumeReady: forced,
         wholeRunDiffEmpty: isWholeRunDiffEmpty(this.repoPath, baseRef),
+        fleetWorker: false,
         bookkeeping: this.bookkeeping,
       },
       {

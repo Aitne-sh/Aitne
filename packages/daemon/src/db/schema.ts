@@ -2094,6 +2094,12 @@ CREATE TABLE IF NOT EXISTS dev_sessions (
     gate_revise_count   INTEGER NOT NULL DEFAULT 0,
     iter_revise_count   INTEGER NOT NULL DEFAULT 0,
     resumes             INTEGER NOT NULL DEFAULT 0,
+    -- Cumulative fleet-mutation counters (dev-flow) — the replan /
+    -- plan-review / integration-fixup budgets are enforced against these;
+    -- they only ever count up across the session's lifetime.
+    replan_count        INTEGER NOT NULL DEFAULT 0,
+    plan_review_count   INTEGER NOT NULL DEFAULT 0,
+    fixup_count         INTEGER NOT NULL DEFAULT 0,
     -- MAX_ITERATIONS captured at approval — a budget-only raise tolerates
     -- resume (loop-kit config_hash_sans_budget). NULL until approved.
     max_iterations      INTEGER,
@@ -2135,22 +2141,94 @@ CREATE INDEX IF NOT EXISTS idx_dev_sessions_non_terminal
     ON dev_sessions(state)
     WHERE state IN ('interview', 'awaiting_approval', 'running', 'awaiting_user');
 
+-- Task-DAG fleet (dev-flow) — one row per task-DAG node. The plan phase
+-- decomposes the approved contract into small dependent tasks; each task
+-- runs its own inner loop inside an isolated git worktree, then flows
+-- through supervise -> merge back onto the session branch. This table is
+-- the durable fleet state authority + boot-resume surface: the per-task
+-- loop-checkpoint counters mirror the session-level ones so a daemon
+-- restart resumes each task rather than restarting it.
+CREATE TABLE IF NOT EXISTS dev_session_tasks (
+    -- uuid v4 (crypto.randomUUID).
+    id                 TEXT PRIMARY KEY,
+    session_id         TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    -- Human DAG id ([a-z0-9][a-z0-9-]{0,23}) — unique per session (see
+    -- idx_dev_tasks_session_key); depends_on edges point at these keys.
+    task_key           TEXT NOT NULL,
+    summary            TEXT NOT NULL,
+    -- JSON string array of task_keys this task waits on. '[]' = a root.
+    depends_on         TEXT NOT NULL DEFAULT '[]',
+    -- Free-text file/module boundary the task is confined to.
+    scope              TEXT NOT NULL DEFAULT '',
+    -- JSON string array of REQ- ids this task claims to advance.
+    reqs               TEXT NOT NULL DEFAULT '[]',
+    -- The task brief handed to the implement leg (the per-task contract).
+    body               TEXT NOT NULL,
+    -- Which fleet mutation created the row: the initial plan, a replan,
+    -- a plan-review insertion, or an integration fixup.
+    origin             TEXT NOT NULL DEFAULT 'plan'
+        CHECK (origin IN ('plan','replan','plan_review','fixup')),
+    -- Task lifecycle. 'queued' — waiting on deps/capacity. 'running' —
+    -- claimed by a worker (branch/worktree stamped). 'supervise_pending' /
+    -- 'merge_pending' — inner loop stopped, awaiting the supervise / merge
+    -- leg. 'awaiting_user' — parked on a task-scoped escalation.
+    -- 'merged'/'failed'/'superseded'/'dep_failed' — terminal.
+    state              TEXT NOT NULL DEFAULT 'queued'
+        CHECK (state IN ('queued','running','supervise_pending','merge_pending',
+                         'awaiting_user','merged','failed','superseded','dep_failed')),
+    -- The task's last inner-loop verdict — the session-level set plus
+    -- NEEDS_DECOMPOSITION (the task asked to be split further).
+    loop_state         TEXT
+        CHECK (loop_state IS NULL OR loop_state IN (
+            'SUCCESS','NO_OP','NEEDS_SPEC_DECISION','NEEDS_ARCHITECTURE_DECISION',
+            'NEEDS_DECOMPOSITION','RISK_REQUIRES_APPROVAL','BLOCKED','STALLED',
+            'BUDGET_EXCEEDED')),
+    -- Per-task working branch + isolated worktree; NULL until claimed,
+    -- cleared again by a merge-redo reset.
+    branch             TEXT,
+    worktree_path      TEXT,
+    -- The sha the task's worktree was cut from (its merge baseline).
+    base_ref           TEXT,
+    -- Branch a decomposed parent seeds its children from, if any.
+    seed_branch        TEXT,
+    -- Per-task loop-kit run-checkpoint (mirrors the dev_sessions block).
+    iteration          INTEGER NOT NULL DEFAULT 0,
+    agent_failures     INTEGER NOT NULL DEFAULT 0,
+    gate_revise_count  INTEGER NOT NULL DEFAULT 0,
+    iter_revise_count  INTEGER NOT NULL DEFAULT 0,
+    resumes            INTEGER NOT NULL DEFAULT 0,
+    -- Merge-redo attempts (kept across resetDevTaskForRedo resets).
+    merge_retries      INTEGER NOT NULL DEFAULT 0,
+    supervise_count    INTEGER NOT NULL DEFAULT 0,
+    -- Post-plan review verdict for this task; NULL = never reviewed.
+    plan_review        TEXT
+        CHECK (plan_review IS NULL OR plan_review IN ('pending','done','escalated')),
+    -- Cumulative USD across this task's legs (session rollup is separate).
+    cost_usd           REAL,
+    fail_reason        TEXT,
+    created_at         INTEGER NOT NULL,
+    -- First claim time — a merge-redo keeps the original value.
+    started_at         INTEGER,
+    ended_at           INTEGER,
+    merged_at          INTEGER,
+    updated_at         INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_tasks_session_key
+    ON dev_session_tasks(session_id, task_key);
+CREATE INDEX IF NOT EXISTS idx_dev_tasks_session_state
+    ON dev_session_tasks(session_id, state);
+
 -- Native journal.jsonl — one immutable row per loop leg. Powers the
 -- dashboard timeline and the chat digest counts.
 CREATE TABLE IF NOT EXISTS dev_session_iterations (
     id          TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    -- The task-DAG node this leg ran under; NULL = session-level leg.
+    task_id     TEXT REFERENCES dev_session_tasks(id) ON DELETE CASCADE,
     iteration   INTEGER NOT NULL,
     phase       TEXT NOT NULL
-        CHECK (phase IN (
-            'plan',
-            'implement',
-            'evaluate',
-            'review',
-            'stop_eval',
-            'gate',
-            'evidence'
-        )),
+        CHECK (phase IN ('plan','implement','evaluate','review','stop_eval','gate','evidence',
+                         'decompose','decompose_review','supervise','plan_review','merge')),
     verdict     TEXT,
     reason      TEXT,
     cost_usd    REAL,
@@ -2159,6 +2237,8 @@ CREATE TABLE IF NOT EXISTS dev_session_iterations (
 );
 CREATE INDEX IF NOT EXISTS idx_dev_iterations_session
     ON dev_session_iterations(session_id, iteration);
+CREATE INDEX IF NOT EXISTS idx_dev_iterations_task
+    ON dev_session_iterations(task_id);
 
 -- The requirements ledger (DB mirror of requirements-ledger.md). Seeded
 -- deterministically from the contract's REQ- headings at !approve; the
@@ -2192,6 +2272,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_reqs_session_req
 CREATE TABLE IF NOT EXISTS dev_session_escalations (
     id              TEXT PRIMARY KEY,
     session_id      TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    -- Task-scoped escalation pointer; NULL = session-scoped. SET NULL so
+    -- deleting a task row keeps the Q&A history on the session.
+    task_id         TEXT REFERENCES dev_session_tasks(id) ON DELETE SET NULL,
     -- Maps to the loop-kit escalation states.
     kind            TEXT NOT NULL
         CHECK (kind IN (

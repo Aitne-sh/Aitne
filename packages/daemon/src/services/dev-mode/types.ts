@@ -98,6 +98,46 @@ export interface DevLoopConfig {
   permissionMode: DevPermissionMode;
   /** Max consecutive resumes that never complete an iteration → BLOCKED. */
   maxResumes: number;
+  /** Fleet/flow settings (decompose + parallel worktree execution). */
+  flow: DevFlowConfig;
+}
+
+/**
+ * Fleet/flow stop conditions — the loop-kit fleet.config.sh port. Approved as
+ * part of `config_json`, so the whole object lands in the approval hash via
+ * `canonicalize` (a flow change after approval is a goalpost move).
+ */
+export interface DevFlowConfig {
+  /** Run the decompose step after approval; false = always the single loop. */
+  decompose: boolean;
+  /** Concurrent worker slots (FLEET_MAX_PARALLEL). */
+  maxParallel: number;
+  /** Hard cap on tasks in flight (FLEET_MAX_TASKS). */
+  maxTasks: number;
+  /** Supervisor decisions per task before parking for the user
+   *  (FLEET_MAX_SUPERVISE_PER_TASK). */
+  superviseCap: number;
+  /** Cumulative replacement-task budget across REPLANs
+   *  (FLEET_MAX_REPLAN_TASKS). */
+  replanCap: number;
+  /** Run the phase-boundary plan review when a merged task has queued
+   *  dependents (FLEET_PLAN_REVIEW). */
+  planReview: boolean;
+  /** Cumulative plan-review REVISE budget (FLEET_MAX_PLAN_REVISIONS). */
+  planReviewCap: number;
+  /** Integration-gate fix-up rounds before BLOCKED
+   *  (FLEET_MAX_INTEGRATION_FIXUPS). */
+  integrationFixupCap: number;
+  /** Percent of maxIterations after which a fleet worker with unmet REQs gets
+   *  the split nudge (SPLIT_NUDGE_AT; 0 = off). */
+  splitNudgeAt: number;
+  /** Seed a NEEDS_DECOMPOSITION replacement block's unique root with the
+   *  escalated task's committed branch (FLEET_SPLIT_CARRYOVER). */
+  splitCarryover: boolean;
+  /** Command run in a fresh worktree before its loop starts (e.g. installing
+   *  gitignored deps so verifyCommands can pass); null = none
+   *  (WORKTREE_SETUP_CMD). */
+  worktreeSetupCommand: string | null;
 }
 
 /** The budget-only keys a resume tolerates without re-approval (loop-kit
@@ -122,6 +162,7 @@ export type DevEvaluateState =
   | "NO_OP"
   | "NEEDS_SPEC_DECISION"
   | "NEEDS_ARCHITECTURE_DECISION"
+  | "NEEDS_DECOMPOSITION"
   | "RISK_REQUIRES_APPROVAL"
   | "BLOCKED"
   | "STALLED";
