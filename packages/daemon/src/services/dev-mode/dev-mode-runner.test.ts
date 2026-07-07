@@ -17,6 +17,7 @@ import {
   getOpenDevEscalationForSession,
   listDevEscalationsForSession,
 } from "../../db/dev-session-escalations-store.js";
+import { listDevTasks } from "../../db/dev-session-tasks-store.js";
 import { DEV_DOCS, ensureDevWorkdir, writeDevDoc, readDevDoc } from "./dev-loop-docs.js";
 import { normalizeDevLoopConfig } from "./dev-loop-config.js";
 import {
@@ -64,6 +65,28 @@ function fakeBackend(
       const override = overrides[req.taskFlowKey];
       if (override) return override(req);
       switch (req.taskFlowKey) {
+        case "dev.decompose":
+          // n=1 (fewer-is-better) — routes straight to the single loop.
+          writeDevDoc(
+            req.sessionDir,
+            DEV_DOCS.taskPlan,
+            [
+              "<!-- TASK-PLAN-BEGIN v1 -->",
+              "TASK: all",
+              "SUMMARY: build everything",
+              "DEPENDS: -",
+              "SCOPE: the whole contract",
+              "REQS: REQ-001,REQ-002",
+              "BODY-BEGIN",
+              "Implement the whole contract.",
+              "BODY-END",
+              "TASK-END",
+              "<!-- TASK-PLAN-END -->",
+            ].join("\n"),
+          );
+          return ok("DECOMPOSE: TASKS n=1");
+        case "dev.decompose_review":
+          return ok("DECOMPOSE-REVIEW: APPROVE single task is right");
         case "dev.plan":
           writeDevDoc(repo, DEV_DOCS.plan, "## Milestones\n- [ ] REQ-001\n- [ ] REQ-002");
           return ok("planned");
@@ -372,5 +395,75 @@ describe("DevModeRunner", () => {
     expect(phases).toContain("implement");
     expect(phases).toContain("evaluate");
     expect(phases).toContain("evidence");
+  });
+
+  it("routes an n>=2 decomposition into the fleet (per-task worktrees + merge)", async () => {
+    // A decompose leg that splits the two REQs into two independent tasks; each
+    // worker writes a task-named file and marks its OWNED req met; the gate
+    // APPROVEs the merged whole.
+    const fleetBackend: DevBackend = {
+      async runLeg(req: DevBackendRequest): Promise<DevLegResponse> {
+        switch (req.taskFlowKey) {
+          case "dev.decompose":
+            writeDevDoc(
+              req.sessionDir,
+              DEV_DOCS.taskPlan,
+              [
+                "<!-- TASK-PLAN-BEGIN v1 -->",
+                "TASK: alpha\nSUMMARY: a\nDEPENDS: -\nSCOPE: alpha.ts\nREQS: REQ-001\nBODY-BEGIN\nbuild alpha\nBODY-END\nTASK-END",
+                "TASK: beta\nSUMMARY: b\nDEPENDS: -\nSCOPE: beta.ts\nREQS: REQ-002\nBODY-BEGIN\nbuild beta\nBODY-END\nTASK-END",
+                "<!-- TASK-PLAN-END -->",
+              ].join("\n"),
+            );
+            return ok("DECOMPOSE: TASKS n=2");
+          case "dev.decompose_review":
+            return ok("DECOMPOSE-REVIEW: APPROVE clean split");
+          case "dev.plan":
+            writeDevDoc(req.sessionDir, DEV_DOCS.plan, "## Milestones\n- [ ] do it");
+            return ok("planned");
+          case "dev.implement": {
+            const key = req.sessionDir.split("/").pop()!;
+            writeFileSync(join(req.sessionDir, `${key}.ts`), `export const ${key} = 1;\n`);
+            const ledgerMd_ = readDevDoc(req.sessionDir, DEV_DOCS.ledger) ?? "";
+            const reqs = [...ledgerMd_.matchAll(/\| (REQ-\d+) \|/g)].map((m) => m[1]!);
+            writeDevDoc(
+              req.sessionDir,
+              DEV_DOCS.ledger,
+              ["| REQ | Status | Evidence | Iter |", "|---|---|---|---|", ...reqs.map((r) => `| ${r} | met | ev | 1 |`)].join("\n"),
+            );
+            writeDevDoc(req.sessionDir, DEV_DOCS.agentState, "READY_FOR_REVIEW done");
+            return ok("implemented");
+          }
+          case "dev.review":
+            // Emit per-REQ MET lines for both reqs so the gate downgrade
+            // (scoped to owned reqs for a worker, all reqs for integration)
+            // never fires.
+            return ok("REQ-001: MET ok\nREQ-002: MET ok\nVERDICT: APPROVE ship it");
+          case "dev.stop_eval":
+            return ok("STOP-EVAL: MET");
+          case "dev.evidence":
+            writeDevDoc(req.sessionDir, DEV_DOCS.evidence, "# Evidence\nall good");
+            return ok("evidence");
+          default:
+            return ok("noop");
+        }
+      },
+    };
+    const runner = makeRunner(fleetBackend);
+    runner.startFromApproval("s1");
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running", 15000);
+    const session = getDevSession(db, "s1")!;
+    expect(session.state).toBe("done");
+    expect(session.loopState).toBe("SUCCESS");
+    // Both decomposed task files landed on the session branch.
+    expect(existsSync(join(repo, "alpha.ts"))).toBe(true);
+    expect(existsSync(join(repo, "beta.ts"))).toBe(true);
+    // The task rows are recorded and merged.
+    const tasks = listDevTasks(db, "s1");
+    expect(tasks).toHaveLength(2);
+    expect(tasks.every((t) => t.state === "merged")).toBe(true);
+    // Iteration rows are tagged with their task id.
+    const taskTagged = listDevIterations(db, "s1").filter((r) => r.taskId !== null);
+    expect(taskTagged.length).toBeGreaterThan(0);
   });
 });

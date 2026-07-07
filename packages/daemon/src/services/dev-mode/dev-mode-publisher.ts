@@ -13,13 +13,13 @@
  * I/O-shaped; excluded from the coverage gate.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { writeFileAtomically } from "../../core/atomic-write.js";
 import type { AgentWriteTracker } from "../../safety/agent-write-tracker.js";
 import { createLogger } from "../../logging.js";
-import { DEV_DOCS, readDevDoc } from "./dev-loop-docs.js";
+import { DEV_DIR_NAME, DEV_DOCS, DEV_TASK_ARCHIVE_DIR, readDevDoc } from "./dev-loop-docs.js";
 
 const logger = createLogger("dev-mode-publisher");
 
@@ -75,6 +75,33 @@ export function createDevModePublisher(deps: DevModePublisherDeps): DevModePubli
       publishOne(DEV_DOCS.ledger, "requirements-ledger.md");
       publishOne(DEV_DOCS.evidence, "evidence-report.md");
       publishOne(DEV_DOCS.progress, "journal.md");
+      // Fleet runs — the task plan + each merged task's archived instruction +
+      // evidence (phase-context source), so the whole decomposition is browsable.
+      publishOne(DEV_DOCS.taskPlan, "task-plan.md");
+      const archiveDir = join(repoPath, DEV_DIR_NAME, DEV_TASK_ARCHIVE_DIR);
+      if (existsSync(archiveDir)) {
+        let taskKeys: string[] = [];
+        try {
+          taskKeys = readdirSync(archiveDir);
+        } catch {
+          taskKeys = [];
+        }
+        for (const taskKey of taskKeys) {
+          const rel = (name: string): string => `${DEV_TASK_ARCHIVE_DIR}/${taskKey}/${name}`;
+          for (const [name, out] of [
+            ["task-instruction.md", "task.md"],
+            ["evidence-report.md", "evidence-report.md"],
+          ] as const) {
+            const content = readDevDoc(repoPath, rel(name));
+            if (content === null || content.trim().length === 0) continue;
+            try {
+              writeManaged(`${base}/tasks/${taskKey}/${out}`, content, trigger);
+            } catch (err) {
+              logger.warn({ err, sessionId, taskKey, out }, "dev publish: task artifact write failed (continuing)");
+            }
+          }
+        }
+      }
       logger.info({ sessionId, slug }, "dev session artifacts published to the knowledge vault");
     },
   };

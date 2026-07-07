@@ -41,9 +41,17 @@ import {
 import {
   createDevEscalation,
   resolveDevEscalation,
+  type DevEscalationKind,
 } from "../../db/dev-session-escalations-store.js";
 import {
+  getDevTask,
+  listDevTasks,
+  markDevTaskState,
+  setDevTaskPlanReview,
+} from "../../db/dev-session-tasks-store.js";
+import {
   DEV_DOCS,
+  DEV_TASK_ARCHIVE_DIR,
   appendDevDoc,
   ensureDevWorkdir,
   gitCommitAll,
@@ -51,7 +59,9 @@ import {
   gitHead,
   readAgentStateFirstLine,
   readDevDoc,
+  writeDevDoc,
 } from "./dev-loop-docs.js";
+import { gitWorktreeRemove } from "./dev-flow-git.js";
 import {
   computeApprovalHash,
   normalizeDevLoopConfig,
@@ -61,6 +71,11 @@ import { extractContractRequirements, parseAgentStateToken } from "./verdict-par
 import type { DevLoopConfig } from "./types.js";
 import { DevLoopEngine, type DevIterationOutcome } from "./dev-loop-engine.js";
 import { createDevLegRunner, type DevBackend } from "./dev-loop-legs.js";
+import { createDevFlowLegRunner } from "./dev-flow-legs.js";
+import {
+  createDevFleetOrchestrator,
+  type DevFleetRunResult,
+} from "./dev-flow-orchestrator.js";
 import type { DevModePublisher } from "./dev-mode-publisher.js";
 
 const logger = createLogger("dev-mode-runner");
@@ -221,7 +236,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
   async function enqueueEscalationDelivery(
     session: DevSessionRow,
     escalationId: string,
-    outcome: Extract<DevIterationOutcome, { kind: "escalate" }>,
+    escalation: { question: string; contextSummary: string | null },
   ): Promise<void> {
     if (!deps.deliveryEnqueuer) return;
     try {
@@ -230,12 +245,42 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         escalationId,
         originatingChannel: session.originatingChannel,
         title: session.slug ?? session.repositoryId,
-        question: outcome.question,
-        contextSummary: outcome.contextSummary,
+        question: escalation.question,
+        contextSummary: escalation.contextSummary,
       });
     } catch (err) {
       logger.warn({ err, sessionId: session.id }, "dev escalation delivery enqueue failed (recovery sweep will retry)");
     }
+  }
+
+  /** Create an escalation row + deliver it, WITHOUT parking the session — the
+   *  fleet's task escalations keep independent siblings running (D-G). The
+   *  session parks only when the orchestrator returns "parked". */
+  async function createAndDeliverEscalation(input: {
+    sessionId: string;
+    taskId: string | null;
+    kind: DevEscalationKind;
+    question: string;
+    contextSummary: string | null;
+  }): Promise<void> {
+    const escalationId = uuid();
+    createDevEscalation(deps.db, {
+      id: escalationId,
+      sessionId: input.sessionId,
+      taskId: input.taskId,
+      kind: input.kind,
+      question: input.question,
+      contextSummary: input.contextSummary,
+      askedAt: now(),
+    });
+    const session = getDevSession(deps.db, input.sessionId);
+    if (session) {
+      await enqueueEscalationDelivery(session, escalationId, {
+        question: input.question,
+        contextSummary: input.contextSummary,
+      });
+    }
+    logger.info({ sessionId: input.sessionId, taskId: input.taskId, kind: input.kind }, "dev task escalation raised");
   }
 
   async function enqueueDigestDelivery(
@@ -273,6 +318,8 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     createDevEscalation(deps.db, {
       id: escalationId,
       sessionId,
+      // Single-loop escalations map the (task-widened) loop state back to a
+      // session escalation kind; NEEDS_DECOMPOSITION never reaches here.
       kind: outcome.escalationKind,
       question: outcome.question,
       contextSummary: outcome.contextSummary,
@@ -377,8 +424,49 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         await failLoud(sessionId, new Error("repository local path unresolved"));
         return;
       }
+      const config = normalizeDevLoopConfig(session.config);
       const backend = deps.makeBackend(controller);
       const legRunner = createDevLegRunner({ backend, loadTaskFlow: deps.loadTaskFlow });
+
+      // Fleet path: decompose the contract into a task DAG, then run the
+      // orchestrator. A resume (tasks already exist) re-enters mid-fleet. When
+      // decompose returns "single" (n=1), fall through to the classic loop.
+      if (config.flow.decompose) {
+        const flowLegs = createDevFlowLegRunner({ backend, loadTaskFlow: deps.loadTaskFlow });
+        const orchestrator = createDevFleetOrchestrator({
+          db: deps.db,
+          repoPath,
+          session,
+          config,
+          legRunner,
+          flowLegs,
+          tier,
+          now,
+          uuid,
+          signal: controller.signal,
+          onTaskEscalation: (e) =>
+            createAndDeliverEscalation({
+              sessionId,
+              taskId: e.taskId,
+              kind: e.kind,
+              question: e.question,
+              contextSummary: e.contextSummary,
+            }),
+          onFleetNote: async (text) => {
+            const s = getDevSession(deps.db, sessionId);
+            if (s) await enqueueFleetNote(s, text);
+          },
+        });
+        const result = await orchestrator.run();
+        if (controller.signal.aborted) return;
+        if (result.kind !== "single") {
+          await handleFleetResult(sessionId, result);
+          return;
+        }
+        logger.info({ sessionId }, "dev fleet: n=1 — running the single loop");
+      }
+
+      // Single-loop path (decompose disabled or n=1).
       const engine = new DevLoopEngine(session, {
         db: deps.db,
         repoPath,
@@ -402,7 +490,9 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
           continue;
         }
         if (outcome.kind === "escalate") {
-          await handleEscalate(sessionId, outcome);
+          // A single loop can only raise session-scoped escalation states
+          // (never NEEDS_DECOMPOSITION — the evaluator gates that on fleet).
+          await handleEscalate(sessionId, outcome as Extract<DevIterationOutcome, { kind: "escalate" }>);
           return;
         }
         await handleTerminal(sessionId, outcome);
@@ -413,6 +503,44 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     } finally {
       active.delete(sessionId);
     }
+  }
+
+  /** A mid-fleet progress note → a low-key digest DM (best-effort). */
+  async function enqueueFleetNote(session: DevSessionRow, text: string): Promise<void> {
+    if (!deps.deliveryEnqueuer) return;
+    try {
+      await deps.deliveryEnqueuer.enqueueDigest({
+        sessionId: session.id,
+        originatingChannel: session.originatingChannel,
+        title: session.slug ?? session.repositoryId,
+        draft: text,
+        report: text,
+        evidencePath: null,
+      });
+    } catch (err) {
+      logger.warn({ err, sessionId: session.id }, "dev fleet note enqueue failed");
+    }
+  }
+
+  /** Map an orchestrator result onto the outer session lifecycle. */
+  async function handleFleetResult(
+    sessionId: string,
+    result: Exclude<DevFleetRunResult, { kind: "single" }>,
+  ): Promise<void> {
+    if (result.kind === "terminal") {
+      await handleTerminal(sessionId, {
+        kind: "terminal",
+        loopState: result.loopState,
+        reason: result.reason,
+      });
+      return;
+    }
+    // parked: the orchestrator already created + delivered the task escalation
+    // rows (or the fleet cancelled). Cancel maps through the runner's cancel().
+    if (result.reason === "cancelled") return;
+    markDevAwaitingUser(deps.db, sessionId, now());
+    cancelTimeout(sessionId);
+    logger.info({ sessionId, reason: result.reason }, "dev fleet parked awaiting the owner");
   }
 
   // ── interview (pre-approval contract authoring) ───────────────────────
@@ -636,6 +764,19 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       loopState: session.loopState,
       exitedAt: now(),
     });
+    // Best-effort fleet worktree cleanup (branches are kept for autopsy).
+    const repoPath = deps.resolveRepoPath(session.repositoryId);
+    if (repoPath) {
+      for (const task of listDevTasks(deps.db, sessionId)) {
+        if (task.worktreePath) {
+          try {
+            gitWorktreeRemove(repoPath, task.worktreePath);
+          } catch (err) {
+            logger.warn({ err, sessionId, taskKey: task.taskKey }, "dev cancel: worktree cleanup failed");
+          }
+        }
+      }
+    }
     deps.onSessionEnded?.(sessionId);
     logger.info({ sessionId, reason, wasRunning: !!controller }, "dev session cancelled");
     return true;
@@ -660,15 +801,36 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       if (resolved.reason !== "already_resolved") return "failed";
     }
 
-    // Fold the owner's decision into decision-requests.md so the next implement
-    // leg (fresh context) sees the resolution.
     const repoPath = deps.resolveRepoPath(session.repositoryId);
-    if (repoPath) {
-      appendDevDoc(
-        repoPath,
-        DEV_DOCS.decisionRequests,
-        `\n## Owner decision (resolved ${new Date(now()).toISOString()})\n${input.answer}\n`,
-      );
+    const taskId = resolved.row?.taskId ?? null;
+    const ownerDecision = `\n## Owner decision (resolved ${new Date(now()).toISOString()})\n${input.answer}\n`;
+
+    if (taskId && repoPath) {
+      // ── task-scoped escalation ──
+      const task = getDevTask(deps.db, taskId);
+      if (task && task.state === "awaiting_user" && task.worktreePath) {
+        // A worker (RISK / supervise-ESCALATE / cap) is parked — write the
+        // owner's call as authoritative guidance and re-queue it. The
+        // orchestrator relaunch resumes it from its checkpoint.
+        writeDevDoc(task.worktreePath, DEV_DOCS.supervisorGuidance, `${input.answer}\n`);
+        appendDevDoc(task.worktreePath, DEV_DOCS.decisionRequests, ownerDecision);
+        markDevTaskState(deps.db, { id: taskId, from: ["awaiting_user"], to: "queued", loopState: null, at: now() });
+      } else if (task && task.planReview === "escalated") {
+        // A phase-boundary plan review escalated — record the call in the
+        // merged task's archive and release the held dependents.
+        appendDevDoc(
+          repoPath,
+          `${DEV_TASK_ARCHIVE_DIR}/${task.taskKey}/decision-requests.md`,
+          ownerDecision,
+        );
+        setDevTaskPlanReview(deps.db, taskId, "done", now());
+      } else {
+        // The task moved on (superseded/merged) — the answer is advisory only.
+        appendDevDoc(repoPath, DEV_DOCS.decisionRequests, ownerDecision);
+      }
+    } else if (repoPath) {
+      // Session-scoped (single loop, integration gate, or decompose failure).
+      appendDevDoc(repoPath, DEV_DOCS.decisionRequests, ownerDecision);
     }
 
     // Resume budget — a TOTAL escalation-resume cap for the session (not
