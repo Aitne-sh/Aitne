@@ -164,8 +164,8 @@ interface ObservationSummary {
  *     frontmatter, the git-evidence Summary, the placeholder Architecture
  *     block bracketed by markers, the Notable Changes list rendered from
  *     `git log`, and the empty Open Threads / Daily Activity Log sections.
- *     Mirror the repository's README into `git/<slug>/README.md` so the
- *     agent can read it through the daemon-owned context dir without
+ *     Mirror the repository's README into `knowledge/repos/<slug>/README.md`
+ *     so the agent can read it through the daemon-owned context dir without
  *     leaving the workspace.
  *  2. **Architecture refresh** (asynchronous, agent-driven): enqueue a
  *     `git.project.refresh_architecture` row in `agent_schedule`. The
@@ -586,7 +586,7 @@ function findReadmeFileName(localPath: string): string | null {
 
 /**
  * Mirror the repository's `README.*` verbatim to
- * `<contextDir>/git/<slug>/README.md`. Mechanical copy — no truncation,
+ * `<contextDir>/knowledge/repos/<slug>/README.md`. Mechanical copy — no truncation,
  * no processing — but routed through `writeManagedContextFile` so the
  * write picks up the same chokepoint guarantees as every other managed
  * write in this module:
@@ -1293,7 +1293,7 @@ function updateArchitectureFrontmatter(
 }
 
 /**
- * Re-copy the repository's README.* into `git/<slug>/README.md`,
+ * Re-copy the repository's README.* into `knowledge/repos/<slug>/README.md`,
  * snapshotting the previous mirror to `md_file_snapshots`. Used by both
  * the management-init flow (initial mirror) and the architecture-refresh
  * flow (keep mirror in sync with the source the agent just analyzed).

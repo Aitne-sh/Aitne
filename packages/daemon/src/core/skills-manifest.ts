@@ -498,16 +498,11 @@ export const EVENT_SKILL_SETS: Record<string, string[]> = {
     "today",
     "observations",
   ],
-  "git.project.init": [
-    "context",
-    "observations",
-    "project-doc",
-  ],
-  "git.project.update": [
-    "context",
-    "observations",
-    "project-doc",
-  ],
+  // `git.project.init` / `git.project.update` have no entry on purpose:
+  // the dispatcher short-circuits both keys to the deterministic
+  // in-process markdown writers (`repository-management-docs.ts`), so no
+  // agent session — and therefore no skill manifest — is ever resolved
+  // for them.
   // Dashboard-triggered one-shot template re-conform. The task-flow
   // operates only against the per-target context files via /api/context
   // and the project-doc skill rules; it never reads observations, today,
@@ -685,8 +680,9 @@ const PROCESS_TO_EVENT_TYPE: Partial<Record<ProcessKey, string>> = {
   "calendar.change": "schedule.approaching",
   setup: "setup.initial",
   "knowledge.import": "knowledge.import",
-  "git.project.init": "git.project.init",
-  "git.project.update": "git.project.update",
+  // git.project.init / git.project.update intentionally absent — handled
+  // in-process by the dispatcher's direct markdown writer, never as an
+  // agent session.
   "git.project.retemplate": "git.project.retemplate",
   "git.lifecycle.poll": "git.lifecycle.poll",
   "wiki.ingest_url": "wiki.ingest_url",

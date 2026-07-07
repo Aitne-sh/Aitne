@@ -27,7 +27,6 @@ export interface RepositoryRunTaskContext {
   workdirMode: RepositoryRunWorkdirMode;
   prompt: string;
   instructionMd: string | null;
-  timeoutMinutes: number | null;
   triggerId?: string;
   triggerName?: string;
   triggerEventType?: string;
@@ -71,8 +70,6 @@ export function parseRepositoryRunTaskContext(
     workdirMode: ctx.workdirMode,
     prompt: ctx.prompt,
     instructionMd: typeof ctx.instructionMd === "string" ? ctx.instructionMd : null,
-    timeoutMinutes:
-      typeof ctx.timeoutMinutes === "number" ? ctx.timeoutMinutes : null,
     ...(typeof ctx.triggerId === "string" ? { triggerId: ctx.triggerId } : {}),
     ...(typeof ctx.triggerName === "string" ? { triggerName: ctx.triggerName } : {}),
     ...(typeof ctx.triggerEventType === "string" ? { triggerEventType: ctx.triggerEventType } : {}),

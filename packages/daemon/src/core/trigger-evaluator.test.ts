@@ -361,4 +361,26 @@ describe("evaluateTriggers", () => {
     };
     expect(evaluateTriggers([t], "git.push.detected", {})).toHaveLength(0);
   });
+
+  it("isolates a trigger whose stored glob throws at compile time", () => {
+    // Rows created before the write-time compile gate (or edited
+    // out-of-band) can carry a glob whose RegExp construction throws.
+    // The bad trigger must read as "no match" without aborting its
+    // siblings' evaluation.
+    const bad: RepositoryTriggerDTO = {
+      ...baseTrigger,
+      id: "bad",
+      filters: { path_pattern: "[a\\]" },
+    };
+    const good: RepositoryTriggerDTO = {
+      ...baseTrigger,
+      id: "good",
+      filters: { branch: "main" },
+    };
+    const matched = evaluateTriggers([bad, good], "git.push.detected", {
+      branch: "main",
+      commits: [{ added: ["packages/x.ts"], modified: [], removed: [] }],
+    });
+    expect(matched.map((t) => t.id)).toEqual(["good"]);
+  });
 });

@@ -1,6 +1,11 @@
 import type Database from "better-sqlite3";
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import type { BackendId } from "@aitne/shared";
+// Value import into the evaluator is safe: trigger-evaluator only imports
+// a *type* from this module, so there is no runtime cycle.
+import { compileGlob } from "../core/trigger-evaluator.js";
 import type { GitWatchedRepoSetting } from "../settings/runtime-settings.js";
 
 /**
@@ -219,6 +224,8 @@ export class RepositoryStoreError extends Error {
     public readonly code:
       | "missing_side"
       | "github_pair_required"
+      | "invalid_github_ref"
+      | "invalid_local_path"
       | "local_only_with_github"
       | "duplicate_github"
       | "duplicate_local"
@@ -244,11 +251,11 @@ const SLUG_PATTERN = /[^a-z0-9._-]+/g;
 // Defense-in-depth (C3): the SLUG_PATTERN allows `.` so legitimate slugs
 // like `v1.2.3` or `my.tool` survive sanitization. A *pure-dot* slug
 // (`.`, `..`, `...`) is structurally legal under that pattern but
-// catastrophic downstream: `path.join(contextDir, "git/../overview.md")`
+// catastrophic downstream: `path.join(contextDir, "knowledge/repos/../overview.md")`
 // normalises the `..` segment and redirects the agent's architecture
 // write to a top-level context file. Reject pure-dot candidates here so
 // no caller — direct store user, future API loosening, or fixture import
-// — can produce a slug that escapes the `git/<slug>/` namespace.
+// — can produce a slug that escapes the `knowledge/repos/<slug>/` namespace.
 const PURE_DOT_PATTERN = /^\.+$/;
 
 function lastPathSegment(value: string): string | null {
@@ -340,17 +347,17 @@ function pathHash12(path: string): string {
 
 /**
  * Slug uniqueness gate (unified-repositories §4.5 + review note C). The
- * `<contextDir>/git/<slug>/` output layout is keyed by `deriveSlug`, so
- * two rows with the same slug would collide on `overview.md` /
- * `journal/<date>.md` writes. The slug is computed (not stored), so a
- * DB UNIQUE constraint isn't viable; this helper performs an in-JS
- * check at create/update time. `excludeId` lets the update path skip
- * the row being mutated.
+ * `<contextDir>/knowledge/repos/<slug>/` output layout is keyed by
+ * `deriveSlug`, so two rows with the same slug would collide on
+ * `overview.md` / `journal/repos/<slug>/<date>.md` writes. The slug is
+ * computed (not stored), so a DB UNIQUE constraint isn't viable; this
+ * helper performs an in-JS check at create/update time. `excludeId`
+ * lets the update path skip the row being mutated.
  *
  * Race-conditions exist in principle (two parallel POST /repositories
  * with colliding slugs) but the dashboard is single-operator and the
  * cost of a colliding write is bounded — both rows would attempt the
- * same `git/<slug>/overview.md` file path through the
+ * same `knowledge/repos/<slug>/overview.md` file path through the
  * `/api/context/...` chokepoint, which is itself locked.
  */
 function findRepositoryWithSlug(
@@ -421,6 +428,42 @@ export function deriveRepositoryId(input: {
 
 // ── Validation ───────────────────────────────────────────────────────
 
+/**
+ * Single path segment of a GitHub `owner/repo` slug. Deliberately
+ * permissive (GitHub's real rules differ slightly between users, orgs,
+ * and repos) but blocks the failure modes that corrupt derived state:
+ * `/` (a pasted `owner/repo` in the owner field yields a
+ * `github:a/b/c` id and a broken `gh api repos/a/b/c/...` URL path),
+ * whitespace, and empty strings.
+ */
+const GITHUB_REF_SEGMENT_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * Canonicalize a user-supplied local clone path: trim, expand a leading
+ * `~`/`~/` to the daemon's home directory, require the result to be
+ * absolute (POSIX or Windows-style), and strip trailing separators so
+ * `/a/b/` and `/a/b` derive the same `local:<hash>` id.
+ *
+ * A relative path would silently resolve against the daemon's cwd in
+ * every later `git -C` call — reject it here with the same message the
+ * link-local route advertises.
+ */
+function normalizeLocalPathInput(value: string): string {
+  let path = value.trim();
+  if (path === "~" || path.startsWith("~/") || path.startsWith("~\\")) {
+    path = join(homedir(), path.slice(1).replace(/^[\\/]/, ""));
+  }
+  if (path.length === 0 || !(isAbsolute(path) || looksWindowsLocalPath(path))) {
+    throw new RepositoryStoreError(
+      "invalid_local_path",
+      `localPath must be an absolute path (got ${JSON.stringify(value)}); `
+        + "a leading '~/' is expanded to the daemon's home directory",
+    );
+  }
+  const stripped = path.replace(/[\\/]+$/g, "");
+  return stripped.length > 0 ? stripped : path;
+}
+
 function validateInputShape(input: {
   githubOwner?: string | null;
   githubRepo?: string | null;
@@ -436,6 +479,20 @@ function validateInputShape(input: {
     );
   }
   const hasGithub = hasGithubOwner && hasGithubRepo;
+  if (hasGithub) {
+    for (const [field, value] of [
+      ["githubOwner", input.githubOwner!],
+      ["githubRepo", input.githubRepo!],
+    ] as const) {
+      if (!GITHUB_REF_SEGMENT_PATTERN.test(value)) {
+        throw new RepositoryStoreError(
+          "invalid_github_ref",
+          `${field} must match ${GITHUB_REF_SEGMENT_PATTERN} (got ${JSON.stringify(value)}); `
+            + "pass owner and repo as separate fields, not a combined 'owner/repo' slug",
+        );
+      }
+    }
+  }
   const hasLocal = Boolean(input.localPath);
   if (!hasGithub && !hasLocal) {
     throw new RepositoryStoreError(
@@ -587,6 +644,11 @@ export function createRepository(
   input: RepositoryCreateInput,
   now: number = Date.now(),
 ): RepositoryDTO {
+  if (input.localPath) {
+    // Canonicalize before anything derives from the path — the id hash,
+    // duplicate detection, and slug all key off the stored value.
+    input = { ...input, localPath: normalizeLocalPathInput(input.localPath) };
+  }
   validateInputShape(input);
   validatePollInterval(input.pollIntervalSec);
 
@@ -700,7 +762,9 @@ export function updateRepository(
     githubRepo: patch.githubRepo !== undefined ? patch.githubRepo : current.github_repo,
     githubAccount:
       patch.githubAccount !== undefined ? patch.githubAccount : current.github_account,
-    localPath: patch.localPath !== undefined ? patch.localPath : current.local_path,
+    localPath: patch.localPath !== undefined
+      ? (patch.localPath === null ? null : normalizeLocalPathInput(patch.localPath))
+      : current.local_path,
     localOnly: patch.localOnly !== undefined ? patch.localOnly : current.local_only === 1,
     displayName:
       patch.displayName !== undefined ? patch.displayName : current.display_name,
@@ -947,12 +1011,32 @@ function validateTriggerFilters(filters: Record<string, unknown>): string {
   // functions / circular structures up-front via JSON.stringify.
   for (const [key, value] of Object.entries(filters)) {
     if (key === "path_pattern") {
-      if (typeof value === "string") continue;
-      if (Array.isArray(value) && value.every((v) => typeof v === "string")) continue;
-      throw new RepositoryStoreError(
-        "filters_invalid",
-        "filters.path_pattern must be string or string[]",
-      );
+      const patterns = typeof value === "string"
+        ? [value]
+        : Array.isArray(value) && value.every((v) => typeof v === "string")
+          ? (value as string[])
+          : null;
+      if (patterns === null) {
+        throw new RepositoryStoreError(
+          "filters_invalid",
+          "filters.path_pattern must be string or string[]",
+        );
+      }
+      // Compile-check each glob NOW. A pattern that only throws at match
+      // time (e.g. `[a\`) would silently kill evaluation for every
+      // trigger sharing the same (repository, event) — reject at write
+      // time so the operator sees the error while editing the trigger.
+      for (const pattern of patterns) {
+        try {
+          compileGlob(pattern);
+        } catch {
+          throw new RepositoryStoreError(
+            "filters_invalid",
+            `filters.path_pattern contains an invalid glob: ${JSON.stringify(pattern)}`,
+          );
+        }
+      }
+      continue;
     }
     // All other keys: scalar (string|number|boolean|null) for flat equality.
     if (

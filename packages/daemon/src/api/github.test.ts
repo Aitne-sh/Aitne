@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
 import Database from "better-sqlite3";
 import { applySchema } from "../db/schema.js";
-import { createRepository } from "../db/repositories-store.js";
+import { createRepository, createTrigger } from "../db/repositories-store.js";
 import { createGitHubRoutes, verifySignature } from "./routes/github.js";
 
 /**
@@ -562,6 +562,133 @@ describe("GitHub webhook push handling", () => {
       expect.objectContaining({
         type: "github.pull_request.opened",
       }),
+    );
+  });
+
+  it("dispatches matching repository triggers for webhook events", async () => {
+    // `github.pull_request.opened|synchronize|closed` are produced ONLY by
+    // the webhook — without the dispatch hook a trigger on those event
+    // types could never fire (the trigger editor offers them).
+    const eventBus = { put: vi.fn().mockResolvedValue(undefined) };
+    const secretBroker = new SecretBroker(
+      new InMemorySecretStore({ githubWebhookSecret: secret }),
+      { cacheTtlMs: 0 },
+    );
+    seedRepoRow(db, "test-owner/test-repo");
+    createTrigger(
+      db,
+      "github:test-owner/test-repo",
+      {
+        name: "on-pr-open",
+        eventType: "github.pull_request.opened",
+        filters: { action: "opened" },
+        backend: "claude",
+        model: "sonnet",
+        workdirMode: "temp",
+        prompt: "triage the new PR",
+        instructionMd: "# temp instructions",
+      },
+      { validateModel: () => true },
+    );
+    const { webhookApp } = createGitHubRoutes({
+      db,
+      config: {} as unknown as AgentConfig,
+      secretBroker,
+      eventBus: eventBus as never,
+    });
+
+    const payload = {
+      action: "opened",
+      repository: { full_name: "test-owner/test-repo" },
+      pull_request: {
+        number: 7,
+        title: "Add feature",
+        user: { login: "someone" },
+        html_url: "https://github.com/test-owner/test-repo/pull/7",
+        draft: false,
+      },
+    };
+    const raw = JSON.stringify(payload);
+
+    const res = await webhookApp.request("/webhook/github", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-github-event": "pull_request",
+        "x-hub-signature-256": sign(raw),
+      },
+      body: raw,
+    });
+
+    expect(res.status).toBe(200);
+    // Task-flow pipeline event…
+    expect(eventBus.put).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "github.pull_request.opened" }),
+    );
+    // …plus the trigger-fired scheduled.task riding alongside it.
+    expect(eventBus.put).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "scheduled.task",
+        taskContext: expect.objectContaining({
+          triggerSource: "repository_trigger",
+          triggerEventType: "github.pull_request.opened",
+          workdirMode: "temp",
+          prompt: "triage the new PR",
+        }),
+      }),
+    );
+  });
+
+  it("does not dispatch triggers whose filters do not match the webhook payload", async () => {
+    const eventBus = { put: vi.fn().mockResolvedValue(undefined) };
+    const secretBroker = new SecretBroker(
+      new InMemorySecretStore({ githubWebhookSecret: secret }),
+      { cacheTtlMs: 0 },
+    );
+    seedRepoRow(db, "test-owner/test-repo");
+    createTrigger(
+      db,
+      "github:test-owner/test-repo",
+      {
+        name: "on-pr-close-only",
+        eventType: "github.pull_request.opened",
+        filters: { action: "closed" },
+        backend: "claude",
+        model: "sonnet",
+        workdirMode: "temp",
+        prompt: "never fires",
+        instructionMd: "# temp instructions",
+      },
+      { validateModel: () => true },
+    );
+    const { webhookApp } = createGitHubRoutes({
+      db,
+      config: {} as unknown as AgentConfig,
+      secretBroker,
+      eventBus: eventBus as never,
+    });
+
+    const payload = {
+      action: "opened",
+      repository: { full_name: "test-owner/test-repo" },
+      pull_request: { number: 8, title: "x", user: { login: "u" }, html_url: "", draft: false },
+    };
+    const raw = JSON.stringify(payload);
+
+    const res = await webhookApp.request("/webhook/github", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-github-event": "pull_request",
+        "x-hub-signature-256": sign(raw),
+      },
+      body: raw,
+    });
+
+    expect(res.status).toBe(200);
+    expect(eventBus.put).toHaveBeenCalledTimes(1);
+    expect(eventBus.put).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "github.pull_request.opened" }),
     );
   });
 

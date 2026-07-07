@@ -44,6 +44,7 @@ For each `target` in `targets`, in order:
    - Keeps the existing frontmatter values for `slug`, `git_repo`, `default_branch`, `remote`, `created`, `account_alias`, `category`, `org`, and any other identifiers — only the *shape* of the frontmatter changes, not the data. Set `updated:` to today's ISO date.
    - For `kind: "project"`: leaves `## Git Activity`, `## Notable Changes`, `## Lifecycle Phases` populated with whatever the existing file said. Do not refetch git history here — the goal is structural conformance, not refresh.
    - For `kind: "git-repo"`: leaves `## Activity` and `## Recent Pushes` intact.
+   - **Management-owned overviews:** when the existing file's frontmatter says `type: git-project`, the file was produced by daily git management, and the daemon's writers anchor on parts of it. Preserve these verbatim even when the template does not define them: the `type`, `repository_id`, `architecture_status`, and `architecture_refreshed_at` frontmatter keys; the `<!-- architecture:start -->` … `<!-- architecture:end -->` block (with its content) under `## Architecture`; and the `## Daily Activity Log` section. Dropping any of these breaks the daily scan append and the architecture-refresh chokepoint.
 
 5. **Write the new body.** `PUT /api/context/<target.contextPath>` with `{ "content": "<full markdown>" }`.
 

@@ -417,7 +417,7 @@ describe("git-project-docs", () => {
   it("repoDocTemplateName returns the project template name for project-classified repos", () => {
     // Mirror image of the repo-only assertion below — pins the truthy
     // branch of the classification ternary so a future rename of
-    // PROJECT_TEMPLATE_NAME (currently `git-project.md`) breaks here.
+    // PROJECT_TEMPLATE_NAME (currently `project.md`) breaks here.
     const [repo] = normalizeGitWatchedRepos({
       gitWatchedRepos: [
         {

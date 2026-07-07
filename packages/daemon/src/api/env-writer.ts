@@ -172,62 +172,9 @@ const ARRAY_VALIDATORS: Record<string, (v: unknown[]) => string | null> = {
     }
     return null;
   },
-  githubRepos: (v) => {
-    const invalid = v.filter(
-      (item) =>
-        typeof item !== "string" ||
-        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(item),
-    );
-    if (invalid.length > 0) {
-      return "githubRepos must contain only owner/repo strings";
-    }
-    const normalized = v.map((item) =>
-      typeof item === "string" ? item.toLowerCase() : String(item),
-    );
-    if (new Set(normalized).size !== v.length) {
-      return "githubRepos must not contain duplicates";
-    }
-    return null;
-  },
-  gitWatchedRepos: (v) => {
-    const seenPaths = new Set<string>();
-    const seenSlugs = new Set<string>();
-    for (const item of v) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) {
-        return "gitWatchedRepos entries must be objects";
-      }
-      const repo = item as Record<string, unknown>;
-      if (typeof repo.path !== "string" || repo.path.trim() === "") {
-        return "gitWatchedRepos entries require a non-empty path";
-      }
-      const normalizedPath = expandHome(repo.path);
-      if (seenPaths.has(normalizedPath)) {
-        return "gitWatchedRepos must not contain duplicate paths";
-      }
-      seenPaths.add(normalizedPath);
-      if (
-        repo.slug !== undefined
-        && (typeof repo.slug !== "string" || repo.slug.trim() === "")
-      ) {
-        return "gitWatchedRepos.slug must be a non-empty string when provided";
-      }
-      if (typeof repo.slug === "string") {
-        const slugKey = repo.slug.toLowerCase();
-        if (seenSlugs.has(slugKey)) {
-          return "gitWatchedRepos must not contain duplicate slugs";
-        }
-        seenSlugs.add(slugKey);
-      }
-      if (
-        repo.classification !== undefined
-        && repo.classification !== "project"
-        && repo.classification !== "repo-only"
-      ) {
-        return "gitWatchedRepos.classification must be project or repo-only";
-      }
-    }
-    return null;
-  },
+  // gitRepos / gitWatchedRepos / githubRepos validators were removed with
+  // the config keys themselves at the unified-repositories cutover — the
+  // `repositories` table (db/repositories-store.ts) owns that validation.
 };
 
 function validateBootstrapValue(key: EditableBootstrapKey, value: unknown): string | null {

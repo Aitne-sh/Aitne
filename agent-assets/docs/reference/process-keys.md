@@ -109,7 +109,8 @@ The **default tier** column maps to a model size, not to a specific id:
 | `git.tag.created` | New tag on a watched repo | lite | yes |
 | `git.merge_to_default` | Merge into the default branch | lite | yes |
 | `git.local_ahead.stale` | Local branch ahead of remote for too long | lite | yes |
-| `git.project.{init,update,refresh_architecture,retemplate}` | Project-doc lifecycle hooks for watched repos (one-shot, generative — Sonnet by default) | medium | yes |
+| `git.project.{init,update}` | Repo overview skeleton + daily journal scan — deterministic in-process daemon writers; no agent session runs, so the tier is unused in practice | medium | yes |
+| `git.project.{refresh_architecture,retemplate}` | Agent-run project-doc sessions (architecture analysis, template re-conform) — one-shot, generative | medium | yes |
 | `github.assigned` | Issue / PR assigned to the operator | lite | yes |
 | `github.pull_request.review_requested` | PR review requested | lite | yes |
 | `github.workflow_run.failed` | CI run failed on a tracked repo | lite | yes |

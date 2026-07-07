@@ -31,11 +31,16 @@ const GIT_EVENT_TYPES = [
 ] as const;
 
 const GITHUB_EVENT_TYPES = [
+  // pull_request.* arrive via the GitHub webhook (review_requested also
+  // via the notification poller); workflow_run.failed comes from the
+  // poller, workflow_run.completed from the webhook (filter on
+  // {"conclusion":"failure"} to match failures only).
   "github.pull_request.opened",
   "github.pull_request.synchronize",
   "github.pull_request.review_requested",
   "github.pull_request.closed",
   "github.workflow_run.failed",
+  "github.workflow_run.completed",
   "github.assigned",
   "github.security_alert",
   "github.notification",

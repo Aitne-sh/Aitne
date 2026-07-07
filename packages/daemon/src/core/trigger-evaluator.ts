@@ -266,6 +266,16 @@ export function evaluateTriggers(
   return triggers.filter((trigger) => {
     if (!trigger.enabled) return false;
     if (trigger.eventType !== eventType) return false;
-    return matchesFilters(trigger.filters, eventType, payload);
+    // Per-trigger isolation: `validateTriggerFilters` compile-checks
+    // path_pattern globs at write time, but rows created before that
+    // gate (or edited out-of-band) can still carry a pattern whose
+    // compiled RegExp throws. Treat a throwing matcher as "no match"
+    // so one bad trigger cannot abort evaluation for its siblings or
+    // 500 the /triggers/:id/test endpoint.
+    try {
+      return matchesFilters(trigger.filters, eventType, payload);
+    } catch {
+      return false;
+    }
   });
 }

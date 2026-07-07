@@ -88,15 +88,14 @@ export default function RepositoriesConnectionsPage() {
           <GitTemplatesCard />
           <TaskFlowOverridesCard />
 
+          {/* git.project.init / git.project.update intentionally have no
+              model card: the daemon writes overview skeletons and daily
+              journals with a deterministic in-process writer — no agent
+              session, so a model setting would be a dead knob. */}
           <ProcessModelCard
-            processKey="git.project.init"
-            title="Git Project Init Model"
-            description="Generates the initial overview MD when daily git management is first enabled for a repository."
-          />
-          <ProcessModelCard
-            processKey="git.project.update"
-            title="Git Project Update Model"
-            description="Runs the daily 24h scan that appends to journal MDs and curates overview sections."
+            processKey="git.project.refresh_architecture"
+            title="Architecture Refresh Model"
+            description="Agent session that reads the repository and rewrites the ## Architecture section of its overview MD."
           />
           <ProcessModelCard
             processKey="git.project.retemplate"

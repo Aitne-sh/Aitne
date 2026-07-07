@@ -148,8 +148,10 @@ export function PollingSection({ repo }: { repo: RepositoryDTO }) {
           </Button>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          Empty falls back to the global cadence ({defaultHint}). Smaller values
-          poll more frequently — costs more rate budget on the GitHub side.
+          Empty falls back to the global cadence ({defaultHint}). The global
+          interval is the floor: an override only slows polling for this
+          repository — values smaller than the global cadence are ignored. To
+          poll faster, lower the global interval in Settings › Infrastructure.
         </p>
         {saveError && (
           <p className="text-xs text-destructive">{saveError}</p>

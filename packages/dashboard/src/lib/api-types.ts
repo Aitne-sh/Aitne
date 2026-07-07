@@ -389,16 +389,6 @@ export interface ProcessBackendConfigRow {
   updatedBy?: string | null;
 }
 
-export interface GitWatchedRepoConfig {
-  path: string;
-  slug?: string;
-  classification: "project" | "repo-only";
-  category: "work" | "personal" | "research" | "client" | "other";
-  org?: string;
-  accountAlias?: string;
-  pollPriority: "high" | "normal";
-}
-
 /**
  * P5 multi-account remote (`gitAccounts[<alias>]`). Mirrors
  * `gitAccountSchema` in `packages/daemon/src/settings/runtime-settings.ts`.
@@ -777,10 +767,10 @@ export interface ConfigResponse {
    * resumable without a one-shot setup form.
    */
   outlookClientConfigConfigured: boolean;
-  gitRepos: string[];
-  gitWatchedRepos: GitWatchedRepoConfig[];
+  // gitRepos / gitWatchedRepos / githubRepos were removed at the
+  // unified-repositories cutover — watched repos live in the
+  // `repositories` table, read via /api/repositories.
   gitAccounts: Record<string, GitAccountConfig>;
-  githubRepos: string[];
   apiPort: number;
   googleCalendarId: string;
   notionDatabaseIds: Record<string, string>;

@@ -109,7 +109,6 @@ export interface RepositoryRunInput {
   workdirMode: TriggerWorkdirMode;
   prompt: string;
   instructionMd?: string;
-  timeoutMinutes?: number;
 }
 
 export interface RepositoryManagementRunResult {

@@ -103,9 +103,12 @@ per repo (all open by default so the controls are visible at a glance):
 
 1. **Polling** — how often the agent checks this repo for new
    activity. It overrides the global `gitPollIntervalSeconds` for
-   this repository alone, which is handy when one repo is busy and you
-   want it scanned more often (or the reverse). It also shows the most
-   recent observations gathered from that repo's polling sources.
+   this repository alone. The global interval is the floor: an
+   override only *slows* polling for this repo (a value shorter than
+   the global cadence is ignored). To poll everything faster, lower
+   the global interval on Settings → Infrastructure. The section also
+   shows the most recent observations gathered from that repo's
+   polling sources.
 2. **Triggers** — fire when matching Git or GitHub events arrive on
    this repository. Triggers run **alongside** the project-wide
    task-flow defaults, not in place of them. Each trigger has a
@@ -225,9 +228,11 @@ Per repository, under `<contextDir>/`:
 | `knowledge/repos/<slug>/README.md` | Verbatim copy of `<repo>/README.*` | Every init + every architecture refresh |
 | `journal/repos/<slug>/<date>.md` | Daemon (commits + PR/workflow observations + diff stat) | Once per day per repo, when activity exists |
 
-Polling additionally produces `observation` rows in the database;
-triggers spawn autonomous sessions whose task-flow is selected by the
-trigger's process key.
+Polling additionally produces `observation` rows in the database.
+Trigger-fired sessions do **not** route through a task-flow file — the
+trigger's own `prompt` is the literal session prompt (and its
+`instructionMd` the instruction file in temp mode); task-flows remain
+the project-wide defaults that run alongside.
 
 ## Where in the Dashboard
 
@@ -239,12 +244,15 @@ trigger's process key.
 - **Connections → Repositories** (`/connections/repositories`) —
   register a repo (link a `localPath` and/or `owner/repo`), rename,
   set `local-only`, delete. The model-binding cards visible on this
-  page now cover only the **`git.project.init`**, **`git.project.update`**,
-  and **`git.project.retemplate`** processes — the per-event
-  GitHub cards (`github.assigned`, `github.security_alert`,
-  `github.pull_request.review_requested`, `github.workflow_run.failed`)
-  were folded back into the default routing. To pin a different model
-  for any of those, use **Settings → Models** instead.
+  page cover only the **`git.project.refresh_architecture`** and
+  **`git.project.retemplate`** processes — the only two git.project
+  keys that actually run an agent session (`git.project.init` and
+  `git.project.update` are deterministic in-process daemon writers, so
+  they take no model). The per-event GitHub cards (`github.assigned`,
+  `github.security_alert`, `github.pull_request.review_requested`,
+  `github.workflow_run.failed`) were folded back into the default
+  routing. To pin a different model for any of those, use
+  **Settings → Models** instead.
 - **Knowledge → Context Files** (`/knowledge?tab=context-files`) — quick
   links on each Daily-git-management panel open the generated overview
   (`knowledge/repos/<slug>/overview.md`), the current day's journal
@@ -257,7 +265,7 @@ trigger's process key.
 |---|---|---|
 | `gitPollIntervalSeconds` | global config | Default poll cadence applied when no per-repo override is set. |
 | Per-repo polling override | `/git` → Polling | Stored on the repository row; null means "use global". |
-| Triggers | `/git` → Triggers | Per-repo, multiple. Each has match conditions, workdir mode, process key. |
+| Triggers | `/git` → Triggers | Per-repo, multiple. Each has match conditions (event type + filters), a backend/model, workdir mode, and its own prompt. |
 | Daily git management toggle | `/git` → Daily git management | Stored in `repository_management` table. Requires `localPath`. |
 | Architecture refresh model | `/settings/models` (process key `git.project.refresh_architecture`) | Defaults to Sonnet. Pin to a different model per backend if you want Opus-grade analysis instead. |
 

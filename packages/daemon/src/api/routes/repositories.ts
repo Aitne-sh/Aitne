@@ -403,7 +403,7 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
     if (typeof body.localPath !== "string") {
       return respondWithValidationError(c, {
         error: "validation_error",
-        message: "localPath is required (POST /repositories/:id/link-local { localPath: '<absolute path>' }; relative paths and ~ are rejected)",
+        message: "localPath is required (POST /repositories/:id/link-local { localPath: '<absolute path>' }; relative paths are rejected, a leading ~/ is expanded)",
       });
     }
     try {
@@ -628,7 +628,6 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
       workdirMode: trg.workdirMode,
       prompt: trg.prompt,
       instructionMd: trg.instructionMd ?? undefined,
-      timeoutMinutes: undefined,
     }, "trigger_manual_fire", { triggerId: trg.id, triggerName: trg.name });
     recordRepoRunAuditAction(db, repo, {
       mode: "trigger_manual_fire",
@@ -819,7 +818,7 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
   // instead of inserting a duplicate. Two concurrent agent sessions
   // would race on the chokepoint write and burn model quota.
   //
-  // Side effect: refreshes `git/<slug>/README.md` synchronously before
+  // Side effect: refreshes `knowledge/repos/<slug>/README.md` synchronously before
   // enqueueing so the README mirror tracks the source the agent is
   // about to read. Mirror failures (e.g. README removed) are non-fatal
   // — they just leave the previous mirror untouched.
@@ -1102,7 +1101,6 @@ interface RunRequestValid {
   workdirMode: TriggerWorkdirMode;
   prompt: string;
   instructionMd?: string;
-  timeoutMinutes?: number;
 }
 
 function validateRunRequest(
@@ -1138,6 +1136,17 @@ function validateRunRequest(
       message: "workdirMode='temp' requires instructionMd",
     };
   }
+  if (body.timeoutMinutes !== undefined && body.timeoutMinutes !== null) {
+    // Was accepted (and silently ignored) by earlier versions — the
+    // execution path has no per-run timeout override; the wall-clock
+    // limit is the global `executeTimeoutMinutes` runtime setting.
+    // Reject explicitly rather than pretend the knob works.
+    return {
+      error: "validation_error",
+      message:
+        "timeoutMinutes is not supported — the run uses the global executeTimeoutMinutes setting; remove the field",
+    };
+  }
   return {
     backend: backend as TriggerBackend,
     model: body.model,
@@ -1145,8 +1154,6 @@ function validateRunRequest(
     prompt: body.prompt,
     instructionMd:
       typeof body.instructionMd === "string" ? body.instructionMd : undefined,
-    timeoutMinutes:
-      typeof body.timeoutMinutes === "number" ? body.timeoutMinutes : undefined,
   };
 }
 
@@ -1245,7 +1252,6 @@ export function buildRunEvent(
       workdirMode: request.workdirMode,
       prompt: request.prompt,
       instructionMd: request.instructionMd ?? null,
-      timeoutMinutes: request.timeoutMinutes ?? null,
       ...extra,
     },
     requestedBackendId: request.backend,

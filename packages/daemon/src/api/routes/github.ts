@@ -12,6 +12,7 @@ import {
   type RepositoryDTO,
 } from "../../db/repositories-store.js";
 import type { SecretBroker } from "../../secrets/secret-broker.js";
+import { dispatchMatchingTriggers } from "../../core/trigger-dispatch.js";
 import { createLogger, toSafeErrorMessage } from "../../logging.js";
 import { readJsonBody } from "../json-body.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
@@ -286,6 +287,26 @@ export function createGitHubRoutes(deps: GitHubRouteDependencies): {
       // and surfaces any enqueue rejection instead of dropping it as an
       // unhandled promise rejection.
       await eventBus.put(event);
+      // Unified-repositories §4.4 — per-repo triggers ride alongside the
+      // task-flow pipeline. Webhook-delivered PR / issue / release /
+      // workflow_run events are the ONLY producers of
+      // `github.pull_request.opened|synchronize|closed` etc., so without
+      // this hook a trigger on those event types can never fire. Push
+      // webhooks are deliberately excluded: the git-watcher poll detects
+      // the same push locally and dispatches `git.*` triggers with full
+      // commit file lists (dispatching here too would double-fire).
+      // Known overlap: `github.pull_request.review_requested` can arrive
+      // via both this webhook and the GitHubPoller notification path —
+      // same coexistence trade-off as the double-DM warning in
+      // bootstrap/observers.ts.
+      const triggerPayload =
+        (event as { data?: Record<string, unknown> }).data ?? {};
+      await dispatchMatchingTriggers(
+        { db, eventBus },
+        resolved.repositoryId,
+        event.type,
+        triggerPayload,
+      );
       logger.info(
         { eventType, action: payload.action, repositoryId: resolved.repositoryId },
         "GitHub webhook event received",

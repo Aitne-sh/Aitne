@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { applySchema } from "./schema.js";
 import {
@@ -298,6 +299,67 @@ describe("repositories-store", () => {
           pollIntervalSec: 0,
         }),
       ).toThrow(/pollIntervalSec/);
+    });
+  });
+
+  describe("input validation — localPath and GitHub ref format", () => {
+    it("rejects relative local paths", () => {
+      expect(() =>
+        createRepository(db, { localPath: "code/widgets", localOnly: true }),
+      ).toThrow(/absolute path/);
+    });
+
+    it("rejects a whitespace-only local path", () => {
+      expect(() =>
+        createRepository(db, { localPath: "   ", localOnly: true }),
+      ).toThrow(/absolute path/);
+    });
+
+    it("expands a leading ~/ to the daemon home directory", () => {
+      const dto = createRepository(db, {
+        localPath: "~/code/widgets",
+        localOnly: true,
+      });
+      expect(dto.localPath).toBe(join(homedir(), "code/widgets"));
+    });
+
+    it("expands a bare ~ to the home directory itself", () => {
+      const dto = createRepository(db, { localPath: "~", localOnly: true });
+      expect(dto.localPath).toBe(homedir());
+    });
+
+    it("strips trailing separators so /a/b/ and /a/b are the same row", () => {
+      createRepository(db, { localPath: "/code/widgets", localOnly: true });
+      expect(() =>
+        createRepository(db, { localPath: "/code/widgets/", localOnly: true }),
+      ).toThrow(/already exists|already registered/);
+    });
+
+    it("keeps the filesystem root when the path is only separators", () => {
+      const dto = createRepository(db, { localPath: "/", localOnly: true });
+      expect(dto.localPath).toBe("/");
+    });
+
+    it("applies path validation on update too", () => {
+      const dto = createRepository(db, {
+        localPath: "/code/widgets",
+        localOnly: true,
+      });
+      expect(() =>
+        updateRepository(db, dto.id, { localPath: "relative/path" }),
+      ).toThrow(/absolute path/);
+    });
+
+    it("rejects an owner containing a slash (pasted owner/repo slug)", () => {
+      expect(() =>
+        createRepository(db, { githubOwner: "acme/widgets", githubRepo: "x" }),
+      ).toThrow(/githubOwner .* separate fields|githubOwner must match/);
+    });
+
+    it("rejects a repo name containing whitespace", () => {
+      expect(() =>
+        createRepository(db, { githubOwner: "acme", githubRepo: "wid gets" }),
+      ).toThrow(/githubRepo/);
     });
   });
 
@@ -813,6 +875,23 @@ describe("repositories-store", () => {
           prompt: "p",
         }),
       ).toThrow(/path_pattern/);
+    });
+
+    it("rejects path_pattern globs that do not compile", () => {
+      // `[a\]` compiles to /^[a\]$/ — an unterminated character class —
+      // before the write-time gate this only exploded at match time,
+      // silently killing evaluation for every sibling trigger.
+      expect(() =>
+        createTrigger(db, repoId, {
+          name: "x",
+          eventType: "git.push.detected",
+          filters: { path_pattern: "[a\\]" },
+          backend: "claude",
+          model: "sonnet",
+          workdirMode: "local-clone",
+          prompt: "p",
+        }),
+      ).toThrow(/invalid glob/);
     });
 
     it("rejects prompts > 16 KB", () => {

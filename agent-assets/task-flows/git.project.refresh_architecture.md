@@ -3,7 +3,7 @@
 # Task Flow: Refresh Repository Architecture Section
 
 You are producing the body of the `## Architecture` section in
-`git/<slug>/overview.md` for a registered repository. The dashboard's
+`knowledge/repos/<slug>/overview.md` for a registered repository. The dashboard's
 "Refresh architecture" button (or the auto-enqueue at manual init time)
 created this `git.project.refresh_architecture` task. The daemon owns the
 surgical merge — you submit only the new section body and it replaces the
@@ -26,7 +26,7 @@ Available:
 Denied (these tools will fail at the SDK layer — do not attempt them):
 
 - `Write`, `Edit` — no agent-side write to the worktree. The daemon owns
-  every byte under `git/<slug>/`.
+  every byte under `knowledge/repos/<slug>/`.
 - `Bash(git ...)`, `Bash(ls ...)`, `Bash(cat ...)` and any other shell verbs —
   use `Glob` to enumerate directories and `Read` to inspect files. You are
   analysing *current code structure*, not git history, so the git CLI is not
@@ -37,10 +37,10 @@ Denied (these tools will fail at the SDK layer — do not attempt them):
 Read `<task_context>` first. It contains:
 
 - `repositoryId` — opaque ID; pass it back on the write call below.
-- `slug` — the directory slug under `git/`; the overview is at `git/<slug>/overview.md`.
+- `slug` — the directory slug under `knowledge/repos/`; the overview is at `knowledge/repos/<slug>/overview.md`.
 - `localPath` — absolute path to the repository's local clone. **Read directly from this path** with the Read tool; you do NOT need to `cd` into it.
 - `githubRepo` — `owner/repo` string when GitHub-linked, otherwise `null`.
-- `classification` — `"project"` or `"non-project"`.
+- `classification` — `"project"` or `"repo-only"`.
 - `category` — operator-supplied category label.
 
 ## Goal

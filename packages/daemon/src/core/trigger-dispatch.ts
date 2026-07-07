@@ -131,7 +131,6 @@ function buildTriggerEvent(
       workdirMode: trigger.workdirMode,
       prompt: trigger.prompt,
       instructionMd: trigger.instructionMd ?? null,
-      timeoutMinutes: null,
       triggerId: trigger.id,
       triggerName: trigger.name,
       triggerEventType: eventType,

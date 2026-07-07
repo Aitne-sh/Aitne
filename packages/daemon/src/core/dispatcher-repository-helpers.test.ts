@@ -88,7 +88,6 @@ describe("parseRepositoryRunTaskContext", () => {
     expect(ctx?.localPath).toBeNull();
     expect(ctx?.githubRepo).toBeNull();
     expect(ctx?.instructionMd).toBeNull();
-    expect(ctx?.timeoutMinutes).toBeNull();
   });
 
   it("preserves valid optional fields", () => {
@@ -98,7 +97,6 @@ describe("parseRepositoryRunTaskContext", () => {
       localPath: "/tmp/repo",
       githubRepo: "owner/repo",
       instructionMd: "# heading",
-      timeoutMinutes: 30,
       triggerId: "trig-1",
       triggerName: "nightly",
       triggerEventType: "schedule",
@@ -113,7 +111,6 @@ describe("parseRepositoryRunTaskContext", () => {
       workdirMode: "local-clone",
       prompt: "do the work",
       instructionMd: "# heading",
-      timeoutMinutes: 30,
       triggerId: "trig-1",
       triggerName: "nightly",
       triggerEventType: "schedule",

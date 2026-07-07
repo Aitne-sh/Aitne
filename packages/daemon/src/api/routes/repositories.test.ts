@@ -719,4 +719,32 @@ describe("repositories routes daily management", () => {
       "Add feature",
     );
   });
+
+  it("POST run rejects the unsupported timeoutMinutes field", async () => {
+    // Earlier versions accepted timeoutMinutes and silently ignored it —
+    // there is no per-run timeout override in the execution path (the
+    // wall clock is the global executeTimeoutMinutes setting). The field
+    // is now an explicit 400 so callers learn the truth immediately.
+    const repo = createRepository(db, { localPath: repoDir, localOnly: true });
+
+    const response = await app().request(
+      `/repositories/${encodeURIComponent(repo.id)}/run`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          backend: "claude",
+          model: "sonnet-5",
+          workdirMode: "local-clone",
+          prompt: "do the thing",
+          timeoutMinutes: 30,
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    const body = await response.json() as { message?: string };
+    expect(String(body.message)).toMatch(/timeoutMinutes/);
+    expect(String(body.message)).toMatch(/executeTimeoutMinutes/);
+  });
 });

@@ -18,7 +18,7 @@ routing any external-service call.
 1. **`policies/management.md` → `## Source of Truth`** carries durable
    user-authored answers ("Schedule = Google Calendar", "Tasks = Notion",
    etc.). This is the authoritative routing table.
-2. **`~/.personal-agent/integrations.md` → `## Note Sources`** is the
+2. **`policies/integrations.md` → `## Note Sources`** is the
    daemon-rendered snapshot of where notes are kept (the user's external
    Obsidian vault, plus Notion's mode). When the user asks "check
    obsidian", this section names the path under
