@@ -268,6 +268,27 @@ export function isWholeRunDiffEmpty(repoPath: string, baseRef: string): boolean 
   return gitDiffPaths(repoPath, baseRef).length === 0;
 }
 
+/** The unified diff text since baseRef (excl. .aitne-dev), capped — injected
+ *  into the review/evidence leg context. */
+export function gitDiffText(
+  repoPath: string,
+  baseRef: string,
+  capBytes = 60_000,
+): string {
+  let text = "";
+  try {
+    text = git(repoPath, ["diff", baseRef, "--", ".", `:(exclude)${DEV_DIR_NAME}`]);
+  } catch {
+    // Unresolvable baseRef (zero-commit repo) — fall back to the staged/working set.
+    try {
+      text = git(repoPath, ["diff", "--", ".", `:(exclude)${DEV_DIR_NAME}`]);
+    } catch {
+      text = "";
+    }
+  }
+  return text.length > capBytes ? `${text.slice(0, capBytes)}\n… (diff truncated)` : text;
+}
+
 // ── the deterministic verify runner (a real subprocess, never a model) ──
 
 export interface VerifyRun {

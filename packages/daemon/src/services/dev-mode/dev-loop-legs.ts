@@ -1,0 +1,216 @@
+/**
+ * Development-mode legs — the model-calling layer. Implements the engine's
+ * injected `DevLegRunner` by (1) loading the `dev.*.md` task-flow, (2)
+ * assembling the injected `<dev_loop_context>` block from the .aitne-dev/
+ * working dir + the git diff, (3) calling a `DevBackend` with the right tool
+ * envelope + tier, and (4) parsing the reply with the covered verdict parser.
+ *
+ * `DevBackend` is injected (implemented by the runner over `IAgentRouter`), so
+ * this module is unit-testable with a fake backend. I/O-bound (reads
+ * .aitne-dev/ + git); excluded from the coverage gate.
+ */
+
+import type { BackendModelTier } from "@aitne/shared";
+import {
+  DEV_DOCS,
+  gitDiffText,
+  readDevDoc,
+} from "./dev-loop-docs.js";
+import {
+  parseReviewResult,
+  applyGateReqDowngrade,
+  parseStopEval,
+  extractContractReqIds,
+} from "./verdict-parse.js";
+import type {
+  DevLegContext,
+  DevLegResponse,
+  DevLegRunner,
+  DevReviewLegContext,
+  DevReviewLegResult,
+} from "./dev-loop-engine.js";
+import type { DevStopEval } from "./types.js";
+
+/** One backend invocation for a leg (the runner turns this into an
+ *  IAgentRouter.execute call). */
+export interface DevBackendRequest {
+  /** Task-flow filename stem, e.g. "dev.implement" → dev.implement.md. */
+  taskFlowKey: string;
+  /** The rendered task-flow body (the role/steps/output-grammar). */
+  prompt: string;
+  /** The injected <dev_loop_context> block. */
+  context: string;
+  /** cwd for the backend — the registered repo path. */
+  sessionDir: string;
+  /** Tool allowlist (REPLACES the default). Read-only legs get Read/Glob/Grep. */
+  allowedTools: readonly string[];
+  /** Whether this leg may only read (no code writes) — a belt-and-braces hint
+   *  the runner can use to pick a stricter permission posture. */
+  readOnly: boolean;
+  tier: BackendModelTier;
+  maxTurns: number;
+  maxBudgetUsd: number;
+}
+
+export interface DevBackend {
+  runLeg(req: DevBackendRequest): Promise<DevLegResponse>;
+}
+
+export interface DevLegRunnerDeps {
+  backend: DevBackend;
+  /** Loads a task-flow body by key (default: core prompts getTaskFlow). */
+  loadTaskFlow: (key: string) => string;
+}
+
+const READONLY_TOOLS: readonly string[] = ["Read", "Glob", "Grep"];
+const WRITE_TOOLS: readonly string[] = ["Read", "Glob", "Grep", "Write", "Edit"];
+
+/** Per-leg execution envelope (turns/budget). The session-level cost cap
+ *  (BUDGET_EXCEEDED) bounds the total across legs. */
+const LEG_ENVELOPE = {
+  plan: { maxTurns: 20, maxBudgetUsd: 0.4, tier: "high" as BackendModelTier },
+  implement: { maxTurns: 60, maxBudgetUsd: 1.0, tier: "high" as BackendModelTier },
+  review: { maxTurns: 25, maxBudgetUsd: 0.5, tier: "high" as BackendModelTier },
+  stop_eval: { maxTurns: 5, maxBudgetUsd: 0.1, tier: "lite" as BackendModelTier },
+  evidence: { maxTurns: 20, maxBudgetUsd: 0.4, tier: "medium" as BackendModelTier },
+} as const;
+
+/**
+ * Derive a Bash allowlist from the verify commands (first token each) plus
+ * read-only git. This lets the implement leg run its own checks WITHOUT an
+ * unscoped Bash that could `git push` (D6 — never push) or run destructive
+ * commands; the deterministic path policy is the harder guard on top.
+ */
+export function deriveBashAllowlist(verifyCommands: readonly string[]): string[] {
+  const roots = new Set<string>();
+  for (const cmd of verifyCommands) {
+    const first = cmd.trim().split(/\s+/)[0];
+    if (first) roots.add(first);
+  }
+  const tools = [...roots].map((r) => `Bash(${r}:*)`);
+  tools.push("Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(ls:*)", "Bash(cat:*)");
+  return tools;
+}
+
+function section(title: string, body: string | null): string {
+  if (!body || body.trim().length === 0) return "";
+  return `\n## ${title}\n${body.trim()}\n`;
+}
+
+function baseContext(ctx: DevLegContext): string {
+  return [
+    `Repo: ${ctx.session.slug ?? ctx.session.repositoryId}  ·  Iteration: ${ctx.iteration}`,
+    section("Product contract (immutable — do not edit)", readDevDoc(ctx.repoPath, DEV_DOCS.contract)),
+    section("Requirements ledger", readDevDoc(ctx.repoPath, DEV_DOCS.ledger)),
+  ].join("");
+}
+
+export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
+  const { backend, loadTaskFlow } = deps;
+
+  return {
+    async plan(ctx: DevLegContext): Promise<DevLegResponse> {
+      const context = `<dev_loop_context>${baseContext(ctx)}${section(
+        "Existing plan (if any)",
+        readDevDoc(ctx.repoPath, DEV_DOCS.plan),
+      )}</dev_loop_context>`;
+      return backend.runLeg({
+        taskFlowKey: "dev.plan",
+        prompt: loadTaskFlow("dev.plan"),
+        context,
+        sessionDir: ctx.repoPath,
+        allowedTools: WRITE_TOOLS,
+        readOnly: false,
+        ...LEG_ENVELOPE.plan,
+      });
+    },
+
+    async implement(ctx: DevLegContext): Promise<DevLegResponse> {
+      const context =
+        `<dev_loop_context>${baseContext(ctx)}`
+        + section("Implementation plan", readDevDoc(ctx.repoPath, DEV_DOCS.plan))
+        + section("Recent progress", readDevDoc(ctx.repoPath, DEV_DOCS.progress))
+        + section("Reviewer must-fix (address FIRST if present)", readDevDoc(ctx.repoPath, DEV_DOCS.reviewFeedback))
+        + section("Open decision requests", readDevDoc(ctx.repoPath, DEV_DOCS.decisionRequests))
+        + `</dev_loop_context>`;
+      return backend.runLeg({
+        taskFlowKey: "dev.implement",
+        prompt: loadTaskFlow("dev.implement"),
+        context,
+        sessionDir: ctx.repoPath,
+        allowedTools: [...WRITE_TOOLS, ...deriveBashAllowlist(ctx.config.verifyCommands)],
+        readOnly: false,
+        maxTurns: LEG_ENVELOPE.implement.maxTurns,
+        maxBudgetUsd: ctx.session.maxBudgetUsd ?? LEG_ENVELOPE.implement.maxBudgetUsd,
+        tier: ctx.tier,
+      });
+    },
+
+    async review(ctx: DevReviewLegContext): Promise<DevReviewLegResult> {
+      const contractMd = readDevDoc(ctx.repoPath, DEV_DOCS.contract) ?? "";
+      const context =
+        `<dev_loop_context>\nReview mode: ${ctx.mode}`
+        + baseContext(ctx)
+        + section("Diff under review", gitDiffText(ctx.repoPath, ctx.baseRef))
+        + `</dev_loop_context>`;
+      const response = await backend.runLeg({
+        taskFlowKey: "dev.review",
+        prompt: loadTaskFlow("dev.review"),
+        context,
+        sessionDir: ctx.repoPath,
+        allowedTools: READONLY_TOOLS,
+        readOnly: true,
+        maxTurns: LEG_ENVELOPE.review.maxTurns,
+        maxBudgetUsd: LEG_ENVELOPE.review.maxBudgetUsd,
+        tier: ctx.tier,
+      });
+      let review = parseReviewResult(response.text, ctx.mode);
+      if (ctx.mode === "gate" && review) {
+        review = applyGateReqDowngrade(review, extractContractReqIds(contractMd), response.text);
+      }
+      return { response, review };
+    },
+
+    async stopEval(ctx: DevLegContext): Promise<{ response: DevLegResponse; verdict: DevStopEval | null }> {
+      const context =
+        `<dev_loop_context>${baseContext(ctx)}`
+        + section("Recent progress", readDevDoc(ctx.repoPath, DEV_DOCS.progress))
+        + section("Last verify log", readDevDoc(ctx.repoPath, DEV_DOCS.lastVerify))
+        + `</dev_loop_context>`;
+      const response = await backend.runLeg({
+        taskFlowKey: "dev.stop_eval",
+        prompt: loadTaskFlow("dev.stop_eval"),
+        context,
+        sessionDir: ctx.repoPath,
+        allowedTools: READONLY_TOOLS,
+        readOnly: true,
+        ...LEG_ENVELOPE.stop_eval,
+      });
+      return { response, verdict: parseStopEval(response.text) };
+    },
+
+    async evidence(
+      ctx: DevLegContext & { gateReqVerdicts: { reqId: string; verdict: string; evidence: string }[] },
+    ): Promise<DevLegResponse> {
+      const verdictLines = ctx.gateReqVerdicts
+        .map((v) => `${v.reqId}: ${v.verdict} — ${v.evidence}`)
+        .join("\n");
+      const context =
+        `<dev_loop_context>${baseContext(ctx)}`
+        + section("Gate reviewer per-REQ verdicts", verdictLines)
+        + section("Verify log", readDevDoc(ctx.repoPath, DEV_DOCS.lastVerify))
+        + section("Assumptions", readDevDoc(ctx.repoPath, DEV_DOCS.assumptions))
+        + section("Whole-run diff", gitDiffText(ctx.repoPath, ctx.session.baseRef ?? "HEAD"))
+        + `</dev_loop_context>`;
+      return backend.runLeg({
+        taskFlowKey: "dev.evidence",
+        prompt: loadTaskFlow("dev.evidence"),
+        context,
+        sessionDir: ctx.repoPath,
+        allowedTools: WRITE_TOOLS,
+        readOnly: false,
+        ...LEG_ENVELOPE.evidence,
+      });
+    },
+  };
+}
