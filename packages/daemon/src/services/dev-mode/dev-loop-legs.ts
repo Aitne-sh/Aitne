@@ -207,7 +207,10 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
       });
       let review = parseReviewResult(response.text, ctx.mode);
       if (ctx.mode === "gate" && review) {
-        review = applyGateReqDowngrade(review, extractContractReqIds(contractMd), response.text);
+        // A fleet worker judges only its owned reqs; the single loop + the
+        // integration gate judge every contract req.
+        const reqIds = ctx.reqIds ?? extractContractReqIds(contractMd);
+        review = applyGateReqDowngrade(review, reqIds, response.text);
       }
       return { response, review };
     },

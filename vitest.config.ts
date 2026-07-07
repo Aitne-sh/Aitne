@@ -808,6 +808,7 @@ export default defineConfig({
         // dev-flow-schedule.ts) stays IN the gate at 100%.
         "packages/daemon/src/services/dev-mode/dev-flow-git.ts",
         "packages/daemon/src/services/dev-mode/dev-flow-legs.ts",
+        "packages/daemon/src/services/dev-mode/dev-flow-orchestrator.ts",
         "packages/daemon/src/api/routes/dev-sessions.ts",
 
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──

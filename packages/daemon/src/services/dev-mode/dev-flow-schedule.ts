@@ -170,6 +170,99 @@ export function classifyIdleFleet(
   };
 }
 
+// ── Prompt-context renderers (queue snapshot / parallel context) ────────
+
+export interface DevQueueSnapshotTask {
+  taskKey: string;
+  state: DevFleetTaskState;
+  dependsOn: readonly string[];
+  reqs: readonly string[];
+  summary: string;
+  scope?: string;
+  planReview?: "pending" | "done" | "escalated" | null;
+  /** Rendered for QUEUED tasks when includeQueuedBodies (plan-review mode —
+   *  the reviser needs the bodies it may replace). */
+  body?: string;
+}
+
+/**
+ * The LIVE queue rendered for a supervisor call — the only source of task
+ * ids a REPLAN/REVISE may reference (the plan file goes stale after any
+ * mutation; the DB is the truth).
+ */
+export function renderQueueSnapshot(
+  tasks: readonly DevQueueSnapshotTask[],
+  opts: { includeQueuedBodies?: boolean } = {},
+): string {
+  const lines = [
+    "| task | state | depends | reqs | plan-review |",
+    "|---|---|---|---|---|",
+    ...tasks.map(
+      (t) =>
+        `| ${t.taskKey} | ${t.state} | ${t.dependsOn.join(",") || "-"} | `
+        + `${t.reqs.join(",") || "-"} | ${t.planReview ?? "-"} |`,
+    ),
+  ];
+  if (opts.includeQueuedBodies) {
+    const queued = tasks.filter((t) => t.state === "queued" && t.body);
+    if (queued.length > 0) {
+      lines.push("", "### Queued task bodies (revisable)");
+      for (const t of queued) {
+        lines.push("", `#### ${t.taskKey}`, t.body!.trim());
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+const PARALLEL_LIVE_STATES: ReadonlySet<DevFleetTaskState> = new Set([
+  "queued",
+  "running",
+  "supervise_pending",
+  "merge_pending",
+  "awaiting_user",
+]);
+
+/**
+ * The parallel-context.md body for one worker's worktree: what the sibling
+ * loops own, so the worker stays in its lane (refreshed by the orchestrator
+ * on every launch/merge/supersede).
+ */
+export function renderParallelContext(
+  selfKey: string,
+  tasks: readonly DevQueueSnapshotTask[],
+): string {
+  const siblings = tasks.filter(
+    (t) => t.taskKey !== selfKey && PARALLEL_LIVE_STATES.has(t.state),
+  );
+  const merged = tasks
+    .filter((t) => t.taskKey !== selfKey && t.state === "merged")
+    .map((t) => t.taskKey);
+  const lines = [
+    "# Parallel loops in this project",
+    "",
+    `You are task \`${selfKey}\`. The tasks below run (or will run) in their`,
+    "own worktrees. NEVER implement, fix, or revert anything in a sibling's",
+    "scope — if its work looks wrong, note it in progress.md and stay in",
+    "your lane.",
+    "",
+  ];
+  if (siblings.length === 0) {
+    lines.push("(no live sibling tasks right now)");
+  } else {
+    for (const t of siblings) {
+      lines.push(
+        `- ${t.taskKey} [${t.state}] ${t.summary}${t.scope ? ` — scope: ${t.scope}` : ""}`,
+      );
+    }
+  }
+  if (merged.length > 0) {
+    lines.push("", `Already merged into your base: ${merged.join(", ")}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 // ── Split nudge (write_split_nudge port) ────────────────────────────────
 
 export interface DevSplitNudgeInput {

@@ -4,6 +4,8 @@ import {
   planFleetActions,
   classifyIdleFleet,
   computeSplitNudge,
+  renderQueueSnapshot,
+  renderParallelContext,
   type DevFleetTaskSnapshot,
 } from "./dev-flow-schedule.js";
 
@@ -155,5 +157,73 @@ describe("computeSplitNudge", () => {
     expect(
       computeSplitNudge({ ...base, maxIterations: 1, splitNudgeAt: 10, iteration: 1 }),
     ).toContain("iteration 1 of 1");
+  });
+});
+
+describe("renderQueueSnapshot", () => {
+  const tasks = [
+    {
+      taskKey: "a",
+      state: "merged" as const,
+      dependsOn: [],
+      reqs: ["REQ-001"],
+      summary: "phase 1",
+      planReview: "done" as const,
+    },
+    {
+      taskKey: "b",
+      state: "queued" as const,
+      dependsOn: ["a"],
+      reqs: ["REQ-002"],
+      summary: "phase 2",
+      body: "Build phase 2.",
+    },
+  ];
+  it("renders the live table", () => {
+    const md = renderQueueSnapshot(tasks);
+    expect(md).toContain("| a | merged | - | REQ-001 | done |");
+    expect(md).toContain("| b | queued | a | REQ-002 | - |");
+    expect(md).not.toContain("Build phase 2.");
+  });
+  it("appends queued bodies only when asked (plan-review staging)", () => {
+    const md = renderQueueSnapshot(tasks, { includeQueuedBodies: true });
+    expect(md).toContain("#### b");
+    expect(md).toContain("Build phase 2.");
+    // merged tasks never leak bodies
+    expect(md).not.toContain("#### a");
+    // queued without a body → section only lists those with bodies
+    const none = renderQueueSnapshot(
+      [{ ...tasks[1]!, body: undefined }],
+      { includeQueuedBodies: true },
+    );
+    expect(none).not.toContain("Queued task bodies");
+  });
+});
+
+describe("renderParallelContext", () => {
+  const tasks = [
+    { taskKey: "me", state: "running" as const, dependsOn: [], reqs: [], summary: "self" },
+    {
+      taskKey: "sib",
+      state: "queued" as const,
+      dependsOn: [],
+      reqs: [],
+      summary: "sibling work",
+      scope: "src/ui only",
+    },
+    { taskKey: "landed", state: "merged" as const, dependsOn: [], reqs: [], summary: "done" },
+    { taskKey: "gone", state: "superseded" as const, dependsOn: [], reqs: [], summary: "old" },
+  ];
+  it("lists live siblings with scopes and merged history, excluding self", () => {
+    const md = renderParallelContext("me", tasks);
+    expect(md).toContain("You are task `me`");
+    expect(md).toContain("- sib [queued] sibling work — scope: src/ui only");
+    expect(md).toContain("Already merged into your base: landed");
+    expect(md).not.toContain("gone");
+    expect(md).not.toContain("- me ");
+  });
+  it("says so when no live siblings remain", () => {
+    const md = renderParallelContext("me", [tasks[0]!, tasks[2]!]);
+    expect(md).toContain("(no live sibling tasks right now)");
   });
 });

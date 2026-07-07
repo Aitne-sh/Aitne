@@ -18,13 +18,17 @@ import type Database from "better-sqlite3";
 import type { BackendModelTier } from "@aitne/shared";
 import {
   addDevSessionCost,
+  listDevRequirements,
   recordDevIteration,
   updateDevRequirement,
   writeDevCheckpoint,
   countDevRequirements,
+  type DevIterationPhase,
+  type DevRequirementStatus,
   type DevSessionRow,
   type DevSessionLoopState,
 } from "../../db/dev-sessions-store.js";
+import type { DevTaskLoopState } from "../../db/dev-session-tasks-store.js";
 import type { DevEscalationKind } from "../../db/dev-session-escalations-store.js";
 import {
   DEV_DOCS,
@@ -47,6 +51,7 @@ import {
   type DevEvaluateBookkeeping,
 } from "./dev-loop-evaluate.js";
 import { computeApprovalHash, normalizeDevLoopConfig } from "./dev-loop-config.js";
+import { computeSplitNudge } from "./dev-flow-schedule.js";
 import { parseAgentStateToken } from "./verdict-parse.js";
 import type {
   DevLoopConfig,
@@ -78,6 +83,11 @@ export interface DevReviewLegContext extends DevLegContext {
   /** Whole-run base for a gate/holistic review; the iteration pre-ref for a
    *  scoped interim review. */
   baseRef: string;
+  /** The REQ ids the gate downgrade judges. A fleet worker passes only the
+   *  task's OWNED reqs (its worktree holds the full master contract for the
+   *  hash anchor, but the task must reach SUCCESS on its slice); undefined =
+   *  all contract reqs (the single loop + the integration gate). */
+  reqIds?: readonly string[];
 }
 
 export interface DevReviewLegResult {
@@ -102,7 +112,9 @@ export type DevIterationOutcome =
   | {
       kind: "escalate";
       escalationKind: DevEscalationKind;
-      loopState: DevSessionLoopState;
+      /** NEEDS_DECOMPOSITION only ever appears for fleet workers — the
+       *  orchestrator routes it to the supervisor, never the session row. */
+      loopState: DevTaskLoopState;
       question: string;
       contextSummary: string | null;
     }
@@ -111,8 +123,82 @@ export type DevIterationOutcome =
 const LOOP_STATE_TO_ESCALATION: Record<string, DevEscalationKind> = {
   NEEDS_SPEC_DECISION: "spec_decision",
   NEEDS_ARCHITECTURE_DECISION: "architecture_decision",
+  // A cap-parked split request surfaces to the user as a spec decision.
+  NEEDS_DECOMPOSITION: "spec_decision",
   RISK_REQUIRES_APPROVAL: "risk_approval",
 };
+
+// ── Persistence seam (session-scoped by default; task-scoped in a fleet) ─
+
+/**
+ * Where the engine's durable side effects land. The default routes to the
+ * session row + session-level journal (v1 behavior); the fleet orchestrator
+ * injects a task-scoped sink that stamps task_id on journal rows, checkpoints
+ * the dev_session_tasks row, rolls cost up to BOTH the task and the session,
+ * and scopes the ledger/REQ reads to the task's owned REQs.
+ */
+export interface DevEnginePersistence {
+  recordIteration(row: {
+    id: string;
+    iteration: number;
+    phase: DevIterationPhase;
+    verdict: string | null;
+    reason: string | null;
+    costUsd: number | null;
+    commitSha: string | null;
+    createdAt: number;
+  }): void;
+  addCost(deltaUsd: number): void;
+  writeCheckpoint(
+    counters: {
+      iteration: number;
+      agentFailures: number;
+      gateReviseCount: number;
+      iterReviseCount: number;
+      resumes: number;
+    },
+    at: number,
+  ): void;
+  syncLedgerRow(row: {
+    reqId: string;
+    status: DevRequirementStatus;
+    evidence: string | null;
+    iter: number | null;
+    updatedAt: number;
+  }): void;
+  requirementCounts(): { total: number; met: number };
+  /** REQ ids not yet 'met' — the split-nudge input. */
+  unmetReqIds(): string[];
+}
+
+/** The v1 session-scoped persistence (journal rows carry task_id NULL). */
+export function createSessionEnginePersistence(
+  db: Database.Database,
+  sessionId: string,
+): DevEnginePersistence {
+  return {
+    recordIteration(row) {
+      recordDevIteration(db, { ...row, sessionId });
+    },
+    addCost(deltaUsd) {
+      addDevSessionCost(db, sessionId, deltaUsd);
+    },
+    writeCheckpoint(counters, at) {
+      writeDevCheckpoint(db, { id: sessionId, ...counters }, at);
+    },
+    syncLedgerRow(row) {
+      updateDevRequirement(db, { sessionId, ...row });
+    },
+    requirementCounts() {
+      return countDevRequirements(db, sessionId);
+    },
+    unmetReqIds() {
+      return listDevRequirements(db, sessionId)
+        .filter((r) => r.status !== "met")
+        .map((r) => r.reqId);
+    },
+  };
+}
 
 export interface DevLoopEngineDeps {
   db: Database.Database;
@@ -122,6 +208,14 @@ export interface DevLoopEngineDeps {
   /** Injected clock/id for deterministic tests (no Date.now/randomUUID). */
   now: () => number;
   uuid: () => string;
+  /** Defaults to the session-scoped sink; the fleet injects a task sink. */
+  persistence?: DevEnginePersistence;
+  /** Session-wide spent-USD reader — parallel workers share ONE budget
+   *  ceiling. Defaults to the engine's own running cost mirror. */
+  getSpentUsd?: () => number;
+  /** Present for fleet workers: enables the NEEDS_DECOMPOSITION token and
+   *  the deterministic split nudge. */
+  fleet?: { taskReqIds: readonly string[] };
 }
 
 /**
@@ -130,13 +224,15 @@ export interface DevLoopEngineDeps {
  * via writeDevCheckpoint before each iteration.
  */
 export class DevLoopEngine {
-  private readonly db: Database.Database;
   private readonly repoPath: string;
   private readonly legRunner: DevLegRunner;
   private readonly tier: BackendModelTier;
   private readonly now: () => number;
   private readonly uuid: () => string;
   private readonly config: DevLoopConfig;
+  private readonly persistence: DevEnginePersistence;
+  private readonly getSpentUsd: (() => number) | null;
+  private readonly fleet: { taskReqIds: readonly string[] } | null;
 
   private session: DevSessionRow;
   private bookkeeping: DevEvaluateBookkeeping = EMPTY_BOOKKEEPING;
@@ -147,13 +243,16 @@ export class DevLoopEngine {
 
   constructor(session: DevSessionRow, deps: DevLoopEngineDeps) {
     this.session = session;
-    this.db = deps.db;
     this.repoPath = deps.repoPath;
     this.legRunner = deps.legRunner;
     this.tier = deps.tier;
     this.now = deps.now;
     this.uuid = deps.uuid;
     this.config = normalizeDevLoopConfig(session.config);
+    this.persistence =
+      deps.persistence ?? createSessionEnginePersistence(deps.db, session.id);
+    this.getSpentUsd = deps.getSpentUsd ?? null;
+    this.fleet = deps.fleet ?? null;
   }
 
   /** The mutable checkpoint counters (the runner reads these to persist). */
@@ -172,15 +271,14 @@ export class DevLoopEngine {
   }
 
   private record(
-    phase: Parameters<typeof recordDevIteration>[1]["phase"],
+    phase: DevIterationPhase,
     verdict: string | null,
     reason: string | null,
     leg?: DevLegResponse,
     commitSha?: string | null,
   ): void {
-    recordDevIteration(this.db, {
+    this.persistence.recordIteration({
       id: this.uuid(),
-      sessionId: this.session.id,
       iteration: this.session.iteration,
       phase,
       verdict,
@@ -190,16 +288,14 @@ export class DevLoopEngine {
       createdAt: this.now(),
     });
     if (leg && leg.costUsd > 0) {
-      addDevSessionCost(this.db, this.session.id, leg.costUsd);
+      this.persistence.addCost(leg.costUsd);
       this.session = { ...this.session, costUsd: (this.session.costUsd ?? 0) + leg.costUsd };
     }
   }
 
   private persistCheckpoint(): void {
-    writeDevCheckpoint(
-      this.db,
+    this.persistence.writeCheckpoint(
       {
-        id: this.session.id,
         iteration: this.session.iteration,
         agentFailures: this.session.agentFailures,
         gateReviseCount: this.session.gateReviseCount,
@@ -221,8 +317,7 @@ export class DevLoopEngine {
   private syncLedger(): void {
     const md = readDevDoc(this.repoPath, DEV_DOCS.ledger);
     for (const row of parseLedgerMarkdown(md)) {
-      updateDevRequirement(this.db, {
-        sessionId: this.session.id,
+      this.persistence.syncLedgerRow({
         reqId: row.reqId,
         status: row.status,
         evidence: row.evidence || null,
@@ -233,7 +328,7 @@ export class DevLoopEngine {
   }
 
   private allRequirementsMet(): boolean {
-    const { total, met } = countDevRequirements(this.db, this.session.id);
+    const { total, met } = this.persistence.requirementCounts();
     return total > 0 && met === total;
   }
 
@@ -254,16 +349,30 @@ export class DevLoopEngine {
   async runIteration(iterationNo: number): Promise<DevIterationOutcome> {
     this.session = { ...this.session, iteration: iterationNo };
 
-    // Budget / iteration-cap guards (loop-kit budget_exceeded).
+    // Budget / iteration-cap guards (loop-kit budget_exceeded). Fleet workers
+    // read the SESSION-WIDE rollup so parallel loops share one ceiling.
     if (iterationNo > this.config.maxIterations) {
       return { kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: "Hit the max-iteration cap." };
     }
-    if (this.session.maxBudgetUsd !== null && (this.session.costUsd ?? 0) >= this.session.maxBudgetUsd) {
+    const spentUsd = this.getSpentUsd ? this.getSpentUsd() : this.session.costUsd ?? 0;
+    if (this.session.maxBudgetUsd !== null && spentUsd >= this.session.maxBudgetUsd) {
       return { kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: "Hit the cost ceiling." };
     }
 
     this.persistCheckpoint();
     clearAgentState(this.repoPath);
+    // Deterministic budget signal for fleet workers (write_split_nudge port).
+    if (this.fleet && this.config.flow.splitNudgeAt > 0) {
+      const nudge = computeSplitNudge({
+        iteration: iterationNo,
+        maxIterations: this.config.maxIterations,
+        splitNudgeAt: this.config.flow.splitNudgeAt,
+        unmetReqIds: this.persistence.unmetReqIds(),
+        stopNudgeActive: false,
+      });
+      if (nudge) writeDevDoc(this.repoPath, DEV_DOCS.splitNudge, nudge);
+      else removeDevDoc(this.repoPath, DEV_DOCS.splitNudge);
+    }
     const preRef = gitHead(this.repoPath) ?? "HEAD";
 
     // ── IMPLEMENT ──
@@ -293,7 +402,7 @@ export class DevLoopEngine {
         final: false,
         assumeReady: false,
         wholeRunDiffEmpty: false,
-        fleetWorker: false,
+        fleetWorker: this.fleet !== null,
         bookkeeping: this.bookkeeping,
       },
       {
@@ -313,7 +422,12 @@ export class DevLoopEngine {
     if (state === "SUCCESS_CANDIDATE") {
       return this.runSuccessGate(false, preRef);
     }
-    if (state === "NEEDS_SPEC_DECISION" || state === "NEEDS_ARCHITECTURE_DECISION" || state === "RISK_REQUIRES_APPROVAL") {
+    if (
+      state === "NEEDS_SPEC_DECISION"
+      || state === "NEEDS_ARCHITECTURE_DECISION"
+      || state === "NEEDS_DECOMPOSITION"
+      || state === "RISK_REQUIRES_APPROVAL"
+    ) {
       return this.escalate(state, evalOut.result.reason);
     }
     if (state === "BLOCKED" || state === "STALLED") {
@@ -400,6 +514,7 @@ export class DevLoopEngine {
       ...this.legCtx(),
       mode: "gate",
       baseRef,
+      reqIds: this.fleet?.taskReqIds,
     });
     if (reviewResp.isError) {
       this.record("gate", "error", "reviewer unavailable", reviewResp);
@@ -444,7 +559,7 @@ export class DevLoopEngine {
         final: true,
         assumeReady: forced,
         wholeRunDiffEmpty: isWholeRunDiffEmpty(this.repoPath, baseRef),
-        fleetWorker: false,
+        fleetWorker: this.fleet !== null,
         bookkeeping: this.bookkeeping,
       },
       {
@@ -460,7 +575,7 @@ export class DevLoopEngine {
     return { kind: "terminal", loopState: "BLOCKED", reason: `Post-evidence re-check failed: ${finalOut.result.reason}` };
   }
 
-  private escalate(loopState: DevSessionLoopState, reason: string): DevIterationOutcome {
+  private escalate(loopState: DevTaskLoopState, reason: string): DevIterationOutcome {
     const kind = LOOP_STATE_TO_ESCALATION[loopState] ?? "spec_decision";
     const decisionRequests = readDevDoc(this.repoPath, DEV_DOCS.decisionRequests);
     return {
