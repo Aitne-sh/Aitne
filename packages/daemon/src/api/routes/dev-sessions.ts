@@ -21,6 +21,8 @@ import {
   type DevSessionState,
 } from "../../db/dev-sessions-store.js";
 import { listDevEscalationsForSession } from "../../db/dev-session-escalations-store.js";
+import { listDevTasks } from "../../db/dev-session-tasks-store.js";
+import { planParallelGroups } from "../../services/dev-mode/task-plan.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
 
 export type DevSessionsRouteDeps = Pick<ApiDependencies, "db">;
@@ -58,6 +60,7 @@ export function createDevSessionsRoutes(deps: DevSessionsRouteDeps): Hono {
     const rows = listDevSessions(db, { repositoryId, states, limit });
     const sessions = rows.map((row) => {
       const { total, met } = countDevRequirements(db, row.id);
+      const tasks = listDevTasks(db, row.id);
       return {
         id: row.id,
         repositoryId: row.repositoryId,
@@ -68,6 +71,9 @@ export function createDevSessionsRoutes(deps: DevSessionsRouteDeps): Hono {
         iteration: row.iteration,
         requirementsMet: met,
         requirementsTotal: total,
+        // Fleet progress (0 tasks = a single-loop or not-yet-decomposed run).
+        tasksTotal: tasks.length,
+        tasksMerged: tasks.filter((t) => t.state === "merged").length,
         costUsd: row.costUsd,
         maxBudgetUsd: row.maxBudgetUsd,
         createdAt: row.createdAt,
@@ -87,12 +93,44 @@ export function createDevSessionsRoutes(deps: DevSessionsRouteDeps): Hono {
       ]);
     }
     const { total, met } = countDevRequirements(db, id);
+    const taskRows = listDevTasks(db, id);
+    // Topological layer index per task (the "runs after ↑" grouping the
+    // dashboard renders). Derived from the live depends_on edges.
+    const layerByKey = new Map<string, number>();
+    planParallelGroups(
+      taskRows.map((t) => ({
+        key: t.taskKey,
+        summary: t.summary,
+        dependsOn: t.dependsOn,
+        scope: t.scope,
+        reqs: t.reqs,
+        body: t.body,
+      })),
+    ).forEach((group, layer) => group.forEach((key) => layerByKey.set(key, layer)));
+    const tasks = taskRows.map((t) => ({
+      id: t.id,
+      taskKey: t.taskKey,
+      summary: t.summary,
+      dependsOn: t.dependsOn,
+      reqs: t.reqs,
+      origin: t.origin,
+      state: t.state,
+      loopState: t.loopState,
+      branch: t.branch,
+      iteration: t.iteration,
+      costUsd: t.costUsd,
+      failReason: t.failReason,
+      group: layerByKey.get(t.taskKey) ?? 0,
+      createdAt: t.createdAt,
+      mergedAt: t.mergedAt,
+    }));
     return c.json({
       session: {
         ...session,
         requirementsMet: met,
         requirementsTotal: total,
       },
+      tasks,
       iterations: listDevIterations(db, id),
       requirements: listDevRequirements(db, id),
       escalations: listDevEscalationsForSession(db, id),

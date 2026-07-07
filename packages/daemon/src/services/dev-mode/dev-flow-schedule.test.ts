@@ -198,6 +198,12 @@ describe("renderQueueSnapshot", () => {
     );
     expect(none).not.toContain("Queued task bodies");
   });
+  it("renders '-' for empty deps/reqs and an absent plan-review", () => {
+    const md = renderQueueSnapshot([
+      { taskKey: "bare", state: "queued", dependsOn: [], reqs: [], summary: "s", planReview: null },
+    ]);
+    expect(md).toContain("| bare | queued | - | - | - |");
+  });
 });
 
 describe("renderParallelContext", () => {
@@ -221,6 +227,14 @@ describe("renderParallelContext", () => {
     expect(md).toContain("Already merged into your base: landed");
     expect(md).not.toContain("gone");
     expect(md).not.toContain("- me ");
+  });
+  it("omits the scope clause when a sibling has none", () => {
+    const md = renderParallelContext("me", [
+      tasks[0]!,
+      { taskKey: "noscope", state: "running", dependsOn: [], reqs: [], summary: "no scope task" },
+    ]);
+    expect(md).toContain("- noscope [running] no scope task");
+    expect(md).not.toContain("no scope task —");
   });
   it("says so when no live siblings remain", () => {
     const md = renderParallelContext("me", [tasks[0]!, tasks[2]!]);

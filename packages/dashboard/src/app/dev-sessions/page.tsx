@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitBranch, ListChecks, Terminal } from "lucide-react";
+import { GitBranch, ListChecks, Network, Terminal } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -14,11 +14,14 @@ import {
   devLoopStateLabel,
   devReqStatusBadgeVariant,
   devPhaseLabel,
+  devTaskStateBadgeVariant,
+  devTaskStateLabel,
+  groupTasksByLayer,
   reqSummary,
   formatCost,
   formatDevTime,
 } from "@/lib/dev-sessions/view";
-import type { DevSessionSummary } from "@/lib/dev-sessions/types";
+import type { DevSessionSummary, DevSessionDetailResponse } from "@/lib/dev-sessions/types";
 
 /**
  * Dev Sessions — visibility into the development-mode loop (drive Claude Code
@@ -84,6 +87,12 @@ export default function DevSessionsPage() {
                           <ListChecks className="h-3.5 w-3.5" />
                           {reqSummary(session.requirementsMet, session.requirementsTotal)}
                         </span>
+                        {session.tasksTotal > 0 ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Network className="h-3.5 w-3.5" />
+                            {session.tasksMerged}/{session.tasksTotal} tasks
+                          </span>
+                        ) : null}
                         {session.branch ? (
                           <span className="inline-flex items-center gap-1">
                             <GitBranch className="h-3.5 w-3.5" />
@@ -167,6 +176,8 @@ function DevSessionDrawer({
                 </section>
               ) : null}
 
+              {data && data.tasks.length > 0 ? <FlowSection data={data} /> : null}
+
               {data && data.escalations.some((e) => !e.resolved) ? (
                 <section className="space-y-2">
                   <h3 className="text-sm font-semibold text-foreground">Open decisions</h3>
@@ -195,16 +206,22 @@ function DevSessionDrawer({
                   <ul className="space-y-1">
                     {data.iterations.map((it) => {
                       const t = formatDevTime(it.createdAt);
+                      const taskKey = it.taskId
+                        ? data.tasks.find((task) => task.id === it.taskId)?.taskKey ?? null
+                        : null;
                       return (
                         <li
                           key={it.id}
                           className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-1.5 text-sm"
                         >
-                          <span className="flex items-center gap-2">
+                          <span className="flex min-w-0 items-center gap-2">
                             <span className="text-muted-foreground">#{it.iteration}</span>
                             <Badge variant="gray">{devPhaseLabel(it.phase)}</Badge>
+                            {taskKey ? (
+                              <Badge variant="blue">{taskKey}</Badge>
+                            ) : null}
                             {it.verdict ? (
-                              <span className="text-xs text-muted-foreground">{it.verdict}</span>
+                              <span className="truncate text-xs text-muted-foreground">{it.verdict}</span>
                             ) : null}
                           </span>
                           <span className="text-xs text-muted-foreground" title={t.absolute}>
@@ -221,6 +238,56 @@ function DevSessionDrawer({
         ) : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** The decomposed task DAG, rendered as topological layers (tasks in one layer
+ *  ran in parallel; a layer separator means "runs after the layer above"). */
+function FlowSection({ data }: { data: DevSessionDetailResponse }) {
+  const layers = groupTasksByLayer(data.tasks);
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-foreground">Flow</h3>
+      <div className="space-y-2">
+        {layers.map((layer, i) => (
+          <div key={i} className="space-y-1">
+            {i > 0 ? (
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                runs after ↑
+              </p>
+            ) : null}
+            {layer.map((task) => (
+              <div
+                key={task.id}
+                className="rounded-md border border-border px-3 py-1.5 text-sm"
+              >
+                <div className="flex items-center gap-2">
+                  <Badge variant={devTaskStateBadgeVariant(task.state)}>
+                    {devTaskStateLabel(task.state)}
+                  </Badge>
+                  <span className="truncate font-medium text-foreground">{task.taskKey}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {formatCost(task.costUsd)}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs text-muted-foreground">{task.summary}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                  <span>{task.reqs.join(", ")}</span>
+                  {task.dependsOn.length > 0 ? (
+                    <span>· needs {task.dependsOn.join(", ")}</span>
+                  ) : null}
+                  <span>· iter {task.iteration}</span>
+                  {task.origin !== "plan" ? <span>· {task.origin}</span> : null}
+                  {task.failReason ? (
+                    <span className="text-destructive">· {task.failReason}</span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

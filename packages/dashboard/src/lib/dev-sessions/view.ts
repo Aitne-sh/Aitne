@@ -10,6 +10,8 @@ import type {
   DevRequirementStatus,
   DevSessionLoopState,
   DevSessionState,
+  DevTaskDTO,
+  DevTaskState,
 } from "./types.js";
 
 /** The `<Badge variant>` names this feature uses (local map — the dev states
@@ -89,10 +91,66 @@ const PHASE_LABELS: Record<DevIterationPhase, string> = {
   stop_eval: "Stop-eval",
   gate: "Gate",
   evidence: "Evidence",
+  decompose: "Decompose",
+  decompose_review: "Decompose review",
+  supervise: "Supervise",
+  plan_review: "Plan review",
+  merge: "Merge",
 };
 
 export function devPhaseLabel(phase: DevIterationPhase): string {
   return PHASE_LABELS[phase] ?? phase;
+}
+
+// ── fleet task rendering ────────────────────────────────────────────────
+
+const TASK_STATE_LABELS: Record<DevTaskState, string> = {
+  queued: "Queued",
+  running: "Running",
+  supervise_pending: "Supervising",
+  merge_pending: "Merging",
+  awaiting_user: "Awaiting decision",
+  merged: "Merged",
+  failed: "Failed",
+  superseded: "Superseded",
+  dep_failed: "Dep failed",
+};
+
+export function devTaskStateLabel(state: DevTaskState): string {
+  return TASK_STATE_LABELS[state] ?? state;
+}
+
+export function devTaskStateBadgeVariant(state: DevTaskState): DevBadgeVariant {
+  switch (state) {
+    case "merged":
+      return "green";
+    case "running":
+    case "merge_pending":
+      return "amber";
+    case "supervise_pending":
+      return "purple";
+    case "awaiting_user":
+      return "orange";
+    case "failed":
+    case "dep_failed":
+      return "red";
+    case "superseded":
+      return "gray";
+    default:
+      return "blue";
+  }
+}
+
+/** Group fleet tasks into their topological layers (the DTO's `group` index),
+ *  sorted so the earliest layer renders first and tasks within a layer keep a
+ *  stable key order. Returns [] for a single-loop / not-yet-decomposed run. */
+export function groupTasksByLayer(tasks: readonly DevTaskDTO[]): DevTaskDTO[][] {
+  if (tasks.length === 0) return [];
+  const maxLayer = tasks.reduce((m, t) => Math.max(m, t.group), 0);
+  const layers: DevTaskDTO[][] = Array.from({ length: maxLayer + 1 }, () => []);
+  for (const t of tasks) layers[t.group]!.push(t);
+  for (const layer of layers) layer.sort((a, b) => a.taskKey.localeCompare(b.taskKey));
+  return layers.filter((l) => l.length > 0);
 }
 
 /** "3/5 requirements met" chip text. */

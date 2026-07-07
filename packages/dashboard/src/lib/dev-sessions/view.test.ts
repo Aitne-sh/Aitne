@@ -5,10 +5,14 @@ import {
   devLoopStateLabel,
   devReqStatusBadgeVariant,
   devPhaseLabel,
+  devTaskStateLabel,
+  devTaskStateBadgeVariant,
+  groupTasksByLayer,
   reqSummary,
   formatCost,
   formatDevTime,
 } from "./view.js";
+import type { DevTaskDTO } from "./types.js";
 
 describe("dev-sessions view helpers", () => {
   it("maps states to token-based badge variants", () => {
@@ -53,5 +57,43 @@ describe("dev-sessions view helpers", () => {
     expect(t.absolute).toContain("2023");
     expect(t.relative).toContain("ago");
     expect(formatDevTime(null).absolute).toBe("—");
+  });
+
+  it("labels + colors fleet task states, new phases included", () => {
+    expect(devTaskStateLabel("merge_pending")).toBe("Merging");
+    expect(devTaskStateLabel("dep_failed")).toBe("Dep failed");
+    expect(devTaskStateBadgeVariant("merged")).toBe("green");
+    expect(devTaskStateBadgeVariant("supervise_pending")).toBe("purple");
+    expect(devTaskStateBadgeVariant("awaiting_user")).toBe("orange");
+    expect(devTaskStateBadgeVariant("failed")).toBe("red");
+    expect(devTaskStateBadgeVariant("queued")).toBe("blue");
+    expect(devPhaseLabel("decompose")).toBe("Decompose");
+    expect(devPhaseLabel("plan_review")).toBe("Plan review");
+    expect(devPhaseLabel("merge")).toBe("Merge");
+  });
+
+  it("groups fleet tasks into topological layers, sorted within a layer", () => {
+    const task = (taskKey: string, group: number): DevTaskDTO => ({
+      id: `id-${taskKey}`,
+      taskKey,
+      summary: taskKey,
+      dependsOn: [],
+      reqs: [],
+      origin: "plan",
+      state: "queued",
+      loopState: null,
+      branch: null,
+      iteration: 0,
+      costUsd: null,
+      failReason: null,
+      group,
+      createdAt: 0,
+      mergedAt: null,
+    });
+    expect(groupTasksByLayer([])).toEqual([]);
+    const layers = groupTasksByLayer([task("beta", 1), task("root", 0), task("alpha", 1)]);
+    expect(layers).toHaveLength(2);
+    expect(layers[0]!.map((t) => t.taskKey)).toEqual(["root"]);
+    expect(layers[1]!.map((t) => t.taskKey)).toEqual(["alpha", "beta"]);
   });
 });

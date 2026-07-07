@@ -10,6 +10,7 @@ import {
   approveDevSession,
 } from "../../db/dev-sessions-store.js";
 import { createDevEscalation } from "../../db/dev-session-escalations-store.js";
+import { insertDevTasks, markDevTaskState } from "../../db/dev-session-tasks-store.js";
 import { createDevSessionsRoutes } from "./dev-sessions.js";
 
 describe("dev-sessions routes", () => {
@@ -100,15 +101,47 @@ describe("dev-sessions routes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       session: Record<string, unknown>;
+      tasks: unknown[];
       iterations: unknown[];
       requirements: unknown[];
       escalations: unknown[];
     };
     expect(body.session.id).toBe("s1");
     expect(body.session.requirementsTotal).toBe(2);
+    expect(body.tasks).toHaveLength(0); // single-loop session — no fleet tasks
     expect(body.iterations).toHaveLength(1);
     expect(body.requirements).toHaveLength(2);
     expect(body.escalations).toHaveLength(1);
+  });
+
+  it("GET /dev-sessions surfaces fleet task progress + topo groups", async () => {
+    insertDevTasks(
+      db,
+      "s1",
+      [
+        { id: "t-root", taskKey: "root", summary: "root", dependsOn: [], scope: "a", reqs: ["REQ-001"], body: "b", origin: "plan" },
+        { id: "t-leaf", taskKey: "leaf", summary: "leaf", dependsOn: ["root"], scope: "b", reqs: ["REQ-002"], body: "b", origin: "plan" },
+      ],
+      400,
+    );
+    markDevTaskState(db, { id: "t-root", from: ["queued"], to: "merged", at: 500 });
+
+    const list = await app.request("/dev-sessions");
+    const listBody = (await list.json()) as { sessions: Array<Record<string, unknown>> };
+    expect(listBody.sessions[0]!.tasksTotal).toBe(2);
+    expect(listBody.sessions[0]!.tasksMerged).toBe(1);
+
+    const detail = await app.request("/dev-sessions/s1");
+    const body = (await detail.json()) as {
+      tasks: Array<{ taskKey: string; group: number; dependsOn: string[]; state: string }>;
+    };
+    expect(body.tasks).toHaveLength(2);
+    const root = body.tasks.find((t) => t.taskKey === "root")!;
+    const leaf = body.tasks.find((t) => t.taskKey === "leaf")!;
+    expect(root.group).toBe(0);
+    expect(leaf.group).toBe(1);
+    expect(leaf.dependsOn).toEqual(["root"]);
+    expect(root.state).toBe("merged");
   });
 
   it("GET /dev-sessions/:id 404s for an unknown id", async () => {

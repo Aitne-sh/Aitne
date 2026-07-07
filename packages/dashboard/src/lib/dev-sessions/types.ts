@@ -38,7 +38,46 @@ export type DevIterationPhase =
   | "review"
   | "stop_eval"
   | "gate"
-  | "evidence";
+  | "evidence"
+  | "decompose"
+  | "decompose_review"
+  | "supervise"
+  | "plan_review"
+  | "merge";
+
+export type DevTaskState =
+  | "queued"
+  | "running"
+  | "supervise_pending"
+  | "merge_pending"
+  | "awaiting_user"
+  | "merged"
+  | "failed"
+  | "superseded"
+  | "dep_failed";
+
+export type DevTaskLoopState = DevSessionLoopState | "NEEDS_DECOMPOSITION";
+export type DevTaskOrigin = "plan" | "replan" | "plan_review" | "fixup";
+
+/** One DAG node in a fleet run (GET /dev-sessions/:id → tasks[]). */
+export interface DevTaskDTO {
+  id: string;
+  taskKey: string;
+  summary: string;
+  dependsOn: string[];
+  reqs: string[];
+  origin: DevTaskOrigin;
+  state: DevTaskState;
+  loopState: DevTaskLoopState | null;
+  branch: string | null;
+  iteration: number;
+  costUsd: number | null;
+  failReason: string | null;
+  /** Topological layer index (tasks in one layer may run in parallel). */
+  group: number;
+  createdAt: number;
+  mergedAt: number | null;
+}
 
 /** One row in the sessions list (GET /dev-sessions). */
 export interface DevSessionSummary {
@@ -51,6 +90,9 @@ export interface DevSessionSummary {
   iteration: number;
   requirementsMet: number;
   requirementsTotal: number;
+  /** Fleet progress; 0 total = a single-loop or not-yet-decomposed run. */
+  tasksTotal: number;
+  tasksMerged: number;
   costUsd: number | null;
   maxBudgetUsd: number | null;
   createdAt: number;
@@ -65,6 +107,7 @@ export interface DevSessionsResponse {
 export interface DevIterationDTO {
   id: string;
   sessionId: string;
+  taskId: string | null;
   iteration: number;
   phase: DevIterationPhase;
   verdict: string | null;
@@ -102,6 +145,7 @@ export interface DevEscalationDTO {
  *  which the page does not need, so it is typed as the summary + a passthrough. */
 export interface DevSessionDetailResponse {
   session: DevSessionSummary & Record<string, unknown>;
+  tasks: DevTaskDTO[];
   iterations: DevIterationDTO[];
   requirements: DevRequirementDTO[];
   escalations: DevEscalationDTO[];
