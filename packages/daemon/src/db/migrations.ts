@@ -1381,6 +1381,130 @@ export const MIGRATIONS: readonly Migration[] = [
       ).run();
     },
   },
+  {
+    id: "0026-dev-mode",
+    description:
+      "(development mode) — create the four dev-mode tables: dev_sessions "
+      + "(one interactive dev session per row — the durable state authority + "
+      + "loop-kit run-checkpoint + boot-resume surface for the native "
+      + "CONTRACT->APPROVE->LOOP->EVIDENCE engine), dev_session_iterations "
+      + "(native journal.jsonl, one immutable row per loop leg), "
+      + "dev_session_requirements (the REQ ledger the gate reads and the UI "
+      + "renders), and dev_session_escalations (a near-clone of "
+      + "background_task_clarifications, CAS-resolve + delivery recovery, but "
+      + "with a NULLABLE deadline_at because dev escalations are never "
+      + "auto-timed-out). All four are new tables with no seed data, so this "
+      + "is a pure CREATE-IF-NOT-EXISTS mirror of the schema.ts definitions — "
+      + "idempotent regardless of prior schema state. See the dev-mode plan.",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS dev_sessions (
+            id                   TEXT PRIMARY KEY,
+            repository_id        TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+            slug                 TEXT,
+            branch               TEXT,
+            base_ref             TEXT,
+            state                TEXT NOT NULL DEFAULT 'interview'
+                CHECK (state IN (
+                    'interview', 'awaiting_approval', 'running',
+                    'awaiting_user', 'done', 'exited', 'failed'
+                )),
+            loop_state           TEXT
+                CHECK (loop_state IS NULL OR loop_state IN (
+                    'SUCCESS', 'NO_OP', 'NEEDS_SPEC_DECISION',
+                    'NEEDS_ARCHITECTURE_DECISION', 'RISK_REQUIRES_APPROVAL',
+                    'BLOCKED', 'STALLED', 'BUDGET_EXCEEDED'
+                )),
+            approved_hash        TEXT,
+            approved_at          INTEGER,
+            iteration            INTEGER NOT NULL DEFAULT 0,
+            agent_failures       INTEGER NOT NULL DEFAULT 0,
+            gate_revise_count    INTEGER NOT NULL DEFAULT 0,
+            iter_revise_count    INTEGER NOT NULL DEFAULT 0,
+            resumes              INTEGER NOT NULL DEFAULT 0,
+            max_iterations       INTEGER,
+            config_json          TEXT,
+            models_json          TEXT,
+            cost_usd             REAL,
+            max_budget_usd       REAL,
+            timeout_schedule_id  INTEGER REFERENCES agent_schedule(id) ON DELETE SET NULL,
+            originating_platform TEXT,
+            originating_channel  TEXT,
+            created_at           INTEGER NOT NULL,
+            entered_at           INTEGER NOT NULL,
+            updated_at           INTEGER NOT NULL,
+            exited_at            INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_sessions_state
+            ON dev_sessions(state);
+        CREATE INDEX IF NOT EXISTS idx_dev_sessions_repo
+            ON dev_sessions(repository_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_sessions_created
+            ON dev_sessions(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_dev_sessions_non_terminal
+            ON dev_sessions(state)
+            WHERE state IN ('interview', 'awaiting_approval', 'running', 'awaiting_user');
+
+        CREATE TABLE IF NOT EXISTS dev_session_iterations (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+            iteration   INTEGER NOT NULL,
+            phase       TEXT NOT NULL
+                CHECK (phase IN (
+                    'plan', 'implement', 'evaluate', 'review',
+                    'stop_eval', 'gate', 'evidence'
+                )),
+            verdict     TEXT,
+            reason      TEXT,
+            cost_usd    REAL,
+            commit_sha  TEXT,
+            created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_iterations_session
+            ON dev_session_iterations(session_id, iteration);
+
+        CREATE TABLE IF NOT EXISTS dev_session_requirements (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+            req_id      TEXT NOT NULL,
+            title       TEXT,
+            status      TEXT NOT NULL DEFAULT 'unstarted'
+                CHECK (status IN (
+                    'unstarted', 'in_progress', 'met', 'at_risk', 'regressed'
+                )),
+            evidence    TEXT,
+            iter        INTEGER,
+            updated_at  INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_reqs_session_req
+            ON dev_session_requirements(session_id, req_id);
+
+        CREATE TABLE IF NOT EXISTS dev_session_escalations (
+            id              TEXT PRIMARY KEY,
+            session_id      TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+            kind            TEXT NOT NULL
+                CHECK (kind IN (
+                    'spec_decision', 'architecture_decision',
+                    'risk_approval', 'review_escalation'
+                )),
+            question        TEXT NOT NULL,
+            context_summary TEXT,
+            asked_at        INTEGER NOT NULL,
+            deadline_at     INTEGER,
+            delivered_at    INTEGER,
+            answer          TEXT,
+            answered_at     INTEGER,
+            resolved        INTEGER NOT NULL DEFAULT 0
+                CHECK (resolved IN (0, 1))
+        );
+        CREATE INDEX IF NOT EXISTS idx_dev_esc_session
+            ON dev_session_escalations(session_id);
+        CREATE INDEX IF NOT EXISTS idx_dev_esc_unresolved
+            ON dev_session_escalations(session_id)
+            WHERE resolved = 0;
+      `);
+    },
+  },
 ];
 
 export interface MigrationRunResult {

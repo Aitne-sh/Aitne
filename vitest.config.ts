@@ -785,6 +785,24 @@ export default defineConfig({
         "packages/daemon/src/services/background-task/background-task-runner.ts",
         "packages/daemon/src/services/background-task/background-task-driver.ts",
 
+        // ── Development mode (dev-mode plan) ── Native port of loop-kit's
+        // loop engine. The PURE core stays IN the gate at 100%:
+        // `services/dev-mode/dev-loop-evaluate.ts` (deterministic decision
+        // order over injected spawn/git shims), `dev-loop-config.ts`
+        // (defaults/normalize/validate/hash-serialize), `verdict-parse.ts`
+        // (extract_verdict + per-REQ table parse). The exclusions below are
+        // I/O-bound — SQL stores, the fs/git working-dir writer, the
+        // IAgentCore SDK-consuming legs, the detached engine/runner
+        // (park/cancel/boot-resume orchestration), and the Hono route.
+        // Mirrors the background-task exclusion rationale above.
+        "packages/daemon/src/db/dev-sessions-store.ts",
+        "packages/daemon/src/db/dev-session-escalations-store.ts",
+        "packages/daemon/src/services/dev-mode/dev-loop-docs.ts",
+        "packages/daemon/src/services/dev-mode/dev-loop-legs.ts",
+        "packages/daemon/src/services/dev-mode/dev-loop-engine.ts",
+        "packages/daemon/src/services/dev-mode/dev-mode-runner.ts",
+        "packages/daemon/src/api/routes/dev-sessions.ts",
+
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──
         // FS-locked write coordinator + best-effort cleanup helpers.
         // Pure planning logic stays in the covered set; the wrappers

@@ -2030,6 +2030,194 @@ CREATE INDEX IF NOT EXISTS idx_bgtask_clar_unresolved
     ON background_task_clarifications(deadline_at)
     WHERE resolved = 0;
 
+-- ── Development Mode (dev-mode) — DEV_MODE_DESIGN plan ─────────────────
+--
+-- One interactive "dev session" per row: the owner enters dev mode from a
+-- messaging app with !repo <name>, the DM agent interviews them into a
+-- product contract + stop conditions, they !approve, and a native port of
+-- the loop-kit engine (CONTRACT -> APPROVE -> LOOP -> EVIDENCE) drives the
+-- Claude Code backend against the registered repo path until a named stop
+-- state. This table is the durable state authority + boot-resume surface;
+-- the per-repo .aitne-dev/ working dir is the model-and-evaluator shared
+-- memory, and knowledge/repos/<slug>/dev-sessions/<id>/ is the published
+-- human-readable copy.
+CREATE TABLE IF NOT EXISTS dev_sessions (
+    -- uuid v4 (crypto.randomUUID).
+    id                  TEXT PRIMARY KEY,
+    -- The registered repository this session builds inside. CASCADE so
+    -- deleting a repo takes its dev-session history with it.
+    repository_id       TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+    -- Denormalized deriveSlug(repo) — the knowledge/ + branch namespace.
+    slug                TEXT,
+    -- aitne-dev/<id> working branch; NULL until !approve creates it.
+    branch              TEXT,
+    -- Run-start HEAD sha (the whole-run diff baseline); NULL until approved.
+    base_ref            TEXT,
+    -- Outer lifecycle. 'interview' — gathering requirements over chat.
+    -- 'awaiting_approval' — loop summary sent, waiting for !approve.
+    -- 'running' — the loop engine owns the session. 'awaiting_user' — the
+    -- loop parked on a critical question (the 30-min timeout is CANCELLED
+    -- while here). 'done'/'exited'/'failed' — terminal.
+    state               TEXT NOT NULL DEFAULT 'interview'
+        CHECK (state IN (
+            'interview',
+            'awaiting_approval',
+            'running',
+            'awaiting_user',
+            'done',
+            'exited',
+            'failed'
+        )),
+    -- The last inner loop verdict (loop-kit's named stop states). NULL
+    -- until the loop reaches a terminal/escalation state.
+    loop_state          TEXT
+        CHECK (loop_state IS NULL OR loop_state IN (
+            'SUCCESS',
+            'NO_OP',
+            'NEEDS_SPEC_DECISION',
+            'NEEDS_ARCHITECTURE_DECISION',
+            'RISK_REQUIRES_APPROVAL',
+            'BLOCKED',
+            'STALLED',
+            'BUDGET_EXCEEDED'
+        )),
+    -- sha256(product-contract.md + config) captured at !approve — the
+    -- immutability anchor. The deterministic evaluator receives this from
+    -- the engine's in-memory value, never re-reads a repo file, so an
+    -- injected instruction cannot move the goalposts. NULL until approved.
+    approved_hash       TEXT,
+    approved_at         INTEGER,
+    -- ── loop-kit run-checkpoint (persisted at the top of every iteration,
+    --    so a daemon restart resumes rather than restarts) ───────────────
+    iteration           INTEGER NOT NULL DEFAULT 0,
+    agent_failures      INTEGER NOT NULL DEFAULT 0,
+    gate_revise_count   INTEGER NOT NULL DEFAULT 0,
+    iter_revise_count   INTEGER NOT NULL DEFAULT 0,
+    resumes             INTEGER NOT NULL DEFAULT 0,
+    -- MAX_ITERATIONS captured at approval — a budget-only raise tolerates
+    -- resume (loop-kit config_hash_sans_budget). NULL until approved.
+    max_iterations      INTEGER,
+    -- The approved stop conditions as JSON: verifyCommands, deniedPaths,
+    -- escalatePaths, stagnationN, repeatFailN, futileN, metForceN,
+    -- maxRevisions, reviewMode, maxIterSeconds, etc. NULL during interview.
+    config_json         TEXT,
+    -- Per-role model routing (implement/review/stop_eval/evidence). NULL
+    -- falls back to the dev.session process-key defaults (Claude v1).
+    models_json         TEXT,
+    -- Cumulative USD across every leg of this session (the rollup; per-leg
+    -- rows land in agent_actions via task-spend-ledger). NULL = none yet.
+    cost_usd            REAL,
+    -- Per-run hard budget ceiling (BUDGET_EXCEEDED when reached). NULL =
+    -- fall back to the dev.session process envelope.
+    max_budget_usd      REAL,
+    -- FK to the armed 30-min inactivity-timeout row; ON DELETE SET NULL so
+    -- cancelling the schedule leaves the session intact. NULL when no
+    -- timeout is armed (during the loop, and while parked on an escalation).
+    timeout_schedule_id INTEGER REFERENCES agent_schedule(id) ON DELETE SET NULL,
+    -- Delivery routing for milestones/escalations/evidence (mirrors
+    -- background_task). "<platform>" / "<platform>:<channel_id>".
+    originating_platform TEXT,
+    originating_channel  TEXT,
+    created_at          INTEGER NOT NULL,
+    entered_at          INTEGER NOT NULL,
+    updated_at          INTEGER NOT NULL,
+    exited_at           INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_dev_sessions_state
+    ON dev_sessions(state);
+CREATE INDEX IF NOT EXISTS idx_dev_sessions_repo
+    ON dev_sessions(repository_id);
+CREATE INDEX IF NOT EXISTS idx_dev_sessions_created
+    ON dev_sessions(created_at DESC);
+-- The non-terminal set drives the boot re-dispatch sweep + the singleton
+-- guard (at most one active session; also enforced in code via runtime_state).
+CREATE INDEX IF NOT EXISTS idx_dev_sessions_non_terminal
+    ON dev_sessions(state)
+    WHERE state IN ('interview', 'awaiting_approval', 'running', 'awaiting_user');
+
+-- Native journal.jsonl — one immutable row per loop leg. Powers the
+-- dashboard timeline and the chat digest counts.
+CREATE TABLE IF NOT EXISTS dev_session_iterations (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    iteration   INTEGER NOT NULL,
+    phase       TEXT NOT NULL
+        CHECK (phase IN (
+            'plan',
+            'implement',
+            'evaluate',
+            'review',
+            'stop_eval',
+            'gate',
+            'evidence'
+        )),
+    verdict     TEXT,
+    reason      TEXT,
+    cost_usd    REAL,
+    commit_sha  TEXT,
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dev_iterations_session
+    ON dev_session_iterations(session_id, iteration);
+
+-- The requirements ledger (DB mirror of requirements-ledger.md). Seeded
+-- deterministically from the contract's REQ- headings at !approve; the
+-- gate refuses promotion while any row is not 'met'; the dashboard renders
+-- it and the chat digest summarizes it ("4/5 REQ met").
+CREATE TABLE IF NOT EXISTS dev_session_requirements (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    req_id      TEXT NOT NULL,
+    title       TEXT,
+    status      TEXT NOT NULL DEFAULT 'unstarted'
+        CHECK (status IN (
+            'unstarted',
+            'in_progress',
+            'met',
+            'at_risk',
+            'regressed'
+        )),
+    evidence    TEXT,
+    iter        INTEGER,
+    updated_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_reqs_session_req
+    ON dev_session_requirements(session_id, req_id);
+
+-- Mid-run escalations — near-clone of background_task_clarifications
+-- (CAS-resolve + delivery-recovery). KEY DIFFERENCE: deadline_at is
+-- NULLABLE and dev escalations are NEVER auto-timed-out — the requirement
+-- is "no inactivity timeout until the pending question resolves or the
+-- user !exits", so the sweep leaves these parked indefinitely.
+CREATE TABLE IF NOT EXISTS dev_session_escalations (
+    id              TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    -- Maps to the loop-kit escalation states.
+    kind            TEXT NOT NULL
+        CHECK (kind IN (
+            'spec_decision',
+            'architecture_decision',
+            'risk_approval',
+            'review_escalation'
+        )),
+    question        TEXT NOT NULL,
+    context_summary TEXT,
+    asked_at        INTEGER NOT NULL,
+    -- NULLABLE — dev escalations are not auto-expired (see table comment).
+    deadline_at     INTEGER,
+    -- task.delivery recovery key.
+    delivered_at    INTEGER,
+    answer          TEXT,
+    answered_at     INTEGER,
+    resolved        INTEGER NOT NULL DEFAULT 0
+        CHECK (resolved IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_dev_esc_session
+    ON dev_session_escalations(session_id);
+CREATE INDEX IF NOT EXISTS idx_dev_esc_unresolved
+    ON dev_session_escalations(session_id)
+    WHERE resolved = 0;
+
 -- INTEGRATION-DRIFT-PHASE-7-PLAN.md §3.2 — persistent dedup for the
 -- 15-minute imminent-meeting reminder. Pre-Phase-7 the scheduler kept
 -- an in-memory Set, which was lost on every daemon restart and re-DMed
