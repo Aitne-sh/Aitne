@@ -129,8 +129,20 @@ export function fingerprintFailure(verify: readonly DevVerifyResult[]): string {
   const body = failed
     .map((v) => `${v.command}\n${v.output}`)
     .join("\n---\n")
+    // Normalize VOLATILE tokens so the SAME failure fingerprints identically
+    // across runs, while KEEPING count-like short integers ("3 failed" vs "2
+    // failed") so genuine forward progress does NOT read as a stall (the old
+    // blanket /[0-9]+/→# over-masked counts → premature STALLED/BLOCKED). The
+    // volatile set: hex/addresses, durations, clock times, pids, ports/line
+    // suffixes, and long digit runs (timestamps/hashes). Note the digit-run
+    // rule has NO \b — a run glued to a unit ("123456ms") lacks a boundary and
+    // would otherwise slip through.
     .replace(/0x[0-9a-fA-F]+/g, "#")
-    .replace(/[0-9]+/g, "#")
+    .replace(/\b\d+(\.\d+)?\s?(ms|µs|us|ns|s|m|h)\b/gi, "#")
+    .replace(/\b\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\b/g, "#")
+    .replace(/\bpid[= ]\s*\d+/gi, "pid #")
+    .replace(/:\d+\b/g, ":#")
+    .replace(/\d{5,}/g, "#")
     .replace(/[ \t]+/g, " ")
     .trim();
   return body;

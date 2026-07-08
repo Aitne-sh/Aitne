@@ -62,14 +62,31 @@ describe("glob helpers", () => {
 });
 
 describe("fingerprintFailure", () => {
-  it("normalizes numbers and hex so identical failures match", () => {
+  it("normalizes VOLATILE numerics (hex, durations, clock, pid, port, long runs)", () => {
+    // Same structural failure, differing only by volatile noise — must match.
     const fp1 = fingerprintFailure([
-      { command: "npm test", exitCode: 1, passed: false, output: "fail at line 42 (0xAB)" },
+      { command: "npm test", exitCode: 1, passed: false, output: "boom (0xAB) in 2.3 s at 12:04:55 pid 483921 conn 10.0.0.1:8080 line src/a.ts:42" },
     ]);
     const fp2 = fingerprintFailure([
-      { command: "npm test", exitCode: 1, passed: false, output: "fail at line 99 (0xFF)" },
+      { command: "npm test", exitCode: 1, passed: false, output: "boom (0xFF) in 4.1 s at 09:15:02 pid 512044 conn 10.0.0.1:9090 line src/a.ts:99" },
     ]);
     expect(fp1).toBe(fp2);
+  });
+  it("normalizes a long digit run glued to a unit suffix (no \\b gap)", () => {
+    const fp1 = fingerprintFailure([{ command: "t", exitCode: 1, passed: false, output: "took 123456ms" }]);
+    const fp2 = fingerprintFailure([{ command: "t", exitCode: 1, passed: false, output: "took 999999ms" }]);
+    expect(fp1).toBe(fp2);
+  });
+  it("PRESERVES small counts so incremental test progress is NOT read as a repeat", () => {
+    // "3 failed" → "2 failed" is real forward progress and must NOT collapse to
+    // the same fingerprint (that would trip REPEAT_FAIL_N → premature BLOCKED).
+    const fp1 = fingerprintFailure([
+      { command: "npm test", exitCode: 1, passed: false, output: "Tests: 3 failed, 45 passed" },
+    ]);
+    const fp2 = fingerprintFailure([
+      { command: "npm test", exitCode: 1, passed: false, output: "Tests: 2 failed, 46 passed" },
+    ]);
+    expect(fp1).not.toBe(fp2);
   });
   it("ignores passed commands", () => {
     expect(

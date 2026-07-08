@@ -284,6 +284,8 @@ export function gitCommitAll(repoPath: string, message: string): string | null {
   const status = git(repoPath, ["status", "--porcelain"]);
   if (status.length === 0) return gitHead(repoPath);
   // -c flags avoid depending on the user's git identity for automated commits.
+  // --no-gpg-sign: a repo with commit.gpgsign=true but no key in the daemon's
+  // env would otherwise fail every automated commit (dev mode never signs).
   execFileSync(
     "git",
     [
@@ -293,6 +295,7 @@ export function gitCommitAll(repoPath: string, message: string): string | null {
       "user.email=dev-mode@aitne.local",
       "commit",
       "--no-verify",
+      "--no-gpg-sign",
       "-m",
       message,
     ],

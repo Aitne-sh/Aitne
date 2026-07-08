@@ -573,9 +573,20 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       `\nRequirements (${reqs.length}):`,
       ...reqs.map((r) => `  • ${r.id}: ${r.title}`),
       `\nVerify (all must pass): ${config.verifyCommands.join(", ")}`,
+      // Surface the setup command too — it runs unsandboxed in each worktree, so
+      // the owner should see (and consent to) it at approval.
+      config.flow.worktreeSetupCommand
+        ? `Worktree setup (runs per worktree): ${config.flow.worktreeSetupCommand}`
+        : "",
       config.deniedPaths.length > 0 ? `Denied paths: ${config.deniedPaths.join(", ")}` : "",
-      `Max iterations: ${config.maxIterations}`
-        + (session.maxBudgetUsd ? `  ·  Budget: $${session.maxBudgetUsd}` : ""),
+      // Three-tier cost model: ① loop count, ② per Claude Code session (leg),
+      // ③ per process (toggle).
+      `\nCost — max loops: ${config.maxIterations}  ·  per session (per call): $${config.maxCostPerSessionUsd}`,
+      config.maxCostUsd !== null
+        ? `Process cap: $${config.maxCostUsd} (hard total)`
+        : config.flow.decompose
+          ? `Process cap: off — no hard total (a parallel fleet can spend well above loops × per-session). Ask me to set one to bound total spend.`
+          : `Process cap: off — no hard total (bounded only by loops × per-session). Ask me to set one for a hard limit.`,
       `\nReply !approve to start the loop, or keep chatting to refine.`,
     ];
     return lines.filter((l) => l.length > 0).join("\n");
@@ -666,7 +677,9 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       readOnly: false,
       tier,
       maxTurns: 40,
-      maxBudgetUsd: 0.6,
+      // The interview is one Claude Code session — cap it at the per-session
+      // budget (the draft config's, or the default before any is written).
+      maxBudgetUsd: normalizeDevLoopConfig(session.config).maxCostPerSessionUsd,
       maxSeconds: 600,
     });
     if (resp.isError) {
@@ -733,7 +746,10 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       branch,
       baseRef,
       maxIterations: config.maxIterations,
-      maxBudgetUsd: session.maxBudgetUsd,
+      // Per-process total cap (③). null = off (COALESCE keeps the NULL) → the
+      // engine's session-wide BUDGET_EXCEEDED guard stays dormant and the
+      // effective ceiling is maxIterations × legs × maxCostPerSessionUsd.
+      maxBudgetUsd: config.maxCostUsd,
       approvedAt: now(),
     });
     if (!approved) return { ok: false, reason: "approval CAS missed (already approved?)" };

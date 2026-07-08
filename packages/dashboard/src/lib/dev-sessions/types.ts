@@ -108,6 +108,8 @@ export interface DevIterationDTO {
   id: string;
   sessionId: string;
   taskId: string | null;
+  /** The owning task's key, resolved server-side (null for session-level legs). */
+  taskKey: string | null;
   iteration: number;
   phase: DevIterationPhase;
   verdict: string | null;

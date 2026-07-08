@@ -213,12 +213,20 @@ export function parseTaskPlan(md: string): DevPlanResult<{ tasks: DevPlanTask[] 
       if (body.trim().length === 0) {
         return err(`line ${n}: task '${key}' has an empty body`);
       }
+      const parsedReqs = splitCsv(reqs).map(normalizeReq);
+      // Reject a syntactically-present-but-empty REQS (`REQS:   ` / `REQS: ,,`)
+      // here so EVERY caller (decompose, replan, plan-revision, fixup) is
+      // protected: a zero-REQ task otherwise slips past coverage and can drop a
+      // requirement from the obligation set.
+      if (parsedReqs.length === 0) {
+        return err(`line ${n}: task '${key}' names no REQ ids (REQS must list at least one)`);
+      }
       tasks.push({
         key,
         summary,
         dependsOn: depends.trim() === "-" ? [] : splitCsv(depends),
         scope,
-        reqs: splitCsv(reqs).map(normalizeReq),
+        reqs: parsedReqs,
         body,
       });
       seen.add(key);
@@ -616,6 +624,22 @@ export function validateReplanBlock(
       `replan budget exceeded (${opts.replanBudgetUsed} + ${tasks.length} > `
         + `cap ${opts.replanCap})`,
     );
+  }
+  // Post-swap in-flight cap (mirrors validatePlanRevision): the escalated task
+  // closes superseded (−1 if it currently counts as live) and the block adds
+  // its tasks. Without this, a REPLAN of an already-full fleet blows past
+  // maxTasks concurrent workers.
+  const liveCount = opts.liveTasks.filter(
+    (t) => t.state === "queued" || CLAIMED_STATES.has(t.state),
+  ).length;
+  const escalatedLive = opts.liveTasks.some(
+    (t) => t.key === opts.escalatedKey && (t.state === "queued" || CLAIMED_STATES.has(t.state)),
+  )
+    ? 1
+    : 0;
+  const after = liveCount - escalatedLive + tasks.length;
+  if (after > opts.maxTasks) {
+    return err(`replan would put ${after} tasks in flight > cap ${opts.maxTasks}`);
   }
   const { roots, sinks } = blockRootsAndSinks(tasks);
   return {

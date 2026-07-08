@@ -42,6 +42,10 @@ function gitCommitMerge(repoPath: string, message: string): void {
       "user.email=dev-mode@aitne.local",
       "commit",
       "--no-verify",
+      // A repo with commit.gpgsign=true but no key would otherwise make every
+      // merge commit fail (→ refused → an un-capped defer loop). Dev mode never
+      // signs its automated commits.
+      "--no-gpg-sign",
       "-m",
       message,
     ],

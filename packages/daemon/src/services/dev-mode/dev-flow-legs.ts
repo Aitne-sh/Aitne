@@ -18,6 +18,7 @@
 import type { BackendModelTier } from "@aitne/shared";
 import type { DevSessionRow } from "../../db/dev-sessions-store.js";
 import { DEV_DOCS, readDevDoc } from "./dev-loop-docs.js";
+import { perCallBudgetUsd } from "./dev-loop-config.js";
 import type { DevBackend } from "./dev-loop-legs.js";
 import type { DevLegResponse } from "./dev-loop-engine.js";
 import type { DevLoopConfig } from "./types.js";
@@ -40,11 +41,14 @@ const DECOMPOSE_TOOLS: readonly string[] = [
   "Edit(.aitne-dev/**)",
 ];
 
+// maxTurns shape only — the USD ceiling is the per-session cap (clamped to the
+// remaining per-process budget), applied uniformly in `runLeg` via
+// perCallBudgetUsd, so the cost knob is the user config, not a constant here.
 const FLOW_LEG_ENVELOPE = {
-  decompose: { maxTurns: 40, maxBudgetUsd: 0.8 },
-  decompose_review: { maxTurns: 25, maxBudgetUsd: 0.4 },
-  supervise: { maxTurns: 30, maxBudgetUsd: 0.5 },
-  plan_review: { maxTurns: 25, maxBudgetUsd: 0.4 },
+  decompose: { maxTurns: 40 },
+  decompose_review: { maxTurns: 25 },
+  supervise: { maxTurns: 30 },
+  plan_review: { maxTurns: 25 },
 } as const;
 
 export interface DevFlowLegContext {
@@ -157,7 +161,7 @@ export function createDevFlowLegRunner(deps: DevFlowLegRunnerDeps): DevFlowLegRu
       context: string;
       allowedTools: readonly string[];
       readOnly: boolean;
-      envelope: { maxTurns: number; maxBudgetUsd: number };
+      envelope: { maxTurns: number };
     },
   ): Promise<DevLegResponse> =>
     backend.runLeg({
@@ -169,7 +173,9 @@ export function createDevFlowLegRunner(deps: DevFlowLegRunnerDeps): DevFlowLegRu
       allowedTools: input.allowedTools,
       readOnly: input.readOnly,
       maxTurns: input.envelope.maxTurns,
-      maxBudgetUsd: input.envelope.maxBudgetUsd,
+      // Per-session cap (clamped to remaining per-process budget); the flow
+      // leg's own budget is a shape hint, superseded by the user's cost knob.
+      maxBudgetUsd: perCallBudgetUsd(ctx.config, ctx.session.costUsd ?? 0),
       tier: ctx.tier,
     });
 

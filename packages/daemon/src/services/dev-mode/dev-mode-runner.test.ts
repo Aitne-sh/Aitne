@@ -228,6 +228,24 @@ describe("DevModeRunner", () => {
     expect(session.timeoutScheduleId).toBeNull();
   });
 
+  it("startFromApproval wires the process cap (③) from config.maxCostUsd when set", async () => {
+    updateDevSessionConfig(db, "s1", { config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxCostUsd: 8 }) }, 0);
+    const runner = makeRunner(fakeBackend(repo));
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    // The per-process cap is authoritative from config → session.max_budget_usd.
+    expect(getDevSession(db, "s1")!.maxBudgetUsd).toBe(8);
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running");
+  });
+
+  it("startFromApproval CLEARS the process cap to null when ③ is off (direct SET, not COALESCE)", async () => {
+    // seedSession pre-set max_budget_usd = 10; approving with ③ off (config
+    // maxCostUsd = null) must CLEAR it — a stale cap must never survive "off".
+    const runner = makeRunner(fakeBackend(repo));
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    expect(getDevSession(db, "s1")!.maxBudgetUsd).toBeNull();
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running");
+  });
+
   it("rejects an approval that is not awaiting_approval", async () => {
     const runner = makeRunner(fakeBackend(repo));
     const first = runner.startFromApproval("s1");

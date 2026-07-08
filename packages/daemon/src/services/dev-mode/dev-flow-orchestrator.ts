@@ -177,8 +177,17 @@ export function createDevFleetOrchestrator(
   let controlBusy = false;
   let fatal: DevFleetRunResult | null = null;
   let mergeDeferCount = 0;
-  let mergeDeferredUntil = 0;
+  let mergeRefusedDeferCount = 0;
+  // A deferred merge (dirty/refused parent repo) is pending its retry timer.
+  // A BOOLEAN (not a now()-based deadline): the retry is driven purely by the
+  // real setTimeout that clears it, so the defer/retry cycle is correct under
+  // ANY clock (production Date.now OR a logical test clock), and can never
+  // livelock waiting for a logical now() to advance past a deadline.
+  let mergeDeferPending = false;
   let wakeResolve: (() => void) | null = null;
+  /** Wall-clock start of THIS orchestrator run (loop-kit MAX_RUN_SECONDS; a
+   *  resume constructs a fresh orchestrator = a fresh window). */
+  const runStartMs = now();
 
   const notify = (): void => {
     wakeResolve?.();
@@ -188,6 +197,16 @@ export function createDevFleetOrchestrator(
     new Promise((resolve) => {
       wakeResolve = resolve;
     });
+
+  /** Arm the merge-defer retry: hold merges for one window, then wake to retry.
+   *  The real timer is the sole driver — no clock comparison. */
+  const armMergeDefer = (): void => {
+    mergeDeferPending = true;
+    setTimeout(() => {
+      mergeDeferPending = false;
+      notify();
+    }, mergeDeferMs);
+  };
 
   // ── shared helpers ──
 
@@ -646,6 +665,11 @@ export function createDevFleetOrchestrator(
       persistence: taskPersistence(task),
       getSpentUsd: spentUsd,
       fleet: { taskReqIds: task.reqs },
+      // Shared fleet deadline so every worker self-terminates together (not a
+      // fresh per-worker window on each relaunch). Same frame as the dispatch
+      // wall-clock check (both off runStartMs).
+      runDeadlineMs:
+        config.maxRunSeconds !== null ? runStartMs + config.maxRunSeconds * 1000 : undefined,
     });
 
     try {
@@ -870,8 +894,7 @@ export function createDevFleetOrchestrator(
         fatal = { kind: "parked", reason: "parent repo dirty — merges blocked" };
         return;
       }
-      mergeDeferredUntil = now() + mergeDeferMs;
-      setTimeout(notify, mergeDeferMs);
+      armMergeDefer();
       return;
     }
     mergeDeferCount = 0;
@@ -888,10 +911,27 @@ export function createDevFleetOrchestrator(
     const merge = gitMergeNoFF(repoPath, task.branch, `dev: merge ${task.taskKey} — ${task.summary}`);
     if (!merge.ok) {
       if (merge.refused) {
-        // A tracked change slipped in after the guard — defer and retry.
+        // git refused to start/commit the merge (a tracked change slipped in
+        // after the guard, an untracked-file collision, or a commit hook/signing
+        // failure). Defer + retry, but CAP it — a persistent refusal (e.g. a
+        // structural collision) must escalate to the owner, never livelock the
+        // control lane forever.
         setDevTaskPlanReview(db, taskId, null, now());
-        mergeDeferredUntil = now() + mergeDeferMs;
-        setTimeout(notify, mergeDeferMs);
+        mergeRefusedDeferCount++;
+        if (mergeRefusedDeferCount > MERGE_DEFER_LIMIT) {
+          await deps.onTaskEscalation({
+            taskId: null,
+            kind: "spec_decision",
+            question:
+              `Merging fleet task '${task.taskKey}' keeps being refused by git `
+              + "(an untracked-file collision, a commit hook, or signing). "
+              + "Resolve it in the repository, then reply here to resume.",
+            contextSummary: null,
+          });
+          fatal = { kind: "parked", reason: "merge persistently refused — blocked" };
+          return;
+        }
+        armMergeDefer();
         return;
       }
       if (task.mergeRetries === 0) {
@@ -918,6 +958,9 @@ export function createDevFleetOrchestrator(
       if (task.worktreePath) gitWorktreeRemove(repoPath, task.worktreePath);
       return;
     }
+
+    // A landing succeeded — clear the refused-defer streak.
+    mergeRefusedDeferCount = 0;
 
     // Archive the task's docs (phase-context + publisher source), sync its
     // final ledger rows, then close it out.
@@ -1204,6 +1247,15 @@ export function createDevFleetOrchestrator(
         fatal = null;
         return { kind: "result", result };
       }
+      if (
+        config.maxRunSeconds !== null
+        && (now() - runStartMs) / 1000 >= config.maxRunSeconds
+      ) {
+        return {
+          kind: "result",
+          result: { kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: "The fleet hit the wall-clock cap for this run." },
+        };
+      }
       const rows = listDevTasks(db, sessionId);
       const snapshots = rows.map(toSnapshot);
       let actions = planFleetActions(snapshots, flow.maxParallel, running.size, controlBusy);
@@ -1213,12 +1265,19 @@ export function createDevFleetOrchestrator(
         // No new spend; running workers stop at their own budget check.
         actions = actions.filter((a) => a.kind === "depFail");
       }
-      if (now() < mergeDeferredUntil) {
+      if (mergeDeferPending) {
         actions = actions.filter((a) => a.kind !== "merge");
       }
 
       if (actions.length === 0) {
-        if (running.size === 0 && !controlBusy) {
+        // A deferred merge (dirty/refused parent repo) is the ONLY pending work:
+        // its retry timer will re-wake us. Do NOT fall through to the idle
+        // classifier, which would read the still-`merge_pending` task as an
+        // unsettled stall and wrongly terminate the fleet BLOCKED before the
+        // retry ever fires (the timer armed by mergeTask calls notify()).
+        const mergeDeferred =
+          mergeDeferPending && snapshots.some((t) => t.state === "merge_pending");
+        if (running.size === 0 && !controlBusy && !mergeDeferred) {
           if (overBudget()) {
             return {
               kind: "result",
@@ -1232,7 +1291,7 @@ export function createDevFleetOrchestrator(
           }
           return {
             kind: "result",
-            result: { kind: "terminal", loopState: "BLOCKED", reason: idle.kind === "failed" ? idle.reason : idle.reason },
+            result: { kind: "terminal", loopState: "BLOCKED", reason: idle.reason },
           };
         }
         await waitForWake();
@@ -1279,17 +1338,50 @@ export function createDevFleetOrchestrator(
 
   // ── Entry ─────────────────────────────────────────────────────────────
 
+  /**
+   * Reclaim tasks a crash/restart left mid-flight. On a fresh start every task
+   * is `queued`, so this is a no-op; on a boot resume a task stuck in `running`
+   * has NO in-memory promise driving it — planFleetActions never relaunches a
+   * `running` row, and the idle classifier would read it as an unsettled stall
+   * and terminate the whole fleet BLOCKED. Re-queue it (keeping the worktree
+   * anchors so runWorker re-claims the surviving worktree, or rebuilds a
+   * vanished one) so it resumes from its checkpoint. Mirrors the abort-path
+   * requeue in runWorker.
+   */
+  function reclaimOrphanedTasks(): void {
+    for (const t of listDevTasks(db, sessionId)) {
+      if (t.state === "running") {
+        markDevTaskState(db, { id: t.id, from: ["running"], to: "queued", loopState: null, at: now() });
+        logger.info({ sessionId, taskKey: t.taskKey }, "dev fleet: reclaimed an orphaned running task on resume");
+      }
+    }
+  }
+
+  /** Let every still-running worker settle before a park/terminal — otherwise a
+   *  detached leg keeps mutating task state (or writing a worktree we are about
+   *  to remove) after run() returns. Each leg is wall-clock-bounded, so this is
+   *  bounded too. */
+  async function drainWorkers(): Promise<void> {
+    if (running.size > 0) await Promise.allSettled([...running.values()]);
+  }
+
   async function run(): Promise<DevFleetRunResult> {
     const early = await decomposeFlow();
-    if (early) return early;
+    if (early) {
+      await drainWorkers();
+      return early;
+    }
+    reclaimOrphanedTasks();
     for (;;) {
       const dispatched = await dispatch();
       if (dispatched.kind === "result") {
+        await drainWorkers();
         if (dispatched.result.kind === "terminal") cleanupWorktrees();
         return dispatched.result;
       }
       const gate = await integrationGate();
       if (gate.kind === "fixup") continue;
+      await drainWorkers();
       if (gate.result.kind === "terminal") cleanupWorktrees();
       return gate.result;
     }

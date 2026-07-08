@@ -124,6 +124,13 @@ export function createDevSessionsRoutes(deps: DevSessionsRouteDeps): Hono {
       createdAt: t.createdAt,
       mergedAt: t.mergedAt,
     }));
+    // Label each iteration with its owning task key so the dashboard flow view
+    // can group the timeline by task without a client-side join.
+    const taskKeyById = new Map(taskRows.map((t) => [t.id, t.taskKey]));
+    const iterations = listDevIterations(db, id).map((it) => ({
+      ...it,
+      taskKey: it.taskId ? taskKeyById.get(it.taskId) ?? null : null,
+    }));
     return c.json({
       session: {
         ...session,
@@ -131,7 +138,7 @@ export function createDevSessionsRoutes(deps: DevSessionsRouteDeps): Hono {
         requirementsTotal: total,
       },
       tasks,
-      iterations: listDevIterations(db, id),
+      iterations,
       requirements: listDevRequirements(db, id),
       escalations: listDevEscalationsForSession(db, id),
     });

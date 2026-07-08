@@ -238,4 +238,34 @@ describe("DevLoopEngine (integration over a real git repo)", () => {
       },
     };
   }
+
+  it("terminates BUDGET_EXCEEDED when the per-run wall-clock cap is exceeded", async () => {
+    const cfg = normalizeDevLoopConfig({ verifyCommands: ["true"], maxRunSeconds: 5 });
+    updateDevSessionConfig(db, "s1", { config: cfg }, 0);
+    const s = getDevSession(db, "s1")!;
+    let clock = 1000; // runStartMs is captured here at construction
+    const e = new DevLoopEngine(s, {
+      db, repoPath: repo, legRunner: baseRunner(), tier: "high",
+      now: () => clock, uuid: () => `id-${idn++}`,
+    });
+    clock = 1000 + 6000; // 6s elapsed > 5s cap
+    const outcome = await e.runIteration(1);
+    expect(outcome).toEqual<DevIterationOutcome>({
+      kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: expect.stringMatching(/wall-clock/),
+    });
+  });
+
+  it("honors a shared absolute runDeadlineMs (fleet worker) over its own window", async () => {
+    let clock = 1000;
+    const e = new DevLoopEngine(session, {
+      db, repoPath: repo, legRunner: baseRunner(), tier: "high",
+      now: () => clock, uuid: () => `id-${idn++}`,
+      runDeadlineMs: 2000, // absolute deadline, independent of construction time
+    });
+    clock = 2001; // past the shared deadline
+    const outcome = await e.runIteration(1);
+    expect(outcome).toEqual<DevIterationOutcome>({
+      kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: expect.stringMatching(/wall-clock/),
+    });
+  });
 });

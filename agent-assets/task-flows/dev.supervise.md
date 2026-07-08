@@ -147,7 +147,9 @@ The staged context includes the gate reviewer's must-fix items
 (`review-feedback.md`) and the merged diff's file list. Reply with either
 exactly ONE fix-up task (a REPLAN block with a single TASK — it branches from
 the merged HEAD, so it sees all landed work) or ESCALATE. ANSWER is not valid
-in this mode.
+in this mode. The fix-up task's `REQS:` line MUST name at least one REQ — the
+requirement(s) the gate marked PARTIAL/UNMET that this fix restores (a task that
+advances no requirement is rejected).
 
 ## Final response
 

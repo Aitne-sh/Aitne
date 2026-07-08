@@ -206,9 +206,13 @@ function DevSessionDrawer({
                   <ul className="space-y-1">
                     {data.iterations.map((it) => {
                       const t = formatDevTime(it.createdAt);
-                      const taskKey = it.taskId
-                        ? data.tasks.find((task) => task.id === it.taskId)?.taskKey ?? null
-                        : null;
+                      // Resolved server-side (falls back to the tasks join for
+                      // older payloads that predate iteration.taskKey).
+                      const taskKey =
+                        it.taskKey
+                        ?? (it.taskId
+                          ? data.tasks.find((task) => task.id === it.taskId)?.taskKey ?? null
+                          : null);
                       return (
                         <li
                           key={it.id}

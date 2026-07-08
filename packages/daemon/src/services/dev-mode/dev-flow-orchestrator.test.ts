@@ -13,7 +13,12 @@ import {
   seedDevRequirements,
   updateDevSessionConfig,
 } from "../../db/dev-sessions-store.js";
-import { listDevTasks, getDevTaskByKey } from "../../db/dev-session-tasks-store.js";
+import {
+  listDevTasks,
+  getDevTaskByKey,
+  insertDevTasks,
+  markDevTaskState,
+} from "../../db/dev-session-tasks-store.js";
 import {
   DEV_DOCS,
   ensureDevWorkdir,
@@ -641,5 +646,66 @@ describe("createDevFleetOrchestrator", () => {
     expect((result as { loopState: string }).loopState).toBe("SUCCESS");
     // decomposeQueue on flow2 was never touched.
     expect(flow2.decomposeQueue).toHaveLength(0);
+  });
+
+  it("reclaims an orphaned `running` task on resume instead of stalling BLOCKED", async () => {
+    const config = seed();
+    // Simulate a crash mid-fleet: the tasks exist and one is stuck `running`
+    // in the DB with NO in-memory worker promise (the daemon restarted).
+    insertDevTasks(
+      db,
+      "s1",
+      [
+        { id: "t-alpha", taskKey: "alpha", summary: "a", dependsOn: [], scope: "alpha.ts", reqs: ["REQ-001"], body: "impl alpha", origin: "plan" },
+        { id: "t-beta", taskKey: "beta", summary: "b", dependsOn: [], scope: "beta.ts", reqs: ["REQ-002"], body: "impl beta", origin: "plan" },
+      ],
+      0,
+    );
+    markDevTaskState(db, { id: "t-alpha", from: ["queued"], to: "running", at: 0 });
+
+    const flow = new FakeFlowLegs();
+    flow.gateReviewQueue.push("APPROVE");
+    // A fresh orchestrator (post-restart) must re-queue the orphaned task and
+    // drive the fleet to SUCCESS — NOT read `running` as an unsettled stall and
+    // terminate BLOCKED. decompose is never called (tasks already exist).
+    const result = await makeOrch(config, fakeWorkerLegsWithGate({}, flow), flow, new AbortController().signal).run();
+
+    expect(result.kind).toBe("terminal");
+    expect((result as { loopState: string }).loopState).toBe("SUCCESS");
+    expect(listDevTasks(db, "s1").every((t) => t.state === "merged")).toBe(true);
+    expect(flow.decomposeQueue).toHaveLength(0);
+  });
+
+  it("defers (not BLOCKED) when the parent repo is dirty at merge, then parks the owner", async () => {
+    const config = seed();
+    const flow = new FakeFlowLegs();
+    flow.decomposeQueue.push({
+      plan: planDoc(taskBlock("alpha", "REQ-001"), taskBlock("beta", "REQ-002")),
+      n: 2,
+    });
+    // Simulate the human editing a tracked file DURING the run (after decompose,
+    // which has its own containment guard): the alpha worker dirties the PARENT
+    // repo. Every merge must then DEFER (never land over the human's edit), and
+    // when nothing else can progress the fleet must PARK the owner — NOT mis-read
+    // merge_pending as an idle stall and die BLOCKED (P0-3).
+    const legs = fakeWorkerLegsWithGate(
+      {
+        alpha: {
+          implement: (): "success" => {
+            writeFileSync(join(repo, "README.md"), "seed\nlocal uncommitted edit\n");
+            return "success";
+          },
+        },
+      },
+      flow,
+    );
+    const result = await makeOrch(config, legs, flow, new AbortController().signal).run();
+
+    expect(result.kind).toBe("parked");
+    expect(escalations.some((e) => /uncommitted/i.test(e.question))).toBe(true);
+    // The human's tracked edit was never merged over.
+    expect(readFileSync(join(repo, "README.md"), "utf8")).toContain("local uncommitted edit");
+    // No task landed (all held at merge_pending), and nothing failed BLOCKED.
+    expect(listDevTasks(db, "s1").every((t) => t.state !== "merged" && t.state !== "failed")).toBe(true);
   });
 });

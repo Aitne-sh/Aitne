@@ -74,7 +74,16 @@ export interface DevLoopConfig {
   maxIterSeconds: number;
   /** Total per-run wall-clock cap (seconds); 0/undefined = no cap. */
   maxRunSeconds: number | null;
-  /** Total USD cap; null = fall back to the process envelope ceiling. */
+  /** Max USD for ONE Claude Code session (= one leg / `query()` call). Applied
+   *  as the SDK `--max-budget-usd` on every leg, so no single call can outgrow
+   *  it. Always on (a positive number). loop-kit per-call parity. */
+  maxCostPerSessionUsd: number;
+  /** Max USD for ONE process (requirements → done), across every leg and every
+   *  fleet worker. TOGGLEABLE: null = off (subscription-first default, like
+   *  loop-kit's empty MAX_COST_USD) — the effective ceiling is then
+   *  ~maxIterations × legs-per-iteration × maxCostPerSessionUsd. When set, it is
+   *  wired to `session.max_budget_usd` at approval and enforced from the
+   *  session-wide running total → BUDGET_EXCEEDED. */
   maxCostUsd: number | null;
   /** Consecutive no-project-diff iterations → STALLED. */
   stagnationN: number;
@@ -145,6 +154,7 @@ export interface DevFlowConfig {
 export const DEV_BUDGET_CONFIG_KEYS = [
   "maxIterations",
   "maxCostUsd",
+  "maxCostPerSessionUsd",
   "maxRunSeconds",
 ] as const satisfies readonly (keyof DevLoopConfig)[];
 

@@ -248,7 +248,10 @@ export function extractBetween(
   return body.trim().length > 0 ? body : null;
 }
 
-const REQ_HEADING_RE = /^#{1,6}\s+REQ-(\d+)\b\s*:?\s*(.*)$/;
+// Case-insensitive to match REQ_LINE_RE and the ledger parser: a contract
+// heading authored as `### Req-005:` (mixed case) must still create the
+// obligation, or the loop could reach SUCCESS without ever implementing it.
+const REQ_HEADING_RE = /^#{1,6}\s+REQ-(\d+)\b\s*:?\s*(.*)$/i;
 
 /**
  * Extract the contract's requirements from its Markdown — heading lines only

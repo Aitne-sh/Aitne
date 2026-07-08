@@ -23,6 +23,7 @@ import {
   parseStopEval,
   extractContractReqIds,
 } from "./verdict-parse.js";
+import { perCallBudgetUsd } from "./dev-loop-config.js";
 import type {
   DevLegContext,
   DevLegResponse,
@@ -69,15 +70,28 @@ export interface DevLegRunnerDeps {
 const READONLY_TOOLS: readonly string[] = ["Read", "Glob", "Grep"];
 const WRITE_TOOLS: readonly string[] = ["Read", "Glob", "Grep", "Write", "Edit"];
 
-/** Per-leg execution envelope (turns/budget). The session-level cost cap
- *  (BUDGET_EXCEEDED) bounds the total across legs. */
+/** Per-leg execution SHAPE (turns + tier only). The USD ceiling is NOT here —
+ *  every leg is capped at `config.maxCostPerSessionUsd` (the per-session cap,
+ *  clamped to the remaining per-process budget when that is set) via
+ *  `perCallBudgetUsd`, so the cost knob is the user-facing config, not a
+ *  hard-coded per-leg constant. `maxTurns`/`tier` still shape each leg (a lite
+ *  5-turn stop-eval simply can't spend much regardless of the money cap). */
 const LEG_ENVELOPE = {
-  plan: { maxTurns: 20, maxBudgetUsd: 0.4, tier: "high" as BackendModelTier },
-  implement: { maxTurns: 60, maxBudgetUsd: 1.0, tier: "high" as BackendModelTier },
-  review: { maxTurns: 25, maxBudgetUsd: 0.5, tier: "high" as BackendModelTier },
-  stop_eval: { maxTurns: 5, maxBudgetUsd: 0.1, tier: "lite" as BackendModelTier },
-  evidence: { maxTurns: 20, maxBudgetUsd: 0.4, tier: "medium" as BackendModelTier },
+  plan: { maxTurns: 20, tier: "high" as BackendModelTier },
+  implement: { maxTurns: 60, tier: "high" as BackendModelTier },
+  review: { maxTurns: 25, tier: "high" as BackendModelTier },
+  stop_eval: { maxTurns: 5, tier: "lite" as BackendModelTier },
+  evidence: { maxTurns: 20, tier: "medium" as BackendModelTier },
 } as const;
+
+/** The USD ceiling for this leg: the per-session cap, clamped to the remaining
+ *  per-process budget (loop-kit's remaining-budget mirror). Uses the LIVE
+ *  session-wide spend (ctx.spentUsd, populated by the engine from getSpentUsd)
+ *  so parallel fleet workers share one process ceiling; falls back to the
+ *  session's own running total for the single loop. */
+function legBudgetUsd(ctx: DevLegContext): number {
+  return perCallBudgetUsd(ctx.config, ctx.spentUsd ?? ctx.session.costUsd ?? 0);
+}
 
 /**
  * Derive a Bash allowlist from the verify commands plus read-only git. Each
@@ -161,6 +175,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         allowedTools: WRITE_TOOLS,
         readOnly: false,
         ...LEG_ENVELOPE.plan,
+        maxBudgetUsd: legBudgetUsd(ctx),
       });
     },
 
@@ -181,7 +196,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         allowedTools: [...WRITE_TOOLS, ...deriveBashAllowlist(ctx.config.verifyCommands)],
         readOnly: false,
         maxTurns: LEG_ENVELOPE.implement.maxTurns,
-        maxBudgetUsd: ctx.session.maxBudgetUsd ?? LEG_ENVELOPE.implement.maxBudgetUsd,
+        maxBudgetUsd: legBudgetUsd(ctx),
         tier: ctx.tier,
       });
     },
@@ -202,7 +217,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         allowedTools: READONLY_TOOLS,
         readOnly: true,
         maxTurns: LEG_ENVELOPE.review.maxTurns,
-        maxBudgetUsd: LEG_ENVELOPE.review.maxBudgetUsd,
+        maxBudgetUsd: legBudgetUsd(ctx),
         tier: ctx.tier,
       });
       let review = parseReviewResult(response.text, ctx.mode);
@@ -230,6 +245,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         allowedTools: READONLY_TOOLS,
         readOnly: true,
         ...LEG_ENVELOPE.stop_eval,
+        maxBudgetUsd: legBudgetUsd(ctx),
       });
       return { response, verdict: parseStopEval(response.text) };
     },
@@ -256,6 +272,7 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         allowedTools: WRITE_TOOLS,
         readOnly: false,
         ...LEG_ENVELOPE.evidence,
+        maxBudgetUsd: legBudgetUsd(ctx),
       });
     },
   };

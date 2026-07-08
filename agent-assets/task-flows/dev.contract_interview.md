@@ -57,6 +57,8 @@ either ask ONE more sharp question or finalize.
      "deniedPaths": [".env*", "secrets/**"],
      "escalatePaths": [],
      "maxIterations": 10,
+     "maxCostPerSessionUsd": 1.0,
+     "maxCostUsd": null,
      "flow": {
        "worktreeSetupCommand": "<install command, or omit>",
        "maxParallel": 3
@@ -73,7 +75,20 @@ either ask ONE more sharp question or finalize.
      Keep the safe defaults and add repo-specific ones.
    - `escalatePaths` — globs (dependency manifests, schema/migration dirs, infra)
      that should pause for the owner if the loop needs to change them.
-   - `maxIterations` — a sane cap for the size of the work (small feature ≈ 5–10).
+   - **Cost caps (three tiers — keep the defaults unless the owner asks).**
+     - `maxIterations` — max loop iterations; a sane cap for the size of the work
+       (small feature ≈ 5–10).
+     - `maxCostPerSessionUsd` — max USD for ONE Claude Code session (one internal
+       leg call). Always on; default `1.0`. Raise it for large repos where a
+       single implement step legitimately needs more; lower it to keep each call
+       tight.
+     - `maxCostUsd` — OPTIONAL hard cap on the WHOLE process (requirements →
+       done), across every leg and fleet worker. Default `null` = **off**
+       (subscription usage has no per-token charge, so a dollar cap would stop
+       healthy loops early). Set a number ONLY when the owner explicitly asks for
+       a total spend ceiling (e.g. API-billed usage) — and it must be ≥
+       `maxCostPerSessionUsd`. With it off, the effective ceiling is already
+       bounded by `maxIterations` × the per-session cap.
    - `flow` — optional fleet settings. Large contracts may be decomposed into
      parallel loops running in **fresh git worktrees**; a fresh worktree does
      not contain gitignored artifacts (node_modules, venvs, build caches), so

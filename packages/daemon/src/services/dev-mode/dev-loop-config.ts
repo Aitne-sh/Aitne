@@ -39,6 +39,7 @@ export const DEV_LOOP_CONFIG_DEFAULTS: DevLoopConfig = {
   maxIterations: 10,
   maxIterSeconds: 900,
   maxRunSeconds: null,
+  maxCostPerSessionUsd: 1.0,
   maxCostUsd: null,
   stagnationN: 2,
   repeatFailN: 3,
@@ -77,6 +78,27 @@ function positiveOrNull(value: unknown): number | null {
     return null;
   }
   return value;
+}
+
+/** Coerce to a positive number, or the fallback when absent/non-positive. */
+function positiveOr(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return value;
+}
+
+/**
+ * The USD ceiling for one leg (`query()` call). Always at most the per-session
+ * cap; when a per-process total is set, also clamped to the remaining process
+ * budget so the last leg cannot overshoot the total (loop-kit's
+ * `remaining_budget` mirror — floored at $0.01 so a call is never handed $0).
+ */
+export function perCallBudgetUsd(config: DevLoopConfig, spentUsd: number): number {
+  const perSession = config.maxCostPerSessionUsd;
+  if (config.maxCostUsd === null) return perSession;
+  const remaining = Math.max(0.01, config.maxCostUsd - Math.max(0, spentUsd));
+  return Math.min(perSession, remaining);
 }
 
 /**
@@ -139,6 +161,11 @@ export function normalizeDevLoopConfig(
     maxRunSeconds: p.maxRunSeconds === undefined
       ? d.maxRunSeconds
       : positiveOrNull(p.maxRunSeconds),
+    // Always-on per-session cap: a non-positive/absent value falls back to the
+    // default rather than disabling the guard.
+    maxCostPerSessionUsd: positiveOr(p.maxCostPerSessionUsd, d.maxCostPerSessionUsd),
+    // Toggleable per-process total: absent → default (off); an explicit
+    // non-positive value also means off (null).
     maxCostUsd: p.maxCostUsd === undefined
       ? d.maxCostUsd
       : positiveOrNull(p.maxCostUsd),
@@ -163,6 +190,43 @@ export interface DevConfigValidation {
 }
 
 /**
+ * DEFENSE-IN-DEPTH prescreen for clearly-dangerous verify / setup shells. These
+ * run as a REAL `/bin/sh -c` subprocess with the daemon's privileges (D4,
+ * unsandboxed), AND each verify command becomes a `Bash(<cmd>:*)` allowlist
+ * prefix for the implement leg. This is a FAIL-CLOSED prescreen over structural
+ * danger categories — NOT a complete sandbox and NOT the sole D6 guard. The
+ * layered controls are: (1) the owner sees every verify + setup command in the
+ * `!approve` summary and must explicitly approve; (2) this prescreen rejects
+ * unambiguous categories (push, remote-code-exec, privilege escalation,
+ * disk/tree destruction) before the owner even sees them; (3) the eventual
+ * root-cause fix is to sandbox / drop-privileges on the verify runner itself
+ * (tracked separately — a denylist is inherently incompletable for shell). The
+ * regexes are lenient about flag placement (e.g. `git -c x push`) but a
+ * determined obfuscation (write-then-exec, aliases) can still slip through —
+ * hence "defense in depth", not a boundary. Returns a reason when refused.
+ */
+export function screenDangerousCommand(command: string): string | null {
+  const lower = command.trim().toLowerCase();
+  const rules: { re: RegExp; why: string }[] = [
+    // git ... push — tolerate flags/values between (git -c x push, --git-dir=. push).
+    { re: /\bgit\b[^;|&\n]*\bpush\b/, why: "runs `git push` (dev mode never pushes — D6)" },
+    { re: /\|\s*(sudo\s+)?(sh|bash|zsh|dash|python[0-9.]*|perl|ruby|node)\b/, why: "pipes into a shell/interpreter (remote-code-execution vector)" },
+    { re: /\bsudo\b/, why: "uses sudo (privilege escalation)" },
+    // rm with any recursive flag (−r/−R/−rf/−fr/−−recursive), flags in any order.
+    { re: /\brm\b[^|;&]*\s(-\S*r\S*|--recursive)\b/, why: "runs a recursive `rm` (destructive)" },
+    { re: /\bdd\s+if=/, why: "runs `dd` (raw disk write)" },
+    { re: /\bmkfs\b/, why: "runs mkfs (formats a filesystem)" },
+    { re: />\s*\/dev\/(sd|nvme|disk|hd)/, why: "writes to a raw disk device" },
+    // netcat -e reverse shell, flag anywhere after nc.
+    { re: /\b(nc|ncat|netcat)\b[^|;&]*\s-[a-z]*e\b/, why: "opens a netcat reverse shell" },
+  ];
+  for (const { re, why } of rules) {
+    if (re.test(lower)) return why;
+  }
+  return null;
+}
+
+/**
  * Approval-gate validation. The one hard rule loop-kit enforces at `cmd_run`:
  * VERIFY_COMMANDS must be non-empty (the only path to SUCCESS). The rest is
  * defensive shape-checking that `normalizeDevLoopConfig` already guarantees,
@@ -178,6 +242,25 @@ export function validateDevLoopConfig(config: DevLoopConfig): DevConfigValidatio
   }
   if (config.maxIterations < 1) {
     errors.push("maxIterations must be at least 1.");
+  }
+  if (!(config.maxCostPerSessionUsd > 0)) {
+    errors.push("maxCostPerSessionUsd must be a positive dollar amount (the per-session cost cap).");
+  }
+  if (config.maxCostUsd !== null && config.maxCostUsd < config.maxCostPerSessionUsd) {
+    errors.push(
+      `maxCostUsd ($${config.maxCostUsd}) must be at least maxCostPerSessionUsd `
+        + `($${config.maxCostPerSessionUsd}) — a process total below one session's cap would stop before the first leg finishes.`,
+    );
+  }
+  // Reject clearly-dangerous verify / setup shells (they run unsandboxed and
+  // become the implement leg's Bash allowlist).
+  for (const cmd of config.verifyCommands) {
+    const why = screenDangerousCommand(cmd);
+    if (why) errors.push(`verify command "${cmd}" is refused — it ${why}.`);
+  }
+  if (config.flow.worktreeSetupCommand) {
+    const why = screenDangerousCommand(config.flow.worktreeSetupCommand);
+    if (why) errors.push(`worktree setup command "${config.flow.worktreeSetupCommand}" is refused — it ${why}.`);
   }
   return { ok: errors.length === 0, errors };
 }

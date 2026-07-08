@@ -164,6 +164,17 @@ describe("extractContractRequirements / extractContractReqIds", () => {
   it("returns empty for a contract with no REQ headings", () => {
     expect(extractContractReqIds("# Goal\nno reqs")).toEqual([]);
   });
+
+  it("matches mixed-case REQ headings (case-insensitive), normalizing the id", () => {
+    const mixed = [
+      "### Req-005: Rate limit",
+      "#### req-6: Audit log",
+    ].join("\n");
+    expect(extractContractRequirements(mixed)).toEqual([
+      { id: "REQ-005", title: "Rate limit" },
+      { id: "REQ-006", title: "Audit log" },
+    ]);
+  });
 });
 
 describe("flow verdicts", () => {

@@ -76,6 +76,10 @@ export interface DevLegContext {
   config: DevLoopConfig;
   iteration: number;
   tier: BackendModelTier;
+  /** Live session-wide spend (USD) for the per-call budget clamp — a FLEET
+   *  worker must clamp against the shared process total, not its own stale
+   *  in-memory mirror. Defaults (undefined) to `session.costUsd`. */
+  spentUsd?: number;
 }
 
 export interface DevReviewLegContext extends DevLegContext {
@@ -216,6 +220,11 @@ export interface DevLoopEngineDeps {
   /** Present for fleet workers: enables the NEEDS_DECOMPOSITION token and
    *  the deterministic split nudge. */
   fleet?: { taskReqIds: readonly string[] };
+  /** Absolute wall-clock deadline (ms, in the injected clock's frame) shared by
+   *  a fleet's workers so they all self-terminate at the SAME instant regardless
+   *  of when each engine was (re)constructed. Undefined → the single-loop uses
+   *  its own construction-time window against config.maxRunSeconds. */
+  runDeadlineMs?: number;
 }
 
 /**
@@ -233,8 +242,12 @@ export class DevLoopEngine {
   private readonly persistence: DevEnginePersistence;
   private readonly getSpentUsd: (() => number) | null;
   private readonly fleet: { taskReqIds: readonly string[] } | null;
+  private readonly runDeadlineMs: number | null;
 
   private session: DevSessionRow;
+  /** Wall-clock start of THIS run (loop-kit MAX_RUN_SECONDS; a resume that
+   *  constructs a fresh engine gets a fresh window, matching loop-kit). */
+  private readonly runStartMs: number;
   private bookkeeping: DevEvaluateBookkeeping = EMPTY_BOOKKEEPING;
   /** Consecutive MET / FUTILE stop-eval verdicts (loop-kit met-count /
    *  futile-count) — drive the forced gate + STALLED. */
@@ -253,6 +266,8 @@ export class DevLoopEngine {
       deps.persistence ?? createSessionEnginePersistence(deps.db, session.id);
     this.getSpentUsd = deps.getSpentUsd ?? null;
     this.fleet = deps.fleet ?? null;
+    this.runStartMs = deps.now();
+    this.runDeadlineMs = deps.runDeadlineMs ?? null;
   }
 
   /** The mutable checkpoint counters (the runner reads these to persist). */
@@ -267,6 +282,10 @@ export class DevLoopEngine {
       config: this.config,
       iteration: this.session.iteration,
       tier: this.tier,
+      // Fleet workers share one process budget: clamp per-call spend against the
+      // LIVE session-wide total (getSpentUsd), not this worker's in-memory
+      // mirror which misses concurrent siblings. Single loop → own cost.
+      spentUsd: this.getSpentUsd ? this.getSpentUsd() : this.session.costUsd ?? 0,
     };
   }
 
@@ -357,6 +376,17 @@ export class DevLoopEngine {
     const spentUsd = this.getSpentUsd ? this.getSpentUsd() : this.session.costUsd ?? 0;
     if (this.session.maxBudgetUsd !== null && spentUsd >= this.session.maxBudgetUsd) {
       return { kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: "Hit the cost ceiling." };
+    }
+    // Wall-clock cap. A fleet worker uses the shared absolute deadline (all
+    // workers stop together); the single loop uses its own construction-time
+    // window against maxRunSeconds.
+    const wallClockHit =
+      this.runDeadlineMs !== null
+        ? this.now() >= this.runDeadlineMs
+        : this.config.maxRunSeconds !== null
+          && (this.now() - this.runStartMs) / 1000 >= this.config.maxRunSeconds;
+    if (wallClockHit) {
+      return { kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: "Hit the wall-clock cap for this run." };
     }
 
     this.persistCheckpoint();

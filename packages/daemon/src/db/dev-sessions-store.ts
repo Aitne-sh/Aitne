@@ -404,7 +404,10 @@ export function approveDevSession(
               branch = ?,
               base_ref = ?,
               max_iterations = ?,
-              max_budget_usd = COALESCE(?, max_budget_usd),
+              -- Authoritative from config.maxCostUsd (③ per-process cap):
+              -- NULL means "off", which must be writable, so a direct SET (not
+              -- COALESCE, which could preserve a stale prior cap).
+              max_budget_usd = ?,
               approved_at = ?,
               updated_at = ?
         WHERE id = ? AND state = 'awaiting_approval'`,

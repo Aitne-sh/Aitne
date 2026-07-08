@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { deriveBashAllowlist } from "./dev-loop-legs.js";
+import {
+  createDevLegRunner,
+  deriveBashAllowlist,
+  type DevBackend,
+  type DevBackendRequest,
+} from "./dev-loop-legs.js";
+import { normalizeDevLoopConfig } from "./dev-loop-config.js";
+import type { DevLegContext } from "./dev-loop-engine.js";
+import type { DevSessionRow } from "../../db/dev-sessions-store.js";
 
 describe("deriveBashAllowlist (D6 — never push)", () => {
   it("grants each verify command as its FULL prefix, never a bare root", () => {
@@ -49,5 +57,44 @@ describe("deriveBashAllowlist (D6 — never push)", () => {
         "Bash(cat:*)",
       ]),
     );
+  });
+});
+
+describe("createDevLegRunner — per-leg budget reaches the backend", () => {
+  function spyBackend(): { backend: DevBackend; reqs: DevBackendRequest[] } {
+    const reqs: DevBackendRequest[] = [];
+    return {
+      reqs,
+      backend: {
+        async runLeg(req) {
+          reqs.push(req);
+          return { text: "", sessionId: null, costUsd: 0, numTurns: 1, isError: false };
+        },
+      },
+    };
+  }
+  const session = { slug: "t", repositoryId: "r", costUsd: 0, baseRef: "HEAD" } as unknown as DevSessionRow;
+  const ctx = (over: Partial<DevLegContext>): DevLegContext => ({
+    repoPath: "/nonexistent-repo", session, config: normalizeDevLoopConfig({ verifyCommands: ["true"] }),
+    iteration: 1, tier: "high", ...over,
+  });
+
+  it("passes the per-session cap as maxBudgetUsd when ③ is off", async () => {
+    const { backend, reqs } = spyBackend();
+    const runner = createDevLegRunner({ backend, loadTaskFlow: (k) => k });
+    await runner.plan(ctx({ config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxCostPerSessionUsd: 2, maxCostUsd: null }) }));
+    expect(reqs[0]!.maxBudgetUsd).toBe(2);
+  });
+
+  it("clamps maxBudgetUsd to the remaining process budget when ③ is on (live spend)", async () => {
+    const { backend, reqs } = spyBackend();
+    const runner = createDevLegRunner({ backend, loadTaskFlow: (k) => k });
+    // remaining = 5 − 4.5 = 0.5 < per-session 2 → 0.5 (uses ctx.spentUsd, the
+    // live fleet-wide spend, not session.costUsd).
+    await runner.implement(ctx({
+      config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxCostPerSessionUsd: 2, maxCostUsd: 5 }),
+      spentUsd: 4.5,
+    }));
+    expect(reqs[0]!.maxBudgetUsd).toBe(0.5);
   });
 });

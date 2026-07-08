@@ -204,6 +204,10 @@ describe("parseTaskPlan", () => {
     expect(parseTaskPlan(plan(block({ key: "a" }), "", "")).ok).toBe(true);
     expectErr(parseTaskPlan(plan("stray prose")), /unexpected line/);
   });
+  it("rejects a syntactically-present-but-empty REQS (spaces / commas only)", () => {
+    expectErr(parseTaskPlan(plan(block({ key: "a", reqs: ",," }))), /names no REQ ids/);
+    expectErr(parseTaskPlan(plan(block({ key: "a", reqs: " " }))), /names no REQ ids/);
+  });
 });
 
 describe("wrapReplanBlock", () => {
@@ -591,6 +595,35 @@ describe("validateReplanBlock", () => {
       ...baseOpts,
       escalatedReqs: [],
     });
+    expect(res.ok).toBe(true);
+  });
+  it("enforces the post-swap in-flight cap (escalated closes, block adds)", () => {
+    // 3 live (escalated supervise_pending + 2 queued rivals) − 1 (escalated
+    // closes superseded) + 2 (block) = 4 > cap 3.
+    const crowded = {
+      ...baseOpts,
+      maxTasks: 3,
+      liveTasks: [
+        escalated,
+        live({ key: "q1", state: "queued", reqs: ["REQ-003"] }),
+        live({ key: "q2", state: "queued", reqs: ["REQ-004"] }),
+      ],
+    };
+    expectErr(
+      validateReplanBlock(
+        [block({ key: "p1", reqs: "REQ-001" }), block({ key: "p2", reqs: "REQ-002" })].join("\n"),
+        crowded,
+      ),
+      /would put 4 tasks in flight > cap 3/,
+    );
+  });
+  it("does not subtract the escalated task when it is not counted as in-flight", () => {
+    // The escalated key is absent from the live queue (already closed) → the
+    // −1 is skipped; 1 live + 2 block = 3 ≤ cap 8 → still accepted.
+    const res = validateReplanBlock(
+      [block({ key: "p1", reqs: "REQ-001" }), block({ key: "p2", reqs: "REQ-002" })].join("\n"),
+      { ...baseOpts, liveTasks: [live({ key: "other", state: "queued", reqs: ["REQ-005"] })] },
+    );
     expect(res.ok).toBe(true);
   });
 });
