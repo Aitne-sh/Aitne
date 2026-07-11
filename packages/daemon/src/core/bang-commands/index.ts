@@ -45,7 +45,7 @@ export {
 export { researchCommand, parseResearchArgs } from "./commands-research.js";
 export { checksCommand, formatChecks } from "./commands-checks.js";
 export { revertTuningCommand } from "./commands-revert-tuning.js";
-export { repoCommand, approveCommand, exitCommand } from "./commands-dev.js";
+export { repoCommand, approveCommand, exitCommand, rollbackCommand } from "./commands-dev.js";
 export {
   buildSystemMarker,
   ensureSystemMarker,
@@ -102,7 +102,7 @@ import {
 import { researchCommand } from "./commands-research.js";
 import { checksCommand } from "./commands-checks.js";
 import { revertTuningCommand } from "./commands-revert-tuning.js";
-import { repoCommand, approveCommand, exitCommand } from "./commands-dev.js";
+import { repoCommand, approveCommand, exitCommand, rollbackCommand } from "./commands-dev.js";
 
 /**
  * Build a registry preloaded with the v1 built-in commands. The registry
@@ -143,9 +143,11 @@ export function createDefaultBangCommandRegistry(): BangCommandRegistry {
   // SELF_TUNING_REVIEW_CYCLE_DESIGN.md §3.4 Phase 3 — `!revert tuning`,
   // the owner-side undo for autonomously applied tuning changes.
   registry.register(revertTuningCommand);
-  // Development mode — `!repo <name>` (prefix), `!approve` / `!exit` (exact).
+  // Development mode — `!repo <name>` (prefix), `!approve` / `!exit` (exact),
+  // `!rollback [n]` (prefix — restore the pre-session checkout / rewind).
   registry.register(repoCommand);
   registry.register(approveCommand);
   registry.register(exitCommand);
+  registry.register(rollbackCommand);
   return registry;
 }

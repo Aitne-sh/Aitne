@@ -16,7 +16,7 @@ import { formatLocalLong } from "./format-utils.js";
 export const stopCommand: BangCommand = {
   name: "!stop",
   title: "Pause agent",
-  describe: "Pause cron-driven autonomous work. In-flight runs are not aborted.",
+  describe: "Pause autonomous work",
   details: [
     "Persists the paused state across daemon restarts.",
     "Does not abort in-flight backend sessions.",

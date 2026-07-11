@@ -215,7 +215,10 @@ export const ingestCommand: BangPrefixCommand = {
 export const compileCommand: BangPrefixCommand = {
   prefix: "!compile",
   title: "Compile wiki",
-  describe: "compile pending raw notes into wiki notes (`!compile full` rebuilds; `--preview` is dry-run)",
+  describe: "Compile raw notes into wiki notes",
+  details: [
+    "`!compile full` rebuilds every note; `--preview` is a dry-run.",
+  ],
   parseArgs(rest) {
     return parseCompileArgs(rest);
   },

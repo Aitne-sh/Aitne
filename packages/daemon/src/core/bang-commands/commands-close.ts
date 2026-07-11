@@ -24,7 +24,7 @@ import type { BangCommand } from "./registry.js";
 export const closeCommand: BangCommand = {
   name: "!close",
   title: "Close session",
-  describe: "End the current DM session. The next DM starts a fresh session.",
+  describe: "End the DM session",
   details: [
     "Closes the active conversation session for this DM channel.",
     "Workdir is cleaned up; the next DM starts fresh with no carried context.",

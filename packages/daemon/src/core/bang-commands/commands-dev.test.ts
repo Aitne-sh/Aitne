@@ -9,13 +9,15 @@ import { applySchema } from "../../db/schema.js";
 import type { AgentConfig } from "../../config.js";
 import type { IAuditLogger } from "../dispatcher.js";
 import {
+  approveDevSession,
   createDevSession,
   getActiveDevSession,
   getDevSession,
   markDevAwaitingApproval,
+  markDevTerminal,
 } from "../../db/dev-sessions-store.js";
 import { createDefaultBangCommandRegistry } from "./index.js";
-import { repoCommand, approveCommand, exitCommand } from "./commands-dev.js";
+import { repoCommand, approveCommand, exitCommand, rollbackCommand } from "./commands-dev.js";
 import type { BangCommandContext } from "./registry.js";
 import type { DevModeRunner } from "../../services/dev-mode/dev-mode-runner.js";
 
@@ -345,5 +347,97 @@ describe("commands-dev", () => {
     const { ctx, notify } = makeCtx();
     await exitCommand.handler(ctx);
     expect(notify.mock.calls[0]?.[0]).toContain("No dev session is active");
+  });
+
+  // ── !rollback (DEV_MODE_GIT_HARDENING Phase A) ─────────────────────────
+
+  function seedBranchedSession(state: "running" | "failed" | "exited", channel = "telegram:D1"): void {
+    // A real approved session whose repo sits on the session branch with the
+    // rollback anchors recorded — the shape startFromApproval leaves behind.
+    execFileSync("git", ["checkout", "-q", "-B", "main"], { cwd: repo });
+    execFileSync("git", ["add", "-A"], { cwd: repo });
+    execFileSync(
+      "git",
+      ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "seed"],
+      { cwd: repo },
+    );
+    const originalHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+    execFileSync("git", ["checkout", "-q", "-B", "aitne-dev/s1"], { cwd: repo });
+    createDevSession(db, {
+      id: "s1",
+      repositoryId: "local:foo",
+      slug: "foo",
+      originatingPlatform: "telegram",
+      originatingChannel: channel,
+      createdAt: 0,
+    });
+    markDevAwaitingApproval(db, "s1", 0);
+    approveDevSession(db, {
+      id: "s1",
+      approvedHash: "h",
+      branch: "aitne-dev/s1",
+      baseRef: originalHead,
+      originalBranch: "main",
+      originalHead,
+      wipSnapshotRef: null,
+      maxIterations: 10,
+      maxBudgetUsd: null,
+      approvedAt: 0,
+    });
+    if (state !== "running") {
+      markDevTerminal(db, { id: "s1", state, loopState: state === "failed" ? "BLOCKED" : null, exitedAt: 1 });
+    }
+  }
+
+  it("!rollback rejects a non-numeric argument with usage", async () => {
+    const { ctx, notify } = makeCtx();
+    await rollbackCommand.handler(ctx, "abc");
+    expect(notify.mock.calls[0]?.[0]).toContain("Usage: !rollback");
+  });
+
+  it("!rollback refuses while the loop is running", async () => {
+    seedBranchedSession("running");
+    const { ctx, notify } = makeCtx();
+    await rollbackCommand.handler(ctx, "");
+    expect(notify.mock.calls[0]?.[0]).toContain("!exit first");
+  });
+
+  it("!rollback is channel-bound", async () => {
+    seedBranchedSession("failed", "telegram:OTHER");
+    const { ctx, notify } = makeCtx();
+    await rollbackCommand.handler(ctx, "");
+    expect(notify.mock.calls[0]?.[0]).toContain("another channel");
+  });
+
+  it("!rollback restores the original checkout of the latest terminal session", async () => {
+    seedBranchedSession("failed");
+    const { ctx, notify } = makeCtx();
+    await rollbackCommand.handler(ctx, "");
+    const reply = notify.mock.calls[0]?.[0] as string;
+    expect(reply).toContain("Rolled back foo");
+    expect(reply).toContain("back on main");
+    expect(reply).toContain("kept on aitne-dev/s1");
+    expect(
+      execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
+    ).toBe("main");
+    // A second !rollback finds nothing (rolled_back_at filter).
+    const second = makeCtx();
+    await rollbackCommand.handler(second.ctx, "");
+    expect(second.notify.mock.calls[0]?.[0]).toContain("Nothing to roll back");
+  });
+
+  it("!exit points at !rollback when the session has a branch", async () => {
+    seedBranchedSession("running");
+    const { ctx, notify } = makeCtx();
+    await exitCommand.handler(ctx);
+    const reply = notify.mock.calls[0]?.[0] as string;
+    expect(reply).toContain("!rollback");
+    expect(reply).toContain("main");
+  });
+
+  it("!rollback with no branched session says so", async () => {
+    const { ctx, notify } = makeCtx();
+    await rollbackCommand.handler(ctx, "");
+    expect(notify.mock.calls[0]?.[0]).toContain("Nothing to roll back");
   });
 });

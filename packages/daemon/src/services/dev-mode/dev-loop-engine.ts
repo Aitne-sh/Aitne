@@ -45,6 +45,7 @@ import {
   readDevDoc,
   removeDevDoc,
   runVerifyCommand,
+  snapshotDevDocs,
   validateBaseRef,
   writeDevDoc,
   writeLastVerifyLog,
@@ -484,6 +485,10 @@ export class DevLoopEngine {
     if (commitGuard) return commitGuard;
     const sha = gitCommitAll(this.repoPath, `dev: iter ${iterationNo} — ${evalOut.result.state}`);
     this.record("evaluate", evalOut.result.state, evalOut.result.reason, undefined, sha);
+    // Pair the checkpoint commit with a docs snapshot: `.aitne-dev/` is
+    // gitignored, so `!rollback <n>` restores the working memory from
+    // history/iter-<n>/ alongside the code reset.
+    snapshotDevDocs(this.repoPath, iterationNo);
 
     const state = evalOut.result.state;
 

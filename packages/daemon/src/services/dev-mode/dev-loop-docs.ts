@@ -357,6 +357,12 @@ export function gitCreateBranch(repoPath: string, branch: string): void {
   git(repoPath, ["checkout", "-B", branch]);
 }
 
+/** `git branch <name> <ref>` WITHOUT moving the checkout — the rollback tip
+ *  archive (never-destructive: the old tip survives as a named branch). */
+export function gitBranchAt(repoPath: string, branch: string, ref: string): void {
+  git(repoPath, ["branch", branch, ref]);
+}
+
 /** True when a merge is in progress (MERGE_HEAD exists). Canonical home —
  *  dev-flow-git re-exports it for the fleet callers. Reads the plumbing file
  *  directly (see GIT_DIR_CACHE) — this runs before every commit. */
