@@ -25,6 +25,10 @@ import {
   listBrowserTasks,
   type BrowserTaskRow,
 } from "../../db/browser-task-store.js";
+import {
+  buildDevStatusSnapshot,
+  formatDevStatus,
+} from "../../services/dev-mode/dev-status.js";
 import type { BangCommand, BangCommandContext, BangPrefixCommand } from "./registry.js";
 
 /** A unified, kind-tagged view of one active detached task. */
@@ -111,7 +115,16 @@ export const statusCommand: BangCommand = {
   describe: "List running background / browser tasks",
   runsWhilePaused: true,
   handler: async (ctx) => {
-    await ctx.notify(formatStatus(listActiveTasks(ctx)));
+    let reply = formatStatus(listActiveTasks(ctx));
+    // Append the dev-session section when this channel has one (active or
+    // most recent) — terminal sessions render too, with the next action.
+    const snapshot = buildDevStatusSnapshot(
+      ctx.db,
+      `${ctx.event.platform}:${ctx.event.channel}`,
+      Date.now(),
+    );
+    if (snapshot) reply += `\n\n${formatDevStatus(snapshot)}`;
+    await ctx.notify(reply);
   },
 };
 

@@ -810,6 +810,8 @@ export default defineConfig({
         "packages/daemon/src/services/dev-mode/dev-flow-git.ts",
         "packages/daemon/src/services/dev-mode/dev-flow-legs.ts",
         "packages/daemon/src/services/dev-mode/dev-flow-orchestrator.ts",
+        "packages/daemon/src/services/dev-mode/dev-rollback.ts",
+        "packages/daemon/src/services/dev-mode/dev-status.ts",
         "packages/daemon/src/api/routes/dev-sessions.ts",
 
         // ── Weekly interests reflection (WEEKLY_INTERESTS_REFLECTION_PLAN) ──
