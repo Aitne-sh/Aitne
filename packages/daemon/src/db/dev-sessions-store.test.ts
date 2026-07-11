@@ -496,6 +496,64 @@ describe("dev-session-escalations-store", () => {
     expect(listUndeliveredDevEscalations(db)).toHaveLength(0);
   });
 
+  it("serializes concurrent escalations and promotes the next on resolve (P0-5)", () => {
+    // Two escalations open at once (a fleet raising per-task questions). The
+    // FIRST is active (queued = 0); the second is held (queued = 1). The open
+    // pointer is the single active one — never the newest — so a bare DM reply
+    // cannot mis-map to the wrong task.
+    const a = createDevEscalation(db, {
+      id: "e-a", sessionId: "s1", kind: "risk_approval",
+      question: "A?", contextSummary: null, askedAt: T0 + 1,
+    });
+    const b = createDevEscalation(db, {
+      id: "e-b", sessionId: "s1", kind: "spec_decision",
+      question: "B?", contextSummary: null, askedAt: T0 + 2,
+    });
+    expect(a.queued).toBe(false);
+    expect(b.queued).toBe(true);
+    expect(getOpenDevEscalationForSession(db, "s1")?.id).toBe("e-a");
+
+    // Resolving A promotes B to active and hands it back for delivery.
+    const res = resolveDevEscalation(db, { id: "e-a", answer: "yes", answeredAt: T0 + 3 });
+    expect(res.ok).toBe(true);
+    expect(res.promoted?.id).toBe("e-b");
+    expect(getOpenDevEscalationForSession(db, "s1")?.id).toBe("e-b");
+
+    // Resolving the last open escalation promotes nothing.
+    const res2 = resolveDevEscalation(db, { id: "e-b", answer: "ok", answeredAt: T0 + 4 });
+    expect(res2.ok).toBe(true);
+    expect(res2.promoted).toBeNull();
+    expect(getOpenDevEscalationForSession(db, "s1")).toBeNull();
+  });
+
+  it("recovery sweep covers an active task escalation on a still-running session, not a held one (P1-18)", () => {
+    insertDevTasks(
+      db,
+      "s1",
+      [
+        { id: "t1", taskKey: "a", summary: "a", dependsOn: [], scope: "", reqs: [], body: "b", origin: "plan" },
+        { id: "t2", taskKey: "b", summary: "b", dependsOn: [], scope: "", reqs: [], body: "b", origin: "plan" },
+      ],
+      T0,
+    );
+    // Fleet task escalations are raised WHILE the session is still 'running'
+    // (siblings in flight); the sweep must recover them, not only awaiting_user.
+    markDevRunningFromParked(db, "s1", T0);
+    const active = createDevEscalation(db, {
+      id: "e-run-a", sessionId: "s1", taskId: "t1", kind: "risk_approval",
+      question: "A?", contextSummary: null, askedAt: T0 + 1,
+    });
+    const held = createDevEscalation(db, {
+      id: "e-run-b", sessionId: "s1", taskId: "t2", kind: "risk_approval",
+      question: "B?", contextSummary: null, askedAt: T0 + 2,
+    });
+    expect(active.queued).toBe(false);
+    expect(held.queued).toBe(true);
+    // The ACTIVE task escalation is recovered despite the running session; the
+    // held (queued) one is withheld until it is promoted.
+    expect(listUndeliveredDevEscalations(db).map((e) => e.id)).toEqual(["e-run-a"]);
+  });
+
   it("missing escalation resolves to not_found", () => {
     expect(
       resolveDevEscalation(db, { id: "nope", answer: "x", answeredAt: T0 }).reason,
@@ -543,9 +601,18 @@ describe("dev-session-escalations-store", () => {
     expect(
       listDevEscalationsForSession(db, "s1").map((e) => e.taskId),
     ).toEqual(["t1", null]);
-    expect(getOpenDevEscalationForSession(db, "s1")?.taskId).toBeNull();
+    // P0-5 serialization: the FIRST-created escalation (e-task) is ACTIVE
+    // (queued = 0); the second (e-session) is held (queued = 1). The open
+    // pointer resolves to the single active one — here the task-scoped row, so
+    // its taskId still round-trips through the open-pointer surface.
+    expect(getOpenDevEscalationForSession(db, "s1")?.id).toBe("e-task");
+    expect(getOpenDevEscalationForSession(db, "s1")?.taskId).toBe("t1");
+    expect(scoped.queued).toBe(false);
+    expect(sessionScoped.queued).toBe(true);
     const undelivered = listUndeliveredDevEscalations(db);
     expect(undelivered.find((e) => e.id === "e-task")?.taskId).toBe("t1");
+    // The held (queued) escalation is NOT swept for delivery ahead of its turn.
+    expect(undelivered.find((e) => e.id === "e-session")).toBeUndefined();
     // ON DELETE SET NULL: dropping the task keeps the Q&A history.
     db.prepare("DELETE FROM dev_session_tasks WHERE id = 't1'").run();
     expect(listDevEscalationsForSession(db, "s1").map((e) => e.taskId)).toEqual([
@@ -578,6 +645,78 @@ describe("migration 0026-dev-mode", () => {
       "dev_session_requirements",
       "dev_sessions",
     ]);
+    db.close();
+  });
+});
+
+describe("migration 0028-dev-escalation-queue", () => {
+  function hasColumn(db: Database.Database, table: string, col: string): boolean {
+    return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((r) => r.name === col);
+  }
+
+  it("is registered after 0027", () => {
+    const i27 = MIGRATIONS.findIndex((m) => m.id === "0027-dev-flow");
+    const i28 = MIGRATIONS.findIndex((m) => m.id === "0028-dev-escalation-queue");
+    expect(i28).toBeGreaterThan(i27);
+  });
+
+  it("adds the queued column to a legacy escalations table, backfills to 0, narrows the index, idempotently", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    // Legacy shape: 0026 creates dev_session_escalations WITHOUT `queued`.
+    runMigrations(db, MIGRATIONS.filter((m) => m.id === "0026-dev-mode"));
+    expect(hasColumn(db, "dev_session_escalations", "queued")).toBe(false);
+    // A pre-existing escalation row (FK off just to seed without a session row).
+    db.pragma("foreign_keys = OFF");
+    db.prepare(
+      `INSERT INTO dev_session_escalations
+         (id, session_id, kind, question, context_summary, asked_at,
+          deadline_at, delivered_at, answer, answered_at, resolved)
+       VALUES ('e1', 's1', 'spec_decision', 'q', NULL, 0, NULL, NULL, NULL, NULL, 0)`,
+    ).run();
+    db.pragma("foreign_keys = ON");
+
+    const only28 = MIGRATIONS.filter((m) => m.id === "0028-dev-escalation-queue");
+    expect(runMigrations(db, only28).applied).toEqual(["0028-dev-escalation-queue"]);
+
+    expect(hasColumn(db, "dev_session_escalations", "queued")).toBe(true);
+    // Pre-existing row backfilled to active (queued = 0).
+    expect((db.prepare(`SELECT queued FROM dev_session_escalations WHERE id='e1'`).get() as { queued: number }).queued).toBe(0);
+    // The partial index is narrowed to the active-escalation predicate.
+    const idx = db.prepare(`SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_dev_esc_unresolved'`).get() as { sql: string };
+    expect(idx.sql).toContain("queued = 0");
+    // Idempotent — a recorded re-run changes nothing.
+    expect(runMigrations(db, only28).applied).toEqual([]);
+    db.close();
+  });
+
+  it("repairs legacy multi-active escalations — only the oldest stays active per session", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    runMigrations(db, MIGRATIONS.filter((m) => m.id === "0026-dev-mode"));
+    // The pre-WP3 fleet engine could raise several concurrent unresolved
+    // escalations per session (no serialization). Seed two for s1, one for s2.
+    db.pragma("foreign_keys = OFF");
+    const seed = db.prepare(
+      `INSERT INTO dev_session_escalations
+         (id, session_id, kind, question, context_summary, asked_at,
+          deadline_at, delivered_at, answer, answered_at, resolved)
+       VALUES (?, ?, 'spec_decision', 'q', NULL, ?, NULL, NULL, NULL, NULL, 0)`,
+    );
+    seed.run("s1-old", "s1", 10);
+    seed.run("s1-new", "s1", 20);
+    seed.run("s2-only", "s2", 5);
+    db.pragma("foreign_keys = ON");
+
+    runMigrations(db, MIGRATIONS.filter((m) => m.id === "0028-dev-escalation-queue"));
+
+    const q = (id: string) =>
+      (db.prepare(`SELECT queued FROM dev_session_escalations WHERE id=?`).get(id) as { queued: number }).queued;
+    // s1: oldest (asked_at 10) stays active; the newer one is held.
+    expect(q("s1-old")).toBe(0);
+    expect(q("s1-new")).toBe(1);
+    // s2: its single escalation stays active.
+    expect(q("s2-only")).toBe(0);
     db.close();
   });
 });

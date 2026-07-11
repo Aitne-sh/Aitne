@@ -23,7 +23,9 @@
  */
 
 import type Database from "better-sqlite3";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 import { Hono } from "hono";
 import {
   createEvent,
@@ -41,6 +43,7 @@ import {
   listRepositories,
   listTriggers,
   markManagementScanQueued,
+  normalizeRepositoryLocalPathInput,
   recordManagementInitDone,
   recordManagementScan,
   RepositoryStoreError,
@@ -71,7 +74,9 @@ import type { ApiDependencies } from "../server.js";
 import { createLogger } from "../../logging.js";
 import { readJsonBody } from "../json-body.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
+import { parseGitHubRemote } from "../../observers/github-poller-classifier.js";
 
+const execFileAsync = promisify(execFile);
 const logger = createLogger("repositories-api");
 
 // Repository triggers fire through the BackendRouter at run time, so the
@@ -218,7 +223,12 @@ function triggerDtoToResponse(
 
 export type RepositoriesRouteDeps = Pick<
   ApiDependencies,
-  "db" | "eventBus" | "config" | "writeTracker" | "onIndexableContextChange"
+  | "db"
+  | "eventBus"
+  | "config"
+  | "writeTracker"
+  | "onIndexableContextChange"
+  | "onGitReposChanged"
 >;
 
 /**
@@ -238,9 +248,79 @@ const triggerModelValidator = (
   );
 };
 
+type LocalProbeReason =
+  | "origin_remote_missing"
+  | "not_git_repository"
+  | "non_github_remote"
+  | "git_failed";
+
+type LocalProbeResult =
+  | {
+      detected: true;
+      localPath: string;
+      githubOwner: string;
+      githubRepo: string;
+      fullName: string;
+    }
+  | {
+      detected: false;
+      localPath: string;
+      reason: LocalProbeReason;
+    };
+
+function gitProbeFailureReason(err: unknown): LocalProbeReason {
+  const withOutput = err as { message?: unknown; stderr?: unknown; stdout?: unknown };
+  const text = [
+    typeof withOutput.message === "string" ? withOutput.message : "",
+    typeof withOutput.stderr === "string" ? withOutput.stderr : "",
+    typeof withOutput.stdout === "string" ? withOutput.stdout : "",
+  ].join("\n");
+  if (/not a git repository/i.test(text)) return "not_git_repository";
+  if (/no such remote/i.test(text) || /'origin'/i.test(text)) {
+    return "origin_remote_missing";
+  }
+  return "git_failed";
+}
+
+async function probeLocalRepository(localPathInput: string): Promise<LocalProbeResult> {
+  const localPath = normalizeRepositoryLocalPathInput(localPathInput);
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["remote", "get-url", "origin"],
+      { cwd: localPath, timeout: 5_000, maxBuffer: 50_000 },
+    );
+    const parsed = parseGitHubRemote(stdout);
+    if (!parsed) {
+      return { detected: false, localPath, reason: "non_github_remote" };
+    }
+    return {
+      detected: true,
+      localPath,
+      githubOwner: parsed.owner,
+      githubRepo: parsed.repo,
+      fullName: `${parsed.owner}/${parsed.repo}`,
+    };
+  } catch (err) {
+    return { detected: false, localPath, reason: gitProbeFailureReason(err) };
+  }
+}
+
 export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
   const { db, eventBus } = deps;
   const app = new Hono();
+
+  const notifyGitReposChanged = async (source: string): Promise<void> => {
+    if (!deps.onGitReposChanged) return;
+    try {
+      await deps.onGitReposChanged();
+    } catch (err) {
+      logger.warn(
+        { err, source },
+        "Repository mutation succeeded but git repository change hook failed",
+      );
+    }
+  };
 
   // ─── §4.1 CRUD ──────────────────────────────────────────────────
 
@@ -264,6 +344,23 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
       ]);
     }
     return c.json({ repository: dtoToResponse(row) });
+  });
+
+  app.post("/repositories/probe-local", async (c) => {
+    const parsed = await readJsonBody(c);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.body as Record<string, unknown>;
+    if (typeof body.localPath !== "string") {
+      return respondWithValidationError(c, {
+        error: "validation_error",
+        message: "localPath is required (POST /repositories/probe-local { localPath: '<absolute path>' }; relative paths are rejected, a leading ~/ is expanded)",
+      });
+    }
+    try {
+      return c.json(await probeLocalRepository(body.localPath));
+    } catch (err) {
+      return respondWithStoreError(c, err);
+    }
   });
 
   app.post("/repositories", async (c) => {
@@ -300,6 +397,7 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
             ? body.pollIntervalSec
             : null,
       });
+      await notifyGitReposChanged("create");
       return c.json({ repository: dtoToResponse(row) }, 201);
     } catch (err) {
       return respondWithStoreError(c, err);
@@ -351,13 +449,14 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
             ? (body.pollIntervalSec as number | null)
             : undefined,
       });
+      await notifyGitReposChanged("patch");
       return c.json({ repository: dtoToResponse(row) });
     } catch (err) {
       return respondWithStoreError(c, err);
     }
   });
 
-  app.delete("/repositories/:id", (c) => {
+  app.delete("/repositories/:id", async (c) => {
     const id = decodeURIComponent(c.req.param("id"));
     const ok = deleteRepository(db, id);
     if (!ok) {
@@ -365,6 +464,7 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
         composeIssue("repositories.not_found", { field: "id", received: id }),
       ]);
     }
+    await notifyGitReposChanged("delete");
     return c.json({ status: "deleted" });
   });
 
@@ -388,6 +488,7 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
           typeof body.account === "string" ? body.account : undefined,
         localOnly: false,
       });
+      await notifyGitReposChanged("link-github");
       return c.json({ repository: dtoToResponse(row) });
     } catch (err) {
       return respondWithStoreError(c, err);
@@ -408,6 +509,7 @@ export function createRepositoriesRoutes(deps: RepositoriesRouteDeps): Hono {
     }
     try {
       const row = updateRepository(db, id, { localPath: body.localPath });
+      await notifyGitReposChanged("link-local");
       return c.json({ repository: dtoToResponse(row) });
     } catch (err) {
       return respondWithStoreError(c, err);

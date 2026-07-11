@@ -51,6 +51,7 @@ import {
 } from "../../db/dev-session-tasks-store.js";
 import {
   DEV_DOCS,
+  DEV_OWNER_PLAN_DECISION_FILE,
   DEV_TASK_ARCHIVE_DIR,
   appendDevDoc,
   ensureDevWorkdir,
@@ -74,6 +75,7 @@ import { createDevLegRunner, type DevBackend } from "./dev-loop-legs.js";
 import { createDevFlowLegRunner } from "./dev-flow-legs.js";
 import {
   createDevFleetOrchestrator,
+  type DevFleetOrchestrator,
   type DevFleetRunResult,
 } from "./dev-flow-orchestrator.js";
 import type { DevModePublisher } from "./dev-mode-publisher.js";
@@ -180,8 +182,16 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
   const timeoutMs = (deps.timeoutMinutes ?? DEFAULT_TIMEOUT_MINUTES) * 60_000;
 
   /** The in-flight loop's controller, keyed by session id. Singleton in
-   *  practice (D5) but keyed for clarity + defensive multi-session safety. */
+   *  practice (D5) but keyed for clarity + defensive multi-session safety.
+   *  Also holds the interview-turn controller so a !exit/timeout aborts a
+   *  mid-interview leg (WP3 P1-15). */
   const active = new Map<string, AbortController>();
+
+  /** The LIVE fleet orchestrator for a running session, so a mid-fleet
+   *  escalation answer can wake its dispatch loop in place instead of
+   *  restarting the whole loop (WP3 P0-4). Present only while a fleet
+   *  `orchestrator.run()` is executing; deleted in runLoop's finally. */
+  const orchestrators = new Map<string, DevFleetOrchestrator>();
 
   // ── inactivity timeout (schedule-backed; no dedicated store) ──────────
 
@@ -264,7 +274,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     contextSummary: string | null;
   }): Promise<void> {
     const escalationId = uuid();
-    createDevEscalation(deps.db, {
+    const row = createDevEscalation(deps.db, {
       id: escalationId,
       sessionId: input.sessionId,
       taskId: input.taskId,
@@ -273,14 +283,21 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       contextSummary: input.contextSummary,
       askedAt: now(),
     });
+    // Serialization (WP3 P0-5): deliver only if this is the ACTIVE escalation.
+    // A concurrent fleet task escalation is created queued and stays silent
+    // until the active one resolves + promotes it (resolveDevEscalation), at
+    // which point the runner delivers the promoted row.
     const session = getDevSession(deps.db, input.sessionId);
-    if (session) {
+    if (session && !row.queued) {
       await enqueueEscalationDelivery(session, escalationId, {
         question: input.question,
         contextSummary: input.contextSummary,
       });
     }
-    logger.info({ sessionId: input.sessionId, taskId: input.taskId, kind: input.kind }, "dev task escalation raised");
+    logger.info(
+      { sessionId: input.sessionId, taskId: input.taskId, kind: input.kind, queued: row.queued },
+      "dev task escalation raised",
+    );
   }
 
   async function enqueueDigestDelivery(
@@ -315,7 +332,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     outcome: Extract<DevIterationOutcome, { kind: "escalate" }>,
   ): Promise<void> {
     const escalationId = uuid();
-    createDevEscalation(deps.db, {
+    const row = createDevEscalation(deps.db, {
       id: escalationId,
       sessionId,
       // Single-loop escalations map the (task-widened) loop state back to a
@@ -328,8 +345,11 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     markDevAwaitingUser(deps.db, sessionId, now());
     // Escalations never auto-expire — cancel the inactivity timer while parked.
     cancelTimeout(sessionId);
+    // A single loop parks with exactly one open escalation, so `row.queued` is
+    // always false here; the guard keeps the "deliver only the active one"
+    // invariant explicit (WP3 P0-5).
     const session = getDevSession(deps.db, sessionId);
-    if (session) await enqueueEscalationDelivery(session, escalationId, outcome);
+    if (session && !row.queued) await enqueueEscalationDelivery(session, escalationId, outcome);
     logger.info({ sessionId, kind: outcome.escalationKind }, "dev session parked on escalation");
   }
 
@@ -392,12 +412,34 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     logger.info({ sessionId, loopState: outcome.loopState, terminalState }, "dev session terminal");
   }
 
+  /** Best-effort removal of every fleet worktree for a session (branches are
+   *  kept for autopsy). Shared by cancel(), failLoud(), and the resume-budget
+   *  block so no terminal path leaks a worktree (WP3 P1-16). Safe to call when
+   *  no worktrees exist (single-loop / pre-fleet). */
+  function cleanupFleetWorktrees(sessionId: string): void {
+    const session = getDevSession(deps.db, sessionId);
+    const repoPath = session ? deps.resolveRepoPath(session.repositoryId) : null;
+    if (!repoPath) return;
+    for (const task of listDevTasks(deps.db, sessionId)) {
+      if (task.worktreePath) {
+        try {
+          gitWorktreeRemove(repoPath, task.worktreePath);
+        } catch (err) {
+          logger.warn({ err, sessionId, taskKey: task.taskKey }, "dev worktree cleanup failed");
+        }
+      }
+    }
+  }
+
   async function failLoud(sessionId: string, err: unknown): Promise<void> {
     const detail = err instanceof Error ? err.message : String(err);
     logger.error({ err, sessionId }, "dev loop threw — marking failed");
     const session = getDevSession(deps.db, sessionId);
     markDevTerminal(deps.db, { id: sessionId, state: "failed", loopState: null, exitedAt: now() });
     cancelTimeout(sessionId);
+    // A throw escapes the orchestrator's terminal-cleanup path, so reap the
+    // fleet worktrees here — failLoud is terminal + non-resumable (WP3 P1-16).
+    cleanupFleetWorktrees(sessionId);
     deps.onSessionEnded?.(sessionId);
     if (session) {
       await enqueueDigestDelivery(
@@ -457,6 +499,9 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
             if (s) await enqueueFleetNote(s, text);
           },
         });
+        // Hold the live handle so a mid-fleet escalation answer can wake the
+        // dispatch loop in place (WP3 P0-4). Cleared in the finally below.
+        orchestrators.set(sessionId, orchestrator);
         const result = await orchestrator.run();
         if (controller.signal.aborted) return;
         if (result.kind !== "single") {
@@ -502,6 +547,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       await failLoud(sessionId, err);
     } finally {
       active.delete(sessionId);
+      orchestrators.delete(sessionId);
     }
   }
 
@@ -659,40 +705,51 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       "</dev_interview_context>",
     ].join("\n");
 
-    // Interview turns are not part of the loop; give them their own controller.
+    // Interview turns are not part of the loop, but they must be abortable —
+    // register the controller in `active` so a !exit / inactivity timeout
+    // unwinds a mid-interview leg instead of waiting out maxSeconds (WP3
+    // P1-15). Interview and loop states are mutually exclusive, so this never
+    // collides with a runLoop controller; the finally only clears our own.
     const controller = new AbortController();
-    const backend = deps.makeBackend(controller);
-    const resp = await backend.runLeg({
-      taskFlowKey: "dev.contract_interview",
-      prompt: deps.loadTaskFlow("dev.contract_interview"),
-      context,
-      sessionDir: repoPath,
-      // Read the repo, but SCOPE writes to the .aitne-dev working dir — the
-      // interview runs pre-approval on the owner's live branch with no branch
-      // isolation, so an over-reaching / prompt-injected turn must not be able
-      // to mutate repo source or out-of-repo files (~/.zshrc etc.). Path-scoped
-      // Write/Edit (cwd-relative glob) is the enforced boundary; the task-flow
-      // prose is only advisory on top.
-      allowedTools: ["Read", "Glob", "Grep", "Write(.aitne-dev/**)", "Edit(.aitne-dev/**)"],
-      readOnly: false,
-      tier,
-      maxTurns: 40,
-      // The interview is one Claude Code session — cap it at the per-session
-      // budget (the draft config's, or the default before any is written).
-      maxBudgetUsd: normalizeDevLoopConfig(session.config).maxCostPerSessionUsd,
-      maxSeconds: 600,
-    });
-    if (resp.isError) {
-      return "Something went wrong while drafting the contract. Try rephrasing, or reply !exit to stop.";
-    }
+    active.set(input.sessionId, controller);
+    try {
+      const backend = deps.makeBackend(controller);
+      const resp = await backend.runLeg({
+        taskFlowKey: "dev.contract_interview",
+        prompt: deps.loadTaskFlow("dev.contract_interview"),
+        context,
+        sessionDir: repoPath,
+        // Read the repo, but SCOPE writes to the .aitne-dev working dir — the
+        // interview runs pre-approval on the owner's live branch with no branch
+        // isolation, so an over-reaching / prompt-injected turn must not be able
+        // to mutate repo source or out-of-repo files (~/.zshrc etc.). Path-scoped
+        // Write/Edit (cwd-relative glob) is the enforced boundary; the task-flow
+        // prose is only advisory on top.
+        allowedTools: ["Read", "Glob", "Grep", "Write(.aitne-dev/**)", "Edit(.aitne-dev/**)"],
+        readOnly: false,
+        tier,
+        maxTurns: 40,
+        // The interview is one Claude Code session — cap it at the per-session
+        // budget (the draft config's, or the default before any is written).
+        maxBudgetUsd: normalizeDevLoopConfig(session.config).maxCostPerSessionUsd,
+        maxSeconds: 600,
+      });
+      if (resp.isError) {
+        return "Something went wrong while drafting the contract. Try rephrasing, or reply !exit to stop.";
+      }
 
-    const stateToken = parseAgentStateToken(readAgentStateFirstLine(repoPath));
-    if (stateToken === "CONTRACT_READY") {
-      return finalizeContract(session, repoPath);
+      const stateToken = parseAgentStateToken(readAgentStateFirstLine(repoPath));
+      if (stateToken === "CONTRACT_READY") {
+        return finalizeContract(session, repoPath);
+      }
+      return resp.text.trim().length > 0
+        ? resp.text.trim()
+        : "Tell me more about what you'd like me to build.";
+    } finally {
+      // Clear only our own controller — a later runLoop may have set a fresh
+      // one (interview/loop states are exclusive, but stay defensive).
+      if (active.get(input.sessionId) === controller) active.delete(input.sessionId);
     }
-    return resp.text.trim().length > 0
-      ? resp.text.trim()
-      : "Tell me more about what you'd like me to build.";
   }
 
   // ── public surface ────────────────────────────────────────────────────
@@ -781,18 +838,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       exitedAt: now(),
     });
     // Best-effort fleet worktree cleanup (branches are kept for autopsy).
-    const repoPath = deps.resolveRepoPath(session.repositoryId);
-    if (repoPath) {
-      for (const task of listDevTasks(deps.db, sessionId)) {
-        if (task.worktreePath) {
-          try {
-            gitWorktreeRemove(repoPath, task.worktreePath);
-          } catch (err) {
-            logger.warn({ err, sessionId, taskKey: task.taskKey }, "dev cancel: worktree cleanup failed");
-          }
-        }
-      }
-    }
+    cleanupFleetWorktrees(sessionId);
     deps.onSessionEnded?.(sessionId);
     logger.info({ sessionId, reason, wasRunning: !!controller }, "dev session cancelled");
     return true;
@@ -804,7 +850,15 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     answer: string;
   }): Promise<"resumed" | "blocked" | "failed"> {
     const session = getDevSession(deps.db, input.sessionId);
-    if (!session || session.state !== "awaiting_user") return "failed";
+    if (!session) return "failed";
+    // Accept an answer when the session is parked (awaiting_user — a single
+    // loop, or a fully-blocked fleet) OR still running with a LIVE fleet
+    // orchestrator: a task escalated while its siblings keep working, so the
+    // session never parked (F6 / WP3 P0-4). Any other state has no answerable
+    // question on file.
+    const orchestrator = orchestrators.get(input.sessionId) ?? null;
+    const midFleet = session.state === "running" && orchestrator !== null;
+    if (session.state !== "awaiting_user" && !midFleet) return "failed";
 
     const resolved = resolveDevEscalation(deps.db, {
       id: input.escalationId,
@@ -827,19 +881,28 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       if (task && task.state === "awaiting_user" && task.worktreePath) {
         // A worker (RISK / supervise-ESCALATE / cap) is parked — write the
         // owner's call as authoritative guidance and re-queue it. The
-        // orchestrator relaunch resumes it from its checkpoint.
+        // orchestrator (live, or relaunched below) resumes it from its
+        // checkpoint.
         writeDevDoc(task.worktreePath, DEV_DOCS.supervisorGuidance, `${input.answer}\n`);
         appendDevDoc(task.worktreePath, DEV_DOCS.decisionRequests, ownerDecision);
         markDevTaskState(deps.db, { id: taskId, from: ["awaiting_user"], to: "queued", loopState: null, at: now() });
       } else if (task && task.planReview === "escalated") {
-        // A phase-boundary plan review escalated — record the call in the
-        // merged task's archive and release the held dependents.
+        // A phase-boundary plan review escalated (WP3 P1-14). Persist the
+        // owner's keep/drop/revise call where planReviewTask re-reads it, then
+        // RE-TRIGGER the review (escalated -> pending) so the re-run folds the
+        // decision into a validated KEEP/REVISE — instead of rubber-stamping
+        // the un-revised plan and releasing the held dependents blind.
         appendDevDoc(
           repoPath,
           `${DEV_TASK_ARCHIVE_DIR}/${task.taskKey}/decision-requests.md`,
           ownerDecision,
         );
-        setDevTaskPlanReview(deps.db, taskId, "done", now());
+        writeDevDoc(
+          repoPath,
+          `${DEV_TASK_ARCHIVE_DIR}/${task.taskKey}/${DEV_OWNER_PLAN_DECISION_FILE}`,
+          `${input.answer}\n`,
+        );
+        setDevTaskPlanReview(deps.db, taskId, "pending", now());
       } else {
         // The task moved on (superseded/merged) — the answer is advisory only.
         appendDevDoc(repoPath, DEV_DOCS.decisionRequests, ownerDecision);
@@ -849,25 +912,38 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       appendDevDoc(repoPath, DEV_DOCS.decisionRequests, ownerDecision);
     }
 
-    // Resume budget — a TOTAL escalation-resume cap for the session (not
-    // loop-kit's per-streak "consecutive resumes that never complete an
-    // iteration"). The per-streak semantics would need a reset when an
-    // iteration completes, but the engine re-persists its construction-time
-    // checkpoint on every iteration and would clobber a mid-loop reset the
-    // runner wrote — so this is a lifetime cap instead. It is a reasonable
-    // safety floor: a bounded dev session needing more than `maxResumes`
-    // human decisions signals a contract too ambiguous to finish, and should
-    // be restarted with a sharper contract rather than looped indefinitely.
+    // Resume budget (WP3 P1-17) — a TOTAL escalation-resume cap, SCALED by the
+    // task count for fleets so a legitimately human-heavy fleet (one decision
+    // per task) is not blocked at the single-loop cap. The denominator is the
+    // SESSION's fleet size (a single loop has zero task rows → cap = maxResumes;
+    // a fleet has N rows → maxResumes × N), NOT the current escalation's scope —
+    // so a late SESSION-scoped escalation (integration gate / dirty-repo /
+    // refused-merge) is judged against the SAME scaled cap as the task ones,
+    // instead of collapsing to the single-loop cap and killing a merged fleet at
+    // its final gate. Per-streak semantics would need a mid-iteration reset, but
+    // the engine re-persists its checkpoint every iteration and would clobber
+    // it, so this stays a (scaled) lifetime floor. Re-read the session so a
+    // concurrent fleet tick's counter writes are not clobbered by the checkpoint.
+    const fresh = getDevSession(deps.db, session.id) ?? session;
     const config = normalizeDevLoopConfig(session.config);
-    const resumes = session.resumes + 1;
-    if (resumes > config.maxResumes) {
+    const taskCount = Math.max(1, listDevTasks(deps.db, session.id).length);
+    const effectiveCap = config.maxResumes * taskCount;
+    const resumes = fresh.resumes + 1;
+    if (resumes > effectiveCap) {
+      // Give up. For a mid-fleet block, abort the live run so no detached
+      // worker keeps going, then reap the (now non-resumable) worktrees. NOTE:
+      // a just-promoted sibling escalation is NOT delivered on this path (the
+      // delivery is below, after the budget gate) so a blocked session never
+      // asks the owner a fresh question it can no longer resume.
+      if (midFleet) active.get(input.sessionId)?.abort(new Error("resume_budget_exceeded"));
       markDevTerminal(deps.db, { id: session.id, state: "failed", loopState: "BLOCKED", exitedAt: now() });
       cancelTimeout(session.id);
+      cleanupFleetWorktrees(session.id);
       deps.onSessionEnded?.(session.id);
       await enqueueDigestDelivery(
         session,
-        `Dev session for ${session.slug ?? session.repositoryId} blocked: hit the resume budget (${config.maxResumes} decisions).`,
-        `The loop needed more than ${config.maxResumes} human decisions. Restart with a sharper contract if you want to continue.`,
+        `Dev session for ${session.slug ?? session.repositoryId} blocked: hit the resume budget (${effectiveCap} decisions).`,
+        `The loop needed more than ${effectiveCap} human decisions. Restart with a sharper contract if you want to continue.`,
       );
       return "blocked";
     }
@@ -875,21 +951,52 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       deps.db,
       {
         id: session.id,
-        iteration: session.iteration,
-        agentFailures: session.agentFailures,
-        gateReviseCount: session.gateReviseCount,
-        iterReviseCount: session.iterReviseCount,
+        iteration: fresh.iteration,
+        agentFailures: fresh.agentFailures,
+        gateReviseCount: fresh.gateReviseCount,
+        iterReviseCount: fresh.iterReviseCount,
         resumes,
       },
       now(),
     );
 
-    const running = markDevRunningFromParked(deps.db, input.sessionId, now());
-    if (!running) return "failed";
-    void runLoop(input.sessionId).catch((err) => {
-      logger.error({ err, sessionId: input.sessionId }, "dev resume runLoop rejected");
-    });
-    logger.info({ sessionId: input.sessionId, escalationId: input.escalationId }, "dev session resumed after escalation");
+    // Kick the loop forward SYNCHRONOUSLY (no await before the wake) so the
+    // resume decision cannot race the live orchestrator tearing down, and so the
+    // block path above has already returned before any owner-facing side effect.
+    if (midFleet) {
+      // The orchestrator is already running — wake its dispatch loop so it picks
+      // up the re-queued task / re-triggered plan review. Do NOT relaunch the
+      // loop or touch the session state (WP3 P0-4).
+      orchestrator!.notifyExternalChange();
+      logger.info(
+        { sessionId: input.sessionId, escalationId: input.escalationId },
+        "dev fleet resumed in place after escalation",
+      );
+    } else {
+      // Parked: flip the session back to running and relaunch the loop; the
+      // engine / a fresh orchestrator resume from the checkpoint.
+      const running = markDevRunningFromParked(deps.db, input.sessionId, now());
+      if (!running) return "failed";
+      void runLoop(input.sessionId).catch((err) => {
+        logger.error({ err, sessionId: input.sessionId }, "dev resume runLoop rejected");
+      });
+      logger.info({ sessionId: input.sessionId, escalationId: input.escalationId }, "dev session resumed after escalation");
+    }
+
+    // Serialization (WP3 P0-5): now that the resume is COMMITTED (past the budget
+    // gate) and the loop is awake/relaunched, deliver the sibling escalation the
+    // resolve promoted to active — so the owner is asked exactly one question at
+    // a time. Delivering before the budget gate could ask a fresh question on a
+    // session about to be terminated (dead-end + a contradictory "blocked" DM).
+    if (resolved.promoted) {
+      const s = getDevSession(deps.db, input.sessionId);
+      if (s) {
+        await enqueueEscalationDelivery(s, resolved.promoted.id, {
+          question: resolved.promoted.question,
+          contextSummary: resolved.promoted.contextSummary,
+        });
+      }
+    }
     return "resumed";
   }
 

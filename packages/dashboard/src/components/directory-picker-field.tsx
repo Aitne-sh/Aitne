@@ -11,6 +11,7 @@ export function DirectoryPickerField({
   id,
   value,
   onChange,
+  onCommit,
   title,
   placeholder = "Choose a folder...",
   defaultPath,
@@ -22,6 +23,7 @@ export function DirectoryPickerField({
   id?: string;
   value: string;
   onChange: (value: string) => void;
+  onCommit?: (value: string) => void;
   title: string;
   placeholder?: string;
   defaultPath?: string;
@@ -41,7 +43,10 @@ export function DirectoryPickerField({
         title,
         defaultPath: value.trim() || defaultPath,
       });
-      if (selected) onChange(selected);
+      if (selected) {
+        onChange(selected);
+        onCommit?.(selected);
+      }
     } catch (err) {
       setPickerError(
         err instanceof Error ? err.message : "Folder picker is unavailable.",
@@ -60,6 +65,10 @@ export function DirectoryPickerField({
           onChange={(e) => {
             onChange(e.target.value);
             setPickerError(null);
+          }}
+          onBlur={(e) => onCommit?.(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onCommit?.(e.currentTarget.value);
           }}
           placeholder={placeholder}
           className={cn("font-mono text-sm", inputClassName)}

@@ -1134,6 +1134,10 @@ async function startup(): Promise<void> {
     secretBroker,
     blobStore,
     writeTracker,
+    // Dev-mode publisher fires this after each evidence write so the doc is
+    // index/wikilink-reachable without waiting for the cron sweep (WP3 P2-23).
+    onIndexableContextChange: () =>
+      contextIndexReconciler.requestReconcile("manual"),
     services,
     messageHub,
     dashboardAdapter,

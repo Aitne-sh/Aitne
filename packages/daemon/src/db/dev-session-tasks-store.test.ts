@@ -458,6 +458,10 @@ describe("dev-session-tasks-store", () => {
 describe("migration 0027-dev-flow", () => {
   const m26 = MIGRATIONS.find((m) => m.id === "0026-dev-mode");
   const m27 = MIGRATIONS.find((m) => m.id === "0027-dev-flow");
+  // 0028 adds the escalation `queued` column that the store SELECTs; the
+  // legacy-upgrade test migrates the DB to the current shape before reading
+  // escalations back through getDevEscalation.
+  const m28 = MIGRATIONS.find((m) => m.id === "0028-dev-escalation-queue");
 
   it("is registered in the production MIGRATIONS list, after 0026", () => {
     expect(m26).toBeDefined();
@@ -543,8 +547,8 @@ describe("migration 0027-dev-flow", () => {
        VALUES ('e1', 's1', 'spec_decision', 'which db?', NULL, ?, NULL, NULL, NULL, NULL, 0)`,
     ).run(T0 + 3);
 
-    const result = runMigrations(db, [m26!, m27!]);
-    expect(result.applied).toEqual(["0027-dev-flow"]);
+    const result = runMigrations(db, [m26!, m27!, m28!]);
+    expect(result.applied).toEqual(["0027-dev-flow", "0028-dev-escalation-queue"]);
 
     // New table + indexes.
     expect(tableExists(db, "dev_session_tasks")).toBe(true);
@@ -587,7 +591,7 @@ describe("migration 0027-dev-flow", () => {
     expect(listDevIterations(db, "s1")[2]?.taskId).toBe("t-1");
 
     // Re-run is a recorded no-op.
-    const second = runMigrations(db, [m26!, m27!]);
+    const second = runMigrations(db, [m26!, m27!, m28!]);
     expect(second.applied).toEqual([]);
     db.close();
   });

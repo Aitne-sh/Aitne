@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -10,7 +11,10 @@ import {
   type RepositoryCategory,
   type RepositoryClassification,
   type RepositoryCreateInput,
+  type RepositoryLocalProbeResult,
+  repositoryLocalProbeSummary,
   useCreateRepository,
+  useProbeRepositoryLocal,
 } from "@/lib/hooks/use-repositories";
 
 const FIELD_LABEL =
@@ -40,9 +44,9 @@ const MODE_OPTIONS: Array<{
   },
   {
     value: "local",
-    label: "Local folder only",
+    label: "Local folder first",
     description:
-      "Agent watches a folder on this Mac. No GitHub remote — e.g. a private working directory.",
+      "Start from a local path. Link GitHub now if detected, or link it later when origin exists.",
   },
 ];
 
@@ -73,6 +77,11 @@ const CATEGORIES: RepositoryCategory[] = [
   "other",
 ];
 
+type ProbeNotice = {
+  tone: "success" | "info" | "error";
+  text: string;
+} | null;
+
 // Wrapper keeps the Sheet root mounted across open→closed so Radix can clear
 // its body pointer-events lock. Inner content is gated by `open` so form state
 // re-initializes each time the sheet is reopened.
@@ -92,10 +101,12 @@ export function AddRepositorySheet({
 
 function AddRepositorySheetContent({ onClose }: { onClose: () => void }) {
   const create = useCreateRepository();
+  const probeLocal = useProbeRepositoryLocal();
   const { data: accounts } = useGitAccounts();
   const [mode, setMode] = useState<Mode>("both");
   const [owner, setOwner] = useState("");
   const [name, setName] = useState("");
+  const [githubEdited, setGithubEdited] = useState(false);
   const [account, setAccount] = useState("");
   const [path, setPath] = useState("");
   const [localOnly, setLocalOnly] = useState(false);
@@ -104,10 +115,57 @@ function AddRepositorySheetContent({ onClose }: { onClose: () => void }) {
     useState<RepositoryClassification>("repo-only");
   const [category, setCategory] = useState<RepositoryCategory>("other");
   const [error, setError] = useState<string | null>(null);
+  const [probeNotice, setProbeNotice] = useState<ProbeNotice>(null);
 
   const showGithubFields = mode === "github" || (mode === "both" && !localOnly);
   const showLocalFields = mode === "local" || mode === "both";
   const showLocalOnlyToggle = mode === "local";
+
+  const applyProbeResult = (result: RepositoryLocalProbeResult) => {
+    if (!result.detected) {
+      setProbeNotice({
+        tone: "info",
+        text: `${repositoryLocalProbeSummary(result)} You can enter GitHub manually, register this local folder now, or link GitHub later.`,
+      });
+      return;
+    }
+
+    const canApply = !githubEdited || (!owner.trim() && !name.trim());
+    if (canApply) {
+      setOwner(result.githubOwner);
+      setName(result.githubRepo);
+      setMode("both");
+      setLocalOnly(false);
+      setProbeNotice({
+        tone: "success",
+        text: `${repositoryLocalProbeSummary(result)} Owner and repository were filled from the local clone.`,
+      });
+      return;
+    }
+
+    setProbeNotice({
+      tone: "info",
+      text: `${repositoryLocalProbeSummary(result)} Existing GitHub fields were left unchanged.`,
+    });
+  };
+
+  const probeLocalPath = async (value: string = path) => {
+    const nextPath = value.trim();
+    if (!nextPath) {
+      setProbeNotice(null);
+      return;
+    }
+    setError(null);
+    try {
+      const result = await probeLocal.mutateAsync(nextPath);
+      applyProbeResult(result);
+    } catch (err) {
+      setProbeNotice({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Failed to inspect local clone",
+      });
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,7 +270,10 @@ function AddRepositorySheetContent({ onClose }: { onClose: () => void }) {
                   <label className={FIELD_LABEL}>Owner (user or org)</label>
                   <Input
                     value={owner}
-                    onChange={(e) => setOwner(e.target.value)}
+                    onChange={(e) => {
+                      setGithubEdited(true);
+                      setOwner(e.target.value);
+                    }}
                     placeholder="acme"
                   />
                 </div>
@@ -220,7 +281,10 @@ function AddRepositorySheetContent({ onClose }: { onClose: () => void }) {
                   <label className={FIELD_LABEL}>Repository name</label>
                   <Input
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => {
+                      setGithubEdited(true);
+                      setName(e.target.value);
+                    }}
                     placeholder="widgets"
                   />
                 </div>
@@ -262,9 +326,47 @@ function AddRepositorySheetContent({ onClose }: { onClose: () => void }) {
               </div>
               <DirectoryPickerField
                 value={path}
-                onChange={setPath}
+                onChange={(next) => {
+                  setPath(next);
+                  setProbeNotice(null);
+                }}
+                onCommit={(next) => void probeLocalPath(next)}
                 title="Choose local clone directory"
               />
+              <div className="flex items-center justify-between gap-2">
+                <p className={FIELD_HINT}>
+                  A selected git clone is inspected for its origin remote.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void probeLocalPath()}
+                  disabled={!path.trim() || probeLocal.isPending}
+                  className="shrink-0 gap-1.5"
+                >
+                  {probeLocal.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Search className="h-3.5 w-3.5" />
+                  )}
+                  Detect GitHub
+                </Button>
+              </div>
+              {probeNotice && (
+                <p
+                  className={
+                    "rounded-md border p-2 text-xs " +
+                    (probeNotice.tone === "success"
+                      ? "border-success/30 bg-success/10 text-success"
+                      : probeNotice.tone === "error"
+                        ? "border-destructive/40 bg-destructive/10 text-destructive"
+                        : "border-border bg-muted/40 text-muted-foreground")
+                  }
+                >
+                  {probeNotice.text}
+                </p>
+              )}
               {showLocalOnlyToggle && (
                 <label className="flex items-start gap-2 text-xs text-muted-foreground">
                   <input

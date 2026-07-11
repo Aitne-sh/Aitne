@@ -209,6 +209,17 @@ export interface BootstrapEventPipelineDeps {
   readonly blobStore: EncryptedBlobStore;
   readonly writeTracker: AgentWriteTracker;
 
+  /**
+   * Context-index reconcile hook — the dev-mode publisher fires it after each
+   * managed evidence write so the file becomes index/wikilink-reachable
+   * without waiting for the next cron sweep (WP3 P2-23; mirrors how the
+   * repository-management-docs publisher is wired). `index.ts` passes
+   * `() => contextIndexReconciler.requestReconcile("manual")`. Optional —
+   * omitted in tests / headless boots, where the periodic reconciler still
+   * re-indexes on its next cycle.
+   */
+  readonly onIndexableContextChange?: (relativePath: string) => void;
+
   // ── Services + adapters (built earlier in §5/§6) ─────────────────────
   readonly services: ServiceRegistry;
   readonly messageHub: MessageHub;
@@ -377,6 +388,7 @@ export async function createEventPipeline(
     secretBroker,
     blobStore,
     writeTracker,
+    onIndexableContextChange,
     services,
     messageHub,
     dashboardAdapter,
@@ -1383,13 +1395,16 @@ export async function createEventPipeline(
   const { createDevModePublisher } = await import(
     "../services/dev-mode/dev-mode-publisher.js"
   );
-  // The context-index reconcile hook isn't reachable from this bootstrap layer
-  // (it lives in bootstrap/api.ts); the periodic reconciler re-indexes the
-  // published files on its next cycle, so omit the immediate-notify hook.
+  // Fire the context-index reconcile hook after each managed evidence write so
+  // published dev-session docs become index/wikilink-reachable immediately,
+  // matching the repository-management-docs publisher (WP3 P2-23). Omitted
+  // (undefined) in tests / headless boots — the periodic reconciler still
+  // re-indexes on its next cycle.
   const devModePublisher = createDevModePublisher({
     db,
     contextDir: getContextDir(config, db),
     writeTracker,
+    onIndexableContextChange,
   });
   // Owner reachable now = NOT in the quiet-hours window (the task-delivery
   // handler drops an `autonomous_forward` idle-send during quiet hours with no

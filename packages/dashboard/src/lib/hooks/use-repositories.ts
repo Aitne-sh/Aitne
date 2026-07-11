@@ -138,6 +138,26 @@ export interface RepositoryFilters {
   account?: string;
 }
 
+export type RepositoryLocalProbeReason =
+  | "origin_remote_missing"
+  | "not_git_repository"
+  | "non_github_remote"
+  | "git_failed";
+
+export type RepositoryLocalProbeResult =
+  | {
+      detected: true;
+      localPath: string;
+      githubOwner: string;
+      githubRepo: string;
+      fullName: string;
+    }
+  | {
+      detected: false;
+      localPath: string;
+      reason: RepositoryLocalProbeReason;
+    };
+
 const REPOS_KEY = ["repositories"] as const;
 const repoKey = (id: string) => [...REPOS_KEY, id] as const;
 const triggersKey = (id: string) => [...repoKey(id), "triggers"] as const;
@@ -175,6 +195,15 @@ export function useCreateRepository() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: REPOS_KEY });
     },
+  });
+}
+
+export function useProbeRepositoryLocal() {
+  return useMutation({
+    mutationFn: (localPath: string) =>
+      api.post<RepositoryLocalProbeResult>("/repositories/probe-local", {
+        localPath,
+      }),
   });
 }
 
@@ -469,6 +498,24 @@ export function repositoryDisplayName(repo: RepositoryDTO): string {
     return parts[parts.length - 1] ?? repo.localPath;
   }
   return repo.slug;
+}
+
+export function repositoryLocalProbeSummary(
+  result: RepositoryLocalProbeResult,
+): string {
+  if (result.detected) {
+    return `Detected GitHub remote ${result.fullName}.`;
+  }
+  switch (result.reason) {
+    case "origin_remote_missing":
+      return "No origin remote is configured yet.";
+    case "not_git_repository":
+      return "This folder is not a git repository yet.";
+    case "non_github_remote":
+      return "The origin remote is not on github.com.";
+    case "git_failed":
+      return "Git could not read the origin remote.";
+  }
 }
 
 /** Source prefixes for the observations API tail per repository. */

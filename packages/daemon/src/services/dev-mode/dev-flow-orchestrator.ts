@@ -60,6 +60,7 @@ import {
 import type { DevEscalationKind } from "../../db/dev-session-escalations-store.js";
 import {
   DEV_DOCS,
+  DEV_OWNER_PLAN_DECISION_FILE,
   DEV_PHASE_CONTEXT_DIR,
   DEV_TASK_ARCHIVE_DIR,
   copyDevDoc,
@@ -575,8 +576,25 @@ export function createDevFleetOrchestrator(
           reason: "worktree missing on relaunch — redoing from the merged HEAD",
         });
         if (task.branch && gitBranchExists(repoPath, task.branch)) {
-          gitRenameBranch(repoPath, task.branch, `${task.branch}-stale-${task.resumes}`);
+          // Probe for a FREE archive name. The `-stale-<resumes>` suffix is not
+          // unique across repeated stale events: `resumes` only advances on the
+          // worker-crash path, not the abort / boot-reclaim re-queues, so a
+          // second external worktree deletion would collide on `-stale-0` and
+          // `git branch -m` (no -M) throws exit 128 BEFORE the try block below,
+          // hot-looping the launcher. A unique name keeps recovery bounded.
+          let archived = `${task.branch}-stale-${task.resumes}`;
+          for (let n = 1; gitBranchExists(repoPath, archived); n += 1) {
+            archived = `${task.branch}-stale-${task.resumes}-${n}`;
+          }
+          gitRenameBranch(repoPath, task.branch, archived);
         }
+        // WP3 P1-16 — the recorded worktree DIR vanished but its
+        // `.git/worktrees/<key>` registration (keyed on the deterministic
+        // `join(wtRoot, key)` path we are about to re-add) survives. Without a
+        // prune, `git worktree add <same-path>` aborts with "missing but
+        // already registered" and the recovery path fails the task forever.
+        // gitWorktreeRemove force-removes then prunes and never throws.
+        if (task.worktreePath) gitWorktreeRemove(repoPath, task.worktreePath);
         writeDevTaskCheckpoint(
           db,
           { id: task.id, iteration: 0, agentFailures: 0, gateReviseCount: 0, iterReviseCount: 0, resumes: task.resumes },
@@ -596,35 +614,47 @@ export function createDevFleetOrchestrator(
         markDevTaskState(db, { id: taskId, from: ["queued"], to: "failed", failReason: `BOOTSTRAP: worktree add failed (${String(err)})`, at: now() });
         return;
       }
-      // Carryover seed (NEEDS_DECOMPOSITION splits) — never fails bootstrap.
-      if (task.seedBranch) {
-        const seeded = seedMergeFromBranch(wt, task.seedBranch);
-        recordFlow("merge", {
-          taskId: task.id,
-          verdict: seeded === "seeded" ? "SEEDED" : "CARRYOVER_SKIPPED",
-          reason: seeded === "seeded"
-            ? `carried committed work from ${task.seedBranch}`
-            : `${seeded} — the carried work remains on ${task.seedBranch}`,
-        });
-      }
-      ensureDevWorkdir(wt);
-      copyDevDoc(repoPath, DEV_DOCS.contract, wt, DEV_DOCS.contract);
-      copyDevDoc(repoPath, DEV_DOCS.loopConfig, wt, DEV_DOCS.loopConfig);
-      writeDevDoc(wt, DEV_DOCS.taskInstruction, task.body);
-      seedWorktreeLedger(wt, task);
-      copyPhaseContext(wt, task);
-      if (flow.worktreeSetupCommand) {
-        const setup = runSetupCommand(wt, flow.worktreeSetupCommand, config.maxIterSeconds * 1000);
-        if (setup.exitCode !== 0) {
+      // WP3 P1-16 — from here the worktree + branch exist on disk but are NOT
+      // yet persisted to the task row (claimDevTask below sets worktreePath),
+      // so cleanupWorktrees / cancel() cannot reap them if a step throws. Any
+      // throw in the post-add bootstrap must remove the worktree + fail the
+      // task rather than leaking an orphan worktree/branch/admin entry.
+      try {
+        // Carryover seed (NEEDS_DECOMPOSITION splits) — never fails bootstrap.
+        if (task.seedBranch) {
+          const seeded = seedMergeFromBranch(wt, task.seedBranch);
           recordFlow("merge", {
             taskId: task.id,
-            verdict: "BOOTSTRAP_FAILED",
-            reason: `worktree setup command exited ${setup.exitCode}`,
+            verdict: seeded === "seeded" ? "SEEDED" : "CARRYOVER_SKIPPED",
+            reason: seeded === "seeded"
+              ? `carried committed work from ${task.seedBranch}`
+              : `${seeded} — the carried work remains on ${task.seedBranch}`,
           });
-          markDevTaskState(db, { id: taskId, from: ["queued"], to: "failed", loopState: "BLOCKED", failReason: `BOOTSTRAP: setup command exited ${setup.exitCode}: ${setup.output.slice(0, 400)}`, at: now() });
-          gitWorktreeRemove(repoPath, wt);
-          return;
         }
+        ensureDevWorkdir(wt);
+        copyDevDoc(repoPath, DEV_DOCS.contract, wt, DEV_DOCS.contract);
+        copyDevDoc(repoPath, DEV_DOCS.loopConfig, wt, DEV_DOCS.loopConfig);
+        writeDevDoc(wt, DEV_DOCS.taskInstruction, task.body);
+        seedWorktreeLedger(wt, task);
+        copyPhaseContext(wt, task);
+        if (flow.worktreeSetupCommand) {
+          const setup = runSetupCommand(wt, flow.worktreeSetupCommand, config.maxIterSeconds * 1000);
+          if (setup.exitCode !== 0) {
+            recordFlow("merge", {
+              taskId: task.id,
+              verdict: "BOOTSTRAP_FAILED",
+              reason: `worktree setup command exited ${setup.exitCode}`,
+            });
+            markDevTaskState(db, { id: taskId, from: ["queued"], to: "failed", loopState: "BLOCKED", failReason: `BOOTSTRAP: setup command exited ${setup.exitCode}: ${setup.output.slice(0, 400)}`, at: now() });
+            gitWorktreeRemove(repoPath, wt);
+            return;
+          }
+        }
+      } catch (err) {
+        logger.error({ err, taskKey: key }, "worktree bootstrap failed after add");
+        gitWorktreeRemove(repoPath, wt);
+        markDevTaskState(db, { id: taskId, from: ["queued"], to: "failed", loopState: "BLOCKED", failReason: `BOOTSTRAP: post-add setup threw (${String(err)})`, at: now() });
+        return;
       }
       const claimed = claimDevTask(db, { id: taskId, branch, worktreePath: wt, baseRef, at: now() });
       if (!claimed) return; // raced (cancel/supersede) — leave it be
@@ -1011,6 +1041,10 @@ export function createDevFleetOrchestrator(
     }
 
     const allTasks = listDevTasks(db, sessionId);
+    // WP3 P1-14 — a re-run triggered by the owner answering a prior ESCALATE
+    // carries their authoritative decision (written by the runner on resume).
+    const ownerDecisionPath = `${DEV_TASK_ARCHIVE_DIR}/${task.taskKey}/${DEV_OWNER_PLAN_DECISION_FILE}`;
+    const ownerGuidance = readDevDoc(repoPath, ownerDecisionPath);
     const decision = await flowLegs.planReview(flowLegCtx(), {
       queueSnapshot: renderQueueSnapshot(
         allTasks.map((t) => toQueueTask(t, t.state === "queued")),
@@ -1020,7 +1054,11 @@ export function createDevFleetOrchestrator(
       mergedTaskKey: task.taskKey,
       mergedTaskInstruction: readDevDoc(repoPath, `${DEV_TASK_ARCHIVE_DIR}/${task.taskKey}/task-instruction.md`),
       mergedEvidence: readDevDoc(repoPath, `${DEV_TASK_ARCHIVE_DIR}/${task.taskKey}/evidence-report.md`),
+      ownerGuidance,
     });
+    // Consume-once: the decision has now been folded into this review. If the
+    // leg escalates again, the runner writes a fresh answer on the next resume.
+    if (ownerGuidance !== null) removeDevDoc(repoPath, ownerDecisionPath);
     recordFlow("plan_review", {
       taskId,
       verdict: decision.verdict ?? "unparseable",
@@ -1096,8 +1134,31 @@ export function createDevFleetOrchestrator(
       }
     }
 
-    // KEEP (default, incl. degraded invalid REVISE / unparseable verdicts) —
-    // a refused mutation must not stop the fleet.
+    // WP3 P1-14 — if this was an OWNER-DECISION re-run (ownerGuidance present)
+    // and the verdict was not a clean KEEP, the owner's explicit instruction
+    // could not be applied (an invalid/unparseable/blockless REVISE degraded to
+    // here). Silently keeping the un-revised plan would DISCARD a human decision
+    // and release the held dependents blind, defeating the whole fix — so
+    // re-escalate and ask the owner to restate instead. The owner's next answer
+    // re-arms the review; the loop is bounded by the (scaled) resume budget in
+    // resumeAfterEscalation, so this cannot spin forever.
+    if (ownerGuidance !== null && decision.verdict !== "KEEP") {
+      setDevTaskPlanReview(db, taskId, "escalated", now());
+      await deps.onTaskEscalation({
+        taskId,
+        kind: "review_escalation",
+        question: `[${task.taskKey} merged] I couldn't apply your decision to the remaining plan automatically (`
+          + `${decision.verdict === "REVISE" ? "the proposed revision was rejected" : "the reviewer's reply was unusable"}). `
+          + "Please restate how the remaining tasks should change, or say to keep the plan as-is.",
+        contextSummary: decision.responses.length > 0
+          ? decision.responses[decision.responses.length - 1]!.text.slice(0, 4000)
+          : null,
+      });
+      return;
+    }
+
+    // KEEP (default, incl. a clean KEEP verdict + a first-pass degraded invalid
+    // REVISE / unparseable verdict) — a refused mutation must not stop the fleet.
     setDevTaskPlanReview(db, taskId, "done", now());
   }
 

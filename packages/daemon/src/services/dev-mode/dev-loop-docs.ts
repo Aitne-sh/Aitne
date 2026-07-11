@@ -65,6 +65,13 @@ export const DEV_PHASE_CONTEXT_DIR = "phase-context";
  *  task's instruction/evidence/ledger — the phase-context + publisher source. */
 export const DEV_TASK_ARCHIVE_DIR = "task-archive";
 
+/** Filename (inside a merged task's `${DEV_TASK_ARCHIVE_DIR}/<taskKey>/`) that
+ *  records the owner's answer to a plan-review escalation. Written by the
+ *  runner on resume and re-read by the orchestrator's `planReviewTask` so the
+ *  re-run folds the owner's keep/drop/revise call into the plan review rather
+ *  than rubber-stamping it (WP3 P1-14). */
+export const DEV_OWNER_PLAN_DECISION_FILE = "owner-plan-decision.md";
+
 function devDir(repoPath: string): string {
   return join(repoPath, DEV_DIR_NAME);
 }

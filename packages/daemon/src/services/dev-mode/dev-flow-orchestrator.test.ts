@@ -18,9 +18,12 @@ import {
   getDevTaskByKey,
   insertDevTasks,
   markDevTaskState,
+  setDevTaskPlanReview,
 } from "../../db/dev-session-tasks-store.js";
 import {
   DEV_DOCS,
+  DEV_OWNER_PLAN_DECISION_FILE,
+  DEV_TASK_ARCHIVE_DIR,
   ensureDevWorkdir,
   writeDevDoc,
   readDevDoc,
@@ -608,6 +611,40 @@ describe("createDevFleetOrchestrator", () => {
     const second2 = getDevTaskByKey(db, "s1", "second2")!;
     expect(second2.origin).toBe("plan_review");
     expect(second2.state).toBe("merged");
+  });
+
+  it("re-escalates a plan-review owner decision that can't be applied, instead of silently keeping (P1-14)", async () => {
+    const config = seed();
+    const flow = new FakeFlowLegs();
+    flow.decomposeQueue.push({
+      plan: planDoc(taskBlock("first", "REQ-001"), taskBlock("second", "REQ-002", "first")),
+      n: 2,
+    });
+    // After `first` merges, its plan review escalates to the owner.
+    flow.planReviewQueue.push({ verdict: "ESCALATE", detail: "should the remaining plan change?" });
+    const run1 = await makeOrch(config, fakeWorkerLegsWithGate({}, flow), flow, new AbortController().signal).run();
+    expect(run1.kind).toBe("parked");
+    expect(getDevTaskByKey(db, "s1", "first")!.planReview).toBe("escalated");
+    expect(escalations.filter((e) => e.kind === "review_escalation").length).toBe(1);
+
+    // Simulate the owner's answer (what resumeAfterEscalation does on resume):
+    // persist the decision + re-arm the review.
+    writeDevDoc(repo, `${DEV_TASK_ARCHIVE_DIR}/first/${DEV_OWNER_PLAN_DECISION_FILE}`, "drop REQ-002 from the plan");
+    setDevTaskPlanReview(db, getDevTaskByKey(db, "s1", "first")!.id, "pending", 999);
+
+    // The re-run's decision cannot be applied (a REVISE with no valid block).
+    // It must RE-ESCALATE, not silently KEEP the un-revised plan + release the
+    // held dependent.
+    const flow2 = new FakeFlowLegs();
+    flow2.planReviewQueue.push({ verdict: "REVISE" }); // no replan block → unusable
+    const run2 = await makeOrch(config, fakeWorkerLegsWithGate({}, flow2), flow2, new AbortController().signal).run();
+    expect(run2.kind).toBe("parked");
+    expect(getDevTaskByKey(db, "s1", "first")!.planReview).toBe("escalated"); // re-escalated, NOT done
+    const reviewEscalations = escalations.filter((e) => e.kind === "review_escalation");
+    expect(reviewEscalations.length).toBe(2);
+    expect(reviewEscalations[1]!.question).toContain("couldn't apply your decision");
+    // The held dependent was NOT released blind.
+    expect(getDevTaskByKey(db, "s1", "second")!.state).toBe("queued");
   });
 
   it("runs an integration fix-up when the gate rejects the merged whole", async () => {

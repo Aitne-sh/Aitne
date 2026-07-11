@@ -7,9 +7,11 @@ import {
   FolderOpen,
   GitBranch,
   Github,
+  Loader2,
   Lock,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Unlink,
 } from "lucide-react";
@@ -24,13 +26,16 @@ import {
   type RepositoryCategory,
   type RepositoryClassification,
   type RepositoryDTO,
+  type RepositoryLocalProbeResult,
   type RepositoryUpdateInput,
+  repositoryLocalProbeSummary,
   repositoryDisplayName,
   repositoryHasGithub,
   repositoryHasLocal,
   useDeleteRepository,
   useLinkGithub,
   useLinkLocal,
+  useProbeRepositoryLocal,
   useUpdateRepository,
 } from "@/lib/hooks/use-repositories";
 import { useGitAccounts } from "@/lib/hooks/use-git-accounts";
@@ -45,6 +50,21 @@ const CATEGORIES: RepositoryCategory[] = [
   "client",
   "other",
 ];
+
+type ProbeNotice = {
+  tone: "success" | "info" | "error";
+  text: string;
+} | null;
+
+function probeNoticeClass(tone: NonNullable<ProbeNotice>["tone"]): string {
+  if (tone === "success") {
+    return "border-success/30 bg-success/10 text-success";
+  }
+  if (tone === "error") {
+    return "border-destructive/40 bg-destructive/10 text-destructive";
+  }
+  return "border-border bg-muted/40 text-muted-foreground";
+}
 
 export function RepositoryCard({ repo }: { repo: RepositoryDTO }) {
   const [editing, setEditing] = useState(false);
@@ -427,11 +447,39 @@ function LinkGithubSheetContent({
   onClose: () => void;
 }) {
   const link = useLinkGithub();
+  const probeLocal = useProbeRepositoryLocal();
   const { data: accounts } = useGitAccounts();
   const [owner, setOwner] = useState("");
   const [name, setName] = useState("");
   const [account, setAccount] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [probeNotice, setProbeNotice] = useState<ProbeNotice>(null);
+
+  const probeFromLocalClone = async () => {
+    if (!repo.localPath) return;
+    setError(null);
+    try {
+      const result = await probeLocal.mutateAsync(repo.localPath);
+      if (result.detected) {
+        setOwner(result.githubOwner);
+        setName(result.githubRepo);
+        setProbeNotice({
+          tone: "success",
+          text: `${repositoryLocalProbeSummary(result)} Owner and repository were filled from the local clone.`,
+        });
+        return;
+      }
+      setProbeNotice({
+        tone: "info",
+        text: `${repositoryLocalProbeSummary(result)} Enter the GitHub owner and repository manually.`,
+      });
+    } catch (err) {
+      setProbeNotice({
+        tone: "error",
+        text: err instanceof Error ? err.message : "Failed to inspect local clone",
+      });
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -454,7 +502,7 @@ function LinkGithubSheetContent({
   };
 
   return (
-    <SheetContent className="overflow-y-auto">
+      <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Link a GitHub remote</SheetTitle>
         </SheetHeader>
@@ -462,6 +510,35 @@ function LinkGithubSheetContent({
           <p className="text-xs text-muted-foreground">
             Personal accounts on github.com only. GHES is not in scope for v1.
           </p>
+          {repo.localPath && (
+            <div className="space-y-2 rounded-md border bg-background/40 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="truncate text-xs text-muted-foreground" title={repo.localPath}>
+                  Local clone: {repo.localPath}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void probeFromLocalClone()}
+                  disabled={probeLocal.isPending}
+                  className="shrink-0 gap-1.5"
+                >
+                  {probeLocal.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Search className="h-3.5 w-3.5" />
+                  )}
+                  Detect
+                </Button>
+              </div>
+              {probeNotice && (
+                <p className={`rounded-md border p-2 text-xs ${probeNoticeClass(probeNotice.tone)}`}>
+                  {probeNotice.text}
+                </p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1.5">
               <label className={FIELD_LABEL}>Owner</label>
@@ -540,14 +617,83 @@ function LinkLocalSheetContent({
   onClose: () => void;
 }) {
   const link = useLinkLocal();
+  const probeLocal = useProbeRepositoryLocal();
   const [path, setPath] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [probe, setProbe] = useState<{
+    path: string;
+    result: RepositoryLocalProbeResult;
+    notice: NonNullable<ProbeNotice>;
+  } | null>(null);
+
+  const expectedFullName = repo.githubOwner && repo.githubRepo
+    ? `${repo.githubOwner}/${repo.githubRepo}`
+    : null;
+  const currentProbe = probe?.path === path.trim() ? probe : null;
+  const probeMismatch = Boolean(
+    expectedFullName
+      && currentProbe
+      && currentProbe.result.detected
+      && currentProbe.result.fullName.toLowerCase() !== expectedFullName.toLowerCase(),
+  );
+
+  const probeLocalPath = async (value: string = path) => {
+    const nextPath = value.trim();
+    if (!nextPath) {
+      setProbe(null);
+      return;
+    }
+    setError(null);
+    try {
+      const result = await probeLocal.mutateAsync(nextPath);
+      if (
+        expectedFullName
+        && result.detected
+        && result.fullName.toLowerCase() !== expectedFullName.toLowerCase()
+      ) {
+        setProbe({
+          path: nextPath,
+          result,
+          notice: {
+            tone: "error",
+            text: `Selected clone points to ${result.fullName}, but this row is ${expectedFullName}.`,
+          },
+        });
+        return;
+      }
+      setProbe({
+        path: nextPath,
+        result,
+        notice: {
+          tone: result.detected ? "success" : "info",
+          text: repositoryLocalProbeSummary(result),
+        },
+      });
+    } catch (err) {
+      setProbe({
+        path: nextPath,
+        result: {
+          detected: false,
+          localPath: nextPath,
+          reason: "git_failed",
+        },
+        notice: {
+          tone: "error",
+          text: err instanceof Error ? err.message : "Failed to inspect local clone",
+        },
+      });
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!path.trim()) {
       setError("Local path is required");
+      return;
+    }
+    if (probeMismatch) {
+      setError("Selected local clone does not match this GitHub repository.");
       return;
     }
     try {
@@ -559,24 +705,52 @@ function LinkLocalSheetContent({
   };
 
   return (
-    <SheetContent className="overflow-y-auto">
+      <SheetContent className="overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Link a local clone</SheetTitle>
         </SheetHeader>
         <form onSubmit={submit} className="mt-6 space-y-4">
           <p className="text-xs text-muted-foreground">
-            Pick the directory of the local clone of this repository. The agent
-            never inspects `.git/config` to suggest values — paths are
-            user-supplied.
+            Pick the directory of the local clone of this repository. The
+            origin remote is checked when a path is selected.
           </p>
           <div className="space-y-1.5">
             <label className={FIELD_LABEL}>Repository directory</label>
             <DirectoryPickerField
               value={path}
-              onChange={setPath}
+              onChange={(next) => {
+                setPath(next);
+                setProbe(null);
+              }}
+              onCommit={(next) => void probeLocalPath(next)}
               title="Choose local clone directory"
             />
           </div>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] text-muted-foreground">
+              Check origin before linking to avoid pairing the wrong clone.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void probeLocalPath()}
+              disabled={!path.trim() || probeLocal.isPending}
+              className="shrink-0 gap-1.5"
+            >
+              {probeLocal.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
+              Check
+            </Button>
+          </div>
+          {probe && (
+            <p className={`rounded-md border p-2 text-xs ${probeNoticeClass(probe.notice.tone)}`}>
+              {probe.notice.text}
+            </p>
+          )}
           {error && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
               {error}

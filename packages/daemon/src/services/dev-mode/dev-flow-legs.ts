@@ -91,6 +91,11 @@ export interface DevPlanReviewStagedContext {
   mergedTaskKey: string;
   mergedTaskInstruction: string | null;
   mergedEvidence: string | null;
+  /** The owner's answer to a prior plan-review escalation for this phase, when
+   *  the plan review is being re-run after an ESCALATE was resolved (WP3
+   *  P1-14). Authoritative — the re-run must honor this keep/drop/revise call
+   *  (emit a matching KEEP or a validated REVISE). Null on a first-pass review. */
+  ownerGuidance: string | null;
 }
 
 export interface DevFlowLegRunner {
@@ -299,7 +304,13 @@ export function createDevFlowLegRunner(deps: DevFlowLegRunnerDeps): DevFlowLegRu
         + section("Merged phase task instruction", staged.mergedTaskInstruction)
         + section("Merged phase evidence report", staged.mergedEvidence)
         + section("Live queue snapshot (the ONLY source of task ids)", staged.queueSnapshot)
-        + section("Original task plan (rationale/scopes — may be stale)", staged.taskPlan);
+        + section("Original task plan (rationale/scopes — may be stale)", staged.taskPlan)
+        + section(
+            "OWNER DECISION on a prior escalation of THIS plan review "
+              + "(authoritative — honor it: emit KEEP if the owner said keep, "
+              + "or a validated REVISE that carries out their call)",
+            staged.ownerGuidance,
+          );
       const { responses, parsed } = await runWithFormatRetry(
         (extra) =>
           runLeg(ctx, {

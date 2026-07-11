@@ -59,7 +59,7 @@ describe("repositories routes daily management", () => {
     });
   }
 
-  function app() {
+  function app(options: { onGitReposChanged?: () => void | Promise<void> } = {}) {
     return createRepositoriesRoutes({
       db,
       eventBus: new EventBus(100),
@@ -67,8 +67,113 @@ describe("repositories routes daily management", () => {
         dataDir: root,
         timezone: "UTC",
       } as unknown as AgentConfig,
+      onGitReposChanged: options.onGitReposChanged,
     });
   }
+
+  it("probe-local detects a GitHub origin remote from a local clone", async () => {
+    git(["remote", "add", "origin", "git@github.com:acme/widgets.git"]);
+
+    const response = await app().request("/repositories/probe-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localPath: repoDir }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      detected: true,
+      localPath: repoDir,
+      githubOwner: "acme",
+      githubRepo: "widgets",
+      fullName: "acme/widgets",
+    });
+  });
+
+  it("probe-local reports a missing origin without failing the request", async () => {
+    const response = await app().request("/repositories/probe-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localPath: repoDir }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      detected: false,
+      localPath: repoDir,
+      reason: "origin_remote_missing",
+    });
+  });
+
+  it("probe-local reports a non-GitHub origin and does not echo the remote URL", async () => {
+    git([
+      "remote",
+      "add",
+      "origin",
+      "https://secret-token@gitlab.com/acme/widgets.git",
+    ]);
+
+    const response = await app().request("/repositories/probe-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localPath: repoDir }),
+    });
+
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).not.toContain("secret-token");
+    expect(JSON.parse(text)).toEqual({
+      detected: false,
+      localPath: repoDir,
+      reason: "non_github_remote",
+    });
+  });
+
+  it("probe-local reports a non-git directory without creating a row", async () => {
+    const plainDir = join(root, "plain");
+    mkdirSync(plainDir, { recursive: true });
+
+    const response = await app().request("/repositories/probe-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localPath: plainDir }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      detected: false,
+      localPath: plainDir,
+      reason: "not_git_repository",
+    });
+  });
+
+  it("probe-local rejects relative paths through the repository path validator", async () => {
+    const response = await app().request("/repositories/probe-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localPath: "relative/repo" }),
+    });
+
+    expect(response.status).toBe(400);
+    const body = await response.json() as { message?: string };
+    expect(String(body.message)).toMatch(/absolute path/);
+  });
+
+  it("notifies the git repository change hook after creating a repository", async () => {
+    let calls = 0;
+    const response = await app({
+      onGitReposChanged: () => {
+        calls += 1;
+      },
+    }).request("/repositories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ localPath: repoDir, localOnly: true }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(calls).toBe(1);
+  });
 
   it("Run init now writes the overview markdown in-process", async () => {
     const repo = createRepository(db, {

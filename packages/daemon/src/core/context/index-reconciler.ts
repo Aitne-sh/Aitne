@@ -91,6 +91,12 @@ export function shouldIndexPath(relativePath: string): boolean {
   if (relativePath.startsWith("policies/")) return true;
   if (relativePath.startsWith("plans/projects/")) return true;
   if (relativePath.startsWith("knowledge/dossiers/")) return true;
+  // Dev-mode session evidence — `knowledge/repos/<slug>/dev-sessions/<id>/`
+  // (WP3 P2-23). Anchor `dev-sessions` as the segment IMMEDIATELY AFTER the
+  // slug (not a bare substring) so repository-management docs at
+  // `knowledge/repos/<slug>/*.md` stay excluded even when the slug itself is
+  // literally "dev-sessions".
+  if (/^knowledge\/repos\/[^/]+\/dev-sessions\//.test(relativePath)) return true;
   if (relativePath.startsWith("journal/daily/")) return true;
   if (relativePath.startsWith("journal/weekly/")) return true;
   if (relativePath.startsWith("journal/monthly/")) return true;

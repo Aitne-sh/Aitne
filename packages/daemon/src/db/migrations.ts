@@ -1664,6 +1664,67 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0028-dev-escalation-queue",
+    description:
+      "(dev-mode WP3 P0-5) — serialize concurrent fleet escalations. ALTER "
+      + "dev_session_escalations ADD queued INTEGER NOT NULL DEFAULT 0: at "
+      + "most one escalation per session is ACTIVE (queued = 0, delivered to "
+      + "the owner) at a time; a second task that escalates while a sibling is "
+      + "still parked is persisted queued = 1 and only promoted (queued -> 0 + "
+      + "delivered) once the active one resolves, so a bare single-channel DM "
+      + "reply is never mis-mapped to the wrong task. Also swaps the partial "
+      + "index idx_dev_esc_unresolved to (resolved = 0 AND queued = 0) — the "
+      + "active-lookup + serialization EXISTS predicate. Idempotent: fresh DBs "
+      + "already carry the column + narrowed index from applySchema (schema.ts) "
+      + "which runs BEFORE migrations, so the ALTER is columnExists-guarded and "
+      + "the index recreate is DROP-then-CREATE. Existing rows backfill to "
+      + "queued = 0 (correct — every legacy row was treated as active).",
+    up(db) {
+      if (
+        tableExists(db, "dev_session_escalations")
+        && !columnExists(db, "dev_session_escalations", "queued")
+      ) {
+        db.exec(
+          `ALTER TABLE dev_session_escalations
+             ADD COLUMN queued INTEGER NOT NULL DEFAULT 0`,
+        );
+        // Repair legacy multi-active data. The pre-WP3 fleet engine raised
+        // task escalations WITHOUT serialization (createAndDeliverEscalation
+        // kept siblings running), so a session could carry several concurrent
+        // unresolved rows. The DEFAULT 0 backfill makes them ALL active,
+        // violating the one-active-per-session invariant and letting a bare DM
+        // reply resolve the wrong task. Keep only the OLDEST unresolved row
+        // active per session (matching getOpenDevEscalationForSession's
+        // asked_at ASC tiebreak, id as a deterministic secondary); hold the
+        // rest queued = 1. Idempotent: a no-op on a fresh/single-active DB.
+        db.exec(`
+          UPDATE dev_session_escalations
+             SET queued = 1
+           WHERE resolved = 0
+             AND id <> (
+               SELECT e2.id FROM dev_session_escalations e2
+                WHERE e2.session_id = dev_session_escalations.session_id
+                  AND e2.resolved = 0
+                ORDER BY e2.asked_at ASC, e2.id ASC
+                LIMIT 1
+             );
+        `);
+      }
+      // Narrow the partial index to the active-escalation predicate. On an
+      // existing DB the old index (WHERE resolved = 0) is dropped and
+      // recreated; on a fresh DB applySchema already made the narrowed form,
+      // so the DROP is a no-op and the CREATE IF NOT EXISTS keeps it.
+      if (tableExists(db, "dev_session_escalations")) {
+        db.exec(`
+          DROP INDEX IF EXISTS idx_dev_esc_unresolved;
+          CREATE INDEX IF NOT EXISTS idx_dev_esc_unresolved
+              ON dev_session_escalations(session_id)
+              WHERE resolved = 0 AND queued = 0;
+        `);
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

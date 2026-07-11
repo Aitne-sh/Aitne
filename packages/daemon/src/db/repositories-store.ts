@@ -464,6 +464,10 @@ function normalizeLocalPathInput(value: string): string {
   return stripped.length > 0 ? stripped : path;
 }
 
+export function normalizeRepositoryLocalPathInput(value: string): string {
+  return normalizeLocalPathInput(value);
+}
+
 function validateInputShape(input: {
   githubOwner?: string | null;
   githubRepo?: string | null;

@@ -71,6 +71,21 @@ describe("shouldIndexPath", () => {
     expect(shouldIndexPath("journal/monthly/2026-04.md")).toBe(true);
   });
 
+  it("includes dev-mode session evidence but not repository-management docs (WP3 P2-23)", () => {
+    // Dev-session artifacts under the dev-sessions subtree ARE indexed.
+    expect(shouldIndexPath("knowledge/repos/acme/dev-sessions/s1/evidence-report.md")).toBe(true);
+    expect(shouldIndexPath("knowledge/repos/acme/dev-sessions/s1/contract.md")).toBe(true);
+    // But repository-management docs at the repo root stay excluded (unchanged).
+    expect(shouldIndexPath("knowledge/repos/acme/README.md")).toBe(false);
+    expect(shouldIndexPath("knowledge/repos/acme/journal.md")).toBe(false);
+    // The `dev-sessions` segment is anchored right after the slug, so a repo
+    // literally slugged "dev-sessions" does NOT leak its management docs...
+    expect(shouldIndexPath("knowledge/repos/dev-sessions/README.md")).toBe(false);
+    expect(shouldIndexPath("knowledge/repos/dev-sessions/overview.md")).toBe(false);
+    // ...but that repo's own dev-session evidence is still indexed.
+    expect(shouldIndexPath("knowledge/repos/dev-sessions/dev-sessions/s1/contract.md")).toBe(true);
+  });
+
   it("excludes unknown top-level paths", () => {
     expect(shouldIndexPath("random.md")).toBe(false);
     expect(shouldIndexPath("outside/foo.md")).toBe(false);

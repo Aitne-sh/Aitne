@@ -249,8 +249,13 @@ export function getDevSession(
 /**
  * The single active session, if any (singleton invariant — at most one
  * non-terminal row). Newest-first so a boot after a crash picks the most
- * recent. The code-level singleton guard (runtime_state) prevents a second
- * one from being created; this is the read side of that invariant.
+ * recent. The D5 singleton is enforced by `!repo`'s synchronous
+ * check-then-insert (this read guards that insert): getActiveDevSession +
+ * createDevSession run with no `await` between them, so on Node's single
+ * thread a second concurrent `!repo` observes the first row and refuses. Note
+ * the `runtime_state` latch (`current_dev_mode`) is a single overwriting
+ * pointer, NOT the guard — this read is. `ORDER BY created_at DESC LIMIT 1`
+ * is defensive against a transient >1 non-terminal row (e.g. a prior crash).
  */
 export function getActiveDevSession(db: Database.Database): DevSessionRow | null {
   const row = db

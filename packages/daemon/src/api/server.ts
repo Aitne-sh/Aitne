@@ -1227,6 +1227,7 @@ export function createApp(deps: ApiDependencies): Hono {
     config: deps.config,
     writeTracker: deps.writeTracker,
     onIndexableContextChange: deps.onIndexableContextChange,
+    onGitReposChanged: deps.onGitReposChanged,
   });
   app.route("/api", repositoriesRoutes);
   // Dev-mode session read projection (dashboard "Dev Sessions" page).

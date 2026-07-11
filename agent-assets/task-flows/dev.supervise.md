@@ -136,6 +136,12 @@ tasks); the merged code is in the repository. Reply with exactly ONE of:
   re-decide (the master contract itself is wrong, a requirement became
   unreachable). Queued dependents are held until the owner decides.
 
+If the staged context carries an **owner decision** on a prior escalation of
+this plan review, it is AUTHORITATIVE: do NOT ESCALATE again on the same point —
+emit `KEEP` if the owner said keep the plan, or a validated `REVISE` that
+carries out their call. Escalating a question the owner has already answered
+strands the fleet.
+
 A malformed/missing REVISE payload is deterministically rejected and treated
 as KEEP (the approved plan continues — a refused mutation must not stop the
 fleet).

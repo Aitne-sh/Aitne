@@ -9,16 +9,26 @@ import {
   createDevSession,
   getDevSession,
   markDevAwaitingApproval,
+  markDevAwaitingUser,
+  approveDevSession,
   updateDevSessionConfig,
   listDevRequirements,
   listDevIterations,
 } from "../../db/dev-sessions-store.js";
 import {
+  createDevEscalation,
   getOpenDevEscalationForSession,
   listDevEscalationsForSession,
 } from "../../db/dev-session-escalations-store.js";
-import { listDevTasks } from "../../db/dev-session-tasks-store.js";
-import { DEV_DOCS, ensureDevWorkdir, writeDevDoc, readDevDoc } from "./dev-loop-docs.js";
+import { getDevTask, listDevTasks } from "../../db/dev-session-tasks-store.js";
+import {
+  DEV_DOCS,
+  DEV_OWNER_PLAN_DECISION_FILE,
+  DEV_TASK_ARCHIVE_DIR,
+  ensureDevWorkdir,
+  writeDevDoc,
+  readDevDoc,
+} from "./dev-loop-docs.js";
 import { normalizeDevLoopConfig } from "./dev-loop-config.js";
 import {
   createDevModeRunner,
@@ -483,5 +493,253 @@ describe("DevModeRunner", () => {
     // Iteration rows are tagged with their task id.
     const taskTagged = listDevIterations(db, "s1").filter((r) => r.taskId !== null);
     expect(taskTagged.length).toBeGreaterThan(0);
+  });
+
+  // ── WP3 escalation-routing + lifecycle ────────────────────────────────
+
+  /** Approve + park the session in awaiting_user (bypassing the loop) so a
+   *  resumeAfterEscalation edge case can be exercised deterministically. */
+  function parkAwaitingUser(): void {
+    approveDevSession(db, {
+      id: "s1", approvedHash: "h", branch: "aitne-dev/s1", baseRef: "base",
+      maxIterations: 10, maxBudgetUsd: null, approvedAt: 0,
+    });
+    markDevAwaitingUser(db, "s1", 0);
+  }
+
+  it("interview turn is abortable via cancel (P1-15)", async () => {
+    db.prepare(`UPDATE dev_sessions SET state = 'interview' WHERE id = 's1'`).run();
+    let started = false;
+    let aborted = false;
+    let ctrl: AbortController | null = null;
+    const backend: DevBackend = {
+      async runLeg() {
+        started = true;
+        if (ctrl!.signal.aborted) {
+          aborted = true;
+        } else {
+          await new Promise<void>((resolve) =>
+            ctrl!.signal.addEventListener("abort", () => { aborted = true; resolve(); }, { once: true }),
+          );
+        }
+        return { text: "aborted", sessionId: null, costUsd: 0, numTurns: 0, isError: true };
+      },
+    };
+    const runner = createDevModeRunner({
+      db,
+      makeBackend: (controller) => { ctrl = controller; return backend; },
+      loadTaskFlow: (key) => `${key} {context}`,
+      resolveRepoPath: (id) => (id === "local:t" ? repo : null),
+      deliveryEnqueuer: makeEnqueuer(cap),
+      tier: "high",
+      now: () => 1000,
+      uuid: () => `id-${idn++}`,
+    });
+    const turn = runner.runInterviewTurn({ sessionId: "s1", userMessage: "build X" });
+    await waitUntil(() => started);
+    // The interview controller is registered in `active`, so cancel aborts it
+    // instead of the leg running out its maxSeconds window.
+    await runner.cancel("s1", "user exit");
+    await turn;
+    expect(aborted).toBe(true);
+  });
+
+  it("promotes + delivers the next queued escalation on a resume that proceeds (P0-5)", async () => {
+    parkAwaitingUser();
+    createDevEscalation(db, {
+      id: "e-a", sessionId: "s1", kind: "spec_decision",
+      question: "A?", contextSummary: null, askedAt: 1,
+    });
+    createDevEscalation(db, {
+      id: "e-b", sessionId: "s1", kind: "spec_decision",
+      question: "B?", contextSummary: null, askedAt: 2,
+    });
+    const runner = makeRunner(fakeBackend(repo));
+    // A resume that PROCEEDS (budget healthy): the held escalation is promoted
+    // to active AND delivered, then the loop resumes.
+    const outcome = await runner.resumeAfterEscalation({ sessionId: "s1", escalationId: "e-a", answer: "use A" });
+    expect(outcome).toBe("resumed");
+    expect(getOpenDevEscalationForSession(db, "s1")?.id).toBe("e-b");
+    expect(cap.escalations.some((e) => e.escalationId === "e-b")).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running", 15000);
+  });
+
+  it("does NOT deliver the promoted escalation when the resume is blocked by budget (P0-5)", async () => {
+    parkAwaitingUser();
+    createDevEscalation(db, {
+      id: "e-a", sessionId: "s1", kind: "spec_decision",
+      question: "A?", contextSummary: null, askedAt: 1,
+    });
+    createDevEscalation(db, {
+      id: "e-b", sessionId: "s1", kind: "spec_decision",
+      question: "B?", contextSummary: null, askedAt: 2,
+    });
+    updateDevSessionConfig(db, "s1", { config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxResumes: 1 }) }, 0);
+    db.prepare(`UPDATE dev_sessions SET resumes = 5 WHERE id = 's1'`).run();
+    const runner = makeRunner(fakeBackend(repo));
+    const outcome = await runner.resumeAfterEscalation({ sessionId: "s1", escalationId: "e-a", answer: "use A" });
+    expect(outcome).toBe("blocked");
+    // e-b was promoted in the store, but NOT delivered — the owner is not asked
+    // a fresh question on a session the budget check just terminated.
+    expect(getOpenDevEscalationForSession(db, "s1")?.id).toBe("e-b");
+    expect(cap.escalations.some((e) => e.escalationId === "e-b")).toBe(false);
+  });
+
+  it("scales the resume budget by task count for a fleet (P1-17)", async () => {
+    parkAwaitingUser();
+    for (const k of ["a", "b", "c"]) {
+      db.prepare(
+        `INSERT INTO dev_session_tasks (id, session_id, task_key, summary, body, state, created_at, updated_at)
+         VALUES (?, 's1', ?, 's', 'b', 'queued', 0, 0)`,
+      ).run(`t-${k}`, k);
+    }
+    createDevEscalation(db, {
+      id: "e1", sessionId: "s1", taskId: "t-a", kind: "risk_approval",
+      question: "?", contextSummary: null, askedAt: 1,
+    });
+    updateDevSessionConfig(db, "s1", { config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxResumes: 1 }) }, 0);
+    // At resumes = 3 the fleet's scaled cap (maxResumes 1 × 3 tasks = 3) is
+    // spent — the next resume blocks; a single-loop cap (1) would have blocked
+    // two resumes earlier.
+    db.prepare(`UPDATE dev_sessions SET resumes = 3 WHERE id = 's1'`).run();
+    const runner = makeRunner(fakeBackend(repo));
+    const outcome = await runner.resumeAfterEscalation({ sessionId: "s1", escalationId: "e1", answer: "ok" });
+    expect(outcome).toBe("blocked");
+    const blockDigest = cap.digests.find((d) => d.draft.includes("resume budget"));
+    expect(blockDigest?.draft).toContain("3 decisions");
+  });
+
+  it("scales the resume budget by fleet size for a SESSION-scoped escalation too (P1-17 fix)", async () => {
+    parkAwaitingUser();
+    for (const k of ["a", "b", "c"]) {
+      db.prepare(
+        `INSERT INTO dev_session_tasks (id, session_id, task_key, summary, body, state, created_at, updated_at)
+         VALUES (?, 's1', ?, 's', 'b', 'merged', 0, 0)`,
+      ).run(`t-${k}`, k);
+    }
+    // A SESSION-scoped escalation (taskId null) — e.g. the integration gate,
+    // raised after every task merged. The cap must be the SAME scaled fleet cap
+    // (1 × 3 = 3), not the single-loop cap (1) — otherwise a merged fleet is
+    // killed at its final gate.
+    createDevEscalation(db, {
+      id: "eg", sessionId: "s1", kind: "review_escalation",
+      question: "gate?", contextSummary: null, askedAt: 1,
+    });
+    updateDevSessionConfig(db, "s1", { config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxResumes: 1 }) }, 0);
+    db.prepare(`UPDATE dev_sessions SET resumes = 3 WHERE id = 's1'`).run();
+    const runner = makeRunner(fakeBackend(repo));
+    const outcome = await runner.resumeAfterEscalation({ sessionId: "s1", escalationId: "eg", answer: "approve" });
+    expect(outcome).toBe("blocked");
+    const blockDigest = cap.digests.find((d) => d.draft.includes("resume budget"));
+    expect(blockDigest?.draft).toContain("3 decisions"); // scaled by fleet size, not the single-loop 1
+  });
+
+  it("re-triggers plan review with the owner decision on a plan-review escalation (P1-14)", async () => {
+    parkAwaitingUser();
+    // A merged task whose plan review escalated.
+    db.prepare(
+      `INSERT INTO dev_session_tasks (id, session_id, task_key, summary, body, state, plan_review, created_at, updated_at)
+       VALUES ('tk', 's1', 'auth', 's', 'b', 'merged', 'escalated', 0, 0)`,
+    ).run();
+    createDevEscalation(db, {
+      id: "e1", sessionId: "s1", taskId: "tk", kind: "review_escalation",
+      question: "keep or drop?", contextSummary: null, askedAt: 1,
+    });
+    // Starve the budget so the resume blocks AFTER the plan-review reset (which
+    // runs first) — deterministic, no loop.
+    updateDevSessionConfig(db, "s1", { config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxResumes: 1 }) }, 0);
+    db.prepare(`UPDATE dev_sessions SET resumes = 5 WHERE id = 's1'`).run();
+    const runner = makeRunner(fakeBackend(repo));
+    const outcome = await runner.resumeAfterEscalation({
+      sessionId: "s1", escalationId: "e1", answer: "drop REQ-002 from the remaining tasks",
+    });
+    expect(outcome).toBe("blocked");
+    // The review is re-armed (escalated -> pending) and the owner's decision is
+    // persisted where planReviewTask re-reads it — NOT rubber-stamped to done.
+    expect(getDevTask(db, "tk")!.planReview).toBe("pending");
+    const ownerDoc = readDevDoc(repo, `${DEV_TASK_ARCHIVE_DIR}/auth/${DEV_OWNER_PLAN_DECISION_FILE}`);
+    expect(ownerDoc).toContain("drop REQ-002");
+  });
+
+  it("accepts a task escalation answer mid-fleet and wakes the loop in place (P0-4)", async () => {
+    // A 2-task fleet: `alpha` escalates RISK on its first pass while `beta` is
+    // held in-flight (blocked on a gate). The session therefore stays 'running'
+    // (a sibling is still working, F6). The owner answers alpha's escalation
+    // WHILE running — it must be accepted and wake the live orchestrator in
+    // place (no second loop), not rejected with "the loop is running".
+    let releaseBeta: () => void = () => {};
+    const betaGate = new Promise<void>((r) => { releaseBeta = r; });
+    const complete = (dir: string, key: string): DevLegResponse => {
+      writeFileSync(join(dir, `${key}.ts`), `export const ${key} = 1;\n`);
+      const led = readDevDoc(dir, DEV_DOCS.ledger) ?? "";
+      const reqs = [...led.matchAll(/\| (REQ-\d+) \|/g)].map((m) => m[1]!);
+      writeDevDoc(dir, DEV_DOCS.ledger, ["| REQ | Status | Evidence | Iter |", "|---|---|---|---|", ...reqs.map((r) => `| ${r} | met | ev | 1 |`)].join("\n"));
+      writeDevDoc(dir, DEV_DOCS.agentState, "READY_FOR_REVIEW done");
+      return ok("implemented");
+    };
+    const backend: DevBackend = {
+      async runLeg(req) {
+        const key = req.sessionDir.split("/").pop()!;
+        switch (req.taskFlowKey) {
+          case "dev.decompose":
+            writeDevDoc(req.sessionDir, DEV_DOCS.taskPlan, [
+              "<!-- TASK-PLAN-BEGIN v1 -->",
+              "TASK: alpha\nSUMMARY: a\nDEPENDS: -\nSCOPE: alpha.ts\nREQS: REQ-001\nBODY-BEGIN\nbuild alpha\nBODY-END\nTASK-END",
+              "TASK: beta\nSUMMARY: b\nDEPENDS: -\nSCOPE: beta.ts\nREQS: REQ-002\nBODY-BEGIN\nbuild beta\nBODY-END\nTASK-END",
+              "<!-- TASK-PLAN-END -->",
+            ].join("\n"));
+            return ok("DECOMPOSE: TASKS n=2");
+          case "dev.decompose_review": return ok("DECOMPOSE-REVIEW: APPROVE clean");
+          case "dev.plan":
+            writeDevDoc(req.sessionDir, DEV_DOCS.plan, "## Milestones\n- [ ] do it");
+            return ok("planned");
+          case "dev.implement": {
+            const guidance = readDevDoc(req.sessionDir, DEV_DOCS.supervisorGuidance);
+            if (key === "alpha" && !guidance) {
+              // First pass → NEEDS_SPEC_DECISION; the supervisor escalates it
+              // straight to the owner (below). The guidance the owner's answer
+              // writes flips alpha to completion on its next pass.
+              writeDevDoc(req.sessionDir, DEV_DOCS.decisionRequests, "DR-1: which database?");
+              writeDevDoc(req.sessionDir, DEV_DOCS.agentState, "NEEDS_SPEC_DECISION which database?");
+              return ok("needs a decision");
+            }
+            if (key === "beta") await betaGate; // hold beta in-flight
+            return complete(req.sessionDir, key);
+          }
+          case "dev.supervise":
+            // Task-mode: the supervisor sends the question to the owner. (The
+            // integration gate never reaches here — dev.review APPROVEs.)
+            return ok("The owner must pick the database.\nSUPERVISE: ESCALATE which database should alpha use?");
+          case "dev.review":
+            return ok("REQ-001: MET ok\nREQ-002: MET ok\nVERDICT: APPROVE ship it");
+          case "dev.stop_eval": return ok("STOP-EVAL: MET");
+          case "dev.evidence":
+            writeDevDoc(req.sessionDir, DEV_DOCS.evidence, "# Evidence\nok");
+            return ok("evidence");
+          default: return ok("noop");
+        }
+      },
+    };
+    const runner = makeRunner(backend);
+    runner.startFromApproval("s1");
+    try {
+      // alpha escalates; beta is still in-flight, so the session stays running.
+      await waitUntil(() => cap.escalations.length > 0, 15000);
+      const esc = getOpenDevEscalationForSession(db, "s1")!;
+      expect(getDevSession(db, "s1")!.state).toBe("running");
+      const outcome = await runner.resumeAfterEscalation({ sessionId: "s1", escalationId: esc.id, answer: "yes, touch .env is fine" });
+      expect(outcome).toBe("resumed");
+      // Still one run — the mid-fleet answer woke the loop in place.
+      expect(getDevSession(db, "s1")!.state).toBe("running");
+    } finally {
+      releaseBeta();
+    }
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running", 20000);
+    const session = getDevSession(db, "s1")!;
+    expect(session.state).toBe("done");
+    expect(session.loopState).toBe("SUCCESS");
+    expect(existsSync(join(repo, "alpha.ts"))).toBe(true);
+    expect(existsSync(join(repo, "beta.ts"))).toBe(true);
+    expect(listDevEscalationsForSession(db, "s1")[0]!.resolved).toBe(true);
   });
 });

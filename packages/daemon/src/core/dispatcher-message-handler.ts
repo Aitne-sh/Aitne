@@ -65,11 +65,15 @@ import type { StreamCallbacks } from "./agent-core.js";
 import type { IAgentRouter } from "./backends/backend-router.js";
 import { getModelLabel } from "./backends/model-registry.js";
 import { parseGeminiAuthCode } from "./backends/auth-recovery.js";
-import { tryHandle as tryHandleBangCommand } from "./bang-commands/registry.js";
+import {
+  normalizeBangCommandText,
+  tryHandle as tryHandleBangCommand,
+} from "./bang-commands/registry.js";
 import { AgentWriteTracker } from "../safety/agent-write-tracker.js";
 import {
   CUSTOM_BANG_COMMAND_SOURCE,
   createUserBangCommandEvent,
+  getEnabledUserBangCommandByCommand,
   resolveCommandSkillSlugs,
   type UserBangCommand,
 } from "./bang-commands/user-commands.js";
@@ -554,13 +558,19 @@ export class MessageHandler {
   /**
    * Development-mode DM routing. Returns `true` when the DM was consumed by the
    * dev session (caller short-circuits), `false` to fall through to normal
-   * processing (only when the latch is stale). Branches on the live session
-   * state:
-   *   - awaiting_user  → the loop parked on a critical question; the DM is the
-   *     owner's answer → resolve the open escalation + resume the loop.
-   *   - interview / awaiting_approval → the DM is an interview turn → draft the
-   *     contract (the inactivity timer slides forward on the activity).
-   *   - running → the loop is busy; acknowledge (owner should `!exit` to stop).
+   * processing (bang interceptor / generic agent).
+   *
+   * Falls through (`false`) for: a stale latch; a DM on a NON-originating
+   * channel (WP3 P0-6 — the singleton latch must not hijack an unrelated DM on
+   * another platform); and a genuine registered bang command (`!exit`/`!approve`
+   * + globals like `!stop`/`!cost`, WP3 P1-13 — anything else beginning with
+   * '!' is treated as the owner's prose, not consumed as an unknown bang).
+   *
+   * Otherwise it routes by intent: an OPEN escalation's answer resumes the loop
+   * (checked first, and regardless of whether the session is parked or a fleet
+   * task escalated while siblings keep running — WP3 P0-4); an interview turn
+   * drafts the contract (the inactivity timer slides forward); a running loop
+   * with no open question gets an out-of-band acknowledgement.
    */
   private async handleDevModeMessage(
     event: MessageEvent,
@@ -577,18 +587,43 @@ export class MessageHandler {
       this.clearDevMode();
       return false;
     }
+
+    // Channel binding (WP3 P0-6) — the session belongs to the channel `!repo`
+    // was sent on (`${platform}:${channel}`). A DM on any other channel is not
+    // part of it: fall through so the latch cannot hijack an unrelated DM, and
+    // so a dashboard-origin session is driven from the dashboard, not blocked.
+    const eventChannel = `${event.platform}:${event.channel}`;
+    if (session.originatingChannel && session.originatingChannel !== eventChannel) {
+      return false;
+    }
+
+    // Bang disambiguation (WP3 P1-13) — a genuine registered bang (built-in
+    // control/global OR a user-defined command) is the bang interceptor's job:
+    // fall through. Anything else is the owner's answer/interview text and must
+    // reach the dev loop, not be consumed as an unknown bang. We consult the
+    // registry (built-ins) AND the user-command table rather than an ASCII
+    // `startsWith("!")` prefix test: `resolve` / `normalizeBangCommandText`
+    // fold a fullwidth `！` (U+FF01, routine from a CJK IME) to `!`, so
+    // `！exit` / `！approve` / `！<user-cmd>` are still recognized as commands
+    // and fall through instead of being swallowed as an answer. Multi-line
+    // content is never a command (the §7 spoof guard), so it routes to the loop.
+    const trimmed = event.content.trim();
+    if (!trimmed.includes("\n")) {
+      const registry = this.getBangCommandRegistry();
+      const isRegisteredBang =
+        registry?.resolve(trimmed) != null
+        || getEnabledUserBangCommandByCommand(this.db, normalizeBangCommandText(trimmed)) != null;
+      if (isRegisteredBang) return false;
+    }
+
     const runner = this.getDevModeRunner();
 
-    if (session.state === "awaiting_user") {
-      const open = getOpenDevEscalationForSession(this.db, session.id);
-      if (!open) {
-        // Parked but no open question — defensive. Nudge the owner.
-        await this.notificationMgr.send(
-          "The dev session is paused but I have no open question on file. Reply `!exit` to end it.",
-          event,
-        );
-        return true;
-      }
+    // An OPEN escalation is the owner's pending question — its answer resolves
+    // it and resumes the loop. Checked FIRST and independent of session state so
+    // a fleet task escalation raised while the session is still 'running'
+    // (siblings in flight) is answerable, not swallowed (WP3 P0-4).
+    const open = getOpenDevEscalationForSession(this.db, session.id);
+    if (open) {
       if (!runner) {
         await this.notificationMgr.send(
           "Dev mode is unavailable right now (the loop runner isn't wired). Try again shortly.",
@@ -614,6 +649,15 @@ export class MessageHandler {
       }
       // outcome === "blocked": the loop hit its resume budget and terminated;
       // the runner already enqueued a "blocked" digest, so don't double-message.
+      return true;
+    }
+
+    if (session.state === "awaiting_user") {
+      // Parked but no open question on file — defensive. Nudge the owner.
+      await this.notificationMgr.send(
+        "The dev session is paused but I have no open question on file. Reply `!exit` to end it.",
+        event,
+      );
       return true;
     }
 
@@ -646,7 +690,8 @@ export class MessageHandler {
       return true;
     }
 
-    // running — the autonomous loop owns the repo; a DM here is out-of-band.
+    // running with no open escalation — the loop owns the repo; a DM is
+    // out-of-band.
     await this.notificationMgr.send(
       "The dev loop is running. Reply `!exit` to stop it, or wait for the next update.",
       event,
@@ -807,23 +852,22 @@ export class MessageHandler {
       }
     }
 
-    // ── Development mode intercept (NON-bang DMs) ──
-    // While a dev session is latched (a singleton, like setup mode), a plain DM
-    // from the owner routes into the loop rather than the generic DM agent: an
-    // escalation answer resumes the parked loop; an interview turn drafts the
-    // contract. This MUST run BEFORE the bang interceptor's pause-decline —
-    // otherwise a paused dev session (started with the `runsWhilePaused` `!repo`)
-    // would have its interview / escalation DMs swallowed by the "agent is
-    // paused" notice, stranding the session. Bang DMs (`!repo`/`!approve`/
-    // `!exit`) are left to the bang interceptor below (they are runsWhilePaused).
-    // Dashboard messages / non-DM mentions keep their own scope and are exempt.
+    // ── Development mode intercept ──
+    // While a dev session is latched (a singleton, like setup mode), a DM from
+    // the owner ON THE ORIGINATING CHANNEL routes into the loop rather than the
+    // generic DM agent: an escalation answer resumes the loop; an interview turn
+    // drafts the contract. This MUST run BEFORE the bang interceptor's
+    // pause-decline — otherwise a paused dev session (started with the
+    // `runsWhilePaused` `!repo`) would have its interview / escalation DMs
+    // swallowed by the "agent is paused" notice, stranding the session.
+    // `handleDevModeMessage` returns false (fall through to the bang interceptor
+    // / normal handling) for a genuine registered bang (`!exit`/`!approve` +
+    // globals like `!stop`/`!cost`, WP3 P1-13), a DM on a non-originating
+    // channel (WP3 P0-6 anti-hijack), or a stale latch. Dashboard-origin
+    // sessions ARE driven here now (the old `platform !== "dashboard"` exclusion
+    // made them undriveable).
     const currentDevMode = this.getCurrentDevMode();
-    if (
-      event.isDm
-      && event.platform !== "dashboard"
-      && currentDevMode !== null
-      && !event.content.trim().startsWith("!")
-    ) {
+    if (event.isDm && currentDevMode !== null) {
       const handledDev = await this.handleDevModeMessage(event, currentDevMode);
       if (handledDev) return;
     }

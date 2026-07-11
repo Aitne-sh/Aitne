@@ -2293,13 +2293,23 @@ CREATE TABLE IF NOT EXISTS dev_session_escalations (
     answer          TEXT,
     answered_at     INTEGER,
     resolved        INTEGER NOT NULL DEFAULT 0
-        CHECK (resolved IN (0, 1))
+        CHECK (resolved IN (0, 1)),
+    -- Serialization marker (dev-mode WP3 P0-5): at most ONE escalation per
+    -- session is ACTIVE (queued = 0, delivered to the owner) at a time; a
+    -- concurrent fleet task escalation is persisted with queued = 1 and only
+    -- promoted (queued -> 0 + delivered) once the active one resolves. This
+    -- keeps a bare single-channel DM reply unambiguous — it always answers the
+    -- one outstanding question. Migration 0028 backfills existing rows to 0.
+    queued          INTEGER NOT NULL DEFAULT 0
+        CHECK (queued IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_dev_esc_session
     ON dev_session_escalations(session_id);
+-- The active-escalation lookup + serialization EXISTS check both key off
+-- (resolved = 0 AND queued = 0), so the partial index narrows to that.
 CREATE INDEX IF NOT EXISTS idx_dev_esc_unresolved
     ON dev_session_escalations(session_id)
-    WHERE resolved = 0;
+    WHERE resolved = 0 AND queued = 0;
 
 -- INTEGRATION-DRIFT-PHASE-7-PLAN.md §3.2 — persistent dedup for the
 -- 15-minute imminent-meeting reminder. Pre-Phase-7 the scheduler kept
