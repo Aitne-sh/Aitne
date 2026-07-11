@@ -105,7 +105,7 @@ describe("dev-loop-docs git safety helpers", () => {
 
   it("gitCommitAll refuses to sweep a half-resolved merge (backstop)", () => {
     startConflictedMerge();
-    expect(() => gitCommitAll(repo, "should not land")).toThrow(/merge in progress/);
+    expect(() => gitCommitAll(repo, "should not land")).toThrow(/merge is in progress/);
     run(repo, "merge", "--abort");
     // After the abort the helper works again.
     writeFileSync(join(repo, "g.txt"), "ok\n");

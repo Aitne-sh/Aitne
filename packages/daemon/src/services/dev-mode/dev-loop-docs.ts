@@ -311,7 +311,40 @@ export function gitHead(repoPath: string): string | null {
   }
 }
 
+/** Per-path absolute git-dir memo. The guards below run at EVERY iteration
+ *  top + before every commit; on machines with slow process spawn (~200ms/
+ *  exec) doing them as subprocesses is real per-iteration latency, so they
+ *  read the git plumbing files directly and only spawn to (re)discover the
+ *  git dir. A stale entry (repo re-created / worktree re-added) self-heals:
+ *  the HEAD probe fails and the dir is re-derived. */
+const GIT_DIR_CACHE = new Map<string, string>();
+
+function resolveGitDir(repoPath: string): string | null {
+  const cached = GIT_DIR_CACHE.get(repoPath);
+  if (cached && existsSync(join(cached, "HEAD"))) return cached;
+  try {
+    const dir = git(repoPath, ["rev-parse", "--absolute-git-dir"]);
+    GIT_DIR_CACHE.set(repoPath, dir);
+    return dir;
+  } catch {
+    GIT_DIR_CACHE.delete(repoPath);
+    return null;
+  }
+}
+
 export function gitCurrentBranch(repoPath: string): string | null {
+  const dir = resolveGitDir(repoPath);
+  if (dir) {
+    try {
+      const head = readFileSync(join(dir, "HEAD"), "utf8").trim();
+      if (head.startsWith("ref: refs/heads/")) {
+        return head.slice("ref: refs/heads/".length);
+      }
+      return null; // detached HEAD (raw sha)
+    } catch {
+      // racing checkout — fall through to the subprocess
+    }
+  }
   try {
     const b = git(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
     return b === "HEAD" ? null : b;
@@ -325,8 +358,11 @@ export function gitCreateBranch(repoPath: string, branch: string): void {
 }
 
 /** True when a merge is in progress (MERGE_HEAD exists). Canonical home —
- *  dev-flow-git re-exports it for the fleet callers. */
+ *  dev-flow-git re-exports it for the fleet callers. Reads the plumbing file
+ *  directly (see GIT_DIR_CACHE) — this runs before every commit. */
 export function gitMergeInProgress(repoPath: string): boolean {
+  const dir = resolveGitDir(repoPath);
+  if (dir) return existsSync(join(dir, "MERGE_HEAD"));
   try {
     git(repoPath, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]);
     return true;
@@ -367,19 +403,38 @@ export type DevRepoGuard =
       question: string;
     };
 
+export type DevRepoGuardFailure = Extract<DevRepoGuard, { ok: false }>;
+
+/** Thrown by the helpers that CANNOT return an outcome (gitCommitAll's
+ *  backstop, the plan leg's pre-commit preflight). Callers park the session
+ *  on `guard.question` instead of failing it. */
+export class DevRepoGuardError extends Error {
+  readonly guard: DevRepoGuardFailure;
+
+  constructor(guard: DevRepoGuardFailure) {
+    super(guard.question);
+    this.name = "DevRepoGuardError";
+    this.guard = guard;
+  }
+}
+
+function mergeInProgressGuard(repoPath: string): DevRepoGuardFailure {
+  return {
+    ok: false,
+    kind: "merge_in_progress",
+    currentBranch: gitCurrentBranch(repoPath),
+    question:
+      "A git merge is in progress in the repository — resolve it (or run "
+      + "`git merge --abort`), then reply here to resume, or !exit.",
+  };
+}
+
 export function checkRepoGuards(
   repoPath: string,
   expectedBranch: string | null,
 ): DevRepoGuard {
   if (gitMergeInProgress(repoPath)) {
-    return {
-      ok: false,
-      kind: "merge_in_progress",
-      currentBranch: gitCurrentBranch(repoPath),
-      question:
-        "A git merge is in progress in the repository — resolve it (or run "
-        + "`git merge --abort`), then reply here to resume, or !exit.",
-    };
+    return mergeInProgressGuard(repoPath);
   }
   if (expectedBranch !== null) {
     const current = gitCurrentBranch(repoPath);
@@ -430,10 +485,7 @@ export function validateBaseRef(
  *  the backstop). */
 export function gitCommitAll(repoPath: string, message: string): string | null {
   if (gitMergeInProgress(repoPath)) {
-    throw new Error(
-      "git merge in progress — refusing `add -A` (it would stage conflict "
-      + "markers as resolved). Resolve or abort the merge first.",
-    );
+    throw new DevRepoGuardError(mergeInProgressGuard(repoPath));
   }
   git(repoPath, ["add", "-A"]);
   const status = git(repoPath, ["status", "--porcelain"]);

@@ -713,7 +713,10 @@ describe("createDevFleetOrchestrator", () => {
     expect(flow.decomposeQueue).toHaveLength(0);
   });
 
-  it("defers (not BLOCKED) when the parent repo is dirty at merge, then parks the owner", async () => {
+  // Spawn-heavy (2 full workers + 21 merge-defer rounds, each round several
+  // git subprocesses) — on a machine with slow process spawn (~200ms/exec)
+  // this brushes the global 45s testTimeout, so it gets its own ceiling.
+  it("defers (not BLOCKED) when the parent repo is dirty at merge, then parks the owner", { timeout: 120_000 }, async () => {
     const config = seed();
     const flow = new FakeFlowLegs();
     flow.decomposeQueue.push({

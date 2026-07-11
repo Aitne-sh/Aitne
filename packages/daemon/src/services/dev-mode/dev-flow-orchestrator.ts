@@ -63,15 +63,21 @@ import {
   DEV_OWNER_PLAN_DECISION_FILE,
   DEV_PHASE_CONTEXT_DIR,
   DEV_TASK_ARCHIVE_DIR,
+  appendDevDoc,
+  checkRepoGuards,
   copyDevDoc,
   ensureDevWorkdir,
+  gitCommitAll,
+  gitCurrentBranch,
   gitDiffPaths,
   gitHead,
+  gitStatusDirty,
   isWholeRunDiffEmpty,
   parseLedgerMarkdown,
   readDevDoc,
   removeDevDoc,
   runVerifyCommand,
+  validateBaseRef,
   writeDevDoc,
   writeLastVerifyLog,
 } from "./dev-loop-docs.js";
@@ -669,6 +675,18 @@ export function createDevFleetOrchestrator(
       });
       if (!claimed) return;
       task = claimed;
+      // A surviving worktree may hold an interrupted iteration's uncommitted
+      // edits (daemon crash / abort mid-leg) — sweep them into a commit so
+      // the reviewer sees them (loop.sh:6969 port). Best-effort: a guard trip
+      // here (mid-merge worktree) surfaces at the engine's iteration-top
+      // check instead.
+      try {
+        if (gitStatusDirty(task.worktreePath!)) {
+          gitCommitAll(task.worktreePath!, `dev: iter ${task.iteration} — recovered uncommitted work on resume`);
+        }
+      } catch (err) {
+        logger.warn({ err, taskKey: key }, "recovered-work commit failed (engine guard will park)");
+      }
     }
 
     refreshParallelContext();
@@ -908,6 +926,24 @@ export function createDevFleetOrchestrator(
         loopState: "BLOCKED",
         reason: "A merge is already in progress in the repository — resolve it manually.",
       };
+      return;
+    }
+    // Branch-identity guard: gitMergeNoFF merges into whatever HEAD is — if
+    // the owner checked out another branch mid-run, fleet work would land on
+    // the WRONG branch. Park for the owner (a moved checkout never
+    // self-heals, so no defer loop).
+    const expectedBranch = liveSession().branch;
+    if (expectedBranch && gitCurrentBranch(repoPath) !== expectedBranch) {
+      await deps.onTaskEscalation({
+        taskId: null,
+        kind: "spec_decision",
+        question:
+          `The repository checkout moved to '${gitCurrentBranch(repoPath) ?? "(detached HEAD)"}' `
+          + `while fleet work was waiting to merge. Run \`git checkout ${expectedBranch}\` `
+          + "again, then reply here to resume.",
+        contextSummary: null,
+      });
+      fatal = { kind: "parked", reason: "repo checkout moved — merges blocked" };
       return;
     }
     if (hasUncommittedTracked(repoPath)) {
@@ -1168,7 +1204,33 @@ export function createDevFleetOrchestrator(
     { kind: "result"; result: DevFleetRunResult } | { kind: "fixup" }
   > {
     const sessionRow = liveSession();
-    const baseRef = sessionRow.baseRef ?? "HEAD";
+    // In-place hazards first: the gate diffs + the final re-check run against
+    // the owner's checkout, which must still be the session branch and not
+    // mid-merge.
+    if (sessionRow.branch) {
+      const guard = checkRepoGuards(repoPath, sessionRow.branch);
+      if (!guard.ok) {
+        await deps.onTaskEscalation({
+          taskId: null,
+          kind: "spec_decision",
+          question: guard.question,
+          contextSummary: null,
+        });
+        return { kind: "result", result: { kind: "parked", reason: "repo checkout moved — integration gate blocked" } };
+      }
+    }
+    // Re-validate the fleet base against real history (degrade to HEAD on a
+    // rewrite — loop.sh:5316 port) so the gate diff is never garbage.
+    const baseCheck = validateBaseRef(repoPath, sessionRow.baseRef);
+    if (baseCheck.degraded) {
+      appendDevDoc(
+        repoPath,
+        DEV_DOCS.progress,
+        `\nintegration gate: recorded base ${sessionRow.baseRef ?? "(none)"} is not an `
+          + `ancestor of HEAD — using ${baseCheck.ref} as the review base.\n`,
+      );
+    }
+    const baseRef = baseCheck.ref;
     const contract = readDevDoc(repoPath, DEV_DOCS.contract) ?? "";
     const legCtx = {
       repoPath,
@@ -1256,12 +1318,26 @@ export function createDevFleetOrchestrator(
     }
 
     // APPROVE → evidence over the whole fleet result, then the final
-    // deterministic re-check against the master contract.
+    // deterministic re-check against the master contract. Everything the
+    // reviewer certified is HEAD right now — the evidence leg must not
+    // change reviewed code (loop.sh:5468 port).
+    const reviewedRef = gitHead(repoPath) ?? "HEAD";
     const reqVerdicts = review?.reqVerdicts ?? [];
     const evidence = await legRunner.evidence({ ...legCtx, gateReqVerdicts: reqVerdicts });
     recordFlow("evidence", { verdict: evidence.isError ? "error" : "ok", responses: [evidence] });
     if (evidence.isError) {
       return { kind: "result", result: { kind: "terminal", loopState: "BLOCKED", reason: "Evidence generation failed at the integration gate." } };
+    }
+    const tainted = gitDiffPaths(repoPath, reviewedRef);
+    if (tainted.length > 0) {
+      return {
+        kind: "result",
+        result: {
+          kind: "terminal",
+          loopState: "BLOCKED",
+          reason: `evidence step changed code after review (unreviewed): ${tainted.slice(0, 10).join(", ")}`,
+        },
+      };
     }
 
     const { total, met } = countDevRequirements(db, sessionId);

@@ -32,6 +32,9 @@ import type { DevTaskLoopState } from "../../db/dev-session-tasks-store.js";
 import type { DevEscalationKind } from "../../db/dev-session-escalations-store.js";
 import {
   DEV_DOCS,
+  DevRepoGuardError,
+  appendDevDoc,
+  checkRepoGuards,
   clearAgentState,
   gitCommitAll,
   gitDiffPaths,
@@ -42,6 +45,7 @@ import {
   readDevDoc,
   removeDevDoc,
   runVerifyCommand,
+  validateBaseRef,
   writeDevDoc,
   writeLastVerifyLog,
 } from "./dev-loop-docs.js";
@@ -351,11 +355,34 @@ export class DevLoopEngine {
     return total > 0 && met === total;
   }
 
-  /** Iteration 0 — produce a plan if none exists yet (loop-kit /loop-plan). */
+  /**
+   * Phase-A in-place hazard check (merge-in-progress + branch-identity): the
+   * engine shares the owner's checkout, so a `git checkout` mid-run would
+   * land every following commit/merge on the WRONG branch. Returns the parked
+   * escalate outcome, or null when safe. Re-checked before every commit —
+   * a leg runs for minutes and the checkout can move under it.
+   */
+  private guardOutcome(): DevIterationOutcome | null {
+    const guard = checkRepoGuards(this.repoPath, this.session.branch);
+    if (guard.ok) return null;
+    return {
+      kind: "escalate",
+      escalationKind: "spec_decision",
+      loopState: "NEEDS_SPEC_DECISION",
+      question: guard.question,
+      contextSummary: null,
+    };
+  }
+
+  /** Iteration 0 — produce a plan if none exists yet (loop-kit /loop-plan).
+   *  Throws DevRepoGuardError when the checkout moved / a merge is live —
+   *  the callers park the session on it (never a plain failure). */
   async ensurePlan(): Promise<void> {
     const plan = readDevDoc(this.repoPath, DEV_DOCS.plan);
     if (plan && plan.trim().length > 0) return;
     const leg = await this.legRunner.plan(this.legCtx());
+    const guard = checkRepoGuards(this.repoPath, this.session.branch);
+    if (!guard.ok) throw new DevRepoGuardError(guard);
     const sha = gitCommitAll(this.repoPath, "dev: iteration 0 — plan");
     this.record("plan", leg.isError ? "error" : "ok", null, leg, sha);
   }
@@ -388,6 +415,11 @@ export class DevLoopEngine {
     if (wallClockHit) {
       return { kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: "Hit the wall-clock cap for this run." };
     }
+
+    // In-place hazard check before any work (the owner may have moved the
+    // checkout / started a merge since the last iteration).
+    const entryGuard = this.guardOutcome();
+    if (entryGuard) return entryGuard;
 
     this.persistCheckpoint();
     clearAgentState(this.repoPath);
@@ -444,6 +476,12 @@ export class DevLoopEngine {
     if (evalOut.result.verify) {
       writeLastVerifyLog(this.repoPath, evalOut.result.verify);
     }
+    // The implement leg ran for minutes — re-check before the checkpoint
+    // commit. On a moved checkout the iteration's uncommitted edits stay in
+    // the tree; the resume path sweeps them onto the RIGHT branch via the
+    // recovered-work commit.
+    const commitGuard = this.guardOutcome();
+    if (commitGuard) return commitGuard;
     const sha = gitCommitAll(this.repoPath, `dev: iter ${iterationNo} — ${evalOut.result.state}`);
     this.record("evaluate", evalOut.result.state, evalOut.result.reason, undefined, sha);
 
@@ -539,7 +577,19 @@ export class DevLoopEngine {
    * per-REQ downgrade and treats any non-escalation state as ready.
    */
   private async runSuccessGate(forced: boolean, preRef: string): Promise<DevIterationOutcome> {
-    const baseRef = this.session.baseRef ?? preRef;
+    // Re-validate the recorded run base against real history — a rewritten
+    // history (owner rebase/reset) degrades to HEAD with a journaled note,
+    // never a broken gate diff (loop.sh:6913 port).
+    const baseCheck = validateBaseRef(this.repoPath, this.session.baseRef ?? preRef);
+    if (baseCheck.degraded) {
+      appendDevDoc(
+        this.repoPath,
+        DEV_DOCS.progress,
+        `\ngate: recorded base ${this.session.baseRef ?? "(none)"} is not an `
+          + `ancestor of HEAD — using ${baseCheck.ref} as the review base.\n`,
+      );
+    }
+    const baseRef = baseCheck.ref;
     const { response: reviewResp, review } = await this.legRunner.review({
       ...this.legCtx(),
       mode: "gate",
@@ -567,14 +617,26 @@ export class DevLoopEngine {
       }
       return { kind: "continue" };
     }
-    // APPROVE → evidence.
+    // APPROVE → evidence. Everything the reviewer certified is HEAD right
+    // now; the evidence leg must not change reviewed code (loop.sh:1556).
     removeDevDoc(this.repoPath, DEV_DOCS.reviewFeedback);
     this.session = { ...this.session, gateReviseCount: 0 };
+    const reviewedRef = gitHead(this.repoPath) ?? "HEAD";
     const evidence = await this.legRunner.evidence({ ...this.legCtx(), gateReqVerdicts: reqVerdicts });
+    const evidenceGuard = this.guardOutcome();
+    if (evidenceGuard) return evidenceGuard;
     const sha = gitCommitAll(this.repoPath, `dev: iter ${this.session.iteration} — evidence`);
     this.record("evidence", evidence.isError ? "error" : "ok", null, evidence, sha);
     if (evidence.isError) {
       return { kind: "terminal", loopState: "BLOCKED", reason: "Evidence generation failed." };
+    }
+    const tainted = gitDiffPaths(this.repoPath, reviewedRef);
+    if (tainted.length > 0) {
+      return {
+        kind: "terminal",
+        loopState: "BLOCKED",
+        reason: `evidence step changed code after review (unreviewed): ${tainted.slice(0, 10).join(", ")}`,
+      };
     }
 
     // Final deterministic re-check.

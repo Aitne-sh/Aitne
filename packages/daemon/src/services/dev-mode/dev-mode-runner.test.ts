@@ -742,4 +742,137 @@ describe("DevModeRunner", () => {
     expect(existsSync(join(repo, "beta.ts"))).toBe(true);
     expect(listDevEscalationsForSession(db, "s1")[0]!.resolved).toBe(true);
   });
+
+  // ── Phase A in-place git safety (DEV_MODE_GIT_HARDENING) ──────────────
+
+  it("startFromApproval refuses over an in-progress merge", async () => {
+    // Manufacture a real conflicted merge in the owner's checkout.
+    const preBranch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(repo, ["checkout", "-q", "-b", "side"]);
+    writeFileSync(join(repo, "README.md"), "side\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "side"]);
+    git(repo, ["checkout", "-q", preBranch]);
+    writeFileSync(join(repo, "README.md"), "local\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "local"]);
+    expect(() => git(repo, ["merge", "side"])).toThrow();
+
+    const runner = makeRunner(fakeBackend(repo));
+    const result = runner.startFromApproval("s1");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("merge is in progress");
+    // Nothing moved: still parked mid-merge on the owner's branch.
+    expect(getDevSession(db, "s1")!.state).toBe("awaiting_approval");
+    git(repo, ["merge", "--abort"]);
+  });
+
+  it("records the rollback anchors + baseline journal row on the fresh path", async () => {
+    // seedSession's ensureDevWorkdir left a fresh untracked .gitignore —
+    // commit it so the owner's tree is genuinely clean at approve.
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "gitignore"]);
+    const preBranch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const preHead = git(repo, ["rev-parse", "HEAD"]);
+    const runner = makeRunner(fakeBackend(repo));
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running");
+
+    const session = getDevSession(db, "s1")!;
+    expect(session.originalBranch).toBe(preBranch);
+    expect(session.originalHead).toBe(preHead);
+    // The tree was clean at approve — no WIP was swept into the snapshot.
+    expect(session.wipSnapshotRef).toBeNull();
+    // Baseline verify ran once and journaled its red→green record.
+    expect(session.baselineVerifiedAt).not.toBeNull();
+    const baseline = listDevIterations(db, "s1").find((i) => i.phase === "baseline");
+    expect(baseline?.verdict).toBe("red=0 green=1");
+  });
+
+  it("sweeps dirty owner WIP into the snapshot and records its sha", async () => {
+    const preHead = git(repo, ["rev-parse", "HEAD"]);
+    writeFileSync(join(repo, "wip.txt"), "uncommitted owner work\n");
+    const runner = makeRunner(fakeBackend(repo));
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running");
+
+    const session = getDevSession(db, "s1")!;
+    expect(session.wipSnapshotRef).not.toBeNull();
+    expect(session.wipSnapshotRef).not.toBe(preHead);
+    // The snapshot commit is exactly the WIP sweep.
+    expect(git(repo, ["show", "--stat", "--format=%s", session.wipSnapshotRef!])).toContain(
+      "baseline snapshot",
+    );
+  });
+
+  it("parks again with a moved-checkout question when resuming off-branch", async () => {
+    // Implement escalates on the first pass so the session parks.
+    let calls = 0;
+    const backend = fakeBackend(repo, {
+      "dev.implement": () => {
+        calls += 1;
+        writeFileSync(join(repo, "wip.ts"), `// pass ${calls}\n`);
+        writeDevDoc(repo, DEV_DOCS.agentState, "NEEDS_SPEC_DECISION which db");
+        writeDevDoc(repo, DEV_DOCS.decisionRequests, "## DR-1\nWhich db?");
+        return ok("stuck");
+      },
+    });
+    const runner = makeRunner(backend);
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state === "awaiting_user");
+    const first = getOpenDevEscalationForSession(db, "s1")!;
+
+    // The owner wanders off the session branch, then answers.
+    git(repo, ["checkout", "-q", "-B", "somewhere-else"]);
+    const outcome = await runner.resumeAfterEscalation({
+      sessionId: "s1",
+      escalationId: first.id,
+      answer: "use sqlite",
+    });
+    expect(outcome).toBe("resumed");
+    await waitUntil(() => getDevSession(db, "s1")?.state === "awaiting_user");
+    const second = getOpenDevEscalationForSession(db, "s1")!;
+    expect(second.id).not.toBe(first.id);
+    expect(second.question).toContain("checkout moved");
+    expect(second.question).toContain("aitne-dev/s1");
+  });
+
+  it("commits recovered uncommitted work on resume so the reviewer sees it", async () => {
+    let calls = 0;
+    const backend = fakeBackend(repo, {
+      "dev.implement": () => {
+        calls += 1;
+        if (calls === 1) {
+          // First pass: leaves WORK UNCOMMITTED and escalates (the park).
+          writeFileSync(join(repo, "half-done.ts"), "export const partial = 1;\n");
+          writeDevDoc(repo, DEV_DOCS.agentState, "NEEDS_SPEC_DECISION which db");
+          return ok("stuck");
+        }
+        writeFileSync(join(repo, "feature.ts"), "export const x = 1;\n");
+        writeDevDoc(repo, DEV_DOCS.ledger, ledgerMd("met"));
+        writeDevDoc(repo, DEV_DOCS.agentState, "READY_FOR_REVIEW done");
+        return ok("implemented");
+      },
+    });
+    const runner = makeRunner(backend);
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state === "awaiting_user");
+    // The escalate iteration itself was checkpoint-committed (half-done.ts is
+    // in history, loop-kit parity). Simulate an interrupted leg's residue —
+    // work that never reached an evaluate commit — appearing while parked.
+    writeFileSync(join(repo, "crash-leftover.ts"), "export const orphan = 1;\n");
+
+    const esc = getOpenDevEscalationForSession(db, "s1")!;
+    await runner.resumeAfterEscalation({ sessionId: "s1", escalationId: esc.id, answer: "sqlite" });
+    await waitUntil(() => {
+      const s = getDevSession(db, "s1");
+      return s?.state !== "running" && s?.state !== "awaiting_user";
+    }, 20000);
+
+    expect(getDevSession(db, "s1")!.loopState).toBe("SUCCESS");
+    const subjects = git(repo, ["log", "--format=%s"]);
+    expect(subjects).toContain("recovered uncommitted work on resume");
+    // The recovered work landed on the SESSION branch, not lost.
+    expect(git(repo, ["status", "--porcelain"])).toBe("");
+  });
 });

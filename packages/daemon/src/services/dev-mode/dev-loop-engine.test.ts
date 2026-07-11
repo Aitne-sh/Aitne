@@ -69,6 +69,9 @@ describe("DevLoopEngine (integration over a real git repo)", () => {
     writeFileSync(join(repo, "README.md"), "seed\n");
     git(repo, ["add", "-A"]);
     git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "seed"]);
+    // Mirror startFromApproval: the loop runs ON the session branch — the
+    // engine's branch-identity guard (Phase A) parks on any other checkout.
+    git(repo, ["checkout", "-q", "-B", "aitne-dev/s1"]);
     const baseRef = git(repo, ["rev-parse", "HEAD"]);
     ensureDevWorkdir(repo);
     writeDevDoc(repo, DEV_DOCS.contract, CONTRACT_MD);
@@ -266,6 +269,69 @@ describe("DevLoopEngine (integration over a real git repo)", () => {
     const outcome = await e.runIteration(1);
     expect(outcome).toEqual<DevIterationOutcome>({
       kind: "terminal", loopState: "BUDGET_EXCEEDED", reason: expect.stringMatching(/wall-clock/),
+    });
+  });
+
+  // ── Phase A in-place guards (DEV_MODE_GIT_HARDENING) ──────────────────
+
+  it("iteration-top guard parks when the owner moved the checkout", async () => {
+    git(repo, ["checkout", "-q", "-B", "main"]);
+    const outcome = await engine(baseRunner()).runIteration(1);
+    expect(outcome.kind).toBe("escalate");
+    if (outcome.kind === "escalate") {
+      expect(outcome.escalationKind).toBe("spec_decision");
+      expect(outcome.question).toContain("checkout moved");
+      expect(outcome.question).toContain("aitne-dev/s1");
+    }
+  });
+
+  it("pre-commit guard parks when a LEG moves the checkout mid-iteration", async () => {
+    const legRunner = baseRunner();
+    legRunner.implement = async () => {
+      writeFileSync(join(repo, "feature.ts"), "export const x = 1;\n");
+      writeDevDoc(repo, DEV_DOCS.agentState, "IN_PROGRESS moving");
+      // Hostile/accidental: the checkout moves DURING the iteration.
+      git(repo, ["checkout", "-q", "-B", "elsewhere"]);
+      return okLeg("moved");
+    };
+    const outcome = await engine(legRunner).runIteration(1);
+    expect(outcome.kind).toBe("escalate");
+    if (outcome.kind === "escalate") {
+      expect(outcome.question).toContain("'elsewhere'");
+    }
+    // Nothing was committed onto the wrong branch — the edits stay
+    // uncommitted for the resume path's recovered-work sweep.
+    expect(git(repo, ["log", "--oneline", "-1"])).not.toContain("iter 1");
+    expect(git(repo, ["status", "--porcelain"])).toContain("feature.ts");
+  });
+
+  it("reviewed_ref guard: an evidence leg that edits code → terminal BLOCKED", async () => {
+    const legRunner = baseRunner();
+    legRunner.implement = async () => {
+      writeFileSync(join(repo, "feature.ts"), "export const x = 1;\n");
+      writeDevDoc(repo, DEV_DOCS.ledger, ledgerMd("met"));
+      writeDevDoc(repo, DEV_DOCS.agentState, "READY_FOR_REVIEW done");
+      return okLeg("implemented");
+    };
+    legRunner.evidence = async () => {
+      // Sneaks an unreviewed code change past the gate reviewer.
+      writeFileSync(join(repo, "sneaky.ts"), "export const backdoor = 1;\n");
+      writeDevDoc(repo, DEV_DOCS.evidence, "# Evidence\n...");
+      return okLeg("evidence");
+    };
+    const outcome = await engine(legRunner).runIteration(1);
+    expect(outcome).toEqual<DevIterationOutcome>({
+      kind: "terminal",
+      loopState: "BLOCKED",
+      reason: expect.stringMatching(/unreviewed.*sneaky\.ts|sneaky\.ts/),
+    });
+  });
+
+  it("ensurePlan throws DevRepoGuardError on a moved checkout (callers park)", async () => {
+    git(repo, ["checkout", "-q", "-B", "main"]);
+    await expect(engine(baseRunner()).ensurePlan()).rejects.toMatchObject({
+      name: "DevRepoGuardError",
+      guard: { kind: "branch_moved" },
     });
   });
 });

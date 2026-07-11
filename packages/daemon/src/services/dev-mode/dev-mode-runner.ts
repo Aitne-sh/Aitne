@@ -31,8 +31,11 @@ import {
   markDevTerminal,
   markDevAwaitingUser,
   markDevRunningFromParked,
+  recordDevIteration,
   seedDevRequirements,
+  setDevSessionBaselineDone,
   setDevTimeoutScheduleId,
+  updateDevSessionBaseRef,
   updateDevSessionConfig,
   writeDevCheckpoint,
   countDevRequirements,
@@ -53,14 +56,21 @@ import {
   DEV_DOCS,
   DEV_OWNER_PLAN_DECISION_FILE,
   DEV_TASK_ARCHIVE_DIR,
+  DevRepoGuardError,
   appendDevDoc,
+  checkRepoGuards,
   ensureDevWorkdir,
   gitCommitAll,
   gitCreateBranch,
   gitCurrentBranch,
   gitHead,
+  gitMergeInProgress,
+  gitStatusDirty,
   readAgentStateFirstLine,
   readDevDoc,
+  runVerifyCommand,
+  validateBaseRef,
+  writeBaselineVerifyLog,
   writeDevDoc,
 } from "./dev-loop-docs.js";
 import { gitWorktreeRemove } from "./dev-flow-git.js";
@@ -467,7 +477,77 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         await failLoud(sessionId, new Error("repository local path unresolved"));
         return;
       }
-      const config = normalizeDevLoopConfig(session.config);
+      let config = normalizeDevLoopConfig(session.config);
+
+      // ── Phase A repo guards + baseline/resume git prep ──────────────────
+      // The daemon shares the owner's checkout: refuse to run over a moved
+      // branch or a half-resolved merge — park on a chat question instead.
+      if (session.branch) {
+        const guard = checkRepoGuards(repoPath, session.branch);
+        if (!guard.ok) {
+          await handleEscalate(sessionId, {
+            kind: "escalate",
+            escalationKind: "spec_decision",
+            loopState: "NEEDS_SPEC_DECISION",
+            question: guard.question,
+            contextSummary: null,
+          });
+          return;
+        }
+      }
+      let session2 = session;
+      if (session.baselineVerifiedAt === null) {
+        // Fresh run — baseline-verify snapshot (loop.sh:7033 port): run the
+        // gate once so tool side-effects (lockfiles/caches) land in BASELINE
+        // (never the agent's diff), record the per-command red→green
+        // baseline, and advance base_ref past the snapshot commit. Fleet
+        // worktrees are cut AFTER this, so workers inherit the clean base.
+        const results = config.verifyCommands.map((command) => {
+          const r = runVerifyCommand(repoPath, command, config.maxIterSeconds * 1000);
+          return { command, exitCode: r.exitCode, passed: r.exitCode === 0, output: r.output };
+        });
+        writeBaselineVerifyLog(repoPath, results);
+        gitCommitAll(repoPath, "dev: baseline verify snapshot");
+        const newBase = gitHead(repoPath);
+        if (newBase) {
+          setDevSessionBaselineDone(deps.db, { id: sessionId, baseRef: newBase, verifiedAt: now() });
+        }
+        const red = results.filter((r) => !r.passed).length;
+        recordDevIteration(deps.db, {
+          id: uuid(),
+          sessionId,
+          iteration: 0,
+          phase: "baseline",
+          verdict: `red=${red} green=${results.length - red}`,
+          commitSha: newBase,
+          createdAt: now(),
+        });
+        session2 = getDevSession(deps.db, sessionId) ?? session;
+      } else {
+        // Resume — re-validate the recorded base against real history
+        // (degrade to HEAD on a rewrite) and sweep the interrupted
+        // iteration's uncommitted work into a commit the reviewer can see.
+        const check = validateBaseRef(repoPath, session.baseRef);
+        if (check.degraded) {
+          updateDevSessionBaseRef(deps.db, sessionId, check.ref, now());
+          appendDevDoc(
+            repoPath,
+            DEV_DOCS.progress,
+            `\nresume: recorded base ${session.baseRef ?? "(none)"} is not an `
+              + `ancestor of HEAD — using ${check.ref} as the review base.\n`,
+          );
+          logger.warn({ sessionId, recorded: session.baseRef, degraded: check.ref }, "dev resume: base ref degraded");
+          session2 = getDevSession(deps.db, sessionId) ?? session;
+        }
+        if (session.branch && gitStatusDirty(repoPath)) {
+          gitCommitAll(repoPath, `dev: iter ${session.iteration} — recovered uncommitted work on resume`);
+          logger.info({ sessionId }, "dev resume: committed recovered uncommitted work");
+        }
+      }
+      if (controller.signal.aborted) return;
+      const session3 = session2;
+      config = normalizeDevLoopConfig(session3.config);
+
       const backend = deps.makeBackend(controller);
       const legRunner = createDevLegRunner({ backend, loadTaskFlow: deps.loadTaskFlow });
 
@@ -479,7 +559,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         const orchestrator = createDevFleetOrchestrator({
           db: deps.db,
           repoPath,
-          session,
+          session: session3,
           config,
           legRunner,
           flowLegs,
@@ -513,7 +593,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       }
 
       // Single-loop path (decompose disabled or n=1).
-      const engine = new DevLoopEngine(session, {
+      const engine = new DevLoopEngine(session3, {
         db: deps.db,
         repoPath,
         legRunner,
@@ -525,7 +605,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       await engine.ensurePlan();
       if (controller.signal.aborted) return;
 
-      let n = Math.max(1, session.iteration);
+      let n = Math.max(1, session3.iteration);
       // Hard backstop above the engine's own maxIterations guard.
       for (;;) {
         if (controller.signal.aborted) return;
@@ -545,6 +625,18 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         return;
       }
     } catch (err) {
+      // A repo-guard trip (merge backstop / plan-leg branch check) is the
+      // owner's to fix — park on the question instead of failing the session.
+      if (err instanceof DevRepoGuardError) {
+        await handleEscalate(sessionId, {
+          kind: "escalate",
+          escalationKind: "spec_decision",
+          loopState: "NEEDS_SPEC_DECISION",
+          question: err.guard.question,
+          contextSummary: null,
+        });
+        return;
+      }
       await failLoud(sessionId, err);
     } finally {
       active.delete(sessionId);
@@ -767,6 +859,17 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     const config = normalizeDevLoopConfig(session.config);
     const validation = validateDevLoopConfig(config);
     if (!validation.ok) return { ok: false, reason: validation.errors.join("; ") };
+
+    // Never `checkout -B` + `add -A` over a half-resolved merge — the
+    // snapshot would stage the conflict markers as resolved (loop.sh:3775).
+    if (gitMergeInProgress(repoPath)) {
+      return {
+        ok: false,
+        reason:
+          "a git merge is in progress in the repository — resolve it (or run "
+          + "`git merge --abort`), then !approve again",
+      };
+    }
 
     ensureDevWorkdir(repoPath);
     const contractMd = readDevDoc(repoPath, DEV_DOCS.contract);
