@@ -7,6 +7,11 @@ import type { AgentConfig } from "../../config.js";
 import type { IAuditLogger } from "../dispatcher.js";
 import { createBackgroundTask } from "../../db/background-task-store.js";
 import {
+  approveDevSession,
+  createDevSession,
+  markDevAwaitingApproval,
+} from "../../db/dev-sessions-store.js";
+import {
   createDefaultBangCommandRegistry,
 } from "./index.js";
 import { statusCommand, stopTaskCommand } from "./commands-task-control.js";
@@ -135,6 +140,38 @@ describe("commands-task-control", () => {
       const reply = notify.mock.calls[0]?.[0] as string;
       expect(reply).toContain("1 active task:");
       expect(reply).toContain("summarize the long quarterly report");
+    });
+
+    it("appends the dev-session section when this channel has one", async () => {
+      db.prepare(
+        `INSERT INTO repositories (id, local_path, local_only, created_at, updated_at)
+         VALUES ('r1', '/tmp/r1', 1, 1, 1)`,
+      ).run();
+      createDevSession(db, {
+        id: "dev1",
+        repositoryId: "r1",
+        slug: "acme",
+        originatingPlatform: "slack",
+        originatingChannel: "slack:D1", // matches makeEvent's platform:channel
+        createdAt: 1000,
+      });
+      markDevAwaitingApproval(db, "dev1", 1000);
+      approveDevSession(db, {
+        id: "dev1", approvedHash: "h", branch: "aitne-dev/dev1", baseRef: "x",
+        maxIterations: 10, maxBudgetUsd: null, approvedAt: 1000,
+      });
+      const { ctx, notify } = makeCtx(db);
+      await statusCommand.handler(ctx);
+      const reply = notify.mock.calls[0]?.[0] as string;
+      // Background section still renders, plus the dev block for this channel.
+      expect(reply).toContain("No background or browser tasks are running");
+      expect(reply).toContain("dev acme: running");
+    });
+
+    it("omits the dev section for a channel with no dev session", async () => {
+      const { ctx, notify } = makeCtx(db);
+      await statusCommand.handler(ctx);
+      expect(notify.mock.calls[0]?.[0]).not.toContain("dev ");
     });
 
     it("runs while paused (pure read)", () => {

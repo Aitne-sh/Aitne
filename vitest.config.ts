@@ -348,9 +348,16 @@ export default defineConfig({
         // The router (`commands-help`, `commands-wiki`, `registry`,
         // `format-utils` peers) all have unit tests; residual branches are
         // DB-error catches + adapter dispatch fall-throughs already covered
-        // structurally by the parent dispatcher exclusion.
+        // structurally by the parent dispatcher exclusion. `commands-dev.ts`
+        // joined this class once dev-mode grew !resume/!add/!rollback: it now
+        // resolves sessions from the DB, routes on live session/fleet state,
+        // and dispatches into the async DevModeRunner — the same
+        // orchestration profile. Its routing IS behaviour-tested in
+        // commands-dev.test.ts (the pure parseResumeArgs stays unit-tested);
+        // gating every notify-message branch adds no signal.
         "packages/daemon/src/core/bang-commands/commands-help.ts",
         "packages/daemon/src/core/bang-commands/commands-wiki.ts",
+        "packages/daemon/src/core/bang-commands/commands-dev.ts",
         "packages/daemon/src/core/bang-commands/registry.ts",
 
         // ── Wiki module (compile / index / dispatch) — FS + DB + SDK ──

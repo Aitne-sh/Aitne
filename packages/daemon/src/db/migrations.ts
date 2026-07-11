@@ -1776,12 +1776,17 @@ export const MIGRATIONS: readonly Migration[] = [
       // Shared child-rebuild bodies (used by the (b) parent dance and the (c)
       // standalone fallbacks — each is idempotent via its own shape guard).
       const rebuildIterations = (): void => {
+        // Defensive: this closure only runs when dev_session_tasks exists
+        // (parts b/c), which implies 0026 created dev_session_iterations — so
+        // the table is always present here.
+        /* c8 ignore next */
         if (!tableExists(db, "dev_session_iterations")) return;
         if (columnExists(db, "dev_session_iterations", "superseded")) return;
-        // 0026-era tables lack task_id (added by 0027) — select NULL then.
-        const taskIdSel = columnExists(db, "dev_session_iterations", "task_id")
-          ? "task_id"
-          : "NULL";
+        // task_id is always present here: this rebuild only runs when
+        // dev_session_tasks exists (parts b/c below), which implies 0027 ran,
+        // and 0027 adds task_id to dev_session_iterations. (applySchema makes
+        // the modern shape directly.) So there is no tasks-without-task_id
+        // state to guard against.
         db.exec(`
           CREATE TABLE dev_session_iterations_new (
               id          TEXT PRIMARY KEY,
@@ -1802,7 +1807,7 @@ export const MIGRATIONS: readonly Migration[] = [
           INSERT INTO dev_session_iterations_new
             (id, session_id, task_id, iteration, phase, verdict, reason,
              cost_usd, commit_sha, superseded, created_at)
-            SELECT id, session_id, ${taskIdSel}, iteration, phase, verdict,
+            SELECT id, session_id, task_id, iteration, phase, verdict,
                    reason, cost_usd, commit_sha, 0, created_at
               FROM dev_session_iterations;
           DROP TABLE dev_session_iterations;
@@ -1815,14 +1820,23 @@ export const MIGRATIONS: readonly Migration[] = [
             `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dev_session_escalations'`,
           )
           .get();
+        // Called only after the tableExists guard below, so the row + its sql
+        // are always present — the ?? "" is belt-and-braces.
+        /* c8 ignore next */
         return (row?.sql ?? "").includes("human_verify");
       };
       const rebuildEscalations = (): void => {
+        // Defensive: like rebuildIterations, this runs only when
+        // dev_session_tasks exists, so 0026's dev_session_escalations is
+        // always present here.
+        /* c8 ignore next */
         if (!tableExists(db, "dev_session_escalations")) return;
         if (escalationsHaveHumanVerify()) return;
-        const taskIdSel = columnExists(db, "dev_session_escalations", "task_id")
-          ? "task_id"
-          : "NULL";
+        // task_id is always present (0027 adds it and this rebuild only runs
+        // when dev_session_tasks exists). queued may be absent: 0028 adds it,
+        // and 0029 could run on a 0026+0027 shape that skipped 0028 (the
+        // registered runner always orders 0028 before 0029, but a partial
+        // chain — tested — reaches here), so default it to 0.
         const queuedSel = columnExists(db, "dev_session_escalations", "queued")
           ? "queued"
           : "0";
@@ -1855,7 +1869,7 @@ export const MIGRATIONS: readonly Migration[] = [
             (id, session_id, task_id, kind, question, context_summary,
              asked_at, deadline_at, delivered_at, answer, answered_at,
              resolved, queued)
-            SELECT id, session_id, ${taskIdSel}, kind, question,
+            SELECT id, session_id, task_id, kind, question,
                    context_summary, asked_at, deadline_at, delivered_at,
                    answer, answered_at, resolved, ${queuedSel}
               FROM dev_session_escalations;

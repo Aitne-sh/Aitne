@@ -858,6 +858,43 @@ describe("migration 0029-dev-loop-hardening", () => {
     db.close();
   });
 
+  it("upgrades a 0026+0027 shape that skipped 0028 — defaults queued to 0", () => {
+    // The registered runner always orders 0028 before 0029, but 0029's
+    // escalations rebuild defensively defaults `queued` when it is absent.
+    // Exercise that fallback via a partial chain (0026+0027, NOT 0028).
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    runMigrations(db, MIGRATIONS.filter((m) => ["0026-dev-mode", "0027-dev-flow"].includes(m.id)));
+    expect(hasColumn(db, "dev_session_escalations", "queued")).toBe(false);
+    expect(hasColumn(db, "dev_session_escalations", "task_id")).toBe(true); // 0027 added it
+
+    db.pragma("foreign_keys = OFF");
+    db.prepare(
+      `INSERT INTO dev_sessions (id, repository_id, slug, state, created_at, entered_at, updated_at)
+       VALUES ('s1', 'r1', 't', 'running', 1, 1, 1)`,
+    ).run();
+    db.pragma("foreign_keys = ON");
+    db.prepare(
+      `INSERT INTO dev_session_escalations
+         (id, session_id, kind, question, asked_at, resolved)
+       VALUES ('e1', 's1', 'spec_decision', 'q', 5, 0)`,
+    ).run();
+
+    expect(runMigrations(db, ONLY_29).applied).toEqual(["0029-dev-loop-hardening"]);
+
+    // queued defaulted to 0; the row survived; the human_verify CHECK landed.
+    expect(hasColumn(db, "dev_session_escalations", "queued")).toBe(true);
+    const row = db
+      .prepare(`SELECT queued FROM dev_session_escalations WHERE id = 'e1'`)
+      .get() as { queued: number };
+    expect(row.queued).toBe(0);
+    db.prepare(
+      `INSERT INTO dev_session_escalations (id, session_id, kind, question, asked_at, resolved, queued)
+       VALUES ('e2', 's1', 'human_verify', 'sign off?', 6, 0, 0)`,
+    ).run();
+    db.close();
+  });
+
   it("is a recorded no-op on a fresh applySchema DB", () => {
     const db = new Database(":memory:");
     db.pragma("foreign_keys = ON");
