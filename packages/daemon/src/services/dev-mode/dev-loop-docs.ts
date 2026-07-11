@@ -21,7 +21,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { statSync } from "node:fs";
 import type { DevRequirementStatus } from "../../db/dev-sessions-store.js";
+import { extractLessonsSection } from "./verdict-parse.js";
 
 export const DEV_DIR_NAME = ".aitne-dev";
 
@@ -161,6 +163,128 @@ export function copyDevDoc(
   const body = readDevDoc(fromRepo, fromRel);
   if (body === null) return;
   writeDevDoc(toRepo, toRel, body);
+}
+
+// ── run archive + lessons intake (guard_new_definition port) ────────────
+
+/** Directory (inside .aitne-dev/) holding archived previous-session docs —
+ *  the "Lessons for future runs" intake source (loop-kit run-archive). */
+export const DEV_SESSION_ARCHIVE_DIR = "archive";
+const ARCHIVE_KEEP = 10;
+
+/** Contract-scoped ephemera cleared with each new session (loop-kit
+ *  reset_contract_scoped_docs). */
+const SESSION_EPHEMERA = [
+  DEV_DOCS.agentState,
+  DEV_DOCS.reviewFeedback,
+  DEV_DOCS.contractReviewFeedback,
+  DEV_DOCS.lastVerify,
+  DEV_DOCS.verifyFlake,
+  DEV_DOCS.decomposeApproved,
+  DEV_DOCS.decomposeFeedback,
+  DEV_DOCS.decomposeReviewFeedback,
+  DEV_DOCS.supervisorGuidance,
+  DEV_DOCS.splitNudge,
+  DEV_DOCS.parallelContext,
+] as const;
+
+/**
+ * Archive the previous session's working memory before a NEW definition
+ * (loop-kit guard_new_definition): move docs/ + task-archive/ into
+ * archive/<label>/, clear the contract-scoped ephemera + history snapshots,
+ * recreate an empty docs/, and prune to the newest N archives. A repo whose
+ * docs/ is empty (fresh registration) is a no-op. No git commits —
+ * .aitne-dev/ is gitignored here, unlike loop-kit's tracked .loop/docs.
+ */
+export function archiveDevSessionDocs(repoPath: string, label: string): void {
+  const docs = devPath(repoPath, "docs");
+  let hasDocs = false;
+  try {
+    hasDocs = existsSync(docs) && readdirSync(docs).length > 0;
+  } catch {
+    hasDocs = false;
+  }
+  if (hasDocs) {
+    const dst = devPath(repoPath, join(DEV_SESSION_ARCHIVE_DIR, label));
+    rmSync(dst, { recursive: true, force: true });
+    mkdirSync(join(dst, ".."), { recursive: true });
+    cpSync(docs, join(dst, "docs"), { recursive: true });
+    const taskArchive = devPath(repoPath, DEV_TASK_ARCHIVE_DIR);
+    if (existsSync(taskArchive)) {
+      cpSync(taskArchive, join(dst, DEV_TASK_ARCHIVE_DIR), { recursive: true });
+      rmSync(taskArchive, { recursive: true, force: true });
+    }
+    rmSync(docs, { recursive: true, force: true });
+  }
+  for (const rel of SESSION_EPHEMERA) removeDevDoc(repoPath, rel);
+  rmSync(devPath(repoPath, DEV_HISTORY_DIR), { recursive: true, force: true });
+  mkdirSync(docs, { recursive: true });
+  // Prune: newest N archives by mtime (label order is not chronological).
+  const root = devPath(repoPath, DEV_SESSION_ARCHIVE_DIR);
+  try {
+    const entries = readdirSync(root)
+      .map((name) => {
+        const p = join(root, name);
+        try {
+          return { name, mtime: statSync(p).mtimeMs };
+        } catch {
+          return { name, mtime: 0 };
+        }
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const stale of entries.slice(ARCHIVE_KEEP)) {
+      rmSync(join(root, stale.name), { recursive: true, force: true });
+    }
+  } catch {
+    // no archives yet
+  }
+}
+
+/**
+ * The newest ≤`limit` archived evidence reports' "Lessons for future runs"
+ * sections, capped — injected into the contract interview as intake (past
+ * runs are the cheapest map of a repo's traps).
+ */
+export function readArchivedLessons(
+  repoPath: string,
+  limit = 3,
+  capBytes = 2000,
+): string | null {
+  const root = devPath(repoPath, DEV_SESSION_ARCHIVE_DIR);
+  if (!existsSync(root)) return null;
+  let dirs: { name: string; mtime: number }[];
+  try {
+    dirs = readdirSync(root)
+      .map((name) => {
+        try {
+          return { name, mtime: statSync(join(root, name)).mtimeMs };
+        } catch {
+          return { name, mtime: 0 };
+        }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+      .slice(0, limit);
+  } catch {
+    return null;
+  }
+  const parts: string[] = [];
+  for (const dir of dirs) {
+    try {
+      const body = readFileSync(
+        join(root, dir.name, "docs", "evidence-report.md"),
+        "utf8",
+      );
+      const lessons = extractLessonsSection(body);
+      if (lessons) parts.push(`### From run ${dir.name}\n${lessons}`);
+    } catch {
+      // archive without an evidence report — skip
+    }
+  }
+  if (parts.length === 0) return null;
+  const joined = parts.join("\n\n");
+  return joined.length > capBytes
+    ? `${joined.slice(0, capBytes)}\n… (lessons truncated)`
+    : joined;
 }
 
 // ── per-iteration docs snapshots (!rollback support) ────────────────────

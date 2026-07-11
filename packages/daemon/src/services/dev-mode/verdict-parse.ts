@@ -301,3 +301,24 @@ export function extractContractRequirements(
 export function extractContractReqIds(contractMarkdown: string): string[] {
   return extractContractRequirements(contractMarkdown).map((r) => r.id);
 }
+
+const LESSONS_HEADING_RE = /^#{2,3}\s*(?:\d+\.\s*)?Lessons for future runs\b/i;
+
+/**
+ * Pull the "Lessons for future runs" section out of an evidence report — the
+ * run's only channel to future runs (the next contract interview reads it as
+ * intake). Returns the section body (heading excluded, trimmed), or null when
+ * absent/empty.
+ */
+export function extractLessonsSection(evidenceMarkdown: string): string | null {
+  const lines = evidenceMarkdown.split(/\r?\n/);
+  const start = lines.findIndex((l) => LESSONS_HEADING_RE.test(l.trim()));
+  if (start < 0) return null;
+  const body: string[] = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^#{1,3}\s+/.test(lines[i]!.trim())) break;
+    body.push(lines[i]!);
+  }
+  const joined = body.join("\n").trim();
+  return joined.length > 0 ? joined : null;
+}

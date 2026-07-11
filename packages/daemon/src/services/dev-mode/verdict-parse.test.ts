@@ -5,6 +5,7 @@ import {
   extractContractReqIds,
   extractContractRequirements,
   extractLastMatching,
+  extractLessonsSection,
   parseAgentStateToken,
   parseContractReviewVerdict,
   parseDecomposeReviewVerdict,
@@ -242,6 +243,28 @@ describe("flow verdicts", () => {
     expect(extractBetween("see GUIDANCE-BEGIN inline", "GUIDANCE-BEGIN", "GUIDANCE-END")).toBeNull();
     expect(extractBetween("A-BEGIN\nA-END", "A-BEGIN", "A-END")).toBeNull();
     expect(extractBetween("A-BEGIN\n   \nA-END", "A-BEGIN", "A-END")).toBeNull();
+  });
+});
+
+describe("extractLessonsSection", () => {
+  it("pulls the section body up to the next heading (numbered headings too)", () => {
+    const md = [
+      "# Implementation Evidence Report",
+      "## 8. Points needing human judgment",
+      "None",
+      "## 9. Lessons for future runs",
+      "- the build needs pnpm install first",
+      "- vitest mocks of node:fs break coverage",
+      "## Appendix",
+      "ignored",
+    ].join("\n");
+    expect(extractLessonsSection(md)).toBe(
+      "- the build needs pnpm install first\n- vitest mocks of node:fs break coverage",
+    );
+  });
+  it("returns null when absent or empty", () => {
+    expect(extractLessonsSection("# Report\n## Risks\nnone")).toBeNull();
+    expect(extractLessonsSection("## Lessons for future runs\n\n## Next")).toBeNull();
   });
 });
 

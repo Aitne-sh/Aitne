@@ -68,6 +68,7 @@ import {
   gitStatusDirty,
   markChecklistRows,
   readAgentStateFirstLine,
+  readArchivedLessons,
   readDevDoc,
   removeDevDoc,
   runVerifyCommand,
@@ -996,6 +997,12 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         "Contract-review feedback (address EVERY must-fix item before re-declaring CONTRACT_READY)",
         DEV_DOCS.contractReviewFeedback,
       ),
+      (() => {
+        const lessons = readArchivedLessons(repoPath);
+        return lessons
+          ? `\n## Lessons from previous runs in this repo (intake — read first)\n${lessons}\n`
+          : "";
+      })(),
       "",
       "## Owner's latest message",
       ownerMessage,

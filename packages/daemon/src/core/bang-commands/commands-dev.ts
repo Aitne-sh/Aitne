@@ -25,9 +25,13 @@ import {
   getActiveDevSession,
   getDevSession,
   getLatestRollbackableDevSession,
+  listDevSessions,
   markDevTerminal,
 } from "../../db/dev-sessions-store.js";
-import { isGitWorktree } from "../../services/dev-mode/dev-loop-docs.js";
+import {
+  archiveDevSessionDocs,
+  isGitWorktree,
+} from "../../services/dev-mode/dev-loop-docs.js";
 import {
   rollbackToIteration,
   rollbackWholeSession,
@@ -96,6 +100,15 @@ export const repoCommand: BangPrefixCommand = {
 
     const sessionId = randomUUID();
     const now = Date.now();
+    // Archive the previous session's working memory (its evidence report's
+    // "Lessons for future runs" becomes the new interview's intake) and start
+    // this definition from clean docs — the guard_new_definition port.
+    try {
+      const previous = listDevSessions(ctx.db, { repositoryId: repo.id, limit: 1 })[0];
+      archiveDevSessionDocs(repo.localPath, previous?.id ?? `pre-${now}`);
+    } catch {
+      // best effort — a fresh repo has nothing to archive
+    }
     createDevSession(ctx.db, {
       id: sessionId,
       repositoryId: repo.id,

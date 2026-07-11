@@ -8,11 +8,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEV_DOCS,
+  archiveDevSessionDocs,
   checkRepoGuards,
   gitCommitAll,
   gitCreateBranch,
@@ -20,6 +21,7 @@ import {
   gitHead,
   gitMergeInProgress,
   gitStatusDirty,
+  readArchivedLessons,
   restoreDevDocsSnapshot,
   snapshotDevDocs,
   validateBaseRef,
@@ -191,6 +193,42 @@ describe("dev-loop-docs git safety helpers", () => {
     snapshotDevDocs(repo, 2);
     expect(existsSync(join(repo, ".aitne-dev", "history", "iter-1", "a.md"))).toBe(true);
     expect(existsSync(join(repo, ".aitne-dev", "history", "iter-1", "history"))).toBe(false);
+  });
+
+  it("archives session docs, clears ephemera, prunes, and feeds lessons intake", () => {
+    const docs = join(repo, ".aitne-dev", "docs");
+    mkdirSync(docs, { recursive: true });
+    writeFileSync(join(docs, "product-contract.md"), "# old contract\n");
+    writeFileSync(
+      join(docs, "evidence-report.md"),
+      "# Report\n## 9. Lessons for future runs\n- run pnpm install before tests\n",
+    );
+    writeFileSync(join(repo, ".aitne-dev", "agent-state"), "READY_FOR_REVIEW x\n");
+    mkdirSync(join(repo, ".aitne-dev", "history", "iter-1"), { recursive: true });
+
+    archiveDevSessionDocs(repo, "session-old");
+
+    // Old docs moved into the archive; docs/ recreated empty; ephemera gone.
+    expect(existsSync(join(repo, ".aitne-dev", "archive", "session-old", "docs", "product-contract.md"))).toBe(true);
+    expect(readdirSync(docs)).toEqual([]);
+    expect(existsSync(join(repo, ".aitne-dev", "agent-state"))).toBe(false);
+    expect(existsSync(join(repo, ".aitne-dev", "history"))).toBe(false);
+
+    // Lessons intake reads the newest archives' evidence sections.
+    expect(readArchivedLessons(repo)).toContain("run pnpm install before tests");
+    expect(readArchivedLessons(repo)).toContain("From run session-old");
+
+    // An empty-docs repo is a no-op (no phantom archive dirs).
+    archiveDevSessionDocs(repo, "session-new");
+    expect(existsSync(join(repo, ".aitne-dev", "archive", "session-new"))).toBe(false);
+  });
+
+  it("readArchivedLessons is null without archives or lessons", () => {
+    expect(readArchivedLessons(repo)).toBeNull();
+    const dst = join(repo, ".aitne-dev", "archive", "x", "docs");
+    mkdirSync(dst, { recursive: true });
+    writeFileSync(join(dst, "evidence-report.md"), "# Report\n## Risks\nnone\n");
+    expect(readArchivedLessons(repo)).toBeNull();
   });
 
   it("writeBaselineVerifyLog writes the [PASS]/[FAIL] grammar", () => {
