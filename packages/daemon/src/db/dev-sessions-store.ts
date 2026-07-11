@@ -56,8 +56,11 @@ export type DevRequirementStatus =
   | "at_risk"
   | "regressed";
 
-/** One loop leg (native journal.jsonl). The last five are dev-flow fleet
- *  phases (task-DAG decompose/supervise/merge + plan review). */
+/** One loop leg (native journal.jsonl). decompose…merge are dev-flow fleet
+ *  phases; baseline/rollback/contract_review/resume/contract_gen are the
+ *  DEV_MODE_GIT_HARDENING additions (baseline-verify snapshot, !rollback
+ *  audit rows, the independent contract-review leg, !resume / RUN_ABEND
+ *  journal rows, and a manual task's sub-contract generation). */
 export type DevIterationPhase =
   | "plan"
   | "implement"
@@ -70,7 +73,12 @@ export type DevIterationPhase =
   | "decompose_review"
   | "supervise"
   | "plan_review"
-  | "merge";
+  | "merge"
+  | "baseline"
+  | "rollback"
+  | "contract_review"
+  | "resume"
+  | "contract_gen";
 
 export interface DevSessionRow {
   id: string;
@@ -78,15 +86,29 @@ export interface DevSessionRow {
   slug: string | null;
   branch: string | null;
   baseRef: string | null;
+  /** Branch the owner's checkout was on BEFORE `checkout -B` at !approve;
+   *  null = detached HEAD at approve (or a pre-0029 session). */
+  originalBranch: string | null;
+  /** HEAD sha before the branch switch — the whole-session rollback target. */
+  originalHead: string | null;
+  /** Sha of the pre-loop baseline snapshot commit IFF it swept in dirty owner
+   *  WIP (!rollback re-applies it); null = the tree was clean at approve. */
+  wipSnapshotRef: string | null;
   state: DevSessionState;
   loopState: DevSessionLoopState | null;
   approvedHash: string | null;
   approvedAt: number | null;
+  /** Epoch-ms when the baseline-verify pass completed; null = fresh run
+   *  pending (the fresh-vs-resume discriminator). */
+  baselineVerifiedAt: number | null;
   iteration: number;
   agentFailures: number;
   gateReviseCount: number;
   iterReviseCount: number;
   resumes: number;
+  /** Crash/terminal-resume counter (loop-kit RESUME_COUNT); reset to 0 after
+   *  any evaluated iteration. Separate from `resumes` (escalation answers). */
+  runResumes: number;
   /** Cumulative fleet-mutation counters — replan / plan-review /
    *  integration-fixup budgets are enforced against these. */
   replanCount: number;
@@ -102,6 +124,9 @@ export interface DevSessionRow {
   timeoutScheduleId: number | null;
   originatingPlatform: string | null;
   originatingChannel: string | null;
+  /** Epoch-ms of a whole-session !rollback; non-null rows drop out of the
+   *  rollback/resume target lookups. */
+  rolledBackAt: number | null;
   createdAt: number;
   enteredAt: number;
   updatedAt: number;
@@ -114,15 +139,20 @@ interface DevSessionDbRow {
   slug: string | null;
   branch: string | null;
   base_ref: string | null;
+  original_branch: string | null;
+  original_head: string | null;
+  wip_snapshot_ref: string | null;
   state: DevSessionState;
   loop_state: DevSessionLoopState | null;
   approved_hash: string | null;
   approved_at: number | null;
+  baseline_verified_at: number | null;
   iteration: number;
   agent_failures: number;
   gate_revise_count: number;
   iter_revise_count: number;
   resumes: number;
+  run_resumes: number;
   replan_count: number;
   plan_review_count: number;
   fixup_count: number;
@@ -134,6 +164,7 @@ interface DevSessionDbRow {
   timeout_schedule_id: number | null;
   originating_platform: string | null;
   originating_channel: string | null;
+  rolled_back_at: number | null;
   created_at: number;
   entered_at: number;
   updated_at: number;
@@ -141,12 +172,15 @@ interface DevSessionDbRow {
 }
 
 const SELECT_COLUMNS = `
-  id, repository_id, slug, branch, base_ref, state, loop_state,
-  approved_hash, approved_at, iteration, agent_failures, gate_revise_count,
-  iter_revise_count, resumes, replan_count, plan_review_count, fixup_count,
+  id, repository_id, slug, branch, base_ref, original_branch, original_head,
+  wip_snapshot_ref, state, loop_state,
+  approved_hash, approved_at, baseline_verified_at, iteration, agent_failures,
+  gate_revise_count, iter_revise_count, resumes, run_resumes,
+  replan_count, plan_review_count, fixup_count,
   max_iterations, config_json, models_json,
   cost_usd, max_budget_usd, timeout_schedule_id, originating_platform,
-  originating_channel, created_at, entered_at, updated_at, exited_at
+  originating_channel, rolled_back_at, created_at, entered_at, updated_at,
+  exited_at
 `;
 
 function parseJsonObject(value: string | null): Record<string, unknown> | null {
@@ -168,15 +202,20 @@ function fromDbRow(row: DevSessionDbRow): DevSessionRow {
     slug: row.slug,
     branch: row.branch,
     baseRef: row.base_ref,
+    originalBranch: row.original_branch,
+    originalHead: row.original_head,
+    wipSnapshotRef: row.wip_snapshot_ref,
     state: row.state,
     loopState: row.loop_state,
     approvedHash: row.approved_hash,
     approvedAt: row.approved_at,
+    baselineVerifiedAt: row.baseline_verified_at,
     iteration: row.iteration,
     agentFailures: row.agent_failures,
     gateReviseCount: row.gate_revise_count,
     iterReviseCount: row.iter_revise_count,
     resumes: row.resumes,
+    runResumes: row.run_resumes,
     replanCount: row.replan_count,
     planReviewCount: row.plan_review_count,
     fixupCount: row.fixup_count,
@@ -188,6 +227,7 @@ function fromDbRow(row: DevSessionDbRow): DevSessionRow {
     timeoutScheduleId: row.timeout_schedule_id,
     originatingPlatform: row.originating_platform,
     originatingChannel: row.originating_channel,
+    rolledBackAt: row.rolled_back_at,
     createdAt: row.created_at,
     enteredAt: row.entered_at,
     updatedAt: row.updated_at,
@@ -387,6 +427,12 @@ export interface ApproveDevSessionInput {
   approvedHash: string;
   branch: string;
   baseRef: string;
+  /** The owner's checkout BEFORE `checkout -B` (rollback anchors); null/
+   *  omitted = detached HEAD / zero-commit repo (rollback then refuses). */
+  originalBranch?: string | null;
+  originalHead?: string | null;
+  /** The pre-loop snapshot commit IFF it swept in dirty owner WIP. */
+  wipSnapshotRef?: string | null;
   maxIterations: number;
   maxBudgetUsd: number | null;
   approvedAt: number;
@@ -408,6 +454,9 @@ export function approveDevSession(
               approved_hash = ?,
               branch = ?,
               base_ref = ?,
+              original_branch = ?,
+              original_head = ?,
+              wip_snapshot_ref = ?,
               max_iterations = ?,
               -- Authoritative from config.maxCostUsd (③ per-process cap):
               -- NULL means "off", which must be writable, so a direct SET (not
@@ -421,6 +470,9 @@ export function approveDevSession(
       input.approvedHash,
       input.branch,
       input.baseRef,
+      input.originalBranch ?? null,
+      input.originalHead ?? null,
+      input.wipSnapshotRef ?? null,
       input.maxIterations,
       input.maxBudgetUsd,
       input.approvedAt,
@@ -614,6 +666,9 @@ export interface DevIterationRow {
   reason: string | null;
   costUsd: number | null;
   commitSha: string | null;
+  /** True once a later `!rollback <n>` superseded this row (audit trail;
+   *  excluded from checkpoint/commit lookups). Inserted rows are always 0. */
+  superseded: boolean;
   createdAt: number;
 }
 
@@ -627,6 +682,7 @@ interface DevIterationDbRow {
   reason: string | null;
   cost_usd: number | null;
   commit_sha: string | null;
+  superseded: number;
   created_at: number;
 }
 
@@ -674,7 +730,7 @@ export function listDevIterations(
   const rows = db
     .prepare<[string], DevIterationDbRow>(
       `SELECT id, session_id, task_id, iteration, phase, verdict, reason,
-              cost_usd, commit_sha, created_at
+              cost_usd, commit_sha, superseded, created_at
          FROM dev_session_iterations
         WHERE session_id = ?
         ORDER BY created_at ASC`,
@@ -690,8 +746,232 @@ export function listDevIterations(
     reason: row.reason,
     costUsd: row.cost_usd,
     commitSha: row.commit_sha,
+    superseded: row.superseded === 1,
     createdAt: row.created_at,
   }));
+}
+
+// ── Rollback / resume support (DEV_MODE_GIT_HARDENING) ──────────────────
+
+/** Stamp the baseline-verify completion: advance base_ref past the baseline
+ *  snapshot commit and set the fresh-vs-resume discriminator. */
+export function setDevSessionBaselineDone(
+  db: Database.Database,
+  input: { id: string; baseRef: string; verifiedAt: number },
+): void {
+  db.prepare(
+    `UPDATE dev_sessions
+        SET base_ref = ?, baseline_verified_at = ?, updated_at = ?
+      WHERE id = ?`,
+  ).run(input.baseRef, input.verifiedAt, input.verifiedAt, input.id);
+}
+
+/** Ancestry-degradation path: the recorded base is no longer an ancestor of
+ *  HEAD (history rewrite), so the review base falls back to HEAD. */
+export function updateDevSessionBaseRef(
+  db: Database.Database,
+  id: string,
+  baseRef: string,
+  updatedAt: number,
+): void {
+  db.prepare(
+    `UPDATE dev_sessions SET base_ref = ?, updated_at = ? WHERE id = ?`,
+  ).run(baseRef, updatedAt, id);
+}
+
+/** Mark a whole-session rollback — the session drops out of the rollback /
+ *  resume target lookups. */
+export function markDevSessionRolledBack(
+  db: Database.Database,
+  input: { id: string; at: number },
+): void {
+  db.prepare(
+    `UPDATE dev_sessions SET rolled_back_at = ?, updated_at = ? WHERE id = ?`,
+  ).run(input.at, input.at, input.id);
+}
+
+/** The newest session whose branch exists and that has not already been
+ *  rolled back — the `!rollback` target when no session is active. */
+export function getLatestRollbackableDevSession(
+  db: Database.Database,
+): DevSessionRow | null {
+  const row = db
+    .prepare<[], DevSessionDbRow>(
+      `SELECT ${SELECT_COLUMNS} FROM dev_sessions
+        WHERE branch IS NOT NULL AND rolled_back_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 1`,
+    )
+    .get();
+  return row ? fromDbRow(row) : null;
+}
+
+/** The newest session bound to a chat channel ("<platform>:<channel>") — the
+ *  `!resume` / `!status` / `!add` target resolution when none is active. */
+export function getLatestDevSessionForChannel(
+  db: Database.Database,
+  channel: string,
+): DevSessionRow | null {
+  const row = db
+    .prepare<[string], DevSessionDbRow>(
+      `SELECT ${SELECT_COLUMNS} FROM dev_sessions
+        WHERE originating_channel = ?
+        ORDER BY created_at DESC
+        LIMIT 1`,
+    )
+    .get(channel);
+  return row ? fromDbRow(row) : null;
+}
+
+/** The post-iteration commit for `!rollback <n>`: the newest non-superseded
+ *  session-level evaluate row at iteration n that carries a commit sha. */
+export function latestEvaluateCommitFor(
+  db: Database.Database,
+  sessionId: string,
+  iteration: number,
+): string | null {
+  const row = db
+    .prepare<[string, number], { commit_sha: string }>(
+      `SELECT commit_sha FROM dev_session_iterations
+        WHERE session_id = ? AND iteration = ? AND task_id IS NULL
+          AND phase = 'evaluate' AND superseded = 0 AND commit_sha IS NOT NULL
+        ORDER BY created_at DESC
+        LIMIT 1`,
+    )
+    .get(sessionId, iteration);
+  return row?.commit_sha ?? null;
+}
+
+/** Flag every session-level journal row past iteration n as superseded by a
+ *  rollback (kept — never deleted). Returns the number of rows flagged. */
+export function supersedeDevIterationsAfter(
+  db: Database.Database,
+  sessionId: string,
+  iteration: number,
+): number {
+  return db
+    .prepare(
+      `UPDATE dev_session_iterations
+          SET superseded = 1
+        WHERE session_id = ? AND task_id IS NULL AND iteration > ?
+          AND superseded = 0`,
+    )
+    .run(sessionId, iteration).changes;
+}
+
+/** Pre-ledger-resync wipe for `!rollback <n>`: every REQ row back to
+ *  'unstarted' (the restored ledger markdown is then re-synced over this). */
+export function resetDevRequirementStatuses(
+  db: Database.Database,
+  sessionId: string,
+  updatedAt: number,
+): void {
+  db.prepare(
+    `UPDATE dev_session_requirements
+        SET status = 'unstarted', evidence = NULL, iter = NULL, updated_at = ?
+      WHERE session_id = ?`,
+  ).run(updatedAt, sessionId);
+}
+
+/** CAS terminal (done/exited/failed) → running for `!resume`. Clears the
+ *  terminal bookkeeping; the caller owns counter resets + relaunch. */
+export function markDevRunningFromTerminal(
+  db: Database.Database,
+  input: { id: string; at: number },
+): DevSessionRow | null {
+  const result = db
+    .prepare(
+      `UPDATE dev_sessions
+          SET state = 'running', exited_at = NULL, updated_at = ?
+        WHERE id = ? AND state IN ('done', 'exited', 'failed')`,
+    )
+    .run(input.at, input.id);
+  return result.changes > 0 ? getDevSession(db, input.id) : null;
+}
+
+/** Fresh stop-heuristic windows for an explicit resume of a BLOCKED/STALLED
+ *  run (loop-kit resets stagnation/futile/fingerprints + BOTH revise counters
+ *  + the agent-failure streak; the first three are engine-memory here, so
+ *  only the persisted counters need zeroing). iteration / cost / base_ref /
+ *  resume counters persist. */
+export function resetDevSessionStopHeuristics(
+  db: Database.Database,
+  id: string,
+  at: number,
+): void {
+  db.prepare(
+    `UPDATE dev_sessions
+        SET agent_failures = 0,
+            gate_revise_count = 0,
+            iter_revise_count = 0,
+            updated_at = ?
+      WHERE id = ?`,
+  ).run(at, id);
+}
+
+/** +1 run_resumes (crash/terminal resume); returns the new value. Persisted
+ *  before any recovery side effect so a crash inside the recovery window
+ *  still advances the backstop (loop-kit 6967). */
+export function bumpDevSessionRunResumes(
+  db: Database.Database,
+  id: string,
+  at: number,
+): number {
+  db.prepare(
+    `UPDATE dev_sessions
+        SET run_resumes = run_resumes + 1, updated_at = ?
+      WHERE id = ?`,
+  ).run(at, id);
+  const row = db
+    .prepare<[string], { n: number }>(
+      `SELECT run_resumes AS n FROM dev_sessions WHERE id = ?`,
+    )
+    .get(id);
+  return row?.n ?? 0;
+}
+
+/** Reset run_resumes after any evaluated iteration — benign interrupts during
+ *  long legs must not accumulate toward the cap (loop-kit 7181). */
+export function clearDevSessionRunResumes(
+  db: Database.Database,
+  id: string,
+  at: number,
+): void {
+  db.prepare(
+    `UPDATE dev_sessions
+        SET run_resumes = 0, updated_at = ?
+      WHERE id = ? AND run_resumes <> 0`,
+  ).run(at, id);
+}
+
+/** Budget-only re-approval (loop-kit ckpt_rebind): a raised iteration/cost
+ *  cap re-anchors the immutability hash WITHOUT a fresh human approval. The
+ *  caller MUST have verified (1) the on-disk contract still matches the OLD
+ *  hash and (2) computeConfigHashSansBudget is unchanged. */
+export function rebindDevSessionApproval(
+  db: Database.Database,
+  input: {
+    id: string;
+    approvedHash: string;
+    maxIterations: number;
+    maxBudgetUsd: number | null;
+    at: number;
+  },
+): void {
+  db.prepare(
+    `UPDATE dev_sessions
+        SET approved_hash = ?,
+            max_iterations = ?,
+            max_budget_usd = ?,
+            updated_at = ?
+      WHERE id = ?`,
+  ).run(
+    input.approvedHash,
+    input.maxIterations,
+    input.maxBudgetUsd,
+    input.at,
+    input.id,
+  );
 }
 
 // ── Requirements ledger ─────────────────────────────────────────────────

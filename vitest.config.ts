@@ -798,6 +798,7 @@ export default defineConfig({
         "packages/daemon/src/db/dev-sessions-store.ts",
         "packages/daemon/src/db/dev-session-escalations-store.ts",
         "packages/daemon/src/db/dev-session-tasks-store.ts",
+        "packages/daemon/src/db/dev-session-checklist-store.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-docs.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-legs.ts",
         "packages/daemon/src/services/dev-mode/dev-loop-engine.ts",

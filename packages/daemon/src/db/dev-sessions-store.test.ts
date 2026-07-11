@@ -1,16 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Database from "better-sqlite3";
 import { applySchema } from "./schema.js";
-import { MIGRATIONS, runMigrations } from "./migrations.js";
+import { MIGRATIONS, runMigrations, tableExists } from "./migrations.js";
 import {
   addDevSessionCost,
   approveDevSession,
   bumpDevSessionFleetCounter,
+  bumpDevSessionRunResumes,
+  clearDevSessionRunResumes,
   countDevRequirements,
   countDevRequirementsIn,
   createDevSession,
   getActiveDevSession,
   getDevSession,
+  getLatestDevSessionForChannel,
+  getLatestRollbackableDevSession,
+  latestEvaluateCommitFor,
   listDevIterations,
   listDevRequirements,
   listDevSessions,
@@ -18,11 +23,19 @@ import {
   markDevAwaitingApproval,
   markDevAwaitingUser,
   markDevRunningFromParked,
+  markDevRunningFromTerminal,
+  markDevSessionRolledBack,
   markDevTerminal,
+  rebindDevSessionApproval,
   recordDevIteration,
+  resetDevRequirementStatuses,
+  resetDevSessionStopHeuristics,
   seedDevRequirements,
+  setDevSessionBaselineDone,
   setDevTimeoutScheduleId,
+  supersedeDevIterationsAfter,
   updateDevRequirement,
+  updateDevSessionBaseRef,
   updateDevSessionConfig,
   writeDevCheckpoint,
 } from "./dev-sessions-store.js";
@@ -718,5 +731,338 @@ describe("migration 0028-dev-escalation-queue", () => {
     // s2: its single escalation stays active.
     expect(q("s2-only")).toBe(0);
     db.close();
+  });
+});
+
+describe("migration 0029-dev-loop-hardening", () => {
+  function hasColumn(db: Database.Database, table: string, col: string): boolean {
+    return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((r) => r.name === col);
+  }
+  const LEGACY = MIGRATIONS.filter((m) =>
+    ["0026-dev-mode", "0027-dev-flow", "0028-dev-escalation-queue"].includes(m.id),
+  );
+  const ONLY_29 = MIGRATIONS.filter((m) => m.id === "0029-dev-loop-hardening");
+
+  it("is registered after 0028", () => {
+    const i28 = MIGRATIONS.findIndex((m) => m.id === "0028-dev-escalation-queue");
+    const i29 = MIGRATIONS.findIndex((m) => m.id === "0029-dev-loop-hardening");
+    expect(i29).toBeGreaterThan(i28);
+  });
+
+  it("upgrades a legacy dev-mode DB: parent rebuild preserves children, CHECKs widen, idempotent", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    runMigrations(db, LEGACY);
+    expect(hasColumn(db, "dev_session_tasks", "approved_hash")).toBe(false);
+    expect(hasColumn(db, "dev_session_iterations", "superseded")).toBe(false);
+
+    // Seed legacy rows (FK off — the bare db has no repositories table).
+    db.pragma("foreign_keys = OFF");
+    db.prepare(
+      `INSERT INTO dev_sessions (id, repository_id, slug, state, created_at, entered_at, updated_at)
+       VALUES ('s1', 'r1', 'test', 'running', 1, 1, 1)`,
+    ).run();
+    db.pragma("foreign_keys = ON");
+    db.prepare(
+      `INSERT INTO dev_session_tasks
+         (id, session_id, task_key, summary, body, origin, state, created_at, updated_at)
+       VALUES ('t1', 's1', 'core', 'core task', 'do it', 'plan', 'running', 1, 1)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO dev_session_iterations
+         (id, session_id, task_id, iteration, phase, verdict, created_at)
+       VALUES ('i1', 's1', 't1', 1, 'implement', 'ok', 2)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO dev_session_iterations
+         (id, session_id, task_id, iteration, phase, verdict, commit_sha, created_at)
+       VALUES ('i2', 's1', NULL, 3, 'evaluate', 'CONTINUE', 'abc123', 3)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO dev_session_escalations
+         (id, session_id, task_id, kind, question, asked_at, resolved, queued)
+       VALUES ('e1', 's1', 't1', 'spec_decision', 'q', 4, 0, 1)`,
+    ).run();
+
+    expect(runMigrations(db, ONLY_29).applied).toEqual(["0029-dev-loop-hardening"]);
+
+    // Columns landed.
+    for (const col of [
+      "original_branch", "original_head", "wip_snapshot_ref",
+      "baseline_verified_at", "rolled_back_at", "run_resumes",
+    ]) {
+      expect(hasColumn(db, "dev_sessions", col)).toBe(true);
+    }
+    expect(hasColumn(db, "dev_session_tasks", "approved_hash")).toBe(true);
+    expect(hasColumn(db, "dev_session_iterations", "superseded")).toBe(true);
+    // The renamed old parent is gone.
+    expect(tableExists(db, "dev_session_tasks_old")).toBe(false);
+    expect(tableExists(db, "dev_session_checklist")).toBe(true);
+
+    // Data preserved across the rebuild dance — INCLUDING child task_id
+    // attribution (the whole point of the rename-first ordering).
+    const iters = db
+      .prepare(`SELECT id, task_id, superseded FROM dev_session_iterations ORDER BY id`)
+      .all() as { id: string; task_id: string | null; superseded: number }[];
+    expect(iters).toEqual([
+      { id: "i1", task_id: "t1", superseded: 0 },
+      { id: "i2", task_id: null, superseded: 0 },
+    ]);
+    const esc = db
+      .prepare(`SELECT task_id, queued FROM dev_session_escalations WHERE id='e1'`)
+      .get() as { task_id: string | null; queued: number };
+    expect(esc).toEqual({ task_id: "t1", queued: 1 });
+
+    // CHECKs widened (and still enforced).
+    db.prepare(
+      `INSERT INTO dev_session_tasks
+         (id, session_id, task_key, summary, body, origin, state, created_at, updated_at)
+       VALUES ('t2', 's1', 'manual-1', 'added', 'body', 'manual', 'queued', 5, 5)`,
+    ).run();
+    expect(() =>
+      db.prepare(
+        `INSERT INTO dev_session_tasks
+           (id, session_id, task_key, summary, body, origin, state, created_at, updated_at)
+         VALUES ('t3', 's1', 'x', 'x', 'x', 'bogus', 'queued', 5, 5)`,
+      ).run(),
+    ).toThrow(/CHECK/);
+    db.prepare(
+      `INSERT INTO dev_session_iterations
+         (id, session_id, iteration, phase, created_at)
+       VALUES ('i3', 's1', 0, 'baseline', 6)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO dev_session_escalations
+         (id, session_id, kind, question, asked_at, resolved, queued)
+       VALUES ('e2', 's1', 'human_verify', 'sign off?', 7, 0, 0)`,
+    ).run();
+    // The unique (session, task_key) index was recreated with the new parent.
+    expect(() =>
+      db.prepare(
+        `INSERT INTO dev_session_tasks
+           (id, session_id, task_key, summary, body, origin, state, created_at, updated_at)
+         VALUES ('t4', 's1', 'core', 'dup key', 'x', 'plan', 'queued', 8, 8)`,
+      ).run(),
+    ).toThrow(/UNIQUE/);
+
+    // FK graph re-points at the NEW parent: delete cascades/nullifies.
+    db.prepare(`DELETE FROM dev_session_tasks WHERE id = 't1'`).run();
+    expect(db.prepare(`SELECT id FROM dev_session_iterations WHERE id='i1'`).get()).toBeUndefined();
+    expect(db.prepare(`SELECT id FROM dev_session_iterations WHERE id='i2'`).get()).toBeDefined();
+    expect(
+      (db.prepare(`SELECT task_id FROM dev_session_escalations WHERE id='e1'`).get() as { task_id: string | null }).task_id,
+    ).toBeNull();
+
+    // Idempotent — a recorded re-run changes nothing.
+    expect(runMigrations(db, ONLY_29).applied).toEqual([]);
+    db.close();
+  });
+
+  it("is a recorded no-op on a fresh applySchema DB", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+    db.prepare(
+      `INSERT INTO repositories (id, local_path, local_only, created_at, updated_at)
+       VALUES ('r1', '/tmp/r1', 1, 1, 1)`,
+    ).run();
+    createDevSession(db, {
+      id: "s1",
+      repositoryId: "r1",
+      slug: "fresh",
+      originatingPlatform: "telegram",
+      originatingChannel: "telegram:1",
+      createdAt: 1,
+    });
+    expect(runMigrations(db, ONLY_29).applied).toEqual(["0029-dev-loop-hardening"]);
+    // The modern shape survived untouched and the store round-trips.
+    const row = getDevSession(db, "s1");
+    expect(row?.runResumes).toBe(0);
+    expect(row?.originalBranch).toBeNull();
+    expect(row?.rolledBackAt).toBeNull();
+    db.close();
+  });
+});
+
+describe("rollback/resume store support (0029)", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+    seedRepo(db);
+    seedSession(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  function approve(id = "s1"): void {
+    markDevAwaitingApproval(db, id, T0 + 1);
+    approveDevSession(db, {
+      id,
+      approvedHash: "h1",
+      branch: `aitne-dev/${id}`,
+      baseRef: "base1",
+      originalBranch: "develop",
+      originalHead: "head0",
+      wipSnapshotRef: "wip1",
+      maxIterations: 10,
+      maxBudgetUsd: null,
+      approvedAt: T0 + 2,
+    });
+  }
+
+  it("approveDevSession records the rollback anchors", () => {
+    approve();
+    const row = getDevSession(db, "s1")!;
+    expect(row.originalBranch).toBe("develop");
+    expect(row.originalHead).toBe("head0");
+    expect(row.wipSnapshotRef).toBe("wip1");
+    expect(row.baselineVerifiedAt).toBeNull();
+  });
+
+  it("setDevSessionBaselineDone advances base_ref and stamps the discriminator", () => {
+    approve();
+    setDevSessionBaselineDone(db, { id: "s1", baseRef: "base2", verifiedAt: T0 + 3 });
+    const row = getDevSession(db, "s1")!;
+    expect(row.baseRef).toBe("base2");
+    expect(row.baselineVerifiedAt).toBe(T0 + 3);
+  });
+
+  it("updateDevSessionBaseRef degrades the review base", () => {
+    approve();
+    updateDevSessionBaseRef(db, "s1", "headX", T0 + 4);
+    expect(getDevSession(db, "s1")?.baseRef).toBe("headX");
+  });
+
+  it("rollback marking removes the session from the rollback target lookup", () => {
+    approve();
+    expect(getLatestRollbackableDevSession(db)?.id).toBe("s1");
+    markDevSessionRolledBack(db, { id: "s1", at: T0 + 5 });
+    expect(getDevSession(db, "s1")?.rolledBackAt).toBe(T0 + 5);
+    expect(getLatestRollbackableDevSession(db)).toBeNull();
+  });
+
+  it("getLatestRollbackableDevSession skips branchless sessions and picks the newest", () => {
+    // s1 never approved (branch NULL) — not a target.
+    expect(getLatestRollbackableDevSession(db)).toBeNull();
+    approve();
+    createDevSession(db, {
+      id: "s2",
+      repositoryId: "local:test",
+      slug: "test",
+      originatingPlatform: "telegram",
+      originatingChannel: "telegram:123",
+      createdAt: T0 + 10,
+    });
+    // s2 is newer but branchless — s1 stays the target.
+    expect(getLatestRollbackableDevSession(db)?.id).toBe("s1");
+  });
+
+  it("getLatestDevSessionForChannel resolves the newest session for the channel", () => {
+    expect(getLatestDevSessionForChannel(db, "telegram:123")?.id).toBe("s1");
+    expect(getLatestDevSessionForChannel(db, "discord:9")).toBeNull();
+    createDevSession(db, {
+      id: "s2",
+      repositoryId: "local:test",
+      slug: "test",
+      originatingPlatform: "telegram",
+      originatingChannel: "telegram:123",
+      createdAt: T0 + 10,
+    });
+    expect(getLatestDevSessionForChannel(db, "telegram:123")?.id).toBe("s2");
+  });
+
+  it("latestEvaluateCommitFor / supersedeDevIterationsAfter drive iteration rollback", () => {
+    approve();
+    const rec = (id: string, iteration: number, phase: "evaluate" | "implement", sha: string | null, at: number) =>
+      recordDevIteration(db, {
+        id, sessionId: "s1", iteration, phase, verdict: "CONTINUE",
+        commitSha: sha, createdAt: at,
+      });
+    rec("i1", 1, "evaluate", "sha1", T0 + 1);
+    rec("i2", 2, "evaluate", "sha2", T0 + 2);
+    rec("i2b", 2, "implement", null, T0 + 3); // no commit — never a target
+    rec("i3", 3, "evaluate", "sha3", T0 + 4);
+    expect(latestEvaluateCommitFor(db, "s1", 2)).toBe("sha2");
+    expect(latestEvaluateCommitFor(db, "s1", 9)).toBeNull();
+
+    // Roll back to iteration 2: rows PAST it flip superseded (kept).
+    expect(supersedeDevIterationsAfter(db, "s1", 2)).toBe(1);
+    const rows = listDevIterations(db, "s1");
+    expect(rows.find((r) => r.id === "i3")?.superseded).toBe(true);
+    expect(rows.find((r) => r.id === "i2")?.superseded).toBe(false);
+    // A superseded evaluate row is no longer a commit target.
+    expect(latestEvaluateCommitFor(db, "s1", 3)).toBeNull();
+  });
+
+  it("resetDevRequirementStatuses wipes the ledger before the re-sync", () => {
+    approve();
+    seedDevRequirements(db, "s1", [
+      { id: "q1", reqId: "REQ-001", title: "a" },
+      { id: "q2", reqId: "REQ-002", title: "b" },
+    ], T0);
+    updateDevRequirement(db, {
+      sessionId: "s1", reqId: "REQ-001", status: "met", evidence: "done", iter: 3, updatedAt: T0 + 1,
+    });
+    resetDevRequirementStatuses(db, "s1", T0 + 2);
+    const rows = listDevRequirements(db, "s1");
+    expect(rows.map((r) => r.status)).toEqual(["unstarted", "unstarted"]);
+    expect(rows[0]?.evidence).toBeNull();
+    expect(rows[0]?.iter).toBeNull();
+  });
+
+  it("markDevRunningFromTerminal is a terminal-only CAS", () => {
+    approve();
+    // Running → refuse.
+    expect(markDevRunningFromTerminal(db, { id: "s1", at: T0 + 5 })).toBeNull();
+    markDevTerminal(db, { id: "s1", state: "failed", loopState: "BLOCKED", exitedAt: T0 + 6 });
+    const resumed = markDevRunningFromTerminal(db, { id: "s1", at: T0 + 7 });
+    expect(resumed?.state).toBe("running");
+    expect(resumed?.exitedAt).toBeNull();
+    // The loop verdict is kept for the resume decision; only state flips.
+    expect(resumed?.loopState).toBe("BLOCKED");
+  });
+
+  it("resetDevSessionStopHeuristics zeroes ONLY the streak counters", () => {
+    approve();
+    writeDevCheckpoint(db, {
+      id: "s1", iteration: 7, agentFailures: 1, gateReviseCount: 2,
+      iterReviseCount: 3, resumes: 4,
+    }, T0 + 3);
+    resetDevSessionStopHeuristics(db, "s1", T0 + 4);
+    const row = getDevSession(db, "s1")!;
+    expect(row.iteration).toBe(7);
+    expect(row.resumes).toBe(4);
+    expect(row.agentFailures).toBe(0);
+    expect(row.gateReviseCount).toBe(0);
+    expect(row.iterReviseCount).toBe(0);
+  });
+
+  it("run_resumes bumps, persists, and clears on progress", () => {
+    approve();
+    expect(bumpDevSessionRunResumes(db, "s1", T0 + 1)).toBe(1);
+    expect(bumpDevSessionRunResumes(db, "s1", T0 + 2)).toBe(2);
+    expect(getDevSession(db, "s1")?.runResumes).toBe(2);
+    clearDevSessionRunResumes(db, "s1", T0 + 3);
+    expect(getDevSession(db, "s1")?.runResumes).toBe(0);
+    // Clearing an already-zero counter is a no-op (no updated_at churn).
+    const before = getDevSession(db, "s1")!.updatedAt;
+    clearDevSessionRunResumes(db, "s1", T0 + 9);
+    expect(getDevSession(db, "s1")!.updatedAt).toBe(before);
+  });
+
+  it("rebindDevSessionApproval re-anchors the hash + budget caps", () => {
+    approve();
+    rebindDevSessionApproval(db, {
+      id: "s1", approvedHash: "h2", maxIterations: 20, maxBudgetUsd: 5, at: T0 + 8,
+    });
+    const row = getDevSession(db, "s1")!;
+    expect(row.approvedHash).toBe("h2");
+    expect(row.maxIterations).toBe(20);
+    expect(row.maxBudgetUsd).toBe(5);
   });
 });

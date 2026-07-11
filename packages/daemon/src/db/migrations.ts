@@ -1725,6 +1725,283 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: "0029-dev-loop-hardening",
+    description:
+      "(DEV_MODE_GIT_HARDENING) — in-place git safety + rollback + the "
+      + "acceptance-checklist rigor layer. (a) dev_sessions gains six columns: "
+      + "original_branch / original_head / wip_snapshot_ref (the !rollback "
+      + "anchors captured at !approve), baseline_verified_at (the "
+      + "baseline-verify fresh-vs-resume discriminator), rolled_back_at, and "
+      + "run_resumes (loop-kit RESUME_COUNT — crash/terminal resumes, separate "
+      + "from the escalation-answer `resumes`). (b) dev_session_tasks is "
+      + "rebuilt to widen the origin CHECK with 'manual' (!add tasks) and add "
+      + "approved_hash (a manual task's own sub-contract anchor). Because "
+      + "dev_session_tasks is a REFERENCED PARENT (iterations.task_id CASCADE, "
+      + "escalations.task_id SET NULL) and foreign_keys is ON, a naive DROP "
+      + "would fire those actions over SQLite's implicit DELETE and cascade "
+      + "away journal rows — so the rebuild renames the old parent aside "
+      + "(SQLite >= 3.25 rewrites the children's FK clauses to follow), "
+      + "creates the final-shape parent, copies rows, rebuilds BOTH children "
+      + "in place against the new parent (they need their own CHECK widenings "
+      + "anyway: iterations gains phase tokens baseline/rollback/"
+      + "contract_review/resume/contract_gen + a superseded flag for "
+      + "!rollback audit rows; escalations gains kind 'human_verify' for the "
+      + "checklist human-method closure), and drops the renamed old parent "
+      + "LAST when nothing references it. (c) The acceptance-checklist mirror "
+      + "table dev_session_checklist is created (UPSERT-only; its id set "
+      + "doubles as loop-kit's run-scoped ac-seen monotonicity baseline). "
+      + "Idempotent: fresh DBs already carry every final shape from "
+      + "applySchema (which runs BEFORE migrations), so each block is guarded "
+      + "on a marker column / CHECK text and records as a no-op. No seed "
+      + "touches these tables.",
+    up(db) {
+      // (a) dev_sessions — six new columns.
+      if (tableExists(db, "dev_sessions")) {
+        const columns: readonly (readonly [string, string])[] = [
+          ["original_branch", "TEXT"],
+          ["original_head", "TEXT"],
+          ["wip_snapshot_ref", "TEXT"],
+          ["baseline_verified_at", "INTEGER"],
+          ["rolled_back_at", "INTEGER"],
+          ["run_resumes", "INTEGER NOT NULL DEFAULT 0"],
+        ];
+        for (const [name, type] of columns) {
+          if (!columnExists(db, "dev_sessions", name)) {
+            db.exec(`ALTER TABLE dev_sessions ADD COLUMN ${name} ${type}`);
+          }
+        }
+      }
+
+      // Shared child-rebuild bodies (used by the (b) parent dance and the (c)
+      // standalone fallbacks — each is idempotent via its own shape guard).
+      const rebuildIterations = (): void => {
+        if (!tableExists(db, "dev_session_iterations")) return;
+        if (columnExists(db, "dev_session_iterations", "superseded")) return;
+        // 0026-era tables lack task_id (added by 0027) — select NULL then.
+        const taskIdSel = columnExists(db, "dev_session_iterations", "task_id")
+          ? "task_id"
+          : "NULL";
+        db.exec(`
+          CREATE TABLE dev_session_iterations_new (
+              id          TEXT PRIMARY KEY,
+              session_id  TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+              task_id     TEXT REFERENCES dev_session_tasks(id) ON DELETE CASCADE,
+              iteration   INTEGER NOT NULL,
+              phase       TEXT NOT NULL
+                  CHECK (phase IN ('plan','implement','evaluate','review','stop_eval','gate','evidence',
+                                   'decompose','decompose_review','supervise','plan_review','merge',
+                                   'baseline','rollback','contract_review','resume','contract_gen')),
+              verdict     TEXT,
+              reason      TEXT,
+              cost_usd    REAL,
+              commit_sha  TEXT,
+              superseded  INTEGER NOT NULL DEFAULT 0 CHECK (superseded IN (0, 1)),
+              created_at  INTEGER NOT NULL
+          );
+          INSERT INTO dev_session_iterations_new
+            (id, session_id, task_id, iteration, phase, verdict, reason,
+             cost_usd, commit_sha, superseded, created_at)
+            SELECT id, session_id, ${taskIdSel}, iteration, phase, verdict,
+                   reason, cost_usd, commit_sha, 0, created_at
+              FROM dev_session_iterations;
+          DROP TABLE dev_session_iterations;
+          ALTER TABLE dev_session_iterations_new RENAME TO dev_session_iterations;
+        `);
+      };
+      const escalationsHaveHumanVerify = (): boolean => {
+        const row = db
+          .prepare<[], { sql: string | null }>(
+            `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dev_session_escalations'`,
+          )
+          .get();
+        return (row?.sql ?? "").includes("human_verify");
+      };
+      const rebuildEscalations = (): void => {
+        if (!tableExists(db, "dev_session_escalations")) return;
+        if (escalationsHaveHumanVerify()) return;
+        const taskIdSel = columnExists(db, "dev_session_escalations", "task_id")
+          ? "task_id"
+          : "NULL";
+        const queuedSel = columnExists(db, "dev_session_escalations", "queued")
+          ? "queued"
+          : "0";
+        db.exec(`
+          CREATE TABLE dev_session_escalations_new (
+              id              TEXT PRIMARY KEY,
+              session_id      TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+              task_id         TEXT REFERENCES dev_session_tasks(id) ON DELETE SET NULL,
+              kind            TEXT NOT NULL
+                  CHECK (kind IN (
+                      'spec_decision',
+                      'architecture_decision',
+                      'risk_approval',
+                      'review_escalation',
+                      'human_verify'
+                  )),
+              question        TEXT NOT NULL,
+              context_summary TEXT,
+              asked_at        INTEGER NOT NULL,
+              deadline_at     INTEGER,
+              delivered_at    INTEGER,
+              answer          TEXT,
+              answered_at     INTEGER,
+              resolved        INTEGER NOT NULL DEFAULT 0
+                  CHECK (resolved IN (0, 1)),
+              queued          INTEGER NOT NULL DEFAULT 0
+                  CHECK (queued IN (0, 1))
+          );
+          INSERT INTO dev_session_escalations_new
+            (id, session_id, task_id, kind, question, context_summary,
+             asked_at, deadline_at, delivered_at, answer, answered_at,
+             resolved, queued)
+            SELECT id, session_id, ${taskIdSel}, kind, question,
+                   context_summary, asked_at, deadline_at, delivered_at,
+                   answer, answered_at, resolved, ${queuedSel}
+              FROM dev_session_escalations;
+          DROP TABLE dev_session_escalations;
+          ALTER TABLE dev_session_escalations_new RENAME TO dev_session_escalations;
+        `);
+      };
+
+      // (b) dev_session_tasks rebuild (the referenced-parent dance).
+      if (
+        tableExists(db, "dev_session_tasks")
+        && !columnExists(db, "dev_session_tasks", "approved_hash")
+      ) {
+        db.exec(`ALTER TABLE dev_session_tasks RENAME TO dev_session_tasks_old`);
+        db.exec(`
+          CREATE TABLE dev_session_tasks (
+              id                 TEXT PRIMARY KEY,
+              session_id         TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+              task_key           TEXT NOT NULL,
+              summary            TEXT NOT NULL,
+              depends_on         TEXT NOT NULL DEFAULT '[]',
+              scope              TEXT NOT NULL DEFAULT '',
+              reqs               TEXT NOT NULL DEFAULT '[]',
+              body               TEXT NOT NULL,
+              origin             TEXT NOT NULL DEFAULT 'plan'
+                  CHECK (origin IN ('plan','replan','plan_review','fixup','manual')),
+              approved_hash      TEXT,
+              state              TEXT NOT NULL DEFAULT 'queued'
+                  CHECK (state IN ('queued','running','supervise_pending','merge_pending',
+                                   'awaiting_user','merged','failed','superseded','dep_failed')),
+              loop_state         TEXT
+                  CHECK (loop_state IS NULL OR loop_state IN (
+                      'SUCCESS','NO_OP','NEEDS_SPEC_DECISION','NEEDS_ARCHITECTURE_DECISION',
+                      'NEEDS_DECOMPOSITION','RISK_REQUIRES_APPROVAL','BLOCKED','STALLED',
+                      'BUDGET_EXCEEDED')),
+              branch             TEXT,
+              worktree_path      TEXT,
+              base_ref           TEXT,
+              seed_branch        TEXT,
+              iteration          INTEGER NOT NULL DEFAULT 0,
+              agent_failures     INTEGER NOT NULL DEFAULT 0,
+              gate_revise_count  INTEGER NOT NULL DEFAULT 0,
+              iter_revise_count  INTEGER NOT NULL DEFAULT 0,
+              resumes            INTEGER NOT NULL DEFAULT 0,
+              merge_retries      INTEGER NOT NULL DEFAULT 0,
+              supervise_count    INTEGER NOT NULL DEFAULT 0,
+              plan_review        TEXT
+                  CHECK (plan_review IS NULL OR plan_review IN ('pending','done','escalated')),
+              cost_usd           REAL,
+              fail_reason        TEXT,
+              created_at         INTEGER NOT NULL,
+              started_at         INTEGER,
+              ended_at           INTEGER,
+              merged_at          INTEGER,
+              updated_at         INTEGER NOT NULL
+          );
+          INSERT INTO dev_session_tasks
+            (id, session_id, task_key, summary, depends_on, scope, reqs, body,
+             origin, approved_hash, state, loop_state, branch, worktree_path,
+             base_ref, seed_branch, iteration, agent_failures,
+             gate_revise_count, iter_revise_count, resumes, merge_retries,
+             supervise_count, plan_review, cost_usd, fail_reason, created_at,
+             started_at, ended_at, merged_at, updated_at)
+            SELECT id, session_id, task_key, summary, depends_on, scope, reqs,
+                   body, origin, NULL, state, loop_state, branch,
+                   worktree_path, base_ref, seed_branch, iteration,
+                   agent_failures, gate_revise_count, iter_revise_count,
+                   resumes, merge_retries, supervise_count, plan_review,
+                   cost_usd, fail_reason, created_at, started_at, ended_at,
+                   merged_at, updated_at
+              FROM dev_session_tasks_old;
+        `);
+        // Children re-point at the NEW parent (their FK clauses were renamed
+        // to ..._old with the parent). Both need shape widenings anyway.
+        rebuildIterations();
+        rebuildEscalations();
+        // Nothing references the old parent now — its implicit DELETE fires
+        // no FK action.
+        db.exec(`DROP TABLE dev_session_tasks_old`);
+      }
+
+      // (c) Standalone child fallbacks (mixed-shape restores; a (b)-rebuilt
+      // child is a no-op via its own guard). Skipped when dev_session_tasks is
+      // absent — inserting into a child whose FK parent table is missing
+      // errors, and every real upgrade path has 0027 applied before this.
+      if (tableExists(db, "dev_session_tasks")) {
+        rebuildIterations();
+        rebuildEscalations();
+      }
+
+      // (d) Recreate the indexes dropped with the rebuilt tables (IF NOT
+      // EXISTS keeps the fresh-DB path a no-op).
+      if (tableExists(db, "dev_session_tasks")) {
+        db.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_tasks_session_key
+              ON dev_session_tasks(session_id, task_key);
+          CREATE INDEX IF NOT EXISTS idx_dev_tasks_session_state
+              ON dev_session_tasks(session_id, state);
+        `);
+      }
+      if (tableExists(db, "dev_session_iterations")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_dev_iterations_session
+              ON dev_session_iterations(session_id, iteration);
+          CREATE INDEX IF NOT EXISTS idx_dev_iterations_task
+              ON dev_session_iterations(task_id);
+        `);
+      }
+      if (tableExists(db, "dev_session_escalations")) {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_dev_esc_session
+              ON dev_session_escalations(session_id);
+          CREATE INDEX IF NOT EXISTS idx_dev_esc_unresolved
+              ON dev_session_escalations(session_id)
+              WHERE resolved = 0 AND queued = 0;
+        `);
+      }
+
+      // (e) The acceptance-checklist mirror table.
+      if (tableExists(db, "dev_sessions")) {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS dev_session_checklist (
+              id              TEXT PRIMARY KEY,
+              session_id      TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+              task_id         TEXT REFERENCES dev_session_tasks(id) ON DELETE CASCADE,
+              ac_id           TEXT NOT NULL,
+              req_id          TEXT,
+              expectation     TEXT,
+              method          TEXT NOT NULL DEFAULT 'cmd'
+                  CHECK (method IN ('cmd','run','human')),
+              status          TEXT NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','verified','failed')),
+              evidence        TEXT,
+              first_seen_iter INTEGER,
+              updated_at      INTEGER NOT NULL
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_checklist_session_ac
+              ON dev_session_checklist(session_id, ac_id) WHERE task_id IS NULL;
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_checklist_task_ac
+              ON dev_session_checklist(session_id, task_id, ac_id) WHERE task_id IS NOT NULL;
+          CREATE INDEX IF NOT EXISTS idx_dev_checklist_session
+              ON dev_session_checklist(session_id);
+        `);
+      }
+    },
+  },
 ];
 
 export interface MigrationRunResult {

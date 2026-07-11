@@ -38,8 +38,9 @@ export type DevTaskState =
 /** The session-level loop verdicts plus the task-only "split me" state. */
 export type DevTaskLoopState = DevSessionLoopState | "NEEDS_DECOMPOSITION";
 
-/** Which fleet mutation created the task row. */
-export type DevTaskOrigin = "plan" | "replan" | "plan_review" | "fixup";
+/** Which fleet mutation created the task row. 'manual' = an owner `!add` —
+ *  it runs OUTSIDE the master contract with its own generated sub-contract. */
+export type DevTaskOrigin = "plan" | "replan" | "plan_review" | "fixup" | "manual";
 
 export type DevTaskPlanReview = "pending" | "done" | "escalated";
 
@@ -71,6 +72,9 @@ export interface DevTaskRow {
   reqs: string[];
   body: string;
   origin: DevTaskOrigin;
+  /** A MANUAL task's own sub-contract anchor (computeApprovalHash over its
+   *  worktree contract + config); null = runs under the session's hash. */
+  approvedHash: string | null;
   state: DevTaskState;
   loopState: DevTaskLoopState | null;
   branch: string | null;
@@ -104,6 +108,7 @@ interface DevTaskDbRow {
   reqs: string;
   body: string;
   origin: DevTaskOrigin;
+  approved_hash: string | null;
   state: DevTaskState;
   loop_state: DevTaskLoopState | null;
   branch: string | null;
@@ -129,7 +134,8 @@ interface DevTaskDbRow {
 
 const SELECT_COLUMNS = `
   id, session_id, task_key, summary, depends_on, scope, reqs, body, origin,
-  state, loop_state, branch, worktree_path, base_ref, seed_branch, iteration,
+  approved_hash, state, loop_state, branch, worktree_path, base_ref,
+  seed_branch, iteration,
   agent_failures, gate_revise_count, iter_revise_count, resumes,
   merge_retries, supervise_count, plan_review, cost_usd, fail_reason,
   created_at, started_at, ended_at, merged_at, updated_at
@@ -161,6 +167,7 @@ function fromDbRow(row: DevTaskDbRow): DevTaskRow {
     reqs: parseJsonStringArray(row.reqs),
     body: row.body,
     origin: row.origin,
+    approvedHash: row.approved_hash,
     state: row.state,
     loopState: row.loop_state,
     branch: row.branch,
@@ -517,6 +524,53 @@ export function setDevTaskWorktree(
   db.prepare(
     `UPDATE dev_session_tasks SET worktree_path = ?, updated_at = ? WHERE id = ?`,
   ).run(worktreePath, now, id);
+}
+
+/** Stamp a MANUAL task's own sub-contract anchor (set once at claim, after
+ *  its contract-gen + contract-review legs). */
+export function setDevTaskApprovedHash(
+  db: Database.Database,
+  id: string,
+  approvedHash: string | null,
+  now: number,
+): void {
+  db.prepare(
+    `UPDATE dev_session_tasks SET approved_hash = ?, updated_at = ? WHERE id = ?`,
+  ).run(approvedHash, now, id);
+}
+
+/**
+ * CAS failed/dep_failed → queued for `!resume`: zero the per-task loop
+ * checkpoint (fresh stop-heuristic window), bump the task resume counter,
+ * clear the worker anchors (branch / worktree_path / base_ref — the runner
+ * renames a surviving branch to a seed first) and loop_state / fail_reason.
+ * Keeps started_at (first claim time), cost_usd (spend is cumulative),
+ * merge_retries, seed_branch and plan_review — mirror of resetDevTaskForRedo
+ * with a resume posture. Returns null on a CAS miss.
+ */
+export function requeueDevTaskForResume(
+  db: Database.Database,
+  input: { id: string; at: number },
+): DevTaskRow | null {
+  const result = db
+    .prepare(
+      `UPDATE dev_session_tasks
+          SET state = 'queued',
+              resumes = resumes + 1,
+              iteration = 0,
+              agent_failures = 0,
+              gate_revise_count = 0,
+              iter_revise_count = 0,
+              branch = NULL,
+              worktree_path = NULL,
+              base_ref = NULL,
+              loop_state = NULL,
+              fail_reason = NULL,
+              updated_at = ?
+        WHERE id = ? AND state IN ('failed', 'dep_failed')`,
+    )
+    .run(input.at, input.id);
+  return result.changes > 0 ? getDevTask(db, input.id) : null;
 }
 
 // ── DAG surgery ─────────────────────────────────────────────────────────

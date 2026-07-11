@@ -57,6 +57,7 @@ import {
   ensureDevWorkdir,
   gitCommitAll,
   gitCreateBranch,
+  gitCurrentBranch,
   gitHead,
   readAgentStateFirstLine,
   readDevDoc,
@@ -779,11 +780,22 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
 
     // Move onto the dev branch (dirty worktree carries over), snapshot the
     // pre-loop baseline there so per-iteration diffs are clean, and anchor the
-    // run baseline. Never touches the owner's original branch (D6).
+    // run baseline. Never touches the owner's original branch (D6). The
+    // pre-switch checkout (branch + HEAD) is recorded FIRST so `!rollback`
+    // can restore it, and the snapshot sha is kept iff it actually swept in
+    // dirty owner WIP (the rollback re-applies exactly that commit).
     const branch = `aitne-dev/${sessionId}`;
+    const originalBranch = gitCurrentBranch(repoPath);
+    const originalHead = gitHead(repoPath);
+    let wipSnapshotRef: string | null = null;
     try {
       gitCreateBranch(repoPath, branch);
       gitCommitAll(repoPath, "dev: baseline snapshot (pre-loop)");
+      const postSnapshotHead = gitHead(repoPath);
+      wipSnapshotRef =
+        postSnapshotHead !== null && postSnapshotHead !== originalHead
+          ? postSnapshotHead
+          : null;
     } catch (err) {
       return { ok: false, reason: `git branch/baseline failed: ${err instanceof Error ? err.message : String(err)}` };
     }
@@ -802,6 +814,9 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       approvedHash,
       branch,
       baseRef,
+      originalBranch,
+      originalHead,
+      wipSnapshotRef,
       maxIterations: config.maxIterations,
       // Per-process total cap (③). null = off (COALESCE keeps the NULL) → the
       // engine's session-wide BUDGET_EXCEEDED guard stays dormant and the

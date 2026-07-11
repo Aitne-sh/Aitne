@@ -21,8 +21,10 @@ import {
   insertDevTasks,
   listDevTasks,
   markDevTaskState,
+  requeueDevTaskForResume,
   resetDevTaskForRedo,
   rewireDevTaskDeps,
+  setDevTaskApprovedHash,
   setDevTaskPlanReview,
   setDevTaskSeedBranch,
   setDevTaskWorktree,
@@ -462,6 +464,7 @@ describe("migration 0027-dev-flow", () => {
   // legacy-upgrade test migrates the DB to the current shape before reading
   // escalations back through getDevEscalation.
   const m28 = MIGRATIONS.find((m) => m.id === "0028-dev-escalation-queue");
+  const m29 = MIGRATIONS.find((m) => m.id === "0029-dev-loop-hardening");
 
   it("is registered in the production MIGRATIONS list, after 0026", () => {
     expect(m26).toBeDefined();
@@ -547,8 +550,14 @@ describe("migration 0027-dev-flow", () => {
        VALUES ('e1', 's1', 'spec_decision', 'which db?', NULL, ?, NULL, NULL, NULL, NULL, 0)`,
     ).run(T0 + 3);
 
-    const result = runMigrations(db, [m26!, m27!, m28!]);
-    expect(result.applied).toEqual(["0027-dev-flow", "0028-dev-escalation-queue"]);
+    // The modern store reads the 0029 shape (superseded etc.), so the legacy
+    // chain runs through 0029 — exactly what a real upgrade does.
+    const result = runMigrations(db, [m26!, m27!, m28!, m29!]);
+    expect(result.applied).toEqual([
+      "0027-dev-flow",
+      "0028-dev-escalation-queue",
+      "0029-dev-loop-hardening",
+    ]);
 
     // New table + indexes.
     expect(tableExists(db, "dev_session_tasks")).toBe(true);
@@ -591,8 +600,81 @@ describe("migration 0027-dev-flow", () => {
     expect(listDevIterations(db, "s1")[2]?.taskId).toBe("t-1");
 
     // Re-run is a recorded no-op.
-    const second = runMigrations(db, [m26!, m27!, m28!]);
+    const second = runMigrations(db, [m26!, m27!, m28!, m29!]);
     expect(second.applied).toEqual([]);
     db.close();
+  });
+});
+
+describe("resume/manual support (0029)", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    applySchema(db);
+    seedRepo(db);
+    seedSession(db);
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("round-trips a manual task with its own approved hash", () => {
+    insertDevTasks(db, "s1", [mkTask({ id: "m1", taskKey: "manual-1", origin: "manual" })], T0);
+    expect(getDevTask(db, "m1")?.origin).toBe("manual");
+    expect(getDevTask(db, "m1")?.approvedHash).toBeNull();
+    setDevTaskApprovedHash(db, "m1", "hash-m1", T0 + 1);
+    expect(getDevTask(db, "m1")?.approvedHash).toBe("hash-m1");
+    setDevTaskApprovedHash(db, "m1", null, T0 + 2);
+    expect(getDevTask(db, "m1")?.approvedHash).toBeNull();
+  });
+
+  it("requeueDevTaskForResume: fresh window, kept forensics, CAS from failed/dep_failed only", () => {
+    insertDevTasks(db, "s1", [mkTask({ id: "t1", taskKey: "a" })], T0);
+    claimDevTask(db, {
+      id: "t1", branch: "aitne-dev/s1-a", worktreePath: "/tmp/wt-a",
+      baseRef: "sha0", at: T0 + 1,
+    });
+    writeDevTaskCheckpoint(db, {
+      id: "t1", iteration: 4, agentFailures: 1, gateReviseCount: 2,
+      iterReviseCount: 1, resumes: 0,
+    }, T0 + 2);
+    addDevTaskCost(db, "t1", 1.25, T0 + 3);
+    bumpDevTaskMergeRetries(db, "t1", T0 + 3);
+    setDevTaskSeedBranch(db, "t1", "seed-a", T0 + 3);
+    // Not failed yet — the CAS refuses.
+    expect(requeueDevTaskForResume(db, { id: "t1", at: T0 + 4 })).toBeNull();
+    markDevTaskState(db, {
+      id: "t1", from: ["running"], to: "failed",
+      loopState: "BLOCKED", failReason: "boom", at: T0 + 5,
+    });
+
+    const requeued = requeueDevTaskForResume(db, { id: "t1", at: T0 + 6 })!;
+    expect(requeued.state).toBe("queued");
+    // Fresh stop-heuristic window.
+    expect(requeued.iteration).toBe(0);
+    expect(requeued.agentFailures).toBe(0);
+    expect(requeued.gateReviseCount).toBe(0);
+    expect(requeued.iterReviseCount).toBe(0);
+    expect(requeued.loopState).toBeNull();
+    expect(requeued.failReason).toBeNull();
+    // Worker anchors cleared for a fresh bootstrap…
+    expect(requeued.branch).toBeNull();
+    expect(requeued.worktreePath).toBeNull();
+    expect(requeued.baseRef).toBeNull();
+    // …but the forensics/carryover state is kept.
+    expect(requeued.resumes).toBe(1);
+    expect(requeued.mergeRetries).toBe(1);
+    expect(requeued.costUsd).toBe(1.25);
+    expect(requeued.seedBranch).toBe("seed-a");
+    expect(requeued.startedAt).toBe(T0 + 1);
+  });
+
+  it("requeueDevTaskForResume accepts dep_failed", () => {
+    insertDevTasks(db, "s1", [mkTask({ id: "t2", taskKey: "b" })], T0);
+    markDevTaskState(db, { id: "t2", from: ["queued"], to: "dep_failed", at: T0 + 1 });
+    expect(requeueDevTaskForResume(db, { id: "t2", at: T0 + 2 })?.state).toBe("queued");
   });
 });

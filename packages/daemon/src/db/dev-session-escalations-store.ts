@@ -28,7 +28,10 @@ export type DevEscalationKind =
   | "spec_decision"
   | "architecture_decision"
   | "risk_approval"
-  | "review_escalation";
+  | "review_escalation"
+  /** Acceptance-checklist human-method closure — the loop is done except for
+   *  expectations only the owner can judge; the answer closes the rows. */
+  | "human_verify";
 
 export interface DevEscalationRow {
   id: string;

@@ -2053,6 +2053,15 @@ CREATE TABLE IF NOT EXISTS dev_sessions (
     branch              TEXT,
     -- Run-start HEAD sha (the whole-run diff baseline); NULL until approved.
     base_ref            TEXT,
+    -- ── in-place git anchors (DEV_MODE_GIT_HARDENING Phase A) ────────────
+    -- Branch the owner's checkout was on BEFORE checkout -B at !approve;
+    -- NULL = detached HEAD at approve (or a pre-0029 session).
+    original_branch     TEXT,
+    -- HEAD sha before the branch switch — the whole-session rollback target.
+    original_head       TEXT,
+    -- Sha of the "dev: baseline snapshot (pre-loop)" commit IFF it swept in
+    -- dirty owner WIP (!rollback re-applies it); NULL = tree was clean.
+    wip_snapshot_ref    TEXT,
     -- Outer lifecycle. 'interview' — gathering requirements over chat.
     -- 'awaiting_approval' — loop summary sent, waiting for !approve.
     -- 'running' — the loop engine owns the session. 'awaiting_user' — the
@@ -2087,6 +2096,10 @@ CREATE TABLE IF NOT EXISTS dev_sessions (
     -- injected instruction cannot move the goalposts. NULL until approved.
     approved_hash       TEXT,
     approved_at         INTEGER,
+    -- Epoch-ms when the run's baseline-verify pass completed (base_ref was
+    -- advanced past the "dev: baseline verify snapshot" commit). NULL = the
+    -- fresh path hasn't run yet — the fresh-vs-resume discriminator.
+    baseline_verified_at INTEGER,
     -- ── loop-kit run-checkpoint (persisted at the top of every iteration,
     --    so a daemon restart resumes rather than restarts) ───────────────
     iteration           INTEGER NOT NULL DEFAULT 0,
@@ -2094,6 +2107,11 @@ CREATE TABLE IF NOT EXISTS dev_sessions (
     gate_revise_count   INTEGER NOT NULL DEFAULT 0,
     iter_revise_count   INTEGER NOT NULL DEFAULT 0,
     resumes             INTEGER NOT NULL DEFAULT 0,
+    -- Crash/terminal-resume counter (loop-kit RESUME_COUNT): bumped by !resume
+    -- and boot crash-recovery, reset to 0 after any evaluated iteration,
+    -- capped at config.maxResumes. Separate from 'resumes', which counts
+    -- escalation answers (its own scaled cap).
+    run_resumes         INTEGER NOT NULL DEFAULT 0,
     -- Cumulative fleet-mutation counters (dev-flow) — the replan /
     -- plan-review / integration-fixup budgets are enforced against these;
     -- they only ever count up across the session's lifetime.
@@ -2124,6 +2142,9 @@ CREATE TABLE IF NOT EXISTS dev_sessions (
     -- background_task). "<platform>" / "<platform>:<channel_id>".
     originating_platform TEXT,
     originating_channel  TEXT,
+    -- Epoch-ms of a whole-session !rollback (original branch restored). A
+    -- rolled-back session drops out of the rollback/resume target lookups.
+    rolled_back_at      INTEGER,
     created_at          INTEGER NOT NULL,
     entered_at          INTEGER NOT NULL,
     updated_at          INTEGER NOT NULL,
@@ -2165,9 +2186,13 @@ CREATE TABLE IF NOT EXISTS dev_session_tasks (
     -- The task brief handed to the implement leg (the per-task contract).
     body               TEXT NOT NULL,
     -- Which fleet mutation created the row: the initial plan, a replan,
-    -- a plan-review insertion, or an integration fixup.
+    -- a plan-review insertion, an integration fixup, or an owner !add
+    -- (manual — runs OUTSIDE the master contract with its own sub-contract).
     origin             TEXT NOT NULL DEFAULT 'plan'
-        CHECK (origin IN ('plan','replan','plan_review','fixup')),
+        CHECK (origin IN ('plan','replan','plan_review','fixup','manual')),
+    -- Per-task immutability anchor for MANUAL tasks that carry their own
+    -- generated sub-contract; NULL = the task runs under the session's hash.
+    approved_hash      TEXT,
     -- Task lifecycle. 'queued' — waiting on deps/capacity. 'running' —
     -- claimed by a worker (branch/worktree stamped). 'supervise_pending' /
     -- 'merge_pending' — inner loop stopped, awaiting the supervise / merge
@@ -2228,11 +2253,15 @@ CREATE TABLE IF NOT EXISTS dev_session_iterations (
     iteration   INTEGER NOT NULL,
     phase       TEXT NOT NULL
         CHECK (phase IN ('plan','implement','evaluate','review','stop_eval','gate','evidence',
-                         'decompose','decompose_review','supervise','plan_review','merge')),
+                         'decompose','decompose_review','supervise','plan_review','merge',
+                         'baseline','rollback','contract_review','resume','contract_gen')),
     verdict     TEXT,
     reason      TEXT,
     cost_usd    REAL,
     commit_sha  TEXT,
+    -- 1 = superseded by a later '!rollback <n>' (kept as the audit trail;
+    -- excluded from checkpoint/commit lookups).
+    superseded  INTEGER NOT NULL DEFAULT 0 CHECK (superseded IN (0, 1)),
     created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dev_iterations_session
@@ -2264,6 +2293,44 @@ CREATE TABLE IF NOT EXISTS dev_session_requirements (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_reqs_session_req
     ON dev_session_requirements(session_id, req_id);
 
+-- The acceptance checklist (DB mirror of acceptance-checklist.md — the
+-- loop-kit fine-grained expectation ledger). Rows are UPSERTed from the
+-- markdown by the engine and NEVER deleted during a run: the full id set in
+-- this table IS the monotonicity baseline (loop-kit's run-scoped .loop/ac-seen
+-- file), so a row the model deletes from the markdown is caught as "vanished"
+-- by the deterministic evaluator. task_id scopes a fleet worker's rows;
+-- NULL = session-level (the single loop / the master checklist).
+CREATE TABLE IF NOT EXISTS dev_session_checklist (
+    id              TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL REFERENCES dev_sessions(id) ON DELETE CASCADE,
+    task_id         TEXT REFERENCES dev_session_tasks(id) ON DELETE CASCADE,
+    -- "AC-001" — stable, never renumbered.
+    ac_id           TEXT NOT NULL,
+    -- The contract REQ this expectation belongs to (unvalidated text cell —
+    -- the approve-time lint flags dangling ids).
+    req_id          TEXT,
+    -- One-line observable expected behavior (the contract's language).
+    expectation     TEXT,
+    -- Verification method: cmd (deterministic command), run (runtime
+    -- observation with a saved artifact), human (only the owner can judge).
+    method          TEXT NOT NULL DEFAULT 'cmd'
+        CHECK (method IN ('cmd','run','human')),
+    status          TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','verified','failed')),
+    evidence        TEXT,
+    -- Iteration the id was first synced at (audit; kept across upserts).
+    first_seen_iter INTEGER,
+    updated_at      INTEGER NOT NULL
+);
+-- Paired partial unique indexes (SQLite treats NULLs as distinct on a plain
+-- composite index, so session-level rows need their own uniqueness lane).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_checklist_session_ac
+    ON dev_session_checklist(session_id, ac_id) WHERE task_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dev_checklist_task_ac
+    ON dev_session_checklist(session_id, task_id, ac_id) WHERE task_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_dev_checklist_session
+    ON dev_session_checklist(session_id);
+
 -- Mid-run escalations — near-clone of background_task_clarifications
 -- (CAS-resolve + delivery-recovery). KEY DIFFERENCE: deadline_at is
 -- NULLABLE and dev escalations are NEVER auto-timed-out — the requirement
@@ -2275,13 +2342,16 @@ CREATE TABLE IF NOT EXISTS dev_session_escalations (
     -- Task-scoped escalation pointer; NULL = session-scoped. SET NULL so
     -- deleting a task row keeps the Q&A history on the session.
     task_id         TEXT REFERENCES dev_session_tasks(id) ON DELETE SET NULL,
-    -- Maps to the loop-kit escalation states.
+    -- Maps to the loop-kit escalation states. 'human_verify' is the
+    -- acceptance-checklist human-method closure — the loop is done except for
+    -- expectations only the owner can judge; the answer closes the rows.
     kind            TEXT NOT NULL
         CHECK (kind IN (
             'spec_decision',
             'architecture_decision',
             'risk_approval',
-            'review_escalation'
+            'review_escalation',
+            'human_verify'
         )),
     question        TEXT NOT NULL,
     context_summary TEXT,
