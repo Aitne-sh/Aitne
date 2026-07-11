@@ -70,6 +70,7 @@ import {
   gitCommitAll,
   gitCreateBranch,
   gitCurrentBranch,
+  gitDiffPaths,
   gitHead,
   gitMergeInProgress,
   gitStatusDirty,
@@ -539,7 +540,13 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         }
       }
       let session2 = session;
-      if (session.baselineVerifiedAt === null) {
+      // Fresh run = never baselined AND still at iteration 0. The iteration
+      // guard matters for a session upgraded mid-flight: migration 0029
+      // back-fills baseline_verified_at=NULL on pre-existing rows, so without
+      // it a resumed pre-upgrade session (iteration>0) would wrongly re-run
+      // baseline verify, add a snapshot commit, and reset base_ref to a
+      // mid-run HEAD (losing the whole-run diff base).
+      if (session.baselineVerifiedAt === null && session.iteration === 0) {
         // Fresh run — baseline-verify snapshot (loop.sh:7033 port): run the
         // gate once so tool side-effects (lockfiles/caches) land in BASELINE
         // (never the agent's diff), record the per-command red→green
@@ -655,6 +662,12 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
           await handleFleetResult(sessionId, result);
           return;
         }
+        // n=1 collapse → run the classic single loop. The orchestrator has
+        // returned and is no longer live, so drop the handle NOW (not only in
+        // the finally): otherwise hasLiveOrchestrator stays true for the whole
+        // single-loop run and `!add` misreports "the fleet is still planning"
+        // instead of the honest single-loop refusal.
+        orchestrators.delete(sessionId);
         logger.info({ sessionId }, "dev fleet: n=1 — running the single loop");
       }
 
@@ -1182,10 +1195,17 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       gitCreateBranch(repoPath, branch);
       gitCommitAll(repoPath, "dev: baseline snapshot (pre-loop)");
       const postSnapshotHead = gitHead(repoPath);
-      wipSnapshotRef =
-        postSnapshotHead !== null && postSnapshotHead !== originalHead
-          ? postSnapshotHead
-          : null;
+      // Record the snapshot as restorable WIP only when it swept in genuine
+      // OWNER files — not merely ensureDevWorkdir's `.gitignore` edit (which
+      // is bundled into the commit on a repo that didn't yet ignore
+      // `.aitne-dev/`). gitDiffPaths already excludes `.aitne-dev/`; filtering
+      // `.gitignore` leaves the owner's uncommitted work. An empty result on a
+      // clean tree keeps wip_snapshot_ref null so `!rollback` doesn't
+      // mislabel "restored your changes".
+      if (postSnapshotHead !== null && originalHead !== null && postSnapshotHead !== originalHead) {
+        const swept = gitDiffPaths(repoPath, originalHead).filter((p) => p !== ".gitignore");
+        wipSnapshotRef = swept.length > 0 ? postSnapshotHead : null;
+      }
     } catch (err) {
       return { ok: false, reason: `git branch/baseline failed: ${err instanceof Error ? err.message : String(err)}` };
     }

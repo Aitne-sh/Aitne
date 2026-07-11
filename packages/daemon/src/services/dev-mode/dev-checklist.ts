@@ -179,13 +179,25 @@ const VERIFY_TOKENS: ReadonlySet<string> = new Set([
   "lgtm",
 ]);
 
+/** A contrastive conjunction or a problem verb anywhere in an otherwise-
+ *  affirmative reply flips it to a rejection ("ok but the header is broken",
+ *  "yes, though the spacing needs a fix"). Deliberately NOT "issue"/"problem"/
+ *  bare "no" — those collide with the affirmative idiom "approved, no issues". */
+const HUMAN_VERIFY_QUALIFIER_RE =
+  /\b(but|however|except|though|although|wrong|broke|broken|fix|fixes|fixed|fails?|failing|incorrect|missing|doesn'?t|isn'?t|aren'?t)\b/i;
+
 /**
- * Classify the owner's reply to a human-verify escalation. Only an explicit
- * affirmative FIRST TOKEN signs the rows off; anything else (including a
- * description of what's wrong) marks them failed with the reply as evidence.
+ * Classify the owner's reply to a human-verify escalation. Sign-off requires
+ * an UNQUALIFIED affirmative: the first token is affirmative AND the reply
+ * carries no contrastive/problem qualifier. Anything else (a description of
+ * what's wrong, or an affirmative hedged with "but …") marks the rows failed
+ * with the reply as evidence — the conservative default for a human gate.
  */
 export function parseHumanVerifyReply(answer: string): "verified" | "rejected" {
+  const trimmed = answer.trim();
   // String.split always yields at least one element, so [0] is never absent.
-  const first = answer.trim().split(/\s+/)[0]!.toLowerCase().replace(/[.,!]+$/, "");
-  return VERIFY_TOKENS.has(first) ? "verified" : "rejected";
+  const first = trimmed.split(/\s+/)[0]!.toLowerCase().replace(/[.,!]+$/, "");
+  if (!VERIFY_TOKENS.has(first)) return "rejected";
+  if (HUMAN_VERIFY_QUALIFIER_RE.test(trimmed)) return "rejected";
+  return "verified";
 }

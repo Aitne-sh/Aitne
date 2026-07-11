@@ -56,6 +56,14 @@ const CONTRACT = [
   "The alpha behavior.",
   "### REQ-002: beta",
   "The beta behavior.",
+  // Acceptance-criteria anchors (new-style contract). A fleet worker's
+  // worktree carries this master contract but NOT the master checklist, so
+  // these master anchors must NOT gate a per-worker §6.6 — otherwise every
+  // worker refuses at candidate promotion and the fleet stalls
+  // BUDGET_EXCEEDED. Their presence here regression-guards that fix.
+  "## Acceptance criteria",
+  "- AC-001 (cmd): alpha is exercised by a test",
+  "- AC-002 (run): beta is observably present",
 ].join("\n");
 
 function ledgerFor(reqIds: readonly string[], status: string): string {

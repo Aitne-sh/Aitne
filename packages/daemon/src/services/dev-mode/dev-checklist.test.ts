@@ -131,12 +131,26 @@ describe("lintContractChecklist", () => {
 });
 
 describe("parseHumanVerifyReply", () => {
-  it("affirmative first tokens sign off (punctuation-tolerant)", () => {
-    for (const answer of ["verified", "Verified.", "yes, ship it", "OK!", "approved", "LGTM — nice"]) {
+  it("unqualified affirmatives sign off (punctuation-tolerant, incl. the 'no issues' idiom)", () => {
+    for (const answer of [
+      "verified", "Verified.", "yes, ship it", "OK!", "approved", "LGTM — nice",
+      "approved, no issues", // "no" is fine when not a leading token / qualifier
+    ]) {
       expect(parseHumanVerifyReply(answer)).toBe("verified");
     }
   });
-  it("anything else (including empty) rejects", () => {
+  it("an affirmative opener with a contrastive/problem qualifier is a REJECTION", () => {
+    for (const answer of [
+      "ok but the header is broken",
+      "yes, though the spacing needs a fix",
+      "approved except the footer is wrong",
+      "lgtm however the test fails",
+      "ok but wait",
+    ]) {
+      expect(parseHumanVerifyReply(answer)).toBe("rejected");
+    }
+  });
+  it("anything not affirmative (including empty) rejects", () => {
     for (const answer of ["the colors are off", "no", "", "   "]) {
       expect(parseHumanVerifyReply(answer)).toBe("rejected");
     }

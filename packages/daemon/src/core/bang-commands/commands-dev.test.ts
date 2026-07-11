@@ -419,11 +419,13 @@ describe("commands-dev", () => {
     expect(notify.mock.calls[0]?.[0]).toContain("!exit first");
   });
 
-  it("!rollback is channel-bound", async () => {
+  it("!rollback is channel-bound (a session on another channel is invisible here)", async () => {
     seedBranchedSession("failed", "telegram:OTHER");
     const { ctx, notify } = makeCtx();
     await rollbackCommand.handler(ctx, "");
-    expect(notify.mock.calls[0]?.[0]).toContain("another channel");
+    // Channel-scoped resolution (consistent with !resume/!add): the D1
+    // channel simply never resolves the OTHER-channel session.
+    expect(notify.mock.calls[0]?.[0]).toContain("no dev session on this channel");
   });
 
   it("!rollback restores the original checkout of the latest terminal session", async () => {
@@ -437,10 +439,12 @@ describe("commands-dev", () => {
     expect(
       execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
     ).toBe("main");
-    // A second !rollback finds nothing (rolled_back_at filter).
+    // A second !rollback resolves the same (now rolled-back) session and
+    // refuses with the specific reason (channel-scoped resolution surfaces it
+    // rather than returning null).
     const second = makeCtx();
     await rollbackCommand.handler(second.ctx, "");
-    expect(second.notify.mock.calls[0]?.[0]).toContain("Nothing to roll back");
+    expect(second.notify.mock.calls[0]?.[0]).toContain("already rolled back");
   });
 
   it("!exit points at !rollback when the session has a branch", async () => {

@@ -434,10 +434,19 @@ export class DevLoopEngine {
         updatedAt: this.now(),
       });
     }
+    // Contract anchors bind the SINGLE loop to its acceptance criteria. A
+    // FLEET WORKER must NOT be held to the master contract's anchors: they
+    // span every slice (a worker owning REQ-001 can never satisfy AC rows for
+    // REQ-005), and its worktree carries the master contract but no master
+    // checklist, so feeding them here would refuse every worker at candidate
+    // promotion (§6.6b) and stall the fleet. The master checklist is
+    // definition-time — enforced at the INTEGRATION GATE by the reviewer
+    // (dev.review.md), not per-worker. A worker is held only to the rows it
+    // appends for its own slice (§6.6a + monotonicity).
     const contractMd = readDevDoc(this.repoPath, DEV_DOCS.contract) ?? "";
     return {
       rows,
-      contractAnchors: extractContractAcAnchors(contractMd),
+      contractAnchors: this.fleet !== null ? [] : extractContractAcAnchors(contractMd),
       seenAcIds: this.persistence.seenAcIds(),
     };
   }
@@ -595,21 +604,7 @@ export class DevLoopEngine {
       return this.runSuccessGate(false, preRef);
     }
     if (state === "NEEDS_HUMAN_VERIFY") {
-      // §6.6 human-method closure: everything is green except expectations
-      // only the owner can judge. Park on a human_verify escalation; the
-      // runner closes the rows from the owner's reply. Persisted loop_state
-      // stays CHECK-valid (RISK_REQUIRES_APPROVAL).
-      return {
-        kind: "escalate",
-        escalationKind: "human_verify",
-        loopState: "RISK_REQUIRES_APPROVAL",
-        question:
-          `${evalOut.result.reason} Check the expectations (see `
-          + "acceptance-checklist.md and any artifacts under "
-          + ".aitne-dev/observations/), then reply `verified` to sign them "
-          + "off — or describe what's wrong.",
-        contextSummary: readDevDoc(this.repoPath, DEV_DOCS.checklist),
-      };
+      return this.humanVerifyEscalate(evalOut.result.reason);
     }
     if (
       state === "NEEDS_SPEC_DECISION"
@@ -632,11 +627,43 @@ export class DevLoopEngine {
       const stopOutcome = await this.runStopEval();
       if (stopOutcome) return stopOutcome;
     }
-    // Forced gate — MET streak + verify green.
+    // Forced gate — MET streak + verify green. But it must NOT bypass the
+    // human-verify closure: it runs the gate with assumeReady, which skips
+    // §6.6, and the gate reviewer is told to EXCEPT pending human rows (the
+    // daemon closes those). So a MET-streak force with pending human rows
+    // would reach SUCCESS without the owner ever signing off. Ask the owner
+    // instead. (Pending NON-human rows are already reviewer-backstopped —
+    // dev.review.md REVISEs on those — so only human rows need this guard.)
     if (this.shouldForceGate()) {
+      const pendingHuman = (checklist.rows ?? []).filter(
+        (r) => r.method === "human" && r.status !== "verified",
+      );
+      if (pendingHuman.length > 0) {
+        return this.humanVerifyEscalate(
+          "Everything is green except expectations only the owner can judge: "
+            + `${pendingHuman.map((r) => r.acId).join(" ")}.`,
+        );
+      }
       return this.runSuccessGate(true, preRef);
     }
     return { kind: "continue" };
+  }
+
+  /** The §6.6 human-method closure escalation — park for the owner's chat
+   *  sign-off (the runner closes the rows from the reply). loop_state stays
+   *  CHECK-valid (RISK_REQUIRES_APPROVAL). Raised from BOTH the deterministic
+   *  NEEDS_HUMAN_VERIFY state and the forced-gate guard. */
+  private humanVerifyEscalate(reason: string): DevIterationOutcome {
+    return {
+      kind: "escalate",
+      escalationKind: "human_verify",
+      loopState: "RISK_REQUIRES_APPROVAL",
+      question:
+        `${reason} Check the expectations (see acceptance-checklist.md and any `
+        + "artifacts under .aitne-dev/observations/), then reply `verified` to "
+        + "sign them off — or describe what's wrong.",
+      contextSummary: readDevDoc(this.repoPath, DEV_DOCS.checklist),
+    };
   }
 
   private async runInterimReview(preRef: string): Promise<DevIterationOutcome | null> {

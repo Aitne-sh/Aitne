@@ -272,6 +272,34 @@ describe("DevLoopEngine (integration over a real git repo)", () => {
     });
   });
 
+  it("forced gate does NOT bypass pending human-verify rows — it asks the owner", async () => {
+    // metForceN defaults to 2. Over two IN_PROGRESS iterations with a MET
+    // stop-eval streak + verify green + a pending human checklist row, the
+    // forced gate must NOT reach SUCCESS (which would skip §6.6 via
+    // assumeReady and the reviewer excepts human rows) — it escalates.
+    const CHECKLIST = [
+      "| AC | REQ | Expectation | Method | Status | Evidence |",
+      "| --- | --- | --- | --- | --- | --- |",
+      "| AC-001 | REQ-001 | looks polished | human | pending | - |",
+    ].join("\n");
+    const legRunner = baseRunner();
+    legRunner.implement = async (ctx) => {
+      writeFileSync(join(repo, `f${ctx.iteration}.ts`), `export const x = ${ctx.iteration};\n`);
+      writeDevDoc(repo, DEV_DOCS.checklist, CHECKLIST);
+      writeDevDoc(repo, DEV_DOCS.agentState, "IN_PROGRESS more to do");
+      return okLeg("progress");
+    };
+    legRunner.stopEval = async () => ({ response: okLeg("STOP-EVAL: MET"), verdict: "MET" });
+    const e = engine(legRunner);
+    expect((await e.runIteration(1)).kind).toBe("continue"); // metStreak = 1
+    const outcome = await e.runIteration(2); // metStreak = 2 → forced gate
+    expect(outcome.kind).toBe("escalate");
+    if (outcome.kind === "escalate") {
+      expect(outcome.escalationKind).toBe("human_verify");
+      expect(outcome.question).toContain("AC-001");
+    }
+  });
+
   // ── Phase A in-place guards (DEV_MODE_GIT_HARDENING) ──────────────────
 
   it("iteration-top guard parks when the owner moved the checkout", async () => {

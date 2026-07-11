@@ -816,10 +816,9 @@ describe("DevModeRunner", () => {
   });
 
   it("records the rollback anchors + baseline journal row on the fresh path", async () => {
-    // seedSession's ensureDevWorkdir left a fresh untracked .gitignore —
-    // commit it so the owner's tree is genuinely clean at approve.
-    git(repo, ["add", "-A"]);
-    git(repo, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "gitignore"]);
+    // The owner's tree is genuinely clean; the ONLY uncommitted change is
+    // ensureDevWorkdir's .gitignore edit, which the baseline snapshot commits
+    // but must NOT be recorded as owner WIP (wip_snapshot_ref stays null).
     const preBranch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
     const preHead = git(repo, ["rev-parse", "HEAD"]);
     const runner = makeRunner(fakeBackend(repo));

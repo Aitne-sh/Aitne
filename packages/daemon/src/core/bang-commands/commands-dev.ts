@@ -25,7 +25,6 @@ import {
   getActiveDevSession,
   getDevSession,
   getLatestDevSessionForChannel,
-  getLatestRollbackableDevSession,
   listDevSessions,
   markDevTerminal,
 } from "../../db/dev-sessions-store.js";
@@ -421,16 +420,17 @@ export const rollbackCommand: BangPrefixCommand = {
       iteration = Number.parseInt(arg, 10);
     }
 
-    const session = getActiveDevSession(ctx.db) ?? getLatestRollbackableDevSession(ctx.db);
-    if (!session) {
-      await ctx.notify("Nothing to roll back — no dev session with a recorded branch.");
+    // Channel-scoped resolution, consistent with !resume/!add: the newest
+    // session on THIS channel (active-matched else latest). Resolving the
+    // latest ROLLBACKABLE session globally would let a newer session on
+    // another channel block a rollback this channel is entitled to.
+    const { session, refused } = resolveDevTarget(ctx);
+    if (refused) {
+      await ctx.notify(refused);
       return;
     }
-    // Stricter than !approve/!exit, deliberately: terminal sessions have no
-    // dispatcher latch protecting them, so bind to the originating channel.
-    const channel = `${ctx.event.platform}:${ctx.event.channel}`;
-    if (session.originatingChannel && session.originatingChannel !== channel) {
-      await ctx.notify("That dev session belongs to another channel.");
+    if (!session) {
+      await ctx.notify("Nothing to roll back — no dev session on this channel.");
       return;
     }
     if (session.state === "interview" || session.state === "awaiting_approval") {
