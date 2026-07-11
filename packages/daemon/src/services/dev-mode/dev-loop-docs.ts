@@ -12,6 +12,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -39,6 +40,11 @@ export const DEV_DOCS = {
   agentState: "agent-state",
   reviewFeedback: "review-feedback.md",
   lastVerify: "last-verify.log",
+  /** Per-command baseline verify results captured once at run start — the
+   *  red→green record the evidence report flips against (loop-kit
+   *  .loop/baseline-verify.log). Lives under docs/ so the per-iteration
+   *  history snapshots carry it. */
+  baselineVerify: "docs/baseline-verify.log",
   // ── fleet/flow docs (loop-kit task-plan / supervisor / worktree files) ──
   /** The decomposed task DAG (grammar in task-plan.ts). */
   taskPlan: "docs/task-plan.md",
@@ -61,6 +67,10 @@ export const DEV_DOCS = {
 /** Directory (inside .aitne-dev/) holding merged dependencies' archived
  *  task-instruction + evidence, copied into a dependent's worktree. */
 export const DEV_PHASE_CONTEXT_DIR = "phase-context";
+/** Directory (inside .aitne-dev/) holding the per-iteration docs snapshots
+ *  that make `!rollback <n>` able to restore the gitignored working memory
+ *  alongside the code reset (docs are NOT in the checkpoint commits). */
+export const DEV_HISTORY_DIR = "history";
 /** Directory (inside the PARENT repo's .aitne-dev/) archiving each merged
  *  task's instruction/evidence/ledger — the phase-context + publisher source. */
 export const DEV_TASK_ARCHIVE_DIR = "task-archive";
@@ -134,6 +144,36 @@ export function copyDevDoc(
   const body = readDevDoc(fromRepo, fromRel);
   if (body === null) return;
   writeDevDoc(toRepo, toRel, body);
+}
+
+// ── per-iteration docs snapshots (!rollback support) ────────────────────
+
+/**
+ * Snapshot docs/ → history/iter-<n>/ right after each iteration's checkpoint
+ * commit. `.aitne-dev/` is gitignored, so the checkpoint commits do NOT carry
+ * the working memory — without these, `!rollback <n>` would reset the code
+ * while the ledger/plan/progress kept describing a FUTURE state. Bounded by
+ * maxIterations; snapshots copy docs/ only (never history/ itself).
+ */
+export function snapshotDevDocs(repoPath: string, iteration: number): void {
+  const src = devPath(repoPath, "docs");
+  if (!existsSync(src)) return;
+  const dst = devPath(repoPath, join(DEV_HISTORY_DIR, `iter-${iteration}`));
+  rmSync(dst, { recursive: true, force: true });
+  mkdirSync(dst, { recursive: true });
+  cpSync(src, dst, { recursive: true });
+}
+
+/** Restore docs/ from the iteration-n snapshot; false when the snapshot is
+ *  absent (pre-feature session — the caller reports the docs may be stale). */
+export function restoreDevDocsSnapshot(repoPath: string, iteration: number): boolean {
+  const src = devPath(repoPath, join(DEV_HISTORY_DIR, `iter-${iteration}`));
+  if (!existsSync(src)) return false;
+  const dst = devPath(repoPath, "docs");
+  rmSync(dst, { recursive: true, force: true });
+  mkdirSync(dst, { recursive: true });
+  cpSync(src, dst, { recursive: true });
+  return true;
 }
 
 /**
@@ -284,9 +324,117 @@ export function gitCreateBranch(repoPath: string, branch: string): void {
   git(repoPath, ["checkout", "-B", branch]);
 }
 
+/** True when a merge is in progress (MERGE_HEAD exists). Canonical home —
+ *  dev-flow-git re-exports it for the fleet callers. */
+export function gitMergeInProgress(repoPath: string): boolean {
+  try {
+    git(repoPath, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Any uncommitted change, tracked or untracked (`git status --porcelain`
+ *  non-empty) — the recovered-work-commit probe on resume. Distinct from
+ *  dev-flow-git's hasUncommittedTracked (-uno), which deliberately ignores
+ *  untracked files for the merge-defer guard. */
+export function gitStatusDirty(repoPath: string): boolean {
+  try {
+    return git(repoPath, ["status", "--porcelain"]).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pre-flight guards for any in-place git mutation (loop-kit 3775-3784 +
+ * the branch-identity hazard unique to a daemon sharing the owner's
+ * checkout): never `add -A` over a half-resolved merge, and never commit /
+ * merge when the owner moved the checkout off the expected branch. The
+ * returned `question` is chat-ready — callers park the session on it via the
+ * existing spec_decision escalation. `expectedBranch` null skips the
+ * branch-identity half (pre-approval sites). TOCTOU between this check and
+ * the following git call is accepted (single-owner local repo; same posture
+ * as loop-kit).
+ */
+export type DevRepoGuard =
+  | { ok: true }
+  | {
+      ok: false;
+      kind: "merge_in_progress" | "branch_moved";
+      currentBranch: string | null;
+      question: string;
+    };
+
+export function checkRepoGuards(
+  repoPath: string,
+  expectedBranch: string | null,
+): DevRepoGuard {
+  if (gitMergeInProgress(repoPath)) {
+    return {
+      ok: false,
+      kind: "merge_in_progress",
+      currentBranch: gitCurrentBranch(repoPath),
+      question:
+        "A git merge is in progress in the repository — resolve it (or run "
+        + "`git merge --abort`), then reply here to resume, or !exit.",
+    };
+  }
+  if (expectedBranch !== null) {
+    const current = gitCurrentBranch(repoPath);
+    if (current !== expectedBranch) {
+      const shown = current ?? "(detached HEAD)";
+      return {
+        ok: false,
+        kind: "branch_moved",
+        currentBranch: current,
+        question:
+          `The repository checkout moved to '${shown}' (expected `
+          + `'${expectedBranch}'). Run \`git checkout ${expectedBranch}\` and `
+          + "reply here to resume, or !exit.",
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Re-validate a recorded base sha against real git history (loop-kit
+ * 6913-6923): the ref must resolve to a commit AND be an ancestor of HEAD.
+ * On failure — history rewritten, ref garbage, or null — degrade to HEAD,
+ * which is never weaker than a fresh run (a fresh run resets the base to the
+ * interruption point anyway). Callers journal the degradation.
+ */
+export function validateBaseRef(
+  repoPath: string,
+  ref: string | null,
+): { ref: string; degraded: boolean } {
+  if (ref && ref.trim().length > 0) {
+    try {
+      git(repoPath, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+      git(repoPath, ["merge-base", "--is-ancestor", ref, "HEAD"]);
+      return { ref, degraded: false };
+    } catch {
+      // fall through to the HEAD degradation
+    }
+  }
+  return { ref: gitHead(repoPath) ?? "HEAD", degraded: true };
+}
+
 /** Stage everything (incl. untracked, excl. gitignored .aitne-dev/) and
- *  commit; returns the new sha, or null when there was nothing to commit. */
+ *  commit; returns the new sha, or null when there was nothing to commit.
+ *  THROWS on an in-progress merge — `add -A` would stage the conflict
+ *  markers as resolved and silently finalize the owner's half-merge
+ *  (loop-kit dies here too; callers pre-check via checkRepoGuards, this is
+ *  the backstop). */
 export function gitCommitAll(repoPath: string, message: string): string | null {
+  if (gitMergeInProgress(repoPath)) {
+    throw new Error(
+      "git merge in progress — refusing `add -A` (it would stage conflict "
+      + "markers as resolved). Resolve or abort the merge first.",
+    );
+  }
   git(repoPath, ["add", "-A"]);
   const status = git(repoPath, ["status", "--porcelain"]);
   if (status.length === 0) return gitHead(repoPath);
@@ -405,17 +553,32 @@ export function runVerifyCommand(
   return { exitCode, output: `${stdout}${stderr}`.trim() };
 }
 
-/** Persist the verify results as loop-kit's last-verify.log for the evidence
- *  report + audit. */
-export function writeLastVerifyLog(
-  repoPath: string,
+function formatVerifyLog(
   results: readonly { command: string; passed: boolean; exitCode: number; output: string }[],
-): void {
+): string {
   const body = results
     .map(
       (r) =>
         `$ ${r.command}\n${r.output}\n${r.passed ? "[PASS]" : `[FAIL] (exit ${r.exitCode})`}`,
     )
     .join("\n\n");
-  writeDevDoc(repoPath, DEV_DOCS.lastVerify, `${body}\n`);
+  return `${body}\n`;
+}
+
+/** Persist the verify results as loop-kit's last-verify.log for the evidence
+ *  report + audit. */
+export function writeLastVerifyLog(
+  repoPath: string,
+  results: readonly { command: string; passed: boolean; exitCode: number; output: string }[],
+): void {
+  writeDevDoc(repoPath, DEV_DOCS.lastVerify, formatVerifyLog(results));
+}
+
+/** Persist the run-start baseline verify pass (same grammar) — the red→green
+ *  record consumed by the evidence report + the contract-review judgment. */
+export function writeBaselineVerifyLog(
+  repoPath: string,
+  results: readonly { command: string; passed: boolean; exitCode: number; output: string }[],
+): void {
+  writeDevDoc(repoPath, DEV_DOCS.baselineVerify, formatVerifyLog(results));
 }

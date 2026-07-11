@@ -16,7 +16,11 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { runVerifyCommand, type VerifyRun } from "./dev-loop-docs.js";
+import { gitMergeInProgress, runVerifyCommand, type VerifyRun } from "./dev-loop-docs.js";
+
+// Canonical home moved to dev-loop-docs.ts (the single-loop side needs it for
+// the commit backstop + checkRepoGuards); re-exported here for fleet callers.
+export { gitMergeInProgress } from "./dev-loop-docs.js";
 
 /** Sibling-dir suffix (loop-kit: `<parent>/<basename>-loops`). */
 const WORKTREE_ROOT_SUFFIX = "-aitne-worktrees";
@@ -213,16 +217,6 @@ export function gitMergeNoFF(
     return { ok: false, conflicts: [], refused: true };
   }
   return { ok: true, sha: gitHeadStrict(repoPath), noChanges: false };
-}
-
-/** True when a merge is in progress (MERGE_HEAD exists). */
-export function gitMergeInProgress(repoPath: string): boolean {
-  try {
-    git(repoPath, ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** Uncommitted changes to TRACKED files (`git status --porcelain -uno`
