@@ -328,6 +328,10 @@ export const addCommand: BangPrefixCommand = {
       await ctx.notify("The contract isn't approved yet — fold this into the interview instead (just describe it).");
       return;
     }
+    if (session.rolledBackAt !== null) {
+      await ctx.notify("That session was rolled back — start fresh with !repo.");
+      return;
+    }
     const tasks = listDevTasks(ctx.db, session.id);
     const hasOrchestration = tasks.some((t) => t.origin !== "manual");
     const runner = ctx.getDevModeRunner?.();

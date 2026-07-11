@@ -70,6 +70,7 @@ import { computeApprovalHash, normalizeDevLoopConfig } from "./dev-loop-config.j
 import { computeSplitNudge } from "./dev-flow-schedule.js";
 import { parseAgentStateToken } from "./verdict-parse.js";
 import type {
+  DevEvaluateResult,
   DevLoopConfig,
   DevReqVerdictLine,
   DevReviewResult,
@@ -361,6 +362,26 @@ export class DevLoopEngine {
     }
   }
 
+  /** A rerun absorbed a red verify pass — keep the failing log + journal it so
+   *  a flaky gate is visible in the timeline (loop-kit VERIFY_FLAKE). Called
+   *  from BOTH the interim evaluate and the final re-check so a flake-absorbed
+   *  SUCCESS never loses its honesty trail. */
+  private journalFlake(flake: NonNullable<DevEvaluateResult["flake"]>): void {
+    writeDevDoc(
+      this.repoPath,
+      DEV_DOCS.verifyFlake,
+      flake.failedVerify
+        .map((r) => `$ ${r.command}\n${r.output}\n${r.passed ? "[PASS]" : `[FAIL] (exit ${r.exitCode})`}`)
+        .join("\n\n") + "\n",
+    );
+    this.record(
+      "evaluate",
+      "VERIFY_FLAKE",
+      `a failing verify pass was absorbed by rerun #${flake.attempt}`
+        + ` (${flake.failedVerify.find((r) => !r.passed)?.command ?? "?"})`,
+    );
+  }
+
   private persistCheckpoint(): void {
     this.persistence.writeCheckpoint(
       {
@@ -550,21 +571,7 @@ export class DevLoopEngine {
       writeLastVerifyLog(this.repoPath, evalOut.result.verify);
     }
     if (evalOut.result.flake) {
-      // A rerun absorbed a red pass — keep the failing log + journal it so a
-      // flaky gate is visible in the timeline (loop-kit VERIFY_FLAKE).
-      writeDevDoc(
-        this.repoPath,
-        DEV_DOCS.verifyFlake,
-        evalOut.result.flake.failedVerify
-          .map((r) => `$ ${r.command}\n${r.output}\n${r.passed ? "[PASS]" : `[FAIL] (exit ${r.exitCode})`}`)
-          .join("\n\n") + "\n",
-      );
-      this.record(
-        "evaluate",
-        "VERIFY_FLAKE",
-        `a failing verify pass was absorbed by rerun #${evalOut.result.flake.attempt}`
-          + ` (${evalOut.result.flake.failedVerify.find((r) => !r.passed)?.command ?? "?"})`,
-      );
+      this.journalFlake(evalOut.result.flake);
     }
     // The implement leg ran for minutes — re-check before the checkpoint
     // commit. On a moved checkout the iteration's uncommitted edits stay in
@@ -775,6 +782,7 @@ export class DevLoopEngine {
       },
     );
     if (finalOut.result.verify) writeLastVerifyLog(this.repoPath, finalOut.result.verify);
+    if (finalOut.result.flake) this.journalFlake(finalOut.result.flake);
     const fs = finalOut.result.state;
     if (fs === "SUCCESS" || fs === "NO_OP") {
       return { kind: "terminal", loopState: fs, reason: finalOut.result.reason };

@@ -91,7 +91,11 @@ function nextAction(s: DevStatusSnapshot): string | null {
       return "answer the open question in chat";
     case "failed":
     case "exited":
-      return "!resume to continue · !rollback to restore your branch";
+      // A pre-approval exit never created a branch — neither !resume nor
+      // !rollback applies, so don't offer a dead-end.
+      return s.branch === null
+        ? "start fresh with !repo"
+        : "!resume to continue · !rollback to restore your branch";
     case "done":
       return s.queuedManual > 0 ? "!resume to run the queued adds" : "!add for follow-up work";
     default:

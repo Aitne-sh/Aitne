@@ -550,6 +550,23 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
           return { command, exitCode: r.exitCode, passed: r.exitCode === 0, output: r.output };
         });
         writeBaselineVerifyLog(repoPath, results);
+        // Re-check the branch identity: the verify run above can take minutes,
+        // during which the owner could `git checkout` off the session branch —
+        // committing the snapshot then would land it on the WRONG branch. Park
+        // instead (the fresh path re-runs the whole baseline on resume).
+        if (session.branch) {
+          const postVerifyGuard = checkRepoGuards(repoPath, session.branch);
+          if (!postVerifyGuard.ok) {
+            await handleEscalate(sessionId, {
+              kind: "escalate",
+              escalationKind: "spec_decision",
+              loopState: "NEEDS_SPEC_DECISION",
+              question: postVerifyGuard.question,
+              contextSummary: null,
+            });
+            return;
+          }
+        }
         gitCommitAll(repoPath, "dev: baseline verify snapshot");
         const newBase = gitHead(repoPath);
         if (newBase) {
@@ -597,7 +614,13 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       // Fleet path: decompose the contract into a task DAG, then run the
       // orchestrator. A resume (tasks already exist) re-enters mid-fleet. When
       // decompose returns "single" (n=1), fall through to the classic loop.
-      if (config.flow.decompose) {
+      // Queued task rows force the orchestrator even when decompose is off —
+      // otherwise a `!add` on a done single-loop session (decompose:false)
+      // would enqueue a manual task the single-loop path never dispatches
+      // (the decomposeFlow guard then runs it as a mini-fleet, skipping
+      // decompose for a pure-manual queue).
+      const hasQueuedTasks = listDevTasks(deps.db, sessionId).length > 0;
+      if (config.flow.decompose || hasQueuedTasks) {
         const flowLegs = createDevFlowLegRunner({ backend, loadTaskFlow: deps.loadTaskFlow });
         const orchestrator = createDevFleetOrchestrator({
           db: deps.db,
@@ -1450,7 +1473,11 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         }
         try {
           gitRenameBranch(repoPath, task.branch, renamed);
-          if (!task.seedBranch) setDevTaskSeedBranch(deps.db, task.id, renamed, now());
+          // Always seed from the NEWEST renamed branch: each rename captures
+          // the cumulative work (the prior attempt was itself seeded from its
+          // predecessor), so the latest branch is a strict superset. Keeping a
+          // stale seed would orphan the most recent attempt's commits.
+          setDevTaskSeedBranch(deps.db, task.id, renamed, now());
         } catch (err) {
           logger.warn({ err, taskKey: task.taskKey }, "dev resume: branch rename failed (redo from merged HEAD)");
         }

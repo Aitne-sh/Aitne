@@ -824,7 +824,9 @@ describe("DevModeRunner", () => {
     const preHead = git(repo, ["rev-parse", "HEAD"]);
     const runner = makeRunner(fakeBackend(repo));
     expect(runner.startFromApproval("s1").ok).toBe(true);
-    await waitUntil(() => getDevSession(db, "s1")?.state !== "running");
+    // This drive runs the baseline-verify subprocess pass + docs snapshots on
+    // top of the loop, so give it the fleet-test budget (slow-CI spawn).
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running", 20000);
 
     const session = getDevSession(db, "s1")!;
     expect(session.originalBranch).toBe(preBranch);
@@ -842,7 +844,7 @@ describe("DevModeRunner", () => {
     writeFileSync(join(repo, "wip.txt"), "uncommitted owner work\n");
     const runner = makeRunner(fakeBackend(repo));
     expect(runner.startFromApproval("s1").ok).toBe(true);
-    await waitUntil(() => getDevSession(db, "s1")?.state !== "running");
+    await waitUntil(() => getDevSession(db, "s1")?.state !== "running", 20000);
 
     const session = getDevSession(db, "s1")!;
     expect(session.wipSnapshotRef).not.toBeNull();

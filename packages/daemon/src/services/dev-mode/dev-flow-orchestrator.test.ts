@@ -413,6 +413,29 @@ describe("createDevFleetOrchestrator", () => {
     expect(listDevTasks(db, "s1")).toHaveLength(0);
   });
 
+  it("a done session with only manual adds SKIPS decompose and runs them as a mini-fleet", async () => {
+    const config = seed();
+    const flow = new FakeFlowLegs();
+    flow.gateReviewQueue.push("APPROVE");
+    // A completed run (loop_state SUCCESS) with an owner `!add` queued — the
+    // decomposeFlow guard must skip decompose (an empty decomposeQueue would
+    // THROW if it ran) and dispatch the manual task straight to the gate.
+    db.prepare(`UPDATE dev_sessions SET loop_state = 'SUCCESS' WHERE id = 's1'`).run();
+    insertDevTasks(db, "s1", [{
+      id: "m1", taskKey: "manual-1", summary: "add a changelog entry",
+      dependsOn: [], scope: "", reqs: [], body: "Add a CHANGELOG entry.", origin: "manual",
+    }], 0);
+    const result = await makeOrch(config, fakeWorkerLegsWithGate({}, flow), flow, new AbortController().signal).run();
+
+    expect(result).toEqual({ kind: "terminal", loopState: "SUCCESS", reason: expect.any(String) });
+    const manual = getDevTaskByKey(db, "s1", "manual-1")!;
+    expect(manual.state).toBe("merged");
+    expect(manual.approvedHash).not.toBeNull(); // ran under its own sub-contract
+    expect(existsSync(join(repo, "manual-1.ts"))).toBe(true);
+    // decompose was never invoked (its queue was left untouched).
+    expect(flow.decomposeQueue).toHaveLength(0);
+  });
+
   it("runs a dependency chain and injects phase-context into the dependent worktree", async () => {
     const config = seed();
     const flow = new FakeFlowLegs();
