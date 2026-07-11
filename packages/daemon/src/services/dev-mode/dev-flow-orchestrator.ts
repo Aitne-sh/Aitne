@@ -51,6 +51,7 @@ import {
   markDevTaskState,
   resetDevTaskForRedo,
   rewireDevTaskDeps,
+  setDevTaskApprovedHash,
   setDevTaskPlanReview,
   setDevTaskSeedBranch,
   setDevTaskWorktree,
@@ -344,7 +345,18 @@ export function createDevFleetOrchestrator(
 
   /** Returns null when fleet tasks are ready; otherwise the early result. */
   async function decomposeFlow(): Promise<DevFleetRunResult | null> {
-    if (listDevTasks(db, sessionId).length > 0) return null; // resume
+    // "Orchestration started" ≠ "queue non-empty" (the loop-kit fleet_inflight
+    // fix): only PLANNED rows mean a resume. A queue holding ONLY owner-added
+    // manual tasks is a parked follow-up queue — on a done-with-adds resume
+    // the master already decomposed+merged (skip decompose, run the adds as a
+    // mini-fleet); on a fresh master it must still decompose, with the manual
+    // adds dispatched alongside the plan.
+    const existing = listDevTasks(db, sessionId);
+    if (existing.some((t) => t.origin !== "manual")) return null; // true fleet resume
+    if (existing.length > 0) {
+      const s = liveSession();
+      if (s.loopState === "SUCCESS" || s.loopState === "NO_OP") return null; // mini-fleet of adds
+    }
     const contract = readDevDoc(repoPath, DEV_DOCS.contract) ?? "";
     const masterReqIds = extractContractReqIds(contract);
 
@@ -538,6 +550,28 @@ export function createDevFleetOrchestrator(
     };
   };
 
+  /** A MANUAL task's engine sink: its single-REQ ledger lives in the
+   *  worktree (the session REQ ledger is master-contract-only). */
+  const manualTaskPersistence = (task: DevTaskRow): DevEnginePersistence => {
+    const base = taskPersistence(task);
+    const wt = task.worktreePath!;
+    const rows = (): ReturnType<typeof parseLedgerMarkdown> =>
+      parseLedgerMarkdown(readDevDoc(wt, DEV_DOCS.ledger));
+    return {
+      ...base,
+      syncLedgerRow() {
+        // no-op — never write a manual task's REQ-001 into the session ledger
+      },
+      requirementCounts() {
+        const r = rows();
+        return { total: r.length, met: r.filter((x) => x.status === "met").length };
+      },
+      unmetReqIds() {
+        return rows().filter((x) => x.status !== "met").map((x) => x.reqId);
+      },
+    };
+  };
+
   /** Seed the worker worktree's ledger with ONLY its owned REQs. */
   const seedWorktreeLedger = (wt: string, task: DevTaskRow): void => {
     const rows = listDevRequirements(db, sessionId).filter((r) =>
@@ -658,6 +692,31 @@ export function createDevFleetOrchestrator(
         writeDevDoc(wt, DEV_DOCS.taskInstruction, task.body);
         seedWorktreeLedger(wt, task);
         copyPhaseContext(wt, task);
+        if (task.origin === "manual") {
+          // Owner `!add` follow-up — it runs OUTSIDE the master contract with
+          // its own DETERMINISTIC single-REQ sub-contract (v1): the owner
+          // authored the instruction moments ago over chat, the verify gate
+          // stays the master's, and the per-task gate reviewer judges
+          // REQ-001 = the instruction. (An LLM contract-gen + contract-review
+          // round for manual tasks is deliberately deferred.)
+          const subContract = [
+            "# Product Contract (manual follow-up task)",
+            "## Goal",
+            task.summary,
+            `### REQ-001: ${task.summary}`,
+            task.body,
+            "## Non-goals",
+            "- Anything outside this instruction (the master contract is the outer boundary).",
+          ].join("\n");
+          writeDevDoc(wt, DEV_DOCS.contract, subContract);
+          writeDevDoc(
+            wt,
+            DEV_DOCS.ledger,
+            "| REQ | Status | Evidence | Iter |\n|---|---|---|---|\n| REQ-001 | unstarted | | |\n",
+          );
+          setDevTaskApprovedHash(db, task.id, computeApprovalHash(subContract, config), now());
+          task = getDevTask(db, taskId)!;
+        }
         if (flow.worktreeSetupCommand) {
           const setup = runSetupCommand(wt, flow.worktreeSetupCommand, config.maxIterSeconds * 1000);
           if (setup.exitCode !== 0) {
@@ -710,6 +769,8 @@ export function createDevFleetOrchestrator(
     const sessionRow = liveSession();
     const taskView: DevSessionRow = {
       ...sessionRow,
+      // A manual task's immutability anchor is its own sub-contract hash.
+      approvedHash: task.approvedHash ?? sessionRow.approvedHash,
       branch: task.branch,
       baseRef: task.baseRef,
       iteration: task.iteration,
@@ -725,9 +786,11 @@ export function createDevFleetOrchestrator(
       tier,
       now,
       uuid,
-      persistence: taskPersistence(task),
+      persistence: task.origin === "manual" ? manualTaskPersistence(task) : taskPersistence(task),
       getSpentUsd: spentUsd,
-      fleet: { taskReqIds: task.reqs },
+      // A manual task's gate judges its sub-contract's REQ-001 (the owner's
+      // instruction), not the master's REQ slice.
+      fleet: { taskReqIds: task.origin === "manual" ? ["REQ-001"] : task.reqs },
       // Shared fleet deadline so every worker self-terminates together (not a
       // fresh per-worker window on each relaunch). Same frame as the dispatch
       // wall-clock check (both off runStartMs).

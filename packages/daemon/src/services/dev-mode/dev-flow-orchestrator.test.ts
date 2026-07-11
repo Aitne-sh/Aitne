@@ -9,6 +9,7 @@ import {
   approveDevSession,
   createDevSession,
   getDevSession,
+  listDevRequirements,
   markDevAwaitingApproval,
   seedDevRequirements,
   updateDevSessionConfig,
@@ -366,6 +367,41 @@ describe("createDevFleetOrchestrator", () => {
     // Worktrees cleaned up.
     expect(tasks.every((t) => t.worktreePath === null)).toBe(true);
     expect(notes.some((n) => n.includes("Decomposed"))).toBe(true);
+  });
+
+  it("runs an owner-added MANUAL task via its own sub-contract, outside the master ledger", async () => {
+    const config = seed();
+    const flow = new FakeFlowLegs();
+    flow.decomposeQueue.push({
+      plan: planDoc(taskBlock("alpha", "REQ-001"), taskBlock("beta", "REQ-002")),
+      n: 2,
+    });
+    flow.gateReviewQueue.push("APPROVE");
+    // The owner queued a follow-up BEFORE the run started — the decompose
+    // guard must still decompose the master (parked manual queue ≠ resume)
+    // and dispatch the add alongside the plan.
+    insertDevTasks(db, "s1", [{
+      id: "m1", taskKey: "manual-1", summary: "also add a README note",
+      dependsOn: [], scope: "", reqs: [], body: "Add a note to the README.", origin: "manual",
+    }], 0);
+    const legs = fakeWorkerLegsWithGate({}, flow);
+    const result = await makeOrch(config, legs, flow, new AbortController().signal).run();
+
+    expect(result).toEqual({ kind: "terminal", loopState: "SUCCESS", reason: expect.any(String) });
+    const tasks = listDevTasks(db, "s1");
+    expect(tasks).toHaveLength(3);
+    expect(tasks.every((t) => t.state === "merged")).toBe(true);
+    // The manual task carries its OWN sub-contract anchor.
+    const manual = tasks.find((t) => t.taskKey === "manual-1")!;
+    expect(manual.approvedHash).not.toBeNull();
+    expect(manual.approvedHash).not.toBe(getDevSession(db, "s1")!.approvedHash);
+    // Its work landed on the session branch.
+    expect(existsSync(join(repo, "manual-1.ts"))).toBe(true);
+    // The session REQ ledger stayed master-only (no manual REQ-001 pollution:
+    // both master REQs were owned + met by the planned workers).
+    const reqs = listDevRequirements(db, "s1");
+    expect(reqs.map((r) => r.reqId).sort()).toEqual(["REQ-001", "REQ-002"]);
+    expect(reqs.every((r) => r.status === "met")).toBe(true);
   });
 
   it("returns single when decompose says n=1", async () => {

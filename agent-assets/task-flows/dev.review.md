@@ -76,7 +76,10 @@ Code quality is judged only after requirements. On every review:
 - **Drift** — work that contradicts a requirement, violates a non-goal, or
   serves no requirement or milestone at all (unrequested scope) => REVISE. The
   loop optimizing something the contract never asked for is drift, not
-  initiative.
+  initiative. EXCEPTION (gate mode over a merged fleet): changes serving an
+  owner-instructed side task — its instruction is archived under
+  `.aitne-dev/task-archive/manual-*/task-instruction.md` — are SANCTIONED
+  side-work, not drift; read the archived instruction before flagging them.
 - **Ledger honesty** — for REQs whose area this diff touches, spot-check the
   ledger's claims. A row marked `met` whose evidence does not hold up (missing
   test, behavior not actually implemented) => REVISE, and name the row that lied.

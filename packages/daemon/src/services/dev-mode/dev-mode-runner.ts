@@ -223,6 +223,10 @@ export interface DevModeRunner {
   cancelTimeout(sessionId: string): void;
   retimeTimeout(sessionId: string): void;
   isRunning(sessionId: string): boolean;
+  /** A live FLEET orchestrator holds this session (vs a single loop). */
+  hasLiveOrchestrator(sessionId: string): boolean;
+  /** Wake a live fleet's dispatch loop after an `!add` enqueue. */
+  notifyTaskQueued(sessionId: string): void;
 }
 
 export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
@@ -1687,6 +1691,14 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     return active.has(sessionId);
   }
 
+  function hasLiveOrchestrator(sessionId: string): boolean {
+    return orchestrators.has(sessionId);
+  }
+
+  function notifyTaskQueued(sessionId: string): void {
+    orchestrators.get(sessionId)?.notifyExternalChange();
+  }
+
   return {
     runInterviewTurn,
     startFromApproval,
@@ -1699,5 +1711,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     cancelTimeout,
     retimeTimeout,
     isRunning,
+    hasLiveOrchestrator,
+    notifyTaskQueued,
   };
 }

@@ -45,7 +45,7 @@ export {
 export { researchCommand, parseResearchArgs } from "./commands-research.js";
 export { checksCommand, formatChecks } from "./commands-checks.js";
 export { revertTuningCommand } from "./commands-revert-tuning.js";
-export { repoCommand, approveCommand, exitCommand, resumeCommand, rollbackCommand, parseResumeArgs } from "./commands-dev.js";
+export { repoCommand, approveCommand, exitCommand, resumeCommand, addCommand, rollbackCommand, parseResumeArgs } from "./commands-dev.js";
 export {
   buildSystemMarker,
   ensureSystemMarker,
@@ -102,7 +102,7 @@ import {
 import { researchCommand } from "./commands-research.js";
 import { checksCommand } from "./commands-checks.js";
 import { revertTuningCommand } from "./commands-revert-tuning.js";
-import { repoCommand, approveCommand, exitCommand, resumeCommand, rollbackCommand } from "./commands-dev.js";
+import { repoCommand, approveCommand, exitCommand, resumeCommand, addCommand, rollbackCommand } from "./commands-dev.js";
 
 /**
  * Build a registry preloaded with the v1 built-in commands. The registry
@@ -149,6 +149,7 @@ export function createDefaultBangCommandRegistry(): BangCommandRegistry {
   registry.register(approveCommand);
   registry.register(exitCommand);
   registry.register(resumeCommand);
+  registry.register(addCommand);
   registry.register(rollbackCommand);
   return registry;
 }

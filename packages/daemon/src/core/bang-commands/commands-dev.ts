@@ -30,6 +30,10 @@ import {
   markDevTerminal,
 } from "../../db/dev-sessions-store.js";
 import {
+  insertDevTasks,
+  listDevTasks,
+} from "../../db/dev-session-tasks-store.js";
+import {
   archiveDevSessionDocs,
   isGitWorktree,
 } from "../../services/dev-mode/dev-loop-docs.js";
@@ -295,6 +299,100 @@ export const resumeCommand: BangPrefixCommand = {
       `Resuming ${session.slug ?? session.repositoryId} from iteration ${session.iteration}`
         + `${parsed.note ? " with your note as the next decision" : ""}. `
         + "I'll report back when it finishes or needs you.",
+    );
+  },
+};
+
+export const addCommand: BangPrefixCommand = {
+  prefix: "!add",
+  title: "Add dev task",
+  describe: "Queue dev follow-up",
+  runsWhilePaused: true,
+  parseArgs: (rest) => rest.trim(),
+  handler: async (ctx, args) => {
+    const instruction = typeof args === "string" ? args.trim() : "";
+    if (instruction.length === 0) {
+      await ctx.notify("Usage: !add <instruction> — queue a follow-up task for the dev session (one line).");
+      return;
+    }
+    const { session, refused } = resolveDevTarget(ctx);
+    if (refused) {
+      await ctx.notify(refused);
+      return;
+    }
+    if (!session) {
+      await ctx.notify("No dev session on this channel — start one with !repo <name>.");
+      return;
+    }
+    if (session.state === "interview" || session.state === "awaiting_approval") {
+      await ctx.notify("The contract isn't approved yet — fold this into the interview instead (just describe it).");
+      return;
+    }
+    const tasks = listDevTasks(ctx.db, session.id);
+    const hasOrchestration = tasks.some((t) => t.origin !== "manual");
+    const runner = ctx.getDevModeRunner?.();
+    if (session.state === "running") {
+      const fleetLive = runner?.hasLiveOrchestrator(session.id) ?? false;
+      if (!fleetLive) {
+        await ctx.notify(
+          "A single-loop session can't take follow-ups mid-run — wait for it to finish, then !add and !resume.",
+        );
+        return;
+      }
+      if (!hasOrchestration) {
+        await ctx.notify("The fleet is still planning — try again in a minute.");
+        return;
+      }
+    }
+    if (session.state === "awaiting_user" && !hasOrchestration) {
+      await ctx.notify(
+        "The session is parked on a question — answer it first; !add works on fleet sessions or after the run finishes.",
+      );
+      return;
+    }
+    if ((session.state === "failed" || session.state === "exited") && !hasOrchestration) {
+      await ctx.notify("The session didn't finish — !resume to continue it; !add once it's done.");
+      return;
+    }
+
+    // Enqueue (loop-kit `add` never refuses at this point; duplicates warn).
+    let n = 1;
+    const keys = new Set(tasks.map((t) => t.taskKey));
+    while (keys.has(`manual-${n}`)) n += 1;
+    const taskKey = `manual-${n}`;
+    const duplicate = tasks.some(
+      (t) => t.origin === "manual" && t.body === instruction
+        && (t.state === "queued" || t.state === "running"),
+    );
+    insertDevTasks(
+      ctx.db,
+      session.id,
+      [{
+        id: randomUUID(),
+        taskKey,
+        summary: instruction.length > 80 ? `${instruction.slice(0, 77)}…` : instruction,
+        dependsOn: [],
+        scope: "",
+        reqs: [],
+        body: instruction,
+        origin: "manual",
+      }],
+      Date.now(),
+    );
+    if (session.state === "running") runner?.notifyTaskQueued(session.id);
+
+    const hint =
+      session.state === "running"
+        ? "It runs outside the master contract and lands through the integration gate"
+        : session.state === "awaiting_user"
+          ? "It dispatches once the session resumes (answer the open question)"
+          : session.state === "done"
+            ? "Reply !resume to run it"
+            : "Reply !resume to restart the fleet including this task";
+    await ctx.notify(
+      `Queued ${taskKey}.`
+        + (duplicate ? " Note: an identical task is already queued." : "")
+        + ` ${hint}.`,
     );
   },
 };

@@ -20,11 +20,13 @@ import { createDefaultBangCommandRegistry } from "./index.js";
 import {
   repoCommand,
   approveCommand,
+  addCommand,
   exitCommand,
   parseResumeArgs,
   resumeCommand,
   rollbackCommand,
 } from "./commands-dev.js";
+import { insertDevTasks, listDevTasks } from "../../db/dev-session-tasks-store.js";
 import type { BangCommandContext } from "./registry.js";
 import type { DevModeRunner } from "../../services/dev-mode/dev-mode-runner.js";
 
@@ -75,6 +77,8 @@ function fakeRunner(): { runner: DevModeRunner; calls: Record<string, unknown[]>
       calls.resumeSession!.push(input);
       return { ok: true };
     }),
+    hasLiveOrchestrator: vi.fn(() => false),
+    notifyTaskQueued: vi.fn(),
     resumeAfterEscalation: vi.fn(),
     resumeFromBoot: vi.fn(),
     expireForTimeout: vi.fn(),
@@ -498,5 +502,56 @@ describe("commands-dev", () => {
     const second = makeCtx();
     await resumeCommand.handler(second.ctx, parseResumeArgs("budget=nope"));
     expect(second.notify.mock.calls[0]?.[0]).toContain("Usage: !resume");
+  });
+
+  // ── !add ────────────────────────────────────────────────────────────────
+
+  it("!add refuses pre-approval and mid-single-loop, honestly", async () => {
+    // Pre-approval → fold into the interview.
+    createDevSession(db, {
+      id: "s1", repositoryId: "local:foo", slug: "foo",
+      originatingPlatform: "telegram", originatingChannel: "telegram:D1", createdAt: 0,
+    });
+    const first = makeCtx();
+    await addCommand.handler(first.ctx, "also do X");
+    expect(first.notify.mock.calls[0]?.[0]).toContain("fold this into the interview");
+    // Running single loop (no live orchestrator) → wait + !add + !resume.
+    markDevAwaitingApproval(db, "s1", 0);
+    approveDevSession(db, {
+      id: "s1", approvedHash: "h", branch: "aitne-dev/s1", baseRef: "x",
+      maxIterations: 10, maxBudgetUsd: null, approvedAt: 0,
+    });
+    (runner.hasLiveOrchestrator as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    const second = makeCtx();
+    await addCommand.handler(second.ctx, "also do X");
+    expect(second.notify.mock.calls[0]?.[0]).toContain("single-loop session");
+    expect(listDevTasks(db, "s1")).toHaveLength(0);
+  });
+
+  it("!add enqueues manual-<n> on a done session and wakes a live fleet", async () => {
+    seedBranchedSession("failed");
+    // Fleet history exists → failed-with-orchestration enqueues with a hint.
+    insertDevTasks(db, "s1", [{
+      id: "t1", taskKey: "core", summary: "core", dependsOn: [], scope: "",
+      reqs: [], body: "x", origin: "plan",
+    }], 0);
+    const first = makeCtx();
+    await addCommand.handler(first.ctx, "polish the README");
+    expect(first.notify.mock.calls[0]?.[0]).toContain("Queued manual-1");
+    expect(first.notify.mock.calls[0]?.[0]).toContain("!resume");
+    // A second identical add warns but still lands as manual-2.
+    const second = makeCtx();
+    await addCommand.handler(second.ctx, "polish the README");
+    expect(second.notify.mock.calls[0]?.[0]).toContain("Queued manual-2");
+    expect(second.notify.mock.calls[0]?.[0]).toContain("identical task");
+    const manuals = listDevTasks(db, "s1").filter((t) => t.origin === "manual");
+    expect(manuals.map((t) => t.taskKey)).toEqual(["manual-1", "manual-2"]);
+    // Live fleet → the dispatch loop is woken.
+    db.prepare(`UPDATE dev_sessions SET state = 'running' WHERE id = 's1'`).run();
+    (runner.hasLiveOrchestrator as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    const third = makeCtx();
+    await addCommand.handler(third.ctx, "one more thing");
+    expect(third.notify.mock.calls[0]?.[0]).toContain("integration gate");
+    expect(runner.notifyTaskQueued).toHaveBeenCalledWith("s1");
   });
 });
