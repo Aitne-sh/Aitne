@@ -57,6 +57,10 @@ import {
   type DevTaskRow,
   type DevTaskLoopState,
 } from "../../db/dev-session-tasks-store.js";
+import {
+  listSeenAcIds,
+  upsertDevChecklistRow,
+} from "../../db/dev-session-checklist-store.js";
 import type { DevEscalationKind } from "../../db/dev-session-escalations-store.js";
 import {
   DEV_DOCS,
@@ -520,6 +524,12 @@ export function createDevFleetOrchestrator(
           .filter((r) => owned.has(r.reqId) && r.status !== "met")
           .map((r) => r.reqId);
       },
+      syncChecklistRow(row) {
+        upsertDevChecklistRow(db, { id: uuid(), sessionId, taskId: task.id, ...row });
+      },
+      seenAcIds() {
+        return listSeenAcIds(db, sessionId, task.id);
+      },
     };
   };
 
@@ -736,11 +746,13 @@ export function createDevFleetOrchestrator(
         if (outcome.kind === "escalate") {
           if (outcome.loopState === "RISK_REQUIRES_APPROVAL") {
             // Never supervised — straight to the owner (siblings keep going).
+            // human_verify keeps its kind so the runner's closure can mark
+            // the worktree's checklist rows from the reply.
             const fresh = getDevTask(db, taskId)!;
             markDevTaskState(db, { id: taskId, from: ["running"], to: "awaiting_user", loopState: outcome.loopState, at: now() });
             await deps.onTaskEscalation({
               taskId,
-              kind: "risk_approval",
+              kind: outcome.escalationKind === "human_verify" ? "human_verify" : "risk_approval",
               question: `[${key}] ${outcome.question}`,
               contextSummary: outcome.contextSummary,
             });

@@ -75,10 +75,12 @@ this order (a downstream consumer keys off them):
 ## 1. Requirements addressed
 ## 2. Changed files
 ## 3. Verification executed
-## 4. Starting unknowns & assumptions made
-## 5. Spec diff
-## 6. Risks
-## 7. Points needing human judgment
+## 4. Acceptance checklist
+## 5. Starting unknowns & assumptions made
+## 6. Spec diff
+## 7. Risks
+## 8. Points needing human judgment
+## 9. Lessons for future runs
 ```
 
 Fill each section:
@@ -94,10 +96,18 @@ Fill each section:
    (verify already passed with no code needed), write "None" and say plainly in
    the section that nothing needed changing.
 3. **Verification executed.** A Markdown table with exactly these columns:
-   `| Command | Result |`, one row per command in the injected verify log, taken
-   **verbatim** from that log (`PASS` / `FAIL`, not your own re-assertion). Add a
-   one-line caption noting the log was produced by the evaluator, not by you.
-4. **Starting unknowns & assumptions made.** First the unknowns the run started
+   `| Command | Baseline | Result |`, one row per command in the injected
+   verify log, `Result` taken **verbatim** from that log (`PASS` / `FAIL`, not
+   your own re-assertion) and `Baseline` from the injected baseline-verify
+   section (`PASS` / `FAIL` at run start; `n/a` when absent) — the
+   red→green flip per command IS the demonstration. Add a one-line caption
+   noting the log was produced by the evaluator, not by you.
+4. **Acceptance checklist.** One row per checklist AC:
+   `| AC | REQ | Method | Status | Evidence |`, taken from the injected
+   checklist. Call out `human` rows explicitly (they carry the owner's
+   sign-off note) and any row that closed late in the run. Or "None" when the
+   run predates the checklist layer.
+5. **Starting unknowns & assumptions made.** First the unknowns the run started
    with (open questions, deferred defaults, direction the definition took), so
    the reviewer begins where the definition did. Then every `AS-N` entry: the
    gap discovered, the default chosen, its reversibility, the REQs it affects,
@@ -105,15 +115,21 @@ Fill each section:
    Surface any `DR-N` decision requests raised during the run. Or "None". These
    are decisions taken **without the human** — they must never be invisible at
    review time.
-5. **Spec diff.** The drift table (product requirement / API contract / data
+6. **Spec diff.** The drift table (product requirement / API contract / data
    model / UX behaviour / security boundary → Changed? → Notes), **verified
    against the actual diff** — correct it where the diff disagrees with the run's
    own drift notes; do not just copy them.
-6. **Risks.** Anything a human should manually QA: hardcoded-looking values,
+7. **Risks.** Anything a human should manually QA: hardcoded-looking values,
    suspicious test-shaped special cases, coverage gaps, irreversible steps.
    "None" only if genuinely none.
-7. **Points needing human judgment.** Open calls the loop deliberately left for a
+8. **Points needing human judgment.** Open calls the loop deliberately left for a
    person. Or "None".
+9. **Lessons for future runs.** 3–7 bullets a FUTURE run should reuse, written
+   for a reader with zero context: non-obvious design decisions and why,
+   approaches tried and rejected, repository traps (build quirks, flaky
+   checks, hidden couplings). Name files and commands. This section is the
+   run's only channel to future runs — the next contract interview reads it
+   as intake. "None" only for genuinely trivial runs.
 
 Be honest and specific. This file is the human's canonical review surface and
 the vault's permanent record — a hedged, vague report is worse than none. Prefer

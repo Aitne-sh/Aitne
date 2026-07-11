@@ -21,6 +21,7 @@ import {
   type DevSessionState,
 } from "../../db/dev-sessions-store.js";
 import { listDevEscalationsForSession } from "../../db/dev-session-escalations-store.js";
+import { listDevChecklist } from "../../db/dev-session-checklist-store.js";
 import { listDevTasks } from "../../db/dev-session-tasks-store.js";
 import { planParallelGroups } from "../../services/dev-mode/task-plan.js";
 import { composeIssue, respondWithAgentError } from "../helpers/agent-errors.js";
@@ -140,6 +141,12 @@ export function createDevSessionsRoutes(deps: DevSessionsRouteDeps): Hono {
       tasks,
       iterations,
       requirements: listDevRequirements(db, id),
+      // The acceptance-checklist mirror (session-level + task-scoped rows;
+      // task rows carry taskKey for grouping).
+      checklist: listDevChecklist(db, id).map((row) => ({
+        ...row,
+        taskKey: row.taskId ? taskKeyById.get(row.taskId) ?? null : null,
+      })),
       escalations: listDevEscalationsForSession(db, id),
     });
   });

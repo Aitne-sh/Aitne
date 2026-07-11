@@ -37,6 +37,20 @@ export const DEV_DOCS = {
   assumptions: "docs/assumptions.md",
   decisionRequests: "docs/decision-requests.md",
   evidence: "docs/evidence-report.md",
+  /** Fine-grained expectation ledger (loop-kit acceptance-checklist.md) —
+   *  written by the interview, maintained by implement, machine-checked by
+   *  the evaluator's §6.6. */
+  checklist: "docs/acceptance-checklist.md",
+  /** The interview's structured unknowns record (2×2 + must-be baseline +
+   *  decision log). */
+  unknowns: "docs/unknowns.md",
+  /** Contract-review REVISE items the next interview turn must address. */
+  contractReviewFeedback: "contract-review-feedback.md",
+  /** Deterministic verify-probe results captured at CONTRACT_READY (per
+   *  command exit + first output lines) — contract-review ground truth. */
+  verifyProbe: "docs/verify-probe.md",
+  /** The failing pass a VERIFY_RETRIES rerun absorbed (audit). */
+  verifyFlake: "verify-flake.log",
   agentState: "agent-state",
   reviewFeedback: "review-feedback.md",
   lastVerify: "last-verify.log",
@@ -71,6 +85,9 @@ export const DEV_PHASE_CONTEXT_DIR = "phase-context";
  *  that make `!rollback <n>` able to restore the gitignored working memory
  *  alongside the code reset (docs are NOT in the checkpoint commits). */
 export const DEV_HISTORY_DIR = "history";
+/** Directory (inside .aitne-dev/) for `run`-method observation artifacts —
+ *  iter<N>-AC-xxx-* probe logs/screenshots the reviewer opens and judges. */
+export const DEV_OBSERVATIONS_DIR = "observations";
 /** Directory (inside the PARENT repo's .aitne-dev/) archiving each merged
  *  task's instruction/evidence/ledger — the phase-context + publisher source. */
 export const DEV_TASK_ARCHIVE_DIR = "task-archive";
@@ -277,6 +294,40 @@ export function parseLedgerMarkdown(md: string | null): ParsedLedgerRow[] {
     });
   }
   return rows;
+}
+
+/**
+ * Rewrite matching checklist rows' Status + Evidence cells in the markdown —
+ * the HUMAN-verify closure. The RUNNER is the only non-model writer of
+ * checklist rows (mirror of loop-kit's "the human may edit rows; the loop may
+ * not"). Rows are matched by normalized AC id; other cells stay verbatim.
+ */
+export function markChecklistRows(
+  repoPath: string,
+  acIds: readonly string[],
+  status: "verified" | "failed",
+  evidenceNote: string,
+): void {
+  const md = readDevDoc(repoPath, DEV_DOCS.checklist);
+  if (md === null) return;
+  const wanted = new Set(
+    acIds.map((id) => {
+      const m = id.match(/^AC-(\d+)$/i);
+      return m ? `AC-${m[1]!.padStart(3, "0")}` : id;
+    }),
+  );
+  const out = md.split(/\r?\n/).map((raw) => {
+    if (!raw.includes("|")) return raw;
+    const cells = raw.split("|");
+    const idIdx = cells.findIndex((c) => /^AC-(\d+)$/i.test(c.trim()));
+    if (idIdx < 0) return raw;
+    const m = cells[idIdx]!.trim().match(/^AC-(\d+)$/i)!;
+    if (!wanted.has(`AC-${m[1]!.padStart(3, "0")}`)) return raw;
+    if (cells.length > idIdx + 4) cells[idIdx + 4] = ` ${status} `;
+    if (cells.length > idIdx + 5) cells[idIdx + 5] = ` ${evidenceNote} `;
+    return cells.join("|");
+  });
+  writeDevDoc(repoPath, DEV_DOCS.checklist, out.join("\n"));
 }
 
 // ── git operations (execFileSync — no shell) ────────────────────────────

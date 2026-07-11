@@ -14,6 +14,7 @@
  * (dev-loop-evaluate.ts) is separately covered 100%.
  */
 
+import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { BackendModelTier } from "@aitne/shared";
 import {
@@ -28,6 +29,15 @@ import {
   type DevSessionRow,
   type DevSessionLoopState,
 } from "../../db/dev-sessions-store.js";
+import {
+  listSeenAcIds,
+  upsertDevChecklistRow,
+} from "../../db/dev-session-checklist-store.js";
+import {
+  extractContractAcAnchors,
+  parseChecklistMarkdown,
+  type DevAcMethod,
+} from "./dev-checklist.js";
 import type { DevTaskLoopState } from "../../db/dev-session-tasks-store.js";
 import type { DevEscalationKind } from "../../db/dev-session-escalations-store.js";
 import {
@@ -178,12 +188,27 @@ export interface DevEnginePersistence {
   requirementCounts(): { total: number; met: number };
   /** REQ ids not yet 'met' — the split-nudge input. */
   unmetReqIds(): string[];
+  /** UPSERT one acceptance-checklist row from the markdown sync (rows are
+   *  never deleted — the id set doubles as the §6.6 monotonicity baseline). */
+  syncChecklistRow(row: {
+    acId: string;
+    reqId: string | null;
+    expectation: string | null;
+    method: DevAcMethod;
+    status: "pending" | "verified" | "failed";
+    evidence: string | null;
+    iter: number | null;
+    updatedAt: number;
+  }): void;
+  /** Every checklist id ever synced for this scope. */
+  seenAcIds(): string[];
 }
 
 /** The v1 session-scoped persistence (journal rows carry task_id NULL). */
 export function createSessionEnginePersistence(
   db: Database.Database,
   sessionId: string,
+  uuid: () => string = () => randomUUID(),
 ): DevEnginePersistence {
   return {
     recordIteration(row) {
@@ -205,6 +230,17 @@ export function createSessionEnginePersistence(
       return listDevRequirements(db, sessionId)
         .filter((r) => r.status !== "met")
         .map((r) => r.reqId);
+    },
+    syncChecklistRow(row) {
+      upsertDevChecklistRow(db, {
+        id: uuid(),
+        sessionId,
+        taskId: null,
+        ...row,
+      });
+    },
+    seenAcIds() {
+      return listSeenAcIds(db, sessionId, null);
     },
   };
 }
@@ -351,6 +387,32 @@ export class DevLoopEngine {
     }
   }
 
+  /** Sync the acceptance-checklist Markdown into the DB mirror and build the
+   *  evaluator's §6.6 input. The DB's accumulated id set is the monotonicity
+   *  baseline; anchors come from the hash-verified contract text. */
+  private syncChecklist(): NonNullable<Parameters<typeof evaluateIteration>[0]["checklist"]> {
+    const rows = parseChecklistMarkdown(readDevDoc(this.repoPath, DEV_DOCS.checklist));
+    for (const row of rows ?? []) {
+      if (row.method === null || row.status === "unknown") continue; // lint-time defects — never mirrored
+      this.persistence.syncChecklistRow({
+        acId: row.acId,
+        reqId: row.reqId || null,
+        expectation: row.expectation || null,
+        method: row.method,
+        status: row.status,
+        evidence: row.evidence || null,
+        iter: this.session.iteration,
+        updatedAt: this.now(),
+      });
+    }
+    const contractMd = readDevDoc(this.repoPath, DEV_DOCS.contract) ?? "";
+    return {
+      rows,
+      contractAnchors: extractContractAcAnchors(contractMd),
+      seenAcIds: this.persistence.seenAcIds(),
+    };
+  }
+
   private allRequirementsMet(): boolean {
     const { total, met } = this.persistence.requirementCounts();
     return total > 0 && met === total;
@@ -451,6 +513,7 @@ export class DevLoopEngine {
     }
     this.session = { ...this.session, agentFailures: 0 };
     this.syncLedger();
+    const checklist = this.syncChecklist();
 
     // ── EVALUATE (deterministic) ──
     const agentStateToken = parseAgentStateToken(readAgentStateFirstLine(this.repoPath));
@@ -466,6 +529,7 @@ export class DevLoopEngine {
         assumeReady: false,
         wholeRunDiffEmpty: false,
         fleetWorker: this.fleet !== null,
+        checklist,
         bookkeeping: this.bookkeeping,
       },
       {
@@ -476,6 +540,23 @@ export class DevLoopEngine {
     this.bookkeeping = evalOut.bookkeeping;
     if (evalOut.result.verify) {
       writeLastVerifyLog(this.repoPath, evalOut.result.verify);
+    }
+    if (evalOut.result.flake) {
+      // A rerun absorbed a red pass — keep the failing log + journal it so a
+      // flaky gate is visible in the timeline (loop-kit VERIFY_FLAKE).
+      writeDevDoc(
+        this.repoPath,
+        DEV_DOCS.verifyFlake,
+        evalOut.result.flake.failedVerify
+          .map((r) => `$ ${r.command}\n${r.output}\n${r.passed ? "[PASS]" : `[FAIL] (exit ${r.exitCode})`}`)
+          .join("\n\n") + "\n",
+      );
+      this.record(
+        "evaluate",
+        "VERIFY_FLAKE",
+        `a failing verify pass was absorbed by rerun #${evalOut.result.flake.attempt}`
+          + ` (${evalOut.result.flake.failedVerify.find((r) => !r.passed)?.command ?? "?"})`,
+      );
     }
     // The implement leg ran for minutes — re-check before the checkpoint
     // commit. On a moved checkout the iteration's uncommitted edits stay in
@@ -494,6 +575,23 @@ export class DevLoopEngine {
 
     if (state === "SUCCESS_CANDIDATE") {
       return this.runSuccessGate(false, preRef);
+    }
+    if (state === "NEEDS_HUMAN_VERIFY") {
+      // §6.6 human-method closure: everything is green except expectations
+      // only the owner can judge. Park on a human_verify escalation; the
+      // runner closes the rows from the owner's reply. Persisted loop_state
+      // stays CHECK-valid (RISK_REQUIRES_APPROVAL).
+      return {
+        kind: "escalate",
+        escalationKind: "human_verify",
+        loopState: "RISK_REQUIRES_APPROVAL",
+        question:
+          `${evalOut.result.reason} Check the expectations (see `
+          + "acceptance-checklist.md and any artifacts under "
+          + ".aitne-dev/observations/), then reply `verified` to sign them "
+          + "off — or describe what's wrong.",
+        contextSummary: readDevDoc(this.repoPath, DEV_DOCS.checklist),
+      };
     }
     if (
       state === "NEEDS_SPEC_DECISION"
@@ -657,6 +755,7 @@ export class DevLoopEngine {
         assumeReady: forced,
         wholeRunDiffEmpty: isWholeRunDiffEmpty(this.repoPath, baseRef),
         fleetWorker: this.fleet !== null,
+        checklist: this.syncChecklist(),
         bookkeeping: this.bookkeeping,
       },
       {

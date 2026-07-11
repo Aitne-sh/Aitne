@@ -80,6 +80,16 @@ Code quality is judged only after requirements. On every review:
 - **Ledger honesty** — for REQs whose area this diff touches, spot-check the
   ledger's claims. A row marked `met` whose evidence does not hold up (missing
   test, behavior not actually implemented) => REVISE, and name the row that lied.
+- **Verification evidence (acceptance checklist)** — for checklist rows in this
+  diff's area claimed `verified`: a `run`-method row MUST cite an observation
+  artifact (a path under `.aitne-dev/observations/` or probe output in the
+  verify log). Open the cited artifact (`Read` displays images) and judge it
+  against the expectation. A `run` row verified on code-reading alone, a
+  missing artifact, or an artifact that does not demonstrate the expectation
+  => REVISE naming the row. A row deleted, reworded, or flipped without
+  evidence is the same dishonesty as a lying ledger row. In gate mode, a REQ
+  whose checklist rows are not all honestly `verified` (pending `human` rows
+  excepted — the owner closes those) is NOT `MET`.
 
 ## Judge
 

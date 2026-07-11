@@ -43,7 +43,12 @@ export type DevIterationPhase =
   | "decompose_review"
   | "supervise"
   | "plan_review"
-  | "merge";
+  | "merge"
+  | "baseline"
+  | "rollback"
+  | "contract_review"
+  | "resume"
+  | "contract_gen";
 
 export type DevTaskState =
   | "queued"
@@ -57,7 +62,7 @@ export type DevTaskState =
   | "dep_failed";
 
 export type DevTaskLoopState = DevSessionLoopState | "NEEDS_DECOMPOSITION";
-export type DevTaskOrigin = "plan" | "replan" | "plan_review" | "fixup";
+export type DevTaskOrigin = "plan" | "replan" | "plan_review" | "fixup" | "manual";
 
 /** One DAG node in a fleet run (GET /dev-sessions/:id → tasks[]). */
 export interface DevTaskDTO {
@@ -142,6 +147,25 @@ export interface DevEscalationDTO {
   resolved: boolean;
 }
 
+export type DevAcMethod = "cmd" | "run" | "human";
+export type DevAcRowStatus = "pending" | "verified" | "failed";
+
+/** One acceptance-checklist row (GET /dev-sessions/:id → checklist[]). */
+export interface DevChecklistDTO {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  /** The owning task's key (null = session-level / master checklist). */
+  taskKey: string | null;
+  acId: string;
+  reqId: string | null;
+  expectation: string | null;
+  method: DevAcMethod;
+  status: DevAcRowStatus;
+  evidence: string | null;
+  updatedAt: number;
+}
+
 /** GET /dev-sessions/:id — the full projection. `session` carries every
  *  DevSessionSummary field plus the daemon's extra columns (approvedHash etc.),
  *  which the page does not need, so it is typed as the summary + a passthrough. */
@@ -150,5 +174,7 @@ export interface DevSessionDetailResponse {
   tasks: DevTaskDTO[];
   iterations: DevIterationDTO[];
   requirements: DevRequirementDTO[];
+  /** Absent on daemons that predate the checklist layer. */
+  checklist?: DevChecklistDTO[];
   escalations: DevEscalationDTO[];
 }

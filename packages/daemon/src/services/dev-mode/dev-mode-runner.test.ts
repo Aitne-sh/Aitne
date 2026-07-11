@@ -21,6 +21,7 @@ import {
   listDevEscalationsForSession,
 } from "../../db/dev-session-escalations-store.js";
 import { getDevTask, listDevTasks } from "../../db/dev-session-tasks-store.js";
+import { listDevChecklist } from "../../db/dev-session-checklist-store.js";
 import {
   DEV_DOCS,
   DEV_OWNER_PLAN_DECISION_FILE,
@@ -391,12 +392,19 @@ describe("DevModeRunner", () => {
 
   it("interview turn scopes Write/Edit to .aitne-dev (no unscoped repo writes)", async () => {
     let capturedTools: readonly string[] = [];
+    let reviewTools: readonly string[] = [];
     const backend: DevBackend = {
       async runLeg(req) {
+        if (req.taskFlowKey === "dev.contract_review") {
+          // The independent review leg is READ-ONLY and read the definition.
+          reviewTools = req.allowedTools;
+          return ok("checked everything\nCONTRACT-REVIEW: APPROVE gate is real");
+        }
         capturedTools = req.allowedTools;
         // Simulate the agent writing the drafts + declaring readiness.
         writeDevDoc(repo, DEV_DOCS.contract, CONTRACT_MD);
         writeDevDoc(repo, "docs/loop-config.json", JSON.stringify({ verifyCommands: ["true"] }));
+        writeDevDoc(repo, DEV_DOCS.unknowns, "## Territory map\nnode repo\n## Must-be baseline\nNone\n");
         writeDevDoc(repo, DEV_DOCS.agentState, "CONTRACT_READY drafted");
         return ok("here's the contract");
       },
@@ -409,9 +417,49 @@ describe("DevModeRunner", () => {
     expect(capturedTools).toContain("Edit(.aitne-dev/**)");
     expect(capturedTools).not.toContain("Write");
     expect(capturedTools).not.toContain("Edit");
-    // CONTRACT_READY → finalized → awaiting_approval + loop summary.
+    expect(reviewTools).toEqual(["Read", "Glob", "Grep"]);
+    // CONTRACT_READY → validated + reviewed → awaiting_approval + summary.
     expect(getDevSession(db, "s1")!.state).toBe("awaiting_approval");
     expect(reply).toContain("Reply !approve");
+    expect(reply).toContain("Independently reviewed: APPROVE");
+    // The deterministic verify probe ran and recorded the baseline.
+    expect(readDevDoc(repo, DEV_DOCS.verifyProbe)).toContain("stays-green");
+  });
+
+  it("interview finalize: reviewer REVISE triggers one bounded auto-revision", async () => {
+    const legCalls: string[] = [];
+    let reviewCalls = 0;
+    const backend: DevBackend = {
+      async runLeg(req) {
+        legCalls.push(req.taskFlowKey);
+        if (req.taskFlowKey === "dev.contract_review") {
+          reviewCalls += 1;
+          return reviewCalls === 1
+            ? ok("CONTRACT-REVIEW: REVISE 1) gate cannot fail — add a red-to-green test")
+            : ok("CONTRACT-REVIEW: APPROVE fixed");
+        }
+        writeDevDoc(repo, DEV_DOCS.contract, CONTRACT_MD);
+        writeDevDoc(repo, "docs/loop-config.json", JSON.stringify({ verifyCommands: ["true"] }));
+        writeDevDoc(repo, DEV_DOCS.unknowns, "## Territory map\nx\n");
+        writeDevDoc(repo, DEV_DOCS.agentState, "CONTRACT_READY drafted");
+        return ok("drafted");
+      },
+    };
+    db.prepare(`UPDATE dev_sessions SET state = 'interview' WHERE id = 's1'`).run();
+    const runner = makeRunner(backend);
+    const reply = await runner.runInterviewTurn({ sessionId: "s1", userMessage: "build X" });
+    // interview → review(REVISE) → auto-revision interview → review(APPROVE).
+    expect(legCalls).toEqual([
+      "dev.contract_interview",
+      "dev.contract_review",
+      "dev.contract_interview",
+      "dev.contract_review",
+    ]);
+    expect(getDevSession(db, "s1")!.state).toBe("awaiting_approval");
+    expect(reply).toContain("Independently reviewed: APPROVE");
+    // The review verdicts landed in the journal.
+    const phases = listDevIterations(db, "s1").filter((i) => i.phase === "contract_review");
+    expect(phases.map((p) => p.verdict)).toEqual(["REVISE", "APPROVE"]);
   });
 
   it("records per-leg iterations for the timeline", async () => {
@@ -874,5 +922,55 @@ describe("DevModeRunner", () => {
     expect(subjects).toContain("recovered uncommitted work on resume");
     // The recovered work landed on the SESSION branch, not lost.
     expect(git(repo, ["status", "--porcelain"])).toBe("");
+  });
+
+  it("checklist human rows park the loop; the owner's sign-off closes them (§6.6 closure)", async () => {
+    const CHECKLIST = [
+      "| AC | REQ | Expectation | Method | Status | Evidence |",
+      "| --- | --- | --- | --- | --- | --- |",
+      "| AC-001 | REQ-001 | tests pass | cmd | verified | true |",
+      "| AC-002 | REQ-002 | the page looks right | human | pending | - |",
+    ].join("\n");
+    let implCalls = 0;
+    const backend = fakeBackend(repo, {
+      "dev.implement": () => {
+        implCalls += 1;
+        writeFileSync(join(repo, "feature.ts"), `export const x = ${implCalls};\n`);
+        writeDevDoc(repo, DEV_DOCS.ledger, ledgerMd("met"));
+        // Only the FIRST pass seeds the checklist — a real implement leg
+        // updates rows, never resets the owner's sign-off.
+        if (readDevDoc(repo, DEV_DOCS.checklist) === null) {
+          writeDevDoc(repo, DEV_DOCS.checklist, CHECKLIST);
+        }
+        writeDevDoc(repo, DEV_DOCS.agentState, "READY_FOR_REVIEW done");
+        return ok("implemented");
+      },
+    });
+    const runner = makeRunner(backend);
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state === "awaiting_user", 20000);
+
+    const esc = getOpenDevEscalationForSession(db, "s1")!;
+    expect(esc.kind).toBe("human_verify");
+    expect(esc.question).toContain("AC-002");
+    // The DB mirror already carries the pending human row.
+    expect(listDevChecklist(db, "s1", null).find((r) => r.acId === "AC-002")?.status).toBe("pending");
+
+    await runner.resumeAfterEscalation({
+      sessionId: "s1",
+      escalationId: esc.id,
+      answer: "verified — looks great",
+    });
+    await waitUntil(() => {
+      const s = getDevSession(db, "s1");
+      return s?.state !== "running" && s?.state !== "awaiting_user";
+    }, 20000);
+
+    expect(getDevSession(db, "s1")!.state).toBe("done");
+    expect(getDevSession(db, "s1")!.loopState).toBe("SUCCESS");
+    // The runner (the only non-model writer) closed the row with the owner's
+    // sign-off, and the mirror re-synced on the next iteration.
+    expect(readDevDoc(repo, DEV_DOCS.checklist)).toContain("owner sign-off");
+    expect(listDevChecklist(db, "s1", null).find((r) => r.acId === "AC-002")?.status).toBe("verified");
   });
 });

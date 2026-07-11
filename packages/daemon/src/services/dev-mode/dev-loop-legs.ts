@@ -129,6 +129,7 @@ function baseContext(ctx: DevLegContext): string {
     `Repo: ${ctx.session.slug ?? ctx.session.repositoryId}  ·  Iteration: ${ctx.iteration}`,
     section("Product contract (immutable — do not edit)", readDevDoc(ctx.repoPath, DEV_DOCS.contract)),
     section("Requirements ledger", readDevDoc(ctx.repoPath, DEV_DOCS.ledger)),
+    section("Acceptance checklist", readDevDoc(ctx.repoPath, DEV_DOCS.checklist)),
   ].join("");
 }
 
@@ -260,6 +261,10 @@ export function createDevLegRunner(deps: DevLegRunnerDeps): DevLegRunner {
         `<dev_loop_context>${baseContext(ctx)}`
         + section("Gate reviewer per-REQ verdicts", verdictLines)
         + section("Verify log", readDevDoc(ctx.repoPath, DEV_DOCS.lastVerify))
+        + section(
+          "Baseline verify (run start — the red-to-green flip source)",
+          readDevDoc(ctx.repoPath, DEV_DOCS.baselineVerify),
+        )
         + section("Assumptions", readDevDoc(ctx.repoPath, DEV_DOCS.assumptions))
         + section("Whole-run diff", gitDiffText(ctx.repoPath, ctx.session.baseRef ?? "HEAD"))
         + `</dev_loop_context>`;

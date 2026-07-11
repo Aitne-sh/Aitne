@@ -13,11 +13,13 @@ import {
   devStateLabel,
   devLoopStateLabel,
   devReqStatusBadgeVariant,
+  devAcStatusBadgeVariant,
   devPhaseLabel,
   devTaskStateBadgeVariant,
   devTaskStateLabel,
   groupTasksByLayer,
   reqSummary,
+  checklistSummary,
   formatCost,
   formatDevTime,
 } from "@/lib/dev-sessions/view";
@@ -169,6 +171,32 @@ function DevSessionDrawer({
                           {req.evidence ? (
                             <span className="block text-xs opacity-80">{req.evidence}</span>
                           ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {data && (data.checklist?.length ?? 0) > 0 ? (
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Acceptance checklist
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      {checklistSummary(data.checklist)}
+                    </span>
+                  </h3>
+                  <ul className="space-y-1">
+                    {data.checklist!.map((row) => (
+                      <li key={row.id} className="flex items-start gap-2 text-sm">
+                        <Badge variant={devAcStatusBadgeVariant(row.status)}>{row.acId}</Badge>
+                        <span className="min-w-0 flex-1 text-muted-foreground">
+                          {row.expectation ?? "—"}
+                          <span className="block text-xs opacity-80">
+                            {row.method}
+                            {row.taskKey ? ` · ${row.taskKey}` : ""}
+                            {row.evidence ? ` · ${row.evidence}` : ""}
+                          </span>
                         </span>
                       </li>
                     ))}

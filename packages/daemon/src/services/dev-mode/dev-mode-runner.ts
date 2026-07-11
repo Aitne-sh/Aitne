@@ -66,8 +66,10 @@ import {
   gitHead,
   gitMergeInProgress,
   gitStatusDirty,
+  markChecklistRows,
   readAgentStateFirstLine,
   readDevDoc,
+  removeDevDoc,
   runVerifyCommand,
   validateBaseRef,
   writeBaselineVerifyLog,
@@ -79,9 +81,21 @@ import {
   normalizeDevLoopConfig,
   validateDevLoopConfig,
 } from "./dev-loop-config.js";
-import { extractContractRequirements, parseAgentStateToken } from "./verdict-parse.js";
+import {
+  extractContractReqIds,
+  extractContractRequirements,
+  parseAgentStateToken,
+  parseContractReviewVerdict,
+  type DevContractReviewVerdict,
+} from "./verdict-parse.js";
+import {
+  lintContractChecklist,
+  parseChecklistMarkdown,
+  parseHumanVerifyReply,
+} from "./dev-checklist.js";
+import { upsertDevChecklistRow } from "../../db/dev-session-checklist-store.js";
 import type { DevLoopConfig } from "./types.js";
-import { DevLoopEngine, type DevIterationOutcome } from "./dev-loop-engine.js";
+import { DevLoopEngine, type DevIterationOutcome, type DevLegResponse } from "./dev-loop-engine.js";
 import { createDevLegRunner, type DevBackend } from "./dev-loop-legs.js";
 import { createDevFlowLegRunner } from "./dev-flow-legs.js";
 import {
@@ -703,14 +717,26 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     session: DevSessionRow,
     contractMd: string,
     config: DevLoopConfig,
+    reviewLine: string | null,
   ): string {
     const reqs = extractContractRequirements(contractMd);
     const goal = extractGoal(contractMd);
+    const repoPath = deps.resolveRepoPath(session.repositoryId);
+    const acRows = repoPath
+      ? parseChecklistMarkdown(readDevDoc(repoPath, DEV_DOCS.checklist)) ?? []
+      : [];
+    const acCount = (m: string): number => acRows.filter((r) => r.method === m).length;
     const lines = [
       `Contract ready for ${session.slug ?? session.repositoryId}.`,
       goal ? `\nGoal: ${goal}` : "",
       `\nRequirements (${reqs.length}):`,
       ...reqs.map((r) => `  • ${r.id}: ${r.title}`),
+      acRows.length > 0
+        ? `\nAcceptance checklist: ${acRows.length} expectations `
+          + `(${acCount("cmd")} cmd · ${acCount("run")} run · ${acCount("human")} human`
+          + `${acCount("human") > 0 ? " — human rows come back to you for sign-off" : ""})`
+        : "",
+      reviewLine ? `\n${reviewLine}` : "",
       `\nVerify (all must pass): ${config.verifyCommands.join(", ")}`,
       // Surface the setup command too — it runs unsandboxed in each worktree, so
       // the owner should see (and consent to) it at approval.
@@ -731,17 +757,25 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     return lines.filter((l) => l.length > 0).join("\n");
   }
 
-  /** CONTRACT_READY path — validate the drafted contract + config and move the
-   *  session to awaiting_approval, returning the loop summary. On any gap,
-   *  return a follow-up question and stay in interview. */
-  function finalizeContract(session: DevSessionRow, repoPath: string): string {
+  /** Deterministic definition checks at CONTRACT_READY: contract shape,
+   *  config validity, the unknowns record, the checklist lint, and the
+   *  runner-side verify PROBE (the interview leg has no shell — the daemon
+   *  runs each command once and refuses finalization when one cannot run). */
+  function validateDefinition(
+    repoPath: string,
+  ):
+    | { kind: "question"; question: string }
+    | { kind: "ok"; contractMd: string; config: DevLoopConfig } {
     const contractMd = readDevDoc(repoPath, DEV_DOCS.contract);
     if (!contractMd || contractMd.trim().length === 0) {
-      return "I couldn't find the drafted contract yet — what's the goal you want me to build toward?";
+      return { kind: "question", question: "I couldn't find the drafted contract yet — what's the goal you want me to build toward?" };
     }
     const reqs = extractContractRequirements(contractMd);
     if (reqs.length === 0) {
-      return "The contract still needs at least one numbered requirement (a `### REQ-001: …` heading). What's the first concrete, verifiable requirement?";
+      return {
+        kind: "question",
+        question: "The contract still needs at least one numbered requirement (a `### REQ-001: …` heading). What's the first concrete, verifiable requirement?",
+      };
     }
     let parsed: Partial<DevLoopConfig> = {};
     const raw = readDevDoc(repoPath, DEV_DOCS.loopConfig);
@@ -755,20 +789,238 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     const config = normalizeDevLoopConfig(parsed);
     const validation = validateDevLoopConfig(config);
     if (!validation.ok) {
-      return `Almost there — ${validation.errors.join(" ")} What command(s) should verify success (e.g. \`npm test\` or \`pytest\`)?`;
+      return {
+        kind: "question",
+        question: `Almost there — ${validation.errors.join(" ")} What command(s) should verify success (e.g. \`npm test\` or \`pytest\`)?`,
+      };
     }
-    updateDevSessionConfig(
-      deps.db,
-      session.id,
-      { config: config as unknown as Record<string, unknown> },
-      now(),
+    // The structured unknowns record is mandatory (blindspot survey output).
+    const unknowns = readDevDoc(repoPath, DEV_DOCS.unknowns);
+    if (!unknowns || unknowns.trim().length === 0) {
+      return {
+        kind: "question",
+        question:
+          "Before I can finalize: the unknowns record (.aitne-dev/docs/unknowns.md) "
+          + "is missing — I need one more pass over the repo to fill it. What area "
+          + "should I prioritize surveying?",
+      };
+    }
+    // Checklist definition lint (anchors ↔ rows ↔ REQs).
+    const lintErrors = lintContractChecklist(
+      contractMd,
+      readDevDoc(repoPath, DEV_DOCS.checklist),
+      extractContractReqIds(contractMd),
     );
-    const advanced = markDevAwaitingApproval(deps.db, session.id, now());
-    // Cancel the inactivity timer? No — awaiting_approval still waits on the
-    // human, so keep it armed (retimed on each message).
-    const finalRow = advanced ?? session;
-    logger.info({ sessionId: session.id, reqCount: reqs.length }, "dev contract finalized — awaiting approval");
-    return renderLoopSummary(finalRow, contractMd, config);
+    if (lintErrors.length > 0) {
+      return {
+        kind: "question",
+        question: `The acceptance checklist needs fixes before approval: ${lintErrors.slice(0, 3).join("; ")}.`,
+      };
+    }
+    // Verify probe — each command must at least be RUNNABLE here (loop-kit
+    // runs them in-session; the read-only interview leg cannot, so the daemon
+    // does it deterministically). Results feed the contract review + summary.
+    const probeLines: string[] = ["| Command | Exit | Baseline |", "|---|---|---|"];
+    for (const command of config.verifyCommands) {
+      const run = runVerifyCommand(repoPath, command, config.maxIterSeconds * 1000);
+      const classification = run.exitCode === 0 ? "stays-green" : "red at baseline (red→green candidate)";
+      probeLines.push(`| ${command.replace(/\|/g, "/")} | ${run.exitCode} | ${classification} |`);
+      if (run.exitCode === 127 || run.exitCode === 126) {
+        writeDevDoc(repoPath, DEV_DOCS.verifyProbe, `${probeLines.join("\n")}\n`);
+        return {
+          kind: "question",
+          question:
+            `The verify command \`${command}\` isn't runnable in this repo `
+            + `(exit ${run.exitCode}) — the gate would never pass. What should it run instead?`,
+        };
+      }
+    }
+    writeDevDoc(repoPath, DEV_DOCS.verifyProbe, `${probeLines.join("\n")}\n`);
+    return { kind: "ok", contractMd, config };
+  }
+
+  /** Independent read-only judge of the interview's definition (loop-kit
+   *  loop-contract-review — dev-mode runs it ALWAYS, not just headless).
+   *  One format-reminder retry; null = no parseable verdict (fail TOWARD the
+   *  human: present the summary with a caveat, never silently approve). */
+  async function runContractReview(
+    session: DevSessionRow,
+    repoPath: string,
+    backend: DevBackend,
+    config: DevLoopConfig,
+  ): Promise<DevContractReviewVerdict | null> {
+    const staged = [
+      "<dev_contract_review_context>",
+      `Repo: ${session.slug ?? session.repositoryId}`,
+      "",
+      "## Product contract (the definition under review)",
+      readDevDoc(repoPath, DEV_DOCS.contract) ?? "(missing)",
+      "",
+      "## Loop config (stop conditions)",
+      readDevDoc(repoPath, DEV_DOCS.loopConfig) ?? "(missing)",
+      "",
+      "## Unknowns record",
+      readDevDoc(repoPath, DEV_DOCS.unknowns) ?? "(missing)",
+      "",
+      "## Acceptance checklist",
+      readDevDoc(repoPath, DEV_DOCS.checklist) ?? "(none)",
+      "",
+      "## Verify probe (deterministic daemon run — exit codes are ground truth)",
+      readDevDoc(repoPath, DEV_DOCS.verifyProbe) ?? "(none)",
+      "</dev_contract_review_context>",
+    ].join("\n");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const resp = await backend.runLeg({
+        taskFlowKey: "dev.contract_review",
+        prompt: deps.loadTaskFlow("dev.contract_review"),
+        context:
+          attempt === 0
+            ? staged
+            : `${staged}\n\nREMINDER: end with exactly one line \`CONTRACT-REVIEW: APPROVE|REVISE|ESCALATE <detail>\`.`,
+        sessionDir: repoPath,
+        allowedTools: ["Read", "Glob", "Grep"],
+        readOnly: true,
+        tier,
+        maxTurns: 25,
+        maxBudgetUsd: config.maxCostPerSessionUsd,
+        maxSeconds: 600,
+      });
+      recordDevIteration(deps.db, {
+        id: uuid(),
+        sessionId: session.id,
+        iteration: 0,
+        phase: "contract_review",
+        verdict: resp.isError ? "error" : parseContractReviewVerdict(resp.text)?.verdict ?? "unparseable",
+        reason: parseContractReviewVerdict(resp.text)?.detail ?? null,
+        costUsd: resp.costUsd > 0 ? resp.costUsd : null,
+        createdAt: now(),
+      });
+      if (resp.isError) continue;
+      const verdict = parseContractReviewVerdict(resp.text);
+      if (verdict) return verdict;
+    }
+    return null;
+  }
+
+  /** CONTRACT_READY path — deterministic checks, the independent contract
+   *  review (bounded auto-revision), then awaiting_approval + the summary. */
+  async function finalizeWithReview(
+    session: DevSessionRow,
+    repoPath: string,
+    backend: DevBackend,
+  ): Promise<string> {
+    for (let round = 0; ; round += 1) {
+      const checked = validateDefinition(repoPath);
+      if (checked.kind === "question") return checked.question;
+      const { contractMd, config } = checked;
+
+      let reviewLine: string | null = null;
+      if (config.contractReview) {
+        const review = await runContractReview(session, repoPath, backend, config);
+        if (review === null) {
+          reviewLine = "⚠️ Independent contract review could not render a verdict — read the summary extra carefully.";
+        } else if (review.verdict === "ESCALATE") {
+          return `The contract reviewer needs your call before this can run: ${review.detail}`;
+        } else if (review.verdict === "REVISE") {
+          writeDevDoc(repoPath, DEV_DOCS.contractReviewFeedback, review.detail);
+          if (round === 0) {
+            // One bounded auto-revision: re-run the interview leg with the
+            // reviewer's must-fix items injected, then re-validate.
+            const resp = await runInterviewLeg(
+              session,
+              repoPath,
+              backend,
+              "(automated) Address the contract reviewer's must-fix items injected above, then re-declare CONTRACT_READY.",
+            );
+            if (!resp.isError) {
+              const token = parseAgentStateToken(readAgentStateFirstLine(repoPath));
+              if (token === "CONTRACT_READY") continue; // re-validate + re-review
+              return resp.text.trim().length > 0
+                ? resp.text.trim()
+                : "The reviewer raised concerns I couldn't resolve automatically — tell me how to proceed.";
+            }
+            reviewLine = `⚠️ Reviewer concerns (auto-revision failed): ${review.detail}`;
+          } else {
+            // Still REVISE after the revision — the human gate decides.
+            reviewLine = `⚠️ Reviewer concerns outstanding: ${review.detail}`;
+          }
+        } else {
+          removeDevDoc(repoPath, DEV_DOCS.contractReviewFeedback);
+          reviewLine = `Independently reviewed: APPROVE${review.detail ? ` — ${review.detail}` : ""}`;
+        }
+      }
+
+      updateDevSessionConfig(
+        deps.db,
+        session.id,
+        { config: config as unknown as Record<string, unknown> },
+        now(),
+      );
+      const advanced = markDevAwaitingApproval(deps.db, session.id, now());
+      // Cancel the inactivity timer? No — awaiting_approval still waits on the
+      // human, so keep it armed (retimed on each message).
+      const finalRow = advanced ?? session;
+      logger.info(
+        { sessionId: session.id, review: reviewLine },
+        "dev contract finalized — awaiting approval",
+      );
+      return renderLoopSummary(finalRow, contractMd, config, reviewLine);
+    }
+  }
+
+  /** One contract-interview leg (also the contract-review auto-revision
+   *  vehicle). Injects every definition draft so a fresh-context turn sees
+   *  the full state, plus any contract-review feedback to address. */
+  async function runInterviewLeg(
+    session: DevSessionRow,
+    repoPath: string,
+    backend: DevBackend,
+    ownerMessage: string,
+  ): Promise<DevLegResponse> {
+    const draftSection = (title: string, rel: string): string => {
+      const body = readDevDoc(repoPath, rel);
+      return body && body.trim().length > 0 ? `\n## ${title}\n${body.trim()}\n` : "";
+    };
+    const draft = readDevDoc(repoPath, DEV_DOCS.contract);
+    const context = [
+      "<dev_interview_context>",
+      `Repo: ${session.slug ?? session.repositoryId}  ·  Local path: ${repoPath}`,
+      `Session id: ${session.id}`,
+      "",
+      "## Current contract draft (.aitne-dev/docs/product-contract.md)",
+      draft && draft.trim().length > 0 ? draft : "(none yet — this is the first turn)",
+      draftSection("Current loop config draft", DEV_DOCS.loopConfig),
+      draftSection("Current unknowns record", DEV_DOCS.unknowns),
+      draftSection("Current acceptance checklist", DEV_DOCS.checklist),
+      draftSection(
+        "Contract-review feedback (address EVERY must-fix item before re-declaring CONTRACT_READY)",
+        DEV_DOCS.contractReviewFeedback,
+      ),
+      "",
+      "## Owner's latest message",
+      ownerMessage,
+      "</dev_interview_context>",
+    ].join("\n");
+    return backend.runLeg({
+      taskFlowKey: "dev.contract_interview",
+      prompt: deps.loadTaskFlow("dev.contract_interview"),
+      context,
+      sessionDir: repoPath,
+      // Read the repo, but SCOPE writes to the .aitne-dev working dir — the
+      // interview runs pre-approval on the owner's live branch with no branch
+      // isolation, so an over-reaching / prompt-injected turn must not be able
+      // to mutate repo source or out-of-repo files (~/.zshrc etc.). Path-scoped
+      // Write/Edit (cwd-relative glob) is the enforced boundary; the task-flow
+      // prose is only advisory on top.
+      allowedTools: ["Read", "Glob", "Grep", "Write(.aitne-dev/**)", "Edit(.aitne-dev/**)"],
+      readOnly: false,
+      tier,
+      maxTurns: 40,
+      // The interview is one Claude Code session — cap it at the per-session
+      // budget (the draft config's, or the default before any is written).
+      maxBudgetUsd: normalizeDevLoopConfig(session.config).maxCostPerSessionUsd,
+      maxSeconds: 600,
+    });
   }
 
   async function runInterviewTurn(input: {
@@ -784,20 +1036,6 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     if (!repoPath) return "I can't find the local path for that repository.";
     ensureDevWorkdir(repoPath);
 
-    const draft = readDevDoc(repoPath, DEV_DOCS.contract);
-    const context = [
-      "<dev_interview_context>",
-      `Repo: ${session.slug ?? session.repositoryId}  ·  Local path: ${repoPath}`,
-      `Session id: ${session.id}`,
-      "",
-      "## Current contract draft (.aitne-dev/docs/product-contract.md)",
-      draft && draft.trim().length > 0 ? draft : "(none yet — this is the first turn)",
-      "",
-      "## Owner's latest message",
-      input.userMessage,
-      "</dev_interview_context>",
-    ].join("\n");
-
     // Interview turns are not part of the loop, but they must be abortable —
     // register the controller in `active` so a !exit / inactivity timeout
     // unwinds a mid-interview leg instead of waiting out maxSeconds (WP3
@@ -807,33 +1045,14 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     active.set(input.sessionId, controller);
     try {
       const backend = deps.makeBackend(controller);
-      const resp = await backend.runLeg({
-        taskFlowKey: "dev.contract_interview",
-        prompt: deps.loadTaskFlow("dev.contract_interview"),
-        context,
-        sessionDir: repoPath,
-        // Read the repo, but SCOPE writes to the .aitne-dev working dir — the
-        // interview runs pre-approval on the owner's live branch with no branch
-        // isolation, so an over-reaching / prompt-injected turn must not be able
-        // to mutate repo source or out-of-repo files (~/.zshrc etc.). Path-scoped
-        // Write/Edit (cwd-relative glob) is the enforced boundary; the task-flow
-        // prose is only advisory on top.
-        allowedTools: ["Read", "Glob", "Grep", "Write(.aitne-dev/**)", "Edit(.aitne-dev/**)"],
-        readOnly: false,
-        tier,
-        maxTurns: 40,
-        // The interview is one Claude Code session — cap it at the per-session
-        // budget (the draft config's, or the default before any is written).
-        maxBudgetUsd: normalizeDevLoopConfig(session.config).maxCostPerSessionUsd,
-        maxSeconds: 600,
-      });
+      const resp = await runInterviewLeg(session, repoPath, backend, input.userMessage);
       if (resp.isError) {
         return "Something went wrong while drafting the contract. Try rephrasing, or reply !exit to stop.";
       }
 
       const stateToken = parseAgentStateToken(readAgentStateFirstLine(repoPath));
       if (stateToken === "CONTRACT_READY") {
-        return finalizeContract(session, repoPath);
+        return await finalizeWithReview(session, repoPath, backend);
       }
       return resp.text.trim().length > 0
         ? resp.text.trim()
@@ -880,6 +1099,16 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     if (reqs.length === 0) {
       return { ok: false, reason: "contract has no REQ-### requirements" };
     }
+    // Belt-and-braces checklist lint (the interview already gates on it, but
+    // the file could have been hand-edited between summary and !approve).
+    const lintErrors = lintContractChecklist(
+      contractMd,
+      readDevDoc(repoPath, DEV_DOCS.checklist),
+      reqs.map((r) => r.id),
+    );
+    if (lintErrors.length > 0) {
+      return { ok: false, reason: `acceptance checklist: ${lintErrors[0]!}` };
+    }
 
     // Move onto the dev branch (dirty worktree carries over), snapshot the
     // pre-loop baseline there so per-iteration diffs are clean, and anchor the
@@ -912,6 +1141,24 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       reqs.map((r) => ({ id: uuid(), reqId: r.id, title: r.title })),
       now(),
     );
+    // Seed the checklist DB mirror (the §6.6 monotonicity baseline starts at
+    // the approved definition; lint-time defects were refused above).
+    for (const row of parseChecklistMarkdown(readDevDoc(repoPath, DEV_DOCS.checklist)) ?? []) {
+      if (row.method === null || row.status === "unknown") continue;
+      upsertDevChecklistRow(deps.db, {
+        id: uuid(),
+        sessionId,
+        taskId: null,
+        acId: row.acId,
+        reqId: row.reqId || null,
+        expectation: row.expectation || null,
+        method: row.method,
+        status: row.status,
+        evidence: row.evidence || null,
+        iter: 0,
+        updatedAt: now(),
+      });
+    }
     const approved = approveDevSession(deps.db, {
       id: sessionId,
       approvedHash,
@@ -1001,6 +1248,22 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
         // owner's call as authoritative guidance and re-queue it. The
         // orchestrator (live, or relaunched below) resumes it from its
         // checkpoint.
+        if (resolved.row?.kind === "human_verify") {
+          // Close the worktree's pending human rows from the owner's reply
+          // BEFORE the requeue, or the worker would just re-escalate.
+          const verdict = parseHumanVerifyReply(input.answer);
+          const rows = parseChecklistMarkdown(readDevDoc(task.worktreePath, DEV_DOCS.checklist)) ?? [];
+          const ids = rows
+            .filter((r) => r.method === "human" && r.status !== "verified")
+            .map((r) => r.acId);
+          markChecklistRows(
+            task.worktreePath,
+            ids,
+            verdict === "verified" ? "verified" : "failed",
+            `owner ${verdict === "verified" ? "sign-off" : "rejection"} via escalation: `
+              + input.answer.replace(/\|/g, "/").slice(0, 160),
+          );
+        }
         writeDevDoc(task.worktreePath, DEV_DOCS.supervisorGuidance, `${input.answer}\n`);
         appendDevDoc(task.worktreePath, DEV_DOCS.decisionRequests, ownerDecision);
         markDevTaskState(deps.db, { id: taskId, from: ["awaiting_user"], to: "queued", loopState: null, at: now() });
@@ -1027,6 +1290,25 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
       }
     } else if (repoPath) {
       // Session-scoped (single loop, integration gate, or decompose failure).
+      if (resolved.row?.kind === "human_verify") {
+        // §6.6 human-method closure: the owner's reply closes the pending
+        // human rows. The RUNNER is the only non-model writer of checklist
+        // rows (loop-kit: "the human may edit rows; the loop may not"); the
+        // engine re-syncs the DB mirror on the next iteration.
+        const verdict = parseHumanVerifyReply(input.answer);
+        const rows = parseChecklistMarkdown(readDevDoc(repoPath, DEV_DOCS.checklist)) ?? [];
+        const ids = rows
+          .filter((r) => r.method === "human" && r.status !== "verified")
+          .map((r) => r.acId);
+        markChecklistRows(
+          repoPath,
+          ids,
+          verdict === "verified" ? "verified" : "failed",
+          `owner ${verdict === "verified" ? "sign-off" : "rejection"} via escalation: `
+            + input.answer.replace(/\|/g, "/").slice(0, 160),
+        );
+        logger.info({ sessionId: session.id, ids, verdict }, "dev human-verify rows closed");
+      }
       appendDevDoc(repoPath, DEV_DOCS.decisionRequests, ownerDecision);
     }
 

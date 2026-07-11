@@ -34,6 +34,16 @@ of truth if the injected copy looks stale.
   table `| REQ | Status | Evidence | Iter |`. Status is one of
   `unstarted | in-progress | met | at-risk | regressed`. You update rows
   honestly at the end.
+- `.aitne-dev/docs/acceptance-checklist.md` — the fine-grained expectation
+  ledger: `| AC | REQ | Expectation | cmd|run|human | pending|verified|failed
+  | Evidence |`. **These rows, not your sense of completeness, define done** —
+  the evaluator refuses the success gate while any row is not `verified`
+  (`human` rows excepted: the daemon closes those with the owner at the end).
+  Never delete or reword a row — the evaluator's monotonicity check refuses
+  the gate when a recorded row disappears; if a row is genuinely wrong,
+  escalate a `DR-N` instead.
+- `.aitne-dev/observations/` — save `run`-method observation artifacts here as
+  `iter<N>-AC-xxx-<what>.<ext>` (probe logs, screenshots, captured output).
 - `.aitne-dev/docs/progress.md` — append-only per-iteration log.
 - `.aitne-dev/docs/assumptions.md` — append-only `AS-N` entries for gaps you
   resolved with a conservative default.
@@ -131,6 +141,19 @@ Chokepoints and denied surfaces (the runtime enforces these — do not fight the
    `progress.md`, write a `DR-N` block, and declare `BLOCKED`.
 
 6. **Update the loop's memory (required every iteration).**
+   - `acceptance-checklist.md`: close the rows this milestone touched. A `cmd`
+     row cites the command that proves it. A `run` row flips to `verified`
+     ONLY by actually running the artifact and observing the expectation hold
+     — save the observation artifact under `.aitne-dev/observations/` and cite
+     its path in the Evidence cell. **Reading your own code is never evidence
+     for a `run` row.** If observation is impossible this iteration, leave it
+     `pending` and record why — never fake it. A regression flips a `verified`
+     row back (`pending`/`failed`) — say so. `human` rows stay `pending`; the
+     daemon brings them to the owner. Then run the **consideration-gap scan**:
+     "what user-visible behavior did this change touch that I have NOT
+     observed working?" — append one `pending` row per REAL gap (continue the
+     AC id sequence; bounded to what YOUR diff touched). An empty scan is the
+     normal outcome.
    - `requirements-ledger.md`: update the status rows **honestly**. `met`
      requires concrete evidence in the Evidence column (a file, a passing test,
      an observable behavior) — never intention. If this iteration weakened a
@@ -152,9 +175,11 @@ Chokepoints and denied surfaces (the runtime enforces these — do not fight the
    short reason. The TOKEN must be byte-for-byte one of:
 
    - `READY_FOR_REVIEW <reason>` — you believe **every** REQ is met, the ledger
-     shows every REQ `met`, verification passes locally, and no reviewer
-     must-fix remains. The evaluator re-checks this and refuses the gate
-     otherwise, so only declare it when you mean it.
+     shows every REQ `met`, the acceptance checklist has no `pending`/`failed`
+     rows (except `human` rows, which the daemon closes with the owner),
+     verification passes locally, and no reviewer must-fix remains. The
+     evaluator re-checks all of this and refuses the gate otherwise, so only
+     declare it when you mean it.
    - `IN_PROGRESS <reason>` — milestone done or partial; real work remains.
    - `NEEDS_SPEC_DECISION <reason>` — the contract must change to proceed
      (also wrote a `DR-N` block).
