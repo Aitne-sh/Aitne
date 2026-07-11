@@ -64,6 +64,15 @@ export type DevPermissionMode = "acceptEdits" | "auto" | "bypassPermissions";
 export interface DevLoopConfig {
   /** Deterministic success gate — ALL must exit 0 (run as a subprocess). */
   verifyCommands: string[];
+  /** Rerun the WHOLE verify pass up to N more times on red to absorb
+   *  environment flakes (0 = trust every red; clamped to 2 — loop-kit
+   *  VERIFY_RETRIES). A red-then-green run is journaled with the failing
+   *  pass preserved; a rerun that stays red fingerprints the FINAL pass. */
+  verifyRetries: number;
+  /** Run the independent contract-review leg between CONTRACT_READY and
+   *  awaiting_approval (an always-on quality gate over the interview's
+   *  output; loop-kit runs it only on the headless auto path). */
+  contractReview: boolean;
   /** Globs; a touch → RISK_REQUIRES_APPROVAL. */
   deniedPaths: string[];
   /** Globs (deps/schema/infra); a touch → NEEDS_ARCHITECTURE_DECISION. */
@@ -174,6 +183,10 @@ export type DevEvaluateState =
   | "NEEDS_ARCHITECTURE_DECISION"
   | "NEEDS_DECOMPOSITION"
   | "RISK_REQUIRES_APPROVAL"
+  /** §6.6 human-method closure: everything is green except checklist rows
+   *  only the owner can judge. TS-level only — persisted via the
+   *  `human_verify` escalation (loop_state RISK_REQUIRES_APPROVAL). */
+  | "NEEDS_HUMAN_VERIFY"
   | "BLOCKED"
   | "STALLED";
 
@@ -182,6 +195,10 @@ export interface DevEvaluateResult {
   reason: string;
   /** Per-VERIFY_COMMANDS pass/fail, for the evidence table + last-verify.log. */
   verify?: DevVerifyResult[];
+  /** Set when a red verify pass was absorbed by a VERIFY_RETRIES rerun — the
+   *  failing pass is preserved for the flake log / journal (loop-kit keeps
+   *  it in .loop/verify-flake.log for fingerprint comparability). */
+  flake?: { attempt: number; failedVerify: DevVerifyResult[] };
 }
 
 export interface DevVerifyResult {

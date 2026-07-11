@@ -34,6 +34,8 @@ export const DEV_FLOW_CONFIG_DEFAULTS: DevFlowConfig = {
  *  list is rejected at approval (fail-closed, never a vacuous pass). */
 export const DEV_LOOP_CONFIG_DEFAULTS: DevLoopConfig = {
   verifyCommands: [],
+  verifyRetries: 0,
+  contractReview: true,
   deniedPaths: [".env*", "secrets/**", "credentials/**"],
   escalatePaths: [],
   maxIterations: 10,
@@ -153,6 +155,10 @@ export function normalizeDevLoopConfig(
       : d.permissionMode;
   return {
     verifyCommands: cleanStringList(p.verifyCommands, d.verifyCommands),
+    // Clamped to [0, 2] — endless reruns would mask genuinely-red gates.
+    verifyRetries: Math.min(2, nonNegInt(p.verifyRetries, d.verifyRetries)),
+    contractReview:
+      typeof p.contractReview === "boolean" ? p.contractReview : d.contractReview,
     deniedPaths: cleanStringList(p.deniedPaths, d.deniedPaths),
     escalatePaths: cleanStringList(p.escalatePaths, d.escalatePaths),
     // maxIterations must be at least 1 (a run with 0 iterations is nonsense).

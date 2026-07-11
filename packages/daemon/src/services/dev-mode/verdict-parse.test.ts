@@ -6,6 +6,7 @@ import {
   extractContractRequirements,
   extractLastMatching,
   parseAgentStateToken,
+  parseContractReviewVerdict,
   parseDecomposeReviewVerdict,
   parseDecomposeVerdict,
   parsePlanReviewVerdict,
@@ -241,5 +242,32 @@ describe("flow verdicts", () => {
     expect(extractBetween("see GUIDANCE-BEGIN inline", "GUIDANCE-BEGIN", "GUIDANCE-END")).toBeNull();
     expect(extractBetween("A-BEGIN\nA-END", "A-BEGIN", "A-END")).toBeNull();
     expect(extractBetween("A-BEGIN\n   \nA-END", "A-BEGIN", "A-END")).toBeNull();
+  });
+});
+
+describe("parseContractReviewVerdict", () => {
+  it("parses the last CONTRACT-REVIEW line, decoration- and case-tolerant", () => {
+    const reply = [
+      "Analysis: the gate is real and discriminating.",
+      "CONTRACT-REVIEW: REVISE early draft — superseded below",
+      "> contract-review: APPROVE the gate can be trusted",
+    ].join("\n");
+    expect(parseContractReviewVerdict(reply)).toEqual({
+      verdict: "APPROVE",
+      detail: "the gate can be trusted",
+    });
+  });
+  it("returns null when no verdict line exists (caller retries then fails toward the human)", () => {
+    expect(parseContractReviewVerdict("I think it looks fine.")).toBeNull();
+  });
+  it("parses REVISE and ESCALATE with their details", () => {
+    expect(parseContractReviewVerdict("CONTRACT-REVIEW: REVISE 1) gate is vacuous; 2) no run probe")).toEqual({
+      verdict: "REVISE",
+      detail: "1) gate is vacuous; 2) no run probe",
+    });
+    expect(parseContractReviewVerdict("CONTRACT-REVIEW: ESCALATE which auth provider?")).toEqual({
+      verdict: "ESCALATE",
+      detail: "which auth provider?",
+    });
   });
 });

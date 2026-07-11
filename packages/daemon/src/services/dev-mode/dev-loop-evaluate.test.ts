@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   EMPTY_BOOKKEEPING,
+  checkAcceptanceChecklist,
+  detectOscillation,
   evaluateIteration,
   fingerprintFailure,
   globToRegExp,
@@ -10,6 +12,7 @@ import {
   type DevEvaluateInput,
 } from "./dev-loop-evaluate.js";
 import { normalizeDevLoopConfig } from "./dev-loop-config.js";
+import type { DevChecklistRow } from "./dev-checklist.js";
 import type { DevLoopConfig } from "./types.js";
 
 const CONFIG: DevLoopConfig = normalizeDevLoopConfig({
@@ -316,5 +319,249 @@ describe("NEEDS_DECOMPOSITION (fleet-only token)", () => {
       deps(),
     );
     expect(out.result.state).toBe("BLOCKED");
+  });
+});
+
+// ── §6.6 acceptance checklist (DEV_MODE_GIT_HARDENING Phase B) ───────────
+
+function acRow(
+  acId: string,
+  overrides: Partial<DevChecklistRow> = {},
+): DevChecklistRow {
+  return {
+    acId,
+    reqId: "REQ-001",
+    expectation: "it observably works",
+    method: "cmd",
+    status: "verified",
+    evidence: "npm test",
+    ...overrides,
+  };
+}
+
+describe("checkAcceptanceChecklist (§6.6)", () => {
+  it("passes when not in use, or when every row is verified", () => {
+    expect(
+      checkAcceptanceChecklist({ rows: null, contractAnchors: [], seenAcIds: [] }),
+    ).toBeNull();
+    expect(
+      checkAcceptanceChecklist({
+        rows: [acRow("AC-001"), acRow("AC-002", { method: "run" })],
+        contractAnchors: [
+          { acId: "AC-001", method: "cmd" },
+          // A method-less anchor (older contract) imposes no method constraint.
+          { acId: "AC-002", method: null },
+        ],
+        seenAcIds: ["AC-001", "AC-002"],
+      }),
+    ).toBeNull();
+    // An empty rows array (file exists, no rows yet) imposes nothing.
+    expect(
+      checkAcceptanceChecklist({ rows: [], contractAnchors: [], seenAcIds: [] }),
+    ).toBeNull();
+  });
+
+  it("(a) refuses on any unverified non-human row", () => {
+    const out = checkAcceptanceChecklist({
+      rows: [acRow("AC-001", { status: "pending" }), acRow("AC-002", { status: "unknown" })],
+      contractAnchors: [],
+      seenAcIds: [],
+    });
+    expect(out).toMatchObject({ kind: "refuse" });
+    if (out?.kind === "refuse") {
+      expect(out.reason).toContain("AC-001(pending)");
+      expect(out.reason).toContain("AC-002(unknown)");
+    }
+  });
+
+  it("(a) human-only unverified rows become the human_verify signal", () => {
+    const out = checkAcceptanceChecklist({
+      rows: [acRow("AC-001"), acRow("AC-002", { method: "human", status: "pending" })],
+      contractAnchors: [{ acId: "AC-002", method: "human" }],
+      seenAcIds: ["AC-001", "AC-002"],
+    });
+    expect(out).toEqual({
+      kind: "human_verify",
+      acIds: ["AC-002"],
+      reason: expect.stringContaining("AC-002"),
+    });
+  });
+
+  it("(b) contract anchors need a row — even when the file is absent", () => {
+    const noFile = checkAcceptanceChecklist({
+      rows: null,
+      contractAnchors: [{ acId: "AC-001", method: null }],
+      seenAcIds: [],
+    });
+    expect(noFile).toMatchObject({ kind: "refuse", reason: expect.stringContaining("AC-001") });
+    const missingRow = checkAcceptanceChecklist({
+      rows: [acRow("AC-001")],
+      contractAnchors: [{ acId: "AC-001", method: null }, { acId: "AC-002", method: null }],
+      seenAcIds: ["AC-001"],
+    });
+    expect(missingRow).toMatchObject({ kind: "refuse", reason: expect.stringContaining("AC-002") });
+  });
+
+  it("(c) vanished previously-seen ids refuse (monotonicity)", () => {
+    const out = checkAcceptanceChecklist({
+      rows: [acRow("AC-001")],
+      contractAnchors: [],
+      seenAcIds: ["AC-001", "AC-002"],
+    });
+    expect(out).toMatchObject({ kind: "refuse", reason: expect.stringContaining("AC-002") });
+    // A deleted FILE with history is the same defect.
+    const gone = checkAcceptanceChecklist({
+      rows: null,
+      contractAnchors: [],
+      seenAcIds: ["AC-001"],
+    });
+    expect(gone).toMatchObject({ kind: "refuse", reason: expect.stringContaining("disappeared") });
+  });
+
+  it("(d) a contract (run) anchor cannot be closed by a cmd row", () => {
+    const out = checkAcceptanceChecklist({
+      rows: [acRow("AC-001", { method: "cmd" })],
+      contractAnchors: [{ acId: "AC-001", method: "run" }],
+      seenAcIds: ["AC-001"],
+    });
+    expect(out).toMatchObject({
+      kind: "refuse",
+      reason: expect.stringContaining("AC-001(contract:run)"),
+    });
+  });
+});
+
+describe("detectOscillation", () => {
+  it("fires on ≤2 distinct fingerprints over a full 2×N window", () => {
+    expect(detectOscillation(["a", "b", "a", "b", "a", "b"], 3)).toEqual({ distinct: 2, window: 6 });
+    // Uniform failures also qualify structurally (repeat-fail usually wins first).
+    expect(detectOscillation(["a", "a", "a", "a"], 2)).toEqual({ distinct: 1, window: 4 });
+  });
+  it("never fires below the window, at N<2, or with ≥3 distinct states", () => {
+    expect(detectOscillation(["a", "b"], 3)).toBeNull();
+    expect(detectOscillation(["a", "b", "a", "b"], 1)).toBeNull();
+    expect(detectOscillation(["a", "b", "c", "a", "b", "c"], 3)).toBeNull();
+  });
+});
+
+describe("evaluateIteration — checklist / oscillation / flake wiring", () => {
+  const READY = {
+    agentStateToken: "READY_FOR_REVIEW",
+    allRequirementsMet: true,
+  };
+
+  it("6.6 refusal demotes a ready candidate to CONTINUE", () => {
+    const out = evaluateIteration(
+      input({
+        ...READY,
+        checklist: {
+          rows: [acRow("AC-001", { status: "pending" })],
+          contractAnchors: [],
+          seenAcIds: [],
+        },
+      }),
+      deps(),
+    );
+    expect(out.result.state).toBe("CONTINUE");
+    expect(out.result.reason).toContain("unverified rows");
+  });
+
+  it("6.6 human-only pending rows surface NEEDS_HUMAN_VERIFY", () => {
+    const out = evaluateIteration(
+      input({
+        ...READY,
+        checklist: {
+          rows: [acRow("AC-001", { method: "human", status: "pending" })],
+          contractAnchors: [],
+          seenAcIds: [],
+        },
+      }),
+      deps(),
+    );
+    expect(out.result.state).toBe("NEEDS_HUMAN_VERIFY");
+  });
+
+  it("6.6 passes through to the candidate when the checklist is satisfied — and is skipped on forced gates", () => {
+    const checklist = {
+      rows: [acRow("AC-001")],
+      contractAnchors: [{ acId: "AC-001", method: "cmd" as const }],
+      seenAcIds: ["AC-001"],
+    };
+    expect(
+      evaluateIteration(input({ ...READY, checklist }), deps()).result.state,
+    ).toBe("SUCCESS_CANDIDATE");
+    // Forced gate (assumeReady): the checklist never blocks it (loop-kit
+    // candidate-promotion-only trust model).
+    const forced = evaluateIteration(
+      input({
+        agentStateToken: null,
+        allRequirementsMet: true,
+        assumeReady: true,
+        checklist: {
+          rows: [acRow("AC-001", { status: "pending" })],
+          contractAnchors: [],
+          seenAcIds: [],
+        },
+      }),
+      deps(),
+    );
+    expect(forced.result.state).toBe("SUCCESS_CANDIDATE");
+  });
+
+  it("oscillation: an A→B→A→B ping-pong BLOCKS where identical-repeat cannot", () => {
+    const config = normalizeDevLoopConfig({ verifyCommands: ["npm test"], repeatFailN: 2 });
+    let call = 0;
+    const d: DevEvaluateDeps = {
+      diffPaths: () => ["src/a.ts"],
+      // Alternate two failure shapes: A, B, A, B — never 2 identical in a row.
+      runVerify: () => ({ exitCode: 1, output: `failure shape ${call++ % 2 === 0 ? "alpha" : "beta"}` }),
+    };
+    let bookkeeping: DevEvaluateBookkeeping = EMPTY_BOOKKEEPING;
+    let state = "";
+    for (let i = 0; i < 4; i += 1) {
+      const out = evaluateIteration(input({ config, bookkeeping }), d);
+      bookkeeping = out.bookkeeping;
+      state = out.result.state;
+    }
+    expect(state).toBe("BLOCKED");
+    expect(bookkeeping.failFingerprints.length).toBe(4); // window respected (2×N)
+  });
+
+  it("flake absorption: red-then-green counts as green and keeps the failing pass", () => {
+    const config = normalizeDevLoopConfig({ verifyCommands: ["npm test"], verifyRetries: 1 });
+    let call = 0;
+    const d: DevEvaluateDeps = {
+      diffPaths: () => ["src/a.ts"],
+      runVerify: () => (call++ === 0
+        ? { exitCode: 1, output: "socket hiccup" }
+        : { exitCode: 0, output: "ok" }),
+    };
+    const out = evaluateIteration(input({ ...READY, config }), d);
+    expect(out.result.state).toBe("SUCCESS_CANDIDATE");
+    expect(out.result.flake).toMatchObject({ attempt: 1 });
+    expect(out.result.flake!.failedVerify[0]!.output).toContain("socket hiccup");
+    expect(call).toBe(2);
+  });
+
+  it("flake absorption: a rerun that stays red fingerprints the FINAL pass", () => {
+    const config = normalizeDevLoopConfig({ verifyCommands: ["npm test"], verifyRetries: 2, repeatFailN: 0 });
+    let call = 0;
+    const d: DevEvaluateDeps = {
+      diffPaths: () => ["src/a.ts"],
+      runVerify: () => ({ exitCode: 1, output: `attempt ${call++} boom` }),
+    };
+    const out = evaluateIteration(input({ config }), d);
+    expect(out.result.state).toBe("CONTINUE");
+    expect(out.result.flake).toBeUndefined();
+    expect(call).toBe(3); // first pass + 2 reruns
+    // The bookkeeping fingerprint came from the LAST rerun's output.
+    expect(out.result.verify![0]!.output).toContain("attempt 2");
+  });
+
+  it("verifyRetries=0 trusts the first red pass", () => {
+    const d = deps({ verifyExit: 1, verifyOutput: "red" });
+    const out = evaluateIteration(input({}), d);
+    expect(out.result.state).toBe("CONTINUE");
+    expect(d.runVerify).toHaveBeenCalledTimes(1);
   });
 });

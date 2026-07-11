@@ -342,3 +342,31 @@ describe("normalizeDevFlowConfig", () => {
     ).not.toBe(computeConfigHashSansBudget(cfg()));
   });
 });
+
+describe("verifyRetries + contractReview (DEV_MODE_GIT_HARDENING Phase B)", () => {
+  it("verifyRetries defaults to 0 and clamps into [0, 2]", () => {
+    expect(normalizeDevLoopConfig({}).verifyRetries).toBe(0);
+    expect(normalizeDevLoopConfig({ verifyRetries: 1 }).verifyRetries).toBe(1);
+    expect(normalizeDevLoopConfig({ verifyRetries: 9 }).verifyRetries).toBe(2);
+    expect(normalizeDevLoopConfig({ verifyRetries: -3 }).verifyRetries).toBe(0);
+    expect(normalizeDevLoopConfig({ verifyRetries: Number.NaN }).verifyRetries).toBe(0);
+  });
+
+  it("contractReview defaults ON and only a boolean overrides it", () => {
+    expect(normalizeDevLoopConfig({}).contractReview).toBe(true);
+    expect(normalizeDevLoopConfig({ contractReview: false }).contractReview).toBe(false);
+    expect(
+      normalizeDevLoopConfig({ contractReview: "off" as unknown as boolean }).contractReview,
+    ).toBe(true);
+  });
+
+  it("both keys land in the approval hash (a change forces re-approval)", () => {
+    const base = normalizeDevLoopConfig({ verifyCommands: ["true"] });
+    const retries = normalizeDevLoopConfig({ verifyCommands: ["true"], verifyRetries: 1 });
+    const review = normalizeDevLoopConfig({ verifyCommands: ["true"], contractReview: false });
+    expect(computeApprovalHash("c", retries)).not.toBe(computeApprovalHash("c", base));
+    expect(computeApprovalHash("c", review)).not.toBe(computeApprovalHash("c", base));
+    // Neither is a budget key — the sans-budget hash changes too.
+    expect(computeConfigHashSansBudget(retries)).not.toBe(computeConfigHashSansBudget(base));
+  });
+});

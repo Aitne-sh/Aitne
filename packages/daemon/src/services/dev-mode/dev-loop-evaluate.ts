@@ -37,6 +37,7 @@ import type {
   DevLoopConfig,
   DevVerifyResult,
 } from "./types.js";
+import type { DevAcAnchor, DevChecklistRow } from "./dev-checklist.js";
 
 /** Persistent counters carried between iterations (loop-kit .loop/* files). */
 export interface DevEvaluateBookkeeping {
@@ -74,6 +75,17 @@ export interface DevEvaluateInput {
    *  behind the .loop/fleet-worker marker); in the single loop the token is
    *  ignored here and the engine journals it as a CONTINUE. */
   fleetWorker: boolean;
+  /** Acceptance-checklist state for the §6.6 self-consistency checks
+   *  (candidate promotion only). `rows` null = the file is absent (checklist
+   *  not in use — older contracts); anchors are parsed from the HASH-FROZEN
+   *  contract text (safe: check 1 already proved on-disk == approved);
+   *  `seenAcIds` is every id ever synced this run (the DB-backed replacement
+   *  for loop-kit's run-scoped .loop/ac-seen). Omitted = checks skipped. */
+  checklist?: {
+    rows: readonly DevChecklistRow[] | null;
+    contractAnchors: readonly DevAcAnchor[];
+    seenAcIds: readonly string[];
+  };
   bookkeeping: DevEvaluateBookkeeping;
 }
 
@@ -153,6 +165,121 @@ function result(state: DevEvaluateState, reason: string, verify?: DevVerifyResul
 }
 
 /**
+ * §6.6 — acceptance-checklist self-consistency (port of evaluate.sh
+ * :270-373), candidate-promotion only. Returns the refusal, the dev-native
+ * human-verify signal (loop-kit blocks and waits for a file edit; dev-mode
+ * escalates to chat), or null (pass).
+ *
+ * (a) every row must be `verified` — EXCEPT rows whose method is `human`
+ *     when they are the ONLY unverified ones (→ human_verify signal);
+ * (b) every contract-anchored id needs a verified row (anchors live in the
+ *     hash-frozen contract, so deleting rows can never shrink the set; runs
+ *     even when the file is absent);
+ * (c) monotonicity — every id ever seen this run must still exist as a row;
+ * (d) method-weakening — a contract `(run)` anchor cannot be satisfied by a
+ *     row silently reclassified to `cmd`.
+ */
+export function checkAcceptanceChecklist(input: {
+  rows: readonly DevChecklistRow[] | null;
+  contractAnchors: readonly DevAcAnchor[];
+  seenAcIds: readonly string[];
+}):
+  | { kind: "refuse"; reason: string }
+  | { kind: "human_verify"; acIds: string[]; reason: string }
+  | null {
+  const { rows, contractAnchors, seenAcIds } = input;
+
+  // (a) — with the human-method carve-out.
+  let humanPending: string[] = [];
+  if (rows !== null && rows.length > 0) {
+    const unverified = rows.filter((r) => r.status !== "verified");
+    if (unverified.length > 0) {
+      const nonHuman = unverified.filter((r) => r.method !== "human");
+      if (nonHuman.length > 0) {
+        return {
+          kind: "refuse",
+          reason:
+            "The acceptance checklist has unverified rows: "
+            + `${nonHuman.map((r) => `${r.acId}(${r.status})`).join(" ")} — refusing the gate.`,
+        };
+      }
+      humanPending = unverified.map((r) => r.acId);
+    }
+  }
+
+  // (c) before (b): a deleted file / vanished rows is the louder defect.
+  const currentIds = new Set((rows ?? []).map((r) => r.acId));
+  const vanished = seenAcIds.filter((id) => !currentIds.has(id));
+  if (vanished.length > 0) {
+    return {
+      kind: "refuse",
+      reason:
+        "Previously-recorded acceptance-checklist rows disappeared: "
+        + `${vanished.join(" ")} — restore them or escalate a contract change.`,
+    };
+  }
+
+  // (b) contract anchors — obligations the checklist cannot shrink. After
+  // (a), every surviving unverified row is human-pending, so an anchor is
+  // unmet exactly when it has NO row at all (a pending human row satisfies
+  // it pro tem — the human_verify closure owns the sign-off).
+  const byId = new Map((rows ?? []).map((r) => [r.acId, r] as const));
+  const missing = contractAnchors.filter((a) => !byId.has(a.acId));
+  if (missing.length > 0) {
+    return {
+      kind: "refuse",
+      reason:
+        "Contract acceptance criteria lack a verified checklist row: "
+        + `${missing.map((a) => a.acId).join(" ")}.`,
+    };
+  }
+
+  // (d) method-weakening — (b) already guaranteed every anchor has a row.
+  const weakened = contractAnchors.filter((a) => {
+    if (a.method === null) return false;
+    return byId.get(a.acId)!.method !== a.method;
+  });
+  if (weakened.length > 0) {
+    return {
+      kind: "refuse",
+      reason:
+        "Checklist methods differ from the contract's anchors: "
+        + `${weakened.map((a) => `${a.acId}(contract:${a.method})`).join(" ")}.`,
+    };
+  }
+
+  if (humanPending.length > 0) {
+    return {
+      kind: "human_verify",
+      acIds: humanPending,
+      reason:
+        "Everything is green except expectations only the owner can judge: "
+        + `${humanPending.join(" ")}.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * A→B→A→B oscillation (port of evaluate.sh :410-441): over a full window of
+ * `2 × repeatFailN` failing iterations, ≤2 distinct fingerprints means the
+ * loop is cycling between states (fix-A-breaks-B ping-pong) — the identical-
+ * repeat rule alone never trips on it. Skipped at repeatFailN < 2 (that
+ * already blocks on any repeat; a 2-wide window would block the first two
+ * genuinely-different failures).
+ */
+export function detectOscillation(
+  fingerprints: readonly string[],
+  repeatFailN: number,
+): { distinct: number; window: number } | null {
+  if (repeatFailN < 2) return null;
+  const window = repeatFailN * 2;
+  if (fingerprints.length < window) return null;
+  const distinct = new Set(fingerprints.slice(-window)).size;
+  return distinct <= 2 ? { distinct, window } : null;
+}
+
+/**
  * Run the deterministic evaluation for one iteration. Pure: all side effects
  * (git, subprocess) come through `deps`; all persistent state comes in via
  * `input.bookkeeping` and goes out via `output.bookkeeping`.
@@ -212,8 +339,33 @@ export function evaluateIteration(
       bookkeeping: keepBookkeeping(),
     };
   }
-  const verify = runAllVerify(config.verifyCommands, deps);
-  const verifyGreen = verify.every((v) => v.passed);
+  let verify = runAllVerify(config.verifyCommands, deps);
+  let verifyGreen = verify.every((v) => v.passed);
+  // Flake absorption (loop-kit VERIFY_RETRIES): rerun the WHOLE pass up to N
+  // times on red. Red-then-green keeps the failing pass in `flake` (the
+  // journal/audit trail); a rerun that stays red replaces `verify` so the
+  // fail fingerprint always comes from the FINAL failing pass.
+  let flake: DevEvaluateResult["flake"];
+  for (
+    let attempt = 1;
+    !verifyGreen && attempt <= config.verifyRetries;
+    attempt += 1
+  ) {
+    const rerun = runAllVerify(config.verifyCommands, deps);
+    if (rerun.every((v) => v.passed)) {
+      flake = { attempt, failedVerify: verify };
+      verify = rerun;
+      verifyGreen = true;
+    } else {
+      verify = rerun;
+    }
+  }
+  /** result() + the flake record (only ever set on a green-after-rerun). */
+  const res = (state: DevEvaluateState, reason: string, v?: DevVerifyResult[]): DevEvaluateResult => {
+    const r = result(state, reason, v);
+    if (flake) r.flake = flake;
+    return r;
+  };
 
   // 5. Agent-declared escalation/block. NEEDS_DECOMPOSITION is a fleet-only
   //    token: a single loop has no supervisor to split the task.
@@ -222,7 +374,7 @@ export function evaluateIteration(
     : AGENT_ESCALATION_TOKENS;
   if (input.agentStateToken && escalationTokens.has(input.agentStateToken)) {
     return {
-      result: result(
+      result: res(
         input.agentStateToken as DevEvaluateState,
         `The implementer declared ${input.agentStateToken}.`,
         verify,
@@ -236,7 +388,7 @@ export function evaluateIteration(
   // 6.5 Ledger self-consistency (candidate promotion only).
   if (!input.final && verifyGreen && agentReady && !input.allRequirementsMet) {
     return {
-      result: result(
+      result: res(
         "CONTINUE",
         "Verify is green and the implementer claims ready, but the "
           + "requirements ledger still has unmet items — refusing the gate.",
@@ -246,12 +398,36 @@ export function evaluateIteration(
     };
   }
 
+  // 6.6 Acceptance-checklist self-consistency (candidate promotion only,
+  // same trust model as 6.5 — never applied under --final or a forced gate).
+  if (
+    input.checklist
+    && !input.final
+    && !input.assumeReady
+    && verifyGreen
+    && agentReady
+  ) {
+    const check = checkAcceptanceChecklist(input.checklist);
+    if (check?.kind === "refuse") {
+      return {
+        result: res("CONTINUE", check.reason, verify),
+        bookkeeping: keepBookkeeping(),
+      };
+    }
+    if (check?.kind === "human_verify") {
+      return {
+        result: res("NEEDS_HUMAN_VERIFY", check.reason, verify),
+        bookkeeping: keepBookkeeping(),
+      };
+    }
+  }
+
   // 6/7. Success gate.
   const ready = agentReady || input.assumeReady;
   if (verifyGreen && ready) {
     if (input.final) {
       return {
-        result: result(
+        result: res(
           input.wholeRunDiffEmpty ? "NO_OP" : "SUCCESS",
           input.wholeRunDiffEmpty
             ? "Final re-check passed with no code change needed."
@@ -262,7 +438,7 @@ export function evaluateIteration(
       };
     }
     return {
-      result: result("SUCCESS_CANDIDATE", "Verify green and ready for review.", verify),
+      result: res("SUCCESS_CANDIDATE", "Verify green and ready for review.", verify),
       bookkeeping: keepBookkeeping(),
     };
   }
@@ -270,7 +446,7 @@ export function evaluateIteration(
   // Under --final, a non-passing gate is a hard failure.
   if (input.final) {
     return {
-      result: result(
+      result: res(
         "BLOCKED",
         verifyGreen
           ? "Final re-check: not ready for success."
@@ -281,12 +457,12 @@ export function evaluateIteration(
     };
   }
 
-  // 8. Bookkeeping — stagnation + repeat-fail.
+  // 8. Bookkeeping — stagnation + repeat-fail + oscillation.
   if (changed.length === 0) {
     const stagnationCount = bookkeeping.stagnationCount + 1;
     if (config.stagnationN > 0 && stagnationCount >= config.stagnationN) {
       return {
-        result: result(
+        result: res(
           "STALLED",
           `No project changes for ${stagnationCount} consecutive iterations.`,
           verify,
@@ -296,7 +472,7 @@ export function evaluateIteration(
     }
     // Continue but carry the incremented stagnation counter.
     return {
-      result: result("CONTINUE", "No project changes this iteration.", verify),
+      result: res("CONTINUE", "No project changes this iteration.", verify),
       bookkeeping: { stagnationCount, failFingerprints: bookkeeping.failFingerprints },
     };
   }
@@ -305,13 +481,28 @@ export function evaluateIteration(
   let failFingerprints = bookkeeping.failFingerprints;
   if (!verifyGreen) {
     const fp = fingerprintFailure(verify);
-    const next = [...failFingerprints, fp].slice(-FINGERPRINT_WINDOW);
+    // Size the window to the config: the oscillation rule needs a full
+    // 2×repeatFailN tail, which a raised repeatFailN must never starve.
+    const cap = Math.max(FINGERPRINT_WINDOW, config.repeatFailN * 2);
+    const next = [...failFingerprints, fp].slice(-cap);
     failFingerprints = next;
     if (config.repeatFailN > 0 && countTrailingIdentical(next) >= config.repeatFailN) {
       return {
-        result: result(
+        result: res(
           "BLOCKED",
           `The same verify failure recurred ${config.repeatFailN} times — no progress.`,
+          verify,
+        ),
+        bookkeeping: { stagnationCount: 0, failFingerprints },
+      };
+    }
+    const osc = detectOscillation(next, config.repeatFailN);
+    if (osc) {
+      return {
+        result: res(
+          "BLOCKED",
+          `Verify failures are cycling between ${osc.distinct} states over the `
+            + `last ${osc.window} failing iterations — no net progress.`,
           verify,
         ),
         bookkeeping: { stagnationCount: 0, failFingerprints },
@@ -323,7 +514,7 @@ export function evaluateIteration(
   }
 
   return {
-    result: result("CONTINUE", "Iteration made progress; continuing.", verify),
+    result: res("CONTINUE", "Iteration made progress; continuing.", verify),
     bookkeeping: { stagnationCount: 0, failFingerprints },
   };
 }

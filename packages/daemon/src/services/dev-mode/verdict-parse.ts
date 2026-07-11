@@ -196,6 +196,27 @@ export function parseSuperviseVerdict(reply: string): DevSuperviseVerdict | null
   };
 }
 
+const CONTRACT_REVIEW_RE = /^CONTRACT-REVIEW:\s*(APPROVE|REVISE|ESCALATE)\b\s*(.*)$/i;
+
+export interface DevContractReviewVerdict {
+  verdict: "APPROVE" | "REVISE" | "ESCALATE";
+  detail: string;
+}
+
+/** Parse the independent contract reviewer's final
+ *  `CONTRACT-REVIEW: APPROVE|REVISE|ESCALATE …` line. null → the caller
+ *  retries once with a format reminder, then fails TOWARD the human
+ *  (present the contract with a "review could not render a verdict" caveat
+ *  — never silently approve). */
+export function parseContractReviewVerdict(reply: string): DevContractReviewVerdict | null {
+  const m = extractLastMatching(reply, CONTRACT_REVIEW_RE);
+  if (!m) return null;
+  return {
+    verdict: m[1]!.toUpperCase() as DevContractReviewVerdict["verdict"],
+    detail: m[2]!.trim(),
+  };
+}
+
 const PLAN_REVIEW_RE = /^PLAN-REVIEW:\s*(KEEP|REVISE|ESCALATE)\b\s*(.*)$/i;
 
 export interface DevPlanReviewVerdict {
