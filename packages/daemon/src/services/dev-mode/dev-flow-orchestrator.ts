@@ -31,6 +31,7 @@ import type { BackendModelTier } from "@aitne/shared";
 import {
   addDevSessionCost,
   bumpDevSessionFleetCounter,
+  clearDevSessionRunResumes,
   countDevRequirements,
   countDevRequirementsIn,
   getDevSession,
@@ -529,6 +530,10 @@ export function createDevFleetOrchestrator(
       },
       seenAcIds() {
         return listSeenAcIds(db, sessionId, task.id);
+      },
+      clearRunResumes(at) {
+        // Any worker's evaluated iteration = the RUN is making progress.
+        clearDevSessionRunResumes(db, sessionId, at);
       },
     };
   };

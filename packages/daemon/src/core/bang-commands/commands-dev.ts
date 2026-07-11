@@ -24,6 +24,7 @@ import {
   createDevSession,
   getActiveDevSession,
   getDevSession,
+  getLatestDevSessionForChannel,
   getLatestRollbackableDevSession,
   listDevSessions,
   markDevTerminal,
@@ -194,6 +195,106 @@ export const exitCommand: BangCommand = {
           + `${session.branch} — reply !rollback to restore `
           + `${session.originalBranch ?? "your original checkout"}, or !rollback <n> to rewind the dev branch.`
         : `Dev mode ended for ${session.slug ?? session.repositoryId}.`,
+    );
+  },
+};
+
+export interface DevResumeArgs {
+  budgetUsd?: number;
+  iters?: number;
+  note?: string;
+  error?: string;
+}
+
+/** `!resume [budget=<usd>] [iters=<n>] [free-text steer note…]`. Exported
+ *  for tests. Invalid numbers surface as `error` (the handler replies usage). */
+export function parseResumeArgs(rest: string): DevResumeArgs {
+  const out: DevResumeArgs = {};
+  const noteParts: string[] = [];
+  for (const token of rest.trim().split(/\s+/).filter((t) => t.length > 0)) {
+    const budget = token.match(/^budget=(.+)$/i);
+    const iters = token.match(/^iters?=(.+)$/i);
+    if (budget) {
+      const n = Number.parseFloat(budget[1]!);
+      if (!Number.isFinite(n) || n <= 0) return { error: `invalid budget "${budget[1]!}"` };
+      out.budgetUsd = n;
+    } else if (iters) {
+      const n = Number.parseInt(iters[1]!, 10);
+      if (!Number.isFinite(n) || n < 1) return { error: `invalid iters "${iters[1]!}"` };
+      out.iters = n;
+    } else {
+      noteParts.push(token);
+    }
+  }
+  if (noteParts.length > 0) out.note = noteParts.join(" ");
+  return out;
+}
+
+/** Resolve the session a dev command targets: the active one (channel-bound)
+ *  first, else the newest session bound to this chat channel. */
+function resolveDevTarget(
+  ctx: BangCommandContext,
+): { session: ReturnType<typeof getActiveDevSession>; refused: string | null } {
+  const channel = `${ctx.event.platform}:${ctx.event.channel}`;
+  const active = getActiveDevSession(ctx.db);
+  if (active) {
+    if (active.originatingChannel && active.originatingChannel !== channel) {
+      return { session: null, refused: "A dev session is active on another channel." };
+    }
+    return { session: active, refused: null };
+  }
+  return { session: getLatestDevSessionForChannel(ctx.db, channel), refused: null };
+}
+
+export const resumeCommand: BangPrefixCommand = {
+  prefix: "!resume",
+  title: "Resume dev session",
+  describe: "Resume a dev session",
+  runsWhilePaused: true,
+  parseArgs: (rest) => parseResumeArgs(rest),
+  handler: async (ctx, args) => {
+    const parsed = (args ?? {}) as DevResumeArgs;
+    if (parsed.error) {
+      await ctx.notify(
+        `Usage: !resume [budget=<usd>] [iters=<n>] [note…] — ${parsed.error}.`,
+      );
+      return;
+    }
+    const { session, refused } = resolveDevTarget(ctx);
+    if (refused) {
+      await ctx.notify(refused);
+      return;
+    }
+    if (!session) {
+      await ctx.notify("No dev session on this channel — start one with !repo <name>.");
+      return;
+    }
+    const runner = ctx.getDevModeRunner?.();
+    if (!runner) {
+      await ctx.notify("Dev mode is unavailable right now (the loop runner isn't wired). Try again shortly.");
+      return;
+    }
+    const result = await runner.resumeSession({
+      sessionId: session.id,
+      budgetUsd: parsed.budgetUsd,
+      iters: parsed.iters,
+      note: parsed.note,
+    });
+    if (!result.ok) {
+      await ctx.notify(`Can't resume: ${result.reason}.`);
+      return;
+    }
+    // Re-capture the chat lane so escalations/steering land here again.
+    ctx.beginDevMode?.({
+      sessionId: session.id,
+      repositoryId: session.repositoryId,
+      slug: session.slug,
+      enteredAt: Date.now(),
+    });
+    await ctx.notify(
+      `Resuming ${session.slug ?? session.repositoryId} from iteration ${session.iteration}`
+        + `${parsed.note ? " with your note as the next decision" : ""}. `
+        + "I'll report back when it finishes or needs you.",
     );
   },
 };

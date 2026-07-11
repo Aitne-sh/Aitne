@@ -17,7 +17,14 @@ import {
   markDevTerminal,
 } from "../../db/dev-sessions-store.js";
 import { createDefaultBangCommandRegistry } from "./index.js";
-import { repoCommand, approveCommand, exitCommand, rollbackCommand } from "./commands-dev.js";
+import {
+  repoCommand,
+  approveCommand,
+  exitCommand,
+  parseResumeArgs,
+  resumeCommand,
+  rollbackCommand,
+} from "./commands-dev.js";
 import type { BangCommandContext } from "./registry.js";
 import type { DevModeRunner } from "../../services/dev-mode/dev-mode-runner.js";
 
@@ -51,7 +58,9 @@ function makeEvent(): MessageEvent {
 }
 
 function fakeRunner(): { runner: DevModeRunner; calls: Record<string, unknown[]> } {
-  const calls: Record<string, unknown[]> = { armTimeout: [], startFromApproval: [], cancel: [] };
+  const calls: Record<string, unknown[]> = {
+    armTimeout: [], startFromApproval: [], cancel: [], resumeSession: [],
+  };
   const runner = {
     armTimeout: vi.fn((id: string) => calls.armTimeout!.push(id)),
     startFromApproval: vi.fn((id: string) => {
@@ -61,6 +70,10 @@ function fakeRunner(): { runner: DevModeRunner; calls: Record<string, unknown[]>
     cancel: vi.fn(async (id: string, reason: string) => {
       calls.cancel!.push([id, reason]);
       return true;
+    }),
+    resumeSession: vi.fn(async (input: unknown) => {
+      calls.resumeSession!.push(input);
+      return { ok: true };
     }),
     resumeAfterEscalation: vi.fn(),
     resumeFromBoot: vi.fn(),
@@ -439,5 +452,51 @@ describe("commands-dev", () => {
     const { ctx, notify } = makeCtx();
     await rollbackCommand.handler(ctx, "");
     expect(notify.mock.calls[0]?.[0]).toContain("Nothing to roll back");
+  });
+
+  // ── !resume ─────────────────────────────────────────────────────────────
+
+  it("parseResumeArgs splits budget/iters raises from the steer note", () => {
+    expect(parseResumeArgs("")).toEqual({});
+    expect(parseResumeArgs("budget=2.5 iters=15 use sqlite instead")).toEqual({
+      budgetUsd: 2.5,
+      iters: 15,
+      note: "use sqlite instead",
+    });
+    expect(parseResumeArgs("just keep going")).toEqual({ note: "just keep going" });
+    expect(parseResumeArgs("budget=abc").error).toContain("invalid budget");
+    expect(parseResumeArgs("iters=0").error).toContain("invalid iters");
+  });
+
+  it("!resume targets the newest channel session and re-latches on success", async () => {
+    seedBranchedSession("failed");
+    const { ctx, notify } = makeCtx();
+    await resumeCommand.handler(ctx, parseResumeArgs("budget=3 keep at it"));
+    expect(calls.resumeSession).toEqual([
+      { sessionId: "s1", budgetUsd: 3, iters: undefined, note: "keep at it" },
+    ]);
+    expect(beganDevMode).toHaveLength(1);
+    expect(notify.mock.calls[0]?.[0]).toContain("Resuming foo");
+  });
+
+  it("!resume relays the runner's honest refusal without latching", async () => {
+    seedBranchedSession("failed");
+    (runner.resumeSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      reason: "budget exhausted",
+    });
+    const { ctx, notify } = makeCtx();
+    await resumeCommand.handler(ctx, parseResumeArgs(""));
+    expect(notify.mock.calls[0]?.[0]).toContain("Can't resume: budget exhausted");
+    expect(beganDevMode).toHaveLength(0);
+  });
+
+  it("!resume with no session / bad args replies usage", async () => {
+    const first = makeCtx();
+    await resumeCommand.handler(first.ctx, parseResumeArgs(""));
+    expect(first.notify.mock.calls[0]?.[0]).toContain("No dev session on this channel");
+    const second = makeCtx();
+    await resumeCommand.handler(second.ctx, parseResumeArgs("budget=nope"));
+    expect(second.notify.mock.calls[0]?.[0]).toContain("Usage: !resume");
   });
 });

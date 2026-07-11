@@ -973,4 +973,93 @@ describe("DevModeRunner", () => {
     expect(readDevDoc(repo, DEV_DOCS.checklist)).toContain("owner sign-off");
     expect(listDevChecklist(db, "s1", null).find((r) => r.acId === "AC-002")?.status).toBe("verified");
   });
+
+  // ── !resume (loop-kit decide_run_mode port) ───────────────────────────
+
+  it("resumeSession: a BLOCKED failure resumes with fresh windows and finishes", async () => {
+    let implCalls = 0;
+    const backend = fakeBackend(repo, {
+      "dev.implement": () => {
+        implCalls += 1;
+        if (implCalls <= 2) {
+          // Two straight leg errors → terminal BLOCKED (implementer failed twice).
+          return { text: "boom", sessionId: null, costUsd: 0, numTurns: 1, isError: true };
+        }
+        writeFileSync(join(repo, "feature.ts"), "export const x = 1;\n");
+        writeDevDoc(repo, DEV_DOCS.ledger, ledgerMd("met"));
+        writeDevDoc(repo, DEV_DOCS.agentState, "READY_FOR_REVIEW done");
+        return ok("implemented");
+      },
+    });
+    const runner = makeRunner(backend);
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state === "failed", 20000);
+    expect(getDevSession(db, "s1")!.loopState).toBe("BLOCKED");
+
+    // A pre-approval-style refusal never happens here — this is resumable.
+    const result = await runner.resumeSession({ sessionId: "s1", note: "try the other file" });
+    expect(result.ok).toBe(true);
+    await waitUntil(() => {
+      const s = getDevSession(db, "s1");
+      return s?.state === "done" || s?.state === "failed";
+    }, 20000);
+
+    const session = getDevSession(db, "s1")!;
+    expect(session.state).toBe("done");
+    expect(session.loopState).toBe("SUCCESS");
+    // The evaluated iteration cleared the resume backstop.
+    expect(session.runResumes).toBe(0);
+    // Journaled RUN_RESUME with the fresh-window note; the steer note landed.
+    const resumeRow = listDevIterations(db, "s1").find((i) => i.phase === "resume");
+    expect(resumeRow?.verdict).toBe("RUN_RESUME");
+    expect(resumeRow?.reason).toContain("windows reset");
+    expect(readDevDoc(repo, DEV_DOCS.supervisorGuidance)).toContain("try the other file");
+  });
+
+  it("resumeSession: BUDGET_EXCEEDED needs headroom or an explicit raise (rebind)", async () => {
+    updateDevSessionConfig(db, "s1", {
+      config: normalizeDevLoopConfig({ verifyCommands: ["true"], maxIterations: 1 }),
+    }, 0);
+    let ready = false;
+    const backend = fakeBackend(repo, {
+      "dev.implement": () => {
+        writeFileSync(join(repo, "feature.ts"), `export const x = ${Date.now()};\n`);
+        writeDevDoc(repo, DEV_DOCS.ledger, ledgerMd(ready ? "met" : "in-progress"));
+        writeDevDoc(repo, DEV_DOCS.agentState, ready ? "READY_FOR_REVIEW done" : "IN_PROGRESS more");
+        return ok("worked");
+      },
+      "dev.stop_eval": () => ok("STOP-EVAL: CONTINUE"),
+    });
+    const runner = makeRunner(backend);
+    expect(runner.startFromApproval("s1").ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state === "failed", 20000);
+    expect(getDevSession(db, "s1")!.loopState).toBe("BUDGET_EXCEEDED");
+    const hashBefore = getDevSession(db, "s1")!.approvedHash;
+
+    // No headroom, no raise → an honest refusal naming the raise syntax.
+    const bare = await runner.resumeSession({ sessionId: "s1" });
+    expect(bare.ok).toBe(false);
+    expect(bare.reason).toContain("budget exhausted");
+
+    // Raise → budget-only rebind (sans-budget hash unchanged) → finishes.
+    ready = true;
+    const raised = await runner.resumeSession({ sessionId: "s1", iters: 5 });
+    expect(raised.ok).toBe(true);
+    await waitUntil(() => getDevSession(db, "s1")?.state === "done", 20000);
+    const session = getDevSession(db, "s1")!;
+    expect(session.maxIterations).toBe(5);
+    expect(session.approvedHash).not.toBe(hashBefore);
+  });
+
+  it("resumeSession refuses the non-resumable states honestly", async () => {
+    const runner = makeRunner(fakeBackend(repo));
+    // awaiting_approval → finish the interview / approve.
+    expect((await runner.resumeSession({ sessionId: "s1" })).reason).toContain("nothing to resume");
+    // done without queued adds → use !add.
+    runner.startFromApproval("s1");
+    await waitUntil(() => getDevSession(db, "s1")?.state === "done", 20000);
+    const done = await runner.resumeSession({ sessionId: "s1" });
+    expect(done.ok).toBe(false);
+    expect(done.reason).toContain("!add");
+  });
 });

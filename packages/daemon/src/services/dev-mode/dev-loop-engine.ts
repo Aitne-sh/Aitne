@@ -19,6 +19,7 @@ import type Database from "better-sqlite3";
 import type { BackendModelTier } from "@aitne/shared";
 import {
   addDevSessionCost,
+  clearDevSessionRunResumes,
   listDevRequirements,
   recordDevIteration,
   updateDevRequirement,
@@ -188,6 +189,10 @@ export interface DevEnginePersistence {
   requirementCounts(): { total: number; met: number };
   /** REQ ids not yet 'met' — the split-nudge input. */
   unmetReqIds(): string[];
+  /** Reset the crash/terminal-resume backstop after ANY evaluated iteration —
+   *  benign interrupts during long legs must never accumulate toward the
+   *  maxResumes cap (loop-kit 7181). Optional: pre-resume sinks omit it. */
+  clearRunResumes?(at: number): void;
   /** UPSERT one acceptance-checklist row from the markdown sync (rows are
    *  never deleted — the id set doubles as the §6.6 monotonicity baseline). */
   syncChecklistRow(row: {
@@ -241,6 +246,9 @@ export function createSessionEnginePersistence(
     },
     seenAcIds() {
       return listSeenAcIds(db, sessionId, null);
+    },
+    clearRunResumes(at) {
+      clearDevSessionRunResumes(db, sessionId, at);
     },
   };
 }
@@ -570,6 +578,9 @@ export class DevLoopEngine {
     // gitignored, so `!rollback <n>` restores the working memory from
     // history/iter-<n>/ alongside the code reset.
     snapshotDevDocs(this.repoPath, iterationNo);
+    // An evaluated iteration IS progress — the crash/terminal-resume backstop
+    // starts a fresh window (loop-kit resets RESUME_COUNT here).
+    this.persistence.clearRunResumes?.(this.now());
 
     const state = evalOut.result.state;
 

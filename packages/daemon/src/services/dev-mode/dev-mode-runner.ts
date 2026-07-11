@@ -26,12 +26,16 @@ import { formatSqliteDatetime } from "@aitne/shared";
 import { createLogger } from "../../logging.js";
 import {
   approveDevSession,
+  bumpDevSessionRunResumes,
   getDevSession,
   markDevAwaitingApproval,
+  markDevRunningFromTerminal,
   markDevTerminal,
   markDevAwaitingUser,
   markDevRunningFromParked,
+  rebindDevSessionApproval,
   recordDevIteration,
+  resetDevSessionStopHeuristics,
   seedDevRequirements,
   setDevSessionBaselineDone,
   setDevTimeoutScheduleId,
@@ -43,6 +47,7 @@ import {
 } from "../../db/dev-sessions-store.js";
 import {
   createDevEscalation,
+  getOpenDevEscalationForSession,
   resolveDevEscalation,
   type DevEscalationKind,
 } from "../../db/dev-session-escalations-store.js";
@@ -50,7 +55,9 @@ import {
   getDevTask,
   listDevTasks,
   markDevTaskState,
+  requeueDevTaskForResume,
   setDevTaskPlanReview,
+  setDevTaskSeedBranch,
 } from "../../db/dev-session-tasks-store.js";
 import {
   DEV_DOCS,
@@ -76,9 +83,10 @@ import {
   writeBaselineVerifyLog,
   writeDevDoc,
 } from "./dev-loop-docs.js";
-import { gitWorktreeRemove } from "./dev-flow-git.js";
+import { gitBranchExists, gitRenameBranch, gitWorktreeRemove } from "./dev-flow-git.js";
 import {
   computeApprovalHash,
+  computeConfigHashSansBudget,
   normalizeDevLoopConfig,
   validateDevLoopConfig,
 } from "./dev-loop-config.js";
@@ -170,7 +178,23 @@ export interface DevApproveResult {
   reqCount?: number;
 }
 
+export interface DevResumeResult {
+  ok: boolean;
+  reason?: string;
+}
+
 export interface DevModeRunner {
+  /** Explicit `!resume` of a terminal (failed/exited/done-with-adds) session —
+   *  loop-kit decide_run_mode semantics: fresh stop-heuristic windows for
+   *  BLOCKED/STALLED, a budget rebind for BUDGET_EXCEEDED raises, a
+   *  run_resumes backstop, and the Phase-A git recovery (base-ref validation
+   *  + recovered-work commit) on relaunch. */
+  resumeSession(input: {
+    sessionId: string;
+    budgetUsd?: number;
+    iters?: number;
+    note?: string;
+  }): Promise<DevResumeResult>;
   /** Run one contract-interview turn: a read/write dev leg (cwd = repo) that
    *  surveys the repo, folds in the owner's message, updates the contract
    *  draft, and either asks a follow-up or declares CONTRACT_READY (the runner
@@ -1407,11 +1431,224 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     return "resumed";
   }
 
+  /** Rename a failed task's surviving branch to a probed-unique seed and
+   *  requeue it with fresh per-task heuristics — the honest v1 of loop-kit's
+   *  resume_class relaunch/requeue (the committed work folds back into the
+   *  fresh worktree via seedMergeFromBranch at bootstrap). */
+  function prepareTasksForResume(sessionId: string, repoPath: string): number {
+    let requeued = 0;
+    for (const task of listDevTasks(deps.db, sessionId)) {
+      if (task.state !== "failed" && task.state !== "dep_failed") continue;
+      if (task.branch && gitBranchExists(repoPath, task.branch)) {
+        let renamed = `${task.branch}-resume-1`;
+        for (let n = 2; gitBranchExists(repoPath, renamed); n += 1) {
+          renamed = `${task.branch}-resume-${n}`;
+        }
+        try {
+          gitRenameBranch(repoPath, task.branch, renamed);
+          if (!task.seedBranch) setDevTaskSeedBranch(deps.db, task.id, renamed, now());
+        } catch (err) {
+          logger.warn({ err, taskKey: task.taskKey }, "dev resume: branch rename failed (redo from merged HEAD)");
+        }
+      }
+      if (task.worktreePath) gitWorktreeRemove(repoPath, task.worktreePath);
+      if (requeueDevTaskForResume(deps.db, { id: task.id, at: now() })) requeued += 1;
+    }
+    return requeued;
+  }
+
+  async function resumeSession(input: {
+    sessionId: string;
+    budgetUsd?: number;
+    iters?: number;
+    note?: string;
+  }): Promise<DevResumeResult> {
+    const session = getDevSession(deps.db, input.sessionId);
+    if (!session) return { ok: false, reason: "that dev session no longer exists" };
+    if (session.rolledBackAt !== null) {
+      return { ok: false, reason: "that session was rolled back — start fresh with !repo" };
+    }
+    if (session.state === "running") {
+      return { ok: false, reason: "the loop is already running" };
+    }
+    if (session.state === "interview" || session.state === "awaiting_approval") {
+      return {
+        ok: false,
+        reason: "nothing to resume — finish the interview (or reply !approve)",
+      };
+    }
+    const repoPath = deps.resolveRepoPath(session.repositoryId);
+    if (!repoPath) return { ok: false, reason: "the repository's local path is unresolved" };
+
+    if (session.state === "awaiting_user") {
+      const open = getOpenDevEscalationForSession(deps.db, session.id);
+      if (open) {
+        return {
+          ok: false,
+          reason: `there's an open question — answer it instead: ${open.question.slice(0, 140)}`,
+        };
+      }
+      // Defensive: parked with no answerable row on file (historical dead
+      // end) — flip back to running and relaunch from the checkpoint.
+      if (!markDevRunningFromParked(deps.db, session.id, now())) {
+        return { ok: false, reason: "could not un-park the session (state moved)" };
+      }
+      void runLoop(session.id).catch((err) => logger.error({ err }, "dev resume runLoop rejected"));
+      return { ok: true };
+    }
+
+    // Terminal states from here.
+    const config = normalizeDevLoopConfig(session.config);
+    if (session.state === "exited" && session.branch === null) {
+      return { ok: false, reason: "the session never started its loop — begin again with !repo" };
+    }
+    if (session.state === "done") {
+      const queuedManual = listDevTasks(deps.db, session.id).some(
+        (t) => t.state === "queued" && t.origin === "manual",
+      );
+      if (!queuedManual) {
+        return { ok: false, reason: "nothing to resume — the run finished; use !add for follow-up work" };
+      }
+    }
+
+    // The crash/terminal-resume backstop (loop-kit MAX_RESUMES; resets to 0
+    // on any evaluated iteration).
+    if (session.runResumes + 1 > config.maxResumes) {
+      return {
+        ok: false,
+        reason: `resumed ${session.runResumes} times without an evaluated iteration — start fresh with !repo`,
+      };
+    }
+
+    // BUDGET_EXCEEDED: resume only with headroom, or with an explicit raise
+    // (the loop-kit budget-only re-approval — the sans-budget hash proves
+    // nothing else changed, so the anchor may be rebound without a fresh
+    // human approval round).
+    if (session.loopState === "BUDGET_EXCEEDED") {
+      const raise = input.budgetUsd !== undefined || input.iters !== undefined;
+      if (raise) {
+        const contractMd = readDevDoc(repoPath, DEV_DOCS.contract) ?? "";
+        if (computeApprovalHash(contractMd, config) !== session.approvedHash) {
+          return { ok: false, reason: "the contract or config changed since approval — start a new session" };
+        }
+        if (input.iters !== undefined && input.iters <= session.iteration) {
+          return { ok: false, reason: `iters must exceed the current iteration (${session.iteration})` };
+        }
+        if (input.budgetUsd !== undefined && input.budgetUsd <= (session.costUsd ?? 0)) {
+          return { ok: false, reason: `budget must exceed the current spend ($${(session.costUsd ?? 0).toFixed(2)})` };
+        }
+        const newConfig = normalizeDevLoopConfig({
+          ...(session.config ?? {}),
+          maxCostUsd: input.budgetUsd ?? config.maxCostUsd,
+          maxIterations: input.iters ?? config.maxIterations,
+        } as Partial<DevLoopConfig>);
+        const validation = validateDevLoopConfig(newConfig);
+        if (!validation.ok) return { ok: false, reason: validation.errors[0]! };
+        if (computeConfigHashSansBudget(newConfig) !== computeConfigHashSansBudget(config)) {
+          return { ok: false, reason: "only the budget keys may change on a resume" };
+        }
+        updateDevSessionConfig(
+          deps.db,
+          session.id,
+          { config: newConfig as unknown as Record<string, unknown> },
+          now(),
+        );
+        rebindDevSessionApproval(deps.db, {
+          id: session.id,
+          approvedHash: computeApprovalHash(contractMd, newConfig),
+          maxIterations: newConfig.maxIterations,
+          maxBudgetUsd: newConfig.maxCostUsd,
+          at: now(),
+        });
+      } else {
+        const iterationHeadroom = session.iteration < (session.maxIterations ?? config.maxIterations);
+        const costHeadroom =
+          session.maxBudgetUsd === null || (session.costUsd ?? 0) < session.maxBudgetUsd;
+        if (!iterationHeadroom || !costHeadroom) {
+          return {
+            ok: false,
+            reason:
+              `budget exhausted (iteration ${session.iteration}/${session.maxIterations ?? config.maxIterations}, `
+              + `$${(session.costUsd ?? 0).toFixed(2)}${session.maxBudgetUsd !== null ? `/$${session.maxBudgetUsd}` : ""}) — `
+              + "raise it: !resume budget=<usd> and/or iters=<n>",
+          };
+        }
+      }
+    }
+
+    // Fresh stop-heuristic windows for an EXPLICIT resume of a stopped run
+    // (loop-kit 6996-7003): the persisted revise/failure counters reset;
+    // stagnation/futile/fingerprints are engine-memory and reset by
+    // construction. iteration / cost / base_ref persist.
+    resetDevSessionStopHeuristics(deps.db, session.id, now());
+    prepareTasksForResume(session.id, repoPath);
+    if (!markDevRunningFromTerminal(deps.db, { id: session.id, at: now() })) {
+      return { ok: false, reason: "could not resume (the session state moved)" };
+    }
+    const resumes = bumpDevSessionRunResumes(deps.db, session.id, now());
+    recordDevIteration(deps.db, {
+      id: uuid(),
+      sessionId: session.id,
+      iteration: session.iteration,
+      phase: "resume",
+      verdict: "RUN_RESUME",
+      reason:
+        `resume #${resumes}; previous: ${session.state}/${session.loopState ?? "-"}`
+        + "; stop-heuristic windows reset"
+        + (input.budgetUsd !== undefined || input.iters !== undefined ? "; budget rebound" : ""),
+      createdAt: now(),
+    });
+    if (input.note && input.note.trim().length > 0) {
+      // The steer note is THE owner decision for the next iteration.
+      writeDevDoc(repoPath, DEV_DOCS.supervisorGuidance, `${input.note.trim()}\n`);
+      appendDevDoc(
+        repoPath,
+        DEV_DOCS.decisionRequests,
+        `\n## Owner decision (resume ${new Date(now()).toISOString()})\n${input.note.trim()}\n`,
+      );
+    }
+    cancelTimeout(session.id);
+    void runLoop(session.id).catch((err) => {
+      logger.error({ err, sessionId: session.id }, "dev resume runLoop rejected");
+    });
+    logger.info({ sessionId: session.id, resumes }, "dev session resumed from terminal");
+    return { ok: true };
+  }
+
   async function resumeFromBoot(sessionId: string): Promise<void> {
     const session = getDevSession(deps.db, sessionId);
     if (!session) return;
     if (session.state === "running") {
-      logger.info({ sessionId }, "dev boot: resuming running loop from checkpoint");
+      // RUN_ABEND: the daemon died while the loop was RUNNING (no interrupt
+      // trap fired). Journal it and advance the resume backstop BEFORE any
+      // recovery side effect — a crash loop must not relaunch forever.
+      const config = normalizeDevLoopConfig(session.config);
+      const resumes = bumpDevSessionRunResumes(deps.db, sessionId, now());
+      recordDevIteration(deps.db, {
+        id: uuid(),
+        sessionId,
+        iteration: session.iteration,
+        phase: "resume",
+        verdict: "RUN_ABEND",
+        reason: `the daemon died while the loop was running; boot resume #${resumes}`,
+        createdAt: now(),
+      });
+      if (resumes > config.maxResumes) {
+        logger.error({ sessionId, resumes }, "dev boot: resume backstop hit — failing the session");
+        markDevTerminal(deps.db, { id: sessionId, state: "failed", loopState: "BLOCKED", exitedAt: now() });
+        cleanupFleetWorktrees(sessionId);
+        deps.onSessionEnded?.(sessionId);
+        const fresh = getDevSession(deps.db, sessionId);
+        if (fresh) {
+          await enqueueDigestDelivery(
+            fresh,
+            `Dev session for ${fresh.slug ?? fresh.repositoryId} blocked: crashed/resumed ${resumes} times without progress.`,
+            "The daemon kept dying mid-loop. Inspect the logs, then start fresh with !repo (or !rollback to restore your branch).",
+          );
+        }
+        return;
+      }
+      logger.info({ sessionId, resumes }, "dev boot: resuming running loop from checkpoint");
       void runLoop(sessionId).catch((err) => {
         logger.error({ err, sessionId }, "dev boot runLoop rejected");
       });
@@ -1454,6 +1691,7 @@ export function createDevModeRunner(deps: DevModeRunnerDeps): DevModeRunner {
     runInterviewTurn,
     startFromApproval,
     cancel,
+    resumeSession,
     resumeAfterEscalation,
     resumeFromBoot,
     expireForTimeout,
